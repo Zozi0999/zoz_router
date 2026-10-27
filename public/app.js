@@ -11661,6 +11661,105 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
   //   4. commit ke pratinjau (dengan revisi agar bisa di-undo)
   // Jika gagal: coba ulang sekali dengan umpan balik, lalu minta file utuh. Maksimal 3 panggilan model.
   // Setiap panggilan punya watchdog (tanpa respons / macet / total), dan hasil akhir SELALU ditampilkan.
+  // ==================== MATHEMATICAL DYCK TREE CLOSURE (WHATWG HTML5 AUTO-HEAL) ====================
+  // Menggunakan prinsip matematika bahasa Dyck (algebraic parenthesis balancing & LIFO stack unwinding)
+  // Menjamin Delta(t) = Open(t) - Close(t) = 0 untuk seluruh container tags tanpa merusak void elements.
+  function autoRepairHtmlDyckClosure(html) {
+    if (!html || typeof html !== 'string') return html;
+    let code = html.trim();
+
+    // 1. Bersihkan marker fence liar di awal/akhir
+    code = code.replace(/^\s*```[a-zA-Z0-9_-]*\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+
+    // 2. Pastikan tag <script> & <style> tertutup terlebih dahulu
+    if (code.includes('<script') && !code.includes('</script>')) {
+      code = code.replace(/<script\b[^>]*>(?:(?!<\/script>)[\s\S])*$/i, match => {
+        let body = match.replace(/<script\b[^>]*>/i, '');
+        const openCurly = (body.match(/\{/g) || []).length;
+        const closeCurly = (body.match(/\}/g) || []).length;
+        if (openCurly > closeCurly) body += '\n' + '}'.repeat(openCurly - closeCurly);
+        const openParen = (body.match(/\(/g) || []).length;
+        const closeParen = (body.match(/\)/g) || []).length;
+        if (openParen > closeParen) body += ')'.repeat(openParen - closeParen);
+        return match.slice(0, match.length - match.replace(/<script\b[^>]*>/i, '').length) + body + '\n</script>';
+      });
+      if (!code.includes('</script>')) code += '\n</script>';
+    }
+    if (code.includes('<style') && !code.includes('</style>')) {
+      code += '\n</style>';
+    }
+
+    // 3. Formula Matematika Dyck Tree Closure LIFO (Stack-Based Parenthesis Balancing)
+    const containerTags = new Set(['div', 'section', 'article', 'aside', 'main', 'header', 'footer', 'nav', 'ul', 'ol', 'table', 'form', 'button']);
+    const clean = code
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
+
+    const tagRegex = /<\/?([a-zA-Z0-9_-]+)(?:\s+[^>]*?)?(\/?)>/g;
+    const stack = [];
+    let m;
+    while ((m = tagRegex.exec(clean)) !== null) {
+      const isClose = m[0].startsWith('</');
+      const isSelfClose = m[2] === '/' || m[0].endsWith('/>');
+      const tag = m[1].toLowerCase();
+      if (!containerTags.has(tag)) continue;
+      if (isSelfClose) continue;
+
+      if (!isClose) {
+        stack.push(tag);
+      } else {
+        const idx = stack.lastIndexOf(tag);
+        if (idx !== -1) {
+          stack.splice(idx, 1);
+        }
+      }
+    }
+
+    // Sisa stack dalam urutan LIFO adalah tag yang wajib ditutup
+    if (stack.length > 0) {
+      const unclosedReversed = [...stack].reverse();
+      const closingStr = unclosedReversed.map(t => '\n</' + t + '>').join('');
+      if (/<\/body\s*>/i.test(code)) {
+        code = code.replace(/<\/body\s*>/i, closingStr + '\n</body>');
+      } else if (/<\/html\s*>/i.test(code)) {
+        code = code.replace(/<\/html\s*>/i, closingStr + '\n</html>');
+      } else {
+        code += closingStr;
+      }
+    }
+
+    // 4. Periksa apakah masih ada surplus closing tags (orphan closing tags liar)
+    for (const t of containerTags) {
+      const cleanNow = code.replace(/<!--[\s\S]*?-->/g, '').replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
+      const openCount = (cleanNow.match(new RegExp('<' + t + '(?=[\s>/])', 'gi')) || []).length;
+      const closeCount = (cleanNow.match(new RegExp('</' + t + '\s*>', 'gi')) || []).length;
+      const diff = openCount - closeCount;
+      if (diff < 0) {
+        let toRemove = Math.abs(diff);
+        const reClose = new RegExp('</' + t + '\s*>', 'gi');
+        const matches = [...code.matchAll(reClose)];
+        for (let i = matches.length - 1; i >= 0 && toRemove > 0; i--, toRemove--) {
+          const matchItem = matches[i];
+          code = code.slice(0, matchItem.index) + code.slice(matchItem.index + matchItem[0].length);
+        }
+      }
+    }
+
+    // 5. Pastikan </body> dan </html> tertutup rapi
+    if (!/<\/body\s*>/i.test(code) && /<body[\s>]/i.test(code)) {
+      if (/<\/html\s*>/i.test(code)) {
+        code = code.replace(/<\/html\s*>/i, '\n</body>\n</html>');
+      } else {
+        code += '\n</body>';
+      }
+    }
+    if (!/<\/html\s*>/i.test(code)) {
+      code += '\n</html>';
+    }
+
+    return code;
+  }
+
   const StudioEditAgent = {
     busy: false,
     TTFT_MS: 25000,      // batas menunggu token pertama (responsif, cegah hang)
@@ -12003,12 +12102,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         const end = body.lastIndexOf('</html>');
         if (end !== -1) {
           body = body.slice(0, end + 7);
-        } else if (/<(?:!DOCTYPE|html|body|main|div)/i.test(body)) {
-          // Auto-closure deterministik: selamatkan kode yang hampir lengkap tanpa </html> penutup
-          if (body.includes('<script') && !body.includes('</script>')) body = repairUnclosedScript(body);
-          if (body.includes('<style') && !body.includes('</style>')) body += '\n</style>';
-          if (body.includes('<body') && !body.includes('</body>')) body += '\n</body>';
-          body += '\n</html>';
+        }
+        if (/<(?:!DOCTYPE|html|body|main|div)/i.test(body)) {
+          body = autoRepairHtmlDyckClosure(body);
         } else {
           return null;
         }
@@ -12073,6 +12169,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         const res = this.applyHunk(code, h.search, h.replace);
         if (res) { code = res.content; ranges.push(res.range); } else { failed.push(i); }
       });
+      if (code && isAuthenticHtml(code)) {
+        code = autoRepairHtmlDyckClosure(code);
+      }
       return { code, ranges, failed };
     },
 
@@ -12113,21 +12212,29 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       if (original.length > 1500 && candidate.length < original.length * 0.5) {
         return { ok: false, reason: 'Hasil edit menghapus lebih dari separuh isi file (kemungkinan terpotong).' };
       }
-      if (!isHtml) return { ok: true };
+      if (!isHtml) return { ok: true, code: candidate };
       if (isAuthenticHtml(original) && !isAuthenticHtml(candidate)) {
         return { ok: false, reason: 'Hasil edit bukan dokumen HTML yang utuh.' };
       }
+
+      // Terapkan penutupan matematis Dyck Tree auto-repair
+      let healedCandidate = autoRepairHtmlDyckClosure(candidate);
+
       const o = this.structuralDelta(original);
-      const c = this.structuralDelta(candidate);
+      let c = this.structuralDelta(healedCandidate);
       for (const t of Object.keys(c)) {
         if (c[t] !== 0 && c[t] !== o[t]) {
-          return { ok: false, reason: `Struktur HTML rusak: tag <${t}> ${c[t] > 0 ? 'kurang penutup' : 'punya penutup berlebih'} setelah edit.` };
+          // Lakukan auto-heal sekunder bila masih ada selisih
+          const diff = c[t];
+          if (diff > 0) {
+            healedCandidate = healedCandidate.replace(/<\/body\s*>/i, ('\n</' + t + '>').repeat(diff) + '\n</body>');
+          }
         }
       }
-      if (this.countBadScripts(candidate) > this.countBadScripts(original)) {
+      if (this.countBadScripts(healedCandidate) > this.countBadScripts(original)) {
         return { ok: false, reason: 'JavaScript hasil edit mengandung kesalahan sintaks.' };
       }
-      return { ok: true };
+      return { ok: true, code: healedCandidate };
     },
 
     // ---------- Prompt ----------
@@ -12255,6 +12362,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           feedback = verdict.reason;
           continue;
         }
+        candidate = verdict.code || candidate;
         return {
           ok: true,
           code: candidate,
@@ -17250,7 +17358,7 @@ Aturan wajib:
       console.warn('[persistStudioCodeChange] Ditahan: newCode bukan HTML autentik utuh, menjaga keutuhan file asli.');
       return;
     }
-    const trimmedCode = isWeb ? healLeakedCssFromHtml(newCode) : newCode;
+    const trimmedCode = isWeb ? autoRepairHtmlDyckClosure(healLeakedCssFromHtml(newCode)) : newCode;
     const codeChanged = activeAIFile.rawContent !== trimmedCode;
     activeAIFile.rawContent = trimmedCode;
     activeAIFile.content = trimmedCode;
@@ -21436,13 +21544,13 @@ ${blocks}
       return true;
     }
 
-    // 2. Pola transformasi konsep ("jadikan website ...", "ganti jadi ...", "ubah jadi ...", "bikin jadi ...")
-    if (/\b(?:jadikan|ganti\s+(?:menjadi|jadi)|ubah\s+(?:menjadi|jadi)|bikin\s+(?:menjadi|jadi)|konversi\s+ke)\b/i.test(p)) {
+    // 2. Pola transformasi konsep ("jadikan website ...", "ganti website jadi ...", "ubah website menjadi ...", "bikin jadi ...")
+    if (/\b(?:jadikan|konversi\s+ke|(?:ganti|ubah|bikin|rancang|buat|desain)\s+(?:website|web|webiste|halaman|tampilan|situs|halaman\s+ini)?\s*(?:menjadi|jadi|ke))\b/i.test(p)) {
       return true;
     }
 
     // 3. Konsep website baru / tema baru mandiri ("portofolio...", "landing page...", "toko online...", "website...", "cv...", dll)
-    const hasConceptKeyword = /\b(?:portofolio|portfolio|landing\s*page|toko\s*online|olshop|e-?commerce|dashboard|game|aplikasi|profil|cv|resume|kalkulator|blog|restoran|kafe|cafe|undangan|portal|sistem)\b/i.test(p);
+    const hasConceptKeyword = /\b(?:portofolio|portfolio|landing\s*page|toko\s*online|olshop|e-?commerce|dashboard|game|aplikasi|profil|cv|resume|kalkulator|blog|restoran|kafe|cafe|undangan|portal|sistem|kisah\s+hidup|biografi|cerita|statis|dinamis)\b/i.test(p);
     if (hasConceptKeyword) {
       // Periksa apakah prompt memiliki kata kunci edit bedah kecil (CSS/teks/elemen spesifik)
       const hasSurgicalKeywords = /\b(?:warna|font|tombol|button|background|bg|header|footer|navbar|nav|padding|margin|geser|pindahkan|tambah\s+tombol|ganti\s+warna|ubah\s+warna|ganti\s+teks|ubah\s+teks|typo|fix|perbaiki|style|css|script|animasi)\b/i.test(p);
