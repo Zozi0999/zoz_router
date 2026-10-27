@@ -11711,40 +11711,47 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       };
 
       if (engine === 'ollama') {
-        const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
-        const headers = { 'Content-Type': 'application/json' };
-        if (STATE.settings.ollamaApiKey) {
-          headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
-          headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
-        }
-        if (STATE.settings.openRouterKey) headers['x-openrouter-key'] = STATE.settings.openRouterKey;
-        const url = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
-        const res = await fetch(url, {
-          method: 'POST',
-          headers,
-          signal,
-          body: JSON.stringify({
-            model,
-            messages,
-            stream: true,
-            endpoint: ep,
-            ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {}),
-            ...(STATE.settings.openRouterKey ? { openRouterKey: STATE.settings.openRouterKey } : {})
-          })
-        });
-        if (!res.ok) throw new Error(await this.describeHttpError(res));
-        await this.readLines(res, (line) => {
-          if (!line.trim()) return;
-          try {
-            const p = JSON.parse(line);
-            if (p.error) throw new Error(typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : String(p.error));
-            feed(p.message?.content || p.response || '');
-          } catch (e) {
-            if (e instanceof SyntaxError) return;
-            throw e;
+        try {
+          const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+          const headers = { 'Content-Type': 'application/json' };
+          if (STATE.settings.ollamaApiKey) {
+            headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
+            headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
           }
-        }, signal);
-        return;
+          if (STATE.settings.openRouterKey) headers['x-openrouter-key'] = STATE.settings.openRouterKey;
+          const url = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+          const res = await fetch(url, {
+            method: 'POST',
+            headers,
+            signal,
+            body: JSON.stringify({
+              model,
+              messages,
+              stream: true,
+              endpoint: ep,
+              ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {}),
+              ...(STATE.settings.openRouterKey ? { openRouterKey: STATE.settings.openRouterKey } : {})
+            })
+          });
+          if (!res.ok) throw new Error(await this.describeHttpError(res));
+          await this.readLines(res, (line) => {
+            if (!line.trim()) return;
+            try {
+              const p = JSON.parse(line);
+              if (p.error) throw new Error(typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : String(p.error));
+              feed(p.message?.content || p.response || '');
+            } catch (e) {
+              if (e instanceof SyntaxError) return;
+              throw e;
+            }
+          }, signal);
+          return;
+        } catch (ollamaErr) {
+          if (signal && signal.aborted) throw ollamaErr;
+          console.warn('[StudioEditAgent] Ollama offline atau tidak merespons, otomatis failover ke OpenRouter Cloud:', ollamaErr.message);
+          engine = 'openrouter';
+          model = mapOllamaModelToOpenRouter(model) || STATE.settings.openRouterModel || 'openrouter/free';
+        }
       }
 
       // OpenRouter: coba rute sesuai lingkungan, lalu rute cadangan
@@ -12091,6 +12098,14 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           // Stream macet tapi blok perubahan sudah lengkap: pakai yang sudah ada
           if (e.partial && step !== 'rewrite' && /^>{3,}[ \t]*REPLACE/im.test(e.partial) && this.parseHunks(e.partial).length) {
             resp = { text: e.partial };
+          } else if (e.partial && step === 'rewrite' && (/<html|<!DOCTYPE/i.test(e.partial))) {
+            const healed = this.extractFullCode(e.partial, kind);
+            if (healed) {
+              resp = { text: healed };
+            } else {
+              lastReason = e.message || 'Gagal menghubungi model.';
+              break;
+            }
           } else {
             // Galat jaringan / kuota / timeout: mengulang tidak akan membantu, hentikan dengan alasan jelas
             lastReason = e.message || 'Gagal menghubungi model.';
