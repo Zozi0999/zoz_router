@@ -11641,10 +11641,10 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
   // Setiap panggilan punya watchdog (tanpa respons / macet / total), dan hasil akhir SELALU ditampilkan.
   const StudioEditAgent = {
     busy: false,
-    TTFT_MS: 45000,      // batas menunggu token pertama
-    IDLE_MS: 30000,      // batas diam di tengah stream
-    TOTAL_MS: 120000,    // batas satu panggilan model
-    DEADLINE_MS: 300000, // batas seluruh proses agen
+    TTFT_MS: 25000,      // batas menunggu token pertama (responsif, cegah hang)
+    IDLE_MS: 15000,      // batas diam di tengah stream
+    TOTAL_MS: 60000,     // batas satu panggilan model
+    DEADLINE_MS: 120000, // batas seluruh proses agen (maksimal 2 menit)
     MAX_FILE_CHARS: 150000,
     _ctrl: null,
     _userStopped: false,
@@ -11675,9 +11675,14 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       return `HTTP ${res.status}${detail ? ': ' + String(detail).slice(0, 200) : ''}`;
     },
 
-    async readLines(res, onLine) {
+    async readLines(res, onLine, signal = null) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
+      const onAbort = () => { try { reader.cancel(); } catch (_) {} };
+      if (signal) {
+        if (signal.aborted) onAbort();
+        else signal.addEventListener('abort', onAbort, { once: true });
+      }
       let buf = '';
       try {
         while (true) {
@@ -11693,6 +11698,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         buf += decoder.decode();
         if (buf.trim()) onLine(buf);
       } finally {
+        if (signal) signal.removeEventListener('abort', onAbort);
         try { reader.cancel(); } catch (_) {}
       }
     },
@@ -11737,7 +11743,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
             if (e instanceof SyntaxError) return;
             throw e;
           }
-        });
+        }, signal);
         return;
       }
 
@@ -11787,7 +11793,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           try { p = JSON.parse(js); } catch (_) { return; }
           if (p.error) throw new Error(typeof p.error === 'object' ? (p.error.message || JSON.stringify(p.error)) : String(p.error));
           feed(p.choices?.[0]?.delta?.content || '');
-        });
+        }, signal);
         return;
       }
       throw new Error(errors.join(' | ') || 'Tidak dapat terhubung ke penyedia model.');
@@ -11889,8 +11895,17 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       body = body.replace(/\n?```\s*$/, '').trim();
       if (kind !== 'jsx') {
         const end = body.lastIndexOf('</html>');
-        if (end === -1) return null; // tanpa </html> = terpotong, jangan dipakai
-        body = body.slice(0, end + 7);
+        if (end !== -1) {
+          body = body.slice(0, end + 7);
+        } else if (/<(?:!DOCTYPE|html|body|main|div)/i.test(body)) {
+          // Auto-closure deterministik: selamatkan kode yang hampir lengkap tanpa </html> penutup
+          if (body.includes('<script') && !body.includes('</script>')) body = repairUnclosedScript(body);
+          if (body.includes('<style') && !body.includes('</style>')) body += '\n</style>';
+          if (body.includes('<body') && !body.includes('</body>')) body += '\n</body>';
+          body += '\n</html>';
+        } else {
+          return null;
+        }
       }
       return body;
     },
@@ -12097,7 +12112,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           const hunks = this.parseHunks(text);
           if (hunks.length === 0) {
             const full = this.extractFullCode(text, kind);
-            if (full && full.length >= original.length * 0.6) {
+            if (full && full.length >= Math.min(original.length * 0.35, 250)) {
               candidate = full;
             } else {
               lastReason = 'Model tidak menghasilkan blok perubahan (hanya teks).';
@@ -12141,9 +12156,25 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     // Titik masuk dari Studio: mengelola UI, state, dan memastikan state selalu dipulihkan
     async runFromStudio({ prompt, selInfo = null, isEditingInCodeMode = false, forceRewrite = false, kind = 'html' }) {
       const file = activeAIFile;
-      if (!file) return;
+      if (!file) {
+        setGeneratingState(false);
+        if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'inline-flex';
+        if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'none';
+        if (activeStudioAssistantBubble) {
+          activeStudioAssistantBubble.innerHTML = '<span style="color:var(--neon-amber);">⚠️ Tidak ada file aktif di pratinjau studio.</span>';
+          activeStudioAssistantBubble = null;
+        }
+        return;
+      }
       if (this.busy) {
         showToast('⚠️ Agen masih mengerjakan permintaan sebelumnya...', 'info');
+        setGeneratingState(false);
+        if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'inline-flex';
+        if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'none';
+        if (activeStudioAssistantBubble) {
+          activeStudioAssistantBubble.innerHTML = '<span style="color:var(--neon-amber);">⚠️ Agen masih sibuk memproses tugas sebelumnya. Silakan coba sebentar lagi.</span>';
+          activeStudioAssistantBubble = null;
+        }
         return;
       }
       this.busy = true;
@@ -16058,10 +16089,12 @@ Aturan wajib:
 })();
 </script>`;
 
-    if (/<head\b[^>]*>/i.test(safeHtml) && /<\/head>/i.test(safeHtml)) {
-      safeHtml = safeHtml.replace(/<\/head>/i, previewBottomSpacerStyle + '\n' + endocrineProbeScript + '\n</head>');
-    } else {
-      safeHtml = previewBottomSpacerStyle + '\n' + endocrineProbeScript + '\n' + safeHtml;
+    if (!safeHtml.includes('id="zoz-endocrine-preview-probe"')) {
+      if (/<head\b[^>]*>/i.test(safeHtml) && /<\/head>/i.test(safeHtml)) {
+        safeHtml = safeHtml.replace(/<\/head>/i, previewBottomSpacerStyle + '\n' + endocrineProbeScript + '\n</head>');
+      } else {
+        safeHtml = previewBottomSpacerStyle + '\n' + endocrineProbeScript + '\n' + safeHtml;
+      }
     }
 
     if (!/<\/body>/i.test(safeHtml)) {
@@ -21228,10 +21261,11 @@ ${blocks}
   async function submitStudioFollowupPrompt() {
     const val = els.inputStudioFollowup?.value?.trim();
     if (!val || !activeAIFile) return;
-    if (STATE.isGenerating || STATE.isSending) {
+    if (STATE.isGenerating || STATE.isSending || (typeof StudioEditAgent !== 'undefined' && StudioEditAgent.busy)) {
       showToast('⚠️ Sedang memproses permintaan sebelumnya...', 'info');
       return;
     }
+    try {
 
     if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.setTaskAnchor === 'function') {
       BioEndocrine.setTaskAnchor(val, { isStudio: true, targetFile: activeAIFile?.name });
@@ -21437,6 +21471,18 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
       skipWebsiteCheck: true,
       skipDocCheck: true
     });
+    } catch (submitErr) {
+      console.error('[submitStudioFollowupPrompt] error:', submitErr);
+      showToast('⚠️ Terjadi kendala saat memproses: ' + (submitErr.message || submitErr), 'warning');
+      setGeneratingState(false);
+      STATE.isSending = false;
+      if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'inline-flex';
+      if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'none';
+      if (activeStudioAssistantBubble) {
+        activeStudioAssistantBubble.innerHTML = '<span style="color:#ff6b6b;"><i class="fa-solid fa-triangle-exclamation"></i> Gagal memproses permintaan (' + escapeHtml(submitErr.message || 'Error') + '). Silakan coba lagi.</span>';
+        activeStudioAssistantBubble = null;
+      }
+    }
   }
 
   function focusStudioAiEditFromEditor() {
@@ -32407,13 +32453,19 @@ Aturan:
     } else {
       const reader = res.body.getReader();
       const decoder = new TextDecoder('utf-8');
+      const onMusicAbort = () => { try { reader.cancel(); } catch(_) {} };
+      if (activeSignal) {
+        if (activeSignal.aborted) onMusicAbort();
+        else activeSignal.addEventListener('abort', onMusicAbort, { once: true });
+      }
       let buffer = '';
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
         for (const line of lines) {
           const l = line.trim();
           if (!l || l.startsWith(':') || !l.startsWith('data:')) continue;
@@ -32439,6 +32491,10 @@ Aturan:
             } catch (_) {}
           }
         }
+      }
+      } finally {
+        if (activeSignal) activeSignal.removeEventListener('abort', onMusicAbort);
+        try { reader.cancel(); } catch(_) {}
       }
     }
 
