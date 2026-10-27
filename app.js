@@ -10089,6 +10089,19 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     chunk = chunk.replace(/^```[a-zA-Z0-9_-]*\s*\n?/i, '');
     chunk = chunk.replace(/\n?```\s*$/i, '');
 
+    // Anti-Duplikasi Dokumen: Jika model AI malah mengulang penulisan website dari awal
+    // (menghasilkan blok <<<ZOZ_FILE baru atau <!DOCTYPE html baru) alih-alih menyambung dari baris terpotong:
+    const isChunkFullRestart = (chunk.includes('<<<ZOZ_FILE') || /<!DOCTYPE\s+html/i.test(chunk)) &&
+                              (existingText.includes('<<<ZOZ_FILE') || /<!DOCTYPE\s+html/i.test(existingText));
+    if (isChunkFullRestart) {
+      console.log('[stitchContinuationChunk] Terdeteksi model mengulang dari awal; menggantikan draf sebelumnya dengan versi baru.');
+      const firstZozIdx = existingText.indexOf('<<<ZOZ_FILE');
+      const firstDocIdx = existingText.search(/<!DOCTYPE\s+html/i);
+      const startIdx = firstZozIdx !== -1 ? firstZozIdx : firstDocIdx;
+      const preamble = (startIdx > 0) ? existingText.slice(0, startIdx).trim() + '\n\n' : '';
+      return preamble + chunk.trim();
+    }
+
     // 3. Bersihkan artefak chevron / diff marker liar
     chunk = chunk.replace(/(?:^|\n)\s*<{2,}\s*(?:SEARCH|REPLACE|END_ZOZ_[A-Z]+|ZOZ_[A-Z]+)?[^>\n]*>{0,}\s*(?=\n|$)/gi, '\n');
     chunk = chunk.replace(/(?:^|\n)\s*={3,}\s*(?=\n|$)/g, '\n');
@@ -15878,6 +15891,24 @@ Aturan wajib:
     });
     // 3. Pastikan tidak ada tag base liar yang merusak anchor in-page (#) dan gradien/masking SVG
     safeHtml = safeHtml.replace(/<base\b[^>]*>/gi, '');
+
+    // 3a. Pembersihan Duplikasi Dokumen HTML (Anti-Duplikasi Website):
+    // Jika teks memuat lebih dari satu <!DOCTYPE html> atau <html (akibat model mengulang dari awal
+    // saat stream terpotong atau hasil continuation yang menyertakan dokumen baru):
+    const doctypeMatches = [...safeHtml.matchAll(/<!DOCTYPE\s+html/gi)];
+    const htmlStartMatches = [...safeHtml.matchAll(/<html[\s>]/gi)];
+    if (doctypeMatches.length > 1 || htmlStartMatches.length > 1) {
+      const lastDoctype = doctypeMatches.length > 0 ? doctypeMatches[doctypeMatches.length - 1].index : -1;
+      const lastHtmlStart = htmlStartMatches.length > 0 ? htmlStartMatches[htmlStartMatches.length - 1].index : -1;
+      const bestStart = lastDoctype !== -1 ? lastDoctype : lastHtmlStart;
+      if (bestStart !== -1) {
+        const candidate = safeHtml.slice(bestStart);
+        if (candidate.includes('</html>') || isAuthenticHtml(candidate)) {
+          safeHtml = candidate;
+        }
+      }
+    }
+
     // 3b. Bersihkan konten residu liar setelah tag penutup </html> pertama yang valid (buang duplikasi tag dan komentar liar)
     const firstClosingHtmlIdx = safeHtml.indexOf('</html>');
     if (firstClosingHtmlIdx !== -1) {
@@ -19192,6 +19223,55 @@ Aturan wajib:
       }
     }
 
+    // DEDUPLIKASI BERKAS HASIL GENERASI (Anti-Duplikasi Website):
+    // Jika model menghasilkan beberapa berkas dengan nama yang sama (misal dua blok index.html),
+    // atau menghasilkan berkas website duplikat yang identik:
+    if (out.files.length > 1) {
+      const deduped = [];
+      const seenNames = new Set();
+      // Iterasi dari belakang (paling akhir) agar versi terbaru/terlengkap yang diprioritaskan
+      for (let i = out.files.length - 1; i >= 0; i--) {
+        const f = out.files[i];
+        const lowerName = (f.name || 'index.html').toLowerCase();
+        if (seenNames.has(lowerName)) {
+          continue;
+        }
+        const isHtml = lowerName.endsWith('.html') || lowerName.endsWith('.htm');
+        if (isHtml) {
+          const content = (f.rawContent || f.content || '').trim();
+          const alreadyHasSameHtml = deduped.some(existing => {
+            const exName = (existing.name || '').toLowerCase();
+            if (!exName.endsWith('.html') && !exName.endsWith('.htm')) return false;
+            const exContent = (existing.rawContent || existing.content || '').trim();
+            return exContent === content || (exContent.length > 50 && content.includes(exContent)) || (content.length > 50 && exContent.includes(content));
+          });
+          if (alreadyHasSameHtml) {
+            continue;
+          }
+        }
+        seenNames.add(lowerName);
+        deduped.unshift(f);
+      }
+      out.files = deduped;
+    }
+
+    // Pastikan HANYA SATU berkas website HTML yang memiliki status isPrimaryWebEntry = true
+    const webHtmlFiles = out.files.filter(f => {
+      const n = (f.name || '').toLowerCase();
+      return n.endsWith('.html') || n.endsWith('.htm');
+    });
+    if (webHtmlFiles.length > 0) {
+      let primaryFound = false;
+      webHtmlFiles.forEach((wf, idx) => {
+        if (!primaryFound && (wf.name.toLowerCase() === 'index.html' || idx === 0)) {
+          wf.isPrimaryWebEntry = true;
+          primaryFound = true;
+        } else {
+          wf.isPrimaryWebEntry = false;
+        }
+      });
+    }
+
     if (Array.isArray(out.files) && out.files.length > 0) {
       out.hasIncompleteFile = out.files.some(f => f.isIncomplete);
     }
@@ -19826,6 +19906,7 @@ ${msg.content.slice(0, 3000)}
 
     const wrap = document.createElement('div');
     wrap.className = 'msg-file-cards-wrap';
+    let primaryWebCardRendered = false;
     files.forEach((file) => {
       if (file && file.name && /\.(?:mermaid|mmd)$/i.test(file.name)) {
         file.name = file.name.replace(/\.(?:mermaid|mmd)$/i, '.svg');
@@ -19862,6 +19943,11 @@ ${msg.content.slice(0, 3000)}
                               isRawJsxOrReactCode(file.rawContent || file.content || '', file);
       const isFileWeb = isWebExtOrReact && (file.isPrimaryWebEntry !== false);
       if (isFileWeb) {
+        if (primaryWebCardRendered) {
+          // Cegah duplikasi kartu kanvas pratinjau website di dalam satu pesan
+          return;
+        }
+        primaryWebCardRendered = true;
         renderGeminiCanvasCard(file, wrap);
         return;
       }
@@ -23231,13 +23317,15 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       }
 
       session.updatedAt = new Date().toISOString();
-      session.messages.push(userMsg);
-      savePersistedState();
-      renderChatHistory(els.searchHistoryInput?.value || '');
+      if (!options._autoRegenCount) {
+        session.messages.push(userMsg);
+        savePersistedState();
+        renderChatHistory(els.searchHistoryInput?.value || '');
 
-      // Immediately render user's message bubble
-      const userRow = appendMessageElement('user', displayPrompt, images, 'Anda', null, session.messages.length - 1, null, docsWithContent.length > 0 ? docsWithContent : docsMeta, false, null, userMsg.timestamp, userMsg);
-      smartScrollChatToBottom(true);
+        // Immediately render user's message bubble
+        const userRow = appendMessageElement('user', displayPrompt, images, 'Anda', null, session.messages.length - 1, null, docsWithContent.length > 0 ? docsWithContent : docsMeta, false, null, userMsg.timestamp, userMsg);
+        smartScrollChatToBottom(true);
+      }
 
       if (STATE.isPromptHidden) {
         togglePromptVisibility(false);
@@ -26307,6 +26395,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
           const freshWebPrompt = `Buatkan website yang lengkap, menarik, interaktif, dan berfungsi penuh untuk: "${promptBase}".\n\nMANDAT UTAMA:\nTuliskan seluruh kode dokumen HTML5 lengkap dari <!DOCTYPE html> sampai </html> di dalam blok <<<ZOZ_FILE name="index.html" lang="html">. Buat kode padat (150-200 baris) dengan Tailwind CSS dan vanilla JavaScript yang langsung jalan!`;
 
+          try { assistantRow.remove(); } catch (_) {}
           setGeneratingState(false);
           STATE.isSending = false;
           setTimeout(() => {
@@ -26351,6 +26440,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
         const freshWebPrompt = `Buatkan website yang lengkap, menarik, interaktif, dan berfungsi penuh untuk: "${promptBase}".\n\nMANDAT UTAMA:\nTuliskan seluruh kode dokumen HTML5 lengkap dari <!DOCTYPE html> sampai </html> di dalam blok <<<ZOZ_FILE name="index.html" lang="html">. Sertakan styling CSS dan JavaScript interaktif dalam satu berkas mandiri yang bekerja langsung tanpa terpotong!`;
 
+        try { assistantRow.remove(); } catch (_) {}
         setGeneratingState(false);
         STATE.isSending = false;
         setTimeout(() => {
@@ -28108,6 +28198,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
           const freshWebPrompt = `Buatkan website yang lengkap, menarik, interaktif, dan berfungsi penuh untuk: "${promptBase}".\n\nMANDAT UTAMA:\nTuliskan seluruh kode dokumen HTML5 lengkap dari <!DOCTYPE html> sampai </html> di dalam blok <<<ZOZ_FILE name="index.html" lang="html">. Buat kode padat (150-200 baris) dengan Tailwind CSS dan vanilla JavaScript yang langsung jalan!`;
 
+          try { assistantRow.remove(); } catch (_) {}
           setGeneratingState(false);
           STATE.isSending = false;
           setTimeout(() => {
@@ -28152,6 +28243,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
         const freshWebPrompt = `Buatkan website yang lengkap, menarik, interaktif, dan berfungsi penuh untuk: "${promptBase}".\n\nMANDAT UTAMA:\nTuliskan seluruh kode dokumen HTML5 lengkap dari <!DOCTYPE html> sampai </html> di dalam blok <<<ZOZ_FILE name="index.html" lang="html">. Sertakan styling CSS dan JavaScript interaktif dalam satu berkas mandiri yang bekerja langsung tanpa terpotong!`;
 
+        try { assistantRow.remove(); } catch (_) {}
         setGeneratingState(false);
         STATE.isSending = false;
         setTimeout(() => {
