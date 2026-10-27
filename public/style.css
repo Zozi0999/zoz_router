@@ -7508,7 +7508,7 @@ div.msg-sources-section button.msg-sources-title span {
   border: none;
   border-radius: 0;
   overflow: hidden;
-  background: #ffffff;
+  background: #0a0e1a;
 }
 
 .ai-file-studio-pane iframe {
@@ -7517,7 +7517,7 @@ div.msg-sources-section button.msg-sources-title span {
   width: 100%;
   height: 100%;
   border: 0;
-  background: #ffffff;
+  background: transparent;
 }
 
 /* Masalah YANG SAMA dengan YouTube yang sudah diperbaiki: CSS author
@@ -8163,7 +8163,7 @@ div.msg-sources-section button.msg-sources-title span {
   min-height: 0 !important;
   border: none !important;
   border-radius: 0 !important;
-  background: #ffffff !important;
+  background: #0a0e1a !important;
 }
 
 .studio-workspace-area .ai-file-studio-pane iframe {
@@ -8172,7 +8172,7 @@ div.msg-sources-section button.msg-sources-title span {
   width: 100% !important;
   height: 100% !important;
   border: 0 !important;
-  background: #ffffff !important;
+  background: transparent !important;
 }
 
 .studio-workspace-area .ai-file-studio-code,

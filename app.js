@@ -9133,12 +9133,46 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     let insideDocBlock = false;
     let insideRawDocBlock = false;
     let insideIsolatedBlock = false;
+    let insideHunkBlock = false;
     let fileBlockLang = 'code';
     let currentFileName = '';
     const isDocMode = Boolean(options && (options.isDocCreation || options.docFormat));
 
+    function isCodeOrMarkupLine(l) {
+      const s = l.trim();
+      if (!s) return true;
+      if (/^<\/?(?:!DOCTYPE|[a-zA-Z0-9_-]+)\b/i.test(s)) return true;
+      if (/^<!--[\s\S]*?(?:-->)?$/i.test(s) || /-->$/.test(s) || s === '>' || s.endsWith('>')) return true;
+      if (/^(?:<{3,}\s*(?:SEARCH|REPLACE|END)?|={3,}|>{3,}\s*(?:REPLACE)?)/i.test(s)) return true;
+      if (/^[a-zA-Z0-9_-]+=(?:"[^"]*"|'[^']*'|[^\s>]+)/i.test(s)) return true;
+      if (/^(?:allowfullscreen|disabled|checked|required|readonly|hidden|controls|autoplay|loop|muted|defer|async)\b/i.test(s)) return true;
+      if (/(?:class|id|src|href|style|title|type|rel|name|target|alt|width|height|placeholder|value)=/i.test(s)) return true;
+      if (/(?:^|\s)(?:color|font|background|padding|margin|border|shadow|text-slate|hex-pattern|scanlines|display|position|top|left|right|bottom|z-index|gap|width|height)\s*:/i.test(s)) return true;
+      if (/^[.#@:][a-zA-Z0-9_-]/.test(s) || /[a-zA-Z0-9_-]+\s*\{/.test(s) || s === '}' || s === '{') return true;
+      if (/^\/\*|\*\/$/.test(s) || /^\/\//.test(s)) return true;
+      if (/^(?:window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|import\s+|export\s+|return\b)/i.test(s)) return true;
+      if (/[{}();]$/.test(s)) return true;
+      if (s.startsWith('```')) return true;
+      return false;
+    }
+
     processed.split('\n').forEach((line) => {
       const t = line.trim();
+
+      // Penanganan khusus blok diff hunk (<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE)
+      if (insideHunkBlock) {
+        if (/^(?:>{3,}\s*(?:REPLACE\b)?|>>>{1,3}\s*(?:REPLACE\b)?|<<<END_ZOZ_EDIT|<<<END_ZOZ_MODIFY)/i.test(t)) {
+          insideHunkBlock = false;
+        }
+        return;
+      }
+      if (!isExplicitCodeInChat && /^(?:<{3,}\s*SEARCH\b|<<<{1,3}\s*SEARCH\b)/i.test(t)) {
+        insideHunkBlock = true;
+        if (!out.some(l => l && l.includes('Sedang memilih & mengganti bagian kode'))) {
+          out.push('\n> ✨ *Sedang memilih & mengganti bagian kode terkait (terisolasi di pratinjau live)*\n');
+        }
+        return;
+      }
 
       // Penanganan khusus isolasi dokumen (agar teks pembuatannya tertutup dan tidak membanjiri chat)
       if (!insideFileBlock && !insideDocBlock && !insideRawDocBlock && (isDocMode || t.startsWith(TICK3 + 'docx') || t.startsWith(TICK3 + 'pdf'))) {
@@ -9181,7 +9215,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       const isWebPreviewMode = Boolean(
         (options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat || options.hideAllCodeBlocks)) ||
         (typeof activeAIFile !== 'undefined' && activeAIFile) ||
-        (typeof isWebCreationPrompt === 'function' && isWebCreationPrompt(text || ''))
+        (typeof isWebsiteCreationPrompt === 'function' && isWebsiteCreationPrompt(text || '')) ||
+        (text && (text.includes('<!DOCTYPE') || text.includes('<html') || text.includes('<<<ZOZ_FILE') || text.includes('```html') || text.includes('```jsx')))
       );
       const NAKED_HTML_START = /^<(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form|template)\b/i;
       const CODE_LIKE_LINE = /^(?:`{3,}|<{1,5}>{1,5}|[<>=]{2,}|<<>>|< < > >|<<<>>|window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|\/\*|\*\/|\/\/|<\/script>|<\/html>|<\/body>|<\/style>|<!--|[{}\[\];]|(?:[.#@:][a-zA-Z0-9_-]|[a-zA-Z0-9_-]+\s*\{|[a-zA-Z0-9_-]+\s*:\s*[^;]+;)).*$/i;
@@ -9203,16 +9238,15 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           }
           return;
         } else if (insideRawHtmlBlock) {
-          // Telan semua tag penutup, komentar kode HTML/JS/CSS, dan statemen script/style lanjutan
-          if (t.includes('</html>') || t === '</script>' || t === '</style>' || t.startsWith('<!--') || CODE_LIKE_LINE.test(t) || t === TICK3 || /^\/\*/.test(t) || /\*\/$/.test(t) || /^\/\//.test(t)) {
+          // Telan semua tag penutup, komentar kode HTML/JS/CSS, atribut lanjutan, dan statemen script/style
+          if (t.includes('</html>') || t === '</script>' || t === '</style>' || t.startsWith('<!--') || t === TICK3) {
+            return;
+          }
+          if (isCodeOrMarkupLine(line) || CODE_LIKE_LINE.test(t)) {
             return;
           }
           // Jika baris adalah teks percakapan biasa (bukan tag / kode), tutup blok raw HTML
-          if (t && !t.startsWith('<') && !t.endsWith(';') && !t.endsWith('}') && !t.endsWith('{') && !t.includes('{') && !t.includes('}') && !CODE_LIKE_LINE.test(t)) {
-            insideRawHtmlBlock = false;
-          } else {
-            return;
-          }
+          insideRawHtmlBlock = false;
         }
       }
 
@@ -9265,7 +9299,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         if (/^(?:\s*<{2,5}>{1,5}|\s*<<>>|\s*< < > >|\s*<<<>>|\s*<{3,}\s*(?:SEARCH|REPLACE|END)?[^>\n]*>{0,5})\s*$/i.test(t) || /^<{1,5}>{1,5}\s*console\.log/i.test(t)) {
           return;
         }
-        if (!isExplicitCodeInChat && (isWebPreviewMode || options.hideAllCodeBlocks) && CODE_LIKE_LINE.test(t)) {
+        if (!isExplicitCodeInChat && (isWebPreviewMode || options.hideAllCodeBlocks) && (CODE_LIKE_LINE.test(t) || isCodeOrMarkupLine(line))) {
           return;
         }
         out.push(line);
@@ -9488,8 +9522,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
         updateStudioPreviewStreamHud(displayText);
         if (activeStudioAssistantBubble) {
-          const cleanStudioText = hideFileBlocksForDisplay(displayText, this.options);
+          const cleanStudioText = hideFileBlocksForDisplay(displayText, { ...this.options, hideAllCodeBlocks: true });
           activeStudioAssistantBubble.innerHTML = appendInlineTypingCursor(renderMarkdown(cleanStudioText || '*Sedang meracik kode website...*', true));
+          activeStudioAssistantBubble.querySelectorAll('.code-block-wrapper, pre').forEach(el => el.remove());
           scrollStudioAssistantToBottom();
         }
       }
@@ -9531,9 +9566,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         }
       }
       if (activeStudioAssistantBubble && els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
-        let cleanStudioText = hideFileBlocksForDisplay(this.text, this.options);
+        let cleanStudioText = hideFileBlocksForDisplay(this.text, { ...this.options, hideAllCodeBlocks: true });
         // Hapus sisa banner progress markdown di akhir jika AI sudah selesai merespons
         cleanStudioText = cleanStudioText.replace(/>\s*✨\s*\*Sedang memilih & mengganti[^\n]*\n?/g, '').trim();
+        cleanStudioText = cleanStudioText.replace(/>\s*🌐\s*\*Sedang merancang kode website[^\n]*\n?/g, '').trim();
         if (!cleanStudioText) {
           const hasCodeMarkers = String(this.text || '').includes('<<<ZOZ_') || String(this.text || '').includes('<<<SEARCH');
           cleanStudioText = hasCodeMarkers
@@ -9541,6 +9577,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             : '💡 Respons diterima.';
         }
         activeStudioAssistantBubble.innerHTML = renderMarkdown(cleanStudioText);
+        activeStudioAssistantBubble.querySelectorAll('.code-block-wrapper, pre').forEach(el => el.remove());
         enhanceCodeBlocks(activeStudioAssistantBubble);
         scrollStudioAssistantToBottom();
         activeStudioAssistantBubble = null;
@@ -14150,145 +14187,127 @@ Aturan wajib:
     if (!html || typeof html !== 'string') return html || '';
     let result = html;
 
-    // 0. Perbaikan Orphan </style> tanpa <style> pembuka (mencegah seluruh CSS menjadi teks telanjang di browser)
-    const firstStyleClose = result.indexOf('</style>');
-    const firstStyleOpen = result.indexOf('<style');
-    if (firstStyleClose !== -1 && (firstStyleOpen === -1 || firstStyleOpen > firstStyleClose)) {
-      const headOpenIdx = result.indexOf('<head');
-      if (headOpenIdx !== -1) {
-        const headTagEnd = result.indexOf('>', headOpenIdx);
-        if (headTagEnd !== -1) {
-          result = result.slice(0, headTagEnd + 1) + '\n  <style>\n' + result.slice(headTagEnd + 1);
-        }
-      } else {
-        const htmlOpenIdx = result.indexOf('<html');
-        if (htmlOpenIdx !== -1) {
-          const htmlTagEnd = result.indexOf('>', htmlOpenIdx);
-          if (htmlTagEnd !== -1) {
-            result = result.slice(0, htmlTagEnd + 1) + '\n<head>\n  <style>\n' + result.slice(htmlTagEnd + 1);
-          }
-        } else {
-          result = '<style>\n' + result;
-        }
-      }
-    }
-
-    // 1. Bersihkan seluruh CSS mentah di dalam <head> yang berada di LUAR tag <style>...</style>
-    const headMatch = result.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i);
-    if (headMatch) {
-      const headInner = headMatch[1];
-      const validTagRegex = /<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|<title\b[^>]*>[\s\S]*?<\/title>|<(?:meta|link|base)\b[^>]*\/?>|<!--[\s\S]*?-->/gi;
-      let lastIndex = 0;
-      let m;
-      const nonTagParts = [];
-      const validTags = [];
-
-      while ((m = validTagRegex.exec(headInner)) !== null) {
-        if (m.index > lastIndex) {
-          const between = headInner.slice(lastIndex, m.index);
-          if (between.trim()) nonTagParts.push(between.trim());
-        }
-        validTags.push(m[0]);
-        lastIndex = validTagRegex.lastIndex;
-      }
-      if (lastIndex < headInner.length) {
-        const tail = headInner.slice(lastIndex);
-        if (tail.trim()) nonTagParts.push(tail.trim());
-      }
-
-      const cssToSave = [];
-      const htmlToBody = [];
-
-      for (const part of nonTagParts) {
-        if (part.includes('{') || part.includes('}') || part.includes('/*') || part.includes('*/') || /(?:color|font|background|padding|margin|border|shadow|text-slate)\s*:/i.test(part)) {
-          cssToSave.push(part);
-        } else if (/<[a-zA-Z0-9_-]+\b/.test(part)) {
-          htmlToBody.push(part);
-        }
-      }
-
-      if (cssToSave.length > 0) {
-        const mergedCss = cssToSave.join('\n    ');
-        const existingStyleIdx = validTags.findIndex(t => /^<style\b/i.test(t));
-        if (existingStyleIdx !== -1) {
-          const oldStyle = validTags[existingStyleIdx];
-          const closeIdx = oldStyle.lastIndexOf('</style>');
-          validTags[existingStyleIdx] = oldStyle.slice(0, closeIdx) + '\n    /* Aturan Gaya Diselamatkan dari Head */\n    ' + mergedCss + '\n  ' + oldStyle.slice(closeIdx);
-        } else {
-          validTags.push(`<style>\n    /* Aturan Gaya Diselamatkan dari Head */\n    ${mergedCss}\n  </style>`);
-        }
-        result = result.replace(headMatch[0], `<head>\n  ${validTags.join('\n  ')}\n</head>`);
-      }
-    }
-
-    // 2. Ekstrak tag body dan bersihkan seluruh CSS telanjang yang bocor ke dalam <body>
+    // Tangkap tag pembuka html, head, dan body asli agar atributnya (class, id, style, lang, onload) tidak hilang
+    const htmlOpenMatch = result.match(/<html\b[^>]*>/i);
+    const headOpenMatch = result.match(/<head\b[^>]*>/i);
     const bodyOpenMatch = result.match(/<body\b[^>]*>/i);
-    const bodyCloseMatch = result.match(/<\/body>/i);
-    if (!bodyOpenMatch) return result;
+    const htmlOpenTag = htmlOpenMatch ? htmlOpenMatch[0] : '<html lang="id">';
+    const headOpenTag = headOpenMatch ? headOpenMatch[0] : '<head>';
+    const bodyOpenTag = bodyOpenMatch ? bodyOpenMatch[0] : '<body>';
 
-    const bodyOpenIdx = bodyOpenMatch.index + bodyOpenMatch[0].length;
-    const bodyCloseIdx = bodyCloseMatch ? bodyCloseMatch.index : result.length;
-    let bodyContent = result.slice(bodyOpenIdx, bodyCloseIdx);
-    const originalBody = bodyContent;
+    // 1. Ekstrak dan amankan tag <style>...</style> yang sudah ada
+    const existingStyles = [];
+    result = result.replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gi, (match, inner) => {
+      existingStyles.push(inner);
+      return '<!-- ZOZ_STYLE_PLACEHOLDER -->';
+    });
+
+    // 2. Deteksi dan ekstrak seluruh aturan CSS telanjang di mana pun posisinya di dokumen
     const orphanCssRules = [];
 
-    // Pola A: Apapun teks di awal <body> sebelum tag HTML elemen pertama
-    const firstRealTagMatch = bodyContent.match(/<(?:[a-zA-Z0-9_-]+)\b[^>]*>/i);
-    if (firstRealTagMatch && firstRealTagMatch.index > 0) {
-      const preamble = bodyContent.slice(0, firstRealTagMatch.index);
-      const hasCssMarkers = preamble.includes('{') || preamble.includes('}') || preamble.includes('/*') || preamble.includes('*/') || preamble.includes('%3E') || /(?:color|font|background|padding|margin|border|shadow|text-slate|hex-pattern|scanlines)\s*[:{]/i.test(preamble);
-      if (hasCssMarkers) {
-        orphanCssRules.push(preamble.trim());
-        bodyContent = bodyContent.slice(firstRealTagMatch.index);
-      }
-    }
-
-    // Pola B: Teks CSS telanjang di antara tag HTML di dalam body
-    const nakedCssRegex = /(?:^|\n)\s*(?:(?:\/\*[\s\S]*?\*\/|[a-zA-Z0-9_\s-]+\*\/)\s*)?(?:@(?:keyframes|media|supports|import)[^{]*\{[\s\S]*?\n\s*\}|[.#@:][a-zA-Z0-9_,\s>:+~*.-]+|[a-zA-Z0-9_-]+\s*)\s*\{[\s\S]*?\}(?:\s*\/\*[\s\S]*?\*\/)?/gi;
-    bodyContent = bodyContent.replace(nakedCssRegex, (match) => {
-      if (!match.trim().startsWith('<')) {
-        orphanCssRules.push(match.trim());
+    // Pola A: Selektor CSS lengkap { ... } atau @media / @keyframes { ... }
+    const cssRuleRegex = /(?:^|\n)\s*(?:(?:\/\*[\s\S]*?\*\/|[a-zA-Z0-9_\s-]+\*\/)\s*)?(?:@(?:keyframes|media|supports|import)[^{]*\{[\s\S]*?\n\s*\}|[.#@:][a-zA-Z0-9_,\s>:+~*.-]+|[a-zA-Z0-9_-]+\s*)\s*\{[\s\S]*?\}(?:\s*\/\*[\s\S]*?\*\/)?/gi;
+    result = result.replace(cssRuleRegex, (match) => {
+      const trimmed = match.trim();
+      if (!trimmed.startsWith('<') && (trimmed.includes('{') || trimmed.includes(':'))) {
+        orphanCssRules.push(trimmed);
         return '\n';
       }
       return match;
     });
 
-    // Pola C: Sisa komentar CSS liar atau fragmen SVG data-URI yang tertinggal di body
-    bodyContent = bodyContent.replace(/(?:^|\n)\s*[^<\n]*?(?:%3E|%3C|xmlns=|viewBox=)[^<\n]*\)?;\s*\}?\s*(?=\n|<|$)/gi, (match) => {
+    // Pola B: Properti CSS lepas seperti `color: #00f0ff; text-shadow: ...; }` atau `UT\nCL\ncolor: ...`
+    const cssPropRegex = /(?:^|\n)\s*(?:[a-zA-Z0-9_-]+\s*:\s*[^;\n<]+;?\s*)+(?:\s*\})?/gi;
+    result = result.replace(cssPropRegex, (match) => {
+      const trimmed = match.trim();
+      if (!trimmed.startsWith('<') && /(?:color|font|background|padding|margin|border|shadow|text-slate|display|position|top|left|right|bottom|z-index|gap|width|height|opacity|transform|filter)\s*:/i.test(trimmed)) {
+        orphanCssRules.push(trimmed);
+        return '\n';
+      }
+      return match;
+    });
+
+    // Pola C: Fragmen SVG data-URI, url("data:..."), dan scanlines yang lepas dari selektor
+    const svgDataUriRegex = /(?:^|\n)\s*[^<\n]*?(?:%3E|%3C|xmlns=|viewBox=|data:image\/svg)[^<\n]*\)?;\s*\}?\s*(?=\n|<|$)/gi;
+    result = result.replace(svgDataUriRegex, (match) => {
       orphanCssRules.push(match.trim());
       return '\n';
     });
-    bodyContent = bodyContent.replace(/(?:^|\n)\s*(?:\/\*[\s\S]*?\*\/|[a-zA-Z0-9_\s-]+\*\/)\s*(?=\n|<|$)/g, '\n');
 
-    // Pola D: Chopped stray words (seperti "in", "cc", "Ef", "rig") yang tertinggal di luar tag
-    bodyContent = bodyContent.replace(/(?:^|\n)\s*(?:in|cc|Ef|rig|out|deg|px|rem|em|vh|vw|s|ms)\s*(?=\n|<|$)/gi, '\n');
-
-    if (bodyContent !== originalBody) {
-      const afterBody = bodyCloseMatch ? result.slice(bodyCloseIdx) : '';
-      result = result.slice(0, bodyOpenIdx) + '\n  ' + bodyContent.trim() + '\n' + afterBody;
-
-      // Pindahkan aturan CSS yang diselamatkan ke dalam tag <style> di <head>
-      if (orphanCssRules.length > 0) {
-        const validRules = orphanCssRules
-          .map(r => r.replace(/^[a-zA-Z0-9_\s-]+\*\/\s*/, '')
-                     .replace(/(?:^|\n)\s*(?:in|cc|Ef|rig|out|deg|px|rem|em|vh|vw|s|ms)\s*(?=\n|$)/gi, '\n')
-                     .trim())
-          .filter(r => r && (r.includes('{') || r.includes('/*') || r.includes(':')) && !r.startsWith('<'))
-          .join('\n    ');
-
-        if (validRules) {
-          if (result.includes('</style>')) {
-            const lastStyleIdx = result.lastIndexOf('</style>');
-            result = result.slice(0, lastStyleIdx) +
-              '\n\n    /* Aturan Gaya Terselamatkan dari Body */\n    ' + validRules +
-              '\n  ' + result.slice(lastStyleIdx);
-          } else if (result.includes('</head>')) {
-            result = result.replace('</head>', `  <style>\n    /* Aturan Gaya Terselamatkan dari Body */\n    ${validRules}\n  </style>\n</head>`);
-          } else {
-            result = `<style>\n    ${validRules}\n  </style>\n` + result;
-          }
-        }
+    // Pola D: Komentar CSS telanjang /* ... */ di luar tag HTML
+    result = result.replace(/(?:^|\n)\s*\/\*[\s\S]*?\*\/\s*(?=\n|<|$)/g, (match) => {
+      const trimmed = match.trim();
+      if (trimmed.includes('Pembaruan Gaya') || trimmed.includes('Modifikasi Gaya') || /(?:color|font|background|slate|neon|glow|grid|scanline)/i.test(trimmed)) {
+        orphanCssRules.push(trimmed);
       }
+      return '\n';
+    });
+
+    // Pola E: Chopped stray words (seperti "in", "cc", "Ef", "rig", "UT", "CL") yang tertinggal di luar tag
+    result = result.replace(/(?:^|\n)\s*(?:in|cc|Ef|rig|out|deg|px|rem|em|vh|vw|s|ms|UT|CL)\s*(?=\n|<|$)/gi, '\n');
+
+    // Bersihkan placeholder style lama
+    result = result.replace(/<!-- ZOZ_STYLE_PLACEHOLDER -->/g, '');
+
+    // 3. Gabungkan semua CSS (CSS yang sudah ada + seluruh orphan CSS yang diselamatkan)
+    const allCss = [...existingStyles, ...orphanCssRules]
+      .map(c => c.trim())
+      .filter(Boolean)
+      .join('\n\n    ');
+
+    // 4. Pastikan struktur HTML lengkap dengan <head> dan <body>
+    let headInner = '';
+    let bodyInner = '';
+
+    const headMatch = result.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i);
+    if (headMatch) {
+      headInner = headMatch[1];
+      result = result.replace(headMatch[0], '<!-- ZOZ_HEAD_PLACEHOLDER -->');
+    }
+
+    const bodyMatch = result.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i);
+    if (bodyMatch) {
+      bodyInner = bodyMatch[1];
+      result = result.replace(bodyMatch[0], '<!-- ZOZ_BODY_PLACEHOLDER -->');
+    } else {
+      bodyInner = result.replace(/<!DOCTYPE[^>]*>/i, '').replace(/<html[^>]*>/i, '').replace(/<\/html>/i, '').replace('<!-- ZOZ_HEAD_PLACEHOLDER -->', '').trim();
+    }
+
+    // Bersihkan sisa karakter non-tag di headInner
+    if (headInner) {
+      headInner = headInner
+        .replace(cssRuleRegex, '')
+        .replace(cssPropRegex, '')
+        .replace(svgDataUriRegex, '')
+        .replace(/(?:^|\n)\s*(?:in|cc|Ef|rig|out|deg|px|rem|em|vh|vw|s|ms|UT|CL)\s*(?=\n|<|$)/gi, '\n')
+        .trim();
+    }
+
+    // Bersihkan sisa karakter non-tag sebelum tag HTML pertama di bodyInner
+    const firstTagMatch = bodyInner.match(/<(?:[a-zA-Z0-9_-]+)\b[^>]*>/i);
+    if (firstTagMatch && firstTagMatch.index > 0) {
+      const lead = bodyInner.slice(0, firstTagMatch.index);
+      if (!lead.includes('<') && (lead.includes('{') || lead.includes('}') || lead.includes(':') || lead.includes(';') || lead.includes('/*') || /[\w-]+\s*:/i.test(lead))) {
+        bodyInner = bodyInner.slice(firstTagMatch.index);
+      }
+    }
+
+    // Format <head> dengan <style> yang rapi
+    const styleBlock = allCss ? `\n  <style id="zoz-healed-styles">\n    ${allCss}\n  </style>` : '';
+    const finalHead = `${headOpenTag}\n  ${headInner ? headInner + '\n' : '<meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'}${styleBlock}\n</head>`;
+    const finalBody = `${bodyOpenTag}\n  ${bodyInner.trim()}\n</body>`;
+
+    // Rekonstruksi dokumen HTML
+    if (result.includes('<!-- ZOZ_HEAD_PLACEHOLDER -->') && result.includes('<!-- ZOZ_BODY_PLACEHOLDER -->')) {
+      result = result
+        .replace('<!-- ZOZ_HEAD_PLACEHOLDER -->', finalHead)
+        .replace('<!-- ZOZ_BODY_PLACEHOLDER -->', finalBody);
+    } else if (result.includes('<!-- ZOZ_HEAD_PLACEHOLDER -->')) {
+      result = result
+        .replace('<!-- ZOZ_HEAD_PLACEHOLDER -->', finalHead) + `\n${finalBody}`;
+    } else {
+      const doctype = /<!DOCTYPE[^>]*>/i.test(result) ? result.match(/<!DOCTYPE[^>]*>/i)[0] : '<!DOCTYPE html>';
+      result = `${doctype}\n${htmlOpenTag}\n${finalHead}\n${finalBody}\n</html>`;
     }
 
     return result;
@@ -14384,7 +14403,22 @@ ${safeHtml}
         }
       }
 
-      if (!recoveredBaseHtml) {
+      if (recoveredBaseHtml) {
+        if (typeof applyZozEditPatch === 'function') {
+          const patchResult = applyZozEditPatch(recoveredBaseHtml, safeHtml);
+          if (patchResult && patchResult.patched) {
+            safeHtml = healLeakedCssFromHtml(patchResult.content);
+          } else {
+            safeHtml = recoveredBaseHtml;
+          }
+        } else {
+          safeHtml = recoveredBaseHtml;
+        }
+        if (fileObj) {
+          fileObj.content = safeHtml;
+          fileObj.rawContent = safeHtml;
+        }
+      } else {
         safeHtml = `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -14392,7 +14426,7 @@ ${safeHtml}
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(fileObj?.name || 'Website Preview')}</title>
 </head>
-<body>
+<body style="background:#0a0e1a; color:#ffffff; font-family:sans-serif; padding:20px;">
 ${safeHtml}
 </body>
 </html>`;
@@ -17505,6 +17539,28 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
           break;
         }
 
+        // Perlindungan Anti-Rusak Dokumen Website:
+        // Jika blok kode adalah HTML tetapi BUKAN dokumen HTML utuh (hanya potongan elemen/komponen),
+        // dan kita sedang menyunting website yang sudah ada (activeAIFile memiliki HTML autentik):
+        if ((langTag === 'html' || langTag === 'htm') && activeAIFile && isAuthenticHtml(activeAIFile.rawContent || activeAIFile.content)) {
+          if (!isAuthenticHtml(repairedBody)) {
+            const baseContent = activeAIFile.rawContent || activeAIFile.content || '';
+            const patchResult = applyZozEditPatch(baseContent, repairedBody);
+            if (patchResult && patchResult.patched) {
+              const patchedHtml = healLeakedCssFromHtml(patchResult.content);
+              const fallbackFile = buildAIFile(activeAIFile.name, activeAIFile.mime || 'text/html', 'html', patchedHtml, 'Pembaruan komponen website');
+              fallbackFile.isSurgicalPatch = true;
+              fallbackFile.editedRanges = patchResult.editedRanges || [];
+              out.files.push(fallbackFile);
+              out.rawBlocks.push(lines.slice(i, hasClosingFence ? end + 1 : lines.length).join('\n'));
+              break;
+            } else {
+              // Bukan dokumen utuh dan patch tidak cocok: pertahankan website asli agar tidak tertimpa/putih!
+              continue;
+            }
+          }
+        }
+
         let fallbackName = guessFileNameFromLang(isMermaidFence ? 'mermaid' : langTag, repairedBody);
         let fallbackMime = isMermaidFence ? 'image/svg+xml' : '';
         if (isDocFence) {
@@ -17841,6 +17897,21 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
       out = out.replace(/<{3,}\s*SEARCH[\s\S]*?>{3,}(?:\s*REPLACE\b)?/gi, '');
       out = out.replace(/<<{1,4}>{1,4}/g, '');
       out = out.replace(/<<>>|< < > >|<<<>>|<<>>>/g, '');
+
+      if (shouldHideCode) {
+        // Pembersihan Total Sisa Kode JavaScript / HTML Terpotong (Naked JS & Orphan Tags)
+        out = out
+          .replace(/<script\b[\s\S]*?<\/script>/gi, '')
+          .replace(/<\/script>/gi, '')
+          .replace(/<\/html>/gi, '')
+          .replace(/<\/body>/gi, '')
+          .replace(/<!DOCTYPE\s+html>/gi, '')
+          .replace(/<!--[\s\S]*?-->/g, '')
+          .replace(/(?:^|\n)\s*(?:window\.addEventListener|document\.(?:getElementById|querySelector|addEventListener)|setInterval|setTimeout|function\s+[a-zA-Z0-9_$]+|const\s+[a-zA-Z0-9_$]+\s*=|let\s+[a-zA-Z0-9_$]+\s*=|var\s+[a-zA-Z0-9_$]+\s*=)[\s\S]*?(?=\n\n|\n[<>]|$)/gi, '')
+          .replace(/(?:^|\n)\s*\/\*[\s\S]*?\*\/\s*(?=\n|$)/g, '')
+          .replace(/(?:^|\n)\s*[a-zA-Z0-9_$]+\s*\([^)]*\);?\s*(?=\n|$)/g, '')
+          .replace(/(?:^|\n)\s*console\.log\s*\([^;]*?\);?\s*(?=\n|$)/gi, '\n');
+      }
     }
 
     const kept = out.split('\n').filter((line) => {
@@ -17861,7 +17932,7 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
     });
 
     let result = cleaned.join('\n').trim();
-    if (!result) {
+    if (!result || /^[\s\n\r]*[{}();,<>/]+[\s\n\r]*$/.test(result)) {
       if (hasStrippedDoc || (options && options.docFormat)) {
         result = `📄 **Dokumen Telah Selesai Disusun!**\n\nBerkas dokumen ${strippedDocName ? `**${escapeHtml(strippedDocName)}** ` : ''}telah berhasil dibuat dengan format rapi dan terstruktur. Anda dapat langsung melihat pratinjau dokumen atau mengunduhnya dalam format **PDF** maupun **Word (.docx)** melalui kartu berkas di bawah ini.`;
       } else if (hasStrippedWeb || shouldHideCode || (options && options.websiteMode === 'preview')) {
@@ -23965,9 +24036,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         if (updatedFile && (updatedFile.rawContent || updatedFile.content)) {
           const newCode = updatedFile.rawContent || updatedFile.content;
           if (newCode) {
-            persistStudioCodeChange(newCode, { session: session });
-            if (typeof StudioAutonomousAgent !== 'undefined') {
-              StudioAutonomousAgent.armVerificationTimer(activeAIFile);
+            // Guard mutlak anti-rusak: Jika website sudah ada dan newCode BUKAN dokumen HTML utuh dan bukan patch bedah
+            if (isWeb && isAuthenticHtml(activeAIFile.rawContent || activeAIFile.content) && !isAuthenticHtml(newCode) && !updatedFile.isSurgicalPatch) {
+              console.warn('[persistStudioIsolatedTurn] Ditahan: updatedFile bukan dokumen HTML utuh, website asli dipertahankan.');
+            } else {
+              persistStudioCodeChange(newCode, { session: session });
+              if (typeof StudioAutonomousAgent !== 'undefined') {
+                StudioAutonomousAgent.armVerificationTimer(activeAIFile);
+              }
             }
           }
         }
