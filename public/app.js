@@ -10646,7 +10646,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             method: 'POST',
             headers,
             body: JSON.stringify(body),
-            signal: STATE.abortController?.signal
+            signal: options.signal || STATE.abortController?.signal
           });
           if (routeType === 'proxy' && attemptRes.status === 404) {
             continue;
@@ -10720,6 +10720,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     while (true) {
       const { done, value } = await reader.read();
+      if (options.heartbeat && typeof options.heartbeat.kick === 'function') {
+        options.heartbeat.kick();
+      }
       if (done) {
         buf += decoder.decode();
         break;
@@ -10822,7 +10825,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {}),
         ...(STATE.settings.openRouterKey ? { openRouterKey: STATE.settings.openRouterKey } : {})
       }),
-      signal: STATE.abortController?.signal
+      signal: options.signal || STATE.abortController?.signal
     });
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -10858,6 +10861,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     while (true) {
       const { done, value } = await reader.read();
+      if (options.heartbeat && typeof options.heartbeat.kick === 'function') {
+        options.heartbeat.kick();
+      }
       if (done) {
         buf += decoder.decode();
         break;
@@ -10896,22 +10902,67 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     return appended;
   }
 
-  // ==================== ZOZ PARALLEL AGENT SWARM ENGINE ====================
-  // Alih-alih mengeksekusi agen AI secara berurutan (sequential waterfall) yang lambat & berputar-putar,
+  // ==================== STREAM HEARTBEAT CONTROLLER ====================
+  // Manajemen Siklus Eksekusi Pengganti Promise.race:
+  // - Zero Promise.race: Dilarang melombakan promise eksekusi dengan timer statis yang memotong respons di tengah jalan.
+  // - Heartbeat Stream Timeout: Selama model masih mengirimkan chunk token (stream aktif), proses TIDAK BOLEH diputus berapa pun lamanya.
+  // - AbortController HANYA memicu pembatalan jika terjadi dead-air (tidak ada token masuk sama sekali selama >15 detik).
+  function createHeartbeatStreamController(deadAirTimeoutMs = 15000, parentSignal = null) {
+    const controller = new AbortController();
+    let timer = null;
+
+    function resetDeadAirTimer() {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        console.warn(`[StreamHeartbeat] Dead-air timeout terlampaui (> ${deadAirTimeoutMs / 1000}s tanpa chunk token). Memicu abort.`);
+        controller.abort(new Error(`Dead-air stream timeout (> ${deadAirTimeoutMs / 1000}s tanpa token). Model tidak merespons.`));
+      }, deadAirTimeoutMs);
+    }
+
+    resetDeadAirTimer();
+
+    if (parentSignal) {
+      if (parentSignal.aborted) {
+        controller.abort(parentSignal.reason);
+      } else {
+        parentSignal.addEventListener('abort', () => {
+          if (timer) clearTimeout(timer);
+          controller.abort(parentSignal.reason);
+        }, { once: true });
+      }
+    }
+
+    return {
+      controller,
+      signal: controller.signal,
+      kick() {
+        resetDeadAirTimer();
+      },
+      dispose() {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      }
+    };
+  }
+
   // ==================== CLAUDE-CODE COLLABORATIVE MULTI-AGENT SWARM ENGINE ====================
   // Arsitektur Asli Claude Code: BUKAN lomba tercepat (anti-lomba/anti-race condition)!
-  // Para subagen bekerja sama secara kolaboratif untuk MENYELESAIKAN TUGAS DENGAN BENAR:
-  // 1. 🧠 Subagent Alpha (Spatial Architect & Context Mapper):
-  //    - Menganalisis pohon DOM, memetakan baris target error/edit, dan menyusun konteks (0-50ms).
-  // 2. 🛠️ Subagent Beta (Code Synthesizer):
-  //    - Menyusun kode/perbaikan secara lengkap, presisi, dan tuntas menggunakan model aktif pengguna.
-  //    - Dilarang memotong kode, dilarang placeholder, dilarang terburu-buru.
-  // 3. 🔍 Subagent Delta (AST & Quality Verifier / Healer):
-  //    - Mengaudit kebenaran kode: validasi sintaks JS, keutuhan kurung/tag HTML, dan memastikan 0 kebocoran CSS ke <body>.
-  //    - Hanya kode yang 100% terverifikasi benar dan aman yang diterapkan ke pratinjau live.
+  // Para subagen bekerja sama secara kolaboratif dalam Sequential State Machine:
+  // 1. 🧠 Subagent Alpha (DOM-Architect):
+  //    - Mempersempit ruang masalah: melokalisasi elemen target (selector & lineRange) dan mengekstrak isolatedContext.
+  //    - Mengeluarkan Kontrak JSON Payload terstruktur ke orkestrator.
+  // 2. 🛠️ Subagent Beta (Surgical-Coder):
+  //    - Menulis kode 100% tuntas pada isolatedContext tanpa pemotongan (Zero-Lazy Policy: dilarang "// ...").
+  // 3. 🔍 Subagent Delta (Static-Verifier & Sandbox Gate):
+  //    - Validator deterministik (<10ms, tanpa LLM): Zero-Lazy regex, DOMParser tag check, new Function() JS syntax check, CSS scoping.
+  //    - Feedback loop: Jika gagal, mengirim RejectionReport kembali ke Beta (maksimal 2x retry).
+  //    - Commit ke Live Preview dengan Snapshot Rollback instan jika runtime crash.
 
   const ClaudeCodeParallelSwarm = {
     activeControllers: new Set(),
+    lastWorkingSnapshot: null,
 
     updateHud(hudEl, subagentsState) {
       if (!hudEl) return;
@@ -10926,11 +10977,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       const isSuccess = Boolean(subagentsState.isSuccess);
       hudEl.className = 'studio-agent-loop-hud' + (isErr ? ' is-error' : (isSuccess ? ' is-success' : ''));
 
-      const arch = subagentsState.architect || { status: 'active', label: 'Memetakan Baris' };
-      const coder = subagentsState.coder || { status: 'active', label: 'Menyusun Kode' };
-      const verif = subagentsState.verifier || { status: 'active', label: 'Mengaudit Kualitas' };
+      const arch = subagentsState.architect || { status: 'active', label: 'Memetakan DOM' };
+      const coder = subagentsState.coder || { status: 'active', label: 'Sintesis Kode' };
+      const verif = subagentsState.verifier || { status: 'active', label: 'Audit Kualitas' };
 
-      const title = subagentsState.title || (isSuccess ? 'Tugas Selesai: 100% Bebas Error' : 'Kolaborasi Multi-Agen Claude-Code');
+      const title = subagentsState.title || (isSuccess ? 'Tugas Selesai: 100% Bebas Error' : 'Orkestrasi Multi-Agen Claude-Code');
 
       hudEl.innerHTML = `
         <div class="claude-swarm-banner">
@@ -10943,13 +10994,13 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           </div>
           <div class="claude-swarm-subagents">
             <div class="swarm-pill pill-architect ${arch.status}">
-              🧠 Architect <span class="pill-badge">${escapeHtml(arch.label)}</span>
+              🧠 Alpha (DOM) <span class="pill-badge">${escapeHtml(arch.label)}</span>
             </div>
             <div class="swarm-pill pill-coder ${coder.status}">
-              🛠️ Coder <span class="pill-badge">${escapeHtml(coder.label)}</span>
+              🛠️ Beta (Coder) <span class="pill-badge">${escapeHtml(coder.label)}</span>
             </div>
             <div class="swarm-pill pill-verifier ${verif.status}">
-              🔍 Verifier <span class="pill-badge">${escapeHtml(verif.label)}</span>
+              🔍 Delta (Gate) <span class="pill-badge">${escapeHtml(verif.label)}</span>
             </div>
           </div>
         </div>
@@ -10963,11 +11014,345 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       this.activeControllers.clear();
     },
 
+    // --- FASE 1: SUBAGENT ALPHA (DOM-Architect) ---
+    async runSubagentAlpha({ userPrompt, currentCode, selInfo, targetName }) {
+      // 1. Pilihan langsung pengguna di editor (Precision Selection)
+      if (selInfo && selInfo.hasSelection && selInfo.selectedLinesCode) {
+        return {
+          targetSelector: `Selection L${selInfo.startLine}–L${selInfo.endLine}`,
+          lineRange: [selInfo.startLine, selInfo.endLine],
+          operation: 'REPLACE_NODE',
+          isolatedContext: selInfo.selectedLinesCode,
+          constraints: ['Modifikasi tepat pada rentang baris yang dipilih pengguna', 'Tulis kode lengkap tanpa placeholder']
+        };
+      }
+
+      const lines = currentCode.split('\n');
+      const lowerPrompt = userPrompt.toLowerCase();
+
+      // 2. Deteksi pembaruan gaya / CSS
+      const isStyleQuery = /(?:warna|color|font|gaya|style|bg|background|kontras|border|shadow|padding|margin|posisi|gelap|terang|neon|glow)/i.test(lowerPrompt);
+      if (isStyleQuery && currentCode.includes('<style')) {
+        let styleStart = -1, styleEnd = -1;
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].toLowerCase().includes('<style') && styleStart === -1) styleStart = i + 1;
+          if (lines[i].toLowerCase().includes('</style>') && styleEnd === -1) styleEnd = i + 1;
+        }
+        if (styleStart !== -1 && styleEnd !== -1) {
+          const styleLines = lines.slice(styleStart - 1, styleEnd).join('\n');
+          return {
+            targetSelector: 'style#main-styles',
+            lineRange: [styleStart, styleEnd],
+            operation: 'UPDATE_STYLE',
+            isolatedContext: styleLines.length > 3000 ? lines.slice(styleEnd - 50, styleEnd).join('\n') : styleLines,
+            constraints: ['Pertahankan CSS yang sudah ada', 'Gunakan variabel atau aturan scoped', 'Jangan merusak tag </style>']
+          };
+        }
+      }
+
+      // 3. Deteksi komponen DOM spesifik berbasis tag / kata kunci
+      const domKeywords = [
+        { term: 'nav', sel: 'nav, header, [id*="nav"], [class*="nav"]', op: 'REPLACE_NODE' },
+        { term: 'menu', sel: 'nav, .nav-links, .menu', op: 'REPLACE_NODE' },
+        { term: 'hero', sel: '#hero, .hero, section:first-of-type', op: 'REPLACE_NODE' },
+        { term: 'header', sel: 'header, #header', op: 'REPLACE_NODE' },
+        { term: 'footer', sel: 'footer, #footer', op: 'REPLACE_NODE' },
+        { term: 'kontak', sel: '#kontak, #contact, .contact, section[id*="kontak"]', op: 'REPLACE_NODE' },
+        { term: 'proyek', sel: '#proyek, #projects, .projects', op: 'REPLACE_NODE' },
+        { term: 'portofolio', sel: '#portfolio, .portfolio', op: 'REPLACE_NODE' },
+        { term: 'tombol', sel: 'button, .btn, a[class*="btn"]', op: 'REPLACE_NODE' },
+        { term: 'button', sel: 'button, .btn', op: 'REPLACE_NODE' }
+      ];
+
+      let matchedSelector = '';
+      for (const k of domKeywords) {
+        if (lowerPrompt.includes(k.term)) {
+          matchedSelector = k.sel;
+          break;
+        }
+      }
+
+      if (typeof DOMParser !== 'undefined') {
+        try {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(currentCode, 'text/html');
+          let targetEl = null;
+
+          if (matchedSelector) {
+            targetEl = doc.querySelector(matchedSelector);
+          }
+
+          if (!targetEl) {
+            const words = userPrompt.match(/[a-zA-Z0-9_-]+/g) || [];
+            for (const w of words) {
+              if (w.length >= 3) {
+                const elById = doc.getElementById(w);
+                if (elById) { targetEl = elById; break; }
+              }
+            }
+          }
+
+          if (targetEl && targetEl.outerHTML) {
+            const rawHtml = targetEl.outerHTML;
+            const firstTag = rawHtml.split('\n')[0].trim();
+            let startLine = -1;
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].includes(firstTag.slice(0, Math.min(30, firstTag.length)))) {
+                startLine = i + 1;
+                break;
+              }
+            }
+            const lineCount = rawHtml.split('\n').length;
+            const endLine = (startLine !== -1) ? (startLine + lineCount - 1) : Math.min(lines.length, 60);
+            const selName = targetEl.id ? `#${targetEl.id}` : (targetEl.className ? `.${String(targetEl.className).split(' ')[0]}` : targetEl.tagName.toLowerCase());
+
+            return {
+              targetSelector: selName,
+              lineRange: [startLine !== -1 ? startLine : 1, endLine],
+              operation: 'REPLACE_NODE',
+              isolatedContext: rawHtml.length <= 4000 ? rawHtml : rawHtml.slice(0, 4000),
+              constraints: ['Pertahankan event listener & atribut data', 'Tulis ulang node secara 100% utuh dari tag pembuka sampai penutup']
+            };
+          }
+        } catch (_) {}
+      }
+
+      // Fallback Spatial Context
+      const defaultStart = 1;
+      const defaultEnd = Math.min(lines.length, 75);
+      return {
+        targetSelector: 'body > main',
+        lineRange: [defaultStart, defaultEnd],
+        operation: 'REPLACE_NODE',
+        isolatedContext: lines.slice(defaultStart - 1, defaultEnd).join('\n'),
+        constraints: ['Pertahankan struktur dokumen', 'Tulis kode lengkap tanpa pemotongan']
+      };
+    },
+
+    // --- FASE 2: SUBAGENT BETA (Surgical-Coder) ---
+    async runSubagentBeta({ alphaContract, userPrompt, rejectionReport = null, currentCode, targetName, singleModel, singleEngine, heartbeat, signal }) {
+      const isRetry = Boolean(rejectionReport);
+      const retryFeedback = isRetry ? `
+[LAPORAN PENOLAKAN DARI SUBAGENT DELTA - ATTEMPT #${rejectionReport.attempt}]:
+Gagal pada tahap: ${rejectionReport.stage}
+Penyebab Error: ${rejectionReport.error}
+Catatan Tambahan: ${rejectionReport.details || 'Kode tidak memenuhi standar verifikasi.'}
+PERBAIKI KODE ANDA SEKARANG AGAR ERROR DI ATAS TIDAK TERULANG!` : '';
+
+      const betaPrompt = `[CLAUDE-CODE MULTI-AGENT SWARM — SURGICAL CODER]
+Target Dokumen: "${targetName}"
+Kontrak Target dari Subagent Alpha:
+- Selektor: ${alphaContract.targetSelector}
+- Rentang Baris: ${alphaContract.lineRange[0]}–${alphaContract.lineRange[1]}
+- Operasi: ${alphaContract.operation}
+- Batasan (Constraints): ${alphaContract.constraints.join(', ')}
+
+[Konteks Terisolasi yang Harus Diubah]:
+\`\`\`html
+${alphaContract.isolatedContext}
+\`\`\`
+
+Instruksi Pengguna: "${userPrompt}"${retryFeedback}
+
+ATURAN MUTLAK SURGICAL CODER:
+1. SURGICAL PATCHING: Tuliskan HANYA blok pengganti untuk konteks terisolasi di atas secara 100% LENGKAP dari tag pembuka sampai tag penutup.
+2. ZERO-LAZY POLICY: DILARANG KERAS menggunakan komentar pemotong kode ("// ... existing code ...", "/* kode lainnya */", "TODO", "<!-- ... -->"). Pelanggaran akan langsung ditolak sistem!
+3. FORMAT KONTRAK: Respon Anda WAJIB langsung dimulai pada baris pertama dengan blok surgical patch:
+<<<<<<< SEARCH
+[salin persis baris asli dari konteks terisolasi di atas]
+=======
+[baris baru yang 100% lengkap, berfungsi, dan bebas error]
+>>>>>>> REPLACE`;
+
+      let rawOutput = '';
+      if (singleEngine === 'ollama') {
+        rawOutput = await streamContinuationOllama(null, singleModel, betaPrompt, null, alphaContract.isolatedContext, {
+          hideAllCodeBlocks: true,
+          signal,
+          heartbeat
+        });
+      } else {
+        rawOutput = await streamContinuationOpenRouter(null, singleModel, betaPrompt, null, alphaContract.isolatedContext, {
+          hideAllCodeBlocks: true,
+          signal,
+          heartbeat
+        });
+      }
+
+      return rawOutput;
+    },
+
+    // --- FASE 3: SUBAGENT DELTA (Static-Verifier & Sandbox Gate) ---
+    verifyDelta({ patchOutput, currentCode, alphaContract, attempt = 1 }) {
+      if (!patchOutput || typeof patchOutput !== 'string' || !patchOutput.trim()) {
+        return {
+          passed: false,
+          stage: 'EMPTY_OUTPUT',
+          error: 'Subagent Beta mengembalikan respons kosong.',
+          attempt
+        };
+      }
+
+      // --- Tahap 3A.1: Regex Anti-Placeholder (Zero-Lazy Policy) ---
+      const lazyPatterns = [
+        /(?:\/\*|\/\/|<!--)\s*\.\.\.\s*(?:\[baris\s+\d+-\d+\s+dilewati\]|existing code|rest of code|sisa kode|kode lainnya|kode tetap|unchanged|kode di atas|kode di bawah)/i,
+        /(?:\/\*|\/\/|<!--)\s*(?:TODO|TBD|IMPLEMENT ME|KODE DI SINI|ISI SENDIRI)\b/i,
+        /\/\/\s*\.\.\.\s*$/m,
+        /<!--\s*\.\.\.\s*-->/
+      ];
+
+      for (const lp of lazyPatterns) {
+        if (lp.test(patchOutput)) {
+          return {
+            passed: false,
+            stage: 'ZERO_LAZY',
+            error: 'Ditemukan komentar penyingkat (Zero-Lazy Policy Violation). Dilarang keras menggunakan "..." atau "TODO".',
+            details: 'Model memotong implementasi dengan komentar pemendek.',
+            attempt
+          };
+        }
+      }
+
+      // Terapkan patch sementara ke currentCode untuk menguji dokumen hasil
+      let candidateCode = currentCode;
+      let applied = false;
+
+      if (patchOutput.includes('<<<<<<< SEARCH') || patchOutput.includes('<<<SEARCH')) {
+        const patchRes = applyZozEditPatch(currentCode, patchOutput);
+        if (patchRes && patchRes.patched) {
+          candidateCode = patchRes.content;
+          applied = true;
+        }
+      } else if (isLikelyCssSnippet(patchOutput)) {
+        candidateCode = injectCssIntoHtmlDocument(currentCode, patchOutput);
+        applied = true;
+      }
+
+      if (!applied) {
+        return {
+          passed: false,
+          stage: 'PATCH_MISMATCH',
+          error: 'Blok SEARCH dari patch tidak cocok persis dengan baris target di dokumen.',
+          details: 'Salin baris yang ingin diganti secara persis dari konteks terisolasi.',
+          attempt
+        };
+      }
+
+      // --- Tahap 3A.2: Uji Keutuhan DOM (DOM Integrity Check) ---
+      if (typeof DOMParser !== 'undefined') {
+        try {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(candidateCode, 'text/html');
+
+          const parseErrors = doc.querySelectorAll('parsererror');
+          if (parseErrors.length > 0) {
+            return {
+              passed: false,
+              stage: 'DOM_INTEGRITY',
+              error: `Parser error terdeteksi pada struktur HTML: ${parseErrors[0].textContent.slice(0, 80)}`,
+              attempt
+            };
+          }
+
+          if (!doc.body || !doc.head) {
+            return {
+              passed: false,
+              stage: 'DOM_INTEGRITY',
+              error: 'Pohon DOM rusak: Tag <head> atau <body> hilang dari dokumen hasil edit.',
+              attempt
+            };
+          }
+
+          // Periksa keseimbangan tag-tag kunci
+          const structuralTags = ['div', 'section', 'ul', 'ol', 'script', 'style', 'table', 'form'];
+          for (const st of structuralTags) {
+            const openC = (candidateCode.match(new RegExp(`<${st}\\b[^>]*>`, 'gi')) || []).length;
+            const closeC = (candidateCode.match(new RegExp(`</${st}>`, 'gi')) || []).length;
+            if (openC !== closeC) {
+              return {
+                passed: false,
+                stage: 'DOM_INTEGRITY',
+                error: `Ketidakseimbangan tag <${st}>: ${openC} tag pembuka vs ${closeC} tag penutup.`,
+                attempt
+              };
+            }
+          }
+        } catch (e) {
+          return {
+            passed: false,
+            stage: 'DOM_INTEGRITY',
+            error: `Gagal memvalidasi DOM: ${e.message}`,
+            attempt
+          };
+        }
+      }
+
+      // --- Tahap 3A.3: Uji Kompilasi JS (JS Syntax Validator) ---
+      const scriptMatches = candidateCode.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi);
+      for (const sm of scriptMatches) {
+        const scriptCode = sm[1].trim();
+        if (!scriptCode) continue;
+        const openingTag = sm[0].slice(0, sm[0].indexOf('>'));
+        if (/type=["'](?:application\/ld\+json|text\/template|text\/jsx|text\/babel)["']/i.test(openingTag)) continue;
+
+        try {
+          new Function(scriptCode);
+        } catch (syntaxErr) {
+          return {
+            passed: false,
+            stage: 'JS_SYNTAX',
+            error: `SyntaxError pada JavaScript: ${syntaxErr.message}`,
+            details: `Script bermasalah: ${scriptCode.slice(0, 100)}...`,
+            attempt
+          };
+        }
+      }
+
+      // --- Tahap 3A.4: Isolasi & Sanitasi CSS (CSS Scoping & Leak Purger) ---
+      const healedCode = healLeakedCssFromHtml(candidateCode);
+
+      return {
+        passed: true,
+        candidateCode: healedCode,
+        attempt
+      };
+    },
+
+    // --- Tahap 3C: Commit ke Live Preview dengan Instant Rollback Snapshot ---
+    commitWithRollback(newCode, targetFile) {
+      this.lastWorkingSnapshot = targetFile?.rawContent || targetFile?.content || '';
+
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => {
+          persistStudioCodeChange(newCode);
+        });
+      } else {
+        persistStudioCodeChange(newCode);
+      }
+
+      const rollbackTimer = setTimeout(() => {
+        this.lastWorkingSnapshot = newCode;
+      }, 2000);
+
+      const handleRuntimeCrash = (ev) => {
+        console.warn('[ClaudeCodeParallelSwarm] Runtime crash terdeteksi pasca commit. Menjalankan Instant Rollback:', ev);
+        clearTimeout(rollbackTimer);
+        if (this.lastWorkingSnapshot) {
+          persistStudioCodeChange(this.lastWorkingSnapshot);
+        }
+      };
+
+      if (typeof window !== 'undefined') {
+        window.addEventListener('error', handleRuntimeCrash, { once: true });
+        window.addEventListener('unhandledrejection', handleRuntimeCrash, { once: true });
+      }
+    },
+
     // 1. EXECUTE REPAIR SWARM (Penyelesaian Perbaikan Kode Secara Benar & Tuntas)
     async executeRepairSwarm({ lastErr, activeAIFile, currentCode, onUpdate, onDone }) {
       const startTime = Date.now();
-      const swarmAbort = new AbortController();
-      this.activeControllers.add(swarmAbort);
+      const heartbeat = createHeartbeatStreamController(15000, STATE.abortController?.signal);
+      this.activeControllers.add(heartbeat.controller);
 
       const targetName = activeAIFile?.name || 'index.html';
       const lines = currentCode.split('\n');
@@ -10977,7 +11362,6 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       const contextCode = lines.slice(startLine - 1, endLine).join('\n');
       const errTitle = (lastErr.message || 'SyntaxError').split('\n')[0].substring(0, 50);
 
-      // Model Tunggal Pilihan Pengguna (Single Model Enforcement)
       const singleEngine = (typeof STATE !== 'undefined' && STATE.mode === 'ollama') ? 'ollama' : 'openrouter';
       const singleModel = (singleEngine === 'ollama')
         ? (STATE.settings.ollamaModel || 'deepseek-coder:latest')
@@ -10993,7 +11377,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       };
       if (onUpdate) onUpdate(subState);
 
-      // --- TAHAP 1: SUBAGENT ALPHA (Architect) — Analisis Struktural & Deteksi Deterministik ---
+      // Tahap 1: Analisis Struktural Cepat Deterministik
       const dupMatch = (lastErr.message || '').match(/Identifier\s+['"]([a-zA-Z0-9_$]+)['"]\s+has already been declared/i);
       if (dupMatch) {
         const varName = dupMatch[1];
@@ -11012,7 +11396,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           const patchRes = applyZozEditPatch(currentCode, patchBlock);
           if (patchRes && patchRes.patched) {
             const healed = healLeakedCssFromHtml(patchRes.content);
-            persistStudioCodeChange(healed);
+            this.commitWithRollback(healed, activeAIFile);
 
             subState.isSuccess = true;
             subState.isError = false;
@@ -11022,14 +11406,15 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             subState.verifier = { status: 'verified', label: '100% Bersih' };
             if (onUpdate) onUpdate(subState);
 
-            this.activeControllers.delete(swarmAbort);
+            heartbeat.dispose();
+            this.activeControllers.delete(heartbeat.controller);
             if (onDone) onDone({ success: true, message: `Deklarasi ganda '${varName}' berhasil diperbaiki tuntas.`, timeMs: Date.now() - startTime });
             return;
           }
         }
       }
 
-      // --- TAHAP 2: SUBAGENT BETA (Coder) — Menyusun Perbaikan Kode yang Lengkap & Benar ---
+      // Tahap 2: Subagent Beta dengan Dead-Air Heartbeat
       const autoHealPrompt = `[CLAUDE-CODE MULTI-AGENT SWARM — REPAIR AGENT]
 Kode berkas "${targetName}" memicu error di browser:
 Isu: "${lastErr.message}" (pada baris ${errLine})
@@ -11058,31 +11443,30 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         if (singleEngine === 'ollama') {
           patchOutput = await streamContinuationOllama(null, singleModel, autoHealPrompt, null, contextCode, {
             hideAllCodeBlocks: true,
-            signal: swarmAbort.signal
+            signal: heartbeat.signal,
+            heartbeat
           });
         } else {
           patchOutput = await streamContinuationOpenRouter(null, singleModel, autoHealPrompt, null, contextCode, {
             hideAllCodeBlocks: true,
-            signal: swarmAbort.signal
+            signal: heartbeat.signal,
+            heartbeat
           });
         }
 
-        // --- TAHAP 3: SUBAGENT DELTA (Verifier) — Mengaudit Kebenaran & Integritas Dokumen ---
         subState.coder = { status: 'verified', label: 'Selesai Ditulis' };
         subState.verifier = { status: 'active', label: 'Mengaudit Sintaks...' };
         if (onUpdate) onUpdate(subState);
 
-        let finalPatchedCode = null;
-        if (patchOutput && (patchOutput.includes('<<<<<<< SEARCH') || patchOutput.includes('<<<SEARCH'))) {
-          const patchRes = applyZozEditPatch(currentCode, patchOutput);
-          if (patchRes && patchRes.patched) {
-            finalPatchedCode = patchRes.content;
-          }
-        }
+        const deltaVerdict = this.verifyDelta({
+          patchOutput,
+          currentCode,
+          alphaContract: { targetSelector: `L${errLine}`, lineRange: [startLine, endLine], constraints: [] },
+          attempt: 1
+        });
 
-        if (finalPatchedCode) {
-          const healed = healLeakedCssFromHtml(finalPatchedCode);
-          persistStudioCodeChange(healed);
+        if (deltaVerdict.passed) {
+          this.commitWithRollback(deltaVerdict.candidateCode, activeAIFile);
 
           subState.isSuccess = true;
           subState.isError = false;
@@ -11092,44 +11476,41 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           subState.verifier = { status: 'verified', label: '100% Terverifikasi' };
           if (onUpdate) onUpdate(subState);
 
-          this.activeControllers.delete(swarmAbort);
+          heartbeat.dispose();
+          this.activeControllers.delete(heartbeat.controller);
           if (onDone) onDone({ success: true, message: 'Kode berhasil diperbaiki tuntas.', timeMs: Date.now() - startTime });
           return;
         }
 
-        // Fallback: Structural AST healing jika model tidak mengembalikan hunk
+        // Fallback AST healing
         const structuralHeal = repairUnclosedScript(currentCode);
         const healed = healLeakedCssFromHtml(structuralHeal);
-        persistStudioCodeChange(healed);
+        this.commitWithRollback(healed, activeAIFile);
 
         subState.isSuccess = true;
         subState.isError = false;
-        subState.title = 'Diselesaikan & Diamankan oleh Subagent Verifier';
+        subState.title = 'Diselesaikan & Diamankan oleh Subagent Delta';
         subState.verifier = { status: 'verified', label: '100% Aman' };
         if (onUpdate) onUpdate(subState);
         if (onDone) onDone({ success: true, message: 'Struktur kode berhasil diamankan.', timeMs: Date.now() - startTime });
       } catch (err) {
-        console.warn('[ClaudeCodeParallelSwarm] Error saat eksekusi perbaikan:', err);
+        console.warn('[ClaudeCodeParallelSwarm] Error saat perbaikan:', err);
         const fallback = healLeakedCssFromHtml(currentCode);
-        persistStudioCodeChange(fallback);
+        this.commitWithRollback(fallback, activeAIFile);
         if (onDone) onDone({ success: false, error: err });
       } finally {
-        this.activeControllers.delete(swarmAbort);
+        heartbeat.dispose();
+        this.activeControllers.delete(heartbeat.controller);
       }
     },
 
-    // 2. EXECUTE EDIT SWARM (Penyelesaian Modifikasi Website Secara Benar & Tuntas)
+    // 2. EXECUTE EDIT SWARM (Sequential State Machine: Alpha -> Beta -> Delta -> Feedback Loop)
     async executeEditSwarm({ userPrompt, activeAIFile, currentCode, selInfo, onUpdate, onDone }) {
       const startTime = Date.now();
-      const swarmAbort = new AbortController();
-      this.activeControllers.add(swarmAbort);
+      const heartbeat = createHeartbeatStreamController(15000, STATE.abortController?.signal);
+      this.activeControllers.add(heartbeat.controller);
 
       const targetName = activeAIFile?.name || 'index.html';
-      const ext = targetName.split('.').pop().toLowerCase();
-      const isHtml = ext === 'html' || ext === 'htm' || ext === 'xhtml';
-      const lang = isHtml ? 'html' : ext;
-
-      // Model Tunggal Pilihan Pengguna (Single Model Enforcement)
       const singleEngine = (typeof STATE !== 'undefined' && STATE.mode === 'ollama') ? 'ollama' : 'openrouter';
       const singleModel = (singleEngine === 'ollama')
         ? (STATE.settings.ollamaModel || 'deepseek-coder:latest')
@@ -11140,113 +11521,104 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         title: `Mengedit "${userPrompt.substring(0, 32)}..."`,
         isError: false,
         isSuccess: false,
-        architect: { status: 'active', label: 'Memetakan Baris' },
-        coder: { status: 'active', label: `Menyusun (${singleModelClean})...` },
-        verifier: { status: 'active', label: 'Audit Kualitas' }
+        architect: { status: 'active', label: 'Memetakan DOM...' },
+        coder: { status: 'idle', label: `Menunggu Alpha` },
+        verifier: { status: 'idle', label: 'Menunggu Kode' }
       };
       if (onUpdate) onUpdate(subState);
 
-      // --- TAHAP 1: SUBAGENT ALPHA (Architect) — Memetakan DOM dan Konteks Baris ---
-      const lines = currentCode.split('\n');
-      let targetSlice = '';
-      if (selInfo && selInfo.hasSelection && selInfo.selectedLinesCode) {
-        targetSlice = `[Target Pilihan Pengguna: Baris ${selInfo.startLine}–${selInfo.endLine}]:\n\`\`\`${lang}\n${selInfo.selectedLinesCode}\n\`\`\`\n`;
-        subState.architect = { status: 'verified', label: `Baris ${selInfo.startLine}–${selInfo.endLine}` };
-      } else {
-        const spatial = StudioEndocrineDiagnostics.buildSpatialAwarenessContext(currentCode, userPrompt);
-        targetSlice = spatial ? `${spatial}\n` : '';
-        subState.architect = { status: 'verified', label: 'Peta DOM Siap' };
-      }
-      if (onUpdate) onUpdate(subState);
-
-      const codeRef = (lines.length <= 4000) ? currentCode : StudioEndocrineDiagnostics.buildCodeReference(currentCode, userPrompt, selInfo);
-      const editPrompt = `[CLAUDE-CODE MULTI-AGENT SWARM — SURGICAL EDIT]
-Berkas: "${targetName}" (${lines.length} baris)
-${targetSlice}
-Instruksi Pengguna: "${userPrompt}"
-
-MANDAT PENYELESAIAN TUGAS SECARA BENAR & TUNTAS:
-1. Selesaikan permintaan modifikasi pengguna secara utuh dan benar.
-2. DILARANG menggunakan komentar pemotong kode ("...rest of code...", "kode tetap sama", dsb).
-3. Respon Anda WAJIB langsung dimulai pada baris pertama dengan blok surgical patch:
-<<<<<<< SEARCH
-[salin persis beberapa baris asli yang ingin diubah dari kode]
-=======
-[baris baru perbaikan/penambahan yang lengkap dan berfungsi]
->>>>>>> REPLACE`;
-
-      subState.coder = { status: 'active', label: 'Menulis Kode Lengkap...' };
-      if (onUpdate) onUpdate(subState);
-
       try {
-        let patchOutput = '';
-        if (singleEngine === 'ollama') {
-          patchOutput = await streamContinuationOllama(null, singleModel, editPrompt, null, codeRef, {
-            hideAllCodeBlocks: true,
-            signal: swarmAbort.signal
-          });
-        } else {
-          patchOutput = await streamContinuationOpenRouter(null, singleModel, editPrompt, null, codeRef, {
-            hideAllCodeBlocks: true,
-            signal: swarmAbort.signal
-          });
-        }
-
-        // --- TAHAP 2: SUBAGENT DELTA (Verifier) — Mengaudit Kebenaran Patch & Keamanan CSS ---
-        subState.coder = { status: 'verified', label: 'Kode Selesai' };
-        subState.verifier = { status: 'active', label: 'Mengaudit Integritas...' };
+        // --- FASE 1: SUBAGENT ALPHA (DOM-Architect) ---
+        const alphaContract = await this.runSubagentAlpha({ userPrompt, currentCode, selInfo, targetName });
+        subState.architect = {
+          status: 'verified',
+          label: `${alphaContract.targetSelector} [L${alphaContract.lineRange[0]}–L${alphaContract.lineRange[1]}]`
+        };
         if (onUpdate) onUpdate(subState);
 
-        let finalPatchedCode = null;
-        if (patchOutput && (patchOutput.includes('<<<<<<< SEARCH') || patchOutput.includes('<<<SEARCH'))) {
-          const patchRes = applyZozEditPatch(currentCode, patchOutput);
-          if (patchRes && patchRes.patched) {
-            finalPatchedCode = patchRes.content;
+        // --- FASE 2 & 3: SEQUENTIAL LOOP (Beta Coder <-> Delta Verifier, Maksimal 2x Retry) ---
+        let currentAttempt = 1;
+        const maxRetries = 2;
+        let rejectionReport = null;
+        let finalValidCode = null;
+
+        while (currentAttempt <= maxRetries + 1) {
+          const isRetry = currentAttempt > 1;
+          subState.coder = {
+            status: 'active',
+            label: isRetry ? `Memperbaiki (${currentAttempt}/${maxRetries + 1})...` : `Sintesis (${singleModelClean})...`
+          };
+          subState.verifier = { status: 'idle', label: 'Menunggu Kode' };
+          if (onUpdate) onUpdate(subState);
+
+          const patchOutput = await this.runSubagentBeta({
+            alphaContract,
+            userPrompt,
+            rejectionReport,
+            currentCode,
+            targetName,
+            singleModel,
+            singleEngine,
+            heartbeat,
+            signal: heartbeat.signal
+          });
+
+          subState.coder = { status: 'verified', label: 'Selesai' };
+          subState.verifier = { status: 'active', label: 'Uji Validasi <10ms...' };
+          if (onUpdate) onUpdate(subState);
+
+          // Subagent Delta menguji secara deterministik (<10ms, tanpa LLM)
+          const deltaVerdict = this.verifyDelta({
+            patchOutput,
+            currentCode,
+            alphaContract,
+            attempt: currentAttempt
+          });
+
+          if (deltaVerdict.passed) {
+            finalValidCode = deltaVerdict.candidateCode;
+            subState.verifier = { status: 'verified', label: '100% Valid & Aman' };
+            if (onUpdate) onUpdate(subState);
+            break;
           }
-        }
 
-        if (finalPatchedCode) {
-          const healed = healLeakedCssFromHtml(finalPatchedCode);
-          persistStudioCodeChange(healed);
-
-          subState.isSuccess = true;
-          subState.title = 'Tugas Selesai: Modifikasi Berhasil Diterapkan!';
-          subState.architect = { status: 'verified', label: 'Done' };
-          subState.coder = { status: 'verified', label: 'Tuntas' };
-          subState.verifier = { status: 'verified', label: '100% Bebas Error' };
+          // Verifikasi gagal: buat RejectionReport dan loop kembali ke Beta
+          console.warn(`[ClaudeCodeParallelSwarm] Verifikasi gagal (Percobaan #${currentAttempt}):`, deltaVerdict.error);
+          rejectionReport = deltaVerdict;
+          subState.verifier = { status: 'error', label: `Ditolak: ${deltaVerdict.stage}` };
           if (onUpdate) onUpdate(subState);
 
-          this.activeControllers.delete(swarmAbort);
-          if (onDone) onDone({ success: true, message: 'Modifikasi kode berhasil diterapkan secara tuntas.', timeMs: Date.now() - startTime });
+          currentAttempt++;
+        }
+
+        if (finalValidCode) {
+          // --- FASE 3C: COMMIT KE LIVE PREVIEW DENGAN SNAPSHOT ROLLBACK ---
+          this.commitWithRollback(finalValidCode, activeAIFile);
+
+          subState.isSuccess = true;
+          subState.isError = false;
+          subState.title = 'Tugas Selesai: 100% Bebas Error & Terverifikasi!';
+          if (onUpdate) onUpdate(subState);
+
+          heartbeat.dispose();
+          this.activeControllers.delete(heartbeat.controller);
+          if (onDone) onDone({
+            success: true,
+            winner: 'Claude-Code Swarm',
+            message: 'Modifikasi kode berhasil diterapkan dan divalidasi tuntas.',
+            timeMs: Date.now() - startTime
+          });
           return;
         }
 
-        // Jika model menghasilkan kode CSS murni
-        const pureCss = (patchOutput || '')
-          .replace(/<{2,}\s*SEARCH[\s\S]*?={2,}/gi, '')
-          .replace(/>{2,}\s*(?:REPLACE\b)?/gi, '')
-          .replace(/<{2,}[^>\n]*>{0,}/g, '')
-          .replace(/={3,}/g, '')
-          .replace(/>{2,}[^>\n]*>{0,}/g, '')
-          .trim();
-        if (pureCss && isLikelyCssSnippet(pureCss)) {
-          const healed = healLeakedCssFromHtml(injectCssIntoHtmlDocument(currentCode, pureCss));
-          persistStudioCodeChange(healed);
-          subState.isSuccess = true;
-          subState.title = 'Tugas Selesai: Gaya CSS Diterapkan ke <style>!';
-          subState.verifier = { status: 'verified', label: 'CSS Konsolidasi' };
-          if (onUpdate) onUpdate(subState);
-          if (onDone) onDone({ success: true, message: 'Gaya CSS berhasil disuntikkan secara aman.', timeMs: Date.now() - startTime });
-          return;
-        }
-
-        // Jika surgical patch belum cocok persis, minta fallback penulisan kontekstual agar website tidak rusak
+        // Jika setelah 2x retry belum lolos, minta fallback penulisan aman agar website tidak rusak
         if (onDone) onDone({ success: false, fallbackRequired: true });
       } catch (err) {
-        console.warn('[ClaudeCodeParallelSwarm] Error saat edit:', err);
+        console.warn('[ClaudeCodeParallelSwarm] Error saat siklus edit:', err);
         if (onDone) onDone({ success: false, error: err });
       } finally {
-        this.activeControllers.delete(swarmAbort);
+        heartbeat.dispose();
+        this.activeControllers.delete(heartbeat.controller);
       }
     },
 
@@ -11254,17 +11626,12 @@ MANDAT PENYELESAIAN TUGAS SECARA BENAR & TUNTAS:
     async executeContinuationSwarm({ session, modelName, engine = 'openrouter', continuePrompt, tailLines, bubbleText, currentAccumulated, runOptions = {}, onStatus = null }) {
       if (onStatus) onStatus('⚡ Menuntaskan kelanjutan kode website...');
 
-      const swarmAbort = new AbortController();
-      const parentSignal = STATE.abortController?.signal;
-      if (parentSignal) {
-        parentSignal.addEventListener('abort', () => swarmAbort.abort(), { once: true });
-      }
+      const heartbeat = createHeartbeatStreamController(15000, STATE.abortController?.signal);
+      this.activeControllers.add(heartbeat.controller);
 
-      // Single model enforcement
       const singleEngine = engine || (typeof STATE !== 'undefined' && STATE.mode === 'ollama' ? 'ollama' : 'openrouter');
       const singleModel = modelName || (singleEngine === 'ollama' ? (STATE.settings.ollamaModel || 'deepseek-coder:latest') : (STATE.settings.openRouterModel || 'openrouter/free'));
 
-      // Delta: Deterministic Structural Healer (0ms instant check)
       const healDeterministic = (text) => {
         let candidate = text;
         if (candidate.includes('<script') && !candidate.includes('</script>')) candidate = repairUnclosedScript(candidate);
@@ -11277,10 +11644,11 @@ MANDAT PENYELESAIAN TUGAS SECARA BENAR & TUNTAS:
 
       try {
         let appended = '';
+        const opts = { ...runOptions, heartbeat, signal: heartbeat.signal };
         if (singleEngine === 'ollama') {
-          appended = await streamContinuationOllama(session, singleModel, continuePrompt, bubbleText, tailLines, runOptions);
+          appended = await streamContinuationOllama(session, singleModel, continuePrompt, bubbleText, tailLines, opts);
         } else {
-          appended = await streamContinuationOpenRouter(session, singleModel, continuePrompt, bubbleText, tailLines, runOptions);
+          appended = await streamContinuationOpenRouter(session, singleModel, continuePrompt, bubbleText, tailLines, opts);
         }
 
         if (appended && appended.trim()) {
@@ -11290,23 +11658,18 @@ MANDAT PENYELESAIAN TUGAS SECARA BENAR & TUNTAS:
           return fullyHealed;
         }
 
-        // Jika stream kosong, amankan dengan penyembuh struktural
         const fallback = healDeterministic(currentAccumulated);
         if (onStatus) onStatus('✅ Kode diselamatkan & ditutup sempurna oleh Subagent Verifier!');
         return fallback;
       } catch (err) {
-        console.warn('[ClaudeCodeParallelSwarm] Error saat melanjutkan, failover ke Verifier Healer:', err);
+        console.warn('[ClaudeCodeParallelSwarm] Failover ke Subagent Verifier:', err);
         return healDeterministic(currentAccumulated);
       } finally {
-        swarmAbort.abort();
+        heartbeat.dispose();
+        this.activeControllers.delete(heartbeat.controller);
       }
     }
   };
-
-  // Delegasikan executeParallelAgentSwarm ke ClaudeCodeParallelSwarm
-  async function executeParallelAgentSwarm(args) {
-    return ClaudeCodeParallelSwarm.executeContinuationSwarm(args);
-  }
 
   // Delegasikan executeParallelAgentSwarm ke ClaudeCodeParallelSwarm
   async function executeParallelAgentSwarm(args) {

@@ -9027,6 +9027,11 @@ body.is-assistant-dragging #aiFileStudioFrame {
   font-weight: 400;
   opacity: 0.85;
 }
+.swarm-pill.idle {
+  opacity: 0.5;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #64748b;
+}
 .swarm-pill.active {
   border-color: #00f0ff;
   color: #00f0ff;
@@ -9042,6 +9047,11 @@ body.is-assistant-dragging #aiFileStudioFrame {
   border-color: #38bdf8;
   color: #bae6fd;
   background: rgba(56, 189, 248, 0.15);
+}
+.swarm-pill.error {
+  border-color: #f43f5e;
+  color: #fda4af;
+  background: rgba(244, 63, 94, 0.2);
 }
 .swarm-pill.pill-architect.active {
   border-color: #38bdf8;
