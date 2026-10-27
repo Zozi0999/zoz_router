@@ -10917,51 +10917,70 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
   // - Zero Promise.race: Dilarang melombakan promise eksekusi dengan timer statis yang memotong respons di tengah jalan.
   // - Heartbeat Stream Timeout: Selama model masih mengirimkan chunk token (stream aktif), proses TIDAK BOLEH diputus berapa pun lamanya.
   // - AbortController HANYA memicu pembatalan jika terjadi dead-air (tidak ada token masuk sama sekali selama >15 detik).
-  function createHeartbeatStreamController(deadAirTimeoutMs = 15000, ttftTimeoutMs = 45000, parentSignal = null) {
-    if (typeof ttftTimeoutMs === 'object' && ttftTimeoutMs !== null && 'aborted' in ttftTimeoutMs) {
-      parentSignal = ttftTimeoutMs;
-      ttftTimeoutMs = 45000;
-    }
-    const controller = new AbortController();
-    let timer = null;
-    let hasReceivedFirstToken = false;
+  function createHeartbeatStreamController(arg1 = 15000, arg2 = 45000, arg3 = null) {
+    let deadAirTimeoutMs = 15000;
+    let ttftTimeoutMs = 45000;
+    let onTimeout = null;
+    let parentSignal = null;
 
-    function scheduleTimer(timeoutMs, isTtftStage = false) {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        const stageName = isTtftStage ? `Time-To-First-Token (TTFT > ${timeoutMs / 1000}s)` : `Dead-air (> ${timeoutMs / 1000}s tanpa chunk)`;
-        console.warn(`[StreamHeartbeat] ${stageName} terlampaui. Memicu abort.`);
-        controller.abort(new Error(`${stageName} timeout. Model tidak merespons.`));
-      }, timeoutMs);
+    if (typeof arg1 === 'object' && arg1 !== null && !('aborted' in arg1)) {
+      deadAirTimeoutMs = arg1.deadAirTimeoutMs ?? 15000;
+      ttftTimeoutMs = arg1.ttftTimeoutMs ?? 45000;
+      onTimeout = arg1.onTimeout ?? null;
+      parentSignal = arg1.parentSignal ?? arg1.signal ?? null;
+    } else {
+      deadAirTimeoutMs = typeof arg1 === 'number' ? arg1 : 15000;
+      if (typeof arg2 === 'object' && arg2 !== null && 'aborted' in arg2) {
+        parentSignal = arg2;
+        ttftTimeoutMs = 45000;
+      } else {
+        ttftTimeoutMs = typeof arg2 === 'number' ? arg2 : 45000;
+        parentSignal = arg3;
+      }
     }
 
-    // Tahap 1: Batas awal TTFT (45s) menunggu chunk pertama
-    scheduleTimer(ttftTimeoutMs, true);
+    const abortController = new AbortController();
+    let timerId = null;
+    let hasReceivedFirstChunk = false;
+
+    const triggerAbort = (stage) => {
+      const reason = new Error(`Stream dibatalkan: ${stage} timeout terlampaui.`);
+      abortController.abort(reason);
+      if (typeof onTimeout === 'function') onTimeout(stage, reason);
+    };
+
+    // Mulai Tahap 1: TTFT Timer (45 dtk)
+    timerId = setTimeout(() => triggerAbort('TTFT_45S'), ttftTimeoutMs);
 
     if (parentSignal) {
       if (parentSignal.aborted) {
-        controller.abort(parentSignal.reason);
+        abortController.abort(parentSignal.reason);
       } else {
         parentSignal.addEventListener('abort', () => {
-          if (timer) clearTimeout(timer);
-          controller.abort(parentSignal.reason);
+          if (timerId) clearTimeout(timerId);
+          abortController.abort(parentSignal.reason);
         }, { once: true });
       }
     }
 
     return {
-      controller,
-      signal: controller.signal,
+      controller: abortController,
+      signal: abortController.signal,
       kick() {
-        // Chunk token diterima! Otomatis beralih ke Tahap 2: Dead-Air Timeout (15s)
-        hasReceivedFirstToken = true;
-        scheduleTimer(deadAirTimeoutMs, false);
+        if (abortController.signal.aborted) return;
+        hasReceivedFirstChunk = true;
+        clearTimeout(timerId);
+        // Mulai/Reset Tahap 2: Dead-Air Timer (15 dtk)
+        timerId = setTimeout(() => triggerAbort('DEAD_AIR_15S'), deadAirTimeoutMs);
       },
       dispose() {
-        if (timer) {
-          clearTimeout(timer);
-          timer = null;
+        if (timerId) {
+          clearTimeout(timerId);
+          timerId = null;
         }
+      },
+      getStage() {
+        return hasReceivedFirstChunk ? 'STREAMING_HEARTBEAT' : 'WAITING_TTFT';
       }
     };
   }
@@ -11034,111 +11053,121 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     },
 
     // --- DETERMINISTIC STATIC VALIDATORS (Delta Engine) ---
-    checkTagBalance(html) {
-      if (!html || typeof html !== 'string') return { valid: true };
-      const HTML_VOID_ELEMENTS = new Set([
-        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-        'link', 'meta', 'param', 'source', 'track', 'wbr'
+    checkTagBalance(htmlString) {
+      if (!htmlString || typeof htmlString !== 'string') return { valid: true, error: null };
+      const VOID_ELEMENTS = new Set([
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img',
+        'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'
       ]);
+
+      // Isolasi dari komentar serta isi script/style agar tidak memicu false-positive
+      const sanitized = htmlString
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '<$1></$1>');
+
       const stack = [];
-      const tagRegex = /<!--[\s\S]*?-->|<(?:\/)?([a-zA-Z0-9_-]+)(?:\s+[^>]*)?\/?>/g;
+      const tagRegex = /<\/?([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*?(\/?)>/g;
       let match;
 
-      while ((match = tagRegex.exec(html)) !== null) {
+      while ((match = tagRegex.exec(sanitized)) !== null) {
         const fullTag = match[0];
-        if (fullTag.startsWith('<!--')) continue;
-
         const tagName = match[1].toLowerCase();
-        const isSelfClosing = fullTag.endsWith('/>') || HTML_VOID_ELEMENTS.has(tagName);
-        const isClosing = fullTag.startsWith('</');
+        const isSelfClosing = match[2] === '/';
+        const isClosingTag = fullTag.startsWith('</');
 
-        if (isSelfClosing) continue;
+        if (VOID_ELEMENTS.has(tagName) || isSelfClosing) continue;
 
-        if (isClosing) {
-          if (stack.length === 0) {
-            return { valid: false, error: `Tag penutup tak terduga </${tagName}> tanpa tag pembuka.` };
-          }
-          const top = stack.pop();
-          if (top.name !== tagName) {
-            return { valid: false, error: `Ketidaksesuaian tag: Ditemukan </${tagName}> tetapi menunggu </${top.name}>.` };
-          }
+        if (!isClosingTag) {
+          stack.push(tagName);
         } else {
-          stack.push({ name: tagName, index: match.index });
+          if (stack.length === 0) {
+            return { valid: false, error: `Tag penutup </${tagName}> berlebih (tanpa pembuka).` };
+          }
+          const lastOpen = stack.pop();
+          if (lastOpen !== tagName) {
+            return {
+              valid: false,
+              error: `Mismatch tag: mengharapkan </${lastOpen}>, tetapi menemukan </${tagName}>.`
+            };
+          }
         }
       }
 
       if (stack.length > 0) {
-        const unclosed = stack.map(s => `<${s.name}>`).join(', ');
-        return { valid: false, error: `Tag tidak tertutup sempurna: ${unclosed}` };
+        return {
+          valid: false,
+          error: `Tag belum ditutup hingga akhir blok: ${stack.map(t => `<${t}>`).join(', ')}`
+        };
       }
-      return { valid: true };
+
+      return { valid: true, error: null };
     },
 
     validateJavaScriptSyntax(scriptCode) {
-      if (!scriptCode || !scriptCode.trim()) return { valid: true };
-      const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-      let sanitized = scriptCode
-        .replace(/^\s*import\s+[\s\S]*?from\s+['"][^'"]+['"];?/gm, '')
-        .replace(/^\s*import\s+['"][^'"]+['"];?/gm, '')
-        .replace(/^\s*export\s+default\s+function\s*\(/gm, 'function _defaultAnon(')
-        .replace(/^\s*export\s+default\s+/gm, '')
-        .replace(/^\s*export\s+/gm, '');
+      if (!scriptCode || !scriptCode.trim()) return { valid: true, error: null };
+      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+
+      // Netralisir static import/export baris per baris agar line number error tetap akurat
+      const normalizedCode = scriptCode
+        .replace(/^\s*import\s+[\s\S]*?from\s+['"][^'"]+['"]\s*;?/gm, (m) => m.replace(/[^\n]/g, ' '))
+        .replace(/^\s*import\s+['"][^'"]+['"]\s*;?/gm, (m) => m.replace(/[^\n]/g, ' '))
+        .replace(/^\s*export\s+default\s+/gm, 'const __zoz_default__ = ')
+        .replace(/^\s*export\s+(?=(const|let|var|function|async|class)\b)/gm, '');
 
       try {
-        new AsyncFunction(sanitized);
-        return { valid: true };
+        new AsyncFunction(normalizedCode);
+        return { valid: true, error: null };
       } catch (err) {
-        return { valid: false, error: err.message };
+        return {
+          valid: false,
+          error: `SyntaxError: ${err.message}`
+        };
       }
     },
 
-    getUniqueDomSelector(el, doc) {
-      if (!el || el.nodeType !== 1) return 'body > main';
-      if (el.id) {
-        const idSel = '#' + el.id;
-        try {
-          if (doc.querySelectorAll(idSel).length === 1) return idSel;
-        } catch (_) {}
-      }
-      const zozId = el.getAttribute('data-zoz-id');
+    getUniqueDomSelector(element, rootDoc = (typeof document !== 'undefined' ? document : null)) {
+      if (!element || element.nodeType !== 1) return null;
+      if (!rootDoc) return element.tagName?.toLowerCase() || 'body';
+
+      // Prioritas 1: Atribut pelacak khusus agen (data-zoz-id)
+      const zozId = element.getAttribute('data-zoz-id');
       if (zozId) {
-        const zozSel = `[data-zoz-id="${zozId}"]`;
+        const sel = `[data-zoz-id="${CSS.escape ? CSS.escape(zozId) : zozId}"]`;
         try {
-          if (doc.querySelectorAll(zozSel).length === 1) return zozSel;
+          if (rootDoc.querySelectorAll(sel).length === 1) return sel;
         } catch (_) {}
       }
-      if (el.className && typeof el.className === 'string') {
-        const firstCls = el.className.split(' ')[0].trim();
-        if (firstCls) {
-          const clsSel = `${el.tagName.toLowerCase()}.${firstCls}`;
-          try {
-            if (doc.querySelectorAll(clsSel).length === 1) return clsSel;
-          } catch (_) {}
-        }
+
+      // Prioritas 2: ID unik
+      if (element.id) {
+        const sel = `#${CSS.escape ? CSS.escape(element.id) : element.id}`;
+        try {
+          if (rootDoc.querySelectorAll(sel).length === 1) return sel;
+        } catch (_) {}
       }
-      // Buat path hierarkis unik 1-to-1
-      let path = '';
-      let cur = el;
-      while (cur && cur.nodeType === 1 && cur.tagName.toLowerCase() !== 'html') {
-        let name = cur.tagName.toLowerCase();
-        if (cur.id) {
-          const checkSel = '#' + cur.id + (path ? ' > ' + path : '');
-          try {
-            if (doc.querySelectorAll(checkSel).length === 1) return checkSel;
-          } catch (_) {}
-        }
-        const parent = cur.parentElement;
+
+      // Prioritas 3: Jalur hierarkis nth-of-type bertingkat
+      const path = [];
+      let current = element;
+      while (current && current.nodeType === 1 && current !== rootDoc.documentElement) {
+        let selector = current.nodeName.toLowerCase();
+        const parent = current.parentElement;
         if (parent) {
-          const siblings = Array.from(parent.children).filter(c => c.tagName === cur.tagName);
+          const siblings = Array.from(parent.children).filter(c => c.nodeName === current.nodeName);
           if (siblings.length > 1) {
-            const index = siblings.indexOf(cur) + 1;
-            name += `:nth-of-type(${index})`;
+            const index = siblings.indexOf(current) + 1;
+            selector += `:nth-of-type(${index})`;
           }
         }
-        path = name + (path ? ' > ' + path : '');
-        cur = cur.parentElement;
+        path.unshift(selector);
+        const candidate = path.join(' > ');
+        try {
+          if (rootDoc.querySelectorAll(candidate).length === 1) return candidate;
+        } catch (_) {}
+        current = parent;
       }
-      return path || el.tagName.toLowerCase();
+
+      return path.join(' > ') || element.nodeName.toLowerCase();
     },
 
     // --- FASE 1: SUBAGENT ALPHA (DOM-Architect) ---
@@ -11449,8 +11478,21 @@ ATURAN MUTLAK SURGICAL CODER:
     },
 
     // --- Tahap 3C: Commit ke Live Preview dengan Instant Rollback Snapshot ---
-    commitWithRollback(newCode, targetFile) {
+    commitWithRollback(newCode, targetFile, morphMeta = null) {
       this.lastWorkingSnapshot = targetFile?.rawContent || targetFile?.content || '';
+
+      // Live DOM Morphing (Pilar 2): Pertahankan root node dan seluruh event listener aktif di preview
+      if (morphMeta && morphMeta.targetSelector && morphMeta.newInnerHtml && typeof document !== 'undefined') {
+        try {
+          const previewFrame = els.previewIframe || document.getElementById('previewIframe');
+          if (previewFrame && previewFrame.contentDocument) {
+            const liveTarget = previewFrame.contentDocument.querySelector(morphMeta.targetSelector);
+            if (liveTarget) {
+              morphTargetNode(liveTarget, morphMeta.newInnerHtml);
+            }
+          }
+        } catch (_) {}
+      }
 
       if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
         window.requestAnimationFrame(() => {
@@ -15039,9 +15081,86 @@ Aturan wajib:
     return hasBraces && (hasCssKeywords || startsWithSelector);
   }
 
-  function injectCssIntoHtmlDocument(html, cssSnippet, scopeKey = 'global') {
+  /**
+   * MORPH_NODE Helper (Pilar 2):
+   * Menyinkronkan atribut dan innerHTML pada rootNode target tanpa mengganti referensi objek DOM-nya
+   * sehingga addEventListener yang terpasang pada rootNode tidak pernah putus/hilang.
+   */
+  function morphTargetNode(targetNode, newHtmlPatch) {
+    if (!targetNode || typeof document === 'undefined') return;
+    const temp = document.createElement('template');
+    temp.innerHTML = newHtmlPatch.trim();
+    const patchedNode = temp.content.firstElementChild;
+
+    if (!patchedNode) throw new Error('Patch HTML kosong atau tidak valid.');
+
+    // 1. Sinkronisasi atribut pada root node tanpa mengganti referensi objek DOM-nya
+    for (const attr of Array.from(targetNode.attributes)) {
+      if (!patchedNode.hasAttribute(attr.name) && attr.name !== 'data-zoz-id') {
+        targetNode.removeAttribute(attr.name);
+      }
+    }
+    for (const attr of Array.from(patchedNode.attributes)) {
+      targetNode.setAttribute(attr.name, attr.value);
+    }
+
+    // 2. Perbarui isi dalam (innerHTML) sambil menjaga root reference
+    targetNode.innerHTML = patchedNode.innerHTML;
+  }
+
+  /**
+   * Keyed Style Injection (injectCssIntoHtmlDocument)
+   * Menimpa aturan CSS berdasarkan scope key di dalam #zoz-healed-styles
+   * dengan proteksi escapeRegex terhadap karakter khusus selektor ([data-zoz-id=...], .btn:hover).
+   */
+  function injectCssIntoHtmlDocument(arg1, arg2, arg3) {
+    const escapeRegex = (str) => String(str || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Mode 1: DOM Document Mode -> injectCssIntoHtmlDocument(scopeKey, cssRules, rootDoc = document)
+    const isDomMode = (typeof arg3 === 'object' && arg3 !== null && 'getElementById' in arg3) ||
+                      (typeof arg1 === 'string' && !arg1.includes('<') && typeof arg2 === 'string' && (arg3 === undefined || arg3 === null));
+
+    if (isDomMode) {
+      const scopeKey = arg1 || 'global';
+      const cssRules = String(arg2 || '').trim();
+      const rootDoc = (typeof arg3 === 'object' && arg3 !== null && 'getElementById' in arg3)
+        ? arg3
+        : (typeof document !== 'undefined' ? document : null);
+
+      if (!rootDoc || !cssRules) return;
+
+      let styleEl = rootDoc.getElementById('zoz-healed-styles');
+      if (!styleEl) {
+        styleEl = rootDoc.createElement('style');
+        styleEl.id = 'zoz-healed-styles';
+        if (rootDoc.head) rootDoc.head.appendChild(styleEl);
+        else if (rootDoc.body) rootDoc.body.prepend(styleEl);
+      }
+
+      const startMarker = `/* [zoz-scope-start: ${scopeKey}] */`;
+      const endMarker = `/* [zoz-scope-end: ${scopeKey}] */`;
+      const newBlock = `${startMarker}\n${cssRules}\n${endMarker}`;
+
+      const blockPattern = new RegExp(
+        `${escapeRegex(startMarker)}[\\s\\S]*?${escapeRegex(endMarker)}`,
+        'g'
+      );
+
+      const currentCss = styleEl.textContent || '';
+      if (blockPattern.test(currentCss)) {
+        styleEl.textContent = currentCss.replace(blockPattern, newBlock);
+      } else {
+        styleEl.textContent = currentCss ? `${currentCss}\n\n${newBlock}` : newBlock;
+      }
+      return;
+    }
+
+    // Mode 2: HTML String Mode -> injectCssIntoHtmlDocument(htmlString, cssRules, scopeKey = 'global')
+    const html = arg1 || '';
+    const cssSnippet = arg2 || '';
+    const scopeKey = arg3 || 'global';
+
     if (!html || !cssSnippet) return html || '';
-    // Bersihkan penanda git diff, blok SEARCH, dan tag style jika ada
     let cleanCss = String(cssSnippet)
       .replace(/<{2,}\s*SEARCH[\s\S]*?={2,}/gi, '')
       .replace(/>{2,}\s*(?:REPLACE\b)?/gi, '')
@@ -15054,35 +15173,37 @@ Aturan wajib:
       .trim();
     if (!cleanCss) return html;
 
-    const safeKey = String(scopeKey || 'global').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const startTag = `/* [zoz-scope: ${safeKey}] */`;
-    const endTag = `/* [end-zoz-scope: ${safeKey}] */`;
-    const scopedBlock = `${startTag}\n${cleanCss}\n${endTag}`;
+    const startMarker = `/* [zoz-scope-start: ${scopeKey}] */`;
+    const endMarker = `/* [zoz-scope-end: ${scopeKey}] */`;
+    const newBlock = `${startMarker}\n${cleanCss}\n${endMarker}`;
 
-    // Keyed Style Injection: Jika <style id="zoz-healed-styles"> sudah ada, timpa blok aturan lama berbasis komentar penanda
+    const blockPattern = new RegExp(
+      `${escapeRegex(startMarker)}[\\s\\S]*?${escapeRegex(endMarker)}`,
+      'g'
+    );
+
     const healedStyleRegex = /<style\b[^>]*\bid=["']zoz-healed-styles["'][^>]*>([\s\S]*?)<\/style>/i;
     const match = html.match(healedStyleRegex);
 
     if (match) {
       let existingStyleBody = match[1];
-      const scopeBlockRegex = new RegExp(`/\\*\\s*\\[zoz-scope:\\s*${safeKey}\\]\\s*\\*/[\\s\\S]*?/\\*\\s*\\[end-zoz-scope:\\s*${safeKey}\\]\\s*\\*/`, 'g');
-      if (scopeBlockRegex.test(existingStyleBody)) {
-        existingStyleBody = existingStyleBody.replace(scopeBlockRegex, scopedBlock);
+      if (blockPattern.test(existingStyleBody)) {
+        existingStyleBody = existingStyleBody.replace(blockPattern, newBlock);
       } else {
-        existingStyleBody = existingStyleBody.trim() + '\n\n    ' + scopedBlock;
+        existingStyleBody = existingStyleBody.trim() + '\n\n    ' + newBlock;
       }
       return html.replace(healedStyleRegex, `<style id="zoz-healed-styles">\n    ${existingStyleBody.trim()}\n  </style>`);
     }
 
     const headCloseIdx = html.indexOf('</head>');
     if (headCloseIdx !== -1) {
-      return html.slice(0, headCloseIdx) + `  <style id="zoz-healed-styles">\n    ${scopedBlock}\n  </style>\n` + html.slice(headCloseIdx);
+      return html.slice(0, headCloseIdx) + `  <style id="zoz-healed-styles">\n    ${newBlock}\n  </style>\n` + html.slice(headCloseIdx);
     }
     const bodyOpenIdx = html.indexOf('<body');
     if (bodyOpenIdx !== -1) {
-      return html.slice(0, bodyOpenIdx) + `<head>\n  <style id="zoz-healed-styles">\n    ${scopedBlock}\n  </style>\n</head>\n` + html.slice(bodyOpenIdx);
+      return html.slice(0, bodyOpenIdx) + `<head>\n  <style id="zoz-healed-styles">\n    ${newBlock}\n  </style>\n</head>\n` + html.slice(bodyOpenIdx);
     }
-    return html + `\n<style id="zoz-healed-styles">\n  ${scopedBlock}\n</style>`;
+    return html + `\n<style id="zoz-healed-styles">\n  ${newBlock}\n</style>`;
   }
 
   // ==================== DETERMINISTIC LEAKED CSS HEALER & PREAMBLE PURGER ====================
