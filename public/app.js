@@ -3388,6 +3388,13 @@ ${logsFormatted}
 7. ATURAN FORMAT RESPON BERSIH & BEBAS BOCORAN TAG (MUTLAK):
    - DILARANG KERAS mencetak, mengutip, atau mengawali balasan Anda dengan label internal seperti "[Model Penjawab: ...]", "[Model: ...]", "[AI Model: ...]", "[Konteks Percakapan: ...]", "[Konteks Silsilah: ...]", atau mencetak blok data telemetri di atas secara mentah!
    - Teks balasan Anda kepada pengguna WAJIB bersih, alami, dan mengalir seperti percakapan biasa tanpa tag atau prefix teknis apapun. Seluruh informasi status di atas adalah pengetahuan latar belakang Anda, bukan untuk dicantumkan sebagai header teks jawaban.`;
+    },
+
+    getSpatialAwarenessContext(code, userQuery = '', selectedRange = null) {
+      if (typeof StudioEndocrineDiagnostics !== 'undefined' && typeof StudioEndocrineDiagnostics.buildSpatialAwarenessContext === 'function') {
+        return StudioEndocrineDiagnostics.buildSpatialAwarenessContext(code, userQuery, selectedRange);
+      }
+      return '';
     }
   };
 
@@ -16612,6 +16619,142 @@ ${safeHtml}
       return code;
     },
 
+    // ==================== KESADARAN SPASIAL & ARSITEKTUR ENDORFIN ====================
+    // Membangun peta kognitif navigasi dokumen HTML: letak <head>, <style>, <section>, dan <script>
+    // Memberikan kesadaran radar spasial mutlak agar AI tahu persis dia berada di mana saat mengedit
+    buildSpatialAwarenessContext(code, userQuery = '', selectedRange = null) {
+      if (!code || typeof code !== 'string') return '';
+      const lines = code.split('\n');
+      const totalLines = lines.length;
+
+      let headStart = -1, headEnd = -1;
+      let styleStart = -1, styleEnd = -1;
+      let bodyStart = -1, bodyEnd = -1;
+      let scriptStart = -1, scriptEnd = -1;
+
+      const sections = [];
+      const cssSelectors = [];
+      const colorsFound = new Set();
+      const fontsFound = new Set();
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lineNum = i + 1;
+        const lower = line.toLowerCase();
+
+        if (lower.includes('<head') && headStart === -1) headStart = lineNum;
+        if (lower.includes('</head>') && headEnd === -1) headEnd = lineNum;
+
+        if (lower.includes('<style') && styleStart === -1) styleStart = lineNum;
+        if (lower.includes('</style>') && styleEnd === -1) styleEnd = lineNum;
+
+        if (lower.includes('<body') && bodyStart === -1) bodyStart = lineNum;
+        if (lower.includes('</body>') && bodyEnd === -1) bodyEnd = lineNum;
+
+        if (lower.includes('<script') && scriptStart === -1) scriptStart = lineNum;
+        if (lower.includes('</script>') && scriptEnd === -1) scriptEnd = lineNum;
+
+        const sectionMatch = line.match(/<(section|header|nav|footer|main|article)\b([^>]*)>/i);
+        if (sectionMatch) {
+          const tag = sectionMatch[1].toLowerCase();
+          const attrs = sectionMatch[2] || '';
+          const idMatch = attrs.match(/\bid=["']([^"']+)["']/i);
+          const classMatch = attrs.match(/\bclass=["']([^"']+)["']/i);
+          const name = idMatch ? `#${idMatch[1]}` : (classMatch ? `.${classMatch[1].split(' ')[0]}` : `<${tag}>`);
+          sections.push({ line: lineNum, tag, name, preview: line.trim().slice(0, 60) });
+        }
+
+        if (styleStart !== -1 && (styleEnd === -1 || lineNum <= styleEnd)) {
+          const selMatch = line.match(/^\s*([.#]?[a-zA-Z0-9_\-\s,>:+~*]+)\s*\{/);
+          if (selMatch && !selMatch[1].includes('http') && !selMatch[1].includes('url(')) {
+            const s = selMatch[1].trim();
+            if (s.length < 40 && !cssSelectors.includes(s)) {
+              cssSelectors.push(s);
+            }
+          }
+        }
+
+        const hexMatches = line.match(/#[0-9a-fA-F]{3,8}\b/g);
+        if (hexMatches) hexMatches.forEach(c => colorsFound.add(c.toLowerCase()));
+
+        const fontMatch = line.match(/font-family\s*:\s*([^;]+);?/i);
+        if (fontMatch) fontsFound.add(fontMatch[1].trim().replace(/['"]/g, ''));
+      }
+
+      const stopWords = new Set(['yang', 'dan', 'di', 'ke', 'dari', 'ini', 'itu', 'untuk', 'pada', 'dengan', 'tolong', 'buat', 'buatkan', 'ubah', 'ganti', 'edit', 'bagian', 'kode', 'code', 'warna', 'jadi', 'agar', 'bisa', 'lebih', 'saya', 'nya']);
+      const queryWords = (userQuery || '').toLowerCase().split(/[^a-z0-9_-]+/).filter(w => w.length >= 3 && !stopWords.has(w));
+
+      const targetHints = [];
+      const isStyleRelated = /(?:warna|color|font|gaya|style|bg|background|kontras|border|shadow|ukuran|jarak|padding|margin|posisi|gelap|terang|neon|glow)/i.test(userQuery);
+      const isScriptRelated = /(?:fungsi|function|klik|click|interaktif|animasi|hitung|modal|popup|event|tombol|button|logic|skrip|script)/i.test(userQuery);
+
+      if (selectedRange && selectedRange.hasSelection) {
+        targetHints.push(`🎯 Pilihan Langsung Pengguna di Edit Kode: Baris ${selectedRange.startLine}–${selectedRange.endLine}`);
+      }
+
+      if (styleStart !== -1 && isStyleRelated) {
+        targetHints.push(`🎨 Penyesuaian Gaya/CSS: Blok <style> di Baris ${styleStart}–${styleEnd !== -1 ? styleEnd : styleStart + 50} (Gunakan selektor yang ada atau tambahkan sebelum </style>)`);
+      }
+
+      for (const sec of sections) {
+        let matchedWord = false;
+        for (const w of queryWords) {
+          if (sec.name.toLowerCase().includes(w) || sec.tag.includes(w) || sec.preview.toLowerCase().includes(w)) {
+            matchedWord = true;
+            break;
+          }
+        }
+        if (matchedWord) {
+          targetHints.push(`🏛️ Komponen Terkait: <${sec.tag}> (${sec.name}) di Baris ${sec.line}`);
+        }
+      }
+
+      if (scriptStart !== -1 && isScriptRelated) {
+        targetHints.push(`⚙️ Logika/Skrip Interaktif: Blok <script> di Baris ${scriptStart}–${scriptEnd !== -1 ? scriptEnd : totalLines}`);
+      }
+
+      let out = `[KESADARAN SPASIAL & ARSITEKTUR ENDORFIN (ENDOCRINE COGNITIVE MAP)]:
+📍 Total Dokumen: ${totalLines} baris
+🗺️ Peta Landmark Dokumen:
+- <head>: Baris ${headStart !== -1 ? headStart : 1}–${headEnd !== -1 ? headEnd : 30}`;
+
+      if (styleStart !== -1) {
+        out += `\n- Blok Gaya (<style>): Baris ${styleStart}–${styleEnd !== -1 ? styleEnd : 'belum tertutup'} (Total ${styleEnd !== -1 ? styleEnd - styleStart : 0} baris CSS)`;
+        if (cssSelectors.length > 0) {
+          out += `\n  - Selektor Utama Terdeteksi: ${cssSelectors.slice(0, 10).join(', ')}`;
+        }
+      }
+
+      if (sections.length > 0) {
+        out += `\n- Komponen Struktur Body (Baris ${bodyStart !== -1 ? bodyStart : 1}–${bodyEnd !== -1 ? bodyEnd : totalLines}):`;
+        sections.slice(0, 10).forEach(s => {
+          out += `\n  • Baris ${s.line}: <${s.tag}> ${s.name}`;
+        });
+      }
+
+      if (scriptStart !== -1) {
+        out += `\n- Blok Logika (<script>): Baris ${scriptStart}–${scriptEnd !== -1 ? scriptEnd : totalLines}`;
+      }
+
+      if (colorsFound.size > 0 || fontsFound.size > 0) {
+        out += `\n🎨 Identitas Desain Terdeteksi:`;
+        if (colorsFound.size > 0) out += ` Palet: ${Array.from(colorsFound).slice(0, 8).join(', ')}`;
+        if (fontsFound.size > 0) out += ` | Font: ${Array.from(fontsFound).slice(0, 4).join(', ')}`;
+      }
+
+      if (targetHints.length > 0) {
+        out += `\n🎯 RADAR KOORDINAT TARGET PERMINTAAN PENGGUNA ("${userQuery}"):`;
+        targetHints.forEach(th => out += `\n  👉 ${th}`);
+      }
+
+      out += `\n⚡ ATURAN KESADARAN ENDORFIN:
+1. Anda tahu PERSIS di mana baris target Anda sebelum menulis SEARCH.
+2. Jika mengubah gaya, lakukan di blok <style> yang sudah ada, DILARANG meletakkan CSS mentah di <body>.
+3. Selalu gunakan 3-5 baris unik di koordinat yang dipetakan sebagai jangkar SEARCH.`;
+
+      return out;
+    },
+
     recordError(data) {
       if (!STATE.settings.endocrineCodeEnabled) return;
       this.lastError = data;
@@ -19406,6 +19549,9 @@ ${blocks}
           const err = StudioEndocrineDiagnostics.lastError;
           endocrineFeedback = `\n[Endocrine Code Sensor]: Error runtime terdeteksi: "${err.message || err}"${err.lineno ? ` (baris ${err.lineno})` : ''}.`;
         }
+        const endocrineAwareness = (isHtml || isJsx)
+          ? StudioEndocrineDiagnostics.buildSpatialAwarenessContext(currentCode, synthesizedGoal, selInfo)
+          : '';
         let selectedContextBlock = '';
         if (selInfo && selInfo.hasSelection && selInfo.selectedLinesCode) {
           selectedContextBlock = `\n[FOKUS PILIHAN PENGGUNA — Baris ${selInfo.startLine}–${selInfo.endLine} di Edit Kode]:\n\`\`\`${lang}\n${selInfo.selectedLinesCode}\n\`\`\`\n`;
@@ -19456,7 +19602,7 @@ Tuliskan SELURUH kode dokumen lengkap terbaru (dari awal sampai akhir) di dalam 
 DILARANG memberikan janji basa-basi. Mulai respons Anda langsung pada baris pertama!`;
         } else {
           followupPrompt = `[ZOZ AUTONOMOUS AGENT — SURGICAL EDIT BERKAS "${targetName}"]
-${selectedContextBlock}${conversationContext}Berikut adalah KODE ARSITEKTUR LENGKAP dari berkas "${targetName}" (${codeLines.length} baris):
+${endocrineAwareness ? endocrineAwareness + '\n\n' : ''}${selectedContextBlock}${conversationContext}Berikut adalah KODE ARSITEKTUR LENGKAP dari berkas "${targetName}" (${codeLines.length} baris):
 \`\`\`${lang}
 ${codeRefToSend}
 \`\`\`
@@ -19464,7 +19610,7 @@ ${codeRefToSend}
 Instruksi Pengguna Terkini: "${synthesizedGoal}"${endocrineFeedback}
 
 MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
-1. Anda adalah Zoz Autonomous Engineer yang bertugas memodifikasi berkas ini secara presisi.
+1. Anda adalah Zoz Autonomous Engineer yang bertugas memodifikasi berkas ini secara presisi. Manfaatkan [KESADARAN SPASIAL & ARSITEKTUR ENDORFIN] di atas untuk menemukan posisi baris target secara akurat.
 2. DILARANG MENULIS ULANG SELURUH KODE! Ubah HANYA bagian (CSS style, elemen HTML, teks, atau script) yang diminta pengguna.
 3. RESPON ANDA WAJIB DIMULAI PADA BARIS PERTAMA DENGAN FORMAT PENGGANTIAN BERIKUT:
 <<<<<<< SEARCH
@@ -19474,7 +19620,7 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
 >>>>>>> REPLACE
 
 (Format <<<ZOZ_EDIT name="${targetName}"> dengan <<<SEARCH>>> dan <<<REPLACE>>> juga didukung penuh).
-4. Pastikan blok SEARCH memuat konteks baris unik agar pencocokan 100% akurat.
+4. Pastikan blok SEARCH memuat konteks baris unik di koordinat yang dipetakan agar pencocokan 100% akurat.
 5. Jika menambahkan aturan CSS atau script baru, pilih blok penutup tag </style> atau </script> terkait sebagai jangkar SEARCH.
 6. DILARANG KERAS membalas dengan basa-basi atau janji seperti "Baik, saya akan...", langsung mulai dengan blok kode pada baris pertama!`;
         }
@@ -20963,35 +21109,56 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
         const err = StudioEndocrineDiagnostics.lastError;
         endocrineFeedback = `\n[Endocrine Code Sensor]: Error runtime: "${err.message || err}"${err.lineno ? ` (baris ${err.lineno})` : ''}.`;
       }
+      const endocrineAwareness = (lang === 'html' || lang === 'jsx')
+        ? StudioEndocrineDiagnostics.buildSpatialAwarenessContext(currentCode, rawText)
+        : '';
       const codeLines = currentCode.split('\n');
       const compactRef = (codeLines.length <= 4000)
         ? currentCode
         : StudioEndocrineDiagnostics.buildCodeReference(currentCode, rawText);
 
-      const wrappedEditPrompt = `[ZOZ SURGICAL EDIT — "${targetName}"]
-Berikut adalah KODE LENGKAP ARSITEKTUR berkas "${targetName}" (${codeLines.length} baris):
+      const isFullRewriteRequested = /\b(?:buat ulang|ulang dari awal|desain ulang total|redesign total|reset total|dari nol|full rewrite)\b/i.test(rawText);
+
+      let wrappedEditPrompt = '';
+      if (isFullRewriteRequested) {
+        wrappedEditPrompt = `[ZOZ AUTONOMOUS AGENT — FULL REWRITE BERKAS "${targetName}"]
+Berikut adalah KODE SEBELUMNYA dari berkas "${targetName}" (${codeLines.length} baris):
+\`\`\`${lang}
+${compactRef}
+\`\`\`
+
+Instruksi Pengguna: "${rawText}"${endocrineFeedback}
+
+MANDAT EKSEKUSI FULL REWRITE:
+Pengguna meminta perancangan ulang total dari awal.
+Tuliskan SELURUH kode dokumen lengkap terbaru (dari awal sampai akhir) di dalam blok:
+<<<ZOZ_FILE name="${targetName}" mime="${existingWebFile.mime || 'text/html'}" lang="${lang}">
+... seluruh kode lengkap terbaru ...
+<<<END_ZOZ_FILE>>>
+DILARANG memberikan janji basa-basi. Mulai respons Anda langsung pada baris pertama!`;
+      } else {
+        wrappedEditPrompt = `[ZOZ SURGICAL EDIT — "${targetName}"]
+${endocrineAwareness ? endocrineAwareness + '\n\n' : ''}Berikut adalah KODE LENGKAP ARSITEKTUR berkas "${targetName}" (${codeLines.length} baris):
 \`\`\`${lang}
 ${compactRef}
 \`\`\`
 Permintaan Pengguna: "${rawText}"${endocrineFeedback}
 
-MANDAT EKSEKUSI ZOZ ENGINE (WAJIB BLOK KODE PADA BARIS PERTAMA):
-1. Anda adalah Zoz Autonomous Engineer. Tugas Anda adalah memodifikasi kode secara langsung dan nyata.
-2. DILARANG KERAS hanya membalas dengan basa-basi percakapan ("Baik, saya akan...") tanpa kode!
-3. RESPON ANDA WAJIB DIMULAI PADA BARIS PERTAMA DENGAN SALAH SATU BLOK KODE BERIKUT:
-<<<ZOZ_EDIT name="${targetName}">
-<<<SEARCH>>>
-[salin persis baris asli yang diubah dari kode lengkap di atas]
-<<<REPLACE>>>
-[baris baru pengganti perbaikan]
-<<<END_ZOZ_EDIT>>>
+MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
+1. Anda adalah Zoz Autonomous Engineer. Tugas Anda adalah memodifikasi bagian yang diminta pengguna secara presisi. Manfaatkan [KESADARAN SPASIAL & ARSITEKTUR ENDORFIN] di atas untuk menemukan posisi baris target secara akurat.
+2. DILARANG MENULIS ULANG SELURUH KODE! Ubah HANYA bagian (CSS style, elemen HTML, teks, atau script) yang diminta pengguna.
+3. RESPON ANDA WAJIB DIMULAI PADA BARIS PERTAMA DENGAN FORMAT PENGGANTIAN BERIKUT:
+<<<<<<< SEARCH
+[salin persis beberapa baris asli yang ingin diubah dari kode di atas]
+=======
+[baris baru perbaikan/penambahan yang diinginkan pengguna]
+>>>>>>> REPLACE
 
-Atau jika merombak tata letak/banyak bagian:
-<<<ZOZ_FILE name="${targetName}" mime="${existingWebFile.mime || 'text/html'}" lang="${lang}">
-... seluruh kode file lengkap terbaru ...
-<<<END_ZOZ_FILE>>>
-
-4. Penjelasan singkat maksimal 1 kalimat HANYA boleh diletakkan DI BAWAH blok penutup kode. Prioritas utama adalah kode siap pakai!`;
+(Format <<<ZOZ_EDIT name="${targetName}"> dengan <<<SEARCH>>> dan <<<REPLACE>>> juga didukung penuh).
+4. Pastikan blok SEARCH memuat konteks baris unik di koordinat yang dipetakan agar pencocokan 100% akurat.
+5. Jika menambahkan aturan CSS atau script baru, pilih blok penutup tag </style> atau </script> terkait sebagai jangkar SEARCH.
+6. DILARANG KERAS membalas dengan basa-basi atau janji seperti "Baik, saya akan...", langsung mulai dengan blok kode pada baris pertama!`;
+      }
 
       options.overrideText = wrappedEditPrompt;
       options.displayPrompt = rawText;
