@@ -9570,8 +9570,12 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         // Hapus sisa banner progress markdown di akhir jika AI sudah selesai merespons
         cleanStudioText = cleanStudioText.replace(/>\s*✨\s*\*Sedang memilih & mengganti[^\n]*\n?/g, '').trim();
         cleanStudioText = cleanStudioText.replace(/>\s*🌐\s*\*Sedang merancang kode website[^\n]*\n?/g, '').trim();
+        // Bersihkan seluruh sisa blok kode markdown (```...```) dan inline code (`...`) agar chat studio 100% bebas dari kode bocor
+        cleanStudioText = cleanStudioText.replace(/```[\s\S]*?```/g, '').replace(/`[^`]*`/g, '').trim();
+        // Bersihkan sisa tag HTML telanjang (seperti </div>, </iframe>, <p>, dll)
+        cleanStudioText = cleanStudioText.replace(/^<\/?[a-zA-Z0-9_-]+[^>]*>$/gm, '').trim();
         if (!cleanStudioText) {
-          const hasCodeMarkers = String(this.text || '').includes('<<<ZOZ_') || String(this.text || '').includes('<<<SEARCH');
+          const hasCodeMarkers = String(this.text || '').includes('<<<ZOZ_') || String(this.text || '').includes('<<<SEARCH') || String(this.text || '').includes('```');
           cleanStudioText = hasCodeMarkers
             ? '⚡ Menyelaraskan modifikasi kode ke pratinjau...'
             : '💡 Respons diterima.';
@@ -9579,6 +9583,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         activeStudioAssistantBubble.innerHTML = renderMarkdown(cleanStudioText);
         activeStudioAssistantBubble.querySelectorAll('.code-block-wrapper, pre').forEach(el => el.remove());
         enhanceCodeBlocks(activeStudioAssistantBubble);
+        activeStudioAssistantBubble.querySelectorAll('.code-block-wrapper, pre').forEach(el => el.remove());
         scrollStudioAssistantToBottom();
         activeStudioAssistantBubble = null;
       }
@@ -14232,7 +14237,17 @@ Aturan wajib:
 
   function injectCssIntoHtmlDocument(html, cssSnippet) {
     if (!html || !cssSnippet) return html || '';
-    let cleanCss = cssSnippet.replace(/<style\b[^>]*>/gi, '').replace(/<\/style>/gi, '').trim();
+    // Bersihkan penanda git diff, blok SEARCH, dan tag style jika ada
+    let cleanCss = String(cssSnippet)
+      .replace(/<{2,}\s*SEARCH[\s\S]*?={2,}/gi, '')
+      .replace(/>{2,}\s*(?:REPLACE\b)?/gi, '')
+      .replace(/<{2,}[^>\n]*>{0,}/g, '')
+      .replace(/={3,}/g, '')
+      .replace(/>{2,}[^>\n]*>{0,}/g, '')
+      .replace(/<style\b[^>]*>/gi, '')
+      .replace(/<\/style>/gi, '')
+      .replace(/try\s*\{[\s\S]*?window\.parent\.postMessage[\s\S]*?\}/gi, '')
+      .trim();
     if (!cleanCss) return html;
     const styleCloseIdx = html.lastIndexOf('</style>');
     if (styleCloseIdx !== -1) {
@@ -14240,23 +14255,49 @@ Aturan wajib:
     }
     const headCloseIdx = html.indexOf('</head>');
     if (headCloseIdx !== -1) {
-      return html.slice(0, headCloseIdx) + '  <style>\n    /* Pembaruan Gaya AI */\n    ' + cleanCss + '\n  </style>\n' + html.slice(headCloseIdx);
+      return html.slice(0, headCloseIdx) + '  <style id="zoz-healed-styles">\n    /* Pembaruan Gaya AI */\n    ' + cleanCss + '\n  </style>\n' + html.slice(headCloseIdx);
     }
     const bodyOpenIdx = html.indexOf('<body');
     if (bodyOpenIdx !== -1) {
-      return html.slice(0, bodyOpenIdx) + '<head>\n  <style>\n    /* Pembaruan Gaya AI */\n    ' + cleanCss + '\n  </style>\n</head>\n' + html.slice(bodyOpenIdx);
+      return html.slice(0, bodyOpenIdx) + '<head>\n  <style id="zoz-healed-styles">\n    /* Pembaruan Gaya AI */\n    ' + cleanCss + '\n  </style>\n</head>\n' + html.slice(bodyOpenIdx);
     }
-    return html + '\n<style>\n  /* Pembaruan Gaya AI */\n  ' + cleanCss + '\n</style>';
+    return html + '\n<style id="zoz-healed-styles">\n  /* Pembaruan Gaya AI */\n  ' + cleanCss + '\n</style>';
   }
 
   // ==================== DETERMINISTIC LEAKED CSS HEALER & PREAMBLE PURGER ====================
   // Mengeliminasi total teks CSS mentah, fragmen SVG data-URI, dan komentar liar yang bocor ke dalam <body> atau <head>
   // Menyelamatkan seluruh aturan CSS yang valid dan memindahkannya ke dalam tag <style> di <head>
+  // 100% AMAN DARI REGEX MUTASI: Tag <script> diproteksi sepenuhnya sebelum ekstraksi CSS dimulai
   function healLeakedCssFromHtml(html) {
     if (!html || typeof html !== 'string') return html || '';
     let result = html;
 
-    // Tangkap tag pembuka html, head, dan body asli agar atributnya (class, id, style, lang, onload) tidak hilang
+    // 1. Bersihkan probe telemetry sementara dan bottom spacer dari render sebelumnya agar tidak berlipat ganda
+    result = result.replace(/<style\b[^>]*\bid=["']zoz-preview-bottom-spacer["'][^>]*>[\s\S]*?<\/style>/gi, '');
+    result = result.replace(/<script\b[^>]*\bid=["']zoz-endocrine-preview-probe["'][^>]*>[\s\S]*?<\/script>/gi, '');
+
+    // 2. Proteksi seluruh tag <script>...</script> dengan token buram agar TIDAK PERNAH tersentuh regex CSS!
+    const scriptBlocks = [];
+    result = result.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, (match) => {
+      scriptBlocks.push(match);
+      return `<!-- __ZOZ_PROTECTED_SCRIPT_${scriptBlocks.length - 1}__ -->`;
+    });
+
+    // 3. Ekstrak dan amankan tag <style>...</style> yang sudah ada
+    const existingStyles = [];
+    result = result.replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gi, (match, inner) => {
+      const clean = inner
+        .replace(/try\s*\{[\s\S]*?window\.parent\.postMessage[\s\S]*?\}/gi, '')
+        .replace(/<{2,}\s*SEARCH[\s\S]*?={2,}[\s\S]*?>{2,}\s*REPLACE/gi, '')
+        .replace(/<{2,}[^>\n]*>{0,}/g, '')
+        .replace(/={3,}/g, '')
+        .replace(/>{2,}[^>\n]*>{0,}/g, '')
+        .trim();
+      if (clean) existingStyles.push(clean);
+      return '<!-- ZOZ_STYLE_PLACEHOLDER -->';
+    });
+
+    // 4. Tangkap tag pembuka html, head, dan body asli agar atributnya (class, id, style, lang, onload) tidak hilang
     const htmlOpenMatch = result.match(/<html\b[^>]*>/i);
     const headOpenMatch = result.match(/<head\b[^>]*>/i);
     const bodyOpenMatch = result.match(/<body\b[^>]*>/i);
@@ -14264,67 +14305,10 @@ Aturan wajib:
     const headOpenTag = headOpenMatch ? headOpenMatch[0] : '<head>';
     const bodyOpenTag = bodyOpenMatch ? bodyOpenMatch[0] : '<body>';
 
-    // 1. Ekstrak dan amankan tag <style>...</style> yang sudah ada
-    const existingStyles = [];
-    result = result.replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gi, (match, inner) => {
-      existingStyles.push(inner);
-      return '<!-- ZOZ_STYLE_PLACEHOLDER -->';
-    });
-
-    // 2. Deteksi dan ekstrak seluruh aturan CSS telanjang di mana pun posisinya di dokumen
-    const orphanCssRules = [];
-
-    // Pola A: Selektor CSS lengkap { ... } atau @media / @keyframes { ... }
-    const cssRuleRegex = /(?:^|\n)\s*(?:(?:\/\*[\s\S]*?\*\/|[a-zA-Z0-9_\s-]+\*\/)\s*)?(?:@(?:keyframes|media|supports|import)[^{]*\{[\s\S]*?\n\s*\}|[.#@:][a-zA-Z0-9_,\s>:+~*.-]+|[a-zA-Z0-9_-]+\s*)\s*\{[\s\S]*?\}(?:\s*\/\*[\s\S]*?\*\/)?/gi;
-    result = result.replace(cssRuleRegex, (match) => {
-      const trimmed = match.trim();
-      if (!trimmed.startsWith('<') && (trimmed.includes('{') || trimmed.includes(':'))) {
-        orphanCssRules.push(trimmed);
-        return '\n';
-      }
-      return match;
-    });
-
-    // Pola B: Properti CSS lepas seperti `color: #00f0ff; text-shadow: ...; }` atau `UT\nCL\ncolor: ...`
-    const cssPropRegex = /(?:^|\n)\s*(?:[a-zA-Z0-9_-]+\s*:\s*[^;\n<]+;?\s*)+(?:\s*\})?/gi;
-    result = result.replace(cssPropRegex, (match) => {
-      const trimmed = match.trim();
-      if (!trimmed.startsWith('<') && /(?:color|font|background|padding|margin|border|shadow|text-slate|display|position|top|left|right|bottom|z-index|gap|width|height|opacity|transform|filter)\s*:/i.test(trimmed)) {
-        orphanCssRules.push(trimmed);
-        return '\n';
-      }
-      return match;
-    });
-
-    // Pola C: Fragmen SVG data-URI, url("data:..."), dan scanlines yang lepas dari selektor
-    const svgDataUriRegex = /(?:^|\n)\s*[^<\n]*?(?:%3E|%3C|xmlns=|viewBox=|data:image\/svg)[^<\n]*\)?;\s*\}?\s*(?=\n|<|$)/gi;
-    result = result.replace(svgDataUriRegex, (match) => {
-      orphanCssRules.push(match.trim());
-      return '\n';
-    });
-
-    // Pola D: Komentar CSS telanjang /* ... */ di luar tag HTML
-    result = result.replace(/(?:^|\n)\s*\/\*[\s\S]*?\*\/\s*(?=\n|<|$)/g, (match) => {
-      const trimmed = match.trim();
-      if (trimmed.includes('Pembaruan Gaya') || trimmed.includes('Modifikasi Gaya') || /(?:color|font|background|slate|neon|glow|grid|scanline)/i.test(trimmed)) {
-        orphanCssRules.push(trimmed);
-      }
-      return '\n';
-    });
-
-    // Pola E: Chopped stray words (seperti "in", "cc", "Ef", "rig", "UT", "CL") yang tertinggal di luar tag
-    result = result.replace(/(?:^|\n)\s*(?:in|cc|Ef|rig|out|deg|px|rem|em|vh|vw|s|ms|UT|CL)\s*(?=\n|<|$)/gi, '\n');
-
     // Bersihkan placeholder style lama
     result = result.replace(/<!-- ZOZ_STYLE_PLACEHOLDER -->/g, '');
 
-    // 3. Gabungkan semua CSS (CSS yang sudah ada + seluruh orphan CSS yang diselamatkan)
-    const allCss = [...existingStyles, ...orphanCssRules]
-      .map(c => c.trim())
-      .filter(Boolean)
-      .join('\n\n    ');
-
-    // 4. Pastikan struktur HTML lengkap dengan <head> dan <body>
+    // 5. Ekstrak headInner dan bodyInner
     let headInner = '';
     let bodyInner = '';
 
@@ -14342,44 +14326,48 @@ Aturan wajib:
       bodyInner = result.replace(/<!DOCTYPE[^>]*>/i, '').replace(/<html[^>]*>/i, '').replace(/<\/html>/i, '').replace('<!-- ZOZ_HEAD_PLACEHOLDER -->', '').trim();
     }
 
-    // Bersihkan sisa karakter non-tag di headInner
-    if (headInner) {
-      headInner = headInner
-        .replace(cssRuleRegex, '')
-        .replace(cssPropRegex, '')
-        .replace(svgDataUriRegex, '')
-        .replace(/(?:^|\n)\s*(?:in|cc|Ef|rig|out|deg|px|rem|em|vh|vw|s|ms|UT|CL)\s*(?=\n|<|$)/gi, '\n')
-        .trim();
-    }
-
-    // Bersihkan sisa karakter non-tag sebelum tag HTML pertama di bodyInner
-    const firstTagMatch = bodyInner.match(/<(?:[a-zA-Z0-9_-]+)\b[^>]*>/i);
+    // 6. Deteksi dan selamatkan seluruh aturan CSS telanjang yang bocor ke dalam bodyInner (sebelum elemen HTML pertama)
+    const orphanCss = [];
+    const firstTagMatch = bodyInner.match(/<(?:div|section|main|header|nav|footer|p|h[1-6]|span|a|ul|ol|table|article|aside|figure|button|form|input|canvas|video|audio|svg)\b/i);
     if (firstTagMatch && firstTagMatch.index > 0) {
-      const lead = bodyInner.slice(0, firstTagMatch.index);
-      if (!lead.includes('<') && (lead.includes('{') || lead.includes('}') || lead.includes(':') || lead.includes(';') || lead.includes('/*') || /[\w-]+\s*:/i.test(lead))) {
+      const preamble = bodyInner.slice(0, firstTagMatch.index).trim();
+      if (preamble && (preamble.includes('{') || preamble.includes(':') || preamble.includes('/*') || /(?:color|font|background|slate|neon|grid|glow|shadow)\s*:/i.test(preamble))) {
+        const cleanPreamble = preamble
+          .replace(/<{2,}\s*SEARCH[\s\S]*?={2,}[\s\S]*?>{2,}\s*REPLACE/gi, '')
+          .replace(/<{2,}[^>\n]*>{0,}/g, '')
+          .replace(/={3,}/g, '')
+          .replace(/>{2,}[^>\n]*>{0,}/g, '')
+          .replace(/(?:^|\n)\s*(?:UT|CL|Ef|rig)\s*(?=\n|$)/gi, '\n')
+          .trim();
+        if (cleanPreamble) orphanCss.push(cleanPreamble);
         bodyInner = bodyInner.slice(firstTagMatch.index);
       }
     }
 
-    // Format <head> dengan <style> yang rapi
-    const styleBlock = allCss ? `\n  <style id="zoz-healed-styles">\n    ${allCss}\n  </style>` : '';
-    const finalHead = `${headOpenTag}\n  ${headInner ? headInner + '\n' : '<meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'}${styleBlock}\n</head>`;
-    const finalBody = `${bodyOpenTag}\n  ${bodyInner.trim()}\n</body>`;
+    // Bersihkan residu kata terpotong (seperti "UT", "CL", "Ef", "rig") yang tercecer di luar tag
+    bodyInner = bodyInner.replace(/(?:^|\n)\s*(?:UT|CL|Ef|rig)\s*(?=\n|$)/gi, '\n');
 
-    // Rekonstruksi dokumen HTML
-    if (result.includes('<!-- ZOZ_HEAD_PLACEHOLDER -->') && result.includes('<!-- ZOZ_BODY_PLACEHOLDER -->')) {
-      result = result
-        .replace('<!-- ZOZ_HEAD_PLACEHOLDER -->', finalHead)
-        .replace('<!-- ZOZ_BODY_PLACEHOLDER -->', finalBody);
-    } else if (result.includes('<!-- ZOZ_HEAD_PLACEHOLDER -->')) {
-      result = result
-        .replace('<!-- ZOZ_HEAD_PLACEHOLDER -->', finalHead) + `\n${finalBody}`;
-    } else {
-      const doctype = /<!DOCTYPE[^>]*>/i.test(result) ? result.match(/<!DOCTYPE[^>]*>/i)[0] : '<!DOCTYPE html>';
-      result = `${doctype}\n${htmlOpenTag}\n${finalHead}\n${finalBody}\n</html>`;
+    // 7. Pulihkan seluruh tag <script> yang diproteksi ke posisi aslinya di head dan body
+    for (let i = 0; i < scriptBlocks.length; i++) {
+      const ph = `<!-- __ZOZ_SCRIPT_PROTECTED_${i}__ -->`;
+      headInner = headInner.replace(ph, scriptBlocks[i]);
+      bodyInner = bodyInner.replace(ph, scriptBlocks[i]);
     }
 
-    return result;
+    // 8. Gabungkan seluruh aturan CSS (CSS asli + CSS yang diselamatkan dari bocoran body)
+    const allCss = [...existingStyles, ...orphanCss]
+      .map(c => c.trim())
+      .filter(Boolean)
+      .join('\n\n    ');
+
+    // 9. Format <head> dengan <style> yang rapi dan konsolidasi
+    const styleBlock = allCss ? `\n  <style id="zoz-healed-styles">\n    ${allCss}\n  </style>` : '';
+    const finalHead = `${headOpenTag}\n  ${headInner.trim() ? headInner.trim() + '\n' : '<meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'}${styleBlock}\n</head>`;
+    const finalBody = `${bodyOpenTag}\n  ${bodyInner.trim()}\n</body>`;
+
+    // 10. Rekonstruksi dokumen HTML utuh
+    const doctype = /<!DOCTYPE[^>]*>/i.test(html) ? html.match(/<!DOCTYPE[^>]*>/i)[0] : '<!DOCTYPE html>';
+    return `${doctype}\n${htmlOpenTag}\n${finalHead}\n${finalBody}\n</html>`;
   }
 
   function prepareSafeHtmlForPreview(rawContent, fileObj = null) {
@@ -14393,28 +14381,34 @@ Aturan wajib:
 
     safeHtml = safeHtml.replace(/^\s*```[a-zA-Z0-9_-]*\s*\n?/i, '').replace(/\n?```\s*$/i, '');
 
-    // Safety & Auto-Recovery Guard: Jika berkas adalah website (.html/.htm), namun isinya murni CSS
-    // (misal karena model AI hanya mengembalikan blok CSS untuk memperbaiki kontras/gaya):
+    // Safety & Auto-Recovery Guard: Jika berkas adalah website (.html/.htm), namun isinya BUKAN dokumen HTML utuh
+    // (misal potongan CSS, potongan tag <div>, <iframe>, atau partial component dari respon AI):
     const isSupposedWeb = Boolean(fileObj && /\.(?:html?|xhtml)$/i.test(fileObj.name || ''));
-    if (isSupposedWeb && !isAuthenticHtml(safeHtml) && isLikelyCssSnippet(safeHtml)) {
+    if (isSupposedWeb && !isAuthenticHtml(safeHtml)) {
       let recoveredBaseHtml = '';
-      try {
-        if (typeof FileRevisionStore !== 'undefined' && fileObj.name) {
-          const revs = (typeof FileRevisionStore.getRevisions === 'function')
-            ? FileRevisionStore.getRevisions(fileObj.name)
-            : (FileRevisionStore.history ? (FileRevisionStore.history.get(fileObj.name) || []) : []);
-          if (Array.isArray(revs) && revs.length > 0) {
-            for (let i = revs.length - 1; i >= 0; i--) {
-              const r = revs[i];
-              if (isAuthenticHtml(r)) {
-                recoveredBaseHtml = r;
-                break;
+      if (typeof activeAIFile !== 'undefined' && activeAIFile && isAuthenticHtml(activeAIFile.rawContent || activeAIFile.content)) {
+        recoveredBaseHtml = activeAIFile.rawContent || activeAIFile.content || '';
+      }
+      if (!recoveredBaseHtml && fileObj && isAuthenticHtml(fileObj._renderedRawContent)) {
+        recoveredBaseHtml = fileObj._renderedRawContent;
+      }
+      if (!recoveredBaseHtml) {
+        try {
+          if (typeof FileRevisionStore !== 'undefined' && fileObj && fileObj.name) {
+            const revs = (typeof FileRevisionStore.getRevisions === 'function')
+              ? FileRevisionStore.getRevisions(fileObj.name)
+              : (FileRevisionStore.history ? (FileRevisionStore.history.get(fileObj.name) || []) : []);
+            if (Array.isArray(revs) && revs.length > 0) {
+              for (let i = revs.length - 1; i >= 0; i--) {
+                const r = revs[i];
+                if (isAuthenticHtml(r)) {
+                  recoveredBaseHtml = r;
+                  break;
+                }
               }
             }
           }
-        }
-      } catch (err) {
-        console.warn('[prepareSafeHtmlForPreview] Gagal membaca revisi:', err);
+        } catch (_) {}
       }
       if (!recoveredBaseHtml && typeof getLatestWebsiteFileInSession === 'function') {
         const latestWeb = getLatestWebsiteFileInSession(typeof getActiveSession === 'function' ? getActiveSession() : null);
@@ -14424,56 +14418,9 @@ Aturan wajib:
       }
 
       if (recoveredBaseHtml) {
-        safeHtml = injectCssIntoHtmlDocument(recoveredBaseHtml, safeHtml);
-        fileObj.content = safeHtml;
-        fileObj.rawContent = safeHtml;
-      } else {
-        safeHtml = `<!DOCTYPE html>
-<html lang="id">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escapeHtml(fileObj?.name || 'Pratinjau Gaya')}</title>
-  <style>
-${safeHtml}
-  </style>
-</head>
-<body style="background:#0a0e1a; color:#00f0ff; font-family:sans-serif; padding:24px; text-align:center;">
-  <div style="max-width:600px; margin:40px auto; padding:24px; border:1px dashed #00f0ff; border-radius:12px; background:rgba(0,240,255,0.05);">
-    <h3 style="margin-top:0;">🎨 Lembar Gaya Website Terpasang</h3>
-    <p style="color:#94a3b8; font-size:14px;">Aturan CSS telah diisolasi dengan aman di dalam tag &lt;style&gt;.</p>
-  </div>
-</body>
-</html>`;
-      }
-    } else if (isSupposedWeb && !isAuthenticHtml(safeHtml) && (safeHtml.includes('<section') || safeHtml.includes('<div') || safeHtml.includes('<header') || safeHtml.includes('<main') || safeHtml.includes('<nav'))) {
-      // Safety Guard: AI hanya mengeluarkan potongan elemen HTML/komponen parsial
-      let recoveredBaseHtml = '';
-      try {
-        if (typeof FileRevisionStore !== 'undefined' && fileObj.name) {
-          const revs = (typeof FileRevisionStore.getRevisions === 'function')
-            ? FileRevisionStore.getRevisions(fileObj.name)
-            : (FileRevisionStore.history ? (FileRevisionStore.history.get(fileObj.name) || []) : []);
-          if (Array.isArray(revs) && revs.length > 0) {
-            for (let i = revs.length - 1; i >= 0; i--) {
-              const r = revs[i];
-              if (isAuthenticHtml(r)) {
-                recoveredBaseHtml = r;
-                break;
-              }
-            }
-          }
-        }
-      } catch (_) {}
-      if (!recoveredBaseHtml && typeof getLatestWebsiteFileInSession === 'function') {
-        const latestWeb = getLatestWebsiteFileInSession(typeof getActiveSession === 'function' ? getActiveSession() : null);
-        if (latestWeb && latestWeb !== fileObj && latestWeb.rawContent && isAuthenticHtml(latestWeb.rawContent)) {
-          recoveredBaseHtml = latestWeb.rawContent || latestWeb.content || '';
-        }
-      }
-
-      if (recoveredBaseHtml) {
-        if (typeof applyZozEditPatch === 'function') {
+        if (isLikelyCssSnippet(safeHtml)) {
+          safeHtml = injectCssIntoHtmlDocument(recoveredBaseHtml, safeHtml);
+        } else if (typeof applyZozEditPatch === 'function') {
           const patchResult = applyZozEditPatch(recoveredBaseHtml, safeHtml);
           if (patchResult && patchResult.patched) {
             safeHtml = healLeakedCssFromHtml(patchResult.content);
@@ -14483,10 +14430,6 @@ ${safeHtml}
         } else {
           safeHtml = recoveredBaseHtml;
         }
-        if (fileObj) {
-          fileObj.content = safeHtml;
-          fileObj.rawContent = safeHtml;
-        }
       } else {
         safeHtml = `<!DOCTYPE html>
 <html lang="id">
@@ -14494,9 +14437,15 @@ ${safeHtml}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(fileObj?.name || 'Website Preview')}</title>
+  <style>
+    body { background: #0a0e1a; color: #00f0ff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 24px; text-align: center; }
+    .card { max-width: 600px; margin: 40px auto; padding: 24px; border: 1px solid rgba(0,240,255,0.3); border-radius: 12px; background: rgba(0,240,255,0.05); }
+  </style>
 </head>
-<body style="background:#0a0e1a; color:#ffffff; font-family:sans-serif; padding:20px;">
-${safeHtml}
+<body>
+  <div class="card">
+    ${safeHtml}
+  </div>
 </body>
 </html>`;
       }
@@ -14529,16 +14478,15 @@ ${safeHtml}
       safeHtml = safeHtml.slice(0, firstClosingHtmlIdx + 7);
     }
     // 3c. Bersihkan artefak baris marker diff / chevron liar (seperti <<>>, <<<>>, <<<<, ====, >>>>, <<<SEARCH>>>, dll.)
-    safeHtml = safeHtml.replace(/(?:^|\n)\s*<{2,5}\s*(?:SEARCH|REPLACE|END_ZOZ_[A-Z]+|ZOZ_[A-Z]+)?[^>\n]*>{0,5}\s*(?=\n|$)/gi, '\n');
+    safeHtml = safeHtml.replace(/(?:^|\n)\s*<{2,}\s*(?:SEARCH|REPLACE|END_ZOZ_[A-Z]+|ZOZ_[A-Z]+)?[^>\n]*>{0,}\s*(?=\n|$)/gi, '\n');
     safeHtml = safeHtml.replace(/(?:^|\n)\s*={3,}\s*(?=\n|$)/g, '\n');
-    safeHtml = safeHtml.replace(/(?:^|\n)\s*>{2,5}\s*(?:REPLACE)?[^>\n]*>{0,5}\s*(?=\n|$)/gi, '\n');
-    safeHtml = safeHtml.replace(/<{2,5}>{1,5}|<{1,5}>{2,5}/g, '');
+    safeHtml = safeHtml.replace(/(?:^|\n)\s*>{2,}\s*(?:REPLACE)?[^>\n]*>{0,}\s*(?=\n|$)/gi, '\n');
+    safeHtml = safeHtml.replace(/<{2,}>{1,}|<{1,}>{2,}/g, '');
     safeHtml = safeHtml.replace(/<<>>|< < > >|<<<>>|<<>>>/g, '');
-    safeHtml = safeHtml.replace(/(?:^|\s)<{2,5}(?=\s|$)/gm, '');
-    safeHtml = safeHtml.replace(/(?:^|\s)>{2,5}(?=\s|$)/gm, '');
+    safeHtml = safeHtml.replace(/(?:^|\s)<{2,}(?=\s|$)/gm, '');
+    safeHtml = safeHtml.replace(/(?:^|\s)>{2,}(?=\s|$)/gm, '');
 
     // 3d. Bersihkan kode JavaScript telanjang (seperti console.log(...)) yang tertulis di luar tag <script>
-    // atau di sekitar delimiter chevron yang dapat bocor dan tampak di layar pratinjau
     safeHtml = safeHtml.replace(/(?:<\/body>|<\/html>)?\s*(?:<{1,5}>{1,5}\s*)?(?:console\.(?:log|warn|error|info|debug)\s*\((?:[^)(]+|\((?:[^)(]+|\([^)(]*\))*\))*\);?\s*)+(?:<{1,5}>{1,5})?/gi, (match) => {
       return match.includes('</html>') ? '</html>' : (match.includes('</body>') ? '</body>' : '');
     });
@@ -14568,13 +14516,16 @@ ${safeHtml}
       });
       return `<script${attrs}>${cleanedScript}</script>`;
     });
+
     // 4. Auto-healing tag yang belum tertutup agar live preview tetap tampil sempurna
     safeHtml = repairUnclosedScript(safeHtml);
     if ((safeHtml.match(/<style\b/gi) || []).length > (safeHtml.match(/<\/style>/gi) || []).length) {
       safeHtml += '\n</style>';
     }
+
     // 5. Tambahkan padding/margin bawah pada area konten pratinjau agar seluruh elemen terbawah website terlihat jelas tanpa terhalang prompt input
     const previewBottomSpacerStyle = '\n<style id="zoz-preview-bottom-spacer">html,body{box-sizing:border-box!important;}body{padding-bottom:100px!important;}</style>';
+
     // 6. Suntikkan Endocrine Telemetry probe script & Live Hot-Reload Bridge ke dalam iframe pratinjau
     const endocrineProbeScript = `\n<script id="zoz-endocrine-preview-probe">
 (function() {
@@ -14661,7 +14612,7 @@ ${safeHtml}
     if (!/<\/html>/i.test(safeHtml)) {
       safeHtml += '\n</html>';
     }
-    safeHtml = healLeakedCssFromHtml(safeHtml);
+    // CATATAN MUTLAK: JANGAN panggil healLeakedCssFromHtml di sini karena akan merusak endocrineProbeScript yang baru disuntikkan!
     return safeHtml;
   }
 
@@ -15654,6 +15605,11 @@ ${safeHtml}
   function persistStudioCodeChange(newCode, options = {}) {
     if (!activeAIFile || typeof newCode !== 'string') return;
     const isWeb = activeAIFile && /\.(?:html?|xhtml)$/i.test(activeAIFile.name || '');
+    // Safety Guard Anti-Hancur: Cegah snippet parsial / tag telanjang (seperti </div> atau </iframe>) merusak dokumen website utuh
+    if (isWeb && isAuthenticHtml(activeAIFile.rawContent || activeAIFile.content) && !isAuthenticHtml(newCode)) {
+      console.warn('[persistStudioCodeChange] Ditahan: newCode bukan HTML autentik utuh, menjaga keutuhan file asli.');
+      return;
+    }
     const trimmedCode = isWeb ? healLeakedCssFromHtml(newCode) : newCode;
     const codeChanged = activeAIFile.rawContent !== trimmedCode;
     activeAIFile.rawContent = trimmedCode;
@@ -17457,9 +17413,22 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
           if (cleanContent.includes('<!DOCTYPE') || (cleanContent.includes('<html') && cleanContent.includes('</html>'))) {
             finalContent = isWebFile ? healLeakedCssFromHtml(cleanContent) : cleanContent;
             isSurgicalPatch = false;
-          } else if (isWebFile && isLikelyCssSnippet(cleanContent)) {
-            finalContent = healLeakedCssFromHtml(injectCssIntoHtmlDocument(baseContent, cleanContent));
-            isSurgicalPatch = true;
+          } else if (isWebFile && (isLikelyCssSnippet(cleanContent) || (cleanContent.includes('{') && cleanContent.includes(':')))) {
+            const pureCss = cleanContent
+              .replace(/<{2,}\s*SEARCH[\s\S]*?={2,}/gi, '')
+              .replace(/>{2,}\s*(?:REPLACE\b)?/gi, '')
+              .replace(/<{2,}[^>\n]*>{0,}/g, '')
+              .replace(/={3,}/g, '')
+              .replace(/>{2,}[^>\n]*>{0,}/g, '')
+              .trim();
+            if (pureCss && isLikelyCssSnippet(pureCss)) {
+              finalContent = healLeakedCssFromHtml(injectCssIntoHtmlDocument(baseContent, pureCss));
+              isSurgicalPatch = true;
+            } else {
+              out.patchFailures = (out.patchFailures || 0) + 1;
+              out.rawBlocks.push(rawBlock);
+              continue;
+            }
           } else {
             out.patchFailures = (out.patchFailures || 0) + 1;
             out.rawBlocks.push(rawBlock);
@@ -17474,9 +17443,16 @@ Pastikan JavaScript 100% valid dan dapat tereksekusi tanpa hambatan di browser.`
         // (misal hanya blok CSS atau potongan kode parsial):
         const isCleanFullHtml = isAuthenticHtml(cleanContent);
         if (!isCleanFullHtml) {
-          if (isLikelyCssSnippet(cleanContent)) {
+          const pureCss = cleanContent
+            .replace(/<{2,}\s*SEARCH[\s\S]*?={2,}/gi, '')
+            .replace(/>{2,}\s*(?:REPLACE\b)?/gi, '')
+            .replace(/<{2,}[^>\n]*>{0,}/g, '')
+            .replace(/={3,}/g, '')
+            .replace(/>{2,}[^>\n]*>{0,}/g, '')
+            .trim();
+          if (pureCss && isLikelyCssSnippet(pureCss)) {
             // AI ingin mengubah gaya/warna/kontras website: suntikkan/gabungkan ke tag <style> website asli!
-            finalContent = healLeakedCssFromHtml(injectCssIntoHtmlDocument(baseContent, cleanContent));
+            finalContent = healLeakedCssFromHtml(injectCssIntoHtmlDocument(baseContent, pureCss));
             isSurgicalPatch = true;
           } else {
             // Snippet tak dikenal yang bukan HTML: pertahankan website asli agar tidak rusak
