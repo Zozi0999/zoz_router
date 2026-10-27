@@ -9372,6 +9372,22 @@ body.is-assistant-dragging #aiFileStudioFrame {
   overflow-x: auto;
 }
 
+/* Mandat Kaisar: Gelembung Tanya AI & Edit Kode Studio 100% Kedap Bocor dari Tag / Kartu Kode Mentah */
+.studio-assistant-panel .studio-msg-bubble pre,
+.studio-assistant-panel .studio-msg-bubble code,
+.studio-assistant-panel .studio-msg-bubble .code-header,
+.studio-assistant-panel .studio-msg-bubble .code-actions-group,
+.studio-assistant-panel .studio-msg-bubble .code-block-card,
+.studio-assistant-panel .studio-msg-bubble .code-block-wrapper,
+#studioAssistantPanel .studio-msg-bubble pre,
+#studioAssistantPanel .studio-msg-bubble code,
+#studioAssistantPanel .studio-msg-bubble .code-header,
+#studioAssistantPanel .studio-msg-bubble .code-actions-group,
+#studioAssistantPanel .studio-msg-bubble .code-block-card,
+#studioAssistantPanel .studio-msg-bubble .code-block-wrapper {
+  display: none !important;
+}
+
 .studio-chat-toggle-btn {
   display: inline-flex;
   align-items: center;

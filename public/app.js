@@ -8837,6 +8837,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     // Process all PRE elements within container
     const preElements = container.querySelectorAll('pre');
     preElements.forEach(pre => {
+      // Mandat Kaisar: Panel Tanya AI studio terisolasi murni, dilarang keras dibungkus header/kartu kode
+      if (pre.closest('#studioAssistantPanel') || pre.closest('.studio-assistant-panel') || pre.closest('.studio-msg-bubble')) return;
       // Avoid duplicate headers or already rendered mermaid cards
       if (pre.querySelector('.code-header') || pre.closest('.mermaid-diagram-card') || pre.dataset.mermaidRendered === 'true') return;
 
@@ -9541,9 +9543,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             .replace(/`[^`]*`/g, '')
             .replace(/<\/?(?:div|p|iframe|script|style|section|html|body|head|span|h[1-6]|button|a)\b[^>]*>/gi, '')
             .replace(/^<\/?[a-zA-Z0-9_-]+[^>]*>$/gm, '')
+            .replace(/^\s*(?:src|href|title|class|allow|allowfullscreen|width|height|style|id|target|rel)=["'][^"']*["']\s*$/gmi, '')
+            .replace(/^\s*(?:allowfullscreen|disabled|checked|required|readonly)\s*$/gmi, '')
             .trim();
-          activeStudioAssistantBubble.innerHTML = appendInlineTypingCursor(renderMarkdown(cleanStudioText || '*Sedang merancang kode website...*', true));
-          activeStudioAssistantBubble.querySelectorAll('.code-block-wrapper, .code-block-card, pre, code').forEach(el => el.remove());
+          const displaySummary = (cleanStudioText && !cleanStudioText.startsWith('<'))
+            ? cleanStudioText
+            : '*Sedang merancang kode website... (terisolasi di pratinjau live)*';
+          activeStudioAssistantBubble.innerHTML = appendInlineTypingCursor(renderMarkdown(displaySummary, true));
+          activeStudioAssistantBubble.querySelectorAll('.code-block-wrapper, .code-block-card, .code-header, .code-actions-group, pre, code').forEach(el => el.remove());
           scrollStudioAssistantToBottom();
         }
       }
@@ -9582,6 +9589,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
         if (!String(this.text || '').includes('<<<ZOZ_') && !String(this.text || '').includes('<<<SEARCH')) {
           finishStudioPreviewStreamHud(false);
+        } else {
+          // Failsafe HUD Watchdog: jika setelah 3 detik HUD belum ditutup oleh persistStudioCodeChange(true),
+          // tutup otomatis agar status "Menemukan baris target & menyiapkan patch..." tidak membeku berjam-jam!
+          setTimeout(() => {
+            if (els.studioPreviewStreamHud && !els.studioPreviewStreamHud.classList.contains('is-success')) {
+              finishStudioPreviewStreamHud(false);
+            }
+          }, 3000);
         }
       }
       if (activeStudioAssistantBubble && els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
@@ -9596,15 +9611,17 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           .replace(/`[^`]*`/g, '')
           .replace(/<\/?(?:div|p|iframe|script|style|section|html|body|head|span|h[1-6]|button|a)\b[^>]*>/gi, '')
           .replace(/^<\/?[a-zA-Z0-9_-]+[^>]*>$/gm, '')
+          .replace(/^\s*(?:src|href|title|class|allow|allowfullscreen|width|height|style|id|target|rel)=["'][^"']*["']\s*$/gmi, '')
+          .replace(/^\s*(?:allowfullscreen|disabled|checked|required|readonly)\s*$/gmi, '')
           .trim();
-        if (!cleanStudioText) {
+        if (!cleanStudioText || cleanStudioText.startsWith('<')) {
           const hasCodeMarkers = String(this.text || '').includes('<<<ZOZ_') || String(this.text || '').includes('<<<SEARCH') || String(this.text || '').includes('```');
           cleanStudioText = hasCodeMarkers
             ? '⚡ Menyelaraskan modifikasi kode ke pratinjau...'
             : '💡 Respons diterima.';
         }
         activeStudioAssistantBubble.innerHTML = renderMarkdown(cleanStudioText);
-        activeStudioAssistantBubble.querySelectorAll('.code-block-wrapper, .code-block-card, .code-header, pre, code').forEach(el => el.remove());
+        activeStudioAssistantBubble.querySelectorAll('.code-block-wrapper, .code-block-card, .code-header, .code-actions-group, pre, code').forEach(el => el.remove());
         scrollStudioAssistantToBottom();
         activeStudioAssistantBubble = null;
       }
@@ -10602,7 +10619,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       });
 
       if (!hasAssistantTail && effectiveTail) {
-        messagesPayload.push({ role: 'assistant', content: effectiveTail });
+        // Mandat API: Dilarang menyisipkan role 'assistant' jika belum ada pesan 'user' sebelumnya
+        // (Anthropic, OpenAI, dan OpenRouter melempar HTTP 400 jika percakapan diawali assistant).
+        if (messagesPayload.some(m => m.role === 'user')) {
+          messagesPayload.push({ role: 'assistant', content: effectiveTail });
+        }
       }
 
       const userInstruction = (!supportsSystem && STATE.settings.systemPrompt)
@@ -10817,7 +10838,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     });
 
     if (!hasAssistantTail && effectiveTail) {
-      messagesPayload.push({ role: 'assistant', content: effectiveTail });
+      // Mandat API: Dilarang menyisipkan role 'assistant' jika belum ada pesan 'user' sebelumnya
+      if (messagesPayload.some(m => m.role === 'user')) {
+        messagesPayload.push({ role: 'assistant', content: effectiveTail });
+      }
     }
 
     messagesPayload.push({ role: 'user', content: promptInstruction });
@@ -11331,13 +11355,13 @@ ATURAN MUTLAK SURGICAL CODER:
 
       let rawOutput = '';
       if (singleEngine === 'ollama') {
-        rawOutput = await streamContinuationOllama(null, singleModel, betaPrompt, null, alphaContract.isolatedContext, {
+        rawOutput = await streamContinuationOllama(null, singleModel, betaPrompt, null, '', {
           hideAllCodeBlocks: true,
           signal,
           heartbeat
         });
       } else {
-        rawOutput = await streamContinuationOpenRouter(null, singleModel, betaPrompt, null, alphaContract.isolatedContext, {
+        rawOutput = await streamContinuationOpenRouter(null, singleModel, betaPrompt, null, '', {
           hideAllCodeBlocks: true,
           signal,
           heartbeat
@@ -20865,16 +20889,32 @@ ${blocks}
     if (Array.isArray(file._studioChatHistory) && file._studioChatHistory.length > 0) {
       file._studioChatHistory.forEach((m) => {
         let text = m.content || '';
-        text = text.replace(/```[\s\S]*?```/g, '').replace(/```[^\n]*\n?/g, '').replace(/`[^`]*`/g, '').trim();
-        const html = m.role === 'user' ? escapeHtml(m.displayContent || m.content || '') : renderMarkdown(text || '✨ Perubahan diterapkan di pratinjau.');
+        text = text
+          .replace(/```[\s\S]*?```/g, '')
+          .replace(/```[^\n]*\n?/g, '')
+          .replace(/`[^`]*`/g, '')
+          .replace(/<\/?(?:div|p|iframe|script|style|section|html|body|head|span|h[1-6]|button|a)\b[^>]*>/gi, '')
+          .replace(/^\s*(?:src|href|title|class|allow|allowfullscreen|width|height|style|id|target|rel)=["'][^"']*["']\s*$/gmi, '')
+          .replace(/^\s*(?:allowfullscreen|disabled|checked|required|readonly)\s*$/gmi, '')
+          .trim();
+        if (!text || text.startsWith('<')) text = '✨ Perubahan diterapkan di pratinjau.';
+        const html = m.role === 'user' ? escapeHtml(m.displayContent || m.content || '') : renderMarkdown(text);
         appendStudioMessage(m.role, html, 'preview');
       });
     }
     if (Array.isArray(file._editChatHistory) && file._editChatHistory.length > 0) {
       file._editChatHistory.forEach((m) => {
         let text = m.content || '';
-        text = text.replace(/```[\s\S]*?```/g, '').replace(/```[^\n]*\n?/g, '').replace(/`[^`]*`/g, '').trim();
-        const html = m.role === 'user' ? escapeHtml(m.displayContent || m.content || '') : renderMarkdown(text || '✨ Perubahan diterapkan di editor.');
+        text = text
+          .replace(/```[\s\S]*?```/g, '')
+          .replace(/```[^\n]*\n?/g, '')
+          .replace(/`[^`]*`/g, '')
+          .replace(/<\/?(?:div|p|iframe|script|style|section|html|body|head|span|h[1-6]|button|a)\b[^>]*>/gi, '')
+          .replace(/^\s*(?:src|href|title|class|allow|allowfullscreen|width|height|style|id|target|rel)=["'][^"']*["']\s*$/gmi, '')
+          .replace(/^\s*(?:allowfullscreen|disabled|checked|required|readonly)\s*$/gmi, '')
+          .trim();
+        if (!text || text.startsWith('<')) text = '✨ Perubahan diterapkan di editor.';
+        const html = m.role === 'user' ? escapeHtml(m.displayContent || m.content || '') : renderMarkdown(text);
         appendStudioMessage(m.role, html, 'edit');
       });
     }
@@ -21158,6 +21198,11 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
 
     // Jalur Cepat Claude-Code Parallel Swarm untuk Surgical Web Edits:
     if (wantsRevision && !isDiagram && !isDoc && !isFullRewriteRequested && (isHtml || isJsx)) {
+      if (!STATE.abortController || STATE.abortController.signal.aborted) {
+        STATE.abortController = new AbortController();
+      }
+      setGeneratingState(true);
+
       ClaudeCodeParallelSwarm.updateHud(els.studioAgentLoopHud, {
         title: `Mengedit "${val.substring(0, 30)}..."`,
         architect: { status: 'active', label: 'Mapping AST' },
@@ -21166,6 +21211,27 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
         verifier: { status: 'active', label: 'Leak Guard' }
       });
 
+      let swarmDoneHandled = false;
+      const swarmSafetyTimer = setTimeout(() => {
+        if (!swarmDoneHandled) {
+          swarmDoneHandled = true;
+          console.warn('[ClaudeCodeParallelSwarm] Swarm timeout 45 detik terlampaui. Mengalihkan ke fallback penataan...');
+          ClaudeCodeParallelSwarm.abortAll();
+          ClaudeCodeParallelSwarm.updateHud(els.studioAgentLoopHud, null);
+          handleSendPrompt({
+            overrideText: followupPrompt,
+            displayPrompt: val,
+            isStudioIsolated: true,
+            studioHistoryMode: isEditingInCodeMode ? 'edit' : 'preview',
+            websiteMode: 'preview',
+            isWebCreation: true,
+            isWebsiteRevision: true,
+            skipWebsiteCheck: true,
+            skipDocCheck: true
+          });
+        }
+      }, 45000);
+
       ClaudeCodeParallelSwarm.executeEditSwarm({
         userPrompt: val,
         activeAIFile,
@@ -21173,6 +21239,11 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
         selInfo,
         onUpdate: (st) => ClaudeCodeParallelSwarm.updateHud(els.studioAgentLoopHud, st),
         onDone: (res) => {
+          if (swarmDoneHandled) return;
+          swarmDoneHandled = true;
+          clearTimeout(swarmSafetyTimer);
+          setGeneratingState(false);
+
           if (res && res.success) {
             ClaudeCodeParallelSwarm.updateHud(els.studioAgentLoopHud, {
               title: `Tuntas via ${res.winner}! (${res.timeMs}ms)`,
@@ -21480,6 +21551,10 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
 
   els.btnStudioStopFollowup?.addEventListener('click', () => {
     stopGeneration();
+    if (typeof ClaudeCodeParallelSwarm !== 'undefined' && typeof ClaudeCodeParallelSwarm.abortAll === 'function') {
+      ClaudeCodeParallelSwarm.abortAll();
+    }
+    finishStudioPreviewStreamHud(false);
     if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'none';
     if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'inline-flex';
     if (activeStudioAssistantBubble) {
@@ -25659,6 +25734,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const accumulatedToolCalls = [];
       streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, runOptions);
 
+      let deadAirTimer = null;
+      const resetDeadAirWatchdog = () => {
+        if (deadAirTimer) clearTimeout(deadAirTimer);
+        deadAirTimer = setTimeout(() => {
+          console.warn(`[Ollama Dead-Air] Model ${modelName} tidak mengirim token selama 20 detik (stalled). Menghentikan stream reader.`);
+          try {
+            STATE.abortController?.abort('DEAD_AIR_TIMEOUT');
+          } catch (_) {}
+        }, 20000);
+      };
+
       function mergeToolCallsInto(targetArr, toolCallsArray) {
         if (!Array.isArray(toolCallsArray)) return;
         toolCallsArray.forEach((tc, defaultIdx) => {
@@ -25694,51 +25780,60 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         });
       }
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          buffer += decoder.decode();
-          break;
+      try {
+        while (true) {
+          resetDeadAirWatchdog();
+          const { done, value } = await reader.read();
+          resetDeadAirWatchdog();
+          if (done) {
+            buffer += decoder.decode();
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop(); // keep partial line
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            let parsed;
+            try {
+              parsed = JSON.parse(line);
+            } catch (pe) {
+              continue;
+            }
+            if (parsed.error) {
+              const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
+              throw new Error(errStr);
+            }
+            if (parsed.done_reason) doneReason = parsed.done_reason;
+            const chunk = parsed.message?.content || parsed.response || '';
+            const reasoningChunk = parsed.message?.reasoning || parsed.reasoning || '';
+            if (reasoningChunk) {
+              streamRenderer.appendReasoning(reasoningChunk);
+            }
+            if (chunk) {
+              if (!firstTokenTime) firstTokenTime = performance.now();
+              tokenCount++;
+              if (tokenCount % 25 === 0) {
+                BioEndocrine.secreteDopamine(0.3, 'Ollama streaming aktif');
+              }
+              streamRenderer.append(chunk);
+              if (streamRenderer.isLoopTerminated) {
+                console.warn('[Ollama] Model token degeneration loop detected and gracefully halted.');
+                try { await reader.cancel(); } catch (_) {}
+                break;
+              }
+            }
+            if (parsed.message?.tool_calls && Array.isArray(parsed.message.tool_calls)) {
+              mergeToolCallsInto(accumulatedToolCalls, parsed.message.tool_calls);
+            }
+          }
         }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop(); // keep partial line
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          let parsed;
-          try {
-            parsed = JSON.parse(line);
-          } catch (pe) {
-            continue;
-          }
-          if (parsed.error) {
-            const errStr = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : parsed.error;
-            throw new Error(errStr);
-          }
-          if (parsed.done_reason) doneReason = parsed.done_reason;
-          const chunk = parsed.message?.content || parsed.response || '';
-          const reasoningChunk = parsed.message?.reasoning || parsed.reasoning || '';
-          if (reasoningChunk) {
-            streamRenderer.appendReasoning(reasoningChunk);
-          }
-          if (chunk) {
-            if (!firstTokenTime) firstTokenTime = performance.now();
-            tokenCount++;
-            if (tokenCount % 25 === 0) {
-              BioEndocrine.secreteDopamine(0.3, 'Ollama streaming aktif');
-            }
-            streamRenderer.append(chunk);
-            if (streamRenderer.isLoopTerminated) {
-              console.warn('[Ollama] Model token degeneration loop detected and gracefully halted.');
-              try { await reader.cancel(); } catch (_) {}
-              break;
-            }
-          }
-          if (parsed.message?.tool_calls && Array.isArray(parsed.message.tool_calls)) {
-            mergeToolCallsInto(accumulatedToolCalls, parsed.message.tool_calls);
-          }
+      } finally {
+        if (deadAirTimer) {
+          clearTimeout(deadAirTimer);
+          deadAirTimer = null;
         }
       }
 
@@ -26220,7 +26315,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       // ===== AUTO-CONTINUATION ENGINE UNTUK PEMBUATAN WEBSITE & KODE TERPOTONG =====
       const isWebTask = Boolean(wantsFile || (runOptions && (runOptions.websiteMode || runOptions.isWebCreation)) || isWebsiteCreationPrompt(promptText));
-      const hasCompletedSurgicalEdit = fullText.includes('<<<END_ZOZ_EDIT') || fullText.includes('<<<END_ZOZ_MODIFY');
+      const hasCompletedSurgicalEdit = fullText.includes('<<<END_ZOZ_EDIT') ||
+        fullText.includes('<<<END_ZOZ_MODIFY') ||
+        /(?:>>>{1,3}|>{3,})(?:\s*REPLACE\b)?/i.test(fullText) ||
+        Boolean(runOptions && runOptions.isWebsiteRevision && extractGeneratedFiles(fullText, wantsFile).files.length > 0);
       const hasClosedHtmlDoc = isWebTask && (fullText.includes('<!DOCTYPE html') || fullText.includes('<html')) && fullText.includes('</html>');
       let initialCheck = extractGeneratedFiles(fullText, wantsFile);
       const isInitiallyIncomplete = !hasCompletedSurgicalEdit && !hasClosedHtmlDoc && (
@@ -27217,10 +27315,22 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             const reader = attemptRes.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
+            let deadAirTimer = null;
+            const resetDeadAirWatchdog = () => {
+              if (deadAirTimer) clearTimeout(deadAirTimer);
+              deadAirTimer = setTimeout(() => {
+                console.warn(`[OpenRouter Dead-Air] Model ${currentModel} tidak mengirim token selama 20 detik (stalled). Menghentikan stream reader.`);
+                try {
+                  attemptController.abort('DEAD_AIR_TIMEOUT');
+                } catch (_) {}
+              }, 20000);
+            };
 
             try {
               while (true) {
+                resetDeadAirWatchdog();
                 const { done, value } = await reader.read();
+                resetDeadAirWatchdog();
                 if (done) {
                   buffer += decoder.decode();
                   break;
@@ -27355,13 +27465,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               break;
 
             } catch (streamErr) {
+              if (deadAirTimer) clearTimeout(deadAirTimer);
               clearTimeout(ttftTimer);
               STATE.abortController?.signal?.removeEventListener('abort', onParentAbort);
               try { await reader.cancel(); } catch (_) {}
 
               if (STATE.abortController?.signal?.aborted) throw streamErr;
 
-              const sMsg = streamErr?.message || String(streamErr);
+              const isDeadAir = streamErr?.name === 'AbortError' && attemptController.signal.reason === 'DEAD_AIR_TIMEOUT';
+              const sMsg = isDeadAir ? 'Aliran token terhenti (Dead-Air Timeout 20s)' : (streamErr?.message || String(streamErr));
               console.warn(`[OpenRouter Stream Error] Model ${currentModel} error saat streaming:`, sMsg);
 
               if (tokenCount > 0) {
@@ -28001,7 +28113,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       // ===== AUTO-CONTINUATION ENGINE UNTUK PEMBUATAN WEBSITE & KODE TERPOTONG =====
       const isWebTask = Boolean(wantsFile || (runOptions && (runOptions.websiteMode || runOptions.isWebCreation)) || isWebsiteCreationPrompt(promptText));
-      const hasCompletedSurgicalEdit = fullText.includes('<<<END_ZOZ_EDIT') || fullText.includes('<<<END_ZOZ_MODIFY');
+      const hasCompletedSurgicalEdit = fullText.includes('<<<END_ZOZ_EDIT') ||
+        fullText.includes('<<<END_ZOZ_MODIFY') ||
+        /(?:>>>{1,3}|>{3,})(?:\s*REPLACE\b)?/i.test(fullText) ||
+        Boolean(runOptions && runOptions.isWebsiteRevision && extractGeneratedFiles(fullText, wantsFile).files.length > 0);
       const hasClosedHtmlDoc = isWebTask && (fullText.includes('<!DOCTYPE html') || fullText.includes('<html')) && fullText.includes('</html>');
       let initialCheck = extractGeneratedFiles(fullText, wantsFile);
       const isInitiallyIncomplete = !hasCompletedSurgicalEdit && !hasClosedHtmlDoc && (
