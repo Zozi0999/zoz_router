@@ -11689,25 +11689,32 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       code += '\n</style>';
     }
 
-    // 3. Formula Matematika Dyck Tree Closure LIFO (Stack-Based Parenthesis Balancing)
+    // 3. Formula Matematika Dyck Tree Closure LIFO (Linear Scan O(N))
     const containerTags = new Set(['div', 'section', 'article', 'aside', 'main', 'header', 'footer', 'nav', 'ul', 'ol', 'table', 'form', 'button']);
+    
+    // Bersihkan komentar dan script/style agar tidak menghitung token di dalamnya
     const clean = code
       .replace(/<!--[\s\S]*?-->/g, '')
       .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
 
     const tagRegex = /<\/?([a-zA-Z0-9_-]+)(?:\s+[^>]*?)?(\/?)>/g;
     const stack = [];
+    const openCount = {};
+    const closeCount = {};
+    containerTags.forEach(t => { openCount[t] = 0; closeCount[t] = 0; });
+
     let m;
     while ((m = tagRegex.exec(clean)) !== null) {
       const isClose = m[0].startsWith('</');
       const isSelfClose = m[2] === '/' || m[0].endsWith('/>');
       const tag = m[1].toLowerCase();
-      if (!containerTags.has(tag)) continue;
-      if (isSelfClose) continue;
+      if (!containerTags.has(tag) || isSelfClose) continue;
 
       if (!isClose) {
         stack.push(tag);
+        openCount[tag] = (openCount[tag] || 0) + 1;
       } else {
+        closeCount[tag] = (closeCount[tag] || 0) + 1;
         const idx = stack.lastIndexOf(tag);
         if (idx !== -1) {
           stack.splice(idx, 1);
@@ -11715,7 +11722,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       }
     }
 
-    // Sisa stack dalam urutan LIFO adalah tag yang wajib ditutup
+    // Sisa stack dalam urutan LIFO adalah tag defisit yang wajib disintesis
     if (stack.length > 0) {
       const unclosedReversed = [...stack].reverse();
       const closingStr = unclosedReversed.map(t => '\n</' + t + '>').join('');
@@ -11728,24 +11735,21 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       }
     }
 
-    // 4. Periksa apakah masih ada surplus closing tags (orphan closing tags liar)
+    // Eliminasi penutup yatim liar (orphan closing tags di mana closeCount > openCount)
     for (const t of containerTags) {
-      const cleanNow = code.replace(/<!--[\s\S]*?-->/g, '').replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
-      const openCount = (cleanNow.match(new RegExp('<' + t + '(?=[\s>/])', 'gi')) || []).length;
-      const closeCount = (cleanNow.match(new RegExp('</' + t + '\s*>', 'gi')) || []).length;
-      const diff = openCount - closeCount;
+      let diff = (openCount[t] || 0) - (closeCount[t] || 0);
       if (diff < 0) {
         let toRemove = Math.abs(diff);
         const reClose = new RegExp('</' + t + '\s*>', 'gi');
         const matches = [...code.matchAll(reClose)];
         for (let i = matches.length - 1; i >= 0 && toRemove > 0; i--, toRemove--) {
-          const matchItem = matches[i];
-          code = code.slice(0, matchItem.index) + code.slice(matchItem.index + matchItem[0].length);
+          const item = matches[i];
+          code = code.slice(0, item.index) + code.slice(item.index + item[0].length);
         }
       }
     }
 
-    // 5. Pastikan </body> dan </html> tertutup rapi
+    // 4. Pastikan </body> dan </html> tertutup rapi
     if (!/<\/body\s*>/i.test(code) && /<body[\s>]/i.test(code)) {
       if (/<\/html\s*>/i.test(code)) {
         code = code.replace(/<\/html\s*>/i, '\n</body>\n</html>');
