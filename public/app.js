@@ -6597,9 +6597,15 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         unfencedHtmlBuffer.push(line);
       } else {
         if (unfencedHtmlBuffer.length > 0) {
-          result.push('```html');
-          result.push(...unfencedHtmlBuffer);
-          result.push('```');
+          // Hanya bungkus jika terdapat tag pembuka atau doctype yang sah, bukan sekadar tag penutup yatim (seperti </div>)
+          const hasOpeningTag = unfencedHtmlBuffer.some(l => /<(?:!DOCTYPE|[a-zA-Z0-9_-]+)\b/i.test(l.trim()) && !/^<\//.test(l.trim()));
+          if (hasOpeningTag && unfencedHtmlBuffer.length >= 2) {
+            result.push('```html');
+            result.push(...unfencedHtmlBuffer);
+            result.push('```');
+          } else {
+            result.push(...unfencedHtmlBuffer);
+          }
           unfencedHtmlBuffer = [];
         }
         result.push(line);
@@ -6607,9 +6613,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     }
 
     if (unfencedHtmlBuffer.length > 0) {
-      result.push('```html');
-      result.push(...unfencedHtmlBuffer);
-      result.push('```');
+      const hasOpeningTag = unfencedHtmlBuffer.some(l => /<(?:!DOCTYPE|[a-zA-Z0-9_-]+)\b/i.test(l.trim()) && !/^<\//.test(l.trim()));
+      if (hasOpeningTag && unfencedHtmlBuffer.length >= 2) {
+        result.push('```html');
+        result.push(...unfencedHtmlBuffer);
+        result.push('```');
+      } else {
+        result.push(...unfencedHtmlBuffer);
+      }
     }
 
     return result.join('\n');
@@ -9213,13 +9224,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
       // Penanganan khusus blok markdown ```html / ```jsx / ```tsx / ```css atau dokumen HTML / Naked HTML & Naked JS / CSS
       const isWebPreviewMode = Boolean(
-        (options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat || options.hideAllCodeBlocks)) ||
+        (options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat || options.hideAllCodeBlocks || options.isStudioIsolated)) ||
         (typeof activeAIFile !== 'undefined' && activeAIFile) ||
+        (typeof els !== 'undefined' && els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) ||
         (typeof isWebsiteCreationPrompt === 'function' && isWebsiteCreationPrompt(text || '')) ||
         (text && (text.includes('<!DOCTYPE') || text.includes('<html') || text.includes('<<<ZOZ_FILE') || text.includes('```html') || text.includes('```jsx')))
       );
-      const NAKED_HTML_START = /^<(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form|template)\b/i;
-      const CODE_LIKE_LINE = /^(?:`{3,}|<{1,5}>{1,5}|[<>=]{2,}|<<>>|< < > >|<<<>>|window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|\/\*|\*\/|\/\/|<\/script>|<\/html>|<\/body>|<\/style>|<!--|[{}\[\];]|(?:[.#@:][a-zA-Z0-9_-]|[a-zA-Z0-9_-]+\s*\{|[a-zA-Z0-9_-]+\s*:\s*[^;]+;)).*$/i;
+      const NAKED_HTML_START = /^<\/?(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form|template|iframe|svg|canvas|ul|ol|li|button|input|label|p|h[1-6]|span|a)\b/i;
+      const CODE_LIKE_LINE = /^(?:`{3,}|<{1,5}>{1,5}|[<>=]{2,}|<<>>|< < > >|<<<>>|window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|\/\*|\*\/|\/\/|<\/script>|<\/html>|<\/body>|<\/style>|<\/div>|<\/iframe>|<\/section>|<!--|[{}\[\];]|(?:[a-zA-Z0-9_-]+=(?:"[^"]*"|'[^']*'|[^\s>]+)|allowfullscreen|disabled|checked)|(?:[.#@:][a-zA-Z0-9_-]|[a-zA-Z0-9_-]+\s*\{|[a-zA-Z0-9_-]+\s*:\s*[^;]+;)).*$/i;
       if (!isExplicitCodeInChat) {
         if (!insideFileBlock && !insideHtmlBlock && !insideRawHtmlBlock) {
           if (t.startsWith(TICK3 + 'html') || t.startsWith(TICK3 + 'htm') || t.startsWith(TICK3 + 'jsx') || t.startsWith(TICK3 + 'tsx') || t.startsWith(TICK3 + 'react') || ((isWebPreviewMode || options.hideAllCodeBlocks) && (t.startsWith(TICK3) || t.startsWith(TICK3 + 'css') || t.startsWith(TICK3 + 'style') || t.startsWith(TICK3 + 'js') || t.startsWith(TICK3 + 'javascript')))) {
@@ -9592,9 +9604,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             : '💡 Respons diterima.';
         }
         activeStudioAssistantBubble.innerHTML = renderMarkdown(cleanStudioText);
-        activeStudioAssistantBubble.querySelectorAll('.code-block-wrapper, .code-block-card, pre, code').forEach(el => el.remove());
-        enhanceCodeBlocks(activeStudioAssistantBubble);
-        activeStudioAssistantBubble.querySelectorAll('.code-block-wrapper, .code-block-card, pre, code').forEach(el => el.remove());
+        activeStudioAssistantBubble.querySelectorAll('.code-block-wrapper, .code-block-card, .code-header, pre, code').forEach(el => el.remove());
         scrollStudioAssistantToBottom();
         activeStudioAssistantBubble = null;
       }
@@ -10907,19 +10917,26 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
   // - Zero Promise.race: Dilarang melombakan promise eksekusi dengan timer statis yang memotong respons di tengah jalan.
   // - Heartbeat Stream Timeout: Selama model masih mengirimkan chunk token (stream aktif), proses TIDAK BOLEH diputus berapa pun lamanya.
   // - AbortController HANYA memicu pembatalan jika terjadi dead-air (tidak ada token masuk sama sekali selama >15 detik).
-  function createHeartbeatStreamController(deadAirTimeoutMs = 15000, parentSignal = null) {
+  function createHeartbeatStreamController(deadAirTimeoutMs = 15000, ttftTimeoutMs = 45000, parentSignal = null) {
+    if (typeof ttftTimeoutMs === 'object' && ttftTimeoutMs !== null && 'aborted' in ttftTimeoutMs) {
+      parentSignal = ttftTimeoutMs;
+      ttftTimeoutMs = 45000;
+    }
     const controller = new AbortController();
     let timer = null;
+    let hasReceivedFirstToken = false;
 
-    function resetDeadAirTimer() {
+    function scheduleTimer(timeoutMs, isTtftStage = false) {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        console.warn(`[StreamHeartbeat] Dead-air timeout terlampaui (> ${deadAirTimeoutMs / 1000}s tanpa chunk token). Memicu abort.`);
-        controller.abort(new Error(`Dead-air stream timeout (> ${deadAirTimeoutMs / 1000}s tanpa token). Model tidak merespons.`));
-      }, deadAirTimeoutMs);
+        const stageName = isTtftStage ? `Time-To-First-Token (TTFT > ${timeoutMs / 1000}s)` : `Dead-air (> ${timeoutMs / 1000}s tanpa chunk)`;
+        console.warn(`[StreamHeartbeat] ${stageName} terlampaui. Memicu abort.`);
+        controller.abort(new Error(`${stageName} timeout. Model tidak merespons.`));
+      }, timeoutMs);
     }
 
-    resetDeadAirTimer();
+    // Tahap 1: Batas awal TTFT (45s) menunggu chunk pertama
+    scheduleTimer(ttftTimeoutMs, true);
 
     if (parentSignal) {
       if (parentSignal.aborted) {
@@ -10936,7 +10953,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       controller,
       signal: controller.signal,
       kick() {
-        resetDeadAirTimer();
+        // Chunk token diterima! Otomatis beralih ke Tahap 2: Dead-Air Timeout (15s)
+        hasReceivedFirstToken = true;
+        scheduleTimer(deadAirTimeoutMs, false);
       },
       dispose() {
         if (timer) {
@@ -11014,6 +11033,114 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       this.activeControllers.clear();
     },
 
+    // --- DETERMINISTIC STATIC VALIDATORS (Delta Engine) ---
+    checkTagBalance(html) {
+      if (!html || typeof html !== 'string') return { valid: true };
+      const HTML_VOID_ELEMENTS = new Set([
+        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+        'link', 'meta', 'param', 'source', 'track', 'wbr'
+      ]);
+      const stack = [];
+      const tagRegex = /<!--[\s\S]*?-->|<(?:\/)?([a-zA-Z0-9_-]+)(?:\s+[^>]*)?\/?>/g;
+      let match;
+
+      while ((match = tagRegex.exec(html)) !== null) {
+        const fullTag = match[0];
+        if (fullTag.startsWith('<!--')) continue;
+
+        const tagName = match[1].toLowerCase();
+        const isSelfClosing = fullTag.endsWith('/>') || HTML_VOID_ELEMENTS.has(tagName);
+        const isClosing = fullTag.startsWith('</');
+
+        if (isSelfClosing) continue;
+
+        if (isClosing) {
+          if (stack.length === 0) {
+            return { valid: false, error: `Tag penutup tak terduga </${tagName}> tanpa tag pembuka.` };
+          }
+          const top = stack.pop();
+          if (top.name !== tagName) {
+            return { valid: false, error: `Ketidaksesuaian tag: Ditemukan </${tagName}> tetapi menunggu </${top.name}>.` };
+          }
+        } else {
+          stack.push({ name: tagName, index: match.index });
+        }
+      }
+
+      if (stack.length > 0) {
+        const unclosed = stack.map(s => `<${s.name}>`).join(', ');
+        return { valid: false, error: `Tag tidak tertutup sempurna: ${unclosed}` };
+      }
+      return { valid: true };
+    },
+
+    validateJavaScriptSyntax(scriptCode) {
+      if (!scriptCode || !scriptCode.trim()) return { valid: true };
+      const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+      let sanitized = scriptCode
+        .replace(/^\s*import\s+[\s\S]*?from\s+['"][^'"]+['"];?/gm, '')
+        .replace(/^\s*import\s+['"][^'"]+['"];?/gm, '')
+        .replace(/^\s*export\s+default\s+function\s*\(/gm, 'function _defaultAnon(')
+        .replace(/^\s*export\s+default\s+/gm, '')
+        .replace(/^\s*export\s+/gm, '');
+
+      try {
+        new AsyncFunction(sanitized);
+        return { valid: true };
+      } catch (err) {
+        return { valid: false, error: err.message };
+      }
+    },
+
+    getUniqueDomSelector(el, doc) {
+      if (!el || el.nodeType !== 1) return 'body > main';
+      if (el.id) {
+        const idSel = '#' + el.id;
+        try {
+          if (doc.querySelectorAll(idSel).length === 1) return idSel;
+        } catch (_) {}
+      }
+      const zozId = el.getAttribute('data-zoz-id');
+      if (zozId) {
+        const zozSel = `[data-zoz-id="${zozId}"]`;
+        try {
+          if (doc.querySelectorAll(zozSel).length === 1) return zozSel;
+        } catch (_) {}
+      }
+      if (el.className && typeof el.className === 'string') {
+        const firstCls = el.className.split(' ')[0].trim();
+        if (firstCls) {
+          const clsSel = `${el.tagName.toLowerCase()}.${firstCls}`;
+          try {
+            if (doc.querySelectorAll(clsSel).length === 1) return clsSel;
+          } catch (_) {}
+        }
+      }
+      // Buat path hierarkis unik 1-to-1
+      let path = '';
+      let cur = el;
+      while (cur && cur.nodeType === 1 && cur.tagName.toLowerCase() !== 'html') {
+        let name = cur.tagName.toLowerCase();
+        if (cur.id) {
+          const checkSel = '#' + cur.id + (path ? ' > ' + path : '');
+          try {
+            if (doc.querySelectorAll(checkSel).length === 1) return checkSel;
+          } catch (_) {}
+        }
+        const parent = cur.parentElement;
+        if (parent) {
+          const siblings = Array.from(parent.children).filter(c => c.tagName === cur.tagName);
+          if (siblings.length > 1) {
+            const index = siblings.indexOf(cur) + 1;
+            name += `:nth-of-type(${index})`;
+          }
+        }
+        path = name + (path ? ' > ' + path : '');
+        cur = cur.parentElement;
+      }
+      return path || el.tagName.toLowerCase();
+    },
+
     // --- FASE 1: SUBAGENT ALPHA (DOM-Architect) ---
     async runSubagentAlpha({ userPrompt, currentCode, selInfo, targetName }) {
       // 1. Pilihan langsung pengguna di editor (Precision Selection)
@@ -11021,9 +11148,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         return {
           targetSelector: `Selection L${selInfo.startLine}–L${selInfo.endLine}`,
           lineRange: [selInfo.startLine, selInfo.endLine],
-          operation: 'REPLACE_NODE',
+          operation: 'MORPH_NODE',
           isolatedContext: selInfo.selectedLinesCode,
-          constraints: ['Modifikasi tepat pada rentang baris yang dipilih pengguna', 'Tulis kode lengkap tanpa placeholder']
+          constraints: ['DOM Morphing: Modifikasi tepat pada rentang baris yang dipilih', 'Tulis kode lengkap tanpa placeholder']
         };
       }
 
@@ -11052,16 +11179,16 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
       // 3. Deteksi komponen DOM spesifik berbasis tag / kata kunci
       const domKeywords = [
-        { term: 'nav', sel: 'nav, header, [id*="nav"], [class*="nav"]', op: 'REPLACE_NODE' },
-        { term: 'menu', sel: 'nav, .nav-links, .menu', op: 'REPLACE_NODE' },
-        { term: 'hero', sel: '#hero, .hero, section:first-of-type', op: 'REPLACE_NODE' },
-        { term: 'header', sel: 'header, #header', op: 'REPLACE_NODE' },
-        { term: 'footer', sel: 'footer, #footer', op: 'REPLACE_NODE' },
-        { term: 'kontak', sel: '#kontak, #contact, .contact, section[id*="kontak"]', op: 'REPLACE_NODE' },
-        { term: 'proyek', sel: '#proyek, #projects, .projects', op: 'REPLACE_NODE' },
-        { term: 'portofolio', sel: '#portfolio, .portfolio', op: 'REPLACE_NODE' },
-        { term: 'tombol', sel: 'button, .btn, a[class*="btn"]', op: 'REPLACE_NODE' },
-        { term: 'button', sel: 'button, .btn', op: 'REPLACE_NODE' }
+        { term: 'nav', sel: 'nav, header, [id*="nav"], [class*="nav"]' },
+        { term: 'menu', sel: 'nav, .nav-links, .menu' },
+        { term: 'hero', sel: '#hero, .hero, section:first-of-type' },
+        { term: 'header', sel: 'header, #header' },
+        { term: 'footer', sel: 'footer, #footer' },
+        { term: 'kontak', sel: '#kontak, #contact, .contact, section[id*="kontak"]' },
+        { term: 'proyek', sel: '#proyek, #projects, .projects' },
+        { term: 'portofolio', sel: '#portfolio, .portfolio' },
+        { term: 'tombol', sel: 'button, .btn, a[class*="btn"]' },
+        { term: 'button', sel: 'button, .btn' }
       ];
 
       let matchedSelector = '';
@@ -11104,14 +11231,18 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             }
             const lineCount = rawHtml.split('\n').length;
             const endLine = (startLine !== -1) ? (startLine + lineCount - 1) : Math.min(lines.length, 60);
-            const selName = targetEl.id ? `#${targetEl.id}` : (targetEl.className ? `.${String(targetEl.className).split(' ')[0]}` : targetEl.tagName.toLowerCase());
+            const uniqueSelector = this.getUniqueDomSelector(targetEl, doc);
 
             return {
-              targetSelector: selName,
+              targetSelector: uniqueSelector,
               lineRange: [startLine !== -1 ? startLine : 1, endLine],
-              operation: 'REPLACE_NODE',
+              operation: 'MORPH_NODE',
               isolatedContext: rawHtml.length <= 4000 ? rawHtml : rawHtml.slice(0, 4000),
-              constraints: ['Pertahankan event listener & atribut data', 'Tulis ulang node secara 100% utuh dari tag pembuka sampai penutup']
+              constraints: [
+                'DOM Morphing: Pertahankan root node target dan seluruh event listener',
+                'Surgical Patching: Perbarui atribut & innerHTML secara utuh dari pembuka sampai penutup',
+                'Zero-Lazy Policy: Dilarang keras menggunakan komentar pemotong kode (... atau TODO)'
+              ]
             };
           }
         } catch (_) {}
@@ -11123,9 +11254,13 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       return {
         targetSelector: 'body > main',
         lineRange: [defaultStart, defaultEnd],
-        operation: 'REPLACE_NODE',
+        operation: 'MORPH_NODE',
         isolatedContext: lines.slice(defaultStart - 1, defaultEnd).join('\n'),
-        constraints: ['Pertahankan struktur dokumen', 'Tulis kode lengkap tanpa pemotongan']
+        constraints: [
+          'DOM Morphing: Pertahankan struktur root dokumen',
+          'Tulis kode lengkap tanpa pemotongan',
+          'Zero-Lazy Policy aktif'
+        ]
       };
     },
 
@@ -11238,7 +11373,18 @@ ATURAN MUTLAK SURGICAL CODER:
         };
       }
 
-      // --- Tahap 3A.2: Uji Keutuhan DOM (DOM Integrity Check) ---
+      // --- Tahap 3A.2: Uji Keutuhan DOM via Tokenizer / Stack Tag Balancer (Zero Void-Element False Positives) ---
+      const tagVerdict = this.checkTagBalance(candidateCode);
+      if (!tagVerdict.valid) {
+        return {
+          passed: false,
+          stage: 'DOM_INTEGRITY',
+          error: tagVerdict.error,
+          details: 'Perbaiki keseimbangan tag HTML. Pastikan seluruh tag berpasangan tertutup sempurna tanpa merusak void elements.',
+          attempt
+        };
+      }
+
       if (typeof DOMParser !== 'undefined') {
         try {
           const parser = new DOMParser();
@@ -11262,21 +11408,6 @@ ATURAN MUTLAK SURGICAL CODER:
               attempt
             };
           }
-
-          // Periksa keseimbangan tag-tag kunci
-          const structuralTags = ['div', 'section', 'ul', 'ol', 'script', 'style', 'table', 'form'];
-          for (const st of structuralTags) {
-            const openC = (candidateCode.match(new RegExp(`<${st}\\b[^>]*>`, 'gi')) || []).length;
-            const closeC = (candidateCode.match(new RegExp(`</${st}>`, 'gi')) || []).length;
-            if (openC !== closeC) {
-              return {
-                passed: false,
-                stage: 'DOM_INTEGRITY',
-                error: `Ketidakseimbangan tag <${st}>: ${openC} tag pembuka vs ${closeC} tag penutup.`,
-                attempt
-              };
-            }
-          }
         } catch (e) {
           return {
             passed: false,
@@ -11287,7 +11418,7 @@ ATURAN MUTLAK SURGICAL CODER:
         }
       }
 
-      // --- Tahap 3A.3: Uji Kompilasi JS (JS Syntax Validator) ---
+      // --- Tahap 3A.3: Uji Kompilasi JS (AsyncFunction & Modern ES Syntax Validator) ---
       const scriptMatches = candidateCode.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi);
       for (const sm of scriptMatches) {
         const scriptCode = sm[1].trim();
@@ -11295,20 +11426,19 @@ ATURAN MUTLAK SURGICAL CODER:
         const openingTag = sm[0].slice(0, sm[0].indexOf('>'));
         if (/type=["'](?:application\/ld\+json|text\/template|text\/jsx|text\/babel)["']/i.test(openingTag)) continue;
 
-        try {
-          new Function(scriptCode);
-        } catch (syntaxErr) {
+        const jsRes = this.validateJavaScriptSyntax(scriptCode);
+        if (!jsRes.valid) {
           return {
             passed: false,
             stage: 'JS_SYNTAX',
-            error: `SyntaxError pada JavaScript: ${syntaxErr.message}`,
+            error: `SyntaxError pada JavaScript: ${jsRes.error}`,
             details: `Script bermasalah: ${scriptCode.slice(0, 100)}...`,
             attempt
           };
         }
       }
 
-      // --- Tahap 3A.4: Isolasi & Sanitasi CSS (CSS Scoping & Leak Purger) ---
+      // --- Tahap 3A.4: Isolasi & Sanitasi CSS (CSS Scoping & Keyed Injection) ---
       const healedCode = healLeakedCssFromHtml(candidateCode);
 
       return {
@@ -14909,7 +15039,7 @@ Aturan wajib:
     return hasBraces && (hasCssKeywords || startsWithSelector);
   }
 
-  function injectCssIntoHtmlDocument(html, cssSnippet) {
+  function injectCssIntoHtmlDocument(html, cssSnippet, scopeKey = 'global') {
     if (!html || !cssSnippet) return html || '';
     // Bersihkan penanda git diff, blok SEARCH, dan tag style jika ada
     let cleanCss = String(cssSnippet)
@@ -14923,19 +15053,36 @@ Aturan wajib:
       .replace(/try\s*\{[\s\S]*?window\.parent\.postMessage[\s\S]*?\}/gi, '')
       .trim();
     if (!cleanCss) return html;
-    const styleCloseIdx = html.lastIndexOf('</style>');
-    if (styleCloseIdx !== -1) {
-      return html.slice(0, styleCloseIdx) + '\n\n    /* Pembaruan Gaya AI */\n    ' + cleanCss + '\n  ' + html.slice(styleCloseIdx);
+
+    const safeKey = String(scopeKey || 'global').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const startTag = `/* [zoz-scope: ${safeKey}] */`;
+    const endTag = `/* [end-zoz-scope: ${safeKey}] */`;
+    const scopedBlock = `${startTag}\n${cleanCss}\n${endTag}`;
+
+    // Keyed Style Injection: Jika <style id="zoz-healed-styles"> sudah ada, timpa blok aturan lama berbasis komentar penanda
+    const healedStyleRegex = /<style\b[^>]*\bid=["']zoz-healed-styles["'][^>]*>([\s\S]*?)<\/style>/i;
+    const match = html.match(healedStyleRegex);
+
+    if (match) {
+      let existingStyleBody = match[1];
+      const scopeBlockRegex = new RegExp(`/\\*\\s*\\[zoz-scope:\\s*${safeKey}\\]\\s*\\*/[\\s\\S]*?/\\*\\s*\\[end-zoz-scope:\\s*${safeKey}\\]\\s*\\*/`, 'g');
+      if (scopeBlockRegex.test(existingStyleBody)) {
+        existingStyleBody = existingStyleBody.replace(scopeBlockRegex, scopedBlock);
+      } else {
+        existingStyleBody = existingStyleBody.trim() + '\n\n    ' + scopedBlock;
+      }
+      return html.replace(healedStyleRegex, `<style id="zoz-healed-styles">\n    ${existingStyleBody.trim()}\n  </style>`);
     }
+
     const headCloseIdx = html.indexOf('</head>');
     if (headCloseIdx !== -1) {
-      return html.slice(0, headCloseIdx) + '  <style id="zoz-healed-styles">\n    /* Pembaruan Gaya AI */\n    ' + cleanCss + '\n  </style>\n' + html.slice(headCloseIdx);
+      return html.slice(0, headCloseIdx) + `  <style id="zoz-healed-styles">\n    ${scopedBlock}\n  </style>\n` + html.slice(headCloseIdx);
     }
     const bodyOpenIdx = html.indexOf('<body');
     if (bodyOpenIdx !== -1) {
-      return html.slice(0, bodyOpenIdx) + '<head>\n  <style id="zoz-healed-styles">\n    /* Pembaruan Gaya AI */\n    ' + cleanCss + '\n  </style>\n</head>\n' + html.slice(bodyOpenIdx);
+      return html.slice(0, bodyOpenIdx) + `<head>\n  <style id="zoz-healed-styles">\n    ${scopedBlock}\n  </style>\n</head>\n` + html.slice(bodyOpenIdx);
     }
-    return html + '\n<style id="zoz-healed-styles">\n  /* Pembaruan Gaya AI */\n  ' + cleanCss + '\n</style>';
+    return html + `\n<style id="zoz-healed-styles">\n  ${scopedBlock}\n</style>`;
   }
 
   // ==================== DETERMINISTIC LEAKED CSS HEALER & PREAMBLE PURGER ====================
@@ -20584,13 +20731,17 @@ ${blocks}
     if (!file) return;
     if (Array.isArray(file._studioChatHistory) && file._studioChatHistory.length > 0) {
       file._studioChatHistory.forEach((m) => {
-        const html = m.role === 'user' ? escapeHtml(m.displayContent || m.content || '') : renderMarkdown(m.content || '');
+        let text = m.content || '';
+        text = text.replace(/```[\s\S]*?```/g, '').replace(/```[^\n]*\n?/g, '').replace(/`[^`]*`/g, '').trim();
+        const html = m.role === 'user' ? escapeHtml(m.displayContent || m.content || '') : renderMarkdown(text || '✨ Perubahan diterapkan di pratinjau.');
         appendStudioMessage(m.role, html, 'preview');
       });
     }
     if (Array.isArray(file._editChatHistory) && file._editChatHistory.length > 0) {
       file._editChatHistory.forEach((m) => {
-        const html = m.role === 'user' ? escapeHtml(m.displayContent || m.content || '') : renderMarkdown(m.content || '');
+        let text = m.content || '';
+        text = text.replace(/```[\s\S]*?```/g, '').replace(/```[^\n]*\n?/g, '').replace(/`[^`]*`/g, '').trim();
+        const html = m.role === 'user' ? escapeHtml(m.displayContent || m.content || '') : renderMarkdown(text || '✨ Perubahan diterapkan di editor.');
         appendStudioMessage(m.role, html, 'edit');
       });
     }
@@ -20656,6 +20807,10 @@ ${blocks}
     const bubble = document.createElement('div');
     bubble.className = 'studio-msg-bubble';
     bubble.innerHTML = contentHtml;
+    // Mandat Kaisar: Panel Tanya AI studio terisolasi murni untuk percakapan & status, kode 100% di pratinjau live!
+    if (role === 'assistant') {
+      bubble.querySelectorAll('.code-block-wrapper, .code-block-card, .code-header, pre, code').forEach(el => el.remove());
+    }
     row.appendChild(bubble);
     container.appendChild(row);
     scrollStudioAssistantToBottom();
@@ -24831,6 +24986,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const isInterimTurn = Boolean((wantsCode && !hasBlockMarker) || patchFailed || voidDev.isDeviation);
 
     let cleanAssistantSummary = hideFileBlocksForDisplay(assistantText || '', { hideAllCodeBlocks: true }).trim();
+    cleanAssistantSummary = cleanAssistantSummary
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/```[^\n]*\n?/g, '')
+      .replace(/`[^`]*`/g, '')
+      .replace(/<\/?(?:div|p|iframe|script|style|section|html|body|head|span|h[1-6]|button|a)\b[^>]*>/gi, '')
+      .replace(/^<\/?[a-zA-Z0-9_-]+[^>]*>$/gm, '')
+      .trim();
     if (voidDev.isDeviation) {
       cleanAssistantSummary = '⚡ Menyelaraskan modifikasi kode ke pratinjau...';
     } else if (isInterimTurn) {
