@@ -182,8 +182,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     { name: 'kimi-k3', model: 'kimi-k3', tag: 'Long Context Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi-k3', parameter_size: '1T' } },
     { name: 'kimi-k2.6', model: 'kimi-k2.6', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi-k2.6', parameter_size: '1T' } },
     { name: 'deepseek-v4.1-flash', model: 'deepseek-v4.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
-    { name: 'deepseek-v4.1-flash:1017', model: 'deepseek-v4.1-flash:1017', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
-    { name: 'deepseek-v4-pro:0813', model: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '1T' } },
+    { name: 'deepseek-v4.1-flash:cloud', model: 'deepseek-v4.1-flash:cloud', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
+    { name: 'deepseek-v4-pro:cloud', model: 'deepseek-v4-pro:cloud', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '1T' } },
     { name: 'glm-5.3', model: 'glm-5.3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm5', parameter_size: '756B' } },
     { name: 'glm-5.3-flash', model: 'glm-5.3-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'glm5', parameter_size: '218B' } },
     { name: 'glm-5.2', model: 'glm-5.2', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm5', parameter_size: '756B' } },
@@ -209,9 +209,19 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
   // Remap otomatis model lokal/deprecated/decision ke model aktif resmi di https://ollama.com
   function resolveOllamaCloudModel(modelId) {
-    if (!modelId || typeof modelId !== 'string') return 'gemma4:31b';
+    if (!modelId || typeof modelId !== 'string') return 'deepseek-v4.1-flash:cloud';
     const raw = modelId.trim();
     const id = raw.toLowerCase();
+    if (id === 'deepseek-v4.1-flash:1017' || id === 'deepseek-v4.1-flash' || id === 'deepseek-v4.1-flash:cloud') return 'deepseek-v4.1-flash:cloud';
+    if (id === 'deepseek-v4-pro:0813' || id === 'deepseek-v4-pro' || id === 'deepseek-v4-pro:cloud') return 'deepseek-v4-pro:cloud';
+    if (id === 'kimi-k2.6' || id === 'kimi-k2.6:cloud') return 'kimi-k2.6:cloud';
+    if (id === 'glm-5.3-flash' || id === 'glm-5.3-flash:cloud') return 'glm-5.3-flash:cloud';
+    if (id === 'nemotron-3-nano:30b' || id === 'nemotron-3-nano:30b-cloud') return 'nemotron-3-nano:30b-cloud';
+    if (id === 'nemotron-3-ultra' || id === 'nemotron-3-ultra:cloud') return 'nemotron-3-ultra:cloud';
+    if (id === 'nemotron-3-super' || id === 'nemotron-3-super:cloud') return 'nemotron-3-super:cloud';
+    if (id === 'mistral-large-3:675b' || id === 'mistral-large-3:675b-cloud') return 'mistral-large-3:675b-cloud';
+    if (id === 'minimax-m2.7' || id === 'minimax-m2.7:cloud') return 'minimax-m2.7:cloud';
+    if (id === 'gpt-oss:120b' || id === 'gpt-oss:120b-cloud') return 'gpt-oss:120b-cloud';
     if (VALID_OLLAMA_CLOUD_MODELS.has(id)) return raw;
     if (id === 'gemma4:31b-cloud' || id.startsWith('gemma')) return 'gemma4:31b';
     if (id.startsWith('clef')) return 'gemma4:31b';
@@ -11669,7 +11679,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     pickTarget() {
       const engine = (STATE.mode === 'ollama') ? 'ollama' : 'openrouter';
       let model = engine === 'ollama'
-        ? (STATE.settings.ollamaModel || 'llama3.2')
+        ? (STATE.settings.ollamaModel === 'deepseek-v4.1-flash:1017' ? 'deepseek-v4.1-flash:cloud' : (STATE.settings.ollamaModel || 'deepseek-v4.1-flash:cloud'))
         : (STATE.settings.openRouterModel || 'openrouter/free');
       if (engine === 'openrouter' && !String(model).includes('/')) {
         model = mapOllamaModelToOpenRouter(model) || 'openrouter/free';
