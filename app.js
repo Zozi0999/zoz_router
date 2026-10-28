@@ -41529,6 +41529,42 @@ Aturan:
     sseReconnectAttempts: 0,
     maxSseAttempts: 3,
 
+    formatPhoneNumber(num) {
+      if (!num) return '';
+      const digits = String(num).replace(/[^0-9]/g, '');
+      if (!digits) return '';
+      if (digits.startsWith('62')) {
+        const rest = digits.slice(2);
+        if (rest.length <= 8) return `+62 ${rest}`;
+        return `+62 ${rest.slice(0, 3)}-${rest.slice(3, 7)}-${rest.slice(7)}`;
+      }
+      if (digits.startsWith('0')) {
+        const rest = digits.slice(1);
+        return `+62 ${rest.slice(0, 3)}-${rest.slice(3, 7)}-${rest.slice(7)}`;
+      }
+      return `+${digits}`;
+    },
+
+    cleanDisplayName(rawName, phoneOrJid) {
+      const raw = (rawName || '').trim();
+      const rawDigits = (phoneOrJid || '').split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+      const formattedPhone = this.formatPhoneNumber(rawDigits);
+
+      const isMeaningless = !raw ||
+        raw === '...' || raw === '..' || raw === '.' || raw === '~' || raw === '-' || raw === '_' || raw === '!?' || raw === '\u200e' ||
+        raw.startsWith('120363') || // ID grup WhatsApp yang bocor sebagai nama
+        /^[\s._\-~:;*#@!?^$()\[\]{}|\\/]+$/.test(raw) ||
+        raw.replace(/[\s._\-~:;*#@!?^$()\[\]{}|\\/]/g, '').length === 0;
+
+      if (isMeaningless) {
+        return formattedPhone || 'Pengguna WhatsApp';
+      }
+      if (/^[0-9]{9,15}$/.test(raw)) {
+        return this.formatPhoneNumber(raw);
+      }
+      return raw;
+    },
+
     isKnownMasterCredential(val) {
       if (!val) return false;
       const clean = String(val).trim().toLowerCase();
@@ -43104,12 +43140,36 @@ Aturan:
 
     updateContactChipUI() {
       if (els.currentWaContactLabel) {
-        els.currentWaContactLabel.textContent = this.activeContact ? this.activeContact.name : 'Pilih Kontak WA';
+        if (this.activeContact) {
+          const isGroup = this.activeContact.id && this.activeContact.id.endsWith('@g.us');
+          let cleanName = (this.activeContact.name || '').trim();
+          if (isGroup) {
+            cleanName = cleanName.startsWith('👥') ? cleanName : `👥 ${cleanName || 'Grup WhatsApp'}`;
+          } else {
+            cleanName = this.cleanDisplayName(cleanName, this.activeContact.phone || this.activeContact.id);
+          }
+          const hasFile = Boolean(this.activeContact.hasFile);
+          els.currentWaContactLabel.innerHTML = `
+            <span>${escapeHtml(cleanName)}</span>
+            ${hasFile ? '<span class="wa-active-contact-file-tag">🔴 Ada Berkas</span>' : ''}
+          `;
+        } else {
+          els.currentWaContactLabel.textContent = 'Pilih Kontak WA';
+        }
       }
       if (els.promptInput) {
-        els.promptInput.placeholder = this.activeContact
-          ? `Kirim pesan WhatsApp ke ${this.activeContact.name}...`
-          : 'Pilih kontak WhatsApp terlebih dahulu...';
+        if (this.activeContact) {
+          const isGroup = this.activeContact.id && this.activeContact.id.endsWith('@g.us');
+          let cleanName = (this.activeContact.name || '').trim();
+          if (isGroup) {
+            cleanName = cleanName.startsWith('👥') ? cleanName : `👥 ${cleanName || 'Grup WhatsApp'}`;
+          } else {
+            cleanName = this.cleanDisplayName(cleanName, this.activeContact.phone || this.activeContact.id);
+          }
+          els.promptInput.placeholder = `Kirim pesan WhatsApp ke ${cleanName}...`;
+        } else {
+          els.promptInput.placeholder = 'Pilih kontak WhatsApp terlebih dahulu...';
+        }
       }
     },
 
@@ -43156,17 +43216,29 @@ Aturan:
         item.className = 'image-model-item' + (this.activeContact && this.activeContact.id === c.id ? ' active' : '');
         item.style.padding = '7px 10px';
 
-        const initial = (c.name || c.phone || 'W').charAt(0).toUpperCase();
+        const isGroup = c.id && c.id.endsWith('@g.us');
+        let cleanName = (c.name || '').trim();
+        if (isGroup) {
+          cleanName = cleanName.startsWith('👥') ? cleanName : `👥 ${cleanName || 'Grup WhatsApp'}`;
+        } else {
+          cleanName = this.cleanDisplayName(cleanName, c.phone || c.id);
+        }
+        const cleanPhone = isGroup ? 'Grup WhatsApp' : (this.formatPhoneNumber(c.phone || c.id) || c.phone || '');
+        const hasFile = Boolean(c.hasFile || (c.lastMessage && (c.lastMessage.includes('[Dokumen:') || c.lastMessage.includes('[Foto]'))));
+
+        const initial = cleanName.replace(/^👥\s*/, '').charAt(0).toUpperCase() || 'W';
         item.innerHTML = `
-          <div class="image-model-icon-box" style="background: rgba(37,211,102,0.15); border-color: rgba(37,211,102,0.4); color: #25D366; font-weight: bold; width: 32px; height: 32px;">
+          <div class="image-model-icon-box" style="position: relative; background: rgba(37,211,102,0.15); border-color: rgba(37,211,102,0.4); color: #25D366; font-weight: bold; width: 32px; height: 32px;">
             ${initial}
+            ${hasFile ? '<span class="wa-contact-file-dot-red" title="Mengirim berkas"></span>' : ''}
           </div>
           <div class="image-model-info" style="text-align: left;">
             <div class="image-model-title-row">
-              <span class="image-model-title" style="color: #25D366;">${escapeHtml(c.name || c.phone)}</span>
+              <span class="image-model-title" style="color: #25D366;">${escapeHtml(cleanName)}</span>
+              ${hasFile ? '<span class="wa-file-badge-red" style="font-size:0.65rem; padding:1px 5px; margin-left:6px;"><i class="fa-solid fa-paperclip"></i> [Berkas]</span>' : ''}
               ${c.unreadCount > 0 ? `<span class="wa-chat-unread">${c.unreadCount}</span>` : ''}
             </div>
-            <span class="image-model-desc">${escapeHtml(c.phone || '')} &bull; ${escapeHtml(c.lastMessage || 'Tidak ada pesan')}</span>
+            <span class="image-model-desc">${escapeHtml(cleanPhone)} &bull; ${escapeHtml(c.lastMessage || 'Tidak ada pesan')}</span>
           </div>
           ${this.activeContact && this.activeContact.id === c.id ? '<i class="fa-solid fa-check image-model-check"></i>' : ''}
         `;
@@ -43221,7 +43293,16 @@ Aturan:
         const isActive = this.activeContact && this.activeContact.id === c.id;
         item.className = 'wa-chat-item' + (isActive ? ' active' : '');
 
-        const initial = (c.name || c.phone || 'W').charAt(0).toUpperCase();
+        const isGroup = c.id && c.id.endsWith('@g.us');
+        let cleanName = (c.name || '').trim();
+        if (isGroup) {
+          cleanName = cleanName.startsWith('👥') ? cleanName : `👥 ${cleanName || 'Grup WhatsApp'}`;
+        } else {
+          cleanName = this.cleanDisplayName(cleanName, c.phone || c.id);
+        }
+        const hasFile = Boolean(c.hasFile || (c.lastMessage && (c.lastMessage.includes('[Dokumen:') || c.lastMessage.includes('[Foto]'))));
+
+        const initial = cleanName.replace(/^👥\s*/, '').charAt(0).toUpperCase() || 'W';
         let timeStr = '';
         if (c.lastTimestamp) {
           const d = new Date(c.lastTimestamp);
@@ -43229,10 +43310,14 @@ Aturan:
         }
 
         item.innerHTML = `
-          <div class="wa-chat-avatar">${initial}</div>
+          <div class="wa-chat-avatar" style="position: relative;">
+            ${initial}
+            ${hasFile ? '<span class="wa-contact-file-dot-red" title="Mengirim berkas"></span>' : ''}
+          </div>
           <div class="wa-chat-info">
             <div class="wa-chat-top-row">
-              <span class="wa-chat-name">${escapeHtml(c.name || c.phone)}</span>
+              <span class="wa-chat-name">${escapeHtml(cleanName)}</span>
+              ${hasFile ? '<span class="wa-file-badge-red" style="font-size:0.62rem; padding:1px 4px; margin-left:4px;"><i class="fa-solid fa-paperclip"></i> [Berkas]</span>' : ''}
               <span class="wa-chat-time">${timeStr}</span>
             </div>
             <div class="wa-chat-bottom-row">
@@ -43270,14 +43355,26 @@ Aturan:
       if (els.welcomeHero) els.welcomeHero.style.display = 'none';
       els.messagesList.innerHTML = '';
 
+      const isGroup = this.activeContact?.id && this.activeContact.id.endsWith('@g.us');
+      let headerName = (this.activeContact?.name || jid).trim();
+      if (isGroup) {
+        headerName = headerName.startsWith('👥') ? headerName : `👥 ${headerName || 'Grup WhatsApp'}`;
+      } else {
+        headerName = this.cleanDisplayName(headerName, this.activeContact?.phone || jid);
+      }
+      const headerPhone = isGroup ? 'Grup WhatsApp' : (this.formatPhoneNumber(this.activeContact?.phone || jid.split('@')[0]) || jid.split('@')[0]);
+
       const headerBar = document.createElement('div');
       headerBar.className = 'wa-chat-header-bar';
       headerBar.innerHTML = `
         <div class="wa-chat-header-info">
           <i class="fa-brands fa-whatsapp text-emerald-400" style="font-size: 1.1rem;"></i>
-          <span class="wa-chat-header-name">${escapeHtml(this.activeContact?.name || jid)}</span>
-          <span class="wa-chat-header-phone">(${escapeHtml(this.activeContact?.phone || jid.split('@')[0])})</span>
+          <span class="wa-chat-header-name">${escapeHtml(headerName)}</span>
+          <span class="wa-chat-header-phone">(${escapeHtml(headerPhone)})</span>
+          ${this.activeContact?.hasFile ? '<span class="wa-active-contact-file-tag">🔴 Ada Berkas</span>' : ''}
         </div>
+      `;
+      els.messagesList.appendChild(headerBar);
         <div class="wa-chat-header-actions">
           <button type="button" id="btnActionClearWaHistory" title="Bersihkan riwayat pesan kontak ini">
             <i class="fa-solid fa-trash-can"></i>
@@ -44007,109 +44104,44 @@ Aturan:
         }
       }
 
-      // 3. EKSTRAKSI MEDIA
-      const media = this.parseMediaFromMessage(msg);
+      // 3. IDENTIFIKASI BERKAS / FILE (Text-Only Mode: Dokumen, Foto, Video, Audio, Stiker, WPS)
+      const hasFile = Boolean(
+        msg.hasFile ||
+        msg.media ||
+        (msg.text && (
+          msg.text.includes('[Dokumen:') ||
+          msg.text.includes('[Document:') ||
+          msg.text.includes('[Foto]') ||
+          msg.text.includes('[Photo]') ||
+          msg.text.includes('[Audio') ||
+          msg.text.includes('[Video') ||
+          msg.text.includes('[Stiker]') ||
+          msg.text.includes('wps.com')
+        ))
+      );
 
-      // 4. SUSUN KONTEN MEDIA HTML
-      let mediaHtml = '';
-      if (media) {
-        if (media.type === 'image') {
-          if (media.url) {
-            mediaHtml = `
-              <div class="wa-bubble-image-wrap wa-photo-interactive" data-action="view-photo" title="Klik untuk memperbesar gambar">
-                <img src="${escapeHtml(media.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" loading="lazy" />
-              </div>
-            `;
-          } else if (media.thumbnail) {
-            mediaHtml = `
-              <div class="wa-bubble-image-wrap wa-photo-interactive" data-action="load-photo" title="Klik untuk memuat & memperbesar foto">
-                <img src="${escapeHtml(media.thumbnail)}" class="wa-chat-img-thumb wa-thumb-blurred" alt="Foto WhatsApp (Thumbnail)" loading="lazy" />
-                <div class="wa-img-load-overlay" title="Klik untuk unduh & lihat foto penuh">
-                  <i class="fa-solid fa-magnifying-glass-plus"></i>
-                </div>
-              </div>
-            `;
-          } else {
-            mediaHtml = `
-              <div class="wa-media-placeholder-badge wa-photo-interactive" data-action="load-photo" style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px dashed rgba(255,255,255,0.2); cursor: pointer; margin-bottom: 6px;">
-                <i class="fa-solid fa-image" style="color: #38bdf8; font-size: 1.2rem;"></i>
-                <div style="flex: 1; min-width: 0;">
-                  <span style="font-weight: 600; font-size: 0.82rem; color: #f8fafc; display: block;">Foto WhatsApp</span>
-                  <span style="font-size: 0.7rem; color: #94a3b8;">Klik untuk memuat dan melihat gambar</span>
-                </div>
-                <i class="fa-solid fa-cloud-arrow-down" style="color: #38bdf8; font-size: 0.9rem;"></i>
-              </div>
-            `;
-          }
-        } else if (media.type === 'document') {
-          const fileName = media.fileName || 'dokumen.bin';
-          const ext = fileName.includes('.') ? (fileName.split('.').pop() || '').toLowerCase() : '';
-          let iconClass = 'fa-solid fa-file-lines';
-          let extClass = 'generic';
-          let typeLabel = 'Dokumen';
-
-          if (ext === 'pdf') {
-            iconClass = 'fa-solid fa-file-pdf';
-            extClass = 'pdf';
-            typeLabel = 'Dokumen PDF';
-          } else if (['doc', 'docx'].includes(ext)) {
-            iconClass = 'fa-solid fa-file-word';
-            extClass = 'word';
-            typeLabel = 'Dokumen Word';
-          } else if (['xls', 'xlsx', 'csv'].includes(ext)) {
-            iconClass = 'fa-solid fa-file-excel';
-            extClass = 'excel';
-            typeLabel = 'Lembar Kerja Excel';
-          } else if (['ppt', 'pptx'].includes(ext)) {
-            iconClass = 'fa-solid fa-file-powerpoint';
-            extClass = 'ppt';
-            typeLabel = 'PowerPoint';
-          } else if (['zip', 'rar', '7z'].includes(ext)) {
-            iconClass = 'fa-solid fa-file-zipper';
-            extClass = 'zip';
-            typeLabel = 'Arsip File';
-          } else if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
-            iconClass = 'fa-solid fa-file-image';
-            extClass = 'image';
-            typeLabel = 'Berkas Gambar';
-          }
-
-          const sizeStr = media.size ? ` • ${this.formatFileSize(media.size)}` : '';
-          const badgeClass = `wa-doc-badge-${extClass}`;
-
-          mediaHtml = `
-            <div class="wa-doc-card ${badgeClass}">
-              <div class="wa-doc-card-top wa-doc-header">
-                <div class="wa-doc-icon-box">
-                  <i class="${iconClass}"></i>
-                </div>
-                <div class="wa-doc-details wa-doc-info">
-                  <div class="wa-doc-title" title="${escapeHtml(fileName)}">${escapeHtml(fileName)}</div>
-                  <div class="wa-doc-subtitle">${typeLabel}${sizeStr}</div>
-                </div>
-              </div>
-              <div class="wa-doc-card-actions wa-doc-actions">
-                <button type="button" class="btn-wa-doc-preview">
-                  <i class="fa-solid fa-eye"></i> Pratinjau
-                </button>
-                <button type="button" class="btn-wa-doc-download">
-                  <i class="fa-solid fa-download"></i> Unduh
-                </button>
-              </div>
-            </div>
-          `;
+      // 4. SUSUN TEKS MURNI (TEXT-ONLY SESUAI INSTRUKSI)
+      let textContent = (msg.text || '').trim();
+      if (!textContent && msg.media) {
+        if (msg.media.type === 'document') {
+          textContent = `📄 [Dokumen: ${msg.media.fileName || 'dokumen'}]`;
+        } else if (msg.media.type === 'image') {
+          textContent = '📷 [Foto]';
+        } else if (msg.media.type === 'audio') {
+          textContent = '🎵 [Audio/Voice Note]';
+        } else if (msg.media.type === 'video') {
+          textContent = '🎬 [Video]';
         }
       }
 
-      // 5. TEKS PENGIRING (CAPTION) ATAU TEKS MURNI
-      let displayText = msg.text || '';
-      if (media) {
-        if (media.type === 'document') {
-          displayText = (media.caption || displayText).replace(/(?:.*?)\[(?:Dokumen|Document):\s*[^\]]+\]/gi, '').trim();
-        } else if (media.type === 'image') {
-          displayText = (media.caption || displayText).replace(/(?:.*?)\[(?:Foto|Photo|Gambar|Image)\]/gi, '').trim();
+      // 5. TENTUKAN NAMA PENGIRIM BERSIH & NOMOR TELEPON JIKA TIDAK MEMILIKI NAMA
+      let senderIdentifier = msg.participant || '';
+      if (!senderIdentifier && !msg.fromMe) {
+        if (this.activeContact?.id && !this.activeContact.id.endsWith('@g.us')) {
+          senderIdentifier = this.activeContact.id.split('@')[0];
         }
       }
+      const cleanSenderName = msg.fromMe ? 'Saya' : this.cleanDisplayName(msg.senderName, senderIdentifier);
 
       const d = new Date(msg.timestamp || Date.now());
       const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -44124,92 +44156,45 @@ Aturan:
       }
 
       const wrap = document.createElement('div');
-      wrap.className = 'wa-bubble-wrap' + (msg.fromMe ? ' wa-bubble-sent' : ' wa-bubble-received');
+      // Bila pesan berisi berkas, tandai bubble dengan class wa-bubble-has-file (border merah di sisi kiri)
+      wrap.className = 'wa-bubble-wrap' +
+        (msg.fromMe ? ' wa-bubble-sent' : ' wa-bubble-received') +
+        (hasFile ? ' wa-bubble-has-file' : '');
       wrap.setAttribute('data-msg-id', msg.id || `msg_${Date.now()}`);
       wrap.setAttribute('data-status', msg.status || (msg.fromMe ? 'sent' : 'received'));
 
+      // Header pengirim: jika mengirim berkas, profil ditandai merah secara tegas!
+      let senderHeaderHtml = '';
+      if (!msg.fromMe) {
+        if (hasFile) {
+          senderHeaderHtml = `
+            <div class="wa-bubble-sender wa-sender-red">
+              <span class="wa-sender-avatar-red-dot">🔴</span>
+              <span class="wa-sender-name">${escapeHtml(cleanSenderName)}</span>
+              <span class="wa-file-badge-red"><i class="fa-solid fa-paperclip"></i> [Berkas]</span>
+            </div>
+          `;
+        } else {
+          senderHeaderHtml = `<div class="wa-bubble-sender">${escapeHtml(cleanSenderName)}</div>`;
+        }
+      } else if (hasFile) {
+        senderHeaderHtml = `
+          <div class="wa-bubble-sender wa-bubble-sender-me wa-sender-red">
+            <span class="wa-sender-avatar-red-dot">🔴</span>
+            <span class="wa-sender-name">Saya</span>
+            <span class="wa-file-badge-red"><i class="fa-solid fa-paperclip"></i> [Berkas]</span>
+          </div>
+        `;
+      }
+
       wrap.innerHTML = `
-        ${!msg.fromMe ? `<div class="wa-bubble-sender">${escapeHtml(msg.senderName || 'Kontak')}</div>` : ''}
-        ${mediaHtml}
-        ${displayText ? `<div class="wa-bubble-text">${escapeHtml(displayText)}</div>` : ''}
+        ${senderHeaderHtml}
+        ${textContent ? `<div class="wa-bubble-text">${escapeHtml(textContent)}</div>` : ''}
         <div class="wa-bubble-meta">
           <span>${timeStr}</span>
           ${statusIcon}
         </div>
       `;
-
-      // Pasang event listeners pada elemen media di dalam bubble
-      if (media) {
-        const interactivePhoto = wrap.querySelector('.wa-photo-interactive');
-        if (interactivePhoto) {
-          interactivePhoto.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            if (media.url) {
-              if (typeof ImageLightbox !== 'undefined' && typeof ImageLightbox.open === 'function') {
-                ImageLightbox.open([media.url], 0);
-              }
-              return;
-            }
-
-            // Jika ada thumbnail, buka segera di Lightbox agar pengguna langsung dapat melihat gambarnya
-            if (media.thumbnail && typeof ImageLightbox !== 'undefined' && typeof ImageLightbox.open === 'function') {
-              ImageLightbox.open([media.thumbnail], 0);
-            }
-
-            // Ambil berkas HD ukuran penuh dari server
-            const overlay = interactivePhoto.querySelector('.wa-img-load-overlay');
-            if (overlay) overlay.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-
-            try {
-              const jidParam = this.activeContact?.id ? `&jid=${encodeURIComponent(this.activeContact.id)}` : '';
-              const res = await this.waFetch(`/api/wa/media?msgId=${encodeURIComponent(msg.id)}&fileName=photo.jpg${jidParam}`, { headers: this.getAuthHeaders() }, 1);
-              const data = await res.json().catch(() => null);
-              if (data && data.url) {
-                media.url = data.url;
-                const newWrap = document.createElement('div');
-                newWrap.className = 'wa-bubble-image-wrap wa-photo-interactive';
-                newWrap.setAttribute('data-action', 'view-photo');
-                newWrap.title = 'Klik untuk memperbesar gambar';
-                newWrap.innerHTML = `<img src="${escapeHtml(data.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" loading="lazy" />`;
-                interactivePhoto.replaceWith(newWrap);
-                newWrap.addEventListener('click', () => {
-                  if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([data.url], 0);
-                });
-                if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([data.url], 0);
-              } else if (!media.thumbnail) {
-                if (overlay) overlay.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="color: #ef4444;"></i>';
-                showToast('⚠️ Foto tidak tersedia di server atau ponsel.', 'warning');
-              }
-            } catch (_) {
-              if (!media.thumbnail && overlay) overlay.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="color: #ef4444;"></i>';
-            }
-          });
-        }
-
-        const btnPreview = wrap.querySelector('.btn-wa-doc-preview');
-        if (btnPreview) {
-          btnPreview.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.openDocumentPreview(media, msg);
-          });
-        }
-
-        const btnDownload = wrap.querySelector('.btn-wa-doc-download');
-        if (btnDownload) {
-          btnDownload.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.downloadDocument(media.fileName, media.url, msg.id);
-          });
-        }
-
-        const docHeader = wrap.querySelector('.wa-doc-card-top, .wa-doc-header');
-        if (docHeader) {
-          docHeader.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.openDocumentPreview(media, msg);
-          });
-        }
-      }
 
       els.messagesList.appendChild(wrap);
       if (els.chatViewport) els.chatViewport.scrollTop = els.chatViewport.scrollHeight;

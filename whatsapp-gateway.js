@@ -86,8 +86,84 @@ class WhatsAppGateway {
       fs.mkdirSync(this.authDir, { recursive: true });
     }
 
+    this.initLidCache();
     this.loadConfig();
     this.loadPersistedData();
+  }
+
+  initLidCache() {
+    this.lidCache = new Map();
+    try {
+      if (fs.existsSync(this.authDir)) {
+        const files = fs.readdirSync(this.authDir);
+        for (const f of files) {
+          if (f.startsWith('lid-mapping-') && f.endsWith('_reverse.json')) {
+            const rawLid = f.replace('lid-mapping-', '').replace('_reverse.json', '').replace(/_\d+$/, '');
+            try {
+              const phone = JSON.parse(fs.readFileSync(path.join(this.authDir, f), 'utf8'));
+              if (phone) this.lidCache.set(rawLid, String(phone));
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  formatPhoneNumber(num) {
+    if (!num) return '';
+    const digits = String(num).replace(/[^0-9]/g, '');
+    if (!digits) return '';
+    if (digits.startsWith('62')) {
+      const rest = digits.slice(2);
+      if (rest.length <= 8) return `+62 ${rest}`;
+      return `+62 ${rest.slice(0, 3)}-${rest.slice(3, 7)}-${rest.slice(7)}`;
+    }
+    if (digits.startsWith('0')) {
+      const rest = digits.slice(1);
+      return `+62 ${rest.slice(0, 3)}-${rest.slice(3, 7)}-${rest.slice(7)}`;
+    }
+    return `+${digits}`;
+  }
+
+  cleanDisplayName(rawName, phoneOrJid) {
+    const raw = (rawName || '').trim();
+    const rawDigits = (phoneOrJid || '').split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+    const formattedPhone = this.formatPhoneNumber(rawDigits);
+
+    const isMeaningless = !raw ||
+      raw === '...' || raw === '..' || raw === '.' || raw === '~' || raw === '-' || raw === '_' || raw === '!?' || raw === '\u200e' ||
+      raw.startsWith('120363') || // ID grup WhatsApp yang bocor sebagai nama
+      /^[\s._\-~:;*#@!?^$()\[\]{}|\\/]+$/.test(raw) ||
+      raw.replace(/[\s._\-~:;*#@!?^$()\[\]{}|\\/]/g, '').length === 0;
+
+    if (isMeaningless) {
+      return formattedPhone || 'Pengguna WhatsApp';
+    }
+    if (/^[0-9]{9,15}$/.test(raw)) {
+      return this.formatPhoneNumber(raw);
+    }
+    return raw;
+  }
+
+  cleanContact(c) {
+    if (!c || !c.id) return c;
+    const isGroup = c.id.endsWith('@g.us');
+    let name = (c.name || c.notify || '').trim();
+    const rawPhone = (c.phone || c.id.split('@')[0] || '').replace(/[^0-9]/g, '');
+
+    if (isGroup) {
+      if (!name || name === '...' || name === '.') {
+        name = c.notify || `Grup ${this.formatPhoneNumber(rawPhone) || c.id.split('@')[0]}`;
+      }
+    } else {
+      name = this.cleanDisplayName(name, rawPhone);
+    }
+
+    return {
+      ...c,
+      name,
+      phone: isGroup ? 'Grup WhatsApp' : (this.formatPhoneNumber(rawPhone) || c.phone || 'Nomor WhatsApp')
+    };
   }
 
   safeBufferToBase64(buf) {
@@ -474,7 +550,8 @@ class WhatsAppGateway {
         if (Array.isArray(raw)) {
           raw.forEach(c => {
             if (!this.isRealContact(c)) return;
-            this.contacts.set(c.id, c);
+            const cleaned = this.cleanContact(c);
+            this.contacts.set(cleaned.id, cleaned);
           });
         }
       }
@@ -540,6 +617,64 @@ class WhatsAppGateway {
                 if (m.media && m.media.thumbnail && typeof m.media.thumbnail !== 'string') {
                   m.media.thumbnail = this.safeBufferToBase64(m.media.thumbnail);
                 }
+
+                // Tentukan status berkas (File / Foto / Dokumen / Audio / Video / WPS Link)
+                const hasFile = Boolean(
+                  m.hasFile ||
+                  m.media ||
+                  (m.text && (
+                    m.text.includes('[Dokumen:') ||
+                    m.text.includes('[Document:') ||
+                    m.text.includes('[Foto]') ||
+                    m.text.includes('[Photo]') ||
+                    m.text.includes('[Audio') ||
+                    m.text.includes('[Video') ||
+                    m.text.includes('[Stiker]') ||
+                    m.text.includes('wps.com')
+                  ))
+                );
+                m.hasFile = hasFile;
+
+                // Sinkronisasi peserta jika ada raw message di memori
+                if (!m.participant && this.rawMessages && this.rawMessages.has(m.id)) {
+                  const rMsg = this.rawMessages.get(m.id);
+                  const p = rMsg?.key?.participant || rMsg?.participant;
+                  if (p) {
+                    const rawLid = p.split('@')[0].split(':')[0].replace(/_\d+$/, '');
+                    if (this.lidCache && this.lidCache.has(rawLid)) {
+                      m.participant = this.lidCache.get(rawLid);
+                    } else {
+                      m.participant = rawLid;
+                    }
+                  }
+                }
+
+                // Retroaktif pemetaan pengirim grup yang bocor tanda titik / titik-titik / ID grup
+                if (!m.fromMe) {
+                  let name = (m.senderName || '').trim();
+                  if (jid === '120363433033717333@g.us') {
+                    if (name === '...' || (m.text && m.text.includes('Fisliatul aini'))) {
+                      m.participant = '6287899163076';
+                      m.senderName = this.formatPhoneNumber('6287899163076');
+                    } else if (name === '.') {
+                      m.participant = '6287871835789';
+                      m.senderName = this.formatPhoneNumber('6287871835789');
+                    } else if (name.startsWith('120363')) {
+                      m.senderName = 'Admin Grup';
+                    }
+                  } else if (jid.endsWith('@s.whatsapp.net')) {
+                    const phone = jid.split('@')[0];
+                    if (!name || name === '.' || name === '...' || name === '~') {
+                      m.participant = phone;
+                      m.senderName = this.formatPhoneNumber(phone);
+                    }
+                  } else if (name.startsWith('120363')) {
+                    m.senderName = 'Admin Grup';
+                  }
+                }
+
+                const fallbackId = m.participant || (!jid.endsWith('@g.us') ? jid.split('@')[0] : '');
+                m.senderName = m.fromMe ? 'Saya' : this.cleanDisplayName(m.senderName, fallbackId);
 
                 return m;
               });
@@ -941,7 +1076,20 @@ class WhatsAppGateway {
 
             const media = this.extractMediaFromMessage(msg);
             const id = msg.key.id || `hist_${ts}_${Math.random().toString(36).slice(2, 6)}`;
-            const senderName = msg.pushName || (fromMe ? 'Saya' : jid.split('@')[0]);
+            
+            const rawParticipant = msg.key?.participant || msg.participant || '';
+            let senderPhone = '';
+            if (rawParticipant) {
+              const pJid = await this.resolveLidToPhone(rawParticipant);
+              senderPhone = pJid ? pJid.split('@')[0].split(':')[0] : '';
+            }
+            if (!senderPhone && !fromMe && !jid.endsWith('@g.us')) {
+              senderPhone = jid.split('@')[0].split(':')[0];
+            }
+
+            const rawSenderName = fromMe ? 'Saya' : (msg.pushName || '');
+            const senderName = fromMe ? 'Saya' : this.cleanDisplayName(rawSenderName, senderPhone || (!jid.endsWith('@g.us') ? jid.split('@')[0] : ''));
+            const hasFile = Boolean(media || (text && (text.includes('[Dokumen:') || text.includes('[Document:') || text.includes('[Foto]') || text.includes('[Photo]') || text.includes('[Audio') || text.includes('[Video') || text.includes('[Stiker]') || text.includes('wps.com'))));
 
             if (!this.messages.has(jid)) {
               this.messages.set(jid, []);
@@ -955,6 +1103,8 @@ class WhatsAppGateway {
                 text,
                 timestamp: ts,
                 senderName,
+                participant: senderPhone,
+                hasFile,
                 status: fromMe ? 'sent' : 'received',
                 ...(media ? { media } : {})
               };
@@ -1076,15 +1226,30 @@ class WhatsAppGateway {
           }
 
           const id = msg.key.id || `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-          const senderName = msg.pushName || (fromMe ? 'Saya' : jid.split('@')[0]);
+          
+          const rawParticipant = msg.key?.participant || msg.participant || '';
+          let senderPhone = '';
+          if (rawParticipant) {
+            const pJid = await this.resolveLidToPhone(rawParticipant);
+            senderPhone = pJid ? pJid.split('@')[0].split(':')[0] : '';
+          }
+          if (!senderPhone && !fromMe && !jid.endsWith('@g.us')) {
+            senderPhone = jid.split('@')[0].split(':')[0];
+          }
 
+          const rawSenderName = fromMe ? 'Saya' : (msg.pushName || '');
+          const senderName = fromMe ? 'Saya' : this.cleanDisplayName(rawSenderName, senderPhone || (!jid.endsWith('@g.us') ? jid.split('@')[0] : ''));
           const media = this.extractMediaFromMessage(msg);
+          const hasFile = Boolean(media || (text && (text.includes('[Dokumen:') || text.includes('[Document:') || text.includes('[Foto]') || text.includes('[Photo]') || text.includes('[Audio') || text.includes('[Video') || text.includes('[Stiker]') || text.includes('wps.com'))));
+
           const messageItem = {
             id,
             fromMe,
             text,
             timestamp: ts,
             senderName,
+            participant: senderPhone,
+            hasFile,
             status: fromMe ? 'sent' : 'received',
             ...(media ? { media } : {})
           };
@@ -1465,11 +1630,18 @@ class WhatsAppGateway {
       }
 
       const formattedName = isGroup && !displayName.startsWith('👥') ? `👥 ${displayName}` : displayName;
+      const msgs = this.messages.get(c.id) || [];
+      const hasFile = Boolean(
+        c.hasFile ||
+        msgs.some(m => m.hasFile || m.media || (m.text && (m.text.includes('[Dokumen:') || m.text.includes('[Foto]')))) ||
+        (c.lastMessage && (c.lastMessage.includes('[Dokumen:') || c.lastMessage.includes('[Foto]')))
+      );
 
       return {
         ...c,
         name: formattedName,
         phone: isGroup ? 'Grup WhatsApp' : (c.phone || c.id.split('@')[0]),
+        hasFile,
         isGroup
       };
     }).sort((a, b) => {
@@ -1512,7 +1684,30 @@ class WhatsAppGateway {
       this.savePersistedData();
       this.broadcast('contacts', this.getContacts());
     }
-    return list;
+
+    return list.map(m => {
+      const hasFile = Boolean(
+        m.hasFile ||
+        m.media ||
+        (m.text && (
+          m.text.includes('[Dokumen:') ||
+          m.text.includes('[Document:') ||
+          m.text.includes('[Foto]') ||
+          m.text.includes('[Photo]') ||
+          m.text.includes('[Audio') ||
+          m.text.includes('[Video') ||
+          m.text.includes('[Stiker]') ||
+          m.text.includes('wps.com')
+        ))
+      );
+      const fallbackId = m.participant || (!targetJid.endsWith('@g.us') ? targetJid.split('@')[0] : '');
+      const senderName = m.fromMe ? 'Saya' : this.cleanDisplayName(m.senderName, fallbackId);
+      return {
+        ...m,
+        hasFile,
+        senderName
+      };
+    });
   }
 
   clearChatHistory(jid) {
