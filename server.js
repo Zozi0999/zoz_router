@@ -2580,7 +2580,7 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
       const req = client.request(ollamaUrl.toString(), {
         method: 'POST',
         headers,
-        timeout: 90000
+        timeout: 180000
       }, (res) => {
         let rawData = '';
         res.on('data', chunk => rawData += chunk);
@@ -8657,7 +8657,7 @@ async function requestHandler(req, res) {
           'X-Title': 'ZOZ ROUTER Neural AI Gateway',
           'Content-Length': Buffer.byteLength(postData)
         },
-        timeout: 45000
+        timeout: 180000
       };
 
       let clientDisconnected = false;
@@ -8896,16 +8896,16 @@ async function requestHandler(req, res) {
       proxyReq.on('timeout', () => {
         if (hasSplicedRefusal || horocycleHalted) return;
         if (sessionId && dbActiveChatTasks[sessionId]) {
-          markChatTaskInterrupted(sessionId, 'OpenRouter stream timed out (120s)');
+          markChatTaskInterrupted(sessionId, 'OpenRouter stream timed out (180s)');
         }
         if (!proxyReq.destroyed) proxyReq.destroy();
         if (clientDisconnected || res.writableEnded || res.destroyed) return;
         try {
           if (!res.headersSent) {
-            sendJSON(res, 504, { error: 'OpenRouter stream timed out (120s)' });
+            sendJSON(res, 504, { error: 'OpenRouter stream timed out (180s)' });
           } else {
             if (isStream) {
-              res.write(`data: ${JSON.stringify({ error: 'OpenRouter stream timed out (120s)' })}\n\n`);
+              res.write(`data: ${JSON.stringify({ error: 'OpenRouter stream timed out (180s)' })}\n\n`);
               res.write('data: [DONE]\n\n');
             }
             res.end();

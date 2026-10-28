@@ -2334,13 +2334,13 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         const now = Date.now();
         if (!this._lastSendStartTimestamp) {
           this._lastSendStartTimestamp = now;
-        } else if (now - this._lastSendStartTimestamp > 25000) {
+        } else if (now - this._lastSendStartTimestamp > 180000) {
           issues.push({
             id: 'gw_stuck_sending',
             type: 'stuck_sending_flag',
             severity: 'high',
             selector: 'STATE.isSending',
-            reason: 'Flag STATE.isSending terkunci lebih dari 25 detik tanpa proses streaming aktif, menghalangi pengguna mengirim pesan baru.',
+            reason: 'Flag STATE.isSending terkunci lebih dari 180 detik tanpa proses streaming aktif, menghalangi pengguna mengirim pesan baru.',
             fixable: true
           });
         }
@@ -10609,7 +10609,15 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           appended = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, { ...contRunOptions, signal: STATE.abortController?.signal });
         }
 
-        if (!appended || !appended.trim()) break;
+        if (!appended || !appended.trim()) {
+          console.warn(`[executeResponseContinuation] Putaran ${agentRound} tidak menghasilkan output teks.`);
+          if (agentRound < MAX_AGENT_ROUNDS && !STATE.abortController?.signal?.aborted) {
+            updateAgentHud(`Putaran ${agentRound} belum menerima token, mencoba kembali putaran ${agentRound + 1}...`);
+            await new Promise(r => setTimeout(r, 1500));
+            continue;
+          }
+          break;
+        }
 
         currentAccumulated = safeAssistantText(stitchContinuationChunk(currentAccumulated, appended));
 
@@ -11273,25 +11281,25 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
   // Manajemen Siklus Eksekusi Pengganti Promise.race:
   // - Zero Promise.race: Dilarang melombakan promise eksekusi dengan timer statis yang memotong respons di tengah jalan.
   // - Heartbeat Stream Timeout: Selama model masih mengirimkan chunk token (stream aktif), proses TIDAK BOLEH diputus berapa pun lamanya.
-  // - AbortController HANYA memicu pembatalan jika terjadi dead-air (tidak ada token masuk sama sekali selama >15 detik).
-  function createHeartbeatStreamController(arg1 = 15000, arg2 = 45000, arg3 = null) {
-    let deadAirTimeoutMs = 15000;
-    let ttftTimeoutMs = 45000;
+  // - AbortController HANYA memicu pembatalan jika terjadi dead-air (tidak ada token masuk sama sekali selama >60 detik) atau TTFT >180 detik.
+  function createHeartbeatStreamController(arg1 = 60000, arg2 = 180000, arg3 = null) {
+    let deadAirTimeoutMs = 60000;
+    let ttftTimeoutMs = 180000;
     let onTimeout = null;
     let parentSignal = null;
 
     if (typeof arg1 === 'object' && arg1 !== null && !('aborted' in arg1)) {
-      deadAirTimeoutMs = arg1.deadAirTimeoutMs ?? 15000;
-      ttftTimeoutMs = arg1.ttftTimeoutMs ?? 45000;
+      deadAirTimeoutMs = arg1.deadAirTimeoutMs ?? 60000;
+      ttftTimeoutMs = arg1.ttftTimeoutMs ?? 180000;
       onTimeout = arg1.onTimeout ?? null;
       parentSignal = arg1.parentSignal ?? arg1.signal ?? null;
     } else {
-      deadAirTimeoutMs = typeof arg1 === 'number' ? arg1 : 15000;
+      deadAirTimeoutMs = typeof arg1 === 'number' ? arg1 : 60000;
       if (typeof arg2 === 'object' && arg2 !== null && 'aborted' in arg2) {
         parentSignal = arg2;
-        ttftTimeoutMs = 45000;
+        ttftTimeoutMs = 180000;
       } else {
-        ttftTimeoutMs = typeof arg2 === 'number' ? arg2 : 45000;
+        ttftTimeoutMs = typeof arg2 === 'number' ? arg2 : 180000;
         parentSignal = arg3;
       }
     }
@@ -11306,8 +11314,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (typeof onTimeout === 'function') onTimeout(stage, reason);
     };
 
-    // Mulai Tahap 1: TTFT Timer (45 dtk)
-    timerId = setTimeout(() => triggerAbort('TTFT_45S'), ttftTimeoutMs);
+    // Mulai Tahap 1: TTFT Timer (180 dtk)
+    timerId = setTimeout(() => triggerAbort('TTFT_180S'), ttftTimeoutMs);
 
     if (parentSignal) {
       if (parentSignal.aborted) {
@@ -11327,8 +11335,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         if (abortController.signal.aborted) return;
         hasReceivedFirstChunk = true;
         clearTimeout(timerId);
-        // Mulai/Reset Tahap 2: Dead-Air Timer (15 dtk)
-        timerId = setTimeout(() => triggerAbort('DEAD_AIR_15S'), deadAirTimeoutMs);
+        // Mulai/Reset Tahap 2: Dead-Air Timer (60 dtk)
+        timerId = setTimeout(() => triggerAbort('DEAD_AIR_60S'), deadAirTimeoutMs);
       },
       dispose() {
         if (timerId) {
@@ -11705,7 +11713,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     // 1. EXECUTE REPAIR SWARM (Penyelesaian Perbaikan Kode Secara Benar & Tuntas)
     async executeRepairSwarm({ lastErr, activeAIFile, currentCode, onUpdate, onDone }) {
       const startTime = Date.now();
-      const heartbeat = createHeartbeatStreamController(15000, STATE.abortController?.signal);
+      const heartbeat = createHeartbeatStreamController({
+        deadAirTimeoutMs: 60000,
+        ttftTimeoutMs: 180000,
+        parentSignal: STATE.abortController?.signal
+      });
       this.activeControllers.add(heartbeat.controller);
 
       const targetName = activeAIFile?.name || 'index.html';
@@ -11862,10 +11874,10 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     async executeContinuationSwarm({ session, modelName, engine = 'openrouter', continuePrompt, tailLines, bubbleText, currentAccumulated, runOptions = {}, onStatus = null }) {
       if (onStatus) onStatus('⚡ Menuntaskan kelanjutan kode website...');
 
-      // Failsafe watchdog 25s TTFT & 12s dead-air agar agen tidak pernah macet / membeku menjadi patung
+      // Watchdog adaptif: 180s TTFT & 60s dead-air memberikan AI ruang bernapas penuh tanpa pemutusan prematur
       const heartbeat = createHeartbeatStreamController({
-        deadAirTimeoutMs: 12000,
-        ttftTimeoutMs: 25000,
+        deadAirTimeoutMs: 60000,
+        ttftTimeoutMs: 180000,
         parentSignal: STATE.abortController?.signal
       });
       this.activeControllers.add(heartbeat.controller);
@@ -12026,11 +12038,11 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
 
   const StudioEditAgent = {
     busy: false,
-    TTFT_MS: 30000,      // batas menunggu token pertama
-    IDLE_MS: 20000,      // batas diam di tengah stream
-    TOTAL_MS: 90000,     // batas satu segmen stream (dilanjutkan otomatis via auto-continue)
-    DEADLINE_MS: 240000, // batas seluruh proses multi-pass & auto-continuation (4 menit)
-    MAX_CONTINUATIONS_PER_STEP: 4, // jumlah sambungan (auto-continue) otomatis per langkah
+    TTFT_MS: 180000,     // batas menunggu token pertama (180 detik)
+    IDLE_MS: 60000,      // batas diam di tengah stream (60 detik)
+    TOTAL_MS: 300000,    // batas satu segmen stream (5 menit)
+    DEADLINE_MS: 600000, // batas seluruh proses multi-pass & auto-continuation (10 menit)
+    MAX_CONTINUATIONS_PER_STEP: 5, // jumlah sambungan (auto-continue) otomatis per langkah
     MAX_FILE_CHARS: 150000,
     _ctrl: null,
     _userStopped: false,
@@ -12225,8 +12237,8 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           clearTimeout(ollamaIdleTimer);
           ollamaIdleTimer = setTimeout(() => { ollamaReason = why; ollamaCtrl.abort(); }, ms);
         };
-        // Berikan waktu toleransi wajar untuk Ollama TTFT (maks 25s)
-        const ollamaTimeoutMs = Math.min(25000, budgetMs || 25000);
+        // Berikan waktu toleransi leluasa untuk Ollama TTFT (maks 180s)
+        const ollamaTimeoutMs = Math.min(180000, budgetMs || 180000);
         armOllama(ollamaTimeoutMs, 'ttft');
 
         const parent = STATE.abortController && STATE.abortController.signal;
@@ -12383,7 +12395,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
               const totalChars = accumulatedText.length + legChars;
               if (onProgress) onProgress(totalChars, leg);
             },
-            Math.max(25000, remaining),
+            Math.max(180000, remaining),
             setStatus
           );
         } catch (err) {
