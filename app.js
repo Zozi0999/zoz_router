@@ -882,7 +882,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
               const tunnelBase = (typeof WhatsAppController !== 'undefined' && WhatsAppController.activeTunnelUrl && WhatsAppController.activeTunnelUrl.includes('.trycloudflare.com'))
                 ? WhatsAppController.activeTunnelUrl.replace(/\/+$/, '')
                 : (localStorage.getItem('zoz_last_tunnel_url') || 'https://roommate-flashers-flags-briefly.trycloudflare.com');
-              const targetBase = tunnelBase || (location.hostname && location.hostname.includes('zozdocs.com') ? '' : 'https://zoz-router.vercel.app');
+              const targetBase = tunnelBase || 'https://zoz-router.vercel.app';
               if (targetBase) {
                 url = targetBase + url;
                 if (typeof input === 'string') {
