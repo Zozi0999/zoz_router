@@ -572,6 +572,256 @@
     };
   }
 
+  // ============================================================================
+  // 5. MESIN CONTINUATION INDUKTIF & PENCANGKOKAN SUB-POHON DOM (DOM SUBTREE GRAFTING)
+  // Menangani kondisi ketika AI mengeluarkan ribuan token namun terputus di tengah
+  // jalan (belum menutup >>>>>>> REPLACE, ```, atau </html>) dengan menyambung
+  // stream secara rekursif (Overlap-Free KMP Suffix-Prefix Stitching) serta
+  // mencangkokkan fragmen komponen HTML parsial (<section id="kontak">...</section>)
+  // ke dalam pohon DOM dokumen utama.
+  // ============================================================================
+  function detectIncompleteEditStream(text, step = 'patch', kind = 'html') {
+    const s = String(text || '');
+    if (!s.trim()) return { incomplete: true, reason: 'empty_stream' };
+
+    // 1. Cek blok SEARCH/REPLACE yang belum ditutup
+    const gitSearchOpens = (s.match(/^<{3,}[ \t]*SEARCH\b/gim) || []).length;
+    const gitReplaceCloses = (s.match(/^>{3,}[ \t]*(?:REPLACE)?[ \t>]*$/gim) || []).length;
+    if (gitSearchOpens > gitReplaceCloses) {
+      return { incomplete: true, reason: 'unclosed_git_hunk', openCount: gitSearchOpens, closeCount: gitReplaceCloses };
+    }
+
+    const zozSearchOpens = (s.match(/<<<SEARCH>>>/gi) || []).length;
+    const zozReplaceOpens = (s.match(/<<<REPLACE>>>/gi) || []).length;
+    const zozEditCloses = (s.match(/<<<END_ZOZ_EDIT>>>/gi) || []).length;
+    if (zozSearchOpens > zozReplaceOpens || (zozSearchOpens > 0 && zozEditCloses === 0 && !/\n```\s*$/.test(s.trim()))) {
+      return { incomplete: true, reason: 'unclosed_zoz_hunk', openCount: zozSearchOpens, closeCount: zozEditCloses };
+    }
+
+    // 2. Cek blok pagar kode markdown (```) yang ganjil (belum ditutup)
+    const fences = (s.match(/```/g) || []).length;
+    if (fences % 2 === 1) {
+      return { incomplete: true, reason: 'unclosed_code_fence', fences };
+    }
+
+    // 3. Cek dokumen HTML utuh yang belum mencapai </html>
+    if (kind !== 'jsx' && (step === 'rewrite' || /<!DOCTYPE\s+html|<html[\s>]/i.test(s))) {
+      if (/<html[\s>]|<!DOCTYPE\s+html/i.test(s) && !/<\/html\s*>/i.test(s)) {
+        return { incomplete: true, reason: 'unclosed_html_document' };
+      }
+    }
+
+    // 4. Cek tag komponen utama (<section>, <style>, <script>, <header>, <footer>) yang masih menggantung
+    for (const tag of ['section', 'style', 'script', 'header', 'footer', 'main', 'nav']) {
+      const oCount = (s.match(new RegExp('<' + tag + '(?=[\\s>/])', 'gi')) || []).length;
+      const cCount = (s.match(new RegExp('</' + tag + '\\s*>', 'gi')) || []).length;
+      if (oCount > cCount && gitSearchOpens === 0 && zozSearchOpens === 0) {
+        return { incomplete: true, reason: `unclosed_${tag}_tag`, openCount: oCount, closeCount: cCount };
+      }
+    }
+
+    return { incomplete: false, reason: 'complete' };
+  }
+
+  function stitchContinuationOverlap(accumulated, nextChunk) {
+    const a = String(accumulated || '');
+    let b = String(nextChunk || '');
+    if (!a) return b;
+    if (!b) return a;
+
+    // Bersihkan pembuka pagar markdown duplikat jika bagian sebelumnya sedang berada di dalam kode/hunk
+    const aFences = (a.match(/```/g) || []).length;
+    const aInUnclosedHunk = ((a.match(/^<{3,}[ \t]*SEARCH\b/gim) || []).length > (a.match(/^>{3,}[ \t]*(?:REPLACE)?[ \t>]*$/gim) || []).length);
+    if (aFences % 2 === 1 || aInUnclosedHunk || (/<html[\s>]|<!DOCTYPE\s+html/i.test(a) && !/<\/html\s*>/i.test(a))) {
+      b = b.replace(/^(?:[^\n<`]*\n)?```[a-zA-Z0-9_-]*\r?\n/, '');
+    }
+
+    // 1. Cari tumpang-tindih berbasis baris (hingga 12 baris terakhir dari a terhadap 12 baris pertama dari b)
+    const aLines = a.split(/\r?\n/);
+    const bLines = b.split(/\r?\n/);
+    const maxLineCheck = Math.min(12, aLines.length, bLines.length);
+    for (let k = maxLineCheck; k >= 1; k--) {
+      let match = true;
+      for (let j = 0; j < k; j++) {
+        const lineA = aLines[aLines.length - k + j].trim();
+        const lineB = bLines[j].trim();
+        if (!lineA || lineA !== lineB) {
+          match = false;
+          break;
+        }
+      }
+      if (match) {
+        return aLines.concat(bLines.slice(k)).join('\n');
+      }
+    }
+
+    // 2. Cari tumpang-tindih berbasis karakter persis (KMP Suffix-Prefix Overlap hingga 350 karakter)
+    const maxCharOverlap = Math.min(350, a.length, b.length);
+    for (let len = maxCharOverlap; len >= 6; len--) {
+      if (a.slice(a.length - len) === b.slice(0, len)) {
+        return a + b.slice(len);
+      }
+    }
+
+    return a + b;
+  }
+
+  function findBalancedTagSpan(html, startIndex, tagName) {
+    const tagRe = new RegExp('<(\\/?)' + tagName + '(?=[\\s>/])[^>]*>', 'gi');
+    tagRe.lastIndex = startIndex;
+    let depth = 0;
+    let m;
+    while ((m = tagRe.exec(html)) !== null) {
+      const fullTag = m[0];
+      const isClose = m[1] === '/';
+      const isSelfClose = /\/\s*>$/.test(fullTag);
+      if (isClose) {
+        depth--;
+        if (depth <= 0) {
+          return { start: startIndex, end: m.index + fullTag.length };
+        }
+      } else if (!isSelfClose) {
+        depth++;
+      }
+    }
+    return null;
+  }
+
+  function graftPartialHtmlFragment(originalHtml, modelText, userGoal = '') {
+    const orig = String(originalHtml || '');
+    const raw = String(modelText || '');
+    if (!orig.trim() || !raw.trim()) return null;
+
+    // Ekstrak seluruh blok kode dari respons model
+    const fragments = [];
+    const fenceRe = /```(?:html|css|js|javascript|xml)?[ \t]*\r?\n([\s\S]*?)(?:\r?\n```|$)/gi;
+    let m;
+    while ((m = fenceRe.exec(raw)) !== null) {
+      if (m[1] && m[1].trim()) fragments.push(m[1].trim());
+    }
+    if (fragments.length === 0) {
+      const rawTagMatch = raw.match(/(<(?:section|header|footer|nav|main|article|aside|div|style|script)\b[\s\S]*<\/(?:section|header|footer|nav|main|article|aside|div|style|script)>)/i);
+      if (rawTagMatch) fragments.push(rawTagMatch[1].trim());
+    }
+    if (fragments.length === 0) return null;
+
+    let working = orig;
+    const editedRanges = [];
+    let graftedCount = 0;
+
+    for (const frag of fragments) {
+      // Abaikan jika ini dokumen HTML penuh (ditangani oleh extractFullCode)
+      if (/<!DOCTYPE\s+html|<html[\s>]/i.test(frag)) continue;
+
+      // Kasus A: Fragmen adalah blok <style>...</style> atau aturan CSS murni
+      if (/^<style\b/i.test(frag) || (!frag.startsWith('<') && /\{[\s\S]*:[\s\S]*\}/.test(frag))) {
+        const styleBlock = /^<style\b/i.test(frag) ? frag : `<style>\n${frag}\n</style>`;
+        if (/<\/head\s*>/i.test(working)) {
+          const idx = working.search(/<\/head\s*>/i);
+          const startLine = working.slice(0, idx).split('\n').length;
+          working = working.slice(0, idx) + styleBlock + '\n' + working.slice(idx);
+          editedRanges.push({ startLine, endLine: startLine + styleBlock.split('\n').length });
+          graftedCount++;
+          continue;
+        }
+      }
+
+      // Kasus B: Fragmen adalah elemen komponen HTML (<section>, <header>, <footer>, <nav>, <div ...>)
+      const openMatch = frag.match(/^<([a-zA-Z0-9_-]+)\b([^>]*)>/);
+      if (!openMatch) continue;
+      const tagName = openMatch[1].toLowerCase();
+      const attrs = openMatch[2] || '';
+      const idMatch = attrs.match(/\bid\s*=\s*["']([^"']+)["']/i);
+      const classMatch = attrs.match(/\bclass\s*=\s*["']([^"']+)["']/i);
+
+      // B1. Cangkokkan berdasarkan atribut id="..." yang cocok di dokumen asli
+      if (idMatch && idMatch[1]) {
+        const targetId = idMatch[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const targetOpenRe = new RegExp('<' + tagName + '\\b[^>]*\\bid\\s*=\\s*["\']' + targetId + '["\'][^>]*>', 'i');
+        const found = targetOpenRe.exec(working);
+        if (found) {
+          const span = findBalancedTagSpan(working, found.index, tagName);
+          if (span) {
+            const startLine = working.slice(0, span.start).split('\n').length;
+            working = working.slice(0, span.start) + frag + working.slice(span.end);
+            editedRanges.push({ startLine, endLine: startLine + frag.split('\n').length - 1 });
+            graftedCount++;
+            continue;
+          }
+        }
+      }
+
+      // B2. Cangkokkan ke elemen sejenis berdasarkan kesamaan Bilangan Erdős / Kőnig pada kandidat <section>/<header>/<footer>/<div class="hero...">
+      const goalLower = String(userGoal || '').toLowerCase();
+      const candidateRe = new RegExp('<' + tagName + '\\b([^>]*)>', 'gi');
+      let candMatch;
+      let bestSpan = null;
+      let bestScore = 0;
+
+      while ((candMatch = candidateRe.exec(working)) !== null) {
+        const span = findBalancedTagSpan(working, candMatch.index, tagName);
+        if (!span) continue;
+        const candidateSubtree = working.slice(span.start, span.end);
+        // Jangan ganti wrapper raksasa yang membungkus seluruh body jika fragmen jauh lebih kecil
+        if (tagName === 'div' && candidateSubtree.length > working.length * 0.75 && frag.length < candidateSubtree.length * 0.6) {
+          continue;
+        }
+        const candOpenLine = candidateSubtree.split('\n')[0];
+        const fragOpenLine = frag.split('\n')[0];
+        let score = computeLineBipartiteWeight(normalizeCodeLineForKonig(fragOpenLine), normalizeCodeLineForKonig(candOpenLine));
+
+        // Tambah skor jika kata kunci target pengguna (mis. "hero", "kontak", "footer") ada di dalam kandidat ini
+        const goalKeywords = goalLower.match(/\b(hero|header|navbar|nav|kontak|contact|tentang|about|fitur|feature|layanan|service|harga|pricing|testimoni|footer|galeri|cta)\b/g) || [];
+        for (const kw of goalKeywords) {
+          if (candidateSubtree.toLowerCase().includes(kw) && frag.toLowerCase().includes(kw)) {
+            score += 0.35;
+          }
+        }
+        if (classMatch && classMatch[1]) {
+          const fragClasses = classMatch[1].split(/\s+/).filter(c => c.length >= 3);
+          const candAttrs = (candMatch[1] || '').toLowerCase();
+          for (const fc of fragClasses) {
+            if (candAttrs.includes(fc.toLowerCase())) score += 0.15;
+          }
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestSpan = span;
+        }
+      }
+
+      if (bestSpan && bestScore >= 0.55) {
+        const startLine = working.slice(0, bestSpan.start).split('\n').length;
+        working = working.slice(0, bestSpan.start) + frag + working.slice(bestSpan.end);
+        editedRanges.push({ startLine, endLine: startLine + frag.split('\n').length - 1 });
+        graftedCount++;
+        continue;
+      }
+
+      // B3. Jika merupakan <section> atau <footer> baru (mis. menambahkan #kontak baru), sisipkan sebelum <footer atau </body>
+      if (['section', 'footer', 'header', 'nav'].includes(tagName)) {
+        const insertBeforeRe = tagName === 'header' || tagName === 'nav'
+          ? /<body\b[^>]*>/i
+          : (/<footer\b/i.test(working) && tagName !== 'footer' ? /<footer\b/i : /<\/body\s*>/i);
+        const insMatch = insertBeforeRe.exec(working);
+        if (insMatch) {
+          const insPos = (tagName === 'header' || tagName === 'nav') ? (insMatch.index + insMatch[0].length) : insMatch.index;
+          const startLine = working.slice(0, insPos).split('\n').length;
+          working = working.slice(0, insPos) + '\n' + frag + '\n' + working.slice(insPos);
+          editedRanges.push({ startLine, endLine: startLine + frag.split('\n').length });
+          graftedCount++;
+        }
+      }
+    }
+
+    if (graftedCount === 0 || working === orig) return null;
+    return {
+      content: working,
+      ranges: editedRanges,
+      graftedCount
+    };
+  }
+
   function createHyperbolicManifold() {
     const PHI = (Math.sqrt(5) - 1) / 2;
     let lastPoint = { x: 0, y: 0, r: 0, theta: 0, geodesicDist: 0, busemann: 0 };
@@ -1066,6 +1316,9 @@
     computeErdosIntentGraph,
     computeSzegoToeplitzSpectrum,
     konigBipartiteMatchHunk,
+    detectIncompleteEditStream,
+    stitchContinuationOverlap,
+    graftPartialHtmlFragment,
     createHyperbolicManifold,
     createEntropyStreamGate
   };

@@ -11790,10 +11790,11 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
 
   const StudioEditAgent = {
     busy: false,
-    TTFT_MS: 25000,      // batas menunggu token pertama (responsif, cegah hang)
-    IDLE_MS: 15000,      // batas diam di tengah stream
-    TOTAL_MS: 60000,     // batas satu panggilan model
-    DEADLINE_MS: 120000, // batas seluruh proses agen (maksimal 2 menit)
+    TTFT_MS: 30000,      // batas menunggu token pertama
+    IDLE_MS: 20000,      // batas diam di tengah stream
+    TOTAL_MS: 90000,     // batas satu segmen stream (dilanjutkan otomatis via auto-continue)
+    DEADLINE_MS: 240000, // batas seluruh proses multi-pass & auto-continuation (4 menit)
+    MAX_CONTINUATIONS_PER_STEP: 4, // jumlah sambungan (auto-continue) otomatis per langkah
     MAX_FILE_CHARS: 150000,
     _ctrl: null,
     _userStopped: false,
@@ -12008,13 +12009,18 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           });
           if (ollamaAcc.text.trim()) {
             ollamaSucceeded = true;
-            return { text: ollamaAcc.text, model };
+            return { text: ollamaAcc.text, model, partial: false };
           }
         } catch (ollamaErr) {
           if (this._userStopped) {
             const e = new Error('Dihentikan oleh pengguna.');
             e.userStopped = true;
             throw e;
+          }
+          // JANGAN BUANG TOKEN PARSIAL! Jika Ollama sudah menghasilkan > 40 karakter sebelum terputus,
+          // kembalikan sebagai segmen parsial agar mesin Auto-Continue menyambungnya sampai selesai!
+          if (ollamaAcc.text && ollamaAcc.text.trim().length > 40) {
+            return { text: ollamaAcc.text, model, partial: true };
           }
           console.warn('[StudioEditAgent] Ollama kendala/timeout (' + (ollamaReason || ollamaErr.message) + '), otomatis failover ke OpenRouter Cloud');
         } finally {
@@ -12062,12 +12068,16 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           }
         });
         if (!cloudAcc.text.trim()) throw new Error('Model Cloud mengembalikan respons kosong.');
-        return { text: cloudAcc.text, model };
+        return { text: cloudAcc.text, model, partial: false };
       } catch (cloudErr) {
         if (this._userStopped) {
           const e = new Error('Dihentikan oleh pengguna.');
           e.userStopped = true;
           throw e;
+        }
+        // JANGAN BUANG TOKEN PARSIAL DARI CLOUD! Jika sudah ada > 40 karakter, kembalikan untuk disambung otomatis
+        if (cloudAcc.text && cloudAcc.text.trim().length > 40) {
+          return { text: cloudAcc.text, model, partial: true };
         }
         if (cloudCtrl.signal.aborted) {
           const e = new Error(
@@ -12089,10 +12099,97 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       }
     },
 
+    // Mesin Auto-Continue Rekursif: Memanggil AI berkali-kali untuk menyambung token yang terputus
+    // (baik karena batas max_tokens, stream timeout, maupun blok kode/hunk yang belum tertutup) sampai tuntas!
+    async callModelWithAutoContinue(baseMessages, step, kind, onProgress, deadlineMs, setStatus = null, prefixLabel = '') {
+      let accumulatedText = '';
+      let lastModel = '';
+      const maxLegs = (this.MAX_CONTINUATIONS_PER_STEP || 4) + 1;
+
+      for (let leg = 1; leg <= maxLegs; leg++) {
+        if (this._userStopped) {
+          const e = new Error('Dihentikan oleh pengguna.');
+          e.userStopped = true;
+          throw e;
+        }
+        const remaining = deadlineMs - Date.now();
+        if (remaining < 10000 && accumulatedText.trim()) break;
+
+        let legMessages = baseMessages;
+        if (leg > 1) {
+          const tailAnchor = accumulatedText.slice(-320);
+          const contLabel = `${prefixLabel} · Sambungan #${leg - 1}`;
+          if (setStatus) {
+            const kLen = accumulatedText.length >= 1000 ? (accumulatedText.length / 1000).toFixed(1) + 'K' : accumulatedText.length;
+            setStatus(`🔄 ${contLabel} (melanjutkan dari ${kLen} karakter)…`);
+          }
+          legMessages = [
+            ...baseMessages,
+            { role: 'assistant', content: accumulatedText },
+            {
+              role: 'user',
+              content: `Respons Anda sebelumnya terpotong di tengah jalan. LANJUTKAN penulisan kode tepat dari ekor terakhir berikut sampai seluruh blok ditutup sempurna (${step === 'rewrite' ? 'sampai </html>' : 'sampai >>>>>>> REPLACE'}) TANPA mengulang bagian awal dan TANPA kata pengantar:\n\`\`\`\n${tailAnchor}\n\`\`\``
+            }
+          ];
+        }
+
+        let legResp;
+        try {
+          legResp = await this.callModel(
+            legMessages,
+            (legChars) => {
+              const totalChars = accumulatedText.length + legChars;
+              if (onProgress) onProgress(totalChars, leg);
+            },
+            Math.max(25000, remaining),
+            setStatus
+          );
+        } catch (err) {
+          if (err && err.userStopped) throw err;
+          if (err && err.partial && err.partial.trim()) {
+            legResp = { text: err.partial, partial: true };
+          } else if (accumulatedText.trim()) {
+            break;
+          } else {
+            throw err;
+          }
+        }
+
+        if (!legResp || !legResp.text || !legResp.text.trim()) break;
+        lastModel = legResp.model || lastModel;
+
+        if (!accumulatedText) {
+          accumulatedText = legResp.text;
+        } else if (typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.stitchContinuationOverlap === 'function') {
+          accumulatedText = TEXT_SAFETY.stitchContinuationOverlap(accumulatedText, legResp.text);
+        } else {
+          accumulatedText += legResp.text;
+        }
+
+        // Cek secara matematis apakah stream sudah lengkap atau masih terputus di tengah blok
+        const incCheck = (typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.detectIncompleteEditStream === 'function')
+          ? TEXT_SAFETY.detectIncompleteEditStream(accumulatedText, step, kind)
+          : { incomplete: Boolean(legResp.partial) };
+
+        if (!incCheck.incomplete && !legResp.partial) {
+          break;
+        }
+      }
+
+      return { text: accumulatedText, model: lastModel };
+    },
+
     // ---------- Parsing & penerapan perubahan ----------
     parseHunks(text) {
       const hunks = [];
-      const src = String(text || '');
+      let src = String(text || '');
+      // Jika terdapat blok SEARCH...======= di ujung akhir yang lupa ditutup dengan >>>>>>> REPLACE, tutup otomatis!
+      const openSearchCount = (src.match(/^<{3,}[ \t]*SEARCH\b/gim) || []).length;
+      const closeReplaceCount = (src.match(/^>{3,}[ \t]*(?:REPLACE)?[ \t>]*$/gim) || []).length;
+      if (openSearchCount > closeReplaceCount && /^={3,}[ \t]*$/m.test(src)) {
+        src = src.replace(/\n?```\s*$/, '') + '\n>>>>>>> REPLACE\n';
+      }
+
       const reGit = /^<{3,}[ \t]*SEARCH[ \t>]*\r?\n([\s\S]*?)\r?\n={3,}[ \t]*\r?\n([\s\S]*?)(?:\r?\n)?^>{3,}[ \t]*(?:REPLACE)?[ \t>]*$/gim;
       let m;
       while ((m = reGit.exec(src)) !== null) hunks.push({ search: m[1], replace: m[2] });
@@ -12333,59 +12430,59 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       return [{ role: 'system', content: system }, { role: 'user', content: user }];
     },
 
-    // ---------- Orkestrasi ----------
+    // ---------- Orkestrasi Multi-Pass & Auto-Continue Sampai Tugas Selesai ----------
     async run({ prompt, file, selInfo, forceRewrite, kind, historyKey, setStatus }) {
       const original = file.rawContent || file.content || '';
+      let workingCode = original;
+      const accumulatedRanges = [];
+      let totalApplied = 0;
       const name = file.name || 'index.html';
       const isHtml = kind !== 'jsx';
       const goal = this.resolveGoal(prompt, file, historyKey);
       const tooBig = original.length > this.MAX_FILE_CHARS;
-      const isFullThemeTransform = /\b(?:ubah|ganti|jadikan|rombak|buat(?:kan)?)\s+(?:seluruh\s+)?(?:website|webiste|web|halaman|situs)?\s*(?:ini\s+)?(?:menjadi|jadi|ke\s+tema|tentang|bertema)\b/i.test(goal) && !/\b(?:tombol|button|warna\s+latar|background|judul|teks|navbar|header|footer|font|ukuran)\b/i.test(goal);
+      const isFullThemeTransform = /\b(?:ubah|ganti|jadikan|rombak|buat(?:kan)?)\s+(?:seluruh\s+)?(?:website|webiste|web|halaman|situs)?\s*(?:ini\s+)?(?:menjadi|jadi|ke\s+tema|tentang|bertema)\b/i.test(goal) && !/\b(?:tombol|button|warna\s+latar|background|judul|teks|navbar|header|footer|font|ukuran|hero|kontak)\b/i.test(goal);
       const plan = (forceRewrite || isFullThemeTransform) && !tooBig
-        ? ['rewrite', 'patch']
-        : (tooBig ? ['patch', 'retry'] : ['patch', 'retry', 'rewrite']);
+        ? ['rewrite', 'patch', 'retry']
+        : (tooBig ? ['patch', 'retry', 'retry'] : ['patch', 'retry', 'retry', 'rewrite']);
       const deadline = Date.now() + this.DEADLINE_MS;
-      const labels = { patch: 'Menulis perubahan', retry: 'Mencoba ulang dengan koreksi', rewrite: 'Menulis ulang file utuh' };
+      const labels = {
+        patch: 'Menulis perubahan',
+        retry: 'Melanjutkan & menyempurnakan target',
+        rewrite: 'Menulis ulang dokumen utuh'
+      };
 
       let lastReason = '';
       let feedback = '';
       for (let i = 0; i < plan.length; i++) {
         const step = plan[i];
         const remaining = deadline - Date.now();
-        if (remaining < 15000) { lastReason = lastReason || 'Waktu proses agen habis.'; break; }
-        const prefix = `Langkah ${i + 1}/${plan.length} · ${labels[step]}`;
+        if (remaining < 12000) { lastReason = lastReason || 'Waktu proses agen habis.'; break; }
+        const prefix = `Tahap ${i + 1}/${plan.length} · ${labels[step]}`;
         setStatus(`${prefix}…`);
 
         let resp;
         try {
-          resp = await this.callModel(
-            this.buildMessages(step, { goal, name, original, kind, selInfo, feedback }),
-            (n) => setStatus(`${prefix} (${n >= 1000 ? (n / 1000).toFixed(1) + 'K' : n} karakter)…`),
-            remaining,
-            setStatus
+          resp = await this.callModelWithAutoContinue(
+            this.buildMessages(step, { goal, name, original: workingCode, kind, selInfo, feedback }),
+            step,
+            kind,
+            (n, leg) => {
+              const kStr = n >= 1000 ? (n / 1000).toFixed(1) + 'K' : n;
+              const legTag = leg > 1 ? ` · Sambungan #${leg - 1}` : '';
+              setStatus(`${prefix}${legTag} (${kStr} karakter)…`);
+            },
+            deadline,
+            setStatus,
+            prefix
           );
         } catch (e) {
           if (e.userStopped) throw e;
-          // Stream macet tapi blok perubahan sudah lengkap: pakai yang sudah ada
-          if (e.partial && step !== 'rewrite' && (/^>{3,}[ \t]*REPLACE/im.test(e.partial) || /<<<END_ZOZ_EDIT>>>/i.test(e.partial)) && this.parseHunks(e.partial).length) {
-            resp = { text: e.partial };
-          } else if (e.partial && step === 'rewrite' && (/<html|<!DOCTYPE/i.test(e.partial))) {
-            const healed = this.extractFullCode(e.partial, kind);
-            if (healed) {
-              resp = { text: healed };
-            } else {
-              lastReason = e.message || 'Gagal menghubungi model.';
-              break;
-            }
-          } else {
-            // Galat jaringan / kuota / timeout: mengulang tidak akan membantu, hentikan dengan alasan jelas
-            lastReason = e.message || 'Gagal menghubungi model.';
-            break;
-          }
+          lastReason = e.message || 'Gagal menghubungi model.';
+          continue;
         }
 
         setStatus('Memeriksa dan menerapkan perubahan…');
-        const text = resp.text;
+        const text = resp.text || '';
         let candidate = null;
         let ranges = [];
         let applied = 0;
@@ -12396,37 +12493,89 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           if (!candidate) {
             const hunksFallback = this.parseHunks(text);
             if (hunksFallback.length > 0) {
-              const hRes = this.applyHunks(original, hunksFallback);
+              const hRes = this.applyHunks(workingCode, hunksFallback);
               if (hRes.failed.length < hunksFallback.length) {
                 candidate = hRes.code;
                 ranges = hRes.ranges;
+                applied = hunksFallback.length - hRes.failed.length;
               }
             }
           }
-          if (!candidate) { lastReason = 'Model tidak mengirim file utuh yang lengkap.'; continue; }
+          if (!candidate && isHtml && typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.graftPartialHtmlFragment === 'function') {
+            const grafted = TEXT_SAFETY.graftPartialHtmlFragment(workingCode, text, goal);
+            if (grafted && grafted.content !== workingCode) {
+              candidate = isAuthenticHtml(grafted.content) ? autoRepairHtmlDyckClosure(grafted.content) : grafted.content;
+              ranges = grafted.ranges || [];
+              applied = grafted.graftedCount || 1;
+            }
+          }
+          if (!candidate) {
+            lastReason = 'Model belum menyelesaikan file utuh; melanjutkan pada tahap berikutnya.';
+            feedback = 'Keluarkan dokumen HTML lengkap dari <!DOCTYPE html> sampai </html>.';
+            continue;
+          }
         } else {
           const hunks = this.parseHunks(text);
           if (hunks.length === 0) {
             const full = this.extractFullCode(text, kind);
-            if (full && full.length >= Math.min(original.length * 0.25, 250)) {
+            if (full && full.length >= Math.min(workingCode.length * 0.25, 250)) {
               candidate = full;
-            } else {
-              lastReason = 'Model tidak menghasilkan blok perubahan (hanya teks).';
-              feedback = lastReason + ' Balas langsung dengan blok SEARCH/REPLACE.';
+            } else if (isHtml && typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.graftPartialHtmlFragment === 'function') {
+              // Pencangkokan Sub-Pohon DOM (DOM Subtree Grafting): Jika AI mengeluarkan potongan <section id="kontak">...</section>
+              // atau <div class="hero">...</div> atau <style>...</style> tanpa penanda SEARCH/REPLACE, cangkokkan otomatis!
+              const grafted = TEXT_SAFETY.graftPartialHtmlFragment(workingCode, text, goal);
+              if (grafted && grafted.content !== workingCode) {
+                candidate = isAuthenticHtml(grafted.content) ? autoRepairHtmlDyckClosure(grafted.content) : grafted.content;
+                ranges = grafted.ranges || [];
+                applied = grafted.graftedCount || 1;
+              }
+            }
+            if (!candidate) {
+              lastReason = 'Model belum menyertakan blok SEARCH/REPLACE yang valid.';
+              feedback = 'Gunakan format <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE dengan menyalin persis baris target dari file.';
               continue;
             }
           } else {
-            const res = this.applyHunks(original, hunks);
+            const res = this.applyHunks(workingCode, hunks);
             applied = hunks.length - res.failed.length;
             skipped = res.failed.length;
-            if (applied === 0 || applied / hunks.length < 0.5) {
-              const firstLines = res.failed.slice(0, 2).map(ix => `"${String(hunks[ix].search).trim().split('\n')[0].slice(0, 80)}"`).join(', ');
-              lastReason = `${skipped} dari ${hunks.length} blok perubahan tidak cocok dengan isi file.`;
-              feedback = `${lastReason} Baris SEARCH yang tidak ditemukan dimulai dengan: ${firstLines}.`;
-              continue;
+
+            // Akumulasi Monotonik: Simpan setiap hunk yang berhasil diterapkan ke workingCode!
+            if (applied > 0 && res.code !== workingCode) {
+              workingCode = res.code;
+              totalApplied += applied;
+              accumulatedRanges.push(...res.ranges);
             }
-            candidate = res.code;
-            ranges = res.ranges;
+
+            if (applied === 0) {
+              // Coba cangkokkan isi REPLACE secara langsung melalui DOM Subtree Grafting sebelum mengulang!
+              if (isHtml && typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.graftPartialHtmlFragment === 'function') {
+                const combinedReplaces = hunks.map(h => '```html\n' + h.replace + '\n```').join('\n');
+                const grafted = TEXT_SAFETY.graftPartialHtmlFragment(workingCode, combinedReplaces, goal);
+                if (grafted && grafted.content !== workingCode) {
+                  workingCode = isAuthenticHtml(grafted.content) ? autoRepairHtmlDyckClosure(grafted.content) : grafted.content;
+                  candidate = workingCode;
+                  ranges = grafted.ranges || [];
+                  applied = grafted.graftedCount || 1;
+                  skipped = 0;
+                }
+              }
+              if (!candidate) {
+                const firstLines = res.failed.slice(0, 2).map(ix => `"${String(hunks[ix].search).trim().split('\n')[0].slice(0, 80)}"`).join(', ');
+                lastReason = `${skipped} dari ${hunks.length} blok perubahan belum cocok dengan baris asli.`;
+                feedback = `${lastReason} Salin baris SEARCH persis dari FILE untuk menggantikan bagian: ${firstLines}.`;
+                continue;
+              }
+            } else {
+              candidate = workingCode;
+              ranges = accumulatedRanges.length ? accumulatedRanges : res.ranges;
+              // Jika masih ada > 50% hunk yang terlewat dan masih ada tahap retry berikutnya, lanjutkan untuk menuntaskan sisanya!
+              if (skipped > applied && i + 1 < plan.length && plan[i + 1] === 'retry') {
+                const missedLines = res.failed.slice(0, 2).map(ix => `"${String(hunks[ix].search).trim().split('\n')[0].slice(0, 80)}"`).join(', ');
+                feedback = `${applied} perubahan sudah berhasil diterapkan ke file. Sekarang terapkan sisa ${skipped} perubahan yang belum cocok (dimulai dari ${missedLines}) dengan menyalin baris SEARCH persis dari FILE terbaru di atas.`;
+                continue;
+              }
+            }
           }
         }
 
@@ -12442,10 +12591,26 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           code: candidate,
           ranges,
           step,
-          applied,
+          applied: totalApplied || applied,
           skipped,
           summary: this.summarize(text, step === 'rewrite' ? 'File ditulis ulang sesuai permintaan.' : 'Perubahan diterapkan.')
         };
+      }
+
+      // Jika sebelum waktu habis ada perubahan parsial di workingCode yang sudah valid, terapkan daripada gagal!
+      if (workingCode !== original) {
+        const finalVerdict = this.evaluate(original, workingCode, isHtml, isFullThemeTransform);
+        if (finalVerdict.ok) {
+          return {
+            ok: true,
+            code: finalVerdict.code || workingCode,
+            ranges: accumulatedRanges,
+            step: 'patch',
+            applied: totalApplied,
+            skipped: 0,
+            summary: 'Perubahan diterapkan secara bertahap.'
+          };
+        }
       }
       return { ok: false, reason: lastReason || 'Tidak ada perubahan yang dapat diterapkan.' };
     },
@@ -12530,10 +12695,22 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         } else if (result.stopped) {
           finalHtml = '<p>⏹ Dihentikan. File tidak diubah.</p>';
         } else {
-          finalHtml = `<p>⚠️ <strong>Perubahan belum berhasil:</strong> ${escapeHtml(result.reason)}</p><p style="opacity:.8;font-size:.85em;">File tidak diubah. Coba kirim ulang, atau tulis permintaan yang lebih spesifik (mis. "ubah warna tombol hero jadi biru").</p>`;
-          showToast('⚠️ Perubahan belum berhasil: ' + String(result.reason).slice(0, 80), 'warning');
+          finalHtml = `<p>⚠️ <strong>Perubahan belum tuntas sepenuhnya:</strong> ${escapeHtml(result.reason)}</p>
+            <div class="surgical-edit-actions" style="margin-top:8px;">
+              <button type="button" class="surgical-edit-btn js-studio-continue-retry"><i class="fa-solid fa-forward-step"></i> Lanjutkan Sampai Selesai</button>
+            </div>`;
+          showToast('⚠️ Proses terhenti sementara: ' + String(result.reason).slice(0, 80), 'warning');
         }
-        if (bubble) bubble.innerHTML = finalHtml;
+        if (bubble) {
+          bubble.innerHTML = finalHtml;
+          const retryBtn = bubble.querySelector('.js-studio-continue-retry');
+          if (retryBtn) {
+            retryBtn.addEventListener('click', () => {
+              if (this.busy) return;
+              this.runFromStudio({ prompt, selInfo, isEditingInCodeMode, forceRewrite: true, kind });
+            });
+          }
+        }
 
         if (Array.isArray(file[historyKey]) === false) file[historyKey] = [];
         file[historyKey].push(
