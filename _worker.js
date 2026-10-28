@@ -682,6 +682,7 @@ export default {
 
     // Universal WhatsApp, AI & Daemon Tunnel Proxy (Edge Bridge)
     const TUNNEL_GATEWAY_URL = 'https://roommate-flashers-flags-briefly.trycloudflare.com';
+    let reqBodyBytes = null;
     if (url.pathname.startsWith('/api/')) {
       const targetUrl = TUNNEL_GATEWAY_URL + url.pathname + url.search;
       const fwdHeaders = new Headers(request.headers);
@@ -697,7 +698,13 @@ export default {
       };
 
       if (request.method !== 'GET' && request.method !== 'HEAD') {
-        fetchInit.body = request.body;
+        try {
+          reqBodyBytes = await request.arrayBuffer();
+        } catch (_) {}
+        if (reqBodyBytes && reqBodyBytes.byteLength > 0) {
+          fetchInit.body = reqBodyBytes;
+          fetchInit.duplex = 'half';
+        }
       }
 
       try {
@@ -795,7 +802,12 @@ export default {
     // Proxy Ollama Chat
     if (url.pathname === '/api/ollama/chat' && request.method === 'POST') {
       try {
-        const body = await request.json();
+        let body = {};
+        if (reqBodyBytes && reqBodyBytes.byteLength > 0) {
+          try { body = JSON.parse(new TextDecoder().decode(reqBodyBytes)); } catch (_) {}
+        } else {
+          body = await request.json().catch(() => ({}));
+        }
         const authHeaderVal = request.headers.get('Authorization') || request.headers.get('authorization') || '';
         const bearerKey = authHeaderVal.startsWith('Bearer ') ? authHeaderVal.slice(7).trim() : authHeaderVal.trim();
         const rawOllamaKey = sanitizeOllamaApiKey(

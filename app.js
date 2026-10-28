@@ -35,9 +35,13 @@
 
   function getUniversalApiUrl(path) {
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
-    const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]');
-    if (isLocal || IS_VERCEL) return cleanPath;
-    return `${VERCEL_BACKEND_GATEWAY}${cleanPath}`;
+    const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
+    const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
+    if (isLocal) return cleanPath;
+    const tunnelBase = (typeof WhatsAppController !== 'undefined' && WhatsAppController.activeTunnelUrl && WhatsAppController.activeTunnelUrl.includes('.trycloudflare.com'))
+      ? WhatsAppController.activeTunnelUrl.replace(/\/+$/, '')
+      : (localStorage.getItem('zoz_last_tunnel_url') || 'https://roommate-flashers-flags-briefly.trycloudflare.com');
+    return (tunnelBase || VERCEL_BACKEND_GATEWAY) + cleanPath;
   }
 
   const extractDomainSafe = (url) => {
@@ -10928,7 +10932,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     messagesPayload.push({ role: 'user', content: promptInstruction });
 
     const effectiveModel = ep.includes('ollama.com') ? resolveOllamaCloudModel(modelName) : modelName;
-    const chatUrl = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+    const chatUrl = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? resolveEndpointUrl(ep, 'api/chat') : getUniversalApiUrl('/api/ollama/chat');
     const res = await fetch(chatUrl, {
       method: 'POST',
       headers,
@@ -11884,7 +11888,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           headers['x-ollama-key'] = cleanKey;
         }
         if (STATE.settings.openRouterKey) headers['x-openrouter-key'] = STATE.settings.openRouterKey;
-        const url = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+        const url = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? resolveEndpointUrl(ep, 'api/chat') : getUniversalApiUrl('/api/ollama/chat');
         const res = await fetch(url, {
           method: 'POST',
           headers,
@@ -22533,7 +22537,7 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
       // Ollama Discovery: Ambil daftar model lewat gateway proxy atau direct endpoint
       if (!IS_GITHUB_PAGES || cleanOllamaKey) {
         try {
-          const gwUrl = '/api/ollama/models?endpoint=' + encodeURIComponent(ep);
+          const gwUrl = getUniversalApiUrl('/api/ollama/models?endpoint=' + encodeURIComponent(ep));
           const gwRes = await fetch(gwUrl, { headers }).catch(() => null);
           if (gwRes && gwRes.ok) {
             const gwData = await gwRes.json();
@@ -26374,7 +26378,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
         chatUrl = resolveEndpointUrl(ep, 'api/chat');
       } else {
-        chatUrl = '/api/ollama/chat';
+        chatUrl = getUniversalApiUrl('/api/ollama/chat');
       }
 
       let response = await fetch(chatUrl, {
@@ -26396,12 +26400,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         });
       }
 
-      // Auto-retry fallback: jika model Ollama Cloud mengembalikan 404 (deprecated/not found) atau 500 (decision model / engine outage), alihkan ke gemma4:31b
-      if (!response.ok && isTargetingOllamaCloud && (response.status === 404 || response.status === 500) && requestBody.model !== 'gemma4:31b') {
-        console.warn(`[Ollama Cloud] Model ${requestBody.model} returned HTTP ${response.status}. Auto-healing to gemma4:31b...`);
-        requestBody.model = 'gemma4:31b';
-        modelName = 'gemma4:31b';
-        STATE.settings.ollamaModel = 'gemma4:31b';
+      // Auto-retry fallback: jika model Ollama Cloud mengembalikan 404 (deprecated/not found) atau 500 (decision model / engine outage)
+      if (!response.ok && isTargetingOllamaCloud && (response.status === 404 || response.status === 500)) {
+        const fallbackCandidates = ['deepseek-v4.1-flash', 'gpt-oss:120b', 'nemotron-3-nano:30b', 'gemma4:31b'];
+        const nextModel = fallbackCandidates.find(m => m !== requestBody.model) || 'deepseek-v4.1-flash';
+        console.warn(`[Ollama Cloud] Model ${requestBody.model} returned HTTP ${response.status}. Auto-healing to ${nextModel}...`);
+        requestBody.model = nextModel;
+        modelName = nextModel;
+        STATE.settings.ollamaModel = nextModel;
         savePersistedState();
         updateModelUI();
         response = await fetch(chatUrl, {
@@ -27318,7 +27324,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
                                     errLower.includes('401') ||
                                     err?.name === 'TypeError';
 
-        const isAutoRouterActive = (STATE.mode === 'auto') || Boolean(runOptions.isAutoRouter);
+        const isAutoRouterActive = (STATE.mode === 'auto') || Boolean(runOptions.isAutoRouter) || !DeviceStorage.isDeviceBackendAvailable || Boolean(STATE.settings.openRouterKey);
         const allowCloudFallback = isAutoRouterActive && (runOptions ? (runOptions.autoCloudFallback !== false) : true);
         if (allowCloudFallback && isNotFoundOrOffline) {
           try { assistantRow.remove(); } catch (_) {}
@@ -36480,7 +36486,7 @@ Aturan:
           }
         } else {
           // Gateway Proxy testing
-          const res = await fetch(`/api/ollama/models?endpoint=${encodeURIComponent(ep)}`, { headers });
+          const res = await fetch(getUniversalApiUrl(`/api/ollama/models?endpoint=${encodeURIComponent(ep)}`), { headers });
           const data = await res.json();
           if (res.ok && data.models && data.models.length > 0) {
             showToast(`✅ Koneksi Ollama sukses! Ditemukan ${data.models.length} model (${data.cloud_auth ? 'Cloud Auth' : 'Local'}).`);
