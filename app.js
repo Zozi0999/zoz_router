@@ -876,18 +876,14 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
           const isVercel = Boolean(location.hostname && location.hostname.endsWith('vercel.app'));
 
-          // Pada domain statis tanpa serverless backend (z21.zozdocs.com, github.io, dll), arahkan ke Tunnel Backend aktif jika tersedia, atau Vercel Gateway
+          // Pada domain publik/statis (z21.zozdocs.com, github.io, pages.dev, dll), arahkan ke Active Cloudflare Tunnel Gateway jika tersedia
           if (!isLocal && !isVercel && typeof url === 'string') {
             if (url.startsWith('/api/')) {
-              // Jika di z21.zozdocs.com, biarkan path relatif '/api/...' agar ditangani langsung oleh Cloudflare Edge Bridge (_worker.js)
-              if (location.hostname && location.hostname.includes('zozdocs.com')) {
-                // Biarkan relatif: _worker.js di z21.zozdocs.com meneruskannya langsung ke Tunnel Gateway lokal
-              } else {
-                // Di github.io atau hosting statis murni lain, gunakan active tunnel URL bila ada, atau fallback Vercel
-                const tunnelBase = (typeof WhatsAppController !== 'undefined' && WhatsAppController.activeTunnelUrl && WhatsAppController.activeTunnelUrl.includes('.trycloudflare.com'))
-                  ? WhatsAppController.activeTunnelUrl.replace(/\/+$/, '')
-                  : (localStorage.getItem('zoz_last_tunnel_url') || 'https://roommate-flashers-flags-briefly.trycloudflare.com');
-                const targetBase = tunnelBase || 'https://zoz-router.vercel.app';
+              const tunnelBase = (typeof WhatsAppController !== 'undefined' && WhatsAppController.activeTunnelUrl && WhatsAppController.activeTunnelUrl.includes('.trycloudflare.com'))
+                ? WhatsAppController.activeTunnelUrl.replace(/\/+$/, '')
+                : (localStorage.getItem('zoz_last_tunnel_url') || 'https://roommate-flashers-flags-briefly.trycloudflare.com');
+              const targetBase = tunnelBase || (location.hostname && location.hostname.includes('zozdocs.com') ? '' : 'https://zoz-router.vercel.app');
+              if (targetBase) {
                 url = targetBase + url;
                 if (typeof input === 'string') {
                   input = url;

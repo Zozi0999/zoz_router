@@ -82,6 +82,11 @@ const OFFICIAL_OLLAMA_CLOUD_MODELS = [
 
 const VALID_OLLAMA_CLOUD_MODELS = new Set(OFFICIAL_OLLAMA_CLOUD_MODELS.map(m => m.model.toLowerCase()));
 
+function sanitizeOllamaApiKey(rawKey) {
+  if (!rawKey || typeof rawKey !== 'string') return '';
+  return rawKey.replace(/^Bearer\s+/i, '').replace(/^["']+|["']+$/g, '').trim();
+}
+
 function isUnsupportedOllamaChatModel(m) {
   if (!m) return true;
   const id = String(m.name || m.model || m.id || '').toLowerCase().trim();
@@ -92,11 +97,25 @@ function isUnsupportedOllamaChatModel(m) {
   return false;
 }
 
+// Resolusi ke nama model resmi di https://ollama.com (TANPA akhiran :cloud / -cloud lokal)
 function resolveOllamaCloudModel(modelId) {
-  if (!modelId || typeof modelId !== 'string') return 'gemma4:31b';
+  if (!modelId || typeof modelId !== 'string') return 'deepseek-v4.1-flash';
   const raw = modelId.trim();
   const id = raw.toLowerCase();
+  if (id === 'deepseek-v4.1-flash:1017') return 'deepseek-v4.1-flash:1017';
+  if (id === 'deepseek-v4.1-flash' || id === 'deepseek-v4.1-flash:cloud' || id === 'deepseek-v4-flash' || id === 'deepseek-v4-flash:cloud') return 'deepseek-v4.1-flash';
+  if (id === 'deepseek-v4-pro:0813' || id === 'deepseek-v4-pro' || id === 'deepseek-v4-pro:cloud') return 'deepseek-v4-pro:0813';
+  if (id === 'kimi-k2.6' || id === 'kimi-k2.6:cloud') return 'kimi-k2.6';
+  if (id === 'glm-5.3-flash' || id === 'glm-5.3-flash:cloud') return 'glm-5.3-flash';
+  if (id === 'nemotron-3-nano:30b' || id === 'nemotron-3-nano:30b-cloud') return 'nemotron-3-nano:30b';
+  if (id === 'nemotron-3-ultra' || id === 'nemotron-3-ultra:cloud') return 'nemotron-3-ultra';
+  if (id === 'nemotron-3-super' || id === 'nemotron-3-super:cloud') return 'nemotron-3-super';
+  if (id === 'mistral-large-3:675b' || id === 'mistral-large-3:675b-cloud') return 'mistral-large-3:675b';
+  if (id === 'minimax-m2.7' || id === 'minimax-m2.7:cloud') return 'minimax-m2.7';
+  if (id === 'gpt-oss:120b' || id === 'gpt-oss:120b-cloud') return 'gpt-oss:120b';
   if (VALID_OLLAMA_CLOUD_MODELS.has(id)) return raw;
+  const stripped = raw.replace(/(?::cloud|-cloud)$/i, '');
+  if (VALID_OLLAMA_CLOUD_MODELS.has(stripped.toLowerCase())) return stripped;
   if (id === 'gemma4:31b-cloud' || id.startsWith('gemma')) return 'gemma4:31b';
   if (id.startsWith('clef')) return 'gemma4:31b';
   if (id.includes('coder') || id.includes('code')) return 'kimi-k2.7-code';
@@ -779,13 +798,13 @@ export default {
         const body = await request.json();
         const authHeaderVal = request.headers.get('Authorization') || request.headers.get('authorization') || '';
         const bearerKey = authHeaderVal.startsWith('Bearer ') ? authHeaderVal.slice(7).trim() : authHeaderVal.trim();
-        const rawOllamaKey = (
-          (body.ollamaApiKey && !String(body.ollamaApiKey).startsWith('sk-or-')) ? String(body.ollamaApiKey).replace(/^Bearer\s+/i, '').trim() :
-          (request.headers.get('x-ollama-key') && !String(request.headers.get('x-ollama-key')).startsWith('sk-or-') ? String(request.headers.get('x-ollama-key')).replace(/^Bearer\s+/i, '').trim() :
-          (request.headers.get('x-api-key') && !String(request.headers.get('x-api-key')).startsWith('sk-or-') ? String(request.headers.get('x-api-key')).replace(/^Bearer\s+/i, '').trim() :
-          ((body.apiKey && !String(body.apiKey).startsWith('sk-or-')) ? String(body.apiKey).replace(/^Bearer\s+/i, '').trim() :
+        const rawOllamaKey = sanitizeOllamaApiKey(
+          (body.ollamaApiKey && !String(body.ollamaApiKey).startsWith('sk-or-')) ? String(body.ollamaApiKey) :
+          (request.headers.get('x-ollama-key') && !String(request.headers.get('x-ollama-key')).startsWith('sk-or-') ? String(request.headers.get('x-ollama-key')) :
+          (request.headers.get('x-api-key') && !String(request.headers.get('x-api-key')).startsWith('sk-or-') ? String(request.headers.get('x-api-key')) :
+          ((body.apiKey && !String(body.apiKey).startsWith('sk-or-')) ? String(body.apiKey) :
           (bearerKey && !bearerKey.startsWith('sk-or-') ? bearerKey : null))))
-        ) || (envKeyAllowed(request, env) ? env?.OLLAMA_API_KEY : null);
+        ) || (envKeyAllowed(request, env) ? sanitizeOllamaApiKey(env?.OLLAMA_API_KEY) : null);
 
         const targetEndpoint = body.endpoint || 'https://ollama.com';
         let cleanEndpoint = (targetEndpoint || 'https://ollama.com').trim();
