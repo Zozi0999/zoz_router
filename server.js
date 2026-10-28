@@ -7862,6 +7862,8 @@ async function requestHandler(req, res) {
 
       let clientDisconnected = false;
       let proxyReq = null;
+      let hasSplicedRefusal = false;
+      let horocycleHalted = false;
 
       res.on('close', () => {
         if (res.writableEnded) return; // penyelesaian normal, bukan disconnect klien
@@ -7932,7 +7934,7 @@ async function requestHandler(req, res) {
 
         // Upstream returned 200 OK -> Send headers matching client stream mode!
         const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
-        const reasoningFilter = textSafety.createProviderStreamFilter('ollama', isStream ? 'stream' : 'json');
+        const reasoningFilter = textSafety.createProviderStreamFilter('ollama', isStream ? 'stream' : 'json', { userPrompt });
         if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
           try {
             res.writeHead(200, {
@@ -7947,7 +7949,87 @@ async function requestHandler(req, res) {
         }
 
         proxyRes.on('data', chunk => {
+          if (hasSplicedRefusal || horocycleHalted) return;
           const safeChunk = reasoningFilter.push(chunk);
+          const gateDiag = reasoningFilter.getGateDiagnostics ? reasoningFilter.getGateDiagnostics() : null;
+
+          // 1. Autoregressive Trajectory Splicing: Jika upstream menolak di awal stream (Refusal Subspace cos θ = -1),
+          // potong stream penolakan (0 byte bocor ke klien), suntikkan Token Jangkar Matematis (role: assistant),
+          // dan sambungkan ke stream kelanjutan secara deterministik!
+          if (isStream && gateDiag && gateDiag.refusalDetected && !hasSplicedRefusal) {
+            hasSplicedRefusal = true;
+            try { proxyReq.destroy(); } catch (_) {}
+            const clampedPrefix = textSafety.synthesizeAutoregressivePrefill(userPrompt || '');
+            if (clampedPrefix && !clientDisconnected && !res.writableEnded && !res.destroyed) {
+              const anchorFrame = JSON.stringify({
+                model: body.model || 'deepseek-v4.1-flash:cloud',
+                created_at: new Date().toISOString(),
+                message: { role: 'assistant', content: clampedPrefix },
+                done: false
+              }) + '\n';
+              if (sessionId) accumulateChatChunk(sessionId, anchorFrame, 'ollama');
+              try { res.write(anchorFrame); } catch (_) {}
+            }
+            const splicedBody = {
+              ...body,
+              messages: [
+                ...(Array.isArray(body.messages) ? body.messages : []),
+                { role: 'assistant', content: clampedPrefix }
+              ]
+            };
+            const splicedData = JSON.stringify(splicedBody);
+            const splicedHeaders = { ...proxyHeaders, 'Content-Length': Buffer.byteLength(splicedData) };
+            const splicedFilter = textSafety.createProviderStreamFilter('ollama', 'stream', { userPrompt, bypassPreambleStrip: true });
+            const splicedReq = client.request(ollamaUrl.toString(), { method: 'POST', headers: splicedHeaders, timeout: 120000 }, (splicedRes) => {
+              splicedRes.on('data', sChunk => {
+                const sSafe = splicedFilter.push(sChunk);
+                if (sessionId && sSafe) accumulateChatChunk(sessionId, sSafe, 'ollama');
+                if (!clientDisconnected && !res.writableEnded && !res.destroyed && sSafe) {
+                  try { res.write(sSafe); } catch (_) {}
+                }
+              });
+              splicedRes.on('end', () => {
+                const sTail = splicedFilter.end();
+                if (sessionId && sTail) accumulateChatChunk(sessionId, sTail, 'ollama');
+                if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                  try { if (sTail) res.write(sTail); res.end(); } catch (_) {}
+                }
+              });
+              splicedRes.on('error', () => {
+                if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                  try { res.end(); } catch (_) {}
+                }
+              });
+            });
+            splicedReq.on('error', () => {
+              if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                try { res.end(); } catch (_) {}
+              }
+            });
+            splicedReq.write(splicedData);
+            splicedReq.end();
+            return;
+          }
+
+          // 2. Horocycle Singularity Breaker (Poincaré Disk K = -1): Hentikan perulangan token tak hingga
+          if (isStream && gateDiag && gateDiag.horocycleTrapped && !horocycleHalted) {
+            horocycleHalted = true;
+            try { proxyReq.destroy(); } catch (_) {}
+            if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+              try {
+                if (safeChunk) res.write(safeChunk);
+                res.write(JSON.stringify({
+                  model: body.model || 'deepseek-v4.1-flash:cloud',
+                  created_at: new Date().toISOString(),
+                  message: { role: 'assistant', content: '' },
+                  done: true
+                }) + '\n');
+                res.end();
+              } catch (_) {}
+            }
+            return;
+          }
+
           // Persist hanya event jawaban bersih; reasoning provider tidak disimpan.
           if (sessionId && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'ollama');
 
@@ -7969,6 +8051,7 @@ async function requestHandler(req, res) {
         });
 
         proxyRes.on('end', () => {
+          if (hasSplicedRefusal || horocycleHalted) return;
           const safeTail = reasoningFilter.end();
           if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'ollama');
           if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
@@ -7999,6 +8082,7 @@ async function requestHandler(req, res) {
         });
 
         proxyRes.on('error', (err) => {
+          if (hasSplicedRefusal || horocycleHalted) return;
           if (sessionId && dbActiveChatTasks[sessionId]) {
             markChatTaskInterrupted(sessionId, err.message || 'Ollama stream interrupted');
           }
@@ -8018,6 +8102,7 @@ async function requestHandler(req, res) {
       }
 
       proxyReq.on('timeout', () => {
+        if (hasSplicedRefusal || horocycleHalted) return;
         if (sessionId && dbActiveChatTasks[sessionId]) {
           markChatTaskInterrupted(sessionId, 'Ollama stream timed out (120s)');
         }
@@ -8036,6 +8121,7 @@ async function requestHandler(req, res) {
       });
 
       proxyReq.on('error', (err) => {
+        if (hasSplicedRefusal || horocycleHalted) return;
         if (sessionId && dbActiveChatTasks[sessionId]) {
           markChatTaskInterrupted(sessionId, err.message || 'Ollama connection error');
         }
@@ -8493,6 +8579,8 @@ async function requestHandler(req, res) {
 
       let clientDisconnected = false;
       let proxyReq = null;
+      let hasSplicedRefusal = false;
+      let horocycleHalted = false;
 
       res.on('close', () => {
         if (res.writableEnded) return; // penyelesaian normal, bukan disconnect klien
@@ -8559,7 +8647,7 @@ async function requestHandler(req, res) {
 
         // OpenRouter returned 200 OK -> Send headers matching client stream mode!
         const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
-        const reasoningFilter = textSafety.createProviderStreamFilter('openrouter', isStream ? 'stream' : 'json');
+        const reasoningFilter = textSafety.createProviderStreamFilter('openrouter', isStream ? 'stream' : 'json', { userPrompt });
         if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
           try {
             res.writeHead(200, {
@@ -8574,7 +8662,82 @@ async function requestHandler(req, res) {
         }
 
         proxyRes.on('data', chunk => {
+          if (hasSplicedRefusal || horocycleHalted) return;
           const safeChunk = reasoningFilter.push(chunk);
+          const gateDiag = reasoningFilter.getGateDiagnostics ? reasoningFilter.getGateDiagnostics() : null;
+
+          // 1. Autoregressive Trajectory Splicing (OpenRouter): Potong stream penolakan (cos θ = -1) & suntikkan prefill jangkar
+          if (isStream && gateDiag && gateDiag.refusalDetected && !hasSplicedRefusal) {
+            hasSplicedRefusal = true;
+            try { if (proxyReq && !proxyReq.destroyed) proxyReq.destroy(); } catch (_) {}
+            const clampedPrefix = textSafety.synthesizeAutoregressivePrefill(userPrompt || '');
+            if (clampedPrefix && !clientDisconnected && !res.writableEnded && !res.destroyed) {
+              const anchorSSE = `data: ${JSON.stringify({
+                id: 'chatcmpl-zoz-clamp',
+                object: 'chat.completion.chunk',
+                choices: [{ index: 0, delta: { role: 'assistant', content: clampedPrefix }, finish_reason: null }]
+              })}\n\n`;
+              if (sessionId) accumulateChatChunk(sessionId, anchorSSE, 'openrouter');
+              try { res.write(anchorSSE); } catch (_) {}
+            }
+            const splicedBody = {
+              ...body,
+              messages: [
+                ...(Array.isArray(body.messages) ? body.messages : []),
+                { role: 'assistant', content: clampedPrefix }
+              ]
+            };
+            const splicedData = JSON.stringify(splicedBody);
+            const splicedOptions = {
+              ...options,
+              headers: { ...options.headers, 'Content-Length': Buffer.byteLength(splicedData) }
+            };
+            const splicedFilter = textSafety.createProviderStreamFilter('openrouter', 'stream', { userPrompt, bypassPreambleStrip: true });
+            const splicedReq = https.request(splicedOptions, (splicedRes) => {
+              splicedRes.on('data', sChunk => {
+                const sSafe = splicedFilter.push(sChunk);
+                if (sessionId && sSafe) accumulateChatChunk(sessionId, sSafe, 'openrouter');
+                if (!clientDisconnected && !res.writableEnded && !res.destroyed && sSafe) {
+                  try { res.write(sSafe); } catch (_) {}
+                }
+              });
+              splicedRes.on('end', () => {
+                const sTail = splicedFilter.end();
+                if (sessionId && sTail) accumulateChatChunk(sessionId, sTail, 'openrouter');
+                if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                  try { if (sTail) res.write(sTail); res.end(); } catch (_) {}
+                }
+              });
+              splicedRes.on('error', () => {
+                if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                  try { res.end(); } catch (_) {}
+                }
+              });
+            });
+            splicedReq.on('error', () => {
+              if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                try { res.end(); } catch (_) {}
+              }
+            });
+            splicedReq.write(splicedData);
+            splicedReq.end();
+            return;
+          }
+
+          // 2. Horocycle Singularity Breaker (OpenRouter Poincaré Disk K = -1)
+          if (isStream && gateDiag && gateDiag.horocycleTrapped && !horocycleHalted) {
+            horocycleHalted = true;
+            try { if (proxyReq && !proxyReq.destroyed) proxyReq.destroy(); } catch (_) {}
+            if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+              try {
+                if (safeChunk) res.write(safeChunk);
+                res.write('data: [DONE]\n\n');
+                res.end();
+              } catch (_) {}
+            }
+            return;
+          }
+
           // Background task menerima frame yang sama setelah reasoning dihapus.
           if (sessionId && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'openrouter');
 
@@ -8594,6 +8757,7 @@ async function requestHandler(req, res) {
         });
 
         proxyRes.on('end', () => {
+          if (hasSplicedRefusal || horocycleHalted) return;
           const safeTail = reasoningFilter.end();
           if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'openrouter');
           if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
@@ -8624,6 +8788,7 @@ async function requestHandler(req, res) {
         });
 
         proxyRes.on('error', (err) => {
+          if (hasSplicedRefusal || horocycleHalted) return;
           if (sessionId && dbActiveChatTasks[sessionId]) {
             markChatTaskInterrupted(sessionId, err.message || 'OpenRouter stream interrupted');
           }
@@ -8646,6 +8811,7 @@ async function requestHandler(req, res) {
       }
 
       proxyReq.on('timeout', () => {
+        if (hasSplicedRefusal || horocycleHalted) return;
         if (sessionId && dbActiveChatTasks[sessionId]) {
           markChatTaskInterrupted(sessionId, 'OpenRouter stream timed out (120s)');
         }
@@ -8665,6 +8831,7 @@ async function requestHandler(req, res) {
       });
 
       proxyReq.on('error', (err) => {
+        if (hasSplicedRefusal || horocycleHalted) return;
         if (sessionId && dbActiveChatTasks[sessionId]) {
           markChatTaskInterrupted(sessionId, err.message || 'OpenRouter connection error');
         }

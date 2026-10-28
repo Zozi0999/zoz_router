@@ -9446,6 +9446,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       this.lastRenderTime = 0;
       this.isDone = false;
       this.isLoopTerminated = false;
+      this.transportGate = (typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.createEntropyStreamGate === 'function')
+        ? TEXT_SAFETY.createEntropyStreamGate(this.options.userPrompt || '', this.options)
+        : null;
     }
 
     setPrefixHtml(prefix) {
@@ -9505,9 +9508,22 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     append(delta) {
       if (delta === null || delta === undefined) return;
       if (this.isLoopTerminated || this.isDone) return;
-      const str = String(delta);
+      let str = String(delta);
       if (!str) return;
       this.isThinking = false;
+
+      if (this.transportGate) {
+        const gated = this.transportGate.push(str, false);
+        const diag = this.transportGate.getDiagnostics ? this.transportGate.getDiagnostics() : null;
+        if (diag && diag.horocycleTrapped) {
+          this.isLoopTerminated = true;
+          this.scheduleRender();
+          return;
+        }
+        str = gated;
+        if (!str) return;
+      }
+
       this.text += str;
 
       if (this.detectRepetitionLoop()) {
@@ -9586,6 +9602,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         clearTimeout(this.renderTimer);
         this.renderTimer = null;
       }
+      if (this.transportGate) {
+        const tail = this.transportGate.flush();
+        if (tail) this.text += tail;
+      }
       // Bersihkan segala tag pemikiran internal — pengguna HANYA menerima output jawaban murni
       this.text = safeAssistantText(this.text || '');
       if (this.text && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.sanitizeModelText === 'function') {
@@ -9651,6 +9671,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     }
 
     getFullText() {
+      if (this.transportGate && !this.isDone) {
+        const tail = this.transportGate.flush();
+        if (tail) this.text += tail;
+      }
       return this.text;
     }
   }
@@ -26171,7 +26195,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       let buffer = '';
       let doneReason = null;
       const accumulatedToolCalls = [];
-      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, runOptions);
+      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, { ...runOptions, userPrompt: promptText });
 
       let deadAirTimer = null;
       const resetDeadAirWatchdog = () => {
@@ -27531,7 +27555,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const collectedImages = [];
       const accumulatedToolCalls = [];
       const selectedAutonomousTools = getSelectableAutonomousTools(canRunAutonomous);
-      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, runOptions);
+      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, { ...runOptions, userPrompt: promptText });
 
       for (let i = 0; i < candidateModels.length; i++) {
         if (STATE.abortController?.signal?.aborted) break;
