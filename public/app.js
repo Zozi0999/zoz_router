@@ -43373,8 +43373,6 @@ Aturan:
           <span class="wa-chat-header-phone">(${escapeHtml(headerPhone)})</span>
           ${this.activeContact?.hasFile ? '<span class="wa-active-contact-file-tag">🔴 Ada Berkas</span>' : ''}
         </div>
-      `;
-      els.messagesList.appendChild(headerBar);
         <div class="wa-chat-header-actions">
           <button type="button" id="btnActionClearWaHistory" title="Bersihkan riwayat pesan kontak ini">
             <i class="fa-solid fa-trash-can"></i>
