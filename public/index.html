@@ -35,7 +35,7 @@
       }
     });
     try {
-      var currentVer = 'v20261028_v543';
+      var currentVer = 'v20261028_v544';
       var savedVer = localStorage.getItem('__zoz_ver__');
       if (savedVer !== currentVer) {
         localStorage.setItem('__zoz_ver__', currentVer);
@@ -46,7 +46,7 @@
         }
       }
     } catch (_) {}
-    window.__ZOZ_VERSION__ = 'v20261028_v543';
+    window.__ZOZ_VERSION__ = 'v20261028_v544';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -1703,7 +1703,7 @@
             <textarea
               id="inputStudioFollowup"
               class="studio-prompt-textarea"
-              aria-label="Ketik instruksi atau pertanyaan untuk website ini"
+              aria-label="Ketik instruksi atau pertanyaan untuk berkas ini"
               placeholder=""
               rows="1"
             ></textarea>
@@ -2272,56 +2272,6 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" data-close="taskCreateModal">Batal</button>
         <button class="btn btn-primary" id="btnSaveManualTask"><i class="fa-solid fa-plus"></i> Tambah Tugas</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- MODAL: Pemilihan Format Output Pembuatan Website (Dinonaktifkan) -->
-  <div class="modal-backdrop" id="websiteModeModal" style="display: none !important;">
-    <div class="modal-card" style="max-width: 520px;">
-      <div class="modal-header">
-        <div class="modal-title">
-          <i class="fa-solid fa-globe" style="color: var(--neon-cyan);"></i> Format Output Website
-        </div>
-        <button class="modal-close-btn" data-close="websiteModeModal" id="btnCloseWebsiteModeModal" aria-label="Tutup form" title="Tutup form"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-      <div class="modal-body" style="padding: 16px 20px;">
-        <p style="margin: 0 0 16px 0; font-size: 0.88rem; color: var(--text-muted); line-height: 1.5;">
-          Tentukan bagaimana Anda ingin menerima hasil pembuatan website dari AI:
-        </p>
-
-        <div class="website-mode-options" style="display: flex; flex-direction: column; gap: 12px;">
-          <!-- Opsi 1: File Siap Pratinjau (Default & Recommended) -->
-          <div class="website-mode-card" id="optWebsiteModePreview" style="cursor: pointer; border: 1.5px solid var(--neon-cyan); background: rgba(56, 189, 248, 0.08); border-radius: 10px; padding: 14px 16px; transition: all 0.2s ease;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-              <div style="display: flex; align-items: center; gap: 10px; font-weight: 700; color: #FFF; font-size: 0.95rem;">
-                <i class="fa-solid fa-eye" style="color: var(--neon-cyan); font-size: 1.1rem;"></i>
-                <span>Langsung File Siap Pratinjau</span>
-              </div>
-              <span style="background: rgba(56, 189, 248, 0.2); color: var(--neon-cyan); font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 12px; border: 1px solid rgba(56, 189, 248, 0.4);">Rekomendasi</span>
-            </div>
-            <p style="margin: 0; font-size: 0.82rem; color: var(--text-dim); line-height: 1.45;">
-              Kode dikemas rapi menjadi berkas aplikasi interaktif di AI File Studio dan langsung bisa dibuka di Pratinjau Live tanpa memenuhi gelembung obrolan chat.
-            </p>
-          </div>
-
-          <!-- Opsi 2: Tampilkan Kode di Percakapan -->
-          <div class="website-mode-card" id="optWebsiteModeCode" style="cursor: pointer; border: 1.5px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.03); border-radius: 10px; padding: 14px 16px; transition: all 0.2s ease;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-              <div style="display: flex; align-items: center; gap: 10px; font-weight: 700; color: #FFF; font-size: 0.95rem;">
-                <i class="fa-solid fa-code" style="color: var(--neon-purple); font-size: 1.1rem;"></i>
-                <span>Tampilkan Kode di Percakapan</span>
-              </div>
-              <span style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 12px; border: 1px solid rgba(168, 85, 247, 0.3);">Kode Lengkap</span>
-            </div>
-            <p style="margin: 0; font-size: 0.82rem; color: var(--text-dim); line-height: 1.45;">
-              Seluruh baris kode HTML, CSS, dan JavaScript ditampilkan langsung di dalam gelembung obrolan untuk dibaca, dipelajari, dan disalin manual.
-            </p>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px;">
-        <button class="btn btn-secondary" id="btnCancelWebsiteMode" data-close="websiteModeModal">Batal</button>
       </div>
     </div>
   </div>

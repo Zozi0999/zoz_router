@@ -45,12 +45,14 @@ class WhatsAppGateway {
       this.authDir = path.join(this.baseDir, 'wa-auth');
       this.contactsFile = path.join(this.baseDir, 'wa-contacts.json');
       this.messagesFile = path.join(this.baseDir, 'wa-messages.json');
+      this.rawMediaFile = path.join(this.baseDir, 'wa-raw-media.json');
       this.configFile = path.join(this.baseDir, 'wa-master-config.json');
     } else {
       this.baseDir = path.join(__dirname, 'data', 'wa-users', sanitizeUserId(userId));
       this.authDir = path.join(this.baseDir, 'auth');
       this.contactsFile = path.join(this.baseDir, 'contacts.json');
       this.messagesFile = path.join(this.baseDir, 'messages.json');
+      this.rawMediaFile = path.join(this.baseDir, 'raw-media.json');
       this.configFile = path.join(this.baseDir, 'config.json');
     }
 
@@ -148,6 +150,18 @@ class WhatsAppGateway {
     return null;
   }
 
+  saveRawMediaData() {
+    try {
+      if (!this.rawMediaFile) return;
+      const obj = {};
+      const entries = Array.from(this.rawMessages.entries()).slice(-300);
+      for (const [id, msg] of entries) {
+        obj[id] = msg;
+      }
+      fs.writeFileSync(this.rawMediaFile, JSON.stringify(obj), 'utf8');
+    } catch (_) {}
+  }
+
   async downloadAndSaveMedia(msg, messageItem) {
     if (!msg || !msg.message) return null;
     const isMedia = Boolean(msg.message.imageMessage || msg.message.documentMessage || msg.message.videoMessage || msg.message.audioMessage || msg.message.stickerMessage);
@@ -160,13 +174,13 @@ class WhatsAppGateway {
         {},
         {
           logger: pino({ level: 'silent' }),
-          reuploadRequest: this.sock ? this.sock.updateMediaMessage : undefined
+          reuploadRequest: this.sock ? ((m) => this.sock.updateMediaMessage(m)) : undefined
         }
       );
 
       if (buffer && buffer.length > 0) {
-        const id = messageItem.id || `media_${Date.now()}`;
-        const rawFileName = messageItem.media?.fileName || (msg.message.imageMessage ? 'photo.jpg' : 'file.bin');
+        const id = messageItem?.id || msg.key?.id || `media_${Date.now()}`;
+        const rawFileName = messageItem?.media?.fileName || msg.message?.documentMessage?.fileName || (msg.message.imageMessage ? 'photo.jpg' : 'file.bin');
         const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
         const savedFilename = `wa_${id}_${cleanFileName}`;
 
@@ -188,6 +202,30 @@ class WhatsAppGateway {
       console.warn(`[WA-Gateway] Gagal mengunduh media pesan ${messageItem?.id}:`, downloadErr.message);
     }
     return null;
+  }
+
+  async requestMediaResend(jid, msgId) {
+    if (!this.sock || !this.status.connected || !msgId) return false;
+    try {
+      const key = {
+        remoteJid: jid,
+        id: msgId,
+        fromMe: false
+      };
+      if (typeof this.sock.requestPlaceholderResend === 'function') {
+        await this.sock.requestPlaceholderResend(key).catch(() => {});
+      }
+      if (typeof this.sock.fetchMessageHistory === 'function') {
+        const list = this.messages.get(jid) || [];
+        const msg = list.find(m => m.id === msgId);
+        const ts = msg?.timestamp || Date.now();
+        await this.sock.fetchMessageHistory(15, key, ts).catch(() => {});
+      }
+      return true;
+    } catch (err) {
+      console.warn(`[WA-Gateway] Gagal request media resend untuk ${msgId}:`, err.message);
+      return false;
+    }
   }
 
   recordDevice(req) {
@@ -468,6 +506,19 @@ class WhatsAppGateway {
       }
     } catch (e) {
       console.warn('[WA-Gateway] Gagal memuat wa-messages.json:', e.message);
+    }
+
+    try {
+      if (this.rawMediaFile && fs.existsSync(this.rawMediaFile)) {
+        const rawMap = JSON.parse(fs.readFileSync(this.rawMediaFile, 'utf8'));
+        if (rawMap && typeof rawMap === 'object') {
+          for (const [mid, rmsg] of Object.entries(rawMap)) {
+            this.rawMessages.set(mid, rmsg);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[WA-Gateway] Gagal memuat wa-raw-media.json:', e.message);
     }
   }
 
@@ -836,7 +887,8 @@ class WhatsAppGateway {
               this.messages.set(jid, []);
             }
             const list = this.messages.get(jid);
-            if (!list.some(m => m.id === id)) {
+            const existing = list.find(m => m.id === id);
+            if (!existing) {
               const item = {
                 id,
                 fromMe,
@@ -849,6 +901,21 @@ class WhatsAppGateway {
               list.push(item);
               if (media) {
                 this.rawMessages.set(id, msg);
+                this.saveRawMediaData();
+                this.downloadAndSaveMedia(msg, item).then(url => {
+                  if (url) this.broadcast('media_ready', { jid, msgId: id, media: item.media });
+                }).catch(() => {});
+              }
+            } else {
+              if (media) {
+                this.rawMessages.set(id, msg);
+                this.saveRawMediaData();
+                if (!existing.media || !existing.media.url) {
+                  existing.media = { ...(existing.media || {}), ...media };
+                  this.downloadAndSaveMedia(msg, existing).then(url => {
+                    if (url) this.broadcast('media_ready', { jid, msgId: id, media: existing.media });
+                  }).catch(() => {});
+                }
               }
             }
 
@@ -964,6 +1031,7 @@ class WhatsAppGateway {
 
           if (media) {
             this.rawMessages.set(id, msg);
+            this.saveRawMediaData();
             this.downloadAndSaveMedia(msg, messageItem).then(url => {
               if (url) {
                 this.broadcast('media_ready', { jid, msgId: id, media: messageItem.media });
@@ -984,6 +1052,16 @@ class WhatsAppGateway {
             // Sudah tercatat via sendMessage() REST API, update ID resmi & lewati agar tidak membroadcast ulang
             list[existingIndex].id = id;
             list[existingIndex].status = 'sent';
+            if (media) {
+              this.rawMessages.set(id, msg);
+              this.saveRawMediaData();
+              if (!list[existingIndex].media || !list[existingIndex].media.url) {
+                list[existingIndex].media = { ...(list[existingIndex].media || {}), ...media };
+                this.downloadAndSaveMedia(msg, list[existingIndex]).then(url => {
+                  if (url) this.broadcast('media_ready', { jid, msgId: id, media: list[existingIndex].media });
+                }).catch(() => {});
+              }
+            }
             continue;
           }
 

@@ -5947,6 +5947,7 @@ async function requestHandler(req, res) {
       return sendJSON(res, tenant.status || 403, { success: false, error: tenant.error });
     }
     const msgId = reqUrl.searchParams.get('msgId');
+    const jid = reqUrl.searchParams.get('jid') || '';
     const rawFileName = reqUrl.searchParams.get('fileName') || 'file.bin';
     if (!msgId) {
       return sendJSON(res, 400, { success: false, error: 'Parameter msgId wajib diisi.' });
@@ -5960,8 +5961,18 @@ async function requestHandler(req, res) {
       return sendJSON(res, 200, { success: true, url: `/uploads/${savedFilename}`, ready: true });
     }
 
-    // Coba unduh on-demand jika raw message ada di cache gateway
-    const rawMsg = tenant.gateway.rawMessages?.get(msgId);
+    // 1. Coba unduh on-demand jika raw message ada di memory atau wa-raw-media.json
+    let rawMsg = tenant.gateway.rawMessages?.get(msgId);
+    if (!rawMsg && tenant.gateway.rawMediaFile && fs.existsSync(tenant.gateway.rawMediaFile)) {
+      try {
+        const rawMap = JSON.parse(fs.readFileSync(tenant.gateway.rawMediaFile, 'utf8'));
+        if (rawMap[msgId]) {
+          rawMsg = rawMap[msgId];
+          tenant.gateway.rawMessages?.set(msgId, rawMsg);
+        }
+      } catch (_) {}
+    }
+
     if (rawMsg) {
       try {
         const url = await tenant.gateway.downloadAndSaveMedia(rawMsg, { id: msgId, media: { fileName: cleanFileName } });
@@ -5973,7 +5984,30 @@ async function requestHandler(req, res) {
       }
     }
 
-    return sendJSON(res, 404, { success: false, error: 'Media belum tersedia atau sesi sudah kadaluarsa.' });
+    // 2. Jika belum ada di disk/rawMessages dan jid ada, minta unduh ulang dari ponsel WhatsApp
+    if (jid && tenant.gateway.status && tenant.gateway.status.connected && typeof tenant.gateway.requestMediaResend === 'function') {
+      try {
+        await tenant.gateway.requestMediaResend(jid, msgId);
+        // Tunggu hingga 3 detik untuk respon stream dari HP
+        let waited = 0;
+        while (waited < 3000) {
+          await new Promise(r => setTimeout(r, 250));
+          waited += 250;
+          if (fs.existsSync(filePath)) {
+            return sendJSON(res, 200, { success: true, url: `/uploads/${savedFilename}`, ready: true });
+          }
+          if (!rawMsg && tenant.gateway.rawMessages?.has(msgId)) {
+            rawMsg = tenant.gateway.rawMessages.get(msgId);
+            const url = await tenant.gateway.downloadAndSaveMedia(rawMsg, { id: msgId, media: { fileName: cleanFileName } });
+            if (url) return sendJSON(res, 200, { success: true, url, ready: true });
+          }
+        }
+      } catch (resendErr) {
+        console.warn('Error during WA media resend request:', resendErr.message);
+      }
+    }
+
+    return sendJSON(res, 404, { success: false, error: 'Media sedang disinkronkan dari ponsel atau sesi sudah kadaluarsa.' });
   }
 
   if (pathname === '/api/wa/send' && method === 'POST') {

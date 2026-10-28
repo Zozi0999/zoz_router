@@ -1360,13 +1360,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     inputTaskSubject: $('#inputTaskSubject'),
     btnSaveManualTask: $('#btnSaveManualTask'),
 
-    // Website Creation Mode Modal
-    websiteModeModal: $('#websiteModeModal'),
-    btnCloseWebsiteModeModal: $('#btnCloseWebsiteModeModal'),
-    optWebsiteModePreview: $('#optWebsiteModePreview'),
-    optWebsiteModeCode: $('#optWebsiteModeCode'),
-    btnCancelWebsiteMode: $('#btnCancelWebsiteMode'),
-
     // Document Creation Mode Modal (PDF vs Word .DOCX)
     docModeModal: $('#docModeModal'),
     btnCloseDocModeModal: $('#btnCloseDocModeModal'),
@@ -10716,8 +10709,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
         if (!finalDisplayContent || finalDisplayContent.length < 25 || /^[\s\n\r]*[{}();,<>/]+[\s\n\r]*$/.test(finalDisplayContent)) {
           finalDisplayContent = isStillIncomplete
-            ? `⚠️ **Pembuatan Website Belum Tuntas (Terpotong di Tengah Jalan)**\n\nKode antarmuka website telah diamankan di kartu pratinjau di bawah. Klik tombol **Lanjutkan Sekarang** untuk menuntaskan sisa komponen.`
-            : `🌐 **Website Telah Selesai Dirancang!**\n\nKode antarmuka website telah berhasil dibuat dan diisolasi dengan aman di pratinjau live. Klik tombol **Pratinjau** pada kartu di bawah untuk membuka dan menguji websitenya secara langsung.`;
+            ? `⚠️ **Generasi Terputus**\n\nSebagian kode telah diamankan di kartu di bawah. Klik tombol **Lanjutkan Sekarang** untuk menyelesaikan sisa kode.`
+            : `💻 **Generasi Selesai**\n\nKode telah berhasil dibuat dan diamankan di kartu di bawah. Klik tombol **Pratinjau** pada kartu untuk membukanya.`;
         }
 
         if (bubbleText) {
@@ -10746,8 +10739,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
         if (!finalDisplayContent || finalDisplayContent.length < 25 || /^[\s\n\r]*[{}();,<>/]+[\s\n\r]*$/.test(finalDisplayContent)) {
           finalDisplayContent = isStillIncomplete
-            ? `⚠️ **Pembuatan Website Belum Tuntas (Terpotong di Tengah Jalan)**\n\nKode antarmuka website telah diamankan di kartu pratinjau di bawah. Klik tombol **Lanjutkan Sekarang** untuk menuntaskan sisa komponen.`
-            : `🌐 **Website Telah Selesai Dirancang!**\n\nKode antarmuka website telah berhasil dibuat dan diisolasi dengan aman di pratinjau live. Klik tombol **Pratinjau** pada kartu di bawah untuk membuka dan menguji websitenya secara langsung.`;
+            ? `⚠️ **Generasi Terputus**\n\nSebagian kode telah diamankan di kartu di bawah. Klik tombol **Lanjutkan Sekarang** untuk menyelesaikan sisa kode.`
+            : `💻 **Generasi Selesai**\n\nKode telah berhasil dibuat dan diamankan di kartu di bawah. Klik tombol **Pratinjau** pada kartu untuk membukanya.`;
         }
 
         if (bubbleText) {
@@ -10829,7 +10822,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         directBtn.style.borderColor = '';
         directBtn.style.color = '';
       }
-      showToast('Gagal melanjutkan pembuatan website: ' + err.message, 'error');
+      showToast('Gagal melanjutkan: ' + err.message, 'error');
     } finally {
       setGeneratingState(false);
     }
@@ -10844,7 +10837,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     btn.type = 'button';
     btn.className = 'continue-response-btn' + (isWebContinue ? ' web-continue-btn' : '');
     if (isWebContinue) {
-      btn.innerHTML = '<i class="fa-solid fa-code-commit"></i> <span>Lanjutkan Pembuatan Website Sampai Tuntas</span>';
+      btn.innerHTML = '<i class="fa-solid fa-play"></i> <span>Lanjutkan Generasi Kode</span>';
       btn.style.borderColor = 'var(--neon-cyan)';
       btn.style.color = 'var(--neon-cyan)';
     } else {
@@ -20174,9 +20167,9 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
         result = `📄 **Dokumen Telah Selesai Disusun!**\n\nBerkas dokumen ${strippedDocName ? `**${escapeHtml(strippedDocName)}** ` : ''}telah berhasil dibuat dengan format rapi dan terstruktur. Anda dapat langsung melihat pratinjau dokumen atau mengunduhnya dalam format **PDF** maupun **Word (.docx)** melalui kartu berkas di bawah ini.`;
       } else if (hasStrippedWeb || shouldHideCode || (options && options.websiteMode === 'preview')) {
         if (isIncomplete) {
-          result = `⚠️ **Pembuatan Website Belum Tuntas (Terpotong di Tengah Jalan)**\n\nKode antarmuka website ${strippedWebName ? `**${escapeHtml(strippedWebName)}** ` : ''}terhenti sebelum selesai seluruhnya. Sistem telah mengamankan potongan kode yang tersedia di kartu bawah ini. Klik tombol **Lanjutkan Pembuatan Website Sampai Tuntas** untuk meneruskan penulisan kode hingga tuntas.`;
+          result = `⚠️ **Generasi Terputus**\n\nSebagian kode ${strippedWebName ? `**${escapeHtml(strippedWebName)}** ` : ''}telah diamankan pada kartu di bawah. Klik tombol **Lanjutkan Jawaban** untuk meneruskan penulisan kode.`;
         } else {
-          result = `🌐 **Website Telah Selesai Dirancang!**\n\nKode antarmuka website ${strippedWebName ? `**${escapeHtml(strippedWebName)}** ` : ''}telah berhasil dibuat dan diisolasi dengan aman di pratinjau live. Klik tombol **Pratinjau** pada kartu di bawah untuk membuka dan menguji websitenya secara langsung, atau unduh berkas HTML secara instan.`;
+          result = `💻 **Kode Berhasil Dihasilkan**\n\nKode ${strippedWebName ? `**${escapeHtml(strippedWebName)}** ` : ''}telah tersedia pada kartu di bawah. Anda dapat menguji pratinjaunya atau menyalin kodenya.`;
         }
       }
     }
@@ -35465,56 +35458,6 @@ Aturan:
       els.promptInput?.focus();
     });
 
-    // Modal Pilihan Format Output Website
-    const triggerWebsiteModeGeneration = (mode) => {
-      const textToSend = pendingWebsitePrompt || (els.promptInput ? els.promptInput.value.trim() : '');
-      pendingWebsitePrompt = null;
-      closeModal('websiteModeModal', false);
-      if (window.history.state && window.history.state.modal === 'websiteModeModal') {
-        try { window.history.replaceState(null, ''); } catch (_) {}
-      }
-      if (!textToSend) return;
-      AudioEngine.click();
-      handleSendPrompt({
-        websiteMode: mode,
-        skipWebsiteCheck: true,
-        skipDocCheck: true,
-        overrideText: textToSend
-      });
-    };
-
-    els.optWebsiteModePreview?.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      triggerWebsiteModeGeneration('preview');
-    });
-
-    els.optWebsiteModeCode?.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      triggerWebsiteModeGeneration('code_in_chat');
-    });
-
-    els.btnCancelWebsiteMode?.addEventListener('click', (e) => {
-      e.preventDefault();
-      pendingWebsitePrompt = null;
-      closeModal('websiteModeModal', false);
-      if (window.history.state && window.history.state.modal === 'websiteModeModal') {
-        try { window.history.replaceState(null, ''); } catch (_) {}
-      }
-      els.promptInput?.focus();
-    });
-
-    els.btnCloseWebsiteModeModal?.addEventListener('click', (e) => {
-      e.preventDefault();
-      pendingWebsitePrompt = null;
-      closeModal('websiteModeModal', false);
-      if (window.history.state && window.history.state.modal === 'websiteModeModal') {
-        try { window.history.replaceState(null, ''); } catch (_) {}
-      }
-      els.promptInput?.focus();
-    });
-
     // Delegasi klik item di taskTrackerList
     els.taskTrackerList?.addEventListener('click', (e) => {
       const allowBtn = e.target.closest('.btn-approval-allow');
@@ -43507,6 +43450,18 @@ Aturan:
       return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     },
 
+    findCloudDocLinkInChat() {
+      const wpsRegex = /https?:\/\/(?:[a-zA-Z0-9-]+\.)?(?:wps\.com|live\.com|office\.com|google\.com)\/[^\s<>"']+/i;
+      if (els.messagesList) {
+        const allTexts = Array.from(els.messagesList.querySelectorAll('.wa-bubble-text')).map(el => el.textContent || '');
+        for (const t of allTexts) {
+          const m = t.match(wpsRegex);
+          if (m) return m[0];
+        }
+      }
+      return '';
+    },
+
     async openDocumentPreview(doc, msg = null) {
       const fileName = doc.fileName || 'dokumen.bin';
       const ext = fileName.includes('.') ? (fileName.split('.').pop() || '').toLowerCase() : '';
@@ -43546,7 +43501,7 @@ Aturan:
       } else if (['xls', 'xlsx', 'csv'].includes(ext)) {
         iconClass = 'fa-solid fa-file-excel';
         iconColor = '#10b981';
-        bgBox = 'rgba(16, 185, 129, 0.15)';
+        bgBox = 'rgba(168, 185, 129, 0.15)';
         borderBox = 'rgba(16, 185, 129, 0.3)';
         typeLabel = 'Lembar Kerja Excel';
       } else if (['ppt', 'pptx'].includes(ext)) {
@@ -43585,14 +43540,28 @@ Aturan:
       modal.style.display = 'flex';
       AudioEngine.click();
 
+      // Deteksi tautan WPS / Office Cloud
+      let cloudDocUrl = '';
+      const wpsRegex = /https?:\/\/(?:[a-zA-Z0-9-]+\.)?(?:wps\.com|live\.com|office\.com|google\.com)\/[^\s<>"']+/i;
+      if (msg && msg.text && wpsRegex.test(msg.text)) {
+        const m = msg.text.match(wpsRegex);
+        if (m) cloudDocUrl = m[0];
+      }
+      if (!cloudDocUrl) {
+        cloudDocUrl = this.findCloudDocLinkInChat();
+      }
+
       // Resolve URL dari server jika belum ada
       if (!url && msgId) {
         try {
-          const res = await this.waFetch(`/api/wa/media?msgId=${encodeURIComponent(msgId)}&fileName=${encodeURIComponent(fileName)}`, { headers: this.getAuthHeaders() }, 1);
+          const jidParam = this.activeContact?.id ? `&jid=${encodeURIComponent(this.activeContact.id)}` : '';
+          const res = await this.waFetch(`/api/wa/media?msgId=${encodeURIComponent(msgId)}&fileName=${encodeURIComponent(fileName)}${jidParam}`, { headers: this.getAuthHeaders() }, 1);
           const data = await res.json().catch(() => null);
           if (data && data.url) {
             url = data.url;
             doc.url = url;
+            // Re-render modal dengan URL yang telah berhasil dimuat
+            return this.openDocumentPreview(doc, msg);
           }
         } catch (_) {}
       }
@@ -43603,6 +43572,9 @@ Aturan:
         if (url) {
           btnOpenTab.style.display = 'inline-flex';
           btnOpenTab.onclick = () => window.open(fullUrl || url, '_blank');
+        } else if (cloudDocUrl) {
+          btnOpenTab.style.display = 'inline-flex';
+          btnOpenTab.onclick = () => window.open(cloudDocUrl, '_blank');
         } else {
           btnOpenTab.style.display = 'none';
         }
@@ -43613,6 +43585,18 @@ Aturan:
           this.downloadDocument(fileName, url, msgId);
         };
       }
+
+      const cloudBtnHtml = cloudDocUrl ? `
+        <a href="${cloudDocUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-color: rgba(56, 189, 248, 0.4); color: #38bdf8; text-decoration: none; border-radius: 10px; background: rgba(56, 189, 248, 0.08); margin-bottom: 8px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <i class="fa-solid fa-cloud-arrow-up" style="font-size: 1.2rem; color: #38bdf8;"></i>
+            <div>
+              <strong style="display: block; font-size: 0.88rem; color: #f8fafc;">Buka di WPS Office Cloud</strong>
+              <span style="font-size: 0.72rem; color: #94a3b8;">Tautan dokumen online yang dibagikan pengirim</span>
+            </div>
+          </div>
+          <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.85rem; opacity: 0.8;"></i>
+        </a>` : '';
 
       if (ext === 'pdf') {
         if (url) {
@@ -43629,7 +43613,8 @@ Aturan:
               <p style="color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin-bottom: 20px;">
                 File PDF ini diterima melalui sesi WhatsApp Anda. Klik tombol unduh di bawah untuk membaca dokumen secara lengkap.
               </p>
-              <button type="button" class="btn btn-primary" onclick="WhatsAppController.downloadDocument('${escapeHtml(fileName)}', '', '${escapeHtml(msgId)}')" style="background: #25D366; border-color: #25D366; color: #052e16; font-weight: 600; padding: 10px 24px; border-radius: 8px;">
+              ${cloudBtnHtml}
+              <button type="button" class="btn btn-primary" onclick="WhatsAppController.downloadDocument('${escapeHtml(fileName)}', '', '${escapeHtml(msgId)}')" style="background: #25D366; border-color: #25D366; color: #052e16; font-weight: 600; padding: 10px 24px; border-radius: 8px; width: 100%;">
                 <i class="fa-solid fa-download"></i> Unduh & Buka PDF
               </button>
             </div>
@@ -43644,9 +43629,11 @@ Aturan:
               <i class="${iconClass}"></i>
             </div>
             <h4 style="color: #f8fafc; margin-bottom: 6px; font-size: 1.1rem; word-break: break-word;">${escapeHtml(fileName)}</h4>
-            <span style="display: inline-block; padding: 3px 10px; border-radius: 12px; background: rgba(255,255,255,0.08); color: #94a3b8; font-size: 0.75rem; margin-bottom: 20px;">${typeLabel}</span>
+            <span style="display: inline-block; padding: 3px 10px; border-radius: 12px; background: rgba(255,255,255,0.08); color: #94a3b8; font-size: 0.75rem; margin-bottom: 16px;">${typeLabel}</span>
             
             <div style="display: flex; flex-direction: column; gap: 10px; text-align: left;">
+              ${cloudBtnHtml}
+
               ${officeViewerUrl ? `
               <a href="${officeViewerUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-color: rgba(59, 130, 246, 0.4); color: #60a5fa; text-decoration: none; border-radius: 10px; background: rgba(59, 130, 246, 0.08);">
                 <div style="display: flex; align-items: center; gap: 10px;">
@@ -43682,7 +43669,8 @@ Aturan:
             <p style="color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin-bottom: 20px;">
               Berkas lampiran dari WhatsApp. Klik tombol unduh di bawah untuk menyimpan berkas ini ke perangkat Anda.
             </p>
-            <button type="button" class="btn btn-primary" onclick="WhatsAppController.downloadDocument('${escapeHtml(fileName)}', '${escapeHtml(url || '')}', '${escapeHtml(msgId)}')" style="background: #25D366; border-color: #25D366; color: #052e16; font-weight: 600; padding: 10px 24px; border-radius: 8px;">
+            ${cloudBtnHtml}
+            <button type="button" class="btn btn-primary" onclick="WhatsAppController.downloadDocument('${escapeHtml(fileName)}', '${escapeHtml(url || '')}', '${escapeHtml(msgId)}')" style="background: #25D366; border-color: #25D366; color: #052e16; font-weight: 600; padding: 10px 24px; border-radius: 8px; width: 100%;">
               <i class="fa-solid fa-download"></i> Unduh Berkas
             </button>
           </div>
@@ -43695,9 +43683,10 @@ Aturan:
       let targetUrl = url;
 
       if (!targetUrl && msgId) {
-        showToast(`⏳ Mengambil file ${fileName} dari WhatsApp...`, 'info');
+        showToast(`⏳ Mengambil berkas ${fileName} dari WhatsApp...`, 'info');
         try {
-          const res = await this.waFetch(`/api/wa/media?msgId=${encodeURIComponent(msgId)}&fileName=${encodeURIComponent(fileName)}`, { headers: this.getAuthHeaders() }, 1);
+          const jidParam = this.activeContact?.id ? `&jid=${encodeURIComponent(this.activeContact.id)}` : '';
+          const res = await this.waFetch(`/api/wa/media?msgId=${encodeURIComponent(msgId)}&fileName=${encodeURIComponent(fileName)}${jidParam}`, { headers: this.getAuthHeaders() }, 1);
           const data = await res.json().catch(() => null);
           if (data && data.url) {
             targetUrl = data.url;
@@ -43716,7 +43705,13 @@ Aturan:
         document.body.removeChild(a);
         showToast(`✅ Berkas ${fileName} berhasil diunduh.`, 'success');
       } else {
-        showToast(`⚠️ Berkas ${fileName} belum dapat diunduh (sesi WhatsApp mungkin perlu dimuat ulang).`, 'warning');
+        const cloudDocUrl = this.findCloudDocLinkInChat();
+        if (cloudDocUrl) {
+          window.open(cloudDocUrl, '_blank');
+          showToast(`🌐 Membuka ${fileName} langsung via WPS Office Cloud...`, 'info');
+        } else {
+          showToast(`⚠️ Berkas ${fileName} sedang disinkronkan dari HP. Silakan buka chat di WhatsApp HP Anda sejenak agar media dapat diunduh.`, 'warning');
+        }
       }
     },
 
