@@ -170,11 +170,11 @@
     const cleanSubject = titleTerms || 'Analisis Teknis';
 
     if (mode === 'code' || mode === 'rewrite') {
-      const fileName = options.fileName || 'index.html';
-      if (options.useZozHeader) {
-        return `<<<ZOZ_FILE name="${fileName}" mime="text/html" lang="html">\n<!DOCTYPE html>\n<html lang="id">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>${cleanSubject}</title>\n`;
+      const fileName = options.fileName || '';
+      if (fileName && options.useZozHeader) {
+        return `<<<ZOZ_FILE name="${fileName}">\n`;
       }
-      return `<!DOCTYPE html>\n<html lang="id">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>${cleanSubject}</title>\n`;
+      return `**${cleanSubject}**\n\n`;
     }
 
     return `**${cleanSubject}**\n\n`;
@@ -896,7 +896,7 @@
       return pt;
     }
 
-    function detectHorocycleTrap(windowSize = 8) {
+    function detectHorocycleTrap(windowSize = 16) {
       if (history.length < windowSize) return { trapped: false, busemannVariance: 1 };
       const win = history.slice(-windowSize);
 
@@ -912,9 +912,11 @@
       busemannVariance /= win.length;
 
       const joined = win.map(p => p.token).join('');
-      const hasPeriodicOrbit = joined.length >= 18 && /(.{3,80})\1{2,}$/s.test(joined);
+      // Abaikan karakter formatting, spasi inden, pemisah tabel (|---|), strip (-) dan simbol syntax
+      const substantiveChars = joined.replace(/[\s\-=_*|.#]+/g, '');
+      const hasSubstantivePeriodicOrbit = substantiveChars.length >= 32 && /([a-zA-Z0-9\u00C0-\u024F]{3,80})\1{2,}$/s.test(substantiveChars);
 
-      const trapped = hasPeriodicOrbit || (busemannVariance < 1e-8 && win[0].token.length > 4 && win.every(p => p.token === win[0].token));
+      const trapped = hasSubstantivePeriodicOrbit || (busemannVariance < 1e-9 && win[0].token.length >= 6 && /[a-zA-Z0-9]/.test(win[0].token) && win.every(p => p.token === win[0].token));
       return { trapped, busemannVariance, radius: lastPoint.r };
     }
 
@@ -943,7 +945,7 @@
     let horocycleTrapped = false;
     let totalProcessedChars = 0;
     let sampleWindowText = '';
-    const MAX_GATE_HOLD_CHARS = options.maxHoldChars || 180;
+    const MAX_GATE_HOLD_CHARS = options.maxHoldChars || 64;
 
     function consumePreamblePrefix() {
       if (!lookaheadBuffer) return;
@@ -999,15 +1001,17 @@
         return '';
       }
 
-      // 3. Jika token yang tersisa adalah kode/markdown/substansi atau sudah melewati batas tunggu, buka katup!
+      // 3. Jika token yang tersisa adalah kode/markdown/substansi atau sudah melewati batas tunggu, buka katup seketika!
       const trimmed = lookaheadBuffer.trimStart();
-      const isDirectSubstance = /^(?:<!DOCTYPE|<html|<div|<<<ZOZ_FILE|<<<<<<< SEARCH|```|#|\*\*|1\.|- )/i.test(trimmed);
+      const isDirectSubstance = /^(?:<!DOCTYPE|<html|<div|<<<ZOZ_FILE|<<<<<<< SEARCH|```|#|\*\*|1\.|- |\{|\[)/i.test(trimmed);
       const hasSentenceOrLineEnd = /[:\n.!?]/.test(lookaheadBuffer);
-      const metrics = computeStreamMetrics(lookaheadBuffer, intent);
 
       const looksLikeIncompletePreamble = /^(?:halo|hai|hi|hello|selamat|wah|pertanyaan|permintaan|topik|ide|tentu|baik|pasti|oke|siap|dengan\s+senang|berikut|sebagai|maaf|mohon\s+maaf|sorry|i\s+apologize|unfortunately|saya\s+tidak|i\s+cannot|i\s+can't|i\s+am\s+unable|as\s+an\s+ai|sure|certainly|of\s+course|here\s+is)\b/i.test(trimmed);
 
-      if (isDirectSubstance || (!looksLikeIncompletePreamble && lookaheadBuffer.length >= 36 && metrics.entropyDensity >= 0.45) || (hasSentenceOrLineEnd && !looksLikeIncompletePreamble && lookaheadBuffer.length >= 24) || lookaheadBuffer.length >= MAX_GATE_HOLD_CHARS || isFinal) {
+      // Fast-path latensi ultra-rendah (<50ms): Jika bukan awalan basa-basi dan sudah ada 1 token substansi + spasi
+      const hasSubstantiveToken = !looksLikeIncompletePreamble && (trimmed.length >= 10 && /\s/.test(trimmed));
+
+      if (isDirectSubstance || hasSubstantiveToken || (hasSentenceOrLineEnd && !looksLikeIncompletePreamble) || lookaheadBuffer.length >= MAX_GATE_HOLD_CHARS || isFinal) {
         consumePreamblePrefix();
         let out = lookaheadBuffer.replace(/^\s+/, '');
         lookaheadBuffer = '';

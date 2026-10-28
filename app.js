@@ -9481,8 +9481,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       const singleCharMatch = /(.)\1{17,}$/.exec(tail);
       if (singleCharMatch) {
         const char = singleCharMatch[1];
-        const isWhitespace = /\s/.test(char);
-        if (!isWhitespace || singleCharMatch[0].length >= 35) {
+        const isWhitespaceOrDivider = /[\s\-=_*|.#]/.test(char);
+        // Karakter divider markdown dan spasi inden hanya dihentikan jika repetisinya ekstrem (>= 80 karakter beruntun)
+        if (!isWhitespaceOrDivider || singleCharMatch[0].length >= 80) {
           const excessLen = singleCharMatch[0].length - 3;
           if (excessLen > 0) {
             this.text = this.text.slice(0, -excessLen);
@@ -9495,13 +9496,16 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       for (let L = 2; L <= 30; L++) {
         if (tail.length < L * 5) continue;
         const pattern = tail.slice(-L);
+        // Abaikan pola tanpa karakter alfanumerik (misal: spasi indentasi, '|---|', '====', '----')
+        if (!/[a-zA-Z0-9\u00C0-\u024F]/.test(pattern)) continue;
+
         let count = 0;
         let pos = tail.length;
         while (pos >= L && tail.slice(pos - L, pos) === pattern) {
           count++;
           pos -= L;
         }
-        const minRepeats = L <= 3 ? 8 : (L <= 10 ? 6 : 4);
+        const minRepeats = L <= 3 ? 12 : (L <= 8 ? 8 : 5);
         if (count >= minRepeats) {
           const excessRepeats = count - 2;
           if (excessRepeats > 0) {
@@ -9592,7 +9596,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             .trim();
           const displaySummary = (cleanStudioText && !cleanStudioText.startsWith('<'))
             ? cleanStudioText
-            : '*Sedang merancang kode website... (terisolasi di pratinjau live)*';
+            : '*Sedang merancang konten... (terisolasi di pratinjau live)*';
           activeStudioAssistantBubble.innerHTML = appendInlineTypingCursor(renderMarkdown(displaySummary, true));
           activeStudioAssistantBubble.querySelectorAll('.code-block-wrapper, .code-block-card, .code-header, .code-actions-group, pre, code').forEach(el => el.remove());
           scrollStudioAssistantToBottom();
@@ -10590,7 +10594,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     try {
       while (agentRound < MAX_AGENT_ROUNDS && !isActuallyComplete && !STATE.abortController?.signal?.aborted) {
         agentRound++;
-        updateAgentHud(`Putaran ${agentRound}/${MAX_AGENT_ROUNDS}: Menyambung sintaks kode website...`);
+        updateAgentHud(`Putaran ${agentRound}/${MAX_AGENT_ROUNDS}: Menyambung respons...`);
 
         // Optimasi Tail-Context: Hanya ambil 40 baris terakhir kode yang terputus
         const lines = currentAccumulated.split('\n');
@@ -10598,9 +10602,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         const tailLinesCount = Math.min(40, totalLines);
         const tailLines = lines.slice(-tailLinesCount).join('\n');
 
-        const continuePrompt = isWebContinue
-          ? `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang dari baris awal!\nDILARANG memulai dengan <<<ZOZ_FILE, DILARANG menulis <!DOCTYPE html>, <html>, atau <head>!\nDILARANG menyertakan pembukaan, salam, penjelasan, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript persis dari karakter terakhir potongan di atas hingga tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`
-          : `[Berikut adalah potongan teks/kode terakhir sebelum terputus]:\n\`\`\`\n${tailLines}\n\`\`\`\n\nLanjutkan penjelasan/kode secara persis mulai dari kata/kalimat terakhir yang terpotong. JANGAN mengulang teks dari awal, langsung teruskan kelanjutannya.`;
+        const continuePrompt = `[Berikut adalah potongan teks/kode terakhir sebelum terputus]:\n\`\`\`\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan penjelasan/kode secara persis mulai dari kata/karakter terakhir yang terpotong.\nDILARANG mengulang teks atau kode dari baris awal!\nDILARANG menyertakan pembukaan, salam, penjelasan pengantar, atau teks basa-basi!\nLangsung teruskan kelanjutan isinya persis dari potongan terakhir di atas hingga selesai tuntas.`;
 
         let appended = '';
         if (engine === 'ollama') {
@@ -11138,7 +11140,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     let effectiveTail = currentFullText || '';
     if (typeof effectiveTail === 'string' && effectiveTail.length > 1200) {
       const tailLines = effectiveTail.split('\n').slice(-40).join('\n');
-      effectiveTail = `<!-- ... [bagian awal kode website sudah selesai disusun] ... -->\n${tailLines}`;
+      effectiveTail = `/* ... [bagian awal isi/kode sudah disusun sebelumnya] ... */\n${tailLines}`;
     }
 
     historyMessages.forEach((m, idx) => {
@@ -11169,6 +11171,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         messages: messagesPayload,
         stream: true,
         options: {
+          num_ctx: 16384,
           num_predict: 4096,
           ...(STATE.settings.useCustomParameters && STATE.settings.temperature !== null ? { temperature: parseFloat(STATE.settings.temperature) } : {})
         },
@@ -25678,6 +25681,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   3. Pada giliran chat ke-2, ke-3, dan seterusnya, pertahankan fakta dan data web tersebut dengan konsisten dan percaya diri. Jangan pernah menyangkal atau menganggap data mutakhir tersebut sebagai karangan atau halusinasi masa lalu.`;
   }
 
+  function estimateBpeTokens(text) {
+    if (!text || typeof text !== 'string') return 0;
+    const words = text.trim().split(/\s+/).filter(Boolean).length;
+    const nonAlpha = (text.length - text.replace(/[^a-zA-Z0-9\s]/g, '').length);
+    return Math.max(1, Math.round(words * 1.33 + nonAlpha * 0.25));
+  }
+
   function buildSanitizedMessagesPayload(sessionOrMessages, currentImages = [], engine = 'openrouter', systemContent = '', modelName = '') {
     const messagesPayload = [];
     const supportsSystem = doesModelSupportSystemRole(modelName);
@@ -25760,6 +25770,57 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       }
     }
 
+    // =========================================================================
+    // ERDŐS-KERNEL SLIDING CONTEXT PRUNER & TOKEN BUDGET ALLOCATOR
+    // v_0 (Erdős = 0) : Turn User Pertama (Initial Task Anchor)
+    // Tail Turns      : 6-8 giliran percakapan terkini (Active Dialog Tail)
+    // Budget Capping  : Maksimal ~14.000 token kontekstual (menghindari error HTTP 400
+    //                   "context length exceeded" dan memangkas waktu KV evaluation).
+    // =========================================================================
+    const MAX_CONTEXT_TOKENS_BUDGET = 14000;
+    const estimateTurnTokens = (m) => Math.ceil(((m && m.content) ? m.content.length : 0) / 3.6);
+
+    let totalHistoryTokens = mergedList.reduce((sum, m) => sum + estimateTurnTokens(m), 0);
+    let budgetedList = mergedList;
+
+    if (totalHistoryTokens > MAX_CONTEXT_TOKENS_BUDGET && mergedList.length > 4) {
+      const anchorUser = mergedList[0];
+      const TAIL_KEEP_COUNT = Math.min(6, mergedList.length - 1);
+      const tailMessages = mergedList.slice(-TAIL_KEEP_COUNT);
+      const intermediateMessages = mergedList.slice(1, -TAIL_KEEP_COUNT);
+
+      let currentBudgetTokens = estimateTurnTokens(anchorUser) + tailMessages.reduce((sum, m) => sum + estimateTurnTokens(m), 0);
+      const keptIntermediate = [];
+
+      for (let i = intermediateMessages.length - 1; i >= 0; i--) {
+        const item = intermediateMessages[i];
+        let itemTokens = estimateTurnTokens(item);
+
+        if (itemTokens > 2500 && item.role === 'assistant' && typeof item.content === 'string') {
+          const head = item.content.slice(0, 1500);
+          const tail = item.content.slice(-1500);
+          item.content = `${head}\n\n[... sebagian kode/uraian tengah dipadatkan demi efisiensi memori konteks ...]\n\n${tail}`;
+          itemTokens = estimateTurnTokens(item);
+        }
+
+        if (currentBudgetTokens + itemTokens <= MAX_CONTEXT_TOKENS_BUDGET) {
+          keptIntermediate.unshift(item);
+          currentBudgetTokens += itemTokens;
+        } else {
+          break;
+        }
+      }
+
+      budgetedList = [anchorUser];
+      if (keptIntermediate.length < intermediateMessages.length) {
+        budgetedList.push({
+          role: supportsSystem ? 'system' : 'user',
+          content: '[Catatan Sistem: Sebagian riwayat percakapan lama di antara turn awal dan turn terkini telah diringkas untuk mengoptimalkan jendela konteks token.]'
+        });
+      }
+      budgetedList.push(...keptIntermediate, ...tailMessages);
+    }
+
     const sanitizeParticipantName = (name) => {
       if (!name || typeof name !== 'string') return undefined;
       const clean = name
@@ -25769,15 +25830,15 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       return clean || undefined;
     };
 
-    const lastIdx = mergedList.length - 1;
-    const prevAssistants = mergedList.filter((m, idx) => idx < lastIdx && m.role === 'assistant');
+    const lastIdx = budgetedList.length - 1;
+    const prevAssistants = budgetedList.filter((m, idx) => idx < lastIdx && m.role === 'assistant');
     let prevAssistantModel = null;
     if (prevAssistants.length > 0) {
       const lastAss = prevAssistants[prevAssistants.length - 1];
       prevAssistantModel = lastAss.model || (lastAss.engine ? `AI (${lastAss.engine})` : null);
     }
 
-    mergedList.forEach((m, idx) => {
+    budgetedList.forEach((m, idx) => {
       const isLatestTurn = (idx === lastIdx);
       const imgs = m.images || [];
 
@@ -26163,8 +26224,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           requestBody.options.top_p = parseFloat(STATE.settings.topP);
         }
       }
+      requestBody.options = requestBody.options || {};
+      if (!requestBody.options.num_ctx) requestBody.options.num_ctx = 16384;
       if (wantsFile || isWebRequest) {
-        requestBody.options = requestBody.options || {};
         if (!requestBody.options.num_predict) requestBody.options.num_predict = 4096;
       }
       // Pasang tools ke Ollama HANYA jika model memiliki kapabilitas tools terverifikasi
@@ -26283,14 +26345,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, { ...runOptions, userPrompt: promptText });
 
       let deadAirTimer = null;
+      let ollamaUsage = null;
       const resetDeadAirWatchdog = () => {
         if (deadAirTimer) clearTimeout(deadAirTimer);
         deadAirTimer = setTimeout(() => {
-          console.warn(`[Ollama Dead-Air] Model ${modelName} tidak mengirim token selama 20 detik (stalled). Menghentikan stream reader.`);
+          console.warn(`[Ollama Dead-Air] Model ${modelName} tidak mengirim token selama 60 detik (stalled). Menghentikan stream reader.`);
           try {
             STATE.abortController?.abort('DEAD_AIR_TIMEOUT');
           } catch (_) {}
-        }, 20000);
+        }, 60000);
       };
 
       function mergeToolCallsInto(targetArr, toolCallsArray) {
@@ -26355,6 +26418,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               throw new Error(errStr);
             }
             if (parsed.done_reason) doneReason = parsed.done_reason;
+            if (parsed.done && (parsed.eval_count !== undefined || parsed.prompt_eval_count !== undefined)) {
+              ollamaUsage = {
+                completion_tokens: parsed.eval_count,
+                prompt_tokens: parsed.prompt_eval_count,
+                eval_duration: parsed.eval_duration,
+                prompt_eval_duration: parsed.prompt_eval_duration,
+                total_duration: parsed.total_duration
+              };
+            }
             const chunk = parsed.message?.content || parsed.response || '';
             const reasoningChunk = parsed.message?.reasoning || parsed.reasoning || '';
             if (reasoningChunk) {
@@ -26393,6 +26465,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             throw new Error(errStr);
           }
           if (parsed.done_reason) doneReason = parsed.done_reason;
+          if (parsed.done && (parsed.eval_count !== undefined || parsed.prompt_eval_count !== undefined)) {
+            ollamaUsage = {
+              completion_tokens: parsed.eval_count,
+              prompt_tokens: parsed.prompt_eval_count,
+              eval_duration: parsed.eval_duration,
+              prompt_eval_duration: parsed.prompt_eval_duration,
+              total_duration: parsed.total_duration
+            };
+          }
           const chunk = parsed.message?.content || parsed.response || '';
           const reasoningChunk = parsed.message?.reasoning || parsed.reasoning || '';
           if (reasoningChunk) {
@@ -26915,8 +26996,18 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
 
       fullText = safeAssistantText(fullText);
+      const evalTokens = (ollamaUsage && typeof ollamaUsage.completion_tokens === 'number')
+        ? ollamaUsage.completion_tokens
+        : Math.max(tokenCount, estimateBpeTokens(fullText));
+      const promptTokens = (ollamaUsage && typeof ollamaUsage.prompt_tokens === 'number')
+        ? ollamaUsage.prompt_tokens
+        : null;
       const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
-      const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
+      const streamDuration = firstTokenTime ? ((performance.now() - firstTokenTime) / 1000) : parseFloat(totalTime);
+      const evalDuration = (ollamaUsage && ollamaUsage.eval_duration) ? (ollamaUsage.eval_duration / 1e9) : null;
+      const tps = (evalDuration && evalDuration > 0)
+        ? (evalTokens / evalDuration).toFixed(1)
+        : (streamDuration > 0 ? (evalTokens / streamDuration).toFixed(1) : '0');
 
       const finalRenderedContent = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
       bubbleText.innerHTML = finalRenderedContent.trim();
@@ -26932,7 +27023,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         <strong>${escapeHtml(modelName)}</strong>
         <span class="meta-model-badge">Ollama</span>
         <span>⏱️ ${totalTime}s</span>
-        <span>⚡ ${tps} tps</span>
+        <span title="${promptTokens ? `${promptTokens} prompt + ${evalTokens} completion token` : `${evalTokens} completion token`}">⚡ ${tps} tps (${evalTokens} tok)</span>
       `;
 
       assistantRow.dataset.fullContent = fullText;
@@ -27488,6 +27579,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           model: currentModel,
           messages: currentMessagesPayload,
           stream: true,
+          stream_options: { include_usage: true },
           include_reasoning: false,
           provider: {
             sort: 'latency',
@@ -27691,14 +27783,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             const decoder = new TextDecoder();
             let buffer = '';
             let deadAirTimer = null;
+            let openRouterUsage = null;
             const resetDeadAirWatchdog = () => {
               if (deadAirTimer) clearTimeout(deadAirTimer);
               deadAirTimer = setTimeout(() => {
-                console.warn(`[OpenRouter Dead-Air] Model ${currentModel} tidak mengirim token selama 20 detik (stalled). Menghentikan stream reader.`);
+                console.warn(`[OpenRouter Dead-Air] Model ${currentModel} tidak mengirim token selama 60 detik (stalled). Menghentikan stream reader.`);
                 try {
                   attemptController.abort('DEAD_AIR_TIMEOUT');
                 } catch (_) {}
-              }, 20000);
+              }, 60000);
             };
 
             try {
@@ -27735,6 +27828,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                   }
                   if (parsed.choices?.[0]?.finish_reason) {
                     finishReason = parsed.choices[0].finish_reason;
+                  }
+                  if (parsed.usage) {
+                    openRouterUsage = parsed.usage;
                   }
 
                   const rawImgs = parsed.choices?.[0]?.delta?.images 
@@ -27820,6 +27916,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                       }
                       if (parsed.choices?.[0]?.finish_reason) {
                         finishReason = parsed.choices[0].finish_reason;
+                      }
+                      if (parsed.usage) {
+                        openRouterUsage = parsed.usage;
                       }
                       const delta = parsed.choices?.[0]?.delta?.content;
                       if (delta) {
@@ -28538,8 +28637,15 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
 
       fullText = safeAssistantText(fullText);
+      const evalTokens = (openRouterUsage && typeof openRouterUsage.completion_tokens === 'number')
+        ? openRouterUsage.completion_tokens
+        : Math.max(tokenCount, estimateBpeTokens(fullText));
+      const promptTokens = (openRouterUsage && typeof openRouterUsage.prompt_tokens === 'number')
+        ? openRouterUsage.prompt_tokens
+        : null;
       const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
-      const tps = totalTime > 0 ? (tokenCount / totalTime).toFixed(1) : '0';
+      const streamDuration = firstTokenTime ? ((performance.now() - firstTokenTime) / 1000) : parseFloat(totalTime);
+      const tps = streamDuration > 0 ? (evalTokens / streamDuration).toFixed(1) : '0';
 
       let renderedMarkdown = renderMarkdown(fullText);
       let imagesHtml = '';
@@ -28576,7 +28682,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         <span class="meta-model-badge" style="${engineLabel === 'Ollama Cloud' ? 'background:rgba(0,242,254,0.15); color:var(--neon-cyan);' : 'background:rgba(255,82,0,0.15); color:var(--neon-amber);'}">${engineLabel}</span>
         ${collectedImages.length > 0 ? '<span class="meta-model-badge" style="background:rgba(255,0,127,0.18); border-color:#FF007F; color:#FF66B2;"><i class="fa-solid fa-wand-magic-sparkles"></i> Gambar Dibuat</span>' : ''}
         <span>⏱️ ${totalTime}s</span>
-        <span>⚡ ${tps} tps</span>
+        <span title="${promptTokens ? `${promptTokens} prompt + ${evalTokens} completion token` : `${evalTokens} completion token`}">⚡ ${tps} tps (${evalTokens} tok)</span>
       `;
 
       assistantRow.dataset.fullContent = fullText;
