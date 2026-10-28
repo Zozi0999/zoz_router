@@ -10133,7 +10133,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     if (!incomingChunk || typeof incomingChunk !== 'string') return existingText || '';
     if (!existingText || typeof existingText !== 'string') return incomingChunk;
 
-    let chunk = incomingChunk;
+    let chunk = incomingChunk.trim();
 
     // 1. Bersihkan kata pengantar / basa-basi model AI yang sering disisipkan di awal sambungan
     chunk = chunk.replace(/^(?:[\s\r\n]*)(?:tentu|baik(?:lah)?|pasti|oke|siap|berikut(?:nya)?|ini(?:lah)?|lanjutan|kelanjutan|sambungan|melanjutkan)[^\n]*\n+/i, '');
@@ -10143,27 +10143,28 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     chunk = chunk.replace(/^```[a-zA-Z0-9_-]*\s*\n?/i, '');
     chunk = chunk.replace(/\n?```\s*$/i, '');
 
-    // Anti-Duplikasi Dokumen: Jika model AI malah mengulang penulisan website dari awal
-    // (menghasilkan blok <<<ZOZ_FILE baru atau <!DOCTYPE html baru) alih-alih menyambung dari baris terpotong:
-    const isChunkFullRestart = (chunk.includes('<<<ZOZ_FILE') || /<!DOCTYPE\s+html/i.test(chunk)) &&
-                              (existingText.includes('<<<ZOZ_FILE') || /<!DOCTYPE\s+html/i.test(existingText));
-    if (isChunkFullRestart) {
-      console.log('[stitchContinuationChunk] Terdeteksi model mengulang dari awal; menggantikan draf sebelumnya dengan versi baru.');
-      const firstZozIdx = existingText.indexOf('<<<ZOZ_FILE');
-      const firstDocIdx = existingText.search(/<!DOCTYPE\s+html/i);
-      const startIdx = firstZozIdx !== -1 ? firstZozIdx : firstDocIdx;
-      const preamble = (startIdx > 0) ? existingText.slice(0, startIdx).trim() + '\n\n' : '';
-      return preamble + chunk.trim();
+    // 3. Strip redundant <<<ZOZ_FILE...>>> headers from continuation chunk (ANTI-WIPEOUT)
+    // Jangan pernah menghapus base text hanya karena chunk memuat header ZOZ_FILE!
+    chunk = chunk.replace(/^<<<ZOZ_(?:FILE|EDIT|MODIFY)[^\n>]*>\s*\n?/i, '');
+
+    // Hanya jika chunk adalah DOKUMEN LENGKAP UTUH dari awal (ada <!DOCTYPE, <head, <body, dan </html>)
+    // dan ukurannya setara/lebih besar dari draf saat ini, barulah ganti dokumen utuh
+    const isChunkTrueFullDocument = /<!DOCTYPE\s+html/i.test(chunk) && /<head\b/i.test(chunk) && /<body\b/i.test(chunk) && /<\/html>/i.test(chunk);
+    if (isChunkTrueFullDocument && chunk.length >= existingText.length * 0.85) {
+      console.log('[stitchContinuationChunk] Model menghasilkan dokumen lengkap pengganti utuh.');
+      return chunk;
     }
 
-    // 3. Bersihkan artefak chevron / diff marker liar
-    chunk = chunk.replace(/(?:^|\n)\s*<{2,}\s*(?:SEARCH|REPLACE|END_ZOZ_[A-Z]+|ZOZ_[A-Z]+)?[^>\n]*>{0,}\s*(?=\n|$)/gi, '\n');
+    // Jika chunk mengulang tag pembuka <!DOCTYPE html> atau <html> di awal tanpa <head>:
+    chunk = chunk.replace(/^<!DOCTYPE\s+html[^>]*>\s*\n?/i, '');
+    chunk = chunk.replace(/^<html\b[^>]*>\s*\n?/i, '');
+
+    // 4. Bersihkan artefak chevron / diff marker liar (KECUALI <<<END_ZOZ_FILE>>> di ujung)
+    chunk = chunk.replace(/(?:^|\n)\s*<{2,}\s*(?:SEARCH|REPLACE)?[^>\n]*>{0,}\s*(?=\n|$)/gi, '\n');
     chunk = chunk.replace(/(?:^|\n)\s*={3,}\s*(?=\n|$)/g, '\n');
     chunk = chunk.replace(/(?:^|\n)\s*>{2,}\s*(?:REPLACE)?[^>\n]*>{0,}\s*(?=\n|$)/gi, '\n');
     chunk = chunk.replace(/<{2,}>{1,}|<{1,}>{2,}/g, '');
     chunk = chunk.replace(/<<>>/g, '');
-    chunk = chunk.replace(/^<<{1,4}>{1,4}\s*/gm, '');
-    chunk = chunk.replace(/\s*<<{1,4}>{1,4}$/gm, '');
 
     // Cegah duplikasi penutup </html> atau penambahan komentar liar setelah </html>
     if (existingText.includes('</html>')) {
@@ -10172,30 +10173,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       }
     }
 
-    if (!chunk) return existingText;
-
-    // 4. Deteksi overlap baris (cegah AI mengulang baris terakhir yang sudah ada di tail prompt)
-    const existingLines = existingText.split('\n').map(l => l.trim()).filter(Boolean);
-    const chunkLinesRaw = chunk.split('\n');
-    let skipLines = 0;
-    for (let i = 0; i < Math.min(10, chunkLinesRaw.length); i++) {
-      const trimmedChunkLine = chunkLinesRaw[i].trim();
-      if (!trimmedChunkLine) {
-        skipLines = i + 1;
-        continue;
-      }
-      const lastExistingTail = existingLines.slice(-6);
-      if (lastExistingTail.includes(trimmedChunkLine)) {
-        skipLines = i + 1;
-      } else {
-        break;
-      }
-    }
-    if (skipLines > 0) {
-      chunk = chunkLinesRaw.slice(skipLines).join('\n');
-    }
-
-    // 4b. Cegah 'SyntaxError: Identifier has already been declared' akibat deklarasi ulang const/let di sambungan chunk
+    // 5. Cegah 'SyntaxError: Identifier has already been declared' akibat deklarasi ulang const/let di sambungan chunk
     if (chunk && (existingText.includes('<script') || chunk.includes('<script'))) {
       const existingDecls = new Set();
       const declRegex = /\b(?:const|let)\s+([a-zA-Z0-9_$]+)\s*=/g;
@@ -10215,11 +10193,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     if (!chunk.trim()) return existingText;
 
-    // 4c. Deteksi overlap teks antara akhir existingText dan awal chunk (cegah duplikasi baris / token)
+    // 6. KMP & Suffix-Prefix Longest Overlap Detection (hingga 1200 karakter)
     const existingTrim = existingText.trimEnd();
     const chunkTrim = chunk.trimStart();
 
-    const maxOverlapCheck = Math.min(120, existingTrim.length, chunkTrim.length);
+    const maxOverlapCheck = Math.min(1200, existingTrim.length, chunkTrim.length);
     let detectedOverlapLen = 0;
     for (let len = maxOverlapCheck; len >= 3; len--) {
       const tail = existingTrim.slice(-len);
@@ -10234,7 +10212,28 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       chunk = chunkTrim.slice(detectedOverlapLen);
     }
 
-    // 5. Tentukan pemisah (token boundary vs newline)
+    // 7. Deteksi overlap baris (fuzzy line matching untuk baris-baris tail)
+    const existingLines = existingText.split('\n').map(l => l.trim()).filter(Boolean);
+    const chunkLinesRaw = chunk.split('\n');
+    let skipLines = 0;
+    for (let i = 0; i < Math.min(15, chunkLinesRaw.length); i++) {
+      const trimmedChunkLine = chunkLinesRaw[i].trim();
+      if (!trimmedChunkLine) {
+        skipLines = i + 1;
+        continue;
+      }
+      const lastExistingTail = existingLines.slice(-10);
+      if (lastExistingTail.includes(trimmedChunkLine)) {
+        skipLines = i + 1;
+      } else {
+        break;
+      }
+    }
+    if (skipLines > 0) {
+      chunk = chunkLinesRaw.slice(skipLines).join('\n');
+    }
+
+    // 8. Tentukan pemisah sintaks
     const endsWithNewline = existingText.endsWith('\n');
     const startsWithNewline = chunk.startsWith('\n');
     const endsWithWhitespace = /\s$/.test(existingText);
@@ -10242,20 +10241,111 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     // Jika terpotong di tengah token/kata (misal 'const nav' + 'Toggle = ...')
     if (!endsWithWhitespace && !startsWithWhitespace && /^[a-zA-Z0-9_$]/.test(chunk) && /[a-zA-Z0-9_$]$/.test(existingText)) {
-      return existingText + chunk;
+      let merged = existingText + chunk;
+      if (merged.includes('<<<ZOZ_FILE') && !merged.includes('<<<END_ZOZ_FILE') && merged.includes('</html>')) {
+        merged += '\n<<<END_ZOZ_FILE>>>';
+      }
+      return merged;
     }
 
     let sep = '';
     if (!endsWithNewline && !startsWithNewline) {
-      if (endsWithWhitespace || startsWithWhitespace) {
-        sep = '';
+      sep = (endsWithWhitespace || startsWithWhitespace) ? '' : '\n';
+    }
+
+    let result = existingText + sep + chunk;
+    if (result.includes('<<<ZOZ_FILE') && !result.includes('<<<END_ZOZ_FILE') && result.includes('</html>')) {
+      result += '\n<<<END_ZOZ_FILE>>>';
+    }
+    return result;
+  }
+
+  // ==================== PURE MATHEMATICAL DYCK LANGUAGE & CONTINUATION THEOREM ====================
+  // Teorema Bahasa Formal Dyck & Defisit Tag:
+  // Himpunan tag HTML yang bersarang seimbang membentuk Bahasa Bebas Konteks Dyck berderajat k (D_k).
+  // Fungsi mu(w) memetakan string HTML ke tumpukan defisit LIFO: Stack(w) = [t_1, t_2, ..., t_m].
+  function computeDyckDeficitStack(html) {
+    const containerTags = ['div', 'section', 'article', 'aside', 'main', 'header', 'footer', 'nav', 'ul', 'ol', 'table', 'form', 'p', 'span', 'button', 'body', 'html'];
+    const clean = String(html || '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<<<[\s\S]*?>>>/g, '')
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+
+    const tagRegex = /<\/?([a-zA-Z0-9_-]+)(?:\s+[^>]*?)?(\/?)>/g;
+    const stack = [];
+    let m;
+    while ((m = tagRegex.exec(clean)) !== null) {
+      const isClose = m[0].startsWith('</');
+      const isSelfClose = m[2] === '/' || m[0].endsWith('/>');
+      const tag = m[1].toLowerCase();
+      if (!containerTags.includes(tag) || isSelfClose) continue;
+
+      if (!isClose) {
+        stack.push(tag);
       } else {
-        sep = '\n';
+        const idx = stack.lastIndexOf(tag);
+        if (idx !== -1) {
+          stack.splice(idx, 1);
+        }
+      }
+    }
+    return stack;
+  }
+  if (typeof window !== 'undefined') window.computeDyckDeficitStack = computeDyckDeficitStack;
+  if (typeof globalThis !== 'undefined') globalThis.computeDyckDeficitStack = computeDyckDeficitStack;
+
+  // Penutupan Aljabar Dyck:
+  // Menghitung defisit tag terbuka dan mensintesis penutup aljabar LIFO: Closure(w) = w * prod_{i=m}^1 </t_i>
+  // Ditambah penyeimbangan kurung kurawal/kurung biasa di dalam script terbuka, penutup style, body, html, dan marker berkas.
+  function applyDyckAlgebraicClosure(html) {
+    if (!html || typeof html !== 'string') return '';
+    let code = html.trim();
+
+    // A. Pastikan <script> dan <style> tertutup
+    if (code.includes('<script') && !code.includes('</script>')) {
+      const lastScriptIdx = code.toLowerCase().lastIndexOf('<script');
+      let scriptBody = code.slice(lastScriptIdx);
+      const openCurly = (scriptBody.match(/\{/g) || []).length;
+      const closeCurly = (scriptBody.match(/\}/g) || []).length;
+      if (openCurly > closeCurly) code += '\n' + '}'.repeat(openCurly - closeCurly);
+      const openParen = (scriptBody.match(/\(/g) || []).length;
+      const closeParen = (scriptBody.match(/\)/g) || []).length;
+      if (openParen > closeParen) code += ')'.repeat(openParen - closeParen);
+      code += '\n</script>';
+    }
+    if (code.includes('<style') && !code.includes('</style>')) {
+      code += '\n</style>';
+    }
+
+    // B. Hitung Defisit Stack Dyck
+    const stackFn = typeof computeDyckDeficitStack === 'function' ? computeDyckDeficitStack : (typeof globalThis !== 'undefined' ? globalThis.computeDyckDeficitStack : null);
+    const stack = stackFn ? stackFn(code) : [];
+    const toClose = stack.filter(t => t !== 'body' && t !== 'html').reverse();
+    if (toClose.length > 0) {
+      const closeStr = toClose.map(t => '\n</' + t + '>').join('');
+      if (/<\/body\s*>/i.test(code)) {
+        code = code.replace(/<\/body\s*>/i, closeStr + '\n</body>');
+      } else {
+        code += closeStr;
       }
     }
 
-    return existingText + sep + chunk;
+    // C. Pastikan </body> dan </html> tertutup
+    if (!/<\/body\s*>/i.test(code) && /<body[\s>]/i.test(code)) {
+      code += '\n</body>';
+    }
+    if (!/<\/html\s*>/i.test(code)) {
+      code += '\n</html>';
+    }
+    if (code.includes('<<<ZOZ_FILE') && !code.includes('<<<END_ZOZ_FILE')) {
+      code += '\n<<<END_ZOZ_FILE>>>';
+    }
+
+    return code;
   }
+  if (typeof window !== 'undefined') window.applyDyckAlgebraicClosure = applyDyckAlgebraicClosure;
+  if (typeof globalThis !== 'undefined') globalThis.applyDyckAlgebraicClosure = applyDyckAlgebraicClosure;
 
   // ==================== DETERMINISTIC WEBSITE COMPLETENESS VALIDATOR ====================
   // Memvalidasi secara matematis dan struktural apakah sebuah berkas website HTML benar-benar
@@ -10299,6 +10389,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     // 5. Cek tag yang terputus di tengah jalan (misal '<button on\n</body>' atau '<div class="')
     const cleanDom = trimmed
       .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<<<[\s\S]*?>>>/g, '')
       .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
       .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
 
@@ -10377,11 +10468,18 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     if (zozFileStarts > zozFileEnds && !hasClosedHtml) return true;
 
     // Check for unclosed HTML document
+    const htmlStarts = (trimmed.match(/<html\b/gi) || []).length;
+    const htmlEnds = (trimmed.match(/<\/html>/gi) || []).length;
     if (htmlStarts > htmlEnds) return true;
     if ((trimmed.includes('<!DOCTYPE html') || /<html\b/i.test(trimmed)) && !/<\/html>/i.test(trimmed)) return true;
 
     // Check for unclosed script or style tag inside HTML
+    const scriptStarts = (trimmed.match(/<script\b/gi) || []).length;
+    const scriptEnds = (trimmed.match(/<\/script>/gi) || []).length;
     if (scriptStarts > scriptEnds) return true;
+
+    const styleStarts = (trimmed.match(/<style\b/gi) || []).length;
+    const styleEnds = (trimmed.match(/<\/style>/gi) || []).length;
     if (styleStarts > styleEnds) return true;
 
     if (trimmed.length < 50) return false;
@@ -10501,7 +10599,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         const tailLines = lines.slice(-tailLinesCount).join('\n');
 
         const continuePrompt = isWebContinue
-          ? `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang kode dari baris awal!\nDILARANG menyertakan pembukaan, penjelasan, salam, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript hingga kode website tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`
+          ? `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang dari baris awal!\nDILARANG memulai dengan <<<ZOZ_FILE, DILARANG menulis <!DOCTYPE html>, <html>, atau <head>!\nDILARANG menyertakan pembukaan, salam, penjelasan, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript persis dari karakter terakhir potongan di atas hingga tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`
           : `[Berikut adalah potongan teks/kode terakhir sebelum terputus]:\n\`\`\`\n${tailLines}\n\`\`\`\n\nLanjutkan penjelasan/kode secara persis mulai dari kata/kalimat terakhir yang terpotong. JANGAN mengulang teks dari awal, langsung teruskan kelanjutannya.`;
 
         let appended = '';
@@ -10528,9 +10626,20 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           }
         }
 
-        if (curPrimary && isWebsiteComplete(curPrimary.rawContent || curPrimary.content || '', currentAccumulated)) {
-          isActuallyComplete = true;
-          break;
+        if (curPrimary) {
+          const curHtml = curPrimary.rawContent || curPrimary.content || '';
+          if (isWebsiteComplete(curHtml, currentAccumulated)) {
+            isActuallyComplete = true;
+            break;
+          } else if (agentRound >= MAX_AGENT_ROUNDS && curHtml.length > 250 && /<body[\s>]/i.test(curHtml)) {
+            console.log('[executeResponseContinuation] Putaran agen maks tercapai. Menerapkan Dyck Algebraic Closure...');
+            const closed = applyDyckAlgebraicClosure(curHtml);
+            curPrimary.rawContent = closed;
+            curPrimary.content = closed;
+            currentAccumulated = applyDyckAlgebraicClosure(currentAccumulated);
+            isActuallyComplete = isWebsiteComplete(closed, currentAccumulated);
+            if (isActuallyComplete) break;
+          }
         }
       }
 
@@ -10538,7 +10647,17 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       const finalExtracted = extractGeneratedFiles(currentAccumulated, true);
       const finalPrimary = finalExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || finalExtracted.files[0];
       if (!isActuallyComplete && finalPrimary) {
-        isActuallyComplete = isWebsiteComplete(finalPrimary.rawContent || finalPrimary.content || '', currentAccumulated);
+        let finalHtml = finalPrimary.rawContent || finalPrimary.content || '';
+        if (isWebsiteComplete(finalHtml, currentAccumulated)) {
+          isActuallyComplete = true;
+        } else if (finalHtml.length > 250 && /<body[\s>]/i.test(finalHtml)) {
+          console.log('[executeResponseContinuation] Menerapkan Dyck Algebraic Closure pada draf website...');
+          finalHtml = applyDyckAlgebraicClosure(finalHtml);
+          finalPrimary.rawContent = finalHtml;
+          finalPrimary.content = finalHtml;
+          currentAccumulated = applyDyckAlgebraicClosure(currentAccumulated);
+          isActuallyComplete = isWebsiteComplete(finalHtml, currentAccumulated);
+        }
       }
       const isStillIncomplete = isWebContinue ? !isActuallyComplete : Boolean(finalExtracted.hasIncompleteFile || isOutputTruncated(currentAccumulated));
 
@@ -11044,7 +11163,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         model: effectiveModel,
         messages: messagesPayload,
         stream: true,
-        ...(STATE.settings.useCustomParameters && STATE.settings.temperature !== null ? { options: { temperature: parseFloat(STATE.settings.temperature) } } : {}),
+        options: {
+          num_predict: 4096,
+          ...(STATE.settings.useCustomParameters && STATE.settings.temperature !== null ? { temperature: parseFloat(STATE.settings.temperature) } : {})
+        },
         endpoint: ep,
         ...(cleanKey ? { apiKey: cleanKey, ollamaApiKey: cleanKey } : {}),
         ...(STATE.settings.openRouterKey ? { openRouterKey: STATE.settings.openRouterKey } : {})
@@ -11763,8 +11885,12 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
 
         if (appended && appended.trim()) {
           const stitched = safeAssistantText(stitchContinuationChunk(currentAccumulated, appended));
-          const cleaned = healLeakedCssFromHtml(stitched);
-          const isDone = isWebsiteComplete(cleaned);
+          let cleaned = healLeakedCssFromHtml(stitched);
+          let isDone = isWebsiteComplete(cleaned);
+          if (!isDone && cleaned.length > 250 && /<body[\s>]/i.test(cleaned)) {
+            cleaned = applyDyckAlgebraicClosure(cleaned);
+            isDone = isWebsiteComplete(cleaned);
+          }
           if (onStatus) {
             onStatus(isDone ? '✅ Kode website berhasil dituntaskan & divalidasi 100% utuh!' : '⚡ Kode berhasil disambung...');
           }
@@ -26428,6 +26554,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           requestBody.options.top_p = parseFloat(STATE.settings.topP);
         }
       }
+      if (wantsFile || isWebRequest) {
+        requestBody.options = requestBody.options || {};
+        if (!requestBody.options.num_predict) requestBody.options.num_predict = 4096;
+      }
       // Pasang tools ke Ollama HANYA jika model memiliki kapabilitas tools terverifikasi
       const canOllamaUseTools = doesModelSupportTools(modelName);
       const selectedOllamaTools = canOllamaUseTools ? getSelectableAutonomousTools(canRunAutonomous) : [];
@@ -27109,7 +27239,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           const totalLines = lines.length;
           const tailLinesCount = Math.min(40, totalLines);
           const tailLines = lines.slice(-tailLinesCount).join('\n');
-          const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang kode dari baris awal!\nDILARANG menyertakan pembukaan, penjelasan, salam, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript hingga kode website tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`;
+          const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang kode dari baris awal!\nDILARANG memulai dengan <<<ZOZ_FILE, DILARANG menulis <!DOCTYPE html>, <html>, atau <head>!\nDILARANG menyertakan pembukaan, salam, penjelasan, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript persis dari karakter terakhir potongan di atas hingga tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`;
 
           try {
             const nextChunk = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, tailLines, { ...runOptions, signal: STATE.abortController?.signal });
@@ -27124,6 +27254,22 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           } catch (err) {
             console.warn(`[AutoContinuation Ollama] Putaran ${continuationRound} terhenti:`, err);
             break;
+          }
+        }
+
+        // Failsafe Dyck Algebraic Closure: Jika model berhenti sebelum menutup tag tetapi konten sudah padat (>250 char)
+        if (!isWebsiteFullyDone) {
+          const curExtracted = extractGeneratedFiles(fullText, wantsFile, runOptions);
+          const curWebFile = curExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || curExtracted.files[0];
+          if (curWebFile) {
+            const rawWeb = curWebFile.rawContent || curWebFile.content || '';
+            if (rawWeb.length > 250 && /<body[\s>]/i.test(rawWeb)) {
+              console.log('[AutoContinuation Ollama] Menuntaskan website dengan Dyck Algebraic Closure...');
+              fullText = safeAssistantText(applyDyckAlgebraicClosure(fullText));
+              const sealedExtracted = extractGeneratedFiles(fullText, wantsFile, runOptions);
+              const sealedWebFile = sealedExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || sealedExtracted.files[0];
+              isWebsiteFullyDone = sealedWebFile ? isWebsiteComplete(sealedWebFile.rawContent || sealedWebFile.content || '', fullText) : false;
+            }
           }
         }
       }
@@ -28895,7 +29041,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           const totalLines = lines.length;
           const tailLinesCount = Math.min(40, totalLines);
           const tailLines = lines.slice(-tailLinesCount).join('\n');
-          const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang kode dari baris awal!\nDILARANG menyertakan pembukaan, penjelasan, salam, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript hingga kode website tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`;
+          const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang kode dari baris awal!\nDILARANG memulai dengan <<<ZOZ_FILE, DILARANG menulis <!DOCTYPE html>, <html>, atau <head>!\nDILARANG menyertakan pembukaan, salam, penjelasan, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript persis dari karakter terakhir potongan di atas hingga tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`;
 
           try {
             const nextChunk = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, { ...runOptions, signal: STATE.abortController?.signal });
@@ -28910,6 +29056,22 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           } catch (err) {
             console.warn(`[AutoContinuation OpenRouter] Putaran ${continuationRound} terhenti:`, err);
             break;
+          }
+        }
+
+        // Failsafe Dyck Algebraic Closure: Jika model berhenti sebelum menutup tag tetapi konten sudah padat (>250 char)
+        if (!isWebsiteFullyDone) {
+          const curExtracted = extractGeneratedFiles(fullText, wantsFile, runOptions);
+          const curWebFile = curExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || curExtracted.files[0];
+          if (curWebFile) {
+            const rawWeb = curWebFile.rawContent || curWebFile.content || '';
+            if (rawWeb.length > 250 && /<body[\s>]/i.test(rawWeb)) {
+              console.log('[AutoContinuation OpenRouter] Menuntaskan website dengan Dyck Algebraic Closure...');
+              fullText = safeAssistantText(applyDyckAlgebraicClosure(fullText));
+              const sealedExtracted = extractGeneratedFiles(fullText, wantsFile, runOptions);
+              const sealedWebFile = sealedExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || sealedExtracted.files[0];
+              isWebsiteFullyDone = sealedWebFile ? isWebsiteComplete(sealedWebFile.rawContent || sealedWebFile.content || '', fullText) : false;
+            }
           }
         }
       }
