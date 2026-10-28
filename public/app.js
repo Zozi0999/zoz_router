@@ -12092,15 +12092,24 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     // ---------- Parsing & penerapan perubahan ----------
     parseHunks(text) {
       const hunks = [];
-      const re = /^<{3,}[ \t]*SEARCH[ \t>]*\r?\n([\s\S]*?)\r?\n={3,}[ \t]*\r?\n([\s\S]*?)(?:\r?\n)?^>{3,}[ \t]*(?:REPLACE)?[ \t>]*$/gim;
+      const src = String(text || '');
+      const reGit = /^<{3,}[ \t]*SEARCH[ \t>]*\r?\n([\s\S]*?)\r?\n={3,}[ \t]*\r?\n([\s\S]*?)(?:\r?\n)?^>{3,}[ \t]*(?:REPLACE)?[ \t>]*$/gim;
       let m;
-      while ((m = re.exec(text)) !== null) hunks.push({ search: m[1], replace: m[2] });
+      while ((m = reGit.exec(src)) !== null) hunks.push({ search: m[1], replace: m[2] });
+      if (hunks.length === 0) {
+        const reZoz = /<<<SEARCH>>>\r?\n([\s\S]*?)\r?\n<<<REPLACE>>>\r?\n([\s\S]*?)(?:\r?\n)?(?:<<<END_ZOZ_EDIT>>>|(?=<<<SEARCH>>>)|$)/gi;
+        while ((m = reZoz.exec(src)) !== null) {
+          if (m[1] && m[1].trim()) hunks.push({ search: m[1], replace: m[2] || '' });
+        }
+      }
       return hunks;
     },
 
     stripHunks(text) {
       return String(text || '')
         .replace(/^<{3,}[ \t]*SEARCH[ \t>]*\r?\n[\s\S]*?^>{3,}[ \t]*(?:REPLACE)?[ \t>]*$/gim, '')
+        .replace(/<<<ZOZ_EDIT[^>]*>[\s\S]*?<<<END_ZOZ_EDIT>>>/gi, '')
+        .replace(/<<<SEARCH>>>[\s\S]*?<<<END_ZOZ_EDIT>>>/gi, '')
         .replace(/```[a-z]*\s*\n?/gi, '')
         .trim();
     },
@@ -12140,7 +12149,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       return body;
     },
 
-    // Terapkan satu hunk: exact -> abaikan indentasi -> fallback applyZozEditPatch
+    // Terapkan satu hunk: exact -> abaikan indentasi -> Teorema Kőnig Bipartite Matching -> fallback applyZozEditPatch
     applyHunk(code, search, replace) {
       const s = String(search).replace(/^\r?\n/, '').replace(/\r?\n\s*$/, '');
       const r = String(replace).replace(/^\r?\n/, '').replace(/\r?\n\s*$/, '');
@@ -12178,7 +12187,17 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         };
       }
 
-      // Fallback: mesin fuzzy lama (toleran terhadap perbedaan kecil)
+      // Lapisan 3: Teorema Kőnig (Maximum Bipartite Matching = Minimum Vertex Cover)
+      if (typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.konigBipartiteMatchHunk === 'function') {
+        try {
+          const konigRes = TEXT_SAFETY.konigBipartiteMatchHunk(code, s, r);
+          if (konigRes && konigRes.content && konigRes.content !== code) {
+            return konigRes;
+          }
+        } catch (_) {}
+      }
+
+      // Lapisan 4: Fallback mesin fuzzy lama
       try {
         const res = applyZozEditPatch(code, `<<<SEARCH>>>\n${s}\n<<<REPLACE>>>\n${r}\n<<<END_ZOZ_EDIT>>>`);
         if (res && res.patched && res.content !== code) {
@@ -12234,11 +12253,12 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       return n;
     },
 
-    evaluate(original, candidate, isHtml) {
+    evaluate(original, candidate, isHtml, allowThemeRewrite = false) {
       if (!candidate || !candidate.trim()) return { ok: false, reason: 'Hasil edit kosong.' };
       if (candidate === original) return { ok: false, reason: 'Perubahan dari model identik dengan isi file saat ini.' };
-      if (original.length > 1500 && candidate.length < original.length * 0.5) {
-        return { ok: false, reason: 'Hasil edit menghapus lebih dari separuh isi file (kemungkinan terpotong).' };
+      const minRatio = allowThemeRewrite ? 0.22 : 0.45;
+      if (original.length > 1500 && candidate.length < original.length * minRatio && !(allowThemeRewrite && candidate.length >= 650 && isAuthenticHtml(candidate))) {
+        return { ok: false, reason: 'Hasil edit menghapus terlalu banyak isi file (kemungkinan terpotong).' };
       }
       if (!isHtml) return { ok: true, code: candidate };
       if (isAuthenticHtml(original) && !isAuthenticHtml(candidate)) {
@@ -12287,15 +12307,28 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       const selBlock = (selInfo && selInfo.hasSelection && selInfo.selectedLinesCode)
         ? `\nPengguna menyorot baris ${selInfo.startLine}-${selInfo.endLine}; fokuskan perubahan di sana:\n\`\`\`${fence}\n${selInfo.selectedLinesCode}\n\`\`\`\n`
         : '';
-      const system = 'Kamu adalah engineer front-end senior yang mengedit satu file website yang sudah ada. Patuhi format keluaran persis. Jangan menolak, jangan berbasa-basi.';
+
+      // Lokalisasi Jarak Graf Bilangan Erdős (d_Erdős = 1) terhadap niat pengguna
+      let erdosBlock = '';
+      if (step !== 'rewrite' && typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.computeErdosIntentGraph === 'function') {
+        try {
+          const eg = TEXT_SAFETY.computeErdosIntentGraph(goal, '', original);
+          if (eg && Array.isArray(eg.hop1Anchors) && eg.hop1Anchors.length > 0) {
+            const anchorLines = eg.hop1Anchors.slice(0, 5).map(a => `  Baris ${a.lineNumber}: ${a.content.trim().slice(0, 120)}`).join('\n');
+            erdosBlock = `\n[SIMPUL TARGET GRAF ERDŐS (d_Erdős = 1, Terhubung Langsung dengan Kernel Pengguna)]:\n${anchorLines}\n`;
+          }
+        } catch (_) {}
+      }
+
+      const system = 'Kamu adalah mesin transformasi kode deterministik yang mengedit file website aktif sesuai spesifikasi pengguna.';
       const fileBlock = `FILE: ${name} (${lineCount} baris)\n\`\`\`${fence}\n${codeView}\n\`\`\``;
-      const generalRule = 'Jika permintaan bersifat umum (mis. "rapikan", "percantik", "perbaiki tampilan"), lakukan perbaikan nyata yang terlihat: atur tipografi, jarak, warna, tata letak yang rapi dan responsif lewat CSS. Untuk menambah gaya baru, jangkarkan SEARCH pada baris </head> dan ganti dengan <style>...</style> lalu </head>.';
+      const generalRule = 'Jika permintaan bersifat umum (mis. "rapikan", "percantik", "perbaiki tampilan", atau mengganti tema), lakukan perubahan nyata yang langsung terlihat pada struktur dan CSS. Untuk menambah gaya baru, jangkarkan SEARCH pada baris </head> dan ganti dengan <style>...</style> lalu </head>.';
 
       let user;
       if (step === 'rewrite') {
         user = `${fileBlock}\n${selBlock}\nPERMINTAAN PENGGUNA: "${goal}"\n\nTulis ulang file ini secara LENGKAP dengan permintaan di atas sudah diterapkan. ${generalRule}\nKeluarkan HANYA satu blok kode berisi file utuh (${kind === 'jsx' ? 'seluruh komponen' : 'dari <!DOCTYPE html> sampai </html>'}) di dalam \`\`\`${fence}. Jangan dipotong, jangan pakai "..." atau komentar pemotong.`;
       } else {
-        user = `${fileBlock}\n${selBlock}\nPERMINTAAN PENGGUNA: "${goal}"\n${feedback ? `\nPERCOBAAN SEBELUMNYA GAGAL: ${feedback}\nSalin ulang bagian SEARCH PERSIS dari file di atas (termasuk spasi dan tanda baca).\n` : ''}\nJawab dengan satu atau lebih blok perubahan berformat:\n<<<<<<< SEARCH\n(salin persis 1-8 baris dari file di atas)\n=======\n(versi baru dari baris tersebut)\n>>>>>>> REPLACE\n\nAturan:\n- Baris pemisah ======= dan penanda <<<<<<< / >>>>>>> harus berdiri sendiri di barisnya.\n- SEARCH harus identik dengan isi file dan cukup unik (sertakan baris di sekitarnya).\n- Ubah hanya yang perlu; jangan menulis ulang seluruh file; jangan pakai "..." atau komentar pemotong.\n- ${generalRule}\n- Setelah semua blok, tulis satu kalimat ringkasan perubahan.`;
+        user = `${fileBlock}\n${selBlock}${erdosBlock}\nPERMINTAAN PENGGUNA: "${goal}"\n${feedback ? `\nPERCOBAAN SEBELUMNYA GAGAL: ${feedback}\nSalin ulang bagian SEARCH PERSIS dari file di atas (termasuk spasi dan tanda baca).\n` : ''}\nJawab dengan satu atau lebih blok perubahan berformat:\n<<<<<<< SEARCH\n(salin persis 1-8 baris dari file di atas)\n=======\n(versi baru dari baris tersebut)\n>>>>>>> REPLACE\n\nAturan:\n- Baris pemisah ======= dan penanda <<<<<<< / >>>>>>> harus berdiri sendiri di barisnya.\n- SEARCH harus identik dengan isi file dan cukup unik (sertakan baris di sekitarnya).\n- Ubah hanya yang perlu; jangan menulis ulang seluruh file; jangan pakai "..." atau komentar pemotong.\n- ${generalRule}\n- Setelah semua blok, tulis satu kalimat ringkasan perubahan.`;
       }
       return [{ role: 'system', content: system }, { role: 'user', content: user }];
     },
@@ -12307,7 +12340,10 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       const isHtml = kind !== 'jsx';
       const goal = this.resolveGoal(prompt, file, historyKey);
       const tooBig = original.length > this.MAX_FILE_CHARS;
-      const plan = forceRewrite && !tooBig ? ['rewrite'] : (tooBig ? ['patch', 'retry'] : ['patch', 'retry', 'rewrite']);
+      const isFullThemeTransform = /\b(?:ubah|ganti|jadikan|rombak|buat(?:kan)?)\s+(?:seluruh\s+)?(?:website|webiste|web|halaman|situs)?\s*(?:ini\s+)?(?:menjadi|jadi|ke\s+tema|tentang|bertema)\b/i.test(goal) && !/\b(?:tombol|button|warna\s+latar|background|judul|teks|navbar|header|footer|font|ukuran)\b/i.test(goal);
+      const plan = (forceRewrite || isFullThemeTransform) && !tooBig
+        ? ['rewrite', 'patch']
+        : (tooBig ? ['patch', 'retry'] : ['patch', 'retry', 'rewrite']);
       const deadline = Date.now() + this.DEADLINE_MS;
       const labels = { patch: 'Menulis perubahan', retry: 'Mencoba ulang dengan koreksi', rewrite: 'Menulis ulang file utuh' };
 
@@ -12331,7 +12367,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         } catch (e) {
           if (e.userStopped) throw e;
           // Stream macet tapi blok perubahan sudah lengkap: pakai yang sudah ada
-          if (e.partial && step !== 'rewrite' && /^>{3,}[ \t]*REPLACE/im.test(e.partial) && this.parseHunks(e.partial).length) {
+          if (e.partial && step !== 'rewrite' && (/^>{3,}[ \t]*REPLACE/im.test(e.partial) || /<<<END_ZOZ_EDIT>>>/i.test(e.partial)) && this.parseHunks(e.partial).length) {
             resp = { text: e.partial };
           } else if (e.partial && step === 'rewrite' && (/<html|<!DOCTYPE/i.test(e.partial))) {
             const healed = this.extractFullCode(e.partial, kind);
@@ -12357,12 +12393,22 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
 
         if (step === 'rewrite') {
           candidate = this.extractFullCode(text, kind);
+          if (!candidate) {
+            const hunksFallback = this.parseHunks(text);
+            if (hunksFallback.length > 0) {
+              const hRes = this.applyHunks(original, hunksFallback);
+              if (hRes.failed.length < hunksFallback.length) {
+                candidate = hRes.code;
+                ranges = hRes.ranges;
+              }
+            }
+          }
           if (!candidate) { lastReason = 'Model tidak mengirim file utuh yang lengkap.'; continue; }
         } else {
           const hunks = this.parseHunks(text);
           if (hunks.length === 0) {
             const full = this.extractFullCode(text, kind);
-            if (full && full.length >= Math.min(original.length * 0.35, 250)) {
+            if (full && full.length >= Math.min(original.length * 0.25, 250)) {
               candidate = full;
             } else {
               lastReason = 'Model tidak menghasilkan blok perubahan (hanya teks).';
@@ -12384,7 +12430,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           }
         }
 
-        const verdict = this.evaluate(original, candidate, isHtml);
+        const verdict = this.evaluate(original, candidate, isHtml, step === 'rewrite' || isFullThemeTransform);
         if (!verdict.ok) {
           lastReason = verdict.reason;
           feedback = verdict.reason;

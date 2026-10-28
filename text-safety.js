@@ -180,6 +180,398 @@
     return `**${cleanSubject}**\n\n`;
   }
 
+  // ============================================================================
+  // 2. TEORI GRAF BILANGAN ERDŐS (ERDŐS COLLABORATION DISTANCE GRAPH)
+  // v_0 (Erdős = 0) : Kernel Niat Pengguna (User Intent Kernel)
+  // v_1 (Erdős = 1) : Token/Baris yang berkolaborasi langsung (co-occurring) dengan v_0
+  // v_2 (Erdős = 2) : Token jembatan struktural yang terhubung ke simpul Erdős = 1
+  // v_∞ (Erdős > 2) : Simpul terisolasi / melenceng dari maksud pengguna
+  // ============================================================================
+  function computeErdosIntentGraph(userPrompt, candidateText = '', sourceCode = '') {
+    const intent = extractIntentVector(userPrompt);
+    const erdosZeroSet = new Set(intent.coreTerms.map(t => t.toLowerCase()));
+    const erdosOneSet = new Set();
+    const erdosTwoSet = new Set();
+
+    // Bangun ketetanggaan Hop-1 dari klausa prompt dan baris sourceCode yang mengandung simpul Erdős-0
+    const contextCorpus = [String(userPrompt || ''), String(sourceCode || ''), String(candidateText || '')].join('\n');
+    const clauses = contextCorpus.split(/[\r\n.;!?]+/);
+
+    for (const clause of clauses) {
+      const words = clause.toLowerCase().replace(/[^a-z0-9_\u00C0-\u024F\s-]/gi, ' ').split(/\s+/).filter(w => w.length >= 2 && !LOW_ENTROPY_FILLERS.has(w));
+      const hasZero = words.some(w => erdosZeroSet.has(w) || [...erdosZeroSet].some(z => z.length >= 4 && (w.includes(z) || z.includes(w))));
+      if (hasZero) {
+        for (const w of words) {
+          if (!erdosZeroSet.has(w)) erdosOneSet.add(w);
+        }
+      }
+    }
+
+    for (const clause of clauses) {
+      const words = clause.toLowerCase().replace(/[^a-z0-9_\u00C0-\u024F\s-]/gi, ' ').split(/\s+/).filter(w => w.length >= 2 && !LOW_ENTROPY_FILLERS.has(w));
+      const hasOne = words.some(w => erdosOneSet.has(w));
+      if (hasOne) {
+        for (const w of words) {
+          if (!erdosZeroSet.has(w) && !erdosOneSet.has(w)) erdosTwoSet.add(w);
+        }
+      }
+    }
+
+    // Evaluasi distribusi bilangan Erdős pada candidateText
+    const evalWords = String(candidateText || '').toLowerCase().replace(/[^a-z0-9_\u00C0-\u024F\s-]/gi, ' ').split(/\s+/).filter(w => w.length >= 2 && !LOW_ENTROPY_FILLERS.has(w));
+    let sumDistance = 0;
+    let hop0Count = 0;
+    let hop1Count = 0;
+    let hop2Count = 0;
+    let disconnectedCount = 0;
+
+    for (const w of evalWords) {
+      if (erdosZeroSet.has(w) || [...erdosZeroSet].some(z => z.length >= 4 && (w.includes(z) || z.includes(w)))) {
+        hop0Count++;
+        sumDistance += 0;
+      } else if (erdosOneSet.has(w)) {
+        hop1Count++;
+        sumDistance += 1;
+      } else if (erdosTwoSet.has(w)) {
+        hop2Count++;
+        sumDistance += 2;
+      } else {
+        disconnectedCount++;
+        sumDistance += 4; // penalti komponen tak terhubung
+      }
+    }
+
+    const totalEval = Math.max(1, evalWords.length);
+    const meanErdosNumber = evalWords.length > 0 ? (sumDistance / totalEval) : 1;
+    const erdosAffinity = 1 / (1 + meanErdosNumber);
+    const hop1Ratio = (hop0Count + hop1Count) / totalEval;
+
+    // Cari baris jangkar pada sourceCode dengan Bilangan Erdős <= 1 (untuk lokalisasi target edit website)
+    const hop1Anchors = [];
+    if (sourceCode) {
+      const srcLines = String(sourceCode).split(/\r?\n/);
+      for (let i = 0; i < srcLines.length; i++) {
+        const line = srcLines[i];
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.length < 4) continue;
+        const lWords = trimmed.toLowerCase().replace(/[^a-z0-9_\u00C0-\u024F\s-]/gi, ' ').split(/\s+/).filter(Boolean);
+        let hits0 = 0;
+        let hits1 = 0;
+        for (const lw of lWords) {
+          if (erdosZeroSet.has(lw) || [...erdosZeroSet].some(z => z.length >= 4 && (lw.includes(z) || z.includes(lw)))) hits0++;
+          else if (erdosOneSet.has(lw)) hits1++;
+        }
+        if (hits0 > 0) {
+          hop1Anchors.push({ lineNumber: i + 1, erdosNumber: 1, score: hits0 * 3 + hits1, content: line });
+        }
+      }
+      hop1Anchors.sort((a, b) => b.score - a.score);
+    }
+
+    return {
+      erdosZeroKernel: [...erdosZeroSet],
+      meanErdosNumber: Number(meanErdosNumber.toFixed(4)),
+      erdosAffinity: Number(erdosAffinity.toFixed(4)),
+      hop1Ratio: Number(hop1Ratio.toFixed(4)),
+      counts: { hop0: hop0Count, hop1: hop1Count, hop2: hop2Count, disconnected: disconnectedCount },
+      hop1Anchors: hop1Anchors.slice(0, 8)
+    };
+  }
+
+  // ============================================================================
+  // 3. TEOREMA BATAS SZEGŐ & MATRIKS TOEPLITZ (SZEGŐ TOEPLITZ SPECTRAL ANALYZER)
+  // Memodelkan sinyal pengiriman token x_1..x_N sebagai matriks autokorelasi Toeplitz
+  // T_p = [r_{|i-j|}] dan menghitung koefisien polinomial ortogonal Szegő / Verblunsky
+  // κ_k serta rasio determinan asimtotik:
+  //   lim_{p->∞} det(T_p) / (r_0 * det(T_{p-1})) = Π_{k=1}^p (1 - κ_k^2) = exp(1/2π ∫ ln(f(ω)/r_0) dω)
+  // ============================================================================
+  function computeSzegoToeplitzSpectrum(signalSamples, maxOrder = 6) {
+    const x = Array.isArray(signalSamples) ? signalSamples.map(Number).filter(Number.isFinite) : [];
+    const N = x.length;
+    if (N < 3) {
+      return {
+        szegoSpectralFlatness: 1,
+        toeplitzDetRatio: 1,
+        verblunskyCoeffs: [],
+        eigenMin: 1,
+        eigenMax: 1,
+        isNarrowbandSingularity: false
+      };
+    }
+
+    let mean = 0;
+    for (let i = 0; i < N; i++) mean += x[i];
+    mean /= N;
+
+    const centered = new Array(N);
+    for (let i = 0; i < N; i++) centered[i] = x[i] - mean;
+
+    const p = Math.min(maxOrder, N - 1);
+    const r = new Array(p + 1).fill(0);
+    for (let k = 0; k <= p; k++) {
+      let acc = 0;
+      for (let n = 0; n < N - k; n++) {
+        acc += centered[n] * centered[n + k];
+      }
+      r[k] = acc / N;
+    }
+
+    if (r[0] <= 1e-12) {
+      return {
+        szegoSpectralFlatness: 0,
+        toeplitzDetRatio: 0,
+        verblunskyCoeffs: [1],
+        eigenMin: 0,
+        eigenMax: 0,
+        isNarrowbandSingularity: N >= 6
+      };
+    }
+
+    // Rekursi Levinson-Durbin untuk Polinomial Ortogonal Szegő pada Lingkaran Satuan (OPUC)
+    const a = new Array(p + 1).fill(0);
+    const verblunskyCoeffs = [];
+    let E = r[0];
+    let detProduct = 1.0;
+
+    for (let k = 1; k <= p; k++) {
+      let lambda = r[k];
+      for (let j = 1; j < k; j++) {
+        lambda += a[j] * r[k - j];
+      }
+      const kappa = Math.max(-0.9999, Math.min(0.9999, -lambda / Math.max(1e-12, E)));
+      verblunskyCoeffs.push(Number(kappa.toFixed(4)));
+
+      const nextA = new Array(p + 1).fill(0);
+      nextA[k] = kappa;
+      for (let j = 1; j < k; j++) {
+        nextA[j] = a[j] + kappa * a[k - j];
+      }
+      for (let j = 1; j <= k; j++) a[j] = nextA[j];
+
+      const factor = 1 - kappa * kappa;
+      detProduct *= factor;
+      E *= factor;
+    }
+
+    // Evaluasi simbol spektral Fourier f(ω) = r_0 + 2 Σ_{k=1}^p (1 - k/(p+1)) r_k cos(k ω) (kernel Fejér-Szegő non-negatif)
+    let fMin = Infinity;
+    let fMax = -Infinity;
+    const M = 16;
+    for (let m = 0; m < M; m++) {
+      const omega = (Math.PI * m) / (M - 1);
+      let fVal = r[0];
+      for (let k = 1; k <= p; k++) {
+        const fejerWeight = 1 - (k / (p + 1));
+        fVal += 2 * fejerWeight * r[k] * Math.cos(k * omega);
+      }
+      if (fVal < fMin) fMin = fVal;
+      if (fVal > fMax) fMax = fVal;
+    }
+
+    const szegoSpectralFlatness = Math.max(0, Math.min(1, detProduct));
+    return {
+      szegoSpectralFlatness: Number(szegoSpectralFlatness.toFixed(4)),
+      toeplitzDetRatio: Number((E / r[0]).toFixed(4)),
+      verblunskyCoeffs,
+      eigenMin: Number(Math.max(0, fMin).toFixed(4)),
+      eigenMax: Number(Math.max(0, fMax).toFixed(4)),
+      isNarrowbandSingularity: N >= 8 && szegoSpectralFlatness < 0.015
+    };
+  }
+
+  // ============================================================================
+  // 4. TEOREMA KŐNIG (BIPARTITE MAXIMUM MATCHING = MINIMUM VERTEX COVER)
+  // Mencocokkan blok SEARCH (himpunan simpul U) terhadap jendela baris kode sumber
+  // (himpunan simpul V) pada graf bipartit G = (U ∪ V, E) menggunakan algoritma
+  // lintasan penambah (augmenting path) Kőnig-Hopcroft-Karp sehingga pengeditan
+  // website berhasil secara deterministik meskipun ada deviasi spasi/atribut kecil.
+  // ============================================================================
+  function normalizeCodeLineForKonig(line) {
+    return String(line || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .replace(/\s*([=<>/{};:(),])\s*/g, '$1')
+      .toLowerCase();
+  }
+
+  function computeLineBipartiteWeight(normU, normV) {
+    if (!normU && !normV) return 1.0;
+    if (!normU || !normV) return 0.0;
+    if (normU === normV) return 1.0;
+    if (normU.length < 3 || normV.length < 3) {
+      return normU === normV ? 1.0 : 0.0;
+    }
+    // Sorensen-Dice bigram similarity pada string ternormalisasi
+    const bigramsU = new Map();
+    for (let i = 0; i < normU.length - 1; i++) {
+      const bg = normU.slice(i, i + 2);
+      bigramsU.set(bg, (bigramsU.get(bg) || 0) + 1);
+    }
+    let intersection = 0;
+    for (let i = 0; i < normV.length - 1; i++) {
+      const bg = normV.slice(i, i + 2);
+      const count = bigramsU.get(bg) || 0;
+      if (count > 0) {
+        intersection++;
+        bigramsU.set(bg, count - 1);
+      }
+    }
+    return (2.0 * intersection) / ((normU.length - 1) + (normV.length - 1));
+  }
+
+  function konigBipartiteMatchHunk(sourceCode, searchStr, replaceStr, edgeThreshold = 0.72) {
+    const code = String(sourceCode || '');
+    const sRaw = String(searchStr || '').replace(/^\r?\n/, '').replace(/\r?\n\s*$/, '');
+    const rRaw = String(replaceStr || '').replace(/^\r?\n/, '').replace(/\r?\n\s*$/, '');
+    if (!code || !sRaw.trim()) return null;
+
+    const srcLines = code.split(/\r?\n/);
+    const rawSearchLines = sRaw.split(/\r?\n/);
+
+    // Filter simpul U (baris non-kosong dari SEARCH) beserta indeks aslinya
+    const U = [];
+    for (let i = 0; i < rawSearchLines.length; i++) {
+      const norm = normalizeCodeLineForKonig(rawSearchLines[i]);
+      if (norm) U.push({ idx: i, raw: rawSearchLines[i], norm });
+    }
+    if (U.length === 0) return null;
+
+    const normSrc = srcLines.map(normalizeCodeLineForKonig);
+
+    // Cari kandidat posisi awal berdasarkan kecocokan simpul pertama U[0] atau simpul kedua U[1]
+    const candidateStarts = new Set();
+    for (let j = 0; j < normSrc.length; j++) {
+      if (!normSrc[j]) continue;
+      if (computeLineBipartiteWeight(U[0].norm, normSrc[j]) >= edgeThreshold) {
+        candidateStarts.add(j);
+      } else if (U.length >= 2 && computeLineBipartiteWeight(U[1].norm, normSrc[j]) >= edgeThreshold && j > 0) {
+        candidateStarts.add(j - 1);
+      }
+    }
+
+    if (candidateStarts.size === 0) return null;
+
+    let bestMatch = null;
+    const minSpan = Math.max(1, U.length - 1);
+    const maxSpan = Math.min(srcLines.length, rawSearchLines.length + Math.max(3, Math.ceil(rawSearchLines.length * 0.35)));
+
+    for (const startIdx of candidateStarts) {
+      const windowLen = Math.min(maxSpan, srcLines.length - startIdx);
+      if (windowLen < minSpan) continue;
+
+      // Himpunan simpul V dalam jendela kandidat [startIdx, startIdx + windowLen - 1]
+      const V = [];
+      for (let k = 0; k < windowLen; k++) {
+        const lineIdx = startIdx + k;
+        if (normSrc[lineIdx]) {
+          V.push({ winOffset: k, lineIdx, norm: normSrc[lineIdx] });
+        }
+      }
+      if (V.length === 0) continue;
+
+      // Konstruksi graf bipartit G = (U ∪ V, E) dengan syarat bobot w(u_a, v_b) >= edgeThreshold
+      const adj = Array.from({ length: U.length }, () => []);
+      const weights = Array.from({ length: U.length }, () => ({}));
+      for (let a = 0; a < U.length; a++) {
+        for (let b = 0; b < V.length; b++) {
+          // Jaga kedekatan urutan relatif agar tidak mencocokkan baris yang melompat jauh
+          if (Math.abs(a - b) > Math.max(3, Math.ceil(U.length * 0.4))) continue;
+          const w = computeLineBipartiteWeight(U[a].norm, V[b].norm);
+          if (w >= edgeThreshold) {
+            adj[a].push(b);
+            weights[a][b] = w;
+          }
+        }
+        // Urutkan tetangga berdasarkan bobot tertinggi terlebih dahulu
+        adj[a].sort((b1, b2) => weights[a][b2] - weights[a][b1]);
+      }
+
+      // Algoritma Augmenting Path Kőnig-Kuhn untuk mencari Pencocokan Maksimum |M*| = Penutup Simpul Minimum |C*|
+      const matchV = new Array(V.length).fill(-1);
+      const matchU = new Array(U.length).fill(-1);
+
+      function dfsAugment(u, visited) {
+        for (const v of adj[u]) {
+          if (visited[v]) continue;
+          visited[v] = true;
+          if (matchV[v] === -1 || dfsAugment(matchV[v], visited)) {
+            matchV[v] = u;
+            matchU[u] = v;
+            return true;
+          }
+        }
+        return false;
+      }
+
+      let matchingCardinality = 0;
+      for (let u = 0; u < U.length; u++) {
+        const visited = new Array(V.length).fill(false);
+        if (dfsAugment(u, visited)) {
+          matchingCardinality++;
+        }
+      }
+
+      const coverageRatio = matchingCardinality / U.length;
+      if (coverageRatio < (U.length <= 2 ? 1.0 : 0.75)) continue;
+
+      // Hitung total bobot pencocokan dan rentang baris aktual [matchedStartLine, matchedEndLine]
+      let totalWeight = 0;
+      let minLineIdx = Infinity;
+      let maxLineIdx = -Infinity;
+      for (let u = 0; u < U.length; u++) {
+        const v = matchU[u];
+        if (v !== -1) {
+          totalWeight += weights[u][v];
+          if (V[v].lineIdx < minLineIdx) minLineIdx = V[v].lineIdx;
+          if (V[v].lineIdx > maxLineIdx) maxLineIdx = V[v].lineIdx;
+        }
+      }
+
+      // Pastikan batas awal dan akhir jendela tercakup dengan baik
+      if (matchU[0] === -1 || matchU[U.length - 1] === -1) continue;
+
+      const avgWeight = totalWeight / matchingCardinality;
+      const compositeScore = coverageRatio * 0.6 + avgWeight * 0.4;
+
+      if (!bestMatch || compositeScore > bestMatch.compositeScore) {
+        bestMatch = {
+          startLineIdx: minLineIdx,
+          endLineIdx: maxLineIdx,
+          matchingCardinality,
+          minimumVertexCoverSize: matchingCardinality, // Berdasarkan Teorema Kőnig: |M*| = |C*|
+          coverageRatio: Number(coverageRatio.toFixed(4)),
+          avgWeight: Number(avgWeight.toFixed(4)),
+          compositeScore: Number(compositeScore.toFixed(4))
+        };
+      }
+    }
+
+    if (!bestMatch || bestMatch.compositeScore < 0.76) return null;
+
+    // Terapkan penggantian pada rentang [startLineIdx, endLineIdx] dengan penyesuaian indentasi
+    const origIndent = (srcLines[bestMatch.startLineIdx].match(/^\s*/) || [''])[0];
+    const rLines = rRaw.split(/\r?\n/);
+    const firstNonEmpty = rLines.find(l => l.trim()) || '';
+    const rIndent = (firstNonEmpty.match(/^\s*/) || [''])[0];
+    const adjustedReplace = rLines.map(l => {
+      if (!l.trim()) return l;
+      return l.startsWith(rIndent) ? origIndent + l.slice(rIndent.length) : origIndent + l.trim();
+    });
+
+    const spanLength = bestMatch.endLineIdx - bestMatch.startLineIdx + 1;
+    const updatedLines = [...srcLines];
+    updatedLines.splice(bestMatch.startLineIdx, spanLength, ...adjustedReplace);
+
+    return {
+      content: updatedLines.join('\n'),
+      range: {
+        startLine: bestMatch.startLineIdx + 1,
+        endLine: bestMatch.startLineIdx + Math.max(1, adjustedReplace.length)
+      },
+      konigDiagnostics: bestMatch
+    };
+  }
+
   function createHyperbolicManifold() {
     const PHI = (Math.sqrt(5) - 1) / 2;
     let lastPoint = { x: 0, y: 0, r: 0, theta: 0, geodesicDist: 0, busemann: 0 };
@@ -279,7 +671,15 @@
     return {
       mapToken,
       detectHorocycleTrap,
-      getState: () => ({ lastPoint, dyckDepth, historyLength: history.length })
+      getState: () => {
+        const signalSamples = history.map(p => p.geodesicDist + p.r);
+        return {
+          lastPoint,
+          dyckDepth,
+          historyLength: history.length,
+          szegoSpectrum: computeSzegoToeplitzSpectrum(signalSamples, 6)
+        };
+      }
     };
   }
 
@@ -292,6 +692,7 @@
     let refusalDetected = false;
     let horocycleTrapped = false;
     let totalProcessedChars = 0;
+    let sampleWindowText = '';
     const MAX_GATE_HOLD_CHARS = options.maxHoldChars || 180;
 
     function consumePreamblePrefix() {
@@ -311,6 +712,9 @@
       const str = String(chunkText || '');
       if (str) {
         totalProcessedChars += str.length;
+        if (sampleWindowText.length < 1600) {
+          sampleWindowText += str;
+        }
         manifold.mapToken(str);
         const trapCheck = manifold.detectHorocycleTrap();
         if (trapCheck.trapped) {
@@ -390,6 +794,7 @@
         strippedPreamble,
         refusalDetected,
         horocycleTrapped,
+        erdosGraph: computeErdosIntentGraph(userPrompt, sampleWindowText),
         manifold: manifold.getState()
       })
     };
@@ -658,6 +1063,9 @@
     extractIntentVector,
     computeStreamMetrics,
     synthesizeAutoregressivePrefill,
+    computeErdosIntentGraph,
+    computeSzegoToeplitzSpectrum,
+    konigBipartiteMatchHunk,
     createHyperbolicManifold,
     createEntropyStreamGate
   };
