@@ -10257,6 +10257,105 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     return existingText + sep + chunk;
   }
 
+  // ==================== DETERMINISTIC WEBSITE COMPLETENESS VALIDATOR ====================
+  // Memvalidasi secara matematis dan struktural apakah sebuah berkas website HTML benar-benar
+  // tuntas 100% atau terpotong di tengah jalan.
+  function isWebsiteComplete(content, fullText = '', options = {}) {
+    if (!content || typeof content !== 'string') return false;
+    const trimmed = content.trim();
+    if (trimmed.length < 150) return false;
+
+    // 1. Tag dokumen HTML5 utama
+    const hasDocTypeOrHtml = /<!DOCTYPE\s+html|<html\b/i.test(trimmed);
+    const hasOpeningBody = /<body\b/i.test(trimmed);
+    const hasClosingBody = /<\/body\s*>/i.test(trimmed);
+    const hasClosingHtml = /<\/html\s*>/i.test(trimmed);
+
+    if (!hasDocTypeOrHtml || !hasClosingHtml || !hasOpeningBody || !hasClosingBody) {
+      return false;
+    }
+
+    // 2. Posisi penutup: </html> harus berada setelah </body>
+    const bodyCloseIdx = trimmed.toLowerCase().lastIndexOf('</body>');
+    const htmlCloseIdx = trimmed.toLowerCase().lastIndexOf('</html>');
+    if (htmlCloseIdx <= bodyCloseIdx) {
+      return false;
+    }
+
+    // 3. Keseimbangan pasangan tag <script> dan </script>
+    const scriptOpenMatches = (trimmed.match(/<script\b[^>]*>/gi) || []).length;
+    const scriptCloseMatches = (trimmed.match(/<\/script\s*>/gi) || []).length;
+    if (scriptOpenMatches !== scriptCloseMatches) {
+      return false;
+    }
+
+    // 4. Keseimbangan pasangan tag <style> dan </style>
+    const styleOpenMatches = (trimmed.match(/<style\b[^>]*>/gi) || []).length;
+    const styleCloseMatches = (trimmed.match(/<\/style\s*>/gi) || []).length;
+    if (styleOpenMatches !== styleCloseMatches) {
+      return false;
+    }
+
+    // 5. Cek tag yang terputus di tengah jalan (misal '<button on\n</body>' atau '<div class="')
+    const cleanDom = trimmed
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+
+    let inAngle = false;
+    for (let i = 0; i < cleanDom.length; i++) {
+      const ch = cleanDom[i];
+      if (ch === '<') {
+        if (inAngle) return false;
+        inAngle = true;
+      } else if (ch === '>') {
+        inAngle = false;
+      }
+    }
+    if (inAngle) return false;
+
+    // 6. Pasangan marker blok berkas (<<<ZOZ_FILE ... >>>)
+    const combined = (fullText ? fullText + '\n' : '') + trimmed;
+    if (combined.includes('<<<ZOZ_FILE')) {
+      const fileStarts = (combined.match(/<<<ZOZ_(?:FILE|EDIT|MODIFY)/g) || []).length;
+      const fileEnds = (combined.match(/<<<END_ZOZ_(?:FILE|EDIT|MODIFY)/g) || []).length;
+      if (fileStarts > fileEnds) {
+        return false;
+      }
+    }
+
+    // 7. Pasangan markdown fence jika dipakai
+    if (combined.includes('```html') || combined.includes('```htm')) {
+      const backtickCount = (combined.match(/```/g) || []).length;
+      if (backtickCount % 2 !== 0) {
+        return false;
+      }
+    }
+
+    // 8. Deteksi Zero-Lazy & placeholder terpotong (anti kode malas)
+    const lazyPlaceholders = [
+      /<!--\s*(?:sisa\s+kode|rest\s+of\s+code|lanjutkan|tambahkan\s+sisa|to\s*be\s*continued|todo:?\s*add)\b/i,
+      /\/\*\s*(?:sisa\s+kode|rest\s+of\s+code|lanjutkan|tambahkan\s+sisa|insert\s+code\s+here)\b/i,
+      /\/\/\s*(?:sisa\s+kode|rest\s+of\s+code|lanjutkan\s+disini|insert\s+code\s+here)\b/i
+    ];
+    if (lazyPlaceholders.some(rx => rx.test(trimmed))) {
+      return false;
+    }
+
+    // 9. Validasi substansi DOM (harus ada konten visual DOM nyata di dalam body)
+    const bodyMatch = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(trimmed);
+    if (bodyMatch) {
+      const bodyInner = bodyMatch[1].trim();
+      const visualDom = bodyInner.replace(/<script\b[\s\S]*?<\/script>/gi, '').replace(/<style\b[\s\S]*?<\/style>/gi, '').trim();
+      if (visualDom.length < 50) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+  if (typeof window !== 'undefined') window.isWebsiteComplete = isWebsiteComplete;
+
   function isOutputTruncated(text, finishReason = null) {
     if (finishReason === 'length') return true;
     if (!text) return false;
@@ -10269,16 +10368,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     if (backtickCount % 2 !== 0) return true;
 
     // Check for HTML document completion
-    const htmlStarts = (trimmed.match(/<html\b/gi) || (trimmed.match(/<!DOCTYPE\s+html/gi) || [])).length;
-    const htmlEnds = (trimmed.match(/<\/html>/gi) || []).length;
-    const scriptStarts = (trimmed.match(/<script\b/gi) || []).length;
-    const scriptEnds = (trimmed.match(/<\/script>/gi) || []).length;
-    const styleStarts = (trimmed.match(/<style\b/gi) || []).length;
-    const styleEnds = (trimmed.match(/<\/style>/gi) || []).length;
-    const hasClosedHtml = htmlEnds > 0 && htmlEnds >= htmlStarts && scriptStarts <= scriptEnds && styleStarts <= styleEnds;
-
-    // Jika dokumen HTML sudah ditutup sempurna dengan </html> dan skrip/style berpasangan,
-    // dokumen ini sudah 100% SELESAI dan TIDAK terpotong (meskipun tanpa marker <<<END_ZOZ_FILE>>>).
+    const hasClosedHtml = isWebsiteComplete(trimmed);
     if (hasClosedHtml) return false;
 
     // Check for unclosed ZOZ_FILE block (toleran terhadap tag penutup tanpa chevrons trailing)
@@ -10374,9 +10464,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     STATE.abortController = new AbortController();
 
     const MAX_AGENT_ROUNDS = 5;
-    let agentRound = 1;
+    let agentRound = 0;
     let currentAccumulated = rawBaseText;
-    let completedSuccessfully = false;
+    let isActuallyComplete = false;
 
     const contRunOptions = {
       websiteMode: session?.lastWebsiteMode || 'preview',
@@ -10400,54 +10490,68 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     };
 
     try {
-      updateAgentHud('Menyambung sintaks kode website secara paralel...');
+      while (agentRound < MAX_AGENT_ROUNDS && !isActuallyComplete && !STATE.abortController?.signal?.aborted) {
+        agentRound++;
+        updateAgentHud(`Putaran ${agentRound}/${MAX_AGENT_ROUNDS}: Menyambung sintaks kode website...`);
 
-      // Optimasi Tail-Context: Hanya ambil 40 baris terakhir kode yang terputus
-      const lines = currentAccumulated.split('\n');
-      const totalLines = lines.length;
-      const tailLinesCount = Math.min(40, totalLines);
-      const tailLines = lines.slice(-tailLinesCount).join('\n');
+        // Optimasi Tail-Context: Hanya ambil 40 baris terakhir kode yang terputus
+        const lines = currentAccumulated.split('\n');
+        const totalLines = lines.length;
+        const tailLinesCount = Math.min(40, totalLines);
+        const tailLines = lines.slice(-tailLinesCount).join('\n');
 
-      const continuePrompt = isWebContinue
-        ? `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang kode dari baris awal!\nDILARANG menyertakan pembukaan, penjelasan, salam, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript hingga kode website tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`
-        : `[Berikut adalah potongan teks/kode terakhir sebelum terputus]:\n\`\`\`\n${tailLines}\n\`\`\`\n\nLanjutkan penjelasan/kode secara persis mulai dari kata/kalimat terakhir yang terpotong. JANGAN mengulang teks dari awal, langsung teruskan kelanjutannya.`;
+        const continuePrompt = isWebContinue
+          ? `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang kode dari baris awal!\nDILARANG menyertakan pembukaan, penjelasan, salam, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript hingga kode website tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`
+          : `[Berikut adalah potongan teks/kode terakhir sebelum terputus]:\n\`\`\`\n${tailLines}\n\`\`\`\n\nLanjutkan penjelasan/kode secara persis mulai dari kata/kalimat terakhir yang terpotong. JANGAN mengulang teks dari awal, langsung teruskan kelanjutannya.`;
 
-      currentAccumulated = await executeParallelAgentSwarm({
-        session,
-        modelName,
-        engine,
-        continuePrompt,
-        tailLines,
-        bubbleText,
-        currentAccumulated,
-        runOptions: contRunOptions,
-        onStatus: updateAgentHud
-      });
+        let appended = '';
+        if (engine === 'ollama') {
+          appended = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, tailLines, { ...contRunOptions, signal: STATE.abortController?.signal });
+        } else {
+          appended = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, { ...contRunOptions, signal: STATE.abortController?.signal });
+        }
 
-      // Re-ekstrak file dan sinkronkan pratinjau kartu canvas secara langsung
-      const reExtracted = extractGeneratedFiles(currentAccumulated, true);
-      if (options.targetCard && reExtracted.files.length > 0) {
-        const updatedF = reExtracted.files[0];
-        if (updatedF) {
+        if (!appended || !appended.trim()) break;
+
+        currentAccumulated = safeAssistantText(stitchContinuationChunk(currentAccumulated, appended));
+
+        // Re-ekstrak file dan sinkronkan pratinjau kartu canvas secara langsung
+        const reExtracted = extractGeneratedFiles(currentAccumulated, true);
+        const curPrimary = reExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || reExtracted.files[0];
+        if (options.targetCard && reExtracted.files.length > 0 && curPrimary) {
           const cardIframe = options.targetCard.querySelector('.gemini-canvas-iframe');
-          if (cardIframe) cardIframe.srcdoc = prepareSafeHtmlForPreview(updatedF.rawContent || updatedF.content || '', updatedF);
+          if (cardIframe) cardIframe.srcdoc = prepareSafeHtmlForPreview(curPrimary.rawContent || curPrimary.content || '', curPrimary);
           const cardCode = options.targetCard.querySelector('.gemini-canvas-code code');
           if (cardCode) {
-            cardCode.textContent = updatedF.rawContent || updatedF.content || '';
+            cardCode.textContent = curPrimary.rawContent || curPrimary.content || '';
             try { if (window.hljs) window.hljs.highlightElement(cardCode); } catch (_) {}
           }
         }
+
+        if (curPrimary && isWebsiteComplete(curPrimary.rawContent || curPrimary.content || '', currentAccumulated)) {
+          isActuallyComplete = true;
+          break;
+        }
       }
 
-      // Re-ekstrak status akhir
+      // Re-ekstrak status akhir secara objektif
       const finalExtracted = extractGeneratedFiles(currentAccumulated, true);
-      const isHtmlFinishedFinal = isWebContinue && currentAccumulated.includes('</html>');
-      const isStillIncomplete = isHtmlFinishedFinal ? false : (
-        finalExtracted.hasIncompleteFile ||
-        isOutputTruncated(currentAccumulated) ||
-        ((currentAccumulated.includes('<!DOCTYPE html') || currentAccumulated.includes('<html') || currentAccumulated.includes('<<<ZOZ_FILE')) &&
-         !currentAccumulated.includes('</html>'))
-      );
+      const finalPrimary = finalExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || finalExtracted.files[0];
+      if (!isActuallyComplete && finalPrimary) {
+        isActuallyComplete = isWebsiteComplete(finalPrimary.rawContent || finalPrimary.content || '', currentAccumulated);
+      }
+      const isStillIncomplete = isWebContinue ? !isActuallyComplete : Boolean(finalExtracted.hasIncompleteFile || isOutputTruncated(currentAccumulated));
+
+      // Selesaikan task di TaskTracker HANYA jika berkas website sudah benar-benar tuntas!
+      if (isActuallyComplete) {
+        (STATE.taskTracker.tasks || []).forEach(t => {
+          if (t.status === 'in_progress') {
+            t.status = 'completed';
+            t.activeForm = 'Selesai';
+          }
+        });
+        renderTaskTrackerUI();
+      }
 
       let finalDisplayContent = currentAccumulated;
       if (finalExtracted.files.length > 0) {
@@ -11647,15 +11751,6 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       const singleEngine = engine || (typeof STATE !== 'undefined' && STATE.mode === 'ollama' ? 'ollama' : 'openrouter');
       const singleModel = modelName || (singleEngine === 'ollama' ? (STATE.settings.ollamaModel || 'deepseek-coder:latest') : (STATE.settings.openRouterModel || 'openrouter/free'));
 
-      const healDeterministic = (text) => {
-        let candidate = text;
-        if (candidate.includes('<script') && !candidate.includes('</script>')) candidate = repairUnclosedScript(candidate);
-        if (candidate.includes('<style') && !candidate.includes('</style>')) candidate += '\n</style>';
-        if (candidate.includes('<body') && !candidate.includes('</body>')) candidate += '\n</body>';
-        if (candidate.includes('<html') && !candidate.includes('</html>')) candidate += '\n</html>';
-        if (candidate.includes('<<<ZOZ_FILE') && !candidate.includes('<<<END_ZOZ_FILE')) candidate += '\n<<<END_ZOZ_FILE>>>';
-        return healLeakedCssFromHtml(candidate);
-      };
 
       try {
         let appended = '';
@@ -11668,17 +11763,18 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
 
         if (appended && appended.trim()) {
           const stitched = safeAssistantText(stitchContinuationChunk(currentAccumulated, appended));
-          const fullyHealed = healDeterministic(stitched);
-          if (onStatus) onStatus('✅ Kode berhasil dituntaskan & divalidasi 100% utuh!');
-          return fullyHealed;
+          const cleaned = healLeakedCssFromHtml(stitched);
+          const isDone = isWebsiteComplete(cleaned);
+          if (onStatus) {
+            onStatus(isDone ? '✅ Kode website berhasil dituntaskan & divalidasi 100% utuh!' : '⚡ Kode berhasil disambung...');
+          }
+          return cleaned;
         }
 
-        const fallback = healDeterministic(currentAccumulated);
-        if (onStatus) onStatus('✅ Kode diselamatkan & ditutup sempurna oleh Subagent Verifier!');
-        return fallback;
+        return healLeakedCssFromHtml(currentAccumulated);
       } catch (err) {
         console.warn('[ClaudeCodeParallelSwarm] Failover ke Subagent Verifier:', err);
-        return healDeterministic(currentAccumulated);
+        return healLeakedCssFromHtml(currentAccumulated);
       } finally {
         heartbeat.dispose();
         this.activeControllers.delete(heartbeat.controller);
@@ -16709,8 +16805,7 @@ Aturan wajib:
     const docTitle = getGeminiDocTitle(file);
     const rawContent = file.rawContent || file.content || '';
     const safeHtml = prepareSafeHtmlForPreview(rawContent, file);
-    const isFileIncomplete = Boolean(file.isIncomplete ||
-      (rawContent && (rawContent.includes('<!DOCTYPE html') || rawContent.includes('<html')) && (!rawContent.includes('</html>') || !rawContent.includes('</body>'))));
+    const isFileIncomplete = Boolean(file.isIncomplete || !isWebsiteComplete(rawContent, file.rawBlock || ''));
 
     FileRevisionStore.pushRevision(file.name, rawContent);
 
@@ -19352,7 +19447,7 @@ Aturan wajib:
       const isWebFile = lowerFileName.endsWith('.html') || lowerFileName.endsWith('.htm') || isReactFile || lowerLang === 'html' || lowerLang === 'htm';
       const hasSurgicalMarkers = isExplicitEdit || cleanContent.includes('<<<SEARCH') || /(?:<<<{1,3}|<{3,})\s*SEARCH\b/.test(cleanContent);
       if (!hasSurgicalMarkers && isWebFile && (cleanContent.includes('<!DOCTYPE html') || cleanContent.includes('<html'))) {
-        if (cleanContent.includes('</html>')) {
+        if (isWebsiteComplete(cleanContent, rawBlock)) {
           isUnclosed = false;
         } else {
           isUnclosed = true;
@@ -19624,7 +19719,9 @@ Aturan wajib:
 
         const rawFenceBlock = lines.slice(i, hasClosingFence ? end + 1 : lines.length).join('\n');
         const fallbackFile = buildAIFile(fallbackName, fallbackMime, isDocFence ? 'markdown' : (isMermaidFence ? 'mermaid' : langTag), repairedBody, '');
-        fallbackFile.isIncomplete = Boolean(isUnclosed);
+        const isCompleteFenceWeb = (isWebFile || isReactFence || langTag === 'html') ? isWebsiteComplete(repairedBody, rawFenceBlock) : !isUnclosed;
+        fallbackFile.isIncomplete = !isCompleteFenceWeb;
+        if (!isCompleteFenceWeb) out.hasIncompleteFile = true;
         fallbackFile.rawBlock = rawFenceBlock;
         out.files.push(fallbackFile);
         out.rawBlocks.push(rawFenceBlock);
@@ -19661,7 +19758,9 @@ Aturan wajib:
             }
             const rawHtmlBlock = text.slice(docStart, docEnd);
             const rawHtmlFile = buildAIFile('index.html', 'text/html', 'html', repairedBody, '');
-            rawHtmlFile.isIncomplete = Boolean(isUnclosed);
+            const isCompleteRawWeb = isWebsiteComplete(repairedBody, rawHtmlBlock);
+            rawHtmlFile.isIncomplete = !isCompleteRawWeb;
+            if (!isCompleteRawWeb) out.hasIncompleteFile = true;
             rawHtmlFile.rawBlock = rawHtmlBlock;
             out.files.push(rawHtmlFile);
             out.rawBlocks.push(rawHtmlBlock);
@@ -20305,13 +20404,16 @@ ${msg.content.slice(0, 3000)}
       if (requireApproval) {
         if (!STATE.localWorkspace.pendingChanges) STATE.localWorkspace.pendingChanges = {};
 
-        // Selesaikan semua subtask AI sebelumnya yang tertinggal in_progress
-        (STATE.taskTracker.tasks || []).forEach(t => {
-          if (t.status === 'in_progress') {
-            t.status = 'completed';
-            t.activeForm = 'Selesai';
-          }
-        });
+        // Selesaikan semua subtask AI sebelumnya yang tertinggal in_progress HANYA jika berkas benar-benar tuntas!
+        const allFilesActuallyComplete = generatedFiles.every(f => !f.isIncomplete && (/\.(?:html?|jsx|tsx)$/i.test(f.name || '') ? isWebsiteComplete(f.rawContent || f.content || '') : true));
+        if (allFilesActuallyComplete) {
+          (STATE.taskTracker.tasks || []).forEach(t => {
+            if (t.status === 'in_progress') {
+              t.status = 'completed';
+              t.activeForm = 'Selesai';
+            }
+          });
+        }
 
         let matchedTask = (STATE.taskTracker.tasks || []).find(t =>
           (t.status === 'waiting_approval' || t.status === 'pending' || t.status === 'in_progress') &&
@@ -26986,78 +27088,61 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         fullText.includes('<<<END_ZOZ_MODIFY') ||
         /(?:>>>{1,3}|>{3,})(?:\s*REPLACE\b)?/i.test(fullText) ||
         Boolean(runOptions && runOptions.isWebsiteRevision && extractGeneratedFiles(fullText, wantsFile).files.length > 0);
-      const hasClosedHtmlDoc = isWebTask && (fullText.includes('<!DOCTYPE html') || fullText.includes('<html')) && fullText.includes('</html>');
-      let initialCheck = extractGeneratedFiles(fullText, wantsFile);
-      const isInitiallyIncomplete = !hasCompletedSurgicalEdit && !hasClosedHtmlDoc && (
-        initialCheck.hasIncompleteFile ||
-        isOutputTruncated(fullText, doneReason === 'length' ? 'length' : null) ||
-        ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
-         !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
-      );
+      const initialExtractedFiles = extractGeneratedFiles(fullText, wantsFile, runOptions);
+      const initialWebFile = initialExtractedFiles.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || initialExtractedFiles.files[0];
+      let isWebsiteFullyDone = initialWebFile ? isWebsiteComplete(initialWebFile.rawContent || initialWebFile.content || '', fullText) : false;
 
-      if (isWebTask && isInitiallyIncomplete && !STATE.abortController?.signal?.aborted) {
-        console.log('[AutoRecovery Ollama] Kode website terpotong. Menjalankan auto-closure deterministik instan...');
+      // AUTONOMOUS MULTI-ROUND CONTINUATION (Ollama):
+      // Jika kode website terpotong di tengah jalan (belum lulus isWebsiteComplete),
+      // jalankan loop kelanjutan multi-putaran otonom hingga tuntas tanpa fake-closing!
+      if (isWebTask && !isWebsiteFullyDone && !hasCompletedSurgicalEdit && !STATE.abortController?.signal?.aborted) {
+        console.log('[AutoContinuation Ollama] Kode website belum tuntas. Menjalankan penuntasan otonom...');
+        let continuationRound = 0;
+        const MAX_AUTO_CONTINUATION = 4;
 
-        // 1. Jika teks sudah memiliki blok atau tag HTML (<!DOCTYPE, <html, <<<ZOZ_FILE, atau tag div/section):
-        // Langsung pulihkan dan tutup tag secara deterministik (<5ms) tanpa memanggil LLM lagi!
-        const hasSomeHtml = fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE') || fullText.includes('<body') || fullText.includes('<div');
-        if (hasSomeHtml) {
-          let healed = fullText;
-          if (healed.includes('<script') && !healed.includes('</script>')) healed = repairUnclosedScript(healed);
-          if (healed.includes('<style') && !healed.includes('</style>')) healed += '\n</style>';
-          if (healed.includes('<body') && !healed.includes('</body>')) healed += '\n</body>';
-          if (!healed.includes('</html>')) healed += '\n</html>';
-          if (healed.includes('<<<ZOZ_FILE') && !healed.includes('<<<END_ZOZ_FILE')) healed += '\n<<<END_ZOZ_FILE>>>';
-          fullText = healLeakedCssFromHtml(healed);
-          console.log('[AutoRecovery Ollama] Website berhasil ditutup & diamankan secara instan (Zero Latency)!');
-        } else if (!runOptions._autoRegenCount) {
-          // 2. Jika kode sama sekali belum terbentuk (misal model hanya merespon 1 kalimat pendek), jalankan 1x reload bersih
-          console.warn('[AutoRegen Website Ollama] Tidak ada kode terbentuk. Memuat ulang pembuatan website secara utuh...');
-          showToast('🔄 Memuat ulang pembuatan website secara utuh...', 'info');
+        while (!isWebsiteFullyDone && continuationRound < MAX_AUTO_CONTINUATION && !STATE.abortController?.signal?.aborted) {
+          continuationRound++;
+          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="auto-continue-hud" style="margin: 8px 0; padding: 10px 14px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.84rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 10px;"><i class="fa-solid fa-arrows-rotate fa-spin"></i> <span><strong>Menuntaskan Pembuatan Website (Putaran ${continuationRound}/${MAX_AUTO_CONTINUATION})</strong> &bull; Kode terpotong di tengah jalan. AI sedang menyambung penulisan kode website hingga tuntas...</span></div>`;
+          smartScrollChatToBottom(false);
 
-          const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
-          const freshWebPrompt = `Buatkan website yang lengkap, menarik, interaktif, dan berfungsi penuh untuk: "${promptBase}".\n\nMANDAT UTAMA:\nTuliskan seluruh kode dokumen HTML5 lengkap dari <!DOCTYPE html> sampai </html> di dalam blok <<<ZOZ_FILE name="index.html" lang="html">. Buat kode padat (150-200 baris) dengan Tailwind CSS dan vanilla JavaScript yang langsung jalan!`;
+          const lines = fullText.split('\n');
+          const totalLines = lines.length;
+          const tailLinesCount = Math.min(40, totalLines);
+          const tailLines = lines.slice(-tailLinesCount).join('\n');
+          const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang kode dari baris awal!\nDILARANG menyertakan pembukaan, penjelasan, salam, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript hingga kode website tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`;
 
-          try { assistantRow.remove(); } catch (_) {}
-          setGeneratingState(false);
-          STATE.isSending = false;
-          setTimeout(() => {
-            handleSendPrompt({
-              ...runOptions,
-              overrideText: freshWebPrompt,
-              displayPrompt: promptBase,
-              _autoRegenCount: 1,
-              websiteMode: 'preview',
-              isWebCreation: true,
-              skipWebsiteCheck: true,
-              skipDocCheck: true
-            });
-          }, 300);
-          return;
+          try {
+            const nextChunk = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, tailLines, { ...runOptions, signal: STATE.abortController?.signal });
+            if (nextChunk && nextChunk.trim()) {
+              fullText = safeAssistantText(stitchContinuationChunk(fullText, nextChunk));
+              const curExtracted = extractGeneratedFiles(fullText, wantsFile, runOptions);
+              const curWebFile = curExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || curExtracted.files[0];
+              isWebsiteFullyDone = curWebFile ? isWebsiteComplete(curWebFile.rawContent || curWebFile.content || '', fullText) : false;
+            } else {
+              break;
+            }
+          } catch (err) {
+            console.warn(`[AutoContinuation Ollama] Putaran ${continuationRound} terhenti:`, err);
+            break;
+          }
         }
       }
 
       const rawFullTextBeforeStripping = fullText;
 
       // ===== AI FILE STUDIO & WORKSPACE AUTO-SAVE =====
-      // Ekstrak file yang dibuat/diedit AI, lalu hapus bloknya dari gelembung agar tidak
-      // tampil kode mentah berulang (kartu file digantikan oleh kartu di bawah).
       const extractedAiFiles = extractGeneratedFiles(fullText, wantsFile, runOptions);
       const generatedFiles = extractedAiFiles.files;
-      const isFinalHtmlClosed = isWebTask && fullText.includes('</html>');
-      const isFileStillIncomplete = !isFinalHtmlClosed && (
-        extractedAiFiles.hasIncompleteFile ||
-        ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
-         !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
-      );
+      const finalWebFile = generatedFiles.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || generatedFiles[0];
+      const isFinalHtmlClosed = isWebTask && finalWebFile && isWebsiteComplete(finalWebFile.rawContent || finalWebFile.content || '', fullText);
+      const isFileStillIncomplete = isWebTask ? !isFinalHtmlClosed : Boolean(extractedAiFiles.hasIncompleteFile);
 
-      // MANDAT USER: Jika pembuatan website terpotong dan tidak berhasil dituntaskan secara lengkap,
-      // JANGAN DIAM DAN TERJADI LOOP! Muat ulang dengan output baru yang bersih dan utuh!
-      if (isWebTask && isFileStillIncomplete && !runOptions._autoRegenCount && !STATE.abortController?.signal?.aborted) {
-        console.warn('[AutoRegen Website Ollama] Output website tidak lengkap. Memuat ulang pembuatan website secara utuh...');
-        showToast('🔄 Respons terputus — memuat ulang pembuatan website secara utuh...', 'info');
+      // Jika sama sekali tidak ada kode website terbentuk (0 byte), reload 1x bersih
+      if (isWebTask && generatedFiles.length === 0 && !runOptions._autoRegenCount && !STATE.abortController?.signal?.aborted) {
+        console.warn('[AutoRegen Website Ollama] Tidak ada berkas website terbentuk. Memuat ulang pembuatan website secara utuh...');
+        showToast('🔄 Respons kosong — memuat ulang pembuatan website...', 'info');
 
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="auto-continue-hud" style="margin: 8px 0; padding: 10px 14px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.84rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 10px;"><i class="fa-solid fa-arrows-rotate fa-spin"></i> <span><strong>Memuat Ulang Pembuatan Website</strong> &bull; Respons terputus. AI sedang merancang ulang kode website secara utuh dari awal...</span></div>`;
+        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="auto-continue-hud" style="margin: 8px 0; padding: 10px 14px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.84rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 10px;"><i class="fa-solid fa-arrows-rotate fa-spin"></i> <span><strong>Memuat Ulang Pembuatan Website</strong> &bull; Respons kosong. AI sedang merancang ulang kode website dari awal...</span></div>`;
         smartScrollChatToBottom(true);
 
         const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
@@ -28789,78 +28874,61 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         fullText.includes('<<<END_ZOZ_MODIFY') ||
         /(?:>>>{1,3}|>{3,})(?:\s*REPLACE\b)?/i.test(fullText) ||
         Boolean(runOptions && runOptions.isWebsiteRevision && extractGeneratedFiles(fullText, wantsFile).files.length > 0);
-      const hasClosedHtmlDoc = isWebTask && (fullText.includes('<!DOCTYPE html') || fullText.includes('<html')) && fullText.includes('</html>');
-      let initialCheck = extractGeneratedFiles(fullText, wantsFile);
-      const isInitiallyIncomplete = !hasCompletedSurgicalEdit && !hasClosedHtmlDoc && (
-        initialCheck.hasIncompleteFile ||
-        isOutputTruncated(fullText, finishReason) ||
-        ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
-         !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
-      );
+      const initialExtractedFiles = extractGeneratedFiles(fullText, wantsFile, runOptions);
+      const initialWebFile = initialExtractedFiles.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || initialExtractedFiles.files[0];
+      let isWebsiteFullyDone = initialWebFile ? isWebsiteComplete(initialWebFile.rawContent || initialWebFile.content || '', fullText) : false;
 
-      if (isWebTask && isInitiallyIncomplete && !STATE.abortController?.signal?.aborted) {
-        console.log('[AutoRecovery OpenRouter] Kode website terpotong. Menjalankan auto-closure deterministik instan...');
+      // AUTONOMOUS MULTI-ROUND CONTINUATION (OpenRouter):
+      // Jika kode website terpotong di tengah jalan (belum lulus isWebsiteComplete),
+      // jalankan loop kelanjutan multi-putaran otonom hingga tuntas tanpa fake-closing!
+      if (isWebTask && !isWebsiteFullyDone && !hasCompletedSurgicalEdit && !STATE.abortController?.signal?.aborted) {
+        console.log('[AutoContinuation OpenRouter] Kode website belum tuntas. Menjalankan penuntasan otonom...');
+        let continuationRound = 0;
+        const MAX_AUTO_CONTINUATION = 4;
 
-        // 1. Jika teks sudah memiliki blok atau tag HTML (<!DOCTYPE, <html, <<<ZOZ_FILE, atau tag div/section):
-        // Langsung pulihkan dan tutup tag secara deterministik (<5ms) tanpa memanggil LLM lagi!
-        const hasSomeHtml = fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE') || fullText.includes('<body') || fullText.includes('<div');
-        if (hasSomeHtml) {
-          let healed = fullText;
-          if (healed.includes('<script') && !healed.includes('</script>')) healed = repairUnclosedScript(healed);
-          if (healed.includes('<style') && !healed.includes('</style>')) healed += '\n</style>';
-          if (healed.includes('<body') && !healed.includes('</body>')) healed += '\n</body>';
-          if (!healed.includes('</html>')) healed += '\n</html>';
-          if (healed.includes('<<<ZOZ_FILE') && !healed.includes('<<<END_ZOZ_FILE')) healed += '\n<<<END_ZOZ_FILE>>>';
-          fullText = healLeakedCssFromHtml(healed);
-          console.log('[AutoRecovery OpenRouter] Website berhasil ditutup & diamankan secara instan (Zero Latency)!');
-        } else if (!runOptions._autoRegenCount) {
-          // 2. Jika kode sama sekali belum terbentuk (misal model hanya merespon 1 kalimat pendek), jalankan 1x reload bersih
-          console.warn('[AutoRegen Website OpenRouter] Tidak ada kode terbentuk. Memuat ulang pembuatan website secara utuh...');
-          showToast('🔄 Memuat ulang pembuatan website secara utuh...', 'info');
+        while (!isWebsiteFullyDone && continuationRound < MAX_AUTO_CONTINUATION && !STATE.abortController?.signal?.aborted) {
+          continuationRound++;
+          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="auto-continue-hud" style="margin: 8px 0; padding: 10px 14px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.84rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 10px;"><i class="fa-solid fa-arrows-rotate fa-spin"></i> <span><strong>Menuntaskan Pembuatan Website (Putaran ${continuationRound}/${MAX_AUTO_CONTINUATION})</strong> &bull; Kode terpotong di tengah jalan. AI sedang menyambung penulisan kode website hingga tuntas...</span></div>`;
+          smartScrollChatToBottom(false);
 
-          const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
-          const freshWebPrompt = `Buatkan website yang lengkap, menarik, interaktif, dan berfungsi penuh untuk: "${promptBase}".\n\nMANDAT UTAMA:\nTuliskan seluruh kode dokumen HTML5 lengkap dari <!DOCTYPE html> sampai </html> di dalam blok <<<ZOZ_FILE name="index.html" lang="html">. Buat kode padat (150-200 baris) dengan Tailwind CSS dan vanilla JavaScript yang langsung jalan!`;
+          const lines = fullText.split('\n');
+          const totalLines = lines.length;
+          const tailLinesCount = Math.min(40, totalLines);
+          const tailLines = lines.slice(-tailLinesCount).join('\n');
+          const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang kode dari baris awal!\nDILARANG menyertakan pembukaan, penjelasan, salam, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript hingga kode website tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`;
 
-          try { assistantRow.remove(); } catch (_) {}
-          setGeneratingState(false);
-          STATE.isSending = false;
-          setTimeout(() => {
-            handleSendPrompt({
-              ...runOptions,
-              overrideText: freshWebPrompt,
-              displayPrompt: promptBase,
-              _autoRegenCount: 1,
-              websiteMode: 'preview',
-              isWebCreation: true,
-              skipWebsiteCheck: true,
-              skipDocCheck: true
-            });
-          }, 300);
-          return;
+          try {
+            const nextChunk = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, { ...runOptions, signal: STATE.abortController?.signal });
+            if (nextChunk && nextChunk.trim()) {
+              fullText = safeAssistantText(stitchContinuationChunk(fullText, nextChunk));
+              const curExtracted = extractGeneratedFiles(fullText, wantsFile, runOptions);
+              const curWebFile = curExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || curExtracted.files[0];
+              isWebsiteFullyDone = curWebFile ? isWebsiteComplete(curWebFile.rawContent || curWebFile.content || '', fullText) : false;
+            } else {
+              break;
+            }
+          } catch (err) {
+            console.warn(`[AutoContinuation OpenRouter] Putaran ${continuationRound} terhenti:`, err);
+            break;
+          }
         }
       }
 
       const rawFullTextBeforeStripping = fullText;
 
       // ===== AI FILE STUDIO & WORKSPACE AUTO-SAVE =====
-      // Ekstrak file yang dibuat/diedit AI, lalu hapus bloknya dari gelembung agar tidak
-      // tampil kode mentah berulang (kartu file digantikan oleh kartu di bawah).
       const extractedAiFiles = extractGeneratedFiles(fullText, wantsFile, runOptions);
       const generatedFiles = extractedAiFiles.files;
-      const isFinalHtmlClosed = isWebTask && fullText.includes('</html>');
-      const isFileStillIncomplete = !isFinalHtmlClosed && (
-        extractedAiFiles.hasIncompleteFile ||
-        ((fullText.includes('<!DOCTYPE html') || fullText.includes('<html') || fullText.includes('<<<ZOZ_FILE')) &&
-         !fullText.includes('</html>') && !fullText.includes('<<<END_ZOZ_FILE'))
-      );
+      const finalWebFile = generatedFiles.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || generatedFiles[0];
+      const isFinalHtmlClosed = isWebTask && finalWebFile && isWebsiteComplete(finalWebFile.rawContent || finalWebFile.content || '', fullText);
+      const isFileStillIncomplete = isWebTask ? !isFinalHtmlClosed : Boolean(extractedAiFiles.hasIncompleteFile);
 
-      // MANDAT USER: Jika pembuatan website terpotong dan tidak berhasil dituntaskan secara lengkap,
-      // JANGAN DIAM DAN TERJADI LOOP! Muat ulang dengan output baru yang bersih dan utuh!
-      if (isWebTask && isFileStillIncomplete && !runOptions._autoRegenCount && !STATE.abortController?.signal?.aborted) {
-        console.warn('[AutoRegen Website OpenRouter] Output website tidak lengkap. Memuat ulang pembuatan website secara utuh...');
-        showToast('🔄 Respons terputus — memuat ulang pembuatan website secara utuh...', 'info');
+      // Jika sama sekali tidak ada kode website terbentuk (0 byte), reload 1x bersih
+      if (isWebTask && generatedFiles.length === 0 && !runOptions._autoRegenCount && !STATE.abortController?.signal?.aborted) {
+        console.warn('[AutoRegen Website OpenRouter] Tidak ada berkas website terbentuk. Memuat ulang pembuatan website secara utuh...');
+        showToast('🔄 Respons kosong — memuat ulang pembuatan website...', 'info');
 
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="auto-continue-hud" style="margin: 8px 0; padding: 10px 14px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.84rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 10px;"><i class="fa-solid fa-arrows-rotate fa-spin"></i> <span><strong>Memuat Ulang Pembuatan Website</strong> &bull; Respons terputus. AI sedang merancang ulang kode website secara utuh dari awal...</span></div>`;
+        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="auto-continue-hud" style="margin: 8px 0; padding: 10px 14px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.84rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 10px;"><i class="fa-solid fa-arrows-rotate fa-spin"></i> <span><strong>Memuat Ulang Pembuatan Website</strong> &bull; Respons kosong. AI sedang merancang ulang kode website dari awal...</span></div>`;
         smartScrollChatToBottom(true);
 
         const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
