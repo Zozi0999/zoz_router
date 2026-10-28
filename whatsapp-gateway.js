@@ -10,7 +10,8 @@ const {
   DisconnectReason,
   Browsers,
   fetchLatestBaileysVersion,
-  makeCacheableSignalKeyStore
+  makeCacheableSignalKeyStore,
+  downloadMediaMessage
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const QRCode = require('qrcode');
@@ -54,7 +55,9 @@ class WhatsAppGateway {
     }
 
     this.contacts = new Map(); // jid -> { id, name, notify, phone, lastMessage, lastTimestamp, unreadCount }
-    this.messages = new Map(); // jid -> [ { id, fromMe, text, timestamp, senderName, status } ]
+    this.messages = new Map(); // jid -> [ { id, fromMe, text, timestamp, senderName, status, media } ]
+    this.rawMessages = new Map(); // id -> raw Baileys WAMessage
+    this.uploadsDir = path.join(__dirname, 'data', 'uploads');
     this.config = { pinHash: null, createdAt: Date.now() };
 
     this.status = {
@@ -83,6 +86,108 @@ class WhatsAppGateway {
 
     this.loadConfig();
     this.loadPersistedData();
+  }
+
+  extractMediaFromMessage(msg) {
+    if (!msg || !msg.message) return null;
+    const m = msg.message;
+    if (m.imageMessage) {
+      const img = m.imageMessage;
+      const thumb = img.jpegThumbnail ? `data:image/jpeg;base64,${img.jpegThumbnail.toString('base64')}` : null;
+      return {
+        type: 'image',
+        fileName: 'photo.jpg',
+        mimetype: img.mimetype || 'image/jpeg',
+        size: img.fileLength ? Number(img.fileLength.low || img.fileLength) : 0,
+        thumbnail: thumb,
+        caption: img.caption || '',
+        url: null
+      };
+    }
+    if (m.documentMessage) {
+      const doc = m.documentMessage;
+      const docName = doc.fileName || 'dokumen.bin';
+      const thumb = doc.jpegThumbnail ? `data:image/jpeg;base64,${doc.jpegThumbnail.toString('base64')}` : null;
+      return {
+        type: 'document',
+        fileName: docName,
+        mimetype: doc.mimetype || 'application/octet-stream',
+        size: doc.fileLength ? Number(doc.fileLength.low || doc.fileLength) : 0,
+        pageCount: doc.pageCount ? Number(doc.pageCount) : null,
+        thumbnail: thumb,
+        caption: doc.caption || '',
+        url: null
+      };
+    }
+    if (m.videoMessage) {
+      const vid = m.videoMessage;
+      const thumb = vid.jpegThumbnail ? `data:image/jpeg;base64,${vid.jpegThumbnail.toString('base64')}` : null;
+      return {
+        type: 'video',
+        fileName: 'video.mp4',
+        mimetype: vid.mimetype || 'video/mp4',
+        size: vid.fileLength ? Number(vid.fileLength.low || vid.fileLength) : 0,
+        thumbnail: thumb,
+        caption: vid.caption || '',
+        url: null
+      };
+    }
+    if (m.audioMessage) {
+      const aud = m.audioMessage;
+      return {
+        type: 'audio',
+        fileName: 'audio.ogg',
+        mimetype: aud.mimetype || 'audio/ogg',
+        size: aud.fileLength ? Number(aud.fileLength.low || aud.fileLength) : 0,
+        seconds: aud.seconds ? Number(aud.seconds) : null,
+        thumbnail: null,
+        caption: '',
+        url: null
+      };
+    }
+    return null;
+  }
+
+  async downloadAndSaveMedia(msg, messageItem) {
+    if (!msg || !msg.message) return null;
+    const isMedia = Boolean(msg.message.imageMessage || msg.message.documentMessage || msg.message.videoMessage || msg.message.audioMessage || msg.message.stickerMessage);
+    if (!isMedia) return null;
+
+    try {
+      const buffer = await downloadMediaMessage(
+        msg,
+        'buffer',
+        {},
+        {
+          logger: pino({ level: 'silent' }),
+          reuploadRequest: this.sock ? this.sock.updateMediaMessage : undefined
+        }
+      );
+
+      if (buffer && buffer.length > 0) {
+        const id = messageItem.id || `media_${Date.now()}`;
+        const rawFileName = messageItem.media?.fileName || (msg.message.imageMessage ? 'photo.jpg' : 'file.bin');
+        const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const savedFilename = `wa_${id}_${cleanFileName}`;
+
+        const uploadsDir = path.join(__dirname, 'data', 'uploads');
+        if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+        const filePath = path.join(uploadsDir, savedFilename);
+        fs.writeFileSync(filePath, buffer);
+
+        if (!messageItem.media) {
+          messageItem.media = this.extractMediaFromMessage(msg) || {};
+        }
+        messageItem.media.url = `/uploads/${savedFilename}`;
+        messageItem.media.size = buffer.length;
+
+        this.savePersistedData();
+        return messageItem.media.url;
+      }
+    } catch (downloadErr) {
+      console.warn(`[WA-Gateway] Gagal mengunduh media pesan ${messageItem?.id}:`, downloadErr.message);
+    }
+    return null;
   }
 
   recordDevice(req) {
@@ -327,7 +432,36 @@ class WhatsAppGateway {
           for (const [jid, list] of Object.entries(raw)) {
             if (jid.includes('6281234567890')) continue;
             if (Array.isArray(list)) {
-              this.messages.set(jid, list.slice(-200)); // Simpan 200 pesan terakhir per kontak
+              const enhancedList = list.slice(-200).map(m => {
+                if (!m.media && m.text) {
+                  const docMatch = m.text.match(/(?:📄\s*)?\[Dokumen:\s*([^\]]+)\]/i);
+                  if (docMatch) {
+                    const rawName = docMatch[1].trim();
+                    const clean = rawName.replace(/[^a-zA-Z0-9._-]/g, '_');
+                    const ext = rawName.includes('.') ? rawName.slice(rawName.lastIndexOf('.')).toLowerCase() : '';
+                    const savedFile = `wa_${m.id}_${clean}`;
+                    const localPath = path.join(__dirname, 'data', 'uploads', savedFile);
+                    m.media = {
+                      type: 'document',
+                      fileName: rawName,
+                      mimetype: ext === '.pdf' ? 'application/pdf' : (ext.includes('doc') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/octet-stream'),
+                      url: fs.existsSync(localPath) ? `/uploads/${savedFile}` : null,
+                      size: 0
+                    };
+                  } else if (m.text.includes('📷 [Foto]')) {
+                    const savedFile = `wa_${m.id}_photo.jpg`;
+                    const localPath = path.join(__dirname, 'data', 'uploads', savedFile);
+                    m.media = {
+                      type: 'image',
+                      fileName: 'photo.jpg',
+                      mimetype: 'image/jpeg',
+                      url: fs.existsSync(localPath) ? `/uploads/${savedFile}` : null
+                    };
+                  }
+                }
+                return m;
+              });
+              this.messages.set(jid, enhancedList);
             }
           }
         }
@@ -694,6 +828,7 @@ class WhatsAppGateway {
               ts = rawTs > 9999999999 ? rawTs : rawTs * 1000;
             }
 
+            const media = this.extractMediaFromMessage(msg);
             const id = msg.key.id || `hist_${ts}_${Math.random().toString(36).slice(2, 6)}`;
             const senderName = msg.pushName || (fromMe ? 'Saya' : jid.split('@')[0]);
 
@@ -702,7 +837,19 @@ class WhatsAppGateway {
             }
             const list = this.messages.get(jid);
             if (!list.some(m => m.id === id)) {
-              list.push({ id, fromMe, text, timestamp: ts, senderName, status: fromMe ? 'sent' : 'received' });
+              const item = {
+                id,
+                fromMe,
+                text,
+                timestamp: ts,
+                senderName,
+                status: fromMe ? 'sent' : 'received',
+                ...(media ? { media } : {})
+              };
+              list.push(item);
+              if (media) {
+                this.rawMessages.set(id, msg);
+              }
             }
 
             let contact = this.contacts.get(jid);
@@ -791,7 +938,7 @@ class WhatsAppGateway {
                        (msg.message.stickerMessage ? '🏷️ [Stiker]' : '') ||
                        '';
 
-          if (!text && !msg.message.imageMessage && !msg.message.audioMessage) continue;
+          if (!text && !msg.message.imageMessage && !msg.message.audioMessage && !msg.message.documentMessage && !msg.message.videoMessage) continue;
 
           let ts = Date.now();
           if (msg.messageTimestamp) {
@@ -804,14 +951,25 @@ class WhatsAppGateway {
           const id = msg.key.id || `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
           const senderName = msg.pushName || (fromMe ? 'Saya' : jid.split('@')[0]);
 
+          const media = this.extractMediaFromMessage(msg);
           const messageItem = {
             id,
             fromMe,
             text,
             timestamp: ts,
             senderName,
-            status: fromMe ? 'sent' : 'received'
+            status: fromMe ? 'sent' : 'received',
+            ...(media ? { media } : {})
           };
+
+          if (media) {
+            this.rawMessages.set(id, msg);
+            this.downloadAndSaveMedia(msg, messageItem).then(url => {
+              if (url) {
+                this.broadcast('media_ready', { jid, msgId: id, media: messageItem.media });
+              }
+            }).catch(() => {});
+          }
 
           // Simpan pesan ke riwayat
           if (!this.messages.has(jid)) {
@@ -965,7 +1123,7 @@ class WhatsAppGateway {
     return { code: formatted, phone: cleanPhone };
   }
 
-  async sendMessage(jid, text) {
+  async sendMessage(jid, text, options = {}) {
     if (!this.sock || !this.status.connected) {
       if (this.hasStoredSession() || this.status.connecting) {
         if (!this.status.connecting) {
@@ -991,15 +1149,94 @@ class WhatsAppGateway {
       targetJid = `${cleanPhone}@s.whatsapp.net`;
     }
 
-    const sent = await this.sock.sendMessage(targetJid, { text });
+    let sent = null;
+    let messageItemMedia = null;
+    let outgoingText = text || '';
+
+    const media = options && options.media ? options.media : null;
+    if (media && (media.data || media.buffer || media.url)) {
+      let mediaBuffer = null;
+      if (Buffer.isBuffer(media.data)) {
+        mediaBuffer = media.data;
+      } else if (Buffer.isBuffer(media.buffer)) {
+        mediaBuffer = media.buffer;
+      } else if (typeof media.data === 'string' && media.data.startsWith('data:')) {
+        const b64 = media.data.replace(/^data:[^;]+;base64,/, '');
+        mediaBuffer = Buffer.from(b64, 'base64');
+      } else if (typeof media.data === 'string' && media.data.startsWith('/uploads/')) {
+        const localPath = path.join(__dirname, 'data', 'uploads', path.basename(media.data));
+        if (fs.existsSync(localPath)) mediaBuffer = fs.readFileSync(localPath);
+      }
+
+      if (mediaBuffer && mediaBuffer.length > 0) {
+        const mime = (media.mimetype || media.mimeType || '').toLowerCase();
+        const isImage = media.type === 'image' || mime.startsWith('image/');
+        const isVideo = media.type === 'video' || mime.startsWith('video/');
+        const isAudio = media.type === 'audio' || mime.startsWith('audio/');
+        const isDoc = !isImage && !isVideo && !isAudio;
+
+        let cleanFileName = (media.fileName || media.name || (isImage ? 'image.jpg' : 'document.bin')).replace(/[^a-zA-Z0-9._-]/g, '_');
+        const savedFilename = `wa_sent_${Date.now()}_${cleanFileName}`;
+        const uploadsDir = path.join(__dirname, 'data', 'uploads');
+        if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+        fs.writeFileSync(path.join(uploadsDir, savedFilename), mediaBuffer);
+
+        const mediaUrl = `/uploads/${savedFilename}`;
+        messageItemMedia = {
+          type: isImage ? 'image' : (isDoc ? 'document' : (isVideo ? 'video' : 'audio')),
+          url: mediaUrl,
+          fileName: cleanFileName,
+          mimetype: mime || (isImage ? 'image/jpeg' : 'application/octet-stream'),
+          size: mediaBuffer.length,
+          caption: outgoingText
+        };
+
+        if (isImage) {
+          sent = await this.sock.sendMessage(targetJid, {
+            image: mediaBuffer,
+            caption: outgoingText,
+            mimetype: mime || 'image/jpeg'
+          });
+          if (!outgoingText) outgoingText = '📷 [Foto]';
+        } else if (isVideo) {
+          sent = await this.sock.sendMessage(targetJid, {
+            video: mediaBuffer,
+            caption: outgoingText,
+            mimetype: mime || 'video/mp4'
+          });
+          if (!outgoingText) outgoingText = '📹 [Video]';
+        } else if (isAudio) {
+          sent = await this.sock.sendMessage(targetJid, {
+            audio: mediaBuffer,
+            mimetype: mime || 'audio/mp4',
+            ptt: true
+          });
+          if (!outgoingText) outgoingText = '🎵 [Audio/Voice Note]';
+        } else {
+          sent = await this.sock.sendMessage(targetJid, {
+            document: mediaBuffer,
+            mimetype: mime || 'application/octet-stream',
+            fileName: cleanFileName,
+            caption: outgoingText
+          });
+          if (!outgoingText) outgoingText = `📄 [Dokumen: ${cleanFileName}]`;
+        }
+      }
+    }
+
+    if (!sent) {
+      sent = await this.sock.sendMessage(targetJid, { text: outgoingText });
+    }
+
     const ts = Date.now();
     const messageItem = {
-      id: sent.key.id || `msg_${ts}`,
+      id: sent.key?.id || `msg_${ts}`,
       fromMe: true,
-      text,
+      text: outgoingText,
       timestamp: ts,
       senderName: 'Saya',
-      status: 'sent'
+      status: 'sent',
+      ...(messageItemMedia ? { media: messageItemMedia } : {})
     };
 
     if (!this.messages.has(targetJid)) {
@@ -1016,12 +1253,12 @@ class WhatsAppGateway {
         notify: '',
         phone: targetJid.split('@')[0],
         unreadCount: 0,
-        lastMessage: text,
+        lastMessage: outgoingText,
         lastTimestamp: ts
       };
       this.contacts.set(targetJid, contact);
     } else {
-      contact.lastMessage = text;
+      contact.lastMessage = outgoingText;
       contact.lastTimestamp = ts;
     }
 

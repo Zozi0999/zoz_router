@@ -5941,6 +5941,41 @@ async function requestHandler(req, res) {
     return sendJSON(res, 200, { success: true, jid, messages });
   }
 
+  if (pathname === '/api/wa/media' && method === 'GET') {
+    const tenant = getWaTenant(req, reqUrl);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, { success: false, error: tenant.error });
+    }
+    const msgId = reqUrl.searchParams.get('msgId');
+    const rawFileName = reqUrl.searchParams.get('fileName') || 'file.bin';
+    if (!msgId) {
+      return sendJSON(res, 400, { success: false, error: 'Parameter msgId wajib diisi.' });
+    }
+
+    const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const savedFilename = `wa_${msgId}_${cleanFileName}`;
+    const filePath = path.join(UPLOADS_DIR, savedFilename);
+
+    if (fs.existsSync(filePath)) {
+      return sendJSON(res, 200, { success: true, url: `/uploads/${savedFilename}`, ready: true });
+    }
+
+    // Coba unduh on-demand jika raw message ada di cache gateway
+    const rawMsg = tenant.gateway.rawMessages?.get(msgId);
+    if (rawMsg) {
+      try {
+        const url = await tenant.gateway.downloadAndSaveMedia(rawMsg, { id: msgId, media: { fileName: cleanFileName } });
+        if (url) {
+          return sendJSON(res, 200, { success: true, url, ready: true });
+        }
+      } catch (e) {
+        console.warn('Error downloading on-demand WA media:', e.message);
+      }
+    }
+
+    return sendJSON(res, 404, { success: false, error: 'Media belum tersedia atau sesi sudah kadaluarsa.' });
+  }
+
   if (pathname === '/api/wa/send' && method === 'POST') {
     const body = (await safeParseBody(req)) || {};
     const tenant = getWaTenant(req, reqUrl, body);
@@ -5952,11 +5987,11 @@ async function requestHandler(req, res) {
         userId: tenant.userId
       });
     }
-    if (!body.jid || !body.text) {
-      return sendJSON(res, 400, { success: false, error: 'Parameter jid dan text wajib diisi.' });
+    if (!body.jid || (!body.text && !body.media)) {
+      return sendJSON(res, 400, { success: false, error: 'Parameter jid dan teks atau media wajib diisi.' });
     }
     try {
-      const message = await tenant.gateway.sendMessage(body.jid, body.text);
+      const message = await tenant.gateway.sendMessage(body.jid, body.text || '', { media: body.media });
       return sendJSON(res, 200, { success: true, message });
     } catch (err) {
       return sendJSON(res, 500, { success: false, error: err.message });

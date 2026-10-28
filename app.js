@@ -1449,7 +1449,17 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     waConnectedDevicesCard: $('#waConnectedDevicesCard'),
     btnRefreshConnectedDevices: $('#btnRefreshConnectedDevices'),
     waDevicesList: $('#waDevicesList'),
-    btnWaModalCameraScan: $('#btnWaModalCameraScan')
+    btnWaModalCameraScan: $('#btnWaModalCameraScan'),
+    modalWaDocPreview: $('#modalWaDocPreview'),
+    btnCloseWaDocPreview: $('#btnCloseWaDocPreview'),
+    waDocPreviewIconBox: $('#waDocPreviewIconBox'),
+    waDocPreviewIcon: $('#waDocPreviewIcon'),
+    waDocPreviewTitle: $('#waDocPreviewTitle'),
+    waDocPreviewSubtitle: $('#waDocPreviewSubtitle'),
+    waDocPreviewBody: $('#waDocPreviewBody'),
+    waDocPreviewMeta: $('#waDocPreviewMeta'),
+    btnWaDocOpenNewTab: $('#btnWaDocOpenNewTab'),
+    btnWaDocDownloadModal: $('#btnWaDocDownloadModal')
   };
 
   // ==================== AUTONOMOUS TOOL RESPONSE CACHE ====================
@@ -14544,11 +14554,20 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
 
       const content = await extractFileContent(file);
+      const dataUrl = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = ev => resolve(ev.target.result);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+      });
 
       STATE.attachedDocs.push({
         name: file.name,
         size: sizeStr,
-        content: content
+        content: content,
+        dataUrl: dataUrl,
+        mimeType: file.type || 'application/octet-stream',
+        rawFile: file
       });
       addedDocsCount++;
     }
@@ -42556,6 +42575,23 @@ Aturan:
           this.closeContactDropdown();
         }
       });
+
+      // WhatsApp Document Preview Modal Close
+      const closeWaDocModal = () => {
+        if (els.modalWaDocPreview) {
+          els.modalWaDocPreview.style.display = 'none';
+          if (els.waDocPreviewBody) els.waDocPreviewBody.innerHTML = '';
+        }
+      };
+      els.btnCloseWaDocPreview?.addEventListener('click', () => {
+        AudioEngine.click();
+        closeWaDocModal();
+      });
+      els.modalWaDocPreview?.addEventListener('click', (e) => {
+        if (e.target.id === 'modalWaDocPreview') {
+          closeWaDocModal();
+        }
+      });
     },
 
     initSSE() {
@@ -42580,6 +42616,8 @@ Aturan:
               this.handleQrUpdate(parsed.data?.qr);
             } else if (parsed.event === 'new_message') {
               this.handleNewMessage(parsed.data);
+            } else if (parsed.event === 'media_ready') {
+              this.handleMediaReady(parsed.data);
             } else if (parsed.event === 'pairing_code') {
               if (parsed.data?.code) {
                 if (els.waPairingCodeDisplay) els.waPairingCodeDisplay.textContent = parsed.data.code;
@@ -43388,6 +43426,366 @@ Aturan:
       });
     },
 
+    parseMediaFromMessage(msg) {
+      if (!msg) return null;
+      if (msg.media && (msg.media.url || msg.media.data || msg.media.type || msg.media.fileName)) {
+        return { ...msg.media };
+      }
+      const text = typeof msg.text === 'string' ? msg.text : '';
+
+      // Pattern 1: Dokumen (mis. "[Dokumen: indana mawaddatul ulya.docx]" atau "📄 [Dokumen: file.pdf]")
+      const docMatch = text.match(/(?:.*?)\[(?:Dokumen|Document):\s*([^\]]+)\]/i);
+      if (docMatch) {
+        const fileName = docMatch[1].trim();
+        const ext = fileName.includes('.') ? (fileName.split('.').pop() || '').toLowerCase() : '';
+        let mimetype = 'application/octet-stream';
+        if (ext === 'pdf') mimetype = 'application/pdf';
+        else if (['doc', 'docx'].includes(ext)) mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        else if (['xls', 'xlsx', 'csv'].includes(ext)) mimetype = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        else if (['ppt', 'pptx'].includes(ext)) mimetype = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+        else if (ext === 'txt') mimetype = 'text/plain';
+        else if (['zip', 'rar', '7z'].includes(ext)) mimetype = 'application/zip';
+        else if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) mimetype = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+
+        const cleanCaption = text.replace(/(?:[\s\S]*?)\[(?:Dokumen|Document):\s*[^\]]+\]/gi, '').trim();
+
+        return {
+          type: 'document',
+          fileName,
+          mimetype,
+          caption: cleanCaption,
+          url: null
+        };
+      }
+
+      // Pattern 2: Foto (mis. "📷 [Foto]" atau "[Foto]")
+      const imgMatch = text.match(/(?:.*?)\[(?:Foto|Photo|Gambar|Image)\]/i);
+      if (imgMatch) {
+        const cleanCaption = text.replace(/(?:[\s\S]*?)\[(?:Foto|Photo|Gambar|Image)\]/gi, '').trim();
+        return {
+          type: 'image',
+          fileName: 'photo.jpg',
+          mimetype: 'image/jpeg',
+          caption: cleanCaption,
+          url: null
+        };
+      }
+
+      // Pattern 3: Video
+      const vidMatch = text.match(/(?:.*?)\[(?:Video)\]/i);
+      if (vidMatch) {
+        const cleanCaption = text.replace(/(?:[\s\S]*?)\[(?:Video)\]/gi, '').trim();
+        return {
+          type: 'video',
+          fileName: 'video.mp4',
+          mimetype: 'video/mp4',
+          caption: cleanCaption,
+          url: null
+        };
+      }
+
+      // Pattern 4: Audio
+      const audMatch = text.match(/(?:.*?)\[(?:Audio|Voice Note)\]/i);
+      if (audMatch) {
+        const cleanCaption = text.replace(/(?:[\s\S]*?)\[(?:Audio|Voice Note)\]/gi, '').trim();
+        return {
+          type: 'audio',
+          fileName: 'audio.mp3',
+          mimetype: 'audio/mp4',
+          caption: cleanCaption,
+          url: null
+        };
+      }
+
+      return null;
+    },
+
+    formatFileSize(bytes) {
+      if (!bytes || typeof bytes !== 'number') return '';
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    },
+
+    async openDocumentPreview(doc, msg = null) {
+      const fileName = doc.fileName || 'dokumen.bin';
+      const ext = fileName.includes('.') ? (fileName.split('.').pop() || '').toLowerCase() : '';
+      let url = doc.url;
+      const msgId = msg?.id || '';
+
+      const modal = document.getElementById('modalWaDocPreview');
+      const titleEl = document.getElementById('waDocPreviewTitle');
+      const subEl = document.getElementById('waDocPreviewSubtitle');
+      const iconBox = document.getElementById('waDocPreviewIconBox');
+      const iconEl = document.getElementById('waDocPreviewIcon');
+      const bodyEl = document.getElementById('waDocPreviewBody');
+      const metaEl = document.getElementById('waDocPreviewMeta');
+      const btnOpenTab = document.getElementById('btnWaDocOpenNewTab');
+      const btnDownload = document.getElementById('btnWaDocDownloadModal');
+
+      if (!modal || !bodyEl) return;
+
+      let iconClass = 'fa-solid fa-file-lines';
+      let iconColor = '#25D366';
+      let bgBox = 'rgba(37, 211, 102, 0.15)';
+      let borderBox = 'rgba(37, 211, 102, 0.3)';
+      let typeLabel = 'Berkas Dokumen';
+
+      if (ext === 'pdf') {
+        iconClass = 'fa-solid fa-file-pdf';
+        iconColor = '#ef4444';
+        bgBox = 'rgba(239, 68, 68, 0.15)';
+        borderBox = 'rgba(239, 68, 68, 0.3)';
+        typeLabel = 'Dokumen Adobe PDF';
+      } else if (['doc', 'docx'].includes(ext)) {
+        iconClass = 'fa-solid fa-file-word';
+        iconColor = '#3b82f6';
+        bgBox = 'rgba(59, 130, 246, 0.15)';
+        borderBox = 'rgba(59, 130, 246, 0.3)';
+        typeLabel = 'Dokumen Microsoft Word';
+      } else if (['xls', 'xlsx', 'csv'].includes(ext)) {
+        iconClass = 'fa-solid fa-file-excel';
+        iconColor = '#10b981';
+        bgBox = 'rgba(16, 185, 129, 0.15)';
+        borderBox = 'rgba(16, 185, 129, 0.3)';
+        typeLabel = 'Lembar Kerja Excel';
+      } else if (['ppt', 'pptx'].includes(ext)) {
+        iconClass = 'fa-solid fa-file-powerpoint';
+        iconColor = '#f97316';
+        bgBox = 'rgba(249, 115, 22, 0.15)';
+        borderBox = 'rgba(249, 115, 22, 0.3)';
+        typeLabel = 'Presentasi PowerPoint';
+      } else if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) {
+        iconClass = 'fa-solid fa-file-zipper';
+        iconColor = '#a855f7';
+        bgBox = 'rgba(168, 85, 247, 0.15)';
+        borderBox = 'rgba(168, 85, 247, 0.3)';
+        typeLabel = 'Arsip Terkompresi';
+      }
+
+      if (titleEl) titleEl.textContent = fileName;
+      if (subEl) subEl.textContent = typeLabel;
+      if (iconEl) iconEl.className = iconClass;
+      if (iconBox) {
+        iconBox.style.color = iconColor;
+        iconBox.style.background = bgBox;
+        iconBox.style.borderColor = borderBox;
+      }
+      if (metaEl) {
+        const sizeStr = doc.size ? ` • ${this.formatFileSize(doc.size)}` : '';
+        metaEl.textContent = `${typeLabel}${sizeStr}`;
+      }
+
+      bodyEl.innerHTML = `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; color: #94a3b8;">
+          <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 2rem; color: #25D366; margin-bottom: 12px;"></i>
+          <span>Menyiapkan pratinjau ${escapeHtml(fileName)}...</span>
+        </div>
+      `;
+      modal.style.display = 'flex';
+      AudioEngine.click();
+
+      // Resolve URL dari server jika belum ada
+      if (!url && msgId) {
+        try {
+          const res = await this.waFetch(`/api/wa/media?msgId=${encodeURIComponent(msgId)}&fileName=${encodeURIComponent(fileName)}`, { headers: this.getAuthHeaders() }, 1);
+          const data = await res.json().catch(() => null);
+          if (data && data.url) {
+            url = data.url;
+            doc.url = url;
+          }
+        } catch (_) {}
+      }
+
+      const fullUrl = url ? (url.startsWith('http') ? url : `${window.location.origin}${url}`) : '';
+
+      if (btnOpenTab) {
+        if (url) {
+          btnOpenTab.style.display = 'inline-flex';
+          btnOpenTab.onclick = () => window.open(fullUrl || url, '_blank');
+        } else {
+          btnOpenTab.style.display = 'none';
+        }
+      }
+
+      if (btnDownload) {
+        btnDownload.onclick = () => {
+          this.downloadDocument(fileName, url, msgId);
+        };
+      }
+
+      if (ext === 'pdf') {
+        if (url) {
+          bodyEl.innerHTML = `
+            <iframe src="${escapeHtml(url)}" style="width: 100%; height: 65vh; border: none; border-radius: 8px; background: #fff;" title="${escapeHtml(fileName)}"></iframe>
+          `;
+        } else {
+          bodyEl.innerHTML = `
+            <div style="text-align: center; padding: 30px 20px; max-width: 480px;">
+              <div style="width: 60px; height: 60px; border-radius: 12px; background: ${bgBox}; color: ${iconColor}; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 0 auto 16px;">
+                <i class="${iconClass}"></i>
+              </div>
+              <h4 style="color: #f8fafc; margin-bottom: 8px; font-size: 1.05rem;">${escapeHtml(fileName)}</h4>
+              <p style="color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin-bottom: 20px;">
+                File PDF ini diterima melalui sesi WhatsApp Anda. Klik tombol unduh di bawah untuk membaca dokumen secara lengkap.
+              </p>
+              <button type="button" class="btn btn-primary" onclick="WhatsAppController.downloadDocument('${escapeHtml(fileName)}', '', '${escapeHtml(msgId)}')" style="background: #25D366; border-color: #25D366; color: #052e16; font-weight: 600; padding: 10px 24px; border-radius: 8px;">
+                <i class="fa-solid fa-download"></i> Unduh & Buka PDF
+              </button>
+            </div>
+          `;
+        }
+      } else if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext)) {
+        const officeViewerUrl = fullUrl && !window.location.hostname.includes('localhost') ? `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(fullUrl)}` : '';
+
+        bodyEl.innerHTML = `
+          <div style="text-align: center; padding: 25px 20px; max-width: 520px; width: 100%;">
+            <div style="width: 64px; height: 64px; border-radius: 16px; background: ${bgBox}; color: ${iconColor}; display: flex; align-items: center; justify-content: center; font-size: 2.2rem; margin: 0 auto 16px;">
+              <i class="${iconClass}"></i>
+            </div>
+            <h4 style="color: #f8fafc; margin-bottom: 6px; font-size: 1.1rem; word-break: break-word;">${escapeHtml(fileName)}</h4>
+            <span style="display: inline-block; padding: 3px 10px; border-radius: 12px; background: rgba(255,255,255,0.08); color: #94a3b8; font-size: 0.75rem; margin-bottom: 20px;">${typeLabel}</span>
+            
+            <div style="display: flex; flex-direction: column; gap: 10px; text-align: left;">
+              ${officeViewerUrl ? `
+              <a href="${officeViewerUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-color: rgba(59, 130, 246, 0.4); color: #60a5fa; text-decoration: none; border-radius: 10px; background: rgba(59, 130, 246, 0.08);">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <i class="fa-solid fa-eye" style="font-size: 1.1rem;"></i>
+                  <div>
+                    <strong style="display: block; font-size: 0.88rem; color: #f8fafc;">Buka di Microsoft Office Online</strong>
+                    <span style="font-size: 0.72rem; color: #94a3b8;">Pratinjau dokumen langsung di peramban</span>
+                  </div>
+                </div>
+                <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.85rem; opacity: 0.7;"></i>
+              </a>` : ''}
+
+              <button type="button" class="btn btn-outline" onclick="WhatsAppController.downloadDocument('${escapeHtml(fileName)}', '${escapeHtml(url || '')}', '${escapeHtml(msgId)}')" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-color: rgba(37, 211, 102, 0.4); color: #25D366; text-decoration: none; border-radius: 10px; background: rgba(37, 211, 102, 0.08); text-align: left;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <i class="fa-solid fa-download" style="font-size: 1.1rem;"></i>
+                  <div>
+                    <strong style="display: block; font-size: 0.88rem; color: #f8fafc;">Unduh Dokumen ke Perangkat</strong>
+                    <span style="font-size: 0.72rem; color: #94a3b8;">Buka dengan WPS Office, Word, atau aplikasi bawaan HP</span>
+                  </div>
+                </div>
+                <i class="fa-solid fa-download" style="font-size: 0.85rem; opacity: 0.7;"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      } else {
+        bodyEl.innerHTML = `
+          <div style="text-align: center; padding: 30px 20px; max-width: 480px;">
+            <div style="width: 60px; height: 60px; border-radius: 12px; background: ${bgBox}; color: ${iconColor}; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 0 auto 16px;">
+              <i class="${iconClass}"></i>
+            </div>
+            <h4 style="color: #f8fafc; margin-bottom: 8px; font-size: 1.05rem;">${escapeHtml(fileName)}</h4>
+            <p style="color: #94a3b8; font-size: 0.85rem; line-height: 1.5; margin-bottom: 20px;">
+              Berkas lampiran dari WhatsApp. Klik tombol unduh di bawah untuk menyimpan berkas ini ke perangkat Anda.
+            </p>
+            <button type="button" class="btn btn-primary" onclick="WhatsAppController.downloadDocument('${escapeHtml(fileName)}', '${escapeHtml(url || '')}', '${escapeHtml(msgId)}')" style="background: #25D366; border-color: #25D366; color: #052e16; font-weight: 600; padding: 10px 24px; border-radius: 8px;">
+              <i class="fa-solid fa-download"></i> Unduh Berkas
+            </button>
+          </div>
+        `;
+      }
+    },
+
+    async downloadDocument(fileName, url, msgId) {
+      AudioEngine.click();
+      let targetUrl = url;
+
+      if (!targetUrl && msgId) {
+        showToast(`⏳ Mengambil file ${fileName} dari WhatsApp...`, 'info');
+        try {
+          const res = await this.waFetch(`/api/wa/media?msgId=${encodeURIComponent(msgId)}&fileName=${encodeURIComponent(fileName)}`, { headers: this.getAuthHeaders() }, 1);
+          const data = await res.json().catch(() => null);
+          if (data && data.url) {
+            targetUrl = data.url;
+          }
+        } catch (e) {
+          console.warn('Error resolving WA media for download:', e.message);
+        }
+      }
+
+      if (targetUrl) {
+        const a = document.createElement('a');
+        a.href = targetUrl;
+        a.download = fileName || 'dokumen.bin';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        showToast(`✅ Berkas ${fileName} berhasil diunduh.`, 'success');
+      } else {
+        showToast(`⚠️ Berkas ${fileName} belum dapat diunduh (sesi WhatsApp mungkin perlu dimuat ulang).`, 'warning');
+      }
+    },
+
+    handleMediaReady(payload) {
+      if (!payload || !payload.msgId) return;
+      const { jid, msgId, media } = payload;
+      if (this.activeContact && this.activeContact.id === jid) {
+        const bubble = els.messagesList?.querySelector(`[data-msg-id="${msgId}"]`);
+        if (bubble) {
+          const imgThumb = bubble.querySelector('.wa-chat-img-thumb');
+          if (imgThumb && media.url) {
+            imgThumb.src = media.url;
+            imgThumb.onclick = () => {
+              if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([media.url], 0);
+            };
+          }
+          const placeholder = bubble.querySelector('.wa-media-placeholder-badge');
+          if (placeholder && media.url && media.type === 'image') {
+            const newWrap = document.createElement('div');
+            newWrap.className = 'wa-bubble-image-wrap';
+            newWrap.innerHTML = `<img src="${escapeHtml(media.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" loading="lazy" />`;
+            placeholder.replaceWith(newWrap);
+            const loadedImg = newWrap.querySelector('.wa-chat-img-thumb');
+            if (loadedImg) {
+              loadedImg.addEventListener('click', () => {
+                if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([media.url], 0);
+              });
+            }
+          }
+        }
+      }
+    },
+
+    handleSendResponse(tempId, data) {
+      if (!data || !data.success) {
+        showToast(`❌ Gagal kirim WA: ${data?.error || 'Terjadi kesalahan'}`, 'error');
+        const failedEl = els.messagesList?.querySelector(`[data-msg-id="${tempId}"]`);
+        if (failedEl) {
+          failedEl.setAttribute('data-status', 'failed');
+          const icon = failedEl.querySelector('.wa-bubble-meta i');
+          if (icon) icon.className = 'fa-solid fa-circle-exclamation text-rose-500';
+        }
+      } else {
+        if (data.message) {
+          const pendingBubble = els.messagesList?.querySelector(`[data-msg-id="${tempId}"]`);
+          if (pendingBubble) {
+            pendingBubble.setAttribute('data-msg-id', data.message.id);
+            pendingBubble.setAttribute('data-status', 'sent');
+            const icon = pendingBubble.querySelector('.wa-bubble-meta i');
+            if (icon) {
+              icon.className = 'fa-solid fa-check-double';
+              icon.style.color = '#38bdf8';
+            }
+          }
+        }
+        this.fetchContacts();
+      }
+    },
+
+    handleSendError(tempId, err) {
+      showToast('⚠️ Menyambungkan kembali ke server WhatsApp, silakan coba lagi.', 'warning');
+      const failedEl = els.messagesList?.querySelector(`[data-msg-id="${tempId}"]`);
+      if (failedEl) {
+        failedEl.setAttribute('data-status', 'failed');
+        const icon = failedEl.querySelector('.wa-bubble-meta i');
+        if (icon) icon.className = 'fa-solid fa-circle-exclamation text-rose-500';
+      }
+    },
+
     appendMessageBubble(msg) {
       if (!els.messagesList) return;
 
@@ -43397,13 +43795,15 @@ Aturan:
       }
 
       // 2. REKONSILIASI OPTIMISTIK UNTUK PESAN KELUAR (fromMe)
-      // Jika pesan keluar dari saya dan ada bubble 'sending' (optimistik) dengan teks yang sama
       if (msg.fromMe && !String(msg.id).startsWith('temp_')) {
         const pendingBubble = Array.from(els.messagesList.querySelectorAll('.wa-bubble-wrap[data-status="sending"]'))
-          .find(el => el.querySelector('.wa-bubble-text')?.textContent === msg.text);
+          .find(el => {
+            const bText = el.querySelector('.wa-bubble-text')?.textContent || '';
+            const bDoc = el.querySelector('.wa-doc-title')?.textContent || '';
+            return (msg.text && bText === msg.text) || (msg.media?.fileName && bDoc === msg.media.fileName) || (msg.text && bDoc && msg.text.includes(bDoc));
+          });
 
         if (pendingBubble) {
-          // Upgrade bubble optimistik ini menjadi pesan terkonfirmasi
           pendingBubble.setAttribute('data-msg-id', msg.id);
           pendingBubble.setAttribute('data-status', 'sent');
           const metaSpan = pendingBubble.querySelector('.wa-bubble-meta span');
@@ -43416,15 +43816,103 @@ Aturan:
             icon.className = 'fa-solid fa-check-double';
             icon.style.color = '#38bdf8';
           }
-          return; // Jangan buat bubble duplikat!
+          return;
         }
       }
 
-      // 3. RENDER BUBBLE BARU
-      const wrap = document.createElement('div');
-      wrap.className = 'wa-bubble-wrap' + (msg.fromMe ? ' wa-bubble-sent' : ' wa-bubble-received');
-      wrap.setAttribute('data-msg-id', msg.id || `msg_${Date.now()}`);
-      wrap.setAttribute('data-status', msg.status || (msg.fromMe ? 'sent' : 'received'));
+      // 3. EKSTRAKSI MEDIA
+      const media = this.parseMediaFromMessage(msg);
+
+      // 4. SUSUN KONTEN MEDIA HTML
+      let mediaHtml = '';
+      if (media) {
+        if (media.type === 'image') {
+          if (media.url) {
+            mediaHtml = `
+              <div class="wa-bubble-image-wrap">
+                <img src="${escapeHtml(media.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" loading="lazy" />
+              </div>
+            `;
+          } else {
+            mediaHtml = `
+              <div class="wa-media-placeholder-badge" data-action="load-photo" style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px dashed rgba(255,255,255,0.2); cursor: pointer; margin-bottom: 6px;">
+                <i class="fa-solid fa-image" style="color: #38bdf8; font-size: 1.2rem;"></i>
+                <div style="flex: 1; min-width: 0;">
+                  <span style="font-weight: 600; font-size: 0.82rem; color: #f8fafc; display: block;">Foto WhatsApp</span>
+                  <span style="font-size: 0.7rem; color: #94a3b8;">Klik untuk memuat dan melihat gambar</span>
+                </div>
+                <i class="fa-solid fa-cloud-arrow-down" style="color: #38bdf8; font-size: 0.9rem;"></i>
+              </div>
+            `;
+          }
+        } else if (media.type === 'document') {
+          const fileName = media.fileName || 'dokumen.bin';
+          const ext = fileName.includes('.') ? (fileName.split('.').pop() || '').toLowerCase() : '';
+          let iconClass = 'fa-solid fa-file-lines';
+          let extClass = 'generic';
+          let typeLabel = 'Dokumen';
+
+          if (ext === 'pdf') {
+            iconClass = 'fa-solid fa-file-pdf';
+            extClass = 'pdf';
+            typeLabel = 'Dokumen PDF';
+          } else if (['doc', 'docx'].includes(ext)) {
+            iconClass = 'fa-solid fa-file-word';
+            extClass = 'word';
+            typeLabel = 'Dokumen Word';
+          } else if (['xls', 'xlsx', 'csv'].includes(ext)) {
+            iconClass = 'fa-solid fa-file-excel';
+            extClass = 'excel';
+            typeLabel = 'Lembar Kerja Excel';
+          } else if (['ppt', 'pptx'].includes(ext)) {
+            iconClass = 'fa-solid fa-file-powerpoint';
+            extClass = 'ppt';
+            typeLabel = 'PowerPoint';
+          } else if (['zip', 'rar', '7z'].includes(ext)) {
+            iconClass = 'fa-solid fa-file-zipper';
+            extClass = 'zip';
+            typeLabel = 'Arsip File';
+          } else if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
+            iconClass = 'fa-solid fa-file-image';
+            extClass = 'image';
+            typeLabel = 'Berkas Gambar';
+          }
+
+          const sizeStr = media.size ? ` • ${this.formatFileSize(media.size)}` : '';
+
+          mediaHtml = `
+            <div class="wa-doc-card">
+              <div class="wa-doc-header">
+                <div class="wa-doc-icon-box ${extClass}">
+                  <i class="${iconClass}"></i>
+                </div>
+                <div class="wa-doc-info">
+                  <div class="wa-doc-title" title="${escapeHtml(fileName)}">${escapeHtml(fileName)}</div>
+                  <div class="wa-doc-subtitle">${typeLabel}${sizeStr}</div>
+                </div>
+              </div>
+              <div class="wa-doc-actions">
+                <button type="button" class="btn-wa-doc-preview">
+                  <i class="fa-solid fa-eye"></i> Pratinjau
+                </button>
+                <button type="button" class="btn-wa-doc-download">
+                  <i class="fa-solid fa-download"></i> Unduh
+                </button>
+              </div>
+            </div>
+          `;
+        }
+      }
+
+      // 5. TEKS PENGIRING (CAPTION) ATAU TEKS MURNI
+      let displayText = msg.text || '';
+      if (media) {
+        if (media.type === 'document') {
+          displayText = (media.caption || displayText).replace(/(?:.*?)\[(?:Dokumen|Document):\s*[^\]]+\]/gi, '').trim();
+        } else if (media.type === 'image') {
+          displayText = (media.caption || displayText).replace(/(?:.*?)\[(?:Foto|Photo|Gambar|Image)\]/gi, '').trim();
+        }
+      }
 
       const d = new Date(msg.timestamp || Date.now());
       const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -43438,21 +43926,98 @@ Aturan:
         }
       }
 
+      const wrap = document.createElement('div');
+      wrap.className = 'wa-bubble-wrap' + (msg.fromMe ? ' wa-bubble-sent' : ' wa-bubble-received');
+      wrap.setAttribute('data-msg-id', msg.id || `msg_${Date.now()}`);
+      wrap.setAttribute('data-status', msg.status || (msg.fromMe ? 'sent' : 'received'));
+
       wrap.innerHTML = `
         ${!msg.fromMe ? `<div class="wa-bubble-sender">${escapeHtml(msg.senderName || 'Kontak')}</div>` : ''}
-        <div class="wa-bubble-text">${escapeHtml(msg.text || '')}</div>
+        ${mediaHtml}
+        ${displayText ? `<div class="wa-bubble-text">${escapeHtml(displayText)}</div>` : ''}
         <div class="wa-bubble-meta">
           <span>${timeStr}</span>
           ${statusIcon}
         </div>
       `;
 
+      // Pasang event listeners pada elemen media di dalam bubble
+      if (media) {
+        const imgEl = wrap.querySelector('.wa-chat-img-thumb');
+        if (imgEl && media.url) {
+          imgEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (typeof ImageLightbox !== 'undefined' && typeof ImageLightbox.open === 'function') {
+              ImageLightbox.open([media.url], 0);
+            }
+          });
+        }
+
+        const placeholder = wrap.querySelector('.wa-media-placeholder-badge[data-action="load-photo"]');
+        if (placeholder) {
+          placeholder.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            placeholder.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="color: #38bdf8;"></i> <span style="font-size: 0.75rem;">Memuat foto...</span>';
+            try {
+              const res = await this.waFetch(`/api/wa/media?msgId=${encodeURIComponent(msg.id)}&fileName=photo.jpg`, { headers: this.getAuthHeaders() }, 1);
+              const data = await res.json().catch(() => null);
+              if (data && data.url) {
+                media.url = data.url;
+                const newWrap = document.createElement('div');
+                newWrap.className = 'wa-bubble-image-wrap';
+                newWrap.innerHTML = `<img src="${escapeHtml(data.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" loading="lazy" />`;
+                placeholder.replaceWith(newWrap);
+                const loadedImg = newWrap.querySelector('.wa-chat-img-thumb');
+                if (loadedImg) {
+                  loadedImg.addEventListener('click', () => {
+                    if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([data.url], 0);
+                  });
+                }
+                if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([data.url], 0);
+              } else {
+                placeholder.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="color: #ef4444;"></i> <span style="font-size: 0.72rem; color: #ef4444;">Foto kadaluarsa di WhatsApp</span>';
+              }
+            } catch (_) {
+              placeholder.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="color: #ef4444;"></i> <span style="font-size: 0.72rem; color: #ef4444;">Gagal memuat foto</span>';
+            }
+          });
+        }
+
+        const btnPreview = wrap.querySelector('.btn-wa-doc-preview');
+        if (btnPreview) {
+          btnPreview.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.openDocumentPreview(media, msg);
+          });
+        }
+
+        const btnDownload = wrap.querySelector('.btn-wa-doc-download');
+        if (btnDownload) {
+          btnDownload.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.downloadDocument(media.fileName, media.url, msg.id);
+          });
+        }
+
+        const docHeader = wrap.querySelector('.wa-doc-header');
+        if (docHeader) {
+          docHeader.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.openDocumentPreview(media, msg);
+          });
+        }
+      }
+
       els.messagesList.appendChild(wrap);
       if (els.chatViewport) els.chatViewport.scrollTop = els.chatViewport.scrollHeight;
     },
 
     async sendCurrentPrompt(text) {
-      if (!text) return;
+      const rawText = (text || '').trim();
+      const images = [...(STATE.attachedImages || [])];
+      const docs = [...(STATE.attachedDocs || [])];
+
+      if (!rawText && images.length === 0 && docs.length === 0) return;
       if (!this.activeContact) {
         showToast('⚠️ Silakan pilih kontak WhatsApp terlebih dahulu!', 'warning');
         this.openContactDropdown();
@@ -43463,52 +44028,140 @@ Aturan:
         els.promptInput.value = '';
         autoResizeTextarea(els.promptInput);
       }
+      STATE.attachedImages = [];
+      STATE.attachedDocs = [];
+      if (typeof clearAttachedImages === 'function') clearAttachedImages();
+      if (typeof renderAttachmentPreviews === 'function') renderAttachmentPreviews();
 
-      const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      const tempMsg = {
-        id: tempId,
-        fromMe: true,
-        text,
-        timestamp: Date.now(),
-        senderName: 'Saya',
-        status: 'sending'
-      };
-      this.appendMessageBubble(tempMsg);
-      AudioEngine.sent?.() || AudioEngine.click();
+      const targetJid = this.activeContact.id;
 
-      try {
-        const res = await this.waFetch('/api/wa/send', {
-          method: 'POST',
-          headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ jid: this.activeContact.id, text, userId: this.getUserId(), pin: this.getPin(), tempId })
-        }, 2);
-        const data = await res.json().catch(() => null);
-        if (!data || !data.success) {
-          showToast(`❌ Gagal kirim WA: ${data?.error || 'Terjadi kesalahan'}`, 'error');
-          const failedEl = els.messagesList.querySelector(`[data-msg-id="${tempId}"]`);
-          if (failedEl) {
-            failedEl.setAttribute('data-status', 'failed');
-            const icon = failedEl.querySelector('.wa-bubble-meta i');
-            if (icon) icon.className = 'fa-solid fa-circle-exclamation text-rose-500';
-          }
-        } else {
-          // Reconcile optimistic bubble instantly with confirmed ID from server
-          if (data.message) {
-            const pendingBubble = els.messagesList.querySelector(`[data-msg-id="${tempId}"]`);
-            if (pendingBubble) {
-              pendingBubble.setAttribute('data-msg-id', data.message.id);
-              pendingBubble.setAttribute('data-status', 'sent');
-              const icon = pendingBubble.querySelector('.wa-bubble-meta i');
-              if (icon) {
-                icon.className = 'fa-solid fa-check-double';
-                icon.style.color = '#38bdf8';
-              }
+      // 1. Kirim Dokumen
+      if (docs.length > 0) {
+        for (let i = 0; i < docs.length; i++) {
+          const doc = docs[i];
+          const docCaption = (i === docs.length - 1 && images.length === 0) ? rawText : '';
+          const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          const tempMsg = {
+            id: tempId,
+            fromMe: true,
+            text: docCaption ? `${docCaption}\n📄 [Dokumen: ${doc.name}]` : `📄 [Dokumen: ${doc.name}]`,
+            timestamp: Date.now(),
+            senderName: 'Saya',
+            status: 'sending',
+            media: {
+              type: 'document',
+              fileName: doc.name,
+              mimetype: doc.mimeType || 'application/octet-stream',
+              data: doc.dataUrl,
+              url: doc.dataUrl,
+              caption: docCaption
             }
+          };
+          this.appendMessageBubble(tempMsg);
+          AudioEngine.sent?.() || AudioEngine.click();
+
+          try {
+            const res = await this.waFetch('/api/wa/send', {
+              method: 'POST',
+              headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+              body: JSON.stringify({
+                jid: targetJid,
+                text: docCaption,
+                media: {
+                  type: 'document',
+                  data: doc.dataUrl,
+                  fileName: doc.name,
+                  mimetype: doc.mimeType || 'application/octet-stream'
+                },
+                userId: this.getUserId(),
+                pin: this.getPin(),
+                tempId
+              })
+            }, 2);
+            const data = await res.json().catch(() => null);
+            this.handleSendResponse(tempId, data);
+          } catch (err) {
+            this.handleSendError(tempId, err);
           }
-          this.fetchContacts();
         }
-      } catch (err) {
-        showToast('⚠️ Menyambungkan kembali ke server WhatsApp, silakan coba lagi.', 'warning');
+      }
+
+      // 2. Kirim Foto / Gambar
+      if (images.length > 0) {
+        for (let i = 0; i < images.length; i++) {
+          const imgData = images[i];
+          const imgCaption = (i === images.length - 1) ? rawText : '';
+          const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          const tempMsg = {
+            id: tempId,
+            fromMe: true,
+            text: imgCaption ? `${imgCaption}\n📷 [Foto]` : '📷 [Foto]',
+            timestamp: Date.now(),
+            senderName: 'Saya',
+            status: 'sending',
+            media: {
+              type: 'image',
+              fileName: `photo_${Date.now()}.jpg`,
+              mimetype: 'image/jpeg',
+              data: imgData,
+              url: imgData,
+              caption: imgCaption
+            }
+          };
+          this.appendMessageBubble(tempMsg);
+          AudioEngine.sent?.() || AudioEngine.click();
+
+          try {
+            const res = await this.waFetch('/api/wa/send', {
+              method: 'POST',
+              headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+              body: JSON.stringify({
+                jid: targetJid,
+                text: imgCaption,
+                media: {
+                  type: 'image',
+                  data: imgData,
+                  fileName: `photo_${Date.now()}.jpg`,
+                  mimetype: 'image/jpeg'
+                },
+                userId: this.getUserId(),
+                pin: this.getPin(),
+                tempId
+              })
+            }, 2);
+            const data = await res.json().catch(() => null);
+            this.handleSendResponse(tempId, data);
+          } catch (err) {
+            this.handleSendError(tempId, err);
+          }
+        }
+      }
+
+      // 3. Kirim Teks Murni (jika tidak ada gambar dan tidak ada dokumen)
+      if (rawText && images.length === 0 && docs.length === 0) {
+        const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const tempMsg = {
+          id: tempId,
+          fromMe: true,
+          text: rawText,
+          timestamp: Date.now(),
+          senderName: 'Saya',
+          status: 'sending'
+        };
+        this.appendMessageBubble(tempMsg);
+        AudioEngine.sent?.() || AudioEngine.click();
+
+        try {
+          const res = await this.waFetch('/api/wa/send', {
+            method: 'POST',
+            headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ jid: targetJid, text: rawText, userId: this.getUserId(), pin: this.getPin(), tempId })
+          }, 2);
+          const data = await res.json().catch(() => null);
+          this.handleSendResponse(tempId, data);
+        } catch (err) {
+          this.handleSendError(tempId, err);
+        }
       }
     }
   };
