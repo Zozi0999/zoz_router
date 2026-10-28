@@ -35,7 +35,7 @@
       }
     });
     try {
-      var currentVer = 'v20261028_v544';
+      var currentVer = 'v20261028_v546';
       var savedVer = localStorage.getItem('__zoz_ver__');
       if (savedVer !== currentVer) {
         localStorage.setItem('__zoz_ver__', currentVer);
@@ -46,7 +46,7 @@
         }
       }
     } catch (_) {}
-    window.__ZOZ_VERSION__ = 'v20261028_v544';
+    window.__ZOZ_VERSION__ = 'v20261028_v546';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png">
@@ -1505,10 +1505,10 @@
           <button class="gemini-pill-btn studio-search-code-btn" id="btnStudioHeaderSearchCode" type="button" style="display: none;" title="Cari kata, nama, atau baris dalam kode (Ctrl+F)">
             <i class="fa-solid fa-magnifying-glass"></i> <span id="labelStudioHeaderSearch">Cari</span>
           </button>
-          <button class="gemini-pill-btn studio-edit-code-btn" id="btnStudioEditCode" type="button" title="Edit kode website secara langsung">
+          <button class="gemini-pill-btn studio-edit-code-btn" id="btnStudioEditCode" type="button" title="Edit kode secara langsung">
             <i class="fa-solid fa-pen-to-square" id="iconStudioEditCode"></i> <span id="labelStudioEditCode">Edit Kode</span>
           </button>
-          <button class="gemini-pill-btn studio-chat-toggle-btn" id="btnToggleStudioAssistant" type="button" title="Tanya AI tentang Website (Popup Melayang)">
+          <button class="gemini-pill-btn studio-chat-toggle-btn" id="btnToggleStudioAssistant" type="button" title="Tanya AI Asisten Studio (Popup Melayang)">
             <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Tanya AI</span>
           </button>
           <div class="studio-download-wrap gemini-dropdown-wrap" id="aiFileStudioDownloadWrap">
@@ -1637,7 +1637,7 @@
               <div class="studio-editor-canvas" id="studioEditorCanvas">
                 <div class="studio-editor-active-line-indicator" id="studioEditorActiveLineIndicator"></div>
                 <pre class="studio-editor-highlight-pre" id="studioEditorHighlightPre" aria-hidden="true"><code class="studio-editor-highlight-code" id="studioEditorHighlightCode"></code></pre>
-                <textarea class="ai-file-studio-editor" id="aiFileStudioEditor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" placeholder="Edit kode website Anda di sini..."></textarea>
+                <textarea class="ai-file-studio-editor" id="aiFileStudioEditor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" placeholder="Edit isi berkas atau kode Anda di sini..."></textarea>
               </div>
             </div>
           </div>
@@ -1656,7 +1656,7 @@
               <span class="studio-history-mode-badge" id="studioHistoryModeBadge" title="Riwayat terpisah dari obrolan utama agar ringan &amp; tidak penuh">Studio</span>
             </div>
             <div class="studio-assistant-controls">
-              <button class="gemini-pill-btn studio-endocrine-toggle-btn" id="btnToggleStudioEndocrine" type="button" title="Sensor Kode (Endocrine Code): Pantau kesehatan &amp; error website">
+              <button class="gemini-pill-btn studio-endocrine-toggle-btn" id="btnToggleStudioEndocrine" type="button" title="Sensor Kode (Endocrine Code): Pantau kesehatan berkas &amp; sintaks">
                 <i class="fa-solid fa-dna" id="iconStudioEndocrine"></i> <span id="labelStudioEndocrine">Endocrine: ON</span>
               </button>
               <button class="gemini-icon-btn assistant-min-btn" id="btnStudioMinAssistant" type="button" title="Lipat / Buka Isi Jendela Tanya AI">

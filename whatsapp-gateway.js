@@ -90,12 +90,31 @@ class WhatsAppGateway {
     this.loadPersistedData();
   }
 
+  safeBufferToBase64(buf) {
+    if (!buf) return null;
+    try {
+      if (typeof buf === 'string') {
+        return buf.startsWith('data:') ? buf : `data:image/jpeg;base64,${buf}`;
+      }
+      if (Buffer.isBuffer(buf)) {
+        return `data:image/jpeg;base64,${buf.toString('base64')}`;
+      }
+      if (buf && buf.data && Array.isArray(buf.data)) {
+        return `data:image/jpeg;base64,${Buffer.from(buf.data).toString('base64')}`;
+      }
+      if (buf instanceof Uint8Array || Array.isArray(buf)) {
+        return `data:image/jpeg;base64,${Buffer.from(buf).toString('base64')}`;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   extractMediaFromMessage(msg) {
     if (!msg || !msg.message) return null;
     const m = msg.message;
     if (m.imageMessage) {
       const img = m.imageMessage;
-      const thumb = img.jpegThumbnail ? `data:image/jpeg;base64,${img.jpegThumbnail.toString('base64')}` : null;
+      const thumb = this.safeBufferToBase64(img.jpegThumbnail);
       return {
         type: 'image',
         fileName: 'photo.jpg',
@@ -109,7 +128,7 @@ class WhatsAppGateway {
     if (m.documentMessage) {
       const doc = m.documentMessage;
       const docName = doc.fileName || 'dokumen.bin';
-      const thumb = doc.jpegThumbnail ? `data:image/jpeg;base64,${doc.jpegThumbnail.toString('base64')}` : null;
+      const thumb = this.safeBufferToBase64(doc.jpegThumbnail);
       return {
         type: 'document',
         fileName: docName,
@@ -123,7 +142,7 @@ class WhatsAppGateway {
     }
     if (m.videoMessage) {
       const vid = m.videoMessage;
-      const thumb = vid.jpegThumbnail ? `data:image/jpeg;base64,${vid.jpegThumbnail.toString('base64')}` : null;
+      const thumb = this.safeBufferToBase64(vid.jpegThumbnail);
       return {
         type: 'video',
         fileName: 'video.mp4',
@@ -466,19 +485,38 @@ class WhatsAppGateway {
     try {
       if (fs.existsSync(this.messagesFile)) {
         const raw = JSON.parse(fs.readFileSync(this.messagesFile, 'utf8'));
+        const uploadsDir = path.join(__dirname, 'data', 'uploads');
+        const diskUploads = fs.existsSync(uploadsDir) ? fs.readdirSync(uploadsDir) : [];
+
         if (raw && typeof raw === 'object') {
           for (const [jid, list] of Object.entries(raw)) {
             if (jid.includes('6281234567890')) continue;
             if (Array.isArray(list)) {
               const enhancedList = list.slice(-200).map(m => {
-                if (!m.media && m.text) {
+                // Cari apakah ada berkas media di data/uploads yang cocok dengan ID pesan ini
+                const diskMatch = diskUploads.find(f => f.startsWith(`wa_${m.id}_`));
+                if (diskMatch) {
+                  if (!m.media) m.media = {};
+                  m.media.url = `/uploads/${diskMatch}`;
+                  try {
+                    m.media.size = fs.statSync(path.join(uploadsDir, diskMatch)).size;
+                  } catch (_) {}
+                  const lowerMatch = diskMatch.toLowerCase();
+                  if (lowerMatch.endsWith('.jpg') || lowerMatch.endsWith('.jpeg') || lowerMatch.endsWith('.png') || lowerMatch.endsWith('.webp')) {
+                    m.media.type = 'image';
+                    m.media.thumbnail = m.media.url;
+                  } else {
+                    m.media.type = 'document';
+                    if (!m.media.fileName) m.media.fileName = diskMatch.replace(`wa_${m.id}_`, '');
+                  }
+                } else if (!m.media && m.text) {
                   const docMatch = m.text.match(/(?:📄\s*)?\[Dokumen:\s*([^\]]+)\]/i);
                   if (docMatch) {
                     const rawName = docMatch[1].trim();
                     const clean = rawName.replace(/[^a-zA-Z0-9._-]/g, '_');
                     const ext = rawName.includes('.') ? rawName.slice(rawName.lastIndexOf('.')).toLowerCase() : '';
                     const savedFile = `wa_${m.id}_${clean}`;
-                    const localPath = path.join(__dirname, 'data', 'uploads', savedFile);
+                    const localPath = path.join(uploadsDir, savedFile);
                     m.media = {
                       type: 'document',
                       fileName: rawName,
@@ -488,7 +526,7 @@ class WhatsAppGateway {
                     };
                   } else if (m.text.includes('📷 [Foto]')) {
                     const savedFile = `wa_${m.id}_photo.jpg`;
-                    const localPath = path.join(__dirname, 'data', 'uploads', savedFile);
+                    const localPath = path.join(uploadsDir, savedFile);
                     m.media = {
                       type: 'image',
                       fileName: 'photo.jpg',
@@ -497,6 +535,12 @@ class WhatsAppGateway {
                     };
                   }
                 }
+
+                // Sanitasi thumbnail jika berbentuk Buffer serialization
+                if (m.media && m.media.thumbnail && typeof m.media.thumbnail !== 'string') {
+                  m.media.thumbnail = this.safeBufferToBase64(m.media.thumbnail);
+                }
+
                 return m;
               });
               this.messages.set(jid, enhancedList);
@@ -688,8 +732,11 @@ class WhatsAppGateway {
         logger: pino({ level: 'silent' }),
         browser: Browsers.windows('Chrome'),
         syncFullHistory: false,
+        keepAliveIntervalMs: 25000,
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
+        retryRequestDelayMs: 250,
+        maxMsgRetryCount: 3,
         markOnlineOnConnect: false,
         getMessage: async () => ({ conversation: '' }),
       });
@@ -740,6 +787,15 @@ class WhatsAppGateway {
           this.status.phone = rawId ? rawId.split(':')[0] : 'Aktif';
           this.status.updatedAt = Date.now();
 
+          if (this.pingInterval) clearInterval(this.pingInterval);
+          this.pingInterval = setInterval(() => {
+            try {
+              if (this.sock?.ws?.readyState === 1) {
+                this.sock.ws.ping?.();
+              }
+            } catch (_) {}
+          }, 20000);
+
           try {
             if (state && state.creds) {
               state.creds.registered = true;
@@ -757,6 +813,10 @@ class WhatsAppGateway {
         }
 
         if (connection === 'close') {
+          if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+            this.pingInterval = null;
+          }
           const statusCode = (lastDisconnect?.error)?.output?.statusCode;
           const isStreamRestart = statusCode === 515;
           const shouldReconnect = statusCode !== DisconnectReason.loggedOut && !this.isExplicitDisconnect;

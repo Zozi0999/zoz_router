@@ -4789,6 +4789,9 @@ async function requestHandler(req, res) {
             }
           }
 
+          const isDownload = reqUrl.searchParams.has('download') || reqUrl.searchParams.has('dl');
+          const disposition = isDownload ? `attachment; filename="${encodeURIComponent(uploadFilename)}"` : `inline; filename="${encodeURIComponent(uploadFilename)}"`;
+
           if (isRangeRequest) {
             const chunkSize = (end - start) + 1;
             res.writeHead(206, {
@@ -4796,10 +4799,11 @@ async function requestHandler(req, res) {
               'Accept-Ranges': 'bytes',
               'Content-Length': chunkSize,
               'Content-Type': contentType,
+              'Content-Disposition': disposition,
               'Cache-Control': 'public, max-age=86400',
               'Access-Control-Allow-Origin': '*',
               'X-Content-Type-Options': 'nosniff',
-              'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+              'Cross-Origin-Resource-Policy': 'cross-origin'
             });
 
             if (method === 'HEAD') {
@@ -4831,11 +4835,12 @@ async function requestHandler(req, res) {
           res.writeHead(200, {
             'Content-Type': contentType,
             'Content-Length': totalSize,
+            'Content-Disposition': disposition,
             'Accept-Ranges': 'bytes',
             'Cache-Control': 'public, max-age=86400',
             'Access-Control-Allow-Origin': '*',
             'X-Content-Type-Options': 'nosniff',
-            'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+            'Cross-Origin-Resource-Policy': 'cross-origin'
           });
           if (method === 'HEAD') {
             return res.end();
@@ -5957,11 +5962,31 @@ async function requestHandler(req, res) {
     const savedFilename = `wa_${msgId}_${cleanFileName}`;
     const filePath = path.join(UPLOADS_DIR, savedFilename);
 
+    // 0. Cek apakah ada berkas di UPLOADS_DIR yang cocok dengan ID pesan ini (toleran terhadap spasi/perbedaan nama)
+    try {
+      if (fs.existsSync(UPLOADS_DIR)) {
+        const diskFiles = fs.readdirSync(UPLOADS_DIR);
+        const matching = diskFiles.find(f => f.startsWith(`wa_${msgId}_`));
+        if (matching) {
+          return sendJSON(res, 200, { success: true, url: `/uploads/${matching}`, ready: true });
+        }
+      }
+    } catch (_) {}
+
     if (fs.existsSync(filePath)) {
       return sendJSON(res, 200, { success: true, url: `/uploads/${savedFilename}`, ready: true });
     }
 
-    // 1. Coba unduh on-demand jika raw message ada di memory atau wa-raw-media.json
+    // 1. Cek apakah di memori pesan kontak sudah tercatat URL berkas ini
+    if (jid && tenant.gateway.messages) {
+      const msgList = tenant.gateway.messages.get(jid) || [];
+      const existingMsg = msgList.find(m => m.id === msgId);
+      if (existingMsg?.media?.url) {
+        return sendJSON(res, 200, { success: true, url: existingMsg.media.url, ready: true });
+      }
+    }
+
+    // 2. Coba unduh on-demand jika raw message ada di memory atau wa-raw-media.json
     let rawMsg = tenant.gateway.rawMessages?.get(msgId);
     if (!rawMsg && tenant.gateway.rawMediaFile && fs.existsSync(tenant.gateway.rawMediaFile)) {
       try {
@@ -5984,17 +6009,22 @@ async function requestHandler(req, res) {
       }
     }
 
-    // 2. Jika belum ada di disk/rawMessages dan jid ada, minta unduh ulang dari ponsel WhatsApp
+    // 3. Jika belum ada di disk/rawMessages dan jid ada, minta unduh ulang dari ponsel WhatsApp
     if (jid && tenant.gateway.status && tenant.gateway.status.connected && typeof tenant.gateway.requestMediaResend === 'function') {
       try {
         await tenant.gateway.requestMediaResend(jid, msgId);
-        // Tunggu hingga 3 detik untuk respon stream dari HP
+        // Tunggu hingga 4 detik untuk respon stream dari HP
         let waited = 0;
-        while (waited < 3000) {
+        while (waited < 4000) {
           await new Promise(r => setTimeout(r, 250));
           waited += 250;
           if (fs.existsSync(filePath)) {
             return sendJSON(res, 200, { success: true, url: `/uploads/${savedFilename}`, ready: true });
+          }
+          if (fs.existsSync(UPLOADS_DIR)) {
+            const diskFiles = fs.readdirSync(UPLOADS_DIR);
+            const matching = diskFiles.find(f => f.startsWith(`wa_${msgId}_`));
+            if (matching) return sendJSON(res, 200, { success: true, url: `/uploads/${matching}`, ready: true });
           }
           if (!rawMsg && tenant.gateway.rawMessages?.has(msgId)) {
             rawMsg = tenant.gateway.rawMessages.get(msgId);
@@ -6005,6 +6035,25 @@ async function requestHandler(req, res) {
       } catch (resendErr) {
         console.warn('Error during WA media resend request:', resendErr.message);
       }
+    }
+
+    // 4. Deteksi tautan WPS / Office Cloud jika tersedia di pesan obrolan
+    let cloudDocUrl = null;
+    if (jid && tenant.gateway.messages) {
+      const msgList = tenant.gateway.messages.get(jid) || [];
+      const cloudRegex = /https?:\/\/(?:[a-zA-Z0-9-]+\.)?(?:wps\.com|live\.com|office\.com|google\.com)\/[^\s<>"']+/i;
+      for (const m of msgList) {
+        if (m.text) {
+          const match = m.text.match(cloudRegex);
+          if (match) {
+            cloudDocUrl = match[0];
+            break;
+          }
+        }
+      }
+    }
+    if (cloudDocUrl) {
+      return sendJSON(res, 200, { success: true, url: null, cloudUrl: cloudDocUrl, ready: true });
     }
 
     return sendJSON(res, 404, { success: false, error: 'Media sedang disinkronkan dari ponsel atau sesi sudah kadaluarsa.' });

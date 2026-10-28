@@ -8953,7 +8953,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             <i class="fa-solid fa-eye"></i>
             <span class="preview-text">Pratinjau</span>
           </button>
-          <button class="code-edit-btn" title="Edit kode website ini secara langsung" type="button">
+          <button class="code-edit-btn" title="Edit kode ini secara langsung" type="button">
             <i class="fa-solid fa-pen-to-square"></i>
             <span class="edit-text">Edit Kode</span>
           </button>` : ''}
@@ -9003,7 +9003,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             }
             const docName = guessFileNameFromLang(lang.toLowerCase(), codeText);
             const mime = guessMimeFromName(docName);
-            const aiFile = pre._aiFile || buildAIFile(docName, mime, lang.toLowerCase(), codeText, 'Edit Kode Website');
+            const aiFile = pre._aiFile || buildAIFile(docName, mime, lang.toLowerCase(), codeText, 'Edit Kode');
             aiFile.rawContent = codeText;
             aiFile.content = codeText;
             aiFile._sourceCodeBlock = codeBlock;
@@ -9156,7 +9156,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
   }
 
   // Konversi/isolasi blok ZOZ_FILE, ZOZ_EDIT, ZOZ_MODIFY saat streaming
-  // agar teks dokumen dan kode website terisolasi dan tidak bocor ke obrolan chat!
+  // agar teks dokumen dan kode terisolasi dan tidak bocor ke obrolan chat!
   function hideFileBlocksForDisplay(text, options = {}) {
     if (!text) return text;
     let processed = text;
@@ -9196,9 +9196,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     const CODE_LIKE_LINE = /^(?:`{3,}|<{1,5}>{1,5}|[<>=]{2,}|<<>>|< < > >|<<<>>|window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|\/\*|\*\/|\/\/|<\/script>|<\/html>|<\/body>|<\/style>|<\/div>|<\/iframe>|<\/section>|<!--|[{}\[\];]|(?:[a-zA-Z0-9_-]+=(?:"[^"]*"|'[^']*'|[^\s>]+)|allowfullscreen|disabled|checked)|(?:[.#@:][a-zA-Z0-9_-]|[a-zA-Z0-9_-]+\s*\{|[a-zA-Z0-9_-]+\s*:\s*[^;]+;)).*$/i;
 
     function pushWebBanner(fileName = '') {
-      if (!out.some(l => l && l.includes('Sedang merancang kode website'))) {
+      if (!out.some(l => l && l.includes('Sedang menyusun kode'))) {
         const namePart = fileName ? ` ${escapeHtml(fileName)}` : '';
-        out.push(`\n> 🌐 *Sedang merancang kode website${namePart}... (terisolasi di pratinjau live)*\n`);
+        out.push(`\n> ⚡ *Sedang menyusun kode${namePart}... (terisolasi di pratinjau)*\n`);
       }
     }
 
@@ -9652,7 +9652,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         let cleanStudioText = hideFileBlocksForDisplay(this.text, { ...this.options, hideAllCodeBlocks: true });
         // Hapus sisa banner progress markdown di akhir jika AI sudah selesai merespons
         cleanStudioText = cleanStudioText.replace(/>\s*✨\s*\*Sedang memilih & mengganti[^\n]*\n?/g, '').trim();
-        cleanStudioText = cleanStudioText.replace(/>\s*🌐\s*\*Sedang merancang kode website[^\n]*\n?/g, '').trim();
+        cleanStudioText = cleanStudioText.replace(/>\s*(?:🌐|⚡)\s*\*Sedang (?:merancang|menyusun) kode[^\n]*\n?/g, '').trim();
         // Bersihkan seluruh sisa blok kode markdown (```...```) dan inline code (`...`) agar chat studio 100% bebas dari kode bocor
         cleanStudioText = cleanStudioText
           .replace(/```[\s\S]*?```/g, '')
@@ -10810,8 +10810,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         attachContinuationButton(container, session, row, modelName, engine, currentAccumulated, { isWebsite: isWebContinue });
       }
 
-      const msgSuccess = `✅ Website selesai sempurna dalam ${agentRound} putaran agen (${modelName})!`;
-      const msgStill = `⚠️ Kode website telah disambung hingga putaran ${agentRound}, tekan Lanjutkan jika masih ada bagian yang diinginkan.`;
+      const msgSuccess = `✅ Berkas selesai sempurna dalam ${agentRound} putaran agen (${modelName})!`;
+      const msgStill = `⚠️ Kode telah disambung hingga putaran ${agentRound}, tekan Lanjutkan jika masih ada bagian yang diinginkan.`;
       showToast(isStillIncomplete ? msgStill : msgSuccess, isStillIncomplete ? 'info' : 'success');
       AudioEngine.click();
     } catch (err) {
@@ -10898,7 +10898,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       let effectiveTail = currentFullText || '';
       if (typeof effectiveTail === 'string' && effectiveTail.length > 1200) {
         const tailLines = effectiveTail.split('\n').slice(-40).join('\n');
-        effectiveTail = `<!-- ... [bagian awal kode website sudah selesai disusun] ... -->\n${tailLines}`;
+        effectiveTail = `<!-- ... [bagian awal kode sudah selesai disusun] ... -->\n${tailLines}`;
       }
 
       historyMessages.forEach((m, idx) => {
@@ -11875,7 +11875,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
 
     // 3. EXECUTE CONTINUATION SWARM (Penuntasan Kode Terpotong Secara Utuh & Bebas Error)
     async executeContinuationSwarm({ session, modelName, engine = 'openrouter', continuePrompt, tailLines, bubbleText, currentAccumulated, runOptions = {}, onStatus = null }) {
-      if (onStatus) onStatus('⚡ Menuntaskan kelanjutan kode website...');
+      if (onStatus) onStatus('⚡ Menuntaskan kelanjutan kode...');
 
       // Watchdog adaptif: 180s TTFT & 60s dead-air memberikan AI ruang bernapas penuh tanpa pemutusan prematur
       const heartbeat = createHeartbeatStreamController({
@@ -11907,7 +11907,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
             isDone = isWebsiteComplete(cleaned);
           }
           if (onStatus) {
-            onStatus(isDone ? '✅ Kode website berhasil dituntaskan & divalidasi 100% utuh!' : '⚡ Kode berhasil disambung...');
+            onStatus(isDone ? '✅ Kode berhasil dituntaskan & divalidasi 100% utuh!' : '⚡ Kode berhasil disambung...');
           }
           return cleaned;
         }
@@ -16865,14 +16865,14 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 
         <!-- Note: Redundant segmented toggle (.gemini-segmented-toggle) and "Buka Studio" buttons were simplified per user specification: single primary [Pratinjau] button provides unified access to interactive preview studio. -->
         <div class="gemini-canvas-header-right">
-          <button class="gemini-pill-btn gemini-primary-preview-btn canvas-card-preview-btn canvas-card-fullscreen-btn" type="button" title="Buka Pratinjau Interaktif Website">
+          <button class="gemini-pill-btn gemini-primary-preview-btn canvas-card-preview-btn canvas-card-fullscreen-btn" type="button" title="Buka Pratinjau Interaktif">
             <i class="fa-solid fa-play"></i> <span>Pratinjau</span>
           </button>
-          <button class="gemini-pill-btn canvas-card-edit-code-btn" type="button" title="Edit kode website ini secara langsung">
+          <button class="gemini-pill-btn canvas-card-edit-code-btn" type="button" title="Edit kode ini secara langsung">
             <i class="fa-solid fa-pen-to-square"></i> <span>Edit Kode</span>
           </button>
           <div class="gemini-dropdown-wrap">
-            <button class="gemini-pill-btn gemini-card-export-btn" type="button" title="Ekspor atau unduh website ini">
+            <button class="gemini-pill-btn gemini-card-export-btn" type="button" title="Ekspor atau unduh berkas ini">
               <i class="fa-solid fa-arrow-down-to-bracket"></i> <span>Ekspor</span> <i class="fa-solid fa-chevron-down caret-icon"></i>
             </button>
             <div class="gemini-export-menu" style="display: none;">
@@ -16988,7 +16988,7 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 
     // Share button
     card.querySelector('.canvas-card-share-btn')?.addEventListener('click', () => {
-      copyTextToClipboard(file.rawContent || file.content || '', null, 'Kode website disalin ke clipboard!');
+      copyTextToClipboard(file.rawContent || file.content || '', null, 'Kode disalin ke clipboard!');
     });
 
     // Reload button
@@ -16996,7 +16996,7 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
       if (iframe) {
         iframe.removeAttribute('srcdoc');
         setTimeout(() => { iframe.srcdoc = prepareSafeHtmlForPreview(file.rawContent || file.content || '', file); }, 50);
-        showToast('Pratinjau website dimuat ulang.');
+        showToast('Pratinjau dimuat ulang.');
       }
     });
 
@@ -20066,7 +20066,7 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
           hasStrippedDoc = true;
           if (rawFileName) strippedDocName = rawFileName;
         } else if (isWeb && shouldHideCode) {
-          // WEBSITE (Universal): Isolasi dan hapus seluruh kode website dari gelembung obrolan chat
+          // CODE (Universal): Isolasi dan hapus seluruh kode dari gelembung obrolan chat
           out = out.split(b).join('');
           hasStrippedWeb = true;
           if (rawFileName) strippedWebName = rawFileName;
@@ -20117,8 +20117,8 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
         out = out.replace(/```(?:markdown|md|docx|doc|pdf)[\s\S]*?(?:```|$)/gi, '');
       }
       // Bersihkan sisa catatan sementara streaming jika ada
-      out = out.replace(/>\s*🌐\s*\*Sedang meracik dan menyiapkan berkas website[^*]*\*/gi, '');
-      out = out.replace(/>\s*🌐\s*\*Sedang merancang kode website[^*]*\*/gi, '');
+      out = out.replace(/>\s*(?:🌐|⚡)\s*\*Sedang meracik dan menyiapkan berkas[^*]*\*/gi, '');
+      out = out.replace(/>\s*(?:🌐|⚡)\s*\*Sedang (?:merancang|menyusun) kode[^*]*\*/gi, '');
       out = out.replace(/>\s*📄\s*\*Sedang menyusun dan memformat dokumen[^*]*\*/gi, '');
 
       // Bersihkan sisa kalimat permintaan maaf teknis semu dari model tentang pembungkus berkas jika berkas berhasil diekstrak
@@ -20333,8 +20333,8 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 
         const promptText = `Anda adalah Zoz Autonomous Code Scrubber.
 TUGAS ANDA:
-Teks respons berikut mengalami kebocoran kode website/HTML/JavaScript atau tag delimiter liar (seperti <<>>, <<<ZOZ_FILE>>>, dsb).
-KODE WEBSITE SUDAH DIAMANKAN DI TEMPAT LAIN.
+Teks respons berikut mengalami kebocoran kode/HTML/JavaScript atau tag delimiter liar (seperti <<>>, <<<ZOZ_FILE>>>, dsb).
+KODE SUDAH DIAMANKAN DI TEMPAT LAIN.
 Tugas Anda adalah membuang SEMUA potongan kode mentah, tag HTML telanjang, dan chevron diff dari teks ini.
 Kembalikan HANYA 1-2 paragraf penjelasan rapi yang sopan dan profesional dalam bahasa Indonesia yang merangkum apa yang telah dirancang untuk pengguna, TANPA menyertakan satu baris pun kode HTML/CSS/JS.
 
@@ -20529,7 +20529,7 @@ ${msg.content.slice(0, 3000)}
             const lastAssistantBubble = Array.from(activeStudioContainer.querySelectorAll('.studio-msg-row.assistant .studio-msg-bubble')).pop();
             if (lastAssistantBubble && !lastAssistantBubble.querySelector('.surgical-edit-summary-card')) {
               if (lastAssistantBubble.textContent && lastAssistantBubble.textContent.includes('Menyelaraskan modifikasi kode')) {
-                lastAssistantBubble.innerHTML = '<p>✨ Modifikasi berhasil diterapkan ke kode website.</p>';
+                lastAssistantBubble.innerHTML = '<p>✨ Modifikasi berhasil diterapkan ke kode.</p>';
               }
               const firstLine = editedRanges.length > 0 ? editedRanges[0].startLine : 1;
               const rangeLabel = editedRanges.length > 0
@@ -20677,7 +20677,7 @@ ${msg.content.slice(0, 3000)}
       } else if (isFileWeb) {
         downloadButtonsHtml =
           '  <button class="ai-file-btn download" type="button" data-act="download" title="Unduh berkas HTML (.html)"><i class="fa-solid fa-download"></i> Unduh HTML</button>' +
-          '  <button class="ai-file-btn view-code" type="button" data-act="view-code" title="Lihat kode website di Studio Terisolasi"><i class="fa-solid fa-code"></i> Lihat Kode</button>';
+          '  <button class="ai-file-btn view-code" type="button" data-act="view-code" title="Lihat kode di Studio Terisolasi"><i class="fa-solid fa-code"></i> Lihat Kode</button>';
       } else {
         downloadButtonsHtml =
           '  <button class="ai-file-btn download" type="button" data-act="download"><i class="fa-solid fa-download"></i> Unduh</button>';
@@ -43462,6 +43462,152 @@ Aturan:
       return '';
     },
 
+    async parseAndRenderDocx(arrayBuffer, containerEl, fileName, url, msgId, cloudDocUrl) {
+      try {
+        await ensureJSZipLoaded().catch(() => null);
+        if (typeof window.JSZip === 'undefined') throw new Error('Pustaka JSZip tidak tersedia');
+        const zip = await window.JSZip.loadAsync(arrayBuffer);
+        const docXml = zip.file('word/document.xml');
+        if (!docXml) throw new Error('word/document.xml tidak ditemukan');
+        const xmlText = await docXml.async('text');
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
+
+        const body = xmlDoc.getElementsByTagName('w:body')[0];
+        if (!body) throw new Error('Body dokumen Word kosong');
+
+        let html = '';
+        let plainText = '';
+        let pCount = 0;
+
+        const children = Array.from(body.childNodes);
+        for (const child of children) {
+          const nodeName = child.nodeName;
+
+          if (nodeName === 'w:p') {
+            pCount++;
+            const pStyle = child.getElementsByTagName('w:pStyle')[0];
+            const styleVal = pStyle?.getAttribute('w:val') || '';
+            const isH1 = /heading\s*1/i.test(styleVal);
+            const isH2 = /heading\s*2/i.test(styleVal);
+            const isH3 = /heading\s*3/i.test(styleVal);
+
+            const jc = child.getElementsByTagName('w:jc')[0];
+            const jcVal = jc?.getAttribute('w:val') || 'left';
+            let textAlign = 'left';
+            if (jcVal === 'center') textAlign = 'center';
+            else if (jcVal === 'right') textAlign = 'right';
+            else if (jcVal === 'both' || jcVal === 'distribute') textAlign = 'justify';
+
+            const runs = child.getElementsByTagName('w:r');
+            let pHtml = '';
+            let pRaw = '';
+
+            for (let i = 0; i < runs.length; i++) {
+              const r = runs[i];
+              const isBold = Boolean(r.getElementsByTagName('w:b')[0]);
+              const isItalic = Boolean(r.getElementsByTagName('w:i')[0]);
+              const isUnderline = Boolean(r.getElementsByTagName('w:u')[0]);
+              const textNodes = r.getElementsByTagName('w:t');
+
+              let rText = '';
+              for (let j = 0; j < textNodes.length; j++) {
+                rText += textNodes[j].textContent || '';
+              }
+              if (rText) {
+                pRaw += rText;
+                let formatted = escapeHtml(rText);
+                if (isUnderline) formatted = `<u>${formatted}</u>`;
+                if (isItalic) formatted = `<em>${formatted}</em>`;
+                if (isBold) formatted = `<strong>${formatted}</strong>`;
+                pHtml += formatted;
+              }
+            }
+
+            if (pRaw.trim()) {
+              plainText += pRaw + '\n';
+              if (isH1) {
+                html += `<h1 style="text-align: ${textAlign};">${pHtml}</h1>`;
+              } else if (isH2) {
+                html += `<h2 style="text-align: ${textAlign};">${pHtml}</h2>`;
+              } else if (isH3) {
+                html += `<h3 style="text-align: ${textAlign};">${pHtml}</h3>`;
+              } else {
+                html += `<p style="text-align: ${textAlign}; margin-bottom: 10px;">${pHtml}</p>`;
+              }
+            } else {
+              html += '<div style="height: 10px;"></div>';
+            }
+          } else if (nodeName === 'w:tbl') {
+            const rows = child.getElementsByTagName('w:tr');
+            if (rows.length > 0) {
+              html += '<div style="overflow-x: auto; margin: 16px 0;"><table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">';
+              for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+                const tr = rows[rIdx];
+                const cells = tr.getElementsByTagName('w:tc');
+                const isHeader = rIdx === 0;
+                const tag = isHeader ? 'th' : 'td';
+                html += '<tr>';
+                for (let cIdx = 0; cIdx < cells.length; cIdx++) {
+                  const tc = cells[cIdx];
+                  const cellTexts = Array.from(tc.getElementsByTagName('w:t')).map(t => t.textContent || '').join(' ');
+                  plainText += cellTexts + '\t';
+                  html += `<${tag} style="border: 1px solid #cbd5e1; padding: 8px 10px; background: ${isHeader ? '#f1f5f9' : (rIdx % 2 === 0 ? '#fff' : '#f8fafc')};">${escapeHtml(cellTexts)}</${tag}>`;
+                }
+                plainText += '\n';
+                html += '</tr>';
+              }
+              html += '</table></div>';
+            }
+          }
+        }
+
+        if (!html.trim() || !plainText.trim()) {
+          throw new Error('Dokumen Word kosong atau tidak memuat teks yang dapat diekstrak.');
+        }
+
+        const wordCount = plainText.trim().split(/\s+/).length;
+
+        containerEl.innerHTML = `
+          <div class="wa-docx-paper-wrapper">
+            <div class="wa-docx-toolbar">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-size: 0.75rem; padding: 4px 8px; border-radius: 6px;">
+                  <i class="fa-solid fa-file-word"></i> Word (.docx)
+                </span>
+                <span style="font-size: 0.78rem; color: #94a3b8;">${pCount} bagian • ${wordCount} kata</span>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <button type="button" class="btn btn-sm btn-outline" id="btnCopyWaDocxText" style="font-size: 0.75rem; padding: 5px 12px; color: #f8fafc; border-color: rgba(255,255,255,0.2);">
+                  <i class="fa-solid fa-copy"></i> Salin Semua Teks
+                </button>
+                <button type="button" class="btn btn-sm btn-primary" id="btnDownloadWaDocxInner" style="font-size: 0.75rem; padding: 5px 12px; background: #25D366; border-color: #25D366; color: #052e16; font-weight: 600;">
+                  <i class="fa-solid fa-download"></i> Unduh File Asli
+                </button>
+              </div>
+            </div>
+            <div class="wa-docx-sheet">
+              ${html}
+            </div>
+          </div>
+        `;
+
+        document.getElementById('btnCopyWaDocxText')?.addEventListener('click', () => {
+          copyTextToClipboard(plainText, null, '📋 Teks dokumen Word berhasil disalin!');
+          AudioEngine.click?.();
+        });
+
+        document.getElementById('btnDownloadWaDocxInner')?.addEventListener('click', () => {
+          this.downloadDocument(fileName, url, msgId);
+        });
+
+        return true;
+      } catch (err) {
+        console.warn('Gagal render DOCX inline:', err.message);
+        return false;
+      }
+    },
+
     async openDocumentPreview(doc, msg = null) {
       const fileName = doc.fileName || 'dokumen.bin';
       const ext = fileName.includes('.') ? (fileName.split('.').pop() || '').toLowerCase() : '';
@@ -43501,7 +43647,7 @@ Aturan:
       } else if (['xls', 'xlsx', 'csv'].includes(ext)) {
         iconClass = 'fa-solid fa-file-excel';
         iconColor = '#10b981';
-        bgBox = 'rgba(168, 185, 129, 0.15)';
+        bgBox = 'rgba(16, 185, 129, 0.15)';
         borderBox = 'rgba(16, 185, 129, 0.3)';
         typeLabel = 'Lembar Kerja Excel';
       } else if (['ppt', 'pptx'].includes(ext)) {
@@ -43538,7 +43684,7 @@ Aturan:
         </div>
       `;
       modal.style.display = 'flex';
-      AudioEngine.click();
+      AudioEngine.click?.();
 
       // Deteksi tautan WPS / Office Cloud
       let cloudDocUrl = '';
@@ -43560,8 +43706,9 @@ Aturan:
           if (data && data.url) {
             url = data.url;
             doc.url = url;
-            // Re-render modal dengan URL yang telah berhasil dimuat
             return this.openDocumentPreview(doc, msg);
+          } else if (data && data.cloudUrl) {
+            cloudDocUrl = data.cloudUrl;
           }
         } catch (_) {}
       }
@@ -43601,7 +43748,7 @@ Aturan:
       if (ext === 'pdf') {
         if (url) {
           bodyEl.innerHTML = `
-            <iframe src="${escapeHtml(url)}" style="width: 100%; height: 65vh; border: none; border-radius: 8px; background: #fff;" title="${escapeHtml(fileName)}"></iframe>
+            <iframe src="${escapeHtml(url)}#view=FitH" style="width: 100%; height: 75vh; border: none; border-radius: 8px; background: #fff;" title="${escapeHtml(fileName)}"></iframe>
           `;
         } else {
           bodyEl.innerHTML = `
@@ -43620,7 +43767,20 @@ Aturan:
             </div>
           `;
         }
-      } else if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext)) {
+      } else if (['doc', 'docx'].includes(ext)) {
+        if (url) {
+          try {
+            const fetchRes = await fetch(fullUrl || url);
+            if (fetchRes.ok) {
+              const arrayBuffer = await fetchRes.arrayBuffer();
+              const rendered = await this.parseAndRenderDocx(arrayBuffer, bodyEl, fileName, url, msgId, cloudDocUrl);
+              if (rendered) return;
+            }
+          } catch (e) {
+            console.warn('Fetch docx inline error:', e.message);
+          }
+        }
+
         const officeViewerUrl = fullUrl && !window.location.hostname.includes('localhost') ? `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(fullUrl)}` : '';
 
         bodyEl.innerHTML = `
@@ -43630,7 +43790,7 @@ Aturan:
             </div>
             <h4 style="color: #f8fafc; margin-bottom: 6px; font-size: 1.1rem; word-break: break-word;">${escapeHtml(fileName)}</h4>
             <span style="display: inline-block; padding: 3px 10px; border-radius: 12px; background: rgba(255,255,255,0.08); color: #94a3b8; font-size: 0.75rem; margin-bottom: 16px;">${typeLabel}</span>
-            
+
             <div style="display: flex; flex-direction: column; gap: 10px; text-align: left;">
               ${cloudBtnHtml}
 
@@ -43651,7 +43811,7 @@ Aturan:
                   <i class="fa-solid fa-download" style="font-size: 1.1rem;"></i>
                   <div>
                     <strong style="display: block; font-size: 0.88rem; color: #f8fafc;">Unduh Dokumen ke Perangkat</strong>
-                    <span style="font-size: 0.72rem; color: #94a3b8;">Buka dengan WPS Office, Word, atau aplikasi bawaan HP</span>
+                    <span style="font-size: 0.72rem; color: #94a3b8;">Buka dengan WPS Office, Word, atau aplikasi HP</span>
                   </div>
                 </div>
                 <i class="fa-solid fa-download" style="font-size: 0.85rem; opacity: 0.7;"></i>
@@ -43679,7 +43839,7 @@ Aturan:
     },
 
     async downloadDocument(fileName, url, msgId) {
-      AudioEngine.click();
+      AudioEngine.click?.();
       let targetUrl = url;
 
       if (!targetUrl && msgId) {
@@ -43690,6 +43850,10 @@ Aturan:
           const data = await res.json().catch(() => null);
           if (data && data.url) {
             targetUrl = data.url;
+          } else if (data && data.cloudUrl) {
+            window.open(data.cloudUrl, '_blank');
+            showToast(`🌐 Membuka tautan dokumen cloud untuk ${fileName}...`, 'info');
+            return;
           }
         } catch (e) {
           console.warn('Error resolving WA media for download:', e.message);
@@ -43697,13 +43861,34 @@ Aturan:
       }
 
       if (targetUrl) {
-        const a = document.createElement('a');
-        a.href = targetUrl;
-        a.download = fileName || 'dokumen.bin';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        showToast(`✅ Berkas ${fileName} berhasil diunduh.`, 'success');
+        showToast(`⏳ Mengunduh berkas ${fileName}...`, 'info');
+        try {
+          const fetchUrl = targetUrl.startsWith('http') ? targetUrl : `${window.location.origin}${targetUrl}`;
+          const res = await fetch(fetchUrl);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const blob = await res.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = fileName || 'dokumen.bin';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+          showToast(`✅ Berkas ${fileName} berhasil diunduh.`, 'success');
+          AudioEngine.success?.() || AudioEngine.click?.();
+        } catch (blobErr) {
+          console.warn('Fallback direct link download:', blobErr.message);
+          const dlUrl = targetUrl.includes('?') ? `${targetUrl}&download=1` : `${targetUrl}?download=1`;
+          const a = document.createElement('a');
+          a.href = dlUrl;
+          a.download = fileName || 'dokumen.bin';
+          a.target = '_blank';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          showToast(`✅ Berkas ${fileName} sedang diunduh.`, 'success');
+        }
       } else {
         const cloudDocUrl = this.findCloudDocLinkInChat();
         if (cloudDocUrl) {
@@ -43721,24 +43906,31 @@ Aturan:
       if (this.activeContact && this.activeContact.id === jid) {
         const bubble = els.messagesList?.querySelector(`[data-msg-id="${msgId}"]`);
         if (bubble) {
-          const imgThumb = bubble.querySelector('.wa-chat-img-thumb');
-          if (imgThumb && media.url) {
-            imgThumb.src = media.url;
-            imgThumb.onclick = () => {
-              if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([media.url], 0);
-            };
-          }
-          const placeholder = bubble.querySelector('.wa-media-placeholder-badge');
-          if (placeholder && media.url && media.type === 'image') {
-            const newWrap = document.createElement('div');
-            newWrap.className = 'wa-bubble-image-wrap';
-            newWrap.innerHTML = `<img src="${escapeHtml(media.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" loading="lazy" />`;
-            placeholder.replaceWith(newWrap);
-            const loadedImg = newWrap.querySelector('.wa-chat-img-thumb');
-            if (loadedImg) {
-              loadedImg.addEventListener('click', () => {
+          if (media.type === 'image' && media.url) {
+            const imgThumb = bubble.querySelector('.wa-chat-img-thumb');
+            if (imgThumb) {
+              imgThumb.src = media.url;
+              imgThumb.classList.remove('wa-thumb-blurred');
+            }
+            const overlay = bubble.querySelector('.wa-img-load-overlay');
+            if (overlay) overlay.remove();
+            const placeholder = bubble.querySelector('.wa-media-placeholder-badge');
+            if (placeholder) {
+              const newWrap = document.createElement('div');
+              newWrap.className = 'wa-bubble-image-wrap';
+              newWrap.innerHTML = `<img src="${escapeHtml(media.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" loading="lazy" />`;
+              placeholder.replaceWith(newWrap);
+              newWrap.addEventListener('click', () => {
                 if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([media.url], 0);
               });
+            }
+          } else if (media.type === 'document' && media.url) {
+            const btnDownload = bubble.querySelector('.btn-wa-doc-download');
+            if (btnDownload) {
+              btnDownload.onclick = (e) => {
+                e.stopPropagation();
+                this.downloadDocument(media.fileName, media.url, msgId);
+              };
             }
           }
         }
@@ -43824,13 +44016,22 @@ Aturan:
         if (media.type === 'image') {
           if (media.url) {
             mediaHtml = `
-              <div class="wa-bubble-image-wrap">
+              <div class="wa-bubble-image-wrap wa-photo-interactive" data-action="view-photo" title="Klik untuk memperbesar gambar">
                 <img src="${escapeHtml(media.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" loading="lazy" />
+              </div>
+            `;
+          } else if (media.thumbnail) {
+            mediaHtml = `
+              <div class="wa-bubble-image-wrap wa-photo-interactive" data-action="load-photo" title="Klik untuk memuat & memperbesar foto">
+                <img src="${escapeHtml(media.thumbnail)}" class="wa-chat-img-thumb wa-thumb-blurred" alt="Foto WhatsApp (Thumbnail)" loading="lazy" />
+                <div class="wa-img-load-overlay" title="Klik untuk unduh & lihat foto penuh">
+                  <i class="fa-solid fa-magnifying-glass-plus"></i>
+                </div>
               </div>
             `;
           } else {
             mediaHtml = `
-              <div class="wa-media-placeholder-badge" data-action="load-photo" style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px dashed rgba(255,255,255,0.2); cursor: pointer; margin-bottom: 6px;">
+              <div class="wa-media-placeholder-badge wa-photo-interactive" data-action="load-photo" style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px dashed rgba(255,255,255,0.2); cursor: pointer; margin-bottom: 6px;">
                 <i class="fa-solid fa-image" style="color: #38bdf8; font-size: 1.2rem;"></i>
                 <div style="flex: 1; min-width: 0;">
                   <span style="font-weight: 600; font-size: 0.82rem; color: #f8fafc; display: block;">Foto WhatsApp</span>
@@ -43874,19 +44075,20 @@ Aturan:
           }
 
           const sizeStr = media.size ? ` • ${this.formatFileSize(media.size)}` : '';
+          const badgeClass = `wa-doc-badge-${extClass}`;
 
           mediaHtml = `
-            <div class="wa-doc-card">
-              <div class="wa-doc-header">
-                <div class="wa-doc-icon-box ${extClass}">
+            <div class="wa-doc-card ${badgeClass}">
+              <div class="wa-doc-card-top wa-doc-header">
+                <div class="wa-doc-icon-box">
                   <i class="${iconClass}"></i>
                 </div>
-                <div class="wa-doc-info">
+                <div class="wa-doc-details wa-doc-info">
                   <div class="wa-doc-title" title="${escapeHtml(fileName)}">${escapeHtml(fileName)}</div>
                   <div class="wa-doc-subtitle">${typeLabel}${sizeStr}</div>
                 </div>
               </div>
-              <div class="wa-doc-actions">
+              <div class="wa-doc-card-actions wa-doc-actions">
                 <button type="button" class="btn-wa-doc-preview">
                   <i class="fa-solid fa-eye"></i> Pratinjau
                 </button>
@@ -43938,42 +44140,48 @@ Aturan:
 
       // Pasang event listeners pada elemen media di dalam bubble
       if (media) {
-        const imgEl = wrap.querySelector('.wa-chat-img-thumb');
-        if (imgEl && media.url) {
-          imgEl.addEventListener('click', (e) => {
+        const interactivePhoto = wrap.querySelector('.wa-photo-interactive');
+        if (interactivePhoto) {
+          interactivePhoto.addEventListener('click', async (e) => {
             e.stopPropagation();
-            if (typeof ImageLightbox !== 'undefined' && typeof ImageLightbox.open === 'function') {
-              ImageLightbox.open([media.url], 0);
+            if (media.url) {
+              if (typeof ImageLightbox !== 'undefined' && typeof ImageLightbox.open === 'function') {
+                ImageLightbox.open([media.url], 0);
+              }
+              return;
             }
-          });
-        }
 
-        const placeholder = wrap.querySelector('.wa-media-placeholder-badge[data-action="load-photo"]');
-        if (placeholder) {
-          placeholder.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            placeholder.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="color: #38bdf8;"></i> <span style="font-size: 0.75rem;">Memuat foto...</span>';
+            // Jika ada thumbnail, buka segera di Lightbox agar pengguna langsung dapat melihat gambarnya
+            if (media.thumbnail && typeof ImageLightbox !== 'undefined' && typeof ImageLightbox.open === 'function') {
+              ImageLightbox.open([media.thumbnail], 0);
+            }
+
+            // Ambil berkas HD ukuran penuh dari server
+            const overlay = interactivePhoto.querySelector('.wa-img-load-overlay');
+            if (overlay) overlay.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
             try {
-              const res = await this.waFetch(`/api/wa/media?msgId=${encodeURIComponent(msg.id)}&fileName=photo.jpg`, { headers: this.getAuthHeaders() }, 1);
+              const jidParam = this.activeContact?.id ? `&jid=${encodeURIComponent(this.activeContact.id)}` : '';
+              const res = await this.waFetch(`/api/wa/media?msgId=${encodeURIComponent(msg.id)}&fileName=photo.jpg${jidParam}`, { headers: this.getAuthHeaders() }, 1);
               const data = await res.json().catch(() => null);
               if (data && data.url) {
                 media.url = data.url;
                 const newWrap = document.createElement('div');
-                newWrap.className = 'wa-bubble-image-wrap';
+                newWrap.className = 'wa-bubble-image-wrap wa-photo-interactive';
+                newWrap.setAttribute('data-action', 'view-photo');
+                newWrap.title = 'Klik untuk memperbesar gambar';
                 newWrap.innerHTML = `<img src="${escapeHtml(data.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" loading="lazy" />`;
-                placeholder.replaceWith(newWrap);
-                const loadedImg = newWrap.querySelector('.wa-chat-img-thumb');
-                if (loadedImg) {
-                  loadedImg.addEventListener('click', () => {
-                    if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([data.url], 0);
-                  });
-                }
+                interactivePhoto.replaceWith(newWrap);
+                newWrap.addEventListener('click', () => {
+                  if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([data.url], 0);
+                });
                 if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([data.url], 0);
-              } else {
-                placeholder.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="color: #ef4444;"></i> <span style="font-size: 0.72rem; color: #ef4444;">Foto kadaluarsa di WhatsApp</span>';
+              } else if (!media.thumbnail) {
+                if (overlay) overlay.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="color: #ef4444;"></i>';
+                showToast('⚠️ Foto tidak tersedia di server atau ponsel.', 'warning');
               }
             } catch (_) {
-              placeholder.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="color: #ef4444;"></i> <span style="font-size: 0.72rem; color: #ef4444;">Gagal memuat foto</span>';
+              if (!media.thumbnail && overlay) overlay.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="color: #ef4444;"></i>';
             }
           });
         }
@@ -43994,7 +44202,7 @@ Aturan:
           });
         }
 
-        const docHeader = wrap.querySelector('.wa-doc-header');
+        const docHeader = wrap.querySelector('.wa-doc-card-top, .wa-doc-header');
         if (docHeader) {
           docHeader.addEventListener('click', (e) => {
             e.stopPropagation();
