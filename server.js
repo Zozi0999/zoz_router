@@ -1179,8 +1179,8 @@ const OFFICIAL_OLLAMA_CLOUD_MODELS = [
   { name: 'kimi-k3', model: 'kimi-k3', tag: 'Long Context Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi-k3', parameter_size: '1T' } },
   { name: 'kimi-k2.6', model: 'kimi-k2.6', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi-k2.6', parameter_size: '1T' } },
   { name: 'deepseek-v4.1-flash', model: 'deepseek-v4.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
-  { name: 'deepseek-v4.1-flash:cloud', model: 'deepseek-v4.1-flash:cloud', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
-  { name: 'deepseek-v4-pro:cloud', model: 'deepseek-v4-pro:cloud', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '1T' } },
+  { name: 'deepseek-v4.1-flash:1017', model: 'deepseek-v4.1-flash:1017', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
+  { name: 'deepseek-v4-pro:0813', model: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '1T' } },
   { name: 'glm-5.3', model: 'glm-5.3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm5', parameter_size: '756B' } },
   { name: 'glm-5.3-flash', model: 'glm-5.3-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'glm5', parameter_size: '218B' } },
   { name: 'glm-5.2', model: 'glm-5.2', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm5', parameter_size: '756B' } },
@@ -1193,6 +1193,11 @@ const OFFICIAL_OLLAMA_CLOUD_MODELS = [
 
 const VALID_OLLAMA_CLOUD_MODELS = new Set(OFFICIAL_OLLAMA_CLOUD_MODELS.map(m => m.model.toLowerCase()));
 
+function sanitizeOllamaApiKey(rawKey) {
+  if (!rawKey || typeof rawKey !== 'string') return '';
+  return rawKey.replace(/^Bearer\s+/i, '').replace(/^["']+|["']+$/g, '').trim();
+}
+
 function isUnsupportedOllamaChatModel(m) {
   if (!m) return true;
   const id = String(m.name || m.model || m.id || '').toLowerCase().trim();
@@ -1203,21 +1208,25 @@ function isUnsupportedOllamaChatModel(m) {
   return false;
 }
 
+// Resolusi ke nama model resmi di https://ollama.com (TANPA akhiran :cloud / -cloud lokal)
 function resolveOllamaCloudModel(modelId) {
-  if (!modelId || typeof modelId !== 'string') return 'deepseek-v4.1-flash:cloud';
+  if (!modelId || typeof modelId !== 'string') return 'deepseek-v4.1-flash';
   const raw = modelId.trim();
   const id = raw.toLowerCase();
-  if (id === 'deepseek-v4.1-flash:1017' || id === 'deepseek-v4.1-flash' || id === 'deepseek-v4.1-flash:cloud') return 'deepseek-v4.1-flash:cloud';
-  if (id === 'deepseek-v4-pro:0813' || id === 'deepseek-v4-pro' || id === 'deepseek-v4-pro:cloud') return 'deepseek-v4-pro:cloud';
-  if (id === 'kimi-k2.6' || id === 'kimi-k2.6:cloud') return 'kimi-k2.6:cloud';
-  if (id === 'glm-5.3-flash' || id === 'glm-5.3-flash:cloud') return 'glm-5.3-flash:cloud';
-  if (id === 'nemotron-3-nano:30b' || id === 'nemotron-3-nano:30b-cloud') return 'nemotron-3-nano:30b-cloud';
-  if (id === 'nemotron-3-ultra' || id === 'nemotron-3-ultra:cloud') return 'nemotron-3-ultra:cloud';
-  if (id === 'nemotron-3-super' || id === 'nemotron-3-super:cloud') return 'nemotron-3-super:cloud';
-  if (id === 'mistral-large-3:675b' || id === 'mistral-large-3:675b-cloud') return 'mistral-large-3:675b-cloud';
-  if (id === 'minimax-m2.7' || id === 'minimax-m2.7:cloud') return 'minimax-m2.7:cloud';
-  if (id === 'gpt-oss:120b' || id === 'gpt-oss:120b-cloud') return 'gpt-oss:120b-cloud';
+  if (id === 'deepseek-v4.1-flash:1017') return 'deepseek-v4.1-flash:1017';
+  if (id === 'deepseek-v4.1-flash' || id === 'deepseek-v4.1-flash:cloud' || id === 'deepseek-v4-flash' || id === 'deepseek-v4-flash:cloud') return 'deepseek-v4.1-flash';
+  if (id === 'deepseek-v4-pro:0813' || id === 'deepseek-v4-pro' || id === 'deepseek-v4-pro:cloud') return 'deepseek-v4-pro:0813';
+  if (id === 'kimi-k2.6' || id === 'kimi-k2.6:cloud') return 'kimi-k2.6';
+  if (id === 'glm-5.3-flash' || id === 'glm-5.3-flash:cloud') return 'glm-5.3-flash';
+  if (id === 'nemotron-3-nano:30b' || id === 'nemotron-3-nano:30b-cloud') return 'nemotron-3-nano:30b';
+  if (id === 'nemotron-3-ultra' || id === 'nemotron-3-ultra:cloud') return 'nemotron-3-ultra';
+  if (id === 'nemotron-3-super' || id === 'nemotron-3-super:cloud') return 'nemotron-3-super';
+  if (id === 'mistral-large-3:675b' || id === 'mistral-large-3:675b-cloud') return 'mistral-large-3:675b';
+  if (id === 'minimax-m2.7' || id === 'minimax-m2.7:cloud') return 'minimax-m2.7';
+  if (id === 'gpt-oss:120b' || id === 'gpt-oss:120b-cloud') return 'gpt-oss:120b';
   if (VALID_OLLAMA_CLOUD_MODELS.has(id)) return raw;
+  const stripped = raw.replace(/(?::cloud|-cloud)$/i, '');
+  if (VALID_OLLAMA_CLOUD_MODELS.has(stripped.toLowerCase())) return stripped;
   if (id === 'gemma4:31b-cloud' || id.startsWith('gemma')) return 'gemma4:31b';
   if (id.startsWith('clef')) return 'gemma4:31b';
   if (id.includes('coder') || id.includes('code')) return 'kimi-k2.7-code';
@@ -1227,6 +1236,35 @@ function resolveOllamaCloudModel(modelId) {
   if (id.startsWith('deepseek-r1') || id.startsWith('deepseek')) return 'deepseek-v4.1-flash';
   if (id.startsWith('mistral')) return 'mistral-large-4';
   return 'gemma4:31b';
+}
+
+// Resolusi ke manifest Cloud Relay yang terpasang pada daemon lokal (http://127.0.0.1:11434)
+function resolveLocalDaemonCloudManifest(modelId) {
+  if (!modelId || typeof modelId !== 'string') return 'deepseek-v4.1-flash:cloud';
+  const raw = modelId.trim();
+  const id = raw.toLowerCase();
+  const localNativeModels = new Set([
+    'nemotron-analisis:latest', 'nemotron-analisis',
+    'granite-mind:latest', 'granite-mind',
+    'granite4.2:3b', 'llama3.2:3b', 'qwen2.5:1.5b',
+    'grok-custom:latest', 'grok-custom',
+    'rose-cloud:latest', 'rose-cloud',
+    'clound:latest', 'clound'
+  ]);
+  if (localNativeModels.has(id)) return raw;
+  if (id === 'deepseek-v4.1-flash:1017' || id === 'deepseek-v4.1-flash' || id === 'deepseek-v4.1-flash:cloud') return 'deepseek-v4.1-flash:cloud';
+  if (id === 'deepseek-v4-flash' || id === 'deepseek-v4-flash:cloud') return 'deepseek-v4-flash:cloud';
+  if (id === 'deepseek-v4-pro:0813' || id === 'deepseek-v4-pro' || id === 'deepseek-v4-pro:cloud') return 'deepseek-v4-pro:cloud';
+  if (id === 'kimi-k2.6' || id === 'kimi-k2.6:cloud' || id === 'kimi-k2.7-code' || id === 'kimi-k3') return 'kimi-k2.6:cloud';
+  if (id === 'glm-5.3-flash' || id === 'glm-5.3-flash:cloud' || id === 'glm-5.3' || id === 'glm-5.2') return 'glm-5.3-flash:cloud';
+  if (id === 'nemotron-3-nano:30b' || id === 'nemotron-3-nano:30b-cloud') return 'nemotron-3-nano:30b-cloud';
+  if (id === 'nemotron-3-ultra' || id === 'nemotron-3-ultra:cloud') return 'nemotron-3-ultra:cloud';
+  if (id === 'nemotron-3-super' || id === 'nemotron-3-super:cloud') return 'nemotron-3-super:cloud';
+  if (id === 'mistral-large-3:675b' || id === 'mistral-large-3:675b-cloud' || id === 'mistral-large-4') return 'mistral-large-3:675b-cloud';
+  if (id === 'minimax-m2.7' || id === 'minimax-m2.7:cloud' || id === 'minimax-m3' || id === 'minimax-m3.1-flash') return 'minimax-m2.7:cloud';
+  if (id === 'gpt-oss:120b' || id === 'gpt-oss:120b-cloud' || id === 'gpt-oss:20b' || id === 'gemma4:31b' || id === 'beam' || id === 'muse-spark-open') return 'gpt-oss:120b-cloud';
+  if (id.endsWith(':cloud') || id.endsWith('-cloud')) return raw;
+  return 'deepseek-v4.1-flash:cloud';
 }
 
 function mapOllamaModelToOpenRouter(modelId) {
@@ -2462,15 +2500,18 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   const ollamaEpIsCustom = Boolean(ollamaEpTrim) && !isTrustedOllamaEndpoint(
     /^https?:\/\//i.test(ollamaEpTrim) ? ollamaEpTrim : 'http://' + ollamaEpTrim
   );
-  const activeOllamaKey = ollamaApiKey || (apiKey && !apiKey.startsWith('sk-or-') ? apiKey : null) ||
-    (ollamaEpIsCustom ? null : process.env.OLLAMA_API_KEY);
+  const rawCandidateOllamaKey = sanitizeOllamaApiKey(
+    ollamaApiKey || (apiKey && !String(apiKey).startsWith('sk-or-') ? apiKey : '') ||
+    (ollamaEpIsCustom ? '' : (process.env.OLLAMA_API_KEY || ''))
+  );
+  const activeOllamaKey = rawCandidateOllamaKey && !rawCandidateOllamaKey.startsWith('sk-or-') ? rawCandidateOllamaKey : null;
   let rawEp = (endpoint || '').trim();
 
   // Pure Cloud Architecture: Hanya jika Auto-Router aktif dan tidak ada Ollama lokal,
   // alihkan ke OpenRouter Cloud. Jika Auto-Router tidak aktif, hormati pilihan Ollama pengguna!
   const hasCustomOllama = Boolean(activeOllamaKey && rawEp && !rawEp.includes('127.0.0.1') && !rawEp.includes('localhost') && !rawEp.includes('ollama.com'));
-  const hasOpenRouterKey = Boolean(openRouterKey || (apiKey && apiKey.startsWith('sk-or-')) || process.env.OPENROUTER_API_KEY);
-  if (isAutoRouterActive && !isOpenRouter && !hasCustomOllama && hasOpenRouterKey) {
+  const hasOpenRouterKey = Boolean(openRouterKey || (apiKey && String(apiKey).startsWith('sk-or-')) || (rawCandidateOllamaKey && rawCandidateOllamaKey.startsWith('sk-or-')) || process.env.OPENROUTER_API_KEY);
+  if ((isAutoRouterActive || (rawCandidateOllamaKey && rawCandidateOllamaKey.startsWith('sk-or-'))) && !isOpenRouter && !hasCustomOllama && hasOpenRouterKey) {
     try {
       const mappedModel = mapOllamaModelToOpenRouter(rawModel);
       return await callLLMBackend({
@@ -2480,8 +2521,8 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
         model: mappedModel,
         provider: 'openrouter',
         endpoint,
-        apiKey: openRouterKey || apiKey,
-        openRouterKey: openRouterKey || (apiKey && apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OPENROUTER_API_KEY,
+        apiKey: openRouterKey || apiKey || rawCandidateOllamaKey,
+        openRouterKey: openRouterKey || (apiKey && String(apiKey).startsWith('sk-or-') ? apiKey : null) || (rawCandidateOllamaKey && rawCandidateOllamaKey.startsWith('sk-or-') ? rawCandidateOllamaKey : null) || process.env.OPENROUTER_API_KEY,
         isAutoRouter: true
       });
     } catch (bridgeErr) {
@@ -2489,7 +2530,7 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     }
   }
 
-  // Jika activeOllamaKey ada dan endpoint tidak dispesifikasi, gunakan Ollama Cloud
+  // Jika activeOllamaKey ada dan endpoint tidak dispesifikasi / loopback, gunakan Ollama Cloud resmi
   if (activeOllamaKey && (!rawEp || rawEp.includes('127.0.0.1') || rawEp.includes('localhost'))) {
     rawEp = 'https://ollama.com';
   } else if (!rawEp) {
@@ -2512,72 +2553,81 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     if (!dnsVerdict.ok) throw new Error(dnsVerdict.msg);
   }
 
-  const ollamaUrl = resolveEndpointUrl(rawEp, 'api/chat');
-  const client = ollamaUrl.protocol === 'https:' ? https : http;
+  const executeOllamaOnce = (targetEp, targetModel, authKey) => {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const safeResolve = (data) => { if (!settled) { settled = true; resolve(data); } };
+      const safeReject = (err) => { if (!settled) { settled = true; reject(err); } };
+
+      const ollamaUrl = resolveEndpointUrl(targetEp, 'api/chat');
+      const client = ollamaUrl.protocol === 'https:' ? https : http;
+      const postData = JSON.stringify({
+        model: targetModel,
+        messages: finalMessages,
+        stream: false,
+        options: { temperature: 0.3 }
+      });
+      const headers = {
+        'Content-Type': 'application/json',
+        'User-Agent': 'ZozRouter/1.0',
+        'Content-Length': Buffer.byteLength(postData)
+      };
+      if (authKey) {
+        headers['Authorization'] = `Bearer ${authKey}`;
+        headers['x-ollama-key'] = authKey;
+      }
+
+      const req = client.request(ollamaUrl.toString(), {
+        method: 'POST',
+        headers,
+        timeout: 90000
+      }, (res) => {
+        let rawData = '';
+        res.on('data', chunk => rawData += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(rawData);
+            if (res.statusCode >= 400 || parsed.error) {
+              const errMsg = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : (parsed.error || `HTTP ${res.statusCode}: Permintaan Ollama gagal`);
+              return safeReject(new Error(`Ollama Error [${res.statusCode}]: ${errMsg}`));
+            }
+            const content = parsed.message?.content || parsed.response || '';
+            if (!content.trim()) {
+              return safeReject(new Error(`Ollama tidak mengembalikan respons teks untuk model: ${targetModel || 'default'}`));
+            }
+            safeResolve(content);
+          } catch (e) {
+            safeReject(new Error('Gagal memproses respon Ollama: ' + e.message));
+          }
+        });
+        res.on('error', err => safeReject(err));
+      });
+      req.on('timeout', () => { req.destroy(); safeReject(new Error('Ollama request timed out')); });
+      req.on('error', err => safeReject(err));
+      req.write(postData);
+      req.end();
+    });
+  };
 
   const isCloudOllama = rawEp.includes('ollama.com');
-  const postData = JSON.stringify({
-    model: rawModel || (isCloudOllama ? 'gemma4:31b' : 'qwen2.5:1.5b'),
-    messages: finalMessages,
-    stream: false,
-    options: { temperature: 0.3 }
-  });
+  const isLoopbackOllama = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(rawEp);
+  const resolvedPrimaryModel = isCloudOllama
+    ? resolveOllamaCloudModel(rawModel || 'gemma4:31b')
+    : (isLoopbackOllama ? resolveLocalDaemonCloudManifest(rawModel || 'deepseek-v4.1-flash:cloud') : (rawModel || 'qwen2.5:1.5b'));
 
-  const headers = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'ZozRouter/1.0',
-    'Content-Length': Buffer.byteLength(postData)
-  };
-  if (activeOllamaKey) {
-    headers['Authorization'] = `Bearer ${activeOllamaKey}`;
-    headers['x-ollama-key'] = activeOllamaKey;
+  try {
+    return await executeOllamaOnce(rawEp, resolvedPrimaryModel, activeOllamaKey);
+  } catch (primaryErr) {
+    // Jika panggilan ke https://ollama.com gagal (misal API key kedaluwarsa/kuota habis/401/404),
+    // otomatis fallback ke daemon Cloud Relay lokal (127.0.0.1:11434)
+    if (isCloudOllama && !process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      try {
+        const localFallbackModel = resolveLocalDaemonCloudManifest(rawModel || resolvedPrimaryModel);
+        return await executeOllamaOnce('http://127.0.0.1:11434', localFallbackModel, null);
+      } catch (_) {}
+    }
+    throw primaryErr;
   }
-
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const safeResolve = (data) => {
-      if (!settled) {
-        settled = true;
-        resolve(data);
-      }
-    };
-    const safeReject = (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    };
-
-    const req = client.request(ollamaUrl.toString(), {
-      method: 'POST',
-      headers,
-      timeout: 90000
-    }, (res) => {
-      let rawData = '';
-      res.on('data', chunk => rawData += chunk);
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(rawData);
-          if (res.statusCode >= 400 || parsed.error) {
-            const errMsg = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : (parsed.error || `HTTP ${res.statusCode}: Permintaan Ollama gagal`);
-            return safeReject(new Error(`Ollama Error [${res.statusCode}]: ${errMsg}`));
-          }
-          const content = parsed.message?.content || parsed.response || '';
-          if (!content.trim()) {
-            return safeReject(new Error(`Ollama tidak mengembalikan respons teks untuk model: ${rawModel || 'default'}`));
-          }
-          safeResolve(content);
-        } catch (e) {
-          safeReject(new Error('Gagal memproses respon Ollama: ' + e.message));
-        }
-      });
-      res.on('error', err => safeReject(err));
-    });
-    req.on('timeout', () => { req.destroy(); safeReject(new Error('Ollama request timed out')); });
-    req.on('error', err => safeReject(err));
-    req.write(postData);
-    req.end();
-  });
 }
 
 
@@ -7265,7 +7315,8 @@ async function requestHandler(req, res) {
 // Ollama: Check status & get models (with multi-route fallback & disk manifests)
   if (pathname === '/api/ollama/models' && method === 'GET') {
     let rawEndpoint = reqUrl.searchParams.get('endpoint') || req.headers['x-ollama-endpoint'] || 'http://127.0.0.1:11434';
-    const authHeader = req.headers['authorization'] || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null);
+    const rawHeaderKey = sanitizeOllamaApiKey(req.headers['x-ollama-key'] || req.headers['authorization'] || '');
+    const authHeader = rawHeaderKey ? `Bearer ${rawHeaderKey}` : null;
 
     if (!rawEndpoint) {
       rawEndpoint = 'http://127.0.0.1:11434';
@@ -7300,6 +7351,7 @@ async function requestHandler(req, res) {
         models: OFFICIAL_OLLAMA_CLOUD_MODELS,
         server_running: true,
         cloud_ready: true,
+        cloud_auth: false,
         note: 'Loaded from official Ollama Cloud catalog'
       });
     }
@@ -7314,6 +7366,7 @@ async function requestHandler(req, res) {
           const client = ollamaUrl.protocol === 'https:' ? https : http;
           const reqHeaders = { 'User-Agent': 'ZozRouter/1.0' };
           if (authHeader) reqHeaders['Authorization'] = authHeader;
+          if (rawHeaderKey) reqHeaders['x-ollama-key'] = rawHeaderKey;
 
           const fetchTimeout = isServerlessEnv ? 2500 : 5000;
           const proxyReq = client.get(ollamaUrl.toString(), { timeout: fetchTimeout, headers: reqHeaders }, (proxyRes) => {
@@ -7346,6 +7399,7 @@ async function requestHandler(req, res) {
           const client = ollamaUrl.protocol === 'https:' ? https : http;
           const reqHeaders = { 'User-Agent': 'ZozRouter/1.0' };
           if (authHeader) reqHeaders['Authorization'] = authHeader;
+          if (rawHeaderKey) reqHeaders['x-ollama-key'] = rawHeaderKey;
 
           const fetchTimeout = isServerlessEnv ? 2500 : 5000;
           const proxyReq = client.get(ollamaUrl.toString(), { timeout: fetchTimeout, headers: reqHeaders }, (proxyRes) => {
@@ -7398,7 +7452,8 @@ async function requestHandler(req, res) {
         return sendJSON(res, 200, {
           models: mergedModels,
           server_running: true,
-          cloud_ready: true
+          cloud_ready: true,
+          cloud_auth: Boolean(authHeader)
         });
       }
 
@@ -7407,6 +7462,7 @@ async function requestHandler(req, res) {
         models: OFFICIAL_OLLAMA_CLOUD_MODELS,
         server_running: true,
         cloud_ready: true,
+        cloud_auth: Boolean(authHeader),
         note: 'Loaded from official Ollama Cloud catalog'
       });
     })().catch(err => {
@@ -7419,8 +7475,8 @@ async function requestHandler(req, res) {
 
   // Ollama Cloud: Get Real-Time Usage & Credits
   if (pathname === '/api/ollama/usage' && method === 'GET') {
-    const rawKey = req.headers['x-ollama-key'] || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '') || process.env.OLLAMA_API_KEY;
-    const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
+    const rawKey = sanitizeOllamaApiKey(req.headers['x-ollama-key'] || req.headers['authorization'] || process.env.OLLAMA_API_KEY || '');
+    const authHeader = rawKey ? `Bearer ${rawKey}` : null;
     if (!authHeader) {
       return sendJSON(res, 401, { error: 'Ollama API key is required' });
     }
@@ -7510,7 +7566,9 @@ async function requestHandler(req, res) {
     const body = await safeParseBody(req);
     if (!body) return;
     try {
-      const clientSuppliedKey = body.apiKey || body.ollamaApiKey || req.headers['x-ollama-key'] || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '');
+      const clientSuppliedKey = sanitizeOllamaApiKey(
+        body.apiKey || body.ollamaApiKey || req.headers['x-ollama-key'] || req.headers['authorization'] || ''
+      );
       let customEndpoint = req.headers['x-ollama-endpoint'] || body.endpoint || 'http://127.0.0.1:11434';
 
       if (!customEndpoint) {
@@ -7519,9 +7577,6 @@ async function requestHandler(req, res) {
 
       customEndpoint = customEndpoint.trim();
       const isServerlessChat = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION || req.headers['x-vercel-id']);
-      if (isServerlessChat && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint)) {
-        customEndpoint = 'https://ollama.com';
-      }
       if (!/^https?:\/\//i.test(customEndpoint)) {
         customEndpoint = (customEndpoint.includes(':443') || customEndpoint.includes('ollama.com') || customEndpoint.includes('.com') || customEndpoint.includes('.io') || customEndpoint.includes('.ai') || customEndpoint.includes('.app'))
           ? `https://${customEndpoint}`
@@ -7543,26 +7598,37 @@ async function requestHandler(req, res) {
       // (localhost / ollama.com). Endpoint khusus milik klien — yang bisa
       // menunjuk ke server penyerang — TIDAK PERNAH menerima secret server;
       // klien tetap boleh memakai key miliknya sendiri via x-ollama-key.
-      const rawKey = clientSuppliedKey ||
-        (isTrustedOllamaEndpoint(customEndpoint) ? process.env.OLLAMA_API_KEY : null);
-      const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
-      const rawOllamaKey = body.ollamaApiKey || req.headers['x-ollama-key'] || (body.apiKey && !String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || (req.headers['authorization'] && !req.headers['authorization'].includes('sk-or-') ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null);
-      const isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint);
+      const envOllamaKey = isTrustedOllamaEndpoint(customEndpoint) ? sanitizeOllamaApiKey(process.env.OLLAMA_API_KEY || '') : '';
+      const rawKey = clientSuppliedKey || envOllamaKey || null;
+      const isOpenRouterKeySupplied = Boolean(rawKey && rawKey.startsWith('sk-or-'));
+      const rawOllamaKey = (rawKey && !isOpenRouterKeySupplied) ? rawKey : null;
+
+      let isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint);
+      // Jika pengguna menyertakan Ollama Cloud API Key pada endpoint default/loopback,
+      // arahkan ke https://ollama.com resmi (selaras dengan /api/ollama/models & callLLMBackend).
+      if ((isServerlessChat || rawOllamaKey) && isLoopbackTarget) {
+        customEndpoint = 'https://ollama.com';
+        isLoopbackTarget = false;
+      }
+
       const isCustomRemoteEndpoint = customEndpoint && !isLoopbackTarget && !customEndpoint.includes('ollama.com');
-      const shouldUseCloudBridge = Boolean(isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint);
+      const shouldUseCloudBridge = Boolean((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (isOpenRouterKeySupplied && !isCustomRemoteEndpoint));
 
       if (shouldUseCloudBridge) {
         // Pure Cloud Architecture Bridge:
-        // Ketika tidak ada daemon lokal atau key khusus Ollama, alihkan secara transparan ke OpenRouter Cloud AI
+        // Ketika tidak ada daemon lokal atau key yang diberikan adalah OpenRouter key, alihkan secara transparan ke OpenRouter Cloud AI
         // dan konversikan stream SSE OpenRouter ke format newline-delimited JSON Ollama.
         const targetCloudModel = mapOllamaModelToOpenRouter(body.model || 'qwen2.5:1.5b');
-        const rawOrKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || body.openRouterKey || (body.apiKey && body.apiKey.startsWith('sk-or-') ? body.apiKey : null) || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || process.env.OPENROUTER_API_KEY;
+        const rawOrKey = sanitizeOllamaApiKey(
+          req.headers['x-openrouter-key'] || req.headers['x-api-key'] || body.openRouterKey ||
+          (isOpenRouterKeySupplied ? rawKey : '') || process.env.OPENROUTER_API_KEY || ''
+        );
         if (!rawOrKey) {
           return sendJSON(res, 401, {
             error: 'Ollama API Key diperlukan untuk menggunakan model Ollama Cloud. Silakan masukkan Ollama API Key Anda di menu Pengaturan.'
           });
         }
-        const openRouterKey = `Bearer ${String(rawOrKey).replace(/^Bearer\s+/i, '').trim()}`;
+        const openRouterKey = `Bearer ${rawOrKey}`;
 
         const orPayload = {
           model: targetCloudModel,
@@ -7736,29 +7802,16 @@ async function requestHandler(req, res) {
         return;
       }
 
-      // Resolusi otomatis nama model ke model aktif di Ollama Cloud (:cloud)
+      // Resolusi nama model yang tepat sesuai target endpoint:
+      // - Untuk https://ollama.com (Official Cloud via API Key): gunakan ID resmi tanpa akhiran :cloud / -cloud
+      // - Untuk http://127.0.0.1:11434 (Local Daemon Cloud Relay): petakan ke manifest :cloud / -cloud lokal
       const rawReqModel = String(body.model || '').trim();
-      const cloudModelMap = {
-        'deepseek-v4.1-flash:1017': 'deepseek-v4.1-flash:cloud',
-        'deepseek-v4.1-flash': 'deepseek-v4.1-flash:cloud',
-        'deepseek-v4-pro:0813': 'deepseek-v4-pro:cloud',
-        'deepseek-v4-pro': 'deepseek-v4-pro:cloud',
-        'deepseek-v4-flash': 'deepseek-v4-flash:cloud',
-        'kimi-k2.6': 'kimi-k2.6:cloud',
-        'glm-5.3-flash': 'glm-5.3-flash:cloud',
-        'nemotron-3-nano:30b': 'nemotron-3-nano:30b-cloud',
-        'nemotron-3-ultra': 'nemotron-3-ultra:cloud',
-        'nemotron-3-super': 'nemotron-3-super:cloud',
-        'mistral-large-3:675b': 'mistral-large-3:675b-cloud',
-        'minimax-m2.7': 'minimax-m2.7:cloud',
-        'gpt-oss:120b': 'gpt-oss:120b-cloud'
-      };
-      if (cloudModelMap[rawReqModel]) {
-        body.model = cloudModelMap[rawReqModel];
+      if (customEndpoint.includes('ollama.com')) {
+        body.model = resolveOllamaCloudModel(rawReqModel || 'deepseek-v4.1-flash');
+      } else if (isLoopbackTarget) {
+        body.model = resolveLocalDaemonCloudManifest(rawReqModel || 'deepseek-v4.1-flash:cloud');
       } else if (!body.model) {
-        body.model = 'deepseek-v4.1-flash:cloud';
-      } else if (customEndpoint.includes('ollama.com')) {
-        body.model = resolveOllamaCloudModel(body.model);
+        body.model = 'deepseek-v4.1-flash';
       }
 
       sessionId = sanitizeTaskKey(body.sessionId || req.headers['x-session-id'] || null);
@@ -7778,6 +7831,7 @@ async function requestHandler(req, res) {
       delete body.endpoint; // Don't send custom field to Ollama
       delete body.apiKey;
       delete body.ollamaApiKey;
+      delete body.openRouterKey;
 
       // Biarkan Ollama menggunakan Modelfile bawaan jika options tidak disertakan
 
@@ -7842,24 +7896,7 @@ async function requestHandler(req, res) {
         };
       }
 
-      const ollamaUrl = resolveEndpointUrl(customEndpoint, 'api/chat');
-      const client = ollamaUrl.protocol === 'https:' ? https : http;
-
       const isStream = body.stream !== false;
-      const postData = JSON.stringify(body);
-
-      const proxyHeaders = {
-        'Content-Type': 'application/json',
-        'User-Agent': 'ZozRouter/1.0 (Windows NT 10.0; Win64; x64)',
-        'Content-Length': Buffer.byteLength(postData)
-      };
-      if (authHeader) {
-        proxyHeaders['Authorization'] = authHeader;
-      }
-      if (rawKey) {
-        proxyHeaders['x-ollama-key'] = rawKey;
-      }
-
       let clientDisconnected = false;
       let proxyReq = null;
       let hasSplicedRefusal = false;
@@ -7875,271 +7912,317 @@ async function requestHandler(req, res) {
         }
       });
 
-      proxyReq = client.request(ollamaUrl.toString(), {
-        method: 'POST',
-        headers: proxyHeaders,
-        timeout: 120000
-      }, (proxyRes) => {
+      const dispatchOllamaUpstream = (targetEndpoint, targetModel, targetAuthKey, allowLocalFallback) => {
+        body.model = targetModel;
         if (sessionId && dbActiveChatTasks[sessionId]) {
-          dbActiveChatTasks[sessionId].proxyReq = proxyReq;
+          dbActiveChatTasks[sessionId].model = targetModel;
+          dbActiveChatTasks[sessionId].status = 'streaming';
+        }
+        const ollamaUrl = resolveEndpointUrl(targetEndpoint, 'api/chat');
+        const client = ollamaUrl.protocol === 'https:' ? https : http;
+        const postData = JSON.stringify(body);
+        const proxyHeaders = {
+          'Content-Type': 'application/json',
+          'User-Agent': 'ZozRouter/1.0 (Windows NT 10.0; Win64; x64)',
+          'Content-Length': Buffer.byteLength(postData)
+        };
+        if (targetAuthKey) {
+          proxyHeaders['Authorization'] = `Bearer ${targetAuthKey}`;
+          proxyHeaders['x-ollama-key'] = targetAuthKey;
         }
 
-        // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
-        if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
-          if (!proxyReq.destroyed) proxyReq.destroy();
-          // Clean up aborted task
-          delete dbActiveChatTasks[sessionId];
-          return;
-        }
-
-        if (clientDisconnected || res.writableEnded || res.destroyed) {
-          if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
-          if (!sessionId) return;
-        }
-
-        const statusCode = proxyRes.statusCode || 200;
-
-        // If upstream returned error (HTTP >= 400)
-        if (statusCode >= 400) {
+        proxyReq = client.request(ollamaUrl.toString(), {
+          method: 'POST',
+          headers: proxyHeaders,
+          timeout: 120000
+        }, (proxyRes) => {
           if (sessionId && dbActiveChatTasks[sessionId]) {
-            dbActiveChatTasks[sessionId].status = 'error';
+            dbActiveChatTasks[sessionId].proxyReq = proxyReq;
           }
-          let errData = '';
-          proxyRes.on('data', chunk => {
-            if (!clientDisconnected) errData += chunk;
-          });
-          proxyRes.on('end', () => {
-            if (sessionId) {
-              delete dbActiveChatTasks[sessionId];
-            }
-            if (clientDisconnected || res.writableEnded || res.destroyed) return;
-            try {
-              let parsedErr = null;
-              try { parsedErr = JSON.parse(errData); } catch (e) {}
-              const errMsg = parsedErr?.error?.message || parsedErr?.error || errData || `Ollama error [${statusCode}]`;
-              return sendJSON(res, statusCode, { error: errMsg, details: parsedErr || errData });
-            } catch (e) {}
-          });
-          proxyRes.on('error', (err) => {
-            if (sessionId) {
-              delete dbActiveChatTasks[sessionId];
-            }
-            if (clientDisconnected || res.writableEnded || res.destroyed) return;
-            if (!res.headersSent) {
-              sendJSON(res, 502, { error: `Ollama upstream error stream interrupted: ${err.message}` });
-            }
-          });
-          return;
-        }
 
-        // Upstream returned 200 OK -> Send headers matching client stream mode!
-        const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
-        const reasoningFilter = textSafety.createProviderStreamFilter('ollama', isStream ? 'stream' : 'json', { userPrompt });
-        if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
-          try {
-            res.writeHead(200, {
-              'Content-Type': contentType,
-              'Cache-Control': 'no-cache',
-              'Connection': 'keep-alive',
-              'Access-Control-Allow-Origin': '*'
+          // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
+          if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+            if (!proxyReq.destroyed) proxyReq.destroy();
+            delete dbActiveChatTasks[sessionId];
+            return;
+          }
+
+          if (clientDisconnected || res.writableEnded || res.destroyed) {
+            if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
+            if (!sessionId) return;
+          }
+
+          const statusCode = proxyRes.statusCode || 200;
+
+          // If upstream returned error (HTTP >= 400)
+          if (statusCode >= 400) {
+            let errData = '';
+            proxyRes.on('data', chunk => {
+              if (!clientDisconnected) errData += chunk;
             });
-          } catch (writeHeadErr) {
-            console.warn('Notice writing head to client (Ollama):', writeHeadErr.message);
+            proxyRes.on('end', () => {
+              // Auto-retry tanpa tools jika model menolak parameter tools
+              if (Array.isArray(body.tools) && body.tools.length > 0 && (statusCode === 400 || statusCode === 422 || statusCode === 500) && /tool/i.test(errData) && !res.headersSent && !clientDisconnected) {
+                delete body.tools;
+                delete body.tool_choice;
+                return dispatchOllamaUpstream(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback);
+              }
+
+              // Multi-Tier Fallback: Jika https://ollama.com mengembalikan HTTP >= 400 (misal 401/403/404/429/500),
+              // otomatis alihkan ke daemon Cloud Relay lokal (http://127.0.0.1:11434) tanpa menggagalkan permintaan pengguna!
+              if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
+                const localManifestModel = resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+                console.warn(`[Ollama Cloud Failover] Upstream ${targetEndpoint} (${targetModel}) returned HTTP ${statusCode}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
+                return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
+              }
+
+              if (sessionId) {
+                delete dbActiveChatTasks[sessionId];
+              }
+              if (clientDisconnected || res.writableEnded || res.destroyed) return;
+              try {
+                let parsedErr = null;
+                try { parsedErr = JSON.parse(errData); } catch (e) {}
+                const errMsg = parsedErr?.error?.message || parsedErr?.error || errData || `Ollama error [${statusCode}]`;
+                return sendJSON(res, statusCode, { error: errMsg, details: parsedErr || errData });
+              } catch (e) {}
+            });
+            proxyRes.on('error', (err) => {
+              if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
+                const localManifestModel = resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+                return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
+              }
+              if (sessionId) {
+                delete dbActiveChatTasks[sessionId];
+              }
+              if (clientDisconnected || res.writableEnded || res.destroyed) return;
+              if (!res.headersSent) {
+                sendJSON(res, 502, { error: `Ollama upstream error stream interrupted: ${err.message}` });
+              }
+            });
+            return;
           }
-        }
 
-        proxyRes.on('data', chunk => {
-          if (hasSplicedRefusal || horocycleHalted) return;
-          const safeChunk = reasoningFilter.push(chunk);
-          const gateDiag = reasoningFilter.getGateDiagnostics ? reasoningFilter.getGateDiagnostics() : null;
-
-          // 1. Autoregressive Trajectory Splicing: Jika upstream menolak di awal stream (Refusal Subspace cos θ = -1),
-          // potong stream penolakan (0 byte bocor ke klien), suntikkan Token Jangkar Matematis (role: assistant),
-          // dan sambungkan ke stream kelanjutan secara deterministik!
-          if (isStream && gateDiag && gateDiag.refusalDetected && !hasSplicedRefusal) {
-            hasSplicedRefusal = true;
-            try { proxyReq.destroy(); } catch (_) {}
-            const clampedPrefix = textSafety.synthesizeAutoregressivePrefill(userPrompt || '');
-            if (clampedPrefix && !clientDisconnected && !res.writableEnded && !res.destroyed) {
-              const anchorFrame = JSON.stringify({
-                model: body.model || 'deepseek-v4.1-flash:cloud',
-                created_at: new Date().toISOString(),
-                message: { role: 'assistant', content: clampedPrefix },
-                done: false
-              }) + '\n';
-              if (sessionId) accumulateChatChunk(sessionId, anchorFrame, 'ollama');
-              try { res.write(anchorFrame); } catch (_) {}
+          // Upstream returned 200 OK -> Send headers matching client stream mode!
+          const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
+          const reasoningFilter = textSafety.createProviderStreamFilter('ollama', isStream ? 'stream' : 'json', { userPrompt });
+          if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
+            try {
+              res.writeHead(200, {
+                'Content-Type': contentType,
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Origin': '*'
+              });
+            } catch (writeHeadErr) {
+              console.warn('Notice writing head to client (Ollama):', writeHeadErr.message);
             }
-            const splicedBody = {
-              ...body,
-              messages: [
-                ...(Array.isArray(body.messages) ? body.messages : []),
-                { role: 'assistant', content: clampedPrefix }
-              ]
-            };
-            const splicedData = JSON.stringify(splicedBody);
-            const splicedHeaders = { ...proxyHeaders, 'Content-Length': Buffer.byteLength(splicedData) };
-            const splicedFilter = textSafety.createProviderStreamFilter('ollama', 'stream', { userPrompt, bypassPreambleStrip: true });
-            const splicedReq = client.request(ollamaUrl.toString(), { method: 'POST', headers: splicedHeaders, timeout: 120000 }, (splicedRes) => {
-              splicedRes.on('data', sChunk => {
-                const sSafe = splicedFilter.push(sChunk);
-                if (sessionId && sSafe) accumulateChatChunk(sessionId, sSafe, 'ollama');
-                if (!clientDisconnected && !res.writableEnded && !res.destroyed && sSafe) {
-                  try { res.write(sSafe); } catch (_) {}
-                }
+          }
+
+          proxyRes.on('data', chunk => {
+            if (hasSplicedRefusal || horocycleHalted) return;
+            const safeChunk = reasoningFilter.push(chunk);
+            const gateDiag = reasoningFilter.getGateDiagnostics ? reasoningFilter.getGateDiagnostics() : null;
+
+            // 1. Autoregressive Trajectory Splicing: Jika upstream menolak di awal stream (Refusal Subspace cos θ = -1),
+            // potong stream penolakan (0 byte bocor ke klien), suntikkan Token Jangkar Matematis (role: assistant),
+            // dan sambungkan ke stream kelanjutan secara deterministik!
+            if (isStream && gateDiag && gateDiag.refusalDetected && !hasSplicedRefusal) {
+              hasSplicedRefusal = true;
+              try { proxyReq.destroy(); } catch (_) {}
+              const clampedPrefix = textSafety.synthesizeAutoregressivePrefill(userPrompt || '');
+              if (clampedPrefix && !clientDisconnected && !res.writableEnded && !res.destroyed) {
+                const anchorFrame = JSON.stringify({
+                  model: body.model || 'deepseek-v4.1-flash:cloud',
+                  created_at: new Date().toISOString(),
+                  message: { role: 'assistant', content: clampedPrefix },
+                  done: false
+                }) + '\n';
+                if (sessionId) accumulateChatChunk(sessionId, anchorFrame, 'ollama');
+                try { res.write(anchorFrame); } catch (_) {}
+              }
+              const splicedBody = {
+                ...body,
+                messages: [
+                  ...(Array.isArray(body.messages) ? body.messages : []),
+                  { role: 'assistant', content: clampedPrefix }
+                ]
+              };
+              const splicedData = JSON.stringify(splicedBody);
+              const splicedHeaders = { ...proxyHeaders, 'Content-Length': Buffer.byteLength(splicedData) };
+              const splicedFilter = textSafety.createProviderStreamFilter('ollama', 'stream', { userPrompt, bypassPreambleStrip: true });
+              const splicedReq = client.request(ollamaUrl.toString(), { method: 'POST', headers: splicedHeaders, timeout: 120000 }, (splicedRes) => {
+                splicedRes.on('data', sChunk => {
+                  const sSafe = splicedFilter.push(sChunk);
+                  if (sessionId && sSafe) accumulateChatChunk(sessionId, sSafe, 'ollama');
+                  if (!clientDisconnected && !res.writableEnded && !res.destroyed && sSafe) {
+                    try { res.write(sSafe); } catch (_) {}
+                  }
+                });
+                splicedRes.on('end', () => {
+                  const sTail = splicedFilter.end();
+                  if (sessionId && sTail) accumulateChatChunk(sessionId, sTail, 'ollama');
+                  if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                    try { if (sTail) res.write(sTail); res.end(); } catch (_) {}
+                  }
+                });
+                splicedRes.on('error', () => {
+                  if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                    try { res.end(); } catch (_) {}
+                  }
+                });
               });
-              splicedRes.on('end', () => {
-                const sTail = splicedFilter.end();
-                if (sessionId && sTail) accumulateChatChunk(sessionId, sTail, 'ollama');
-                if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
-                  try { if (sTail) res.write(sTail); res.end(); } catch (_) {}
-                }
-              });
-              splicedRes.on('error', () => {
+              splicedReq.on('error', () => {
                 if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
                   try { res.end(); } catch (_) {}
                 }
               });
-            });
-            splicedReq.on('error', () => {
-              if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
-                try { res.end(); } catch (_) {}
-              }
-            });
-            splicedReq.write(splicedData);
-            splicedReq.end();
-            return;
-          }
-
-          // 2. Horocycle Singularity Breaker (Poincaré Disk K = -1): Hentikan perulangan token tak hingga
-          if (isStream && gateDiag && gateDiag.horocycleTrapped && !horocycleHalted) {
-            horocycleHalted = true;
-            try { proxyReq.destroy(); } catch (_) {}
-            if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
-              try {
-                if (safeChunk) res.write(safeChunk);
-                res.write(JSON.stringify({
-                  model: body.model || 'deepseek-v4.1-flash:cloud',
-                  created_at: new Date().toISOString(),
-                  message: { role: 'assistant', content: '' },
-                  done: true
-                }) + '\n');
-                res.end();
-              } catch (_) {}
-            }
-            return;
-          }
-
-          // Persist hanya event jawaban bersih; reasoning provider tidak disimpan.
-          if (sessionId && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'ollama');
-
-          if (clientDisconnected || res.writableEnded || res.destroyed) {
-            if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
-            return;
-          }
-          try {
-            if (!safeChunk) return;
-            const flushed = res.write(safeChunk);
-            // M27: hormati backpressure — klien lambat yang berhenti membaca
-            // (tapi socket tetap terbuka) menghentikan sementara upstream alih-alih
-            // menumpuk token tak terbatas di memori proses.
-            if (flushed === false && typeof proxyRes.pause === 'function') {
-              proxyRes.pause();
-              res.once('drain', () => { try { proxyRes.resume(); } catch (_) {} });
-            }
-          } catch (e) {}
-        });
-
-        proxyRes.on('end', () => {
-          if (hasSplicedRefusal || horocycleHalted) return;
-          const safeTail = reasoningFilter.end();
-          if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'ollama');
-          if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
-            try {
-              if (safeTail) res.write(safeTail);
-              res.end();
-            } catch (e) {}
-          }
-
-          // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
-          if (sessionId && dbActiveChatTasks[sessionId]) {
-            if (dbActiveChatTasks[sessionId].status === 'aborted') {
-              // Jangan timpa status aborted dan jangan simpan ulang
-              delete dbActiveChatTasks[sessionId];
+              splicedReq.write(splicedData);
+              splicedReq.end();
               return;
             }
-            flushChatTaskBuffer(sessionId, 'ollama');
-            const task = dbActiveChatTasks[sessionId];
-            task.status = 'completed';
-            task.completedAt = Date.now();
-            if (task.fullText && task.fullText.trim()) {
-              appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model)
-                .catch(err => console.warn('Gagal simpan respons chat ke sesi:', err && err.message));
+
+            // 2. Horocycle Singularity Breaker (Poincaré Disk K = -1): Hentikan perulangan token tak hingga
+            if (isStream && gateDiag && gateDiag.horocycleTrapped && !horocycleHalted) {
+              horocycleHalted = true;
+              try { proxyReq.destroy(); } catch (_) {}
+              if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                try {
+                  if (safeChunk) res.write(safeChunk);
+                  res.write(JSON.stringify({
+                    model: body.model || 'deepseek-v4.1-flash:cloud',
+                    created_at: new Date().toISOString(),
+                    message: { role: 'assistant', content: '' },
+                    done: true
+                  }) + '\n');
+                  res.end();
+                } catch (_) {}
+              }
+              return;
             }
-            // Clean up completed task
-            delete dbActiveChatTasks[sessionId];
-          }
+
+            // Persist hanya event jawaban bersih; reasoning provider tidak disimpan.
+            if (sessionId && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'ollama');
+
+            if (clientDisconnected || res.writableEnded || res.destroyed) {
+              if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
+              return;
+            }
+            try {
+              if (!safeChunk) return;
+              const flushed = res.write(safeChunk);
+              // M27: hormati backpressure — klien lambat yang berhenti membaca
+              // (tapi socket tetap terbuka) menghentikan sementara upstream alih-alih
+              // menumpuk token tak terbatas di memori proses.
+              if (flushed === false && typeof proxyRes.pause === 'function') {
+                proxyRes.pause();
+                res.once('drain', () => { try { proxyRes.resume(); } catch (_) {} });
+              }
+            } catch (e) {}
+          });
+
+          proxyRes.on('end', () => {
+            if (hasSplicedRefusal || horocycleHalted) return;
+            const safeTail = reasoningFilter.end();
+            if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'ollama');
+            if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+              try {
+                if (safeTail) res.write(safeTail);
+                res.end();
+              } catch (e) {}
+            }
+
+            // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
+            if (sessionId && dbActiveChatTasks[sessionId]) {
+              if (dbActiveChatTasks[sessionId].status === 'aborted') {
+                // Jangan timpa status aborted dan jangan simpan ulang
+                delete dbActiveChatTasks[sessionId];
+                return;
+              }
+              flushChatTaskBuffer(sessionId, 'ollama');
+              const task = dbActiveChatTasks[sessionId];
+              task.status = 'completed';
+              task.completedAt = Date.now();
+              if (task.fullText && task.fullText.trim()) {
+                appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model)
+                  .catch(err => console.warn('Gagal simpan respons chat ke sesi:', err && err.message));
+              }
+              // Clean up completed task
+              delete dbActiveChatTasks[sessionId];
+            }
+          });
+
+          proxyRes.on('error', (err) => {
+            if (hasSplicedRefusal || horocycleHalted) return;
+            if (sessionId && dbActiveChatTasks[sessionId]) {
+              markChatTaskInterrupted(sessionId, err.message || 'Ollama stream interrupted');
+            }
+            if (clientDisconnected || res.writableEnded || res.destroyed) return;
+            try {
+              if (!res.headersSent) {
+                return sendJSON(res, 502, { error: `Ollama Response Stream Error: ${err.message}` });
+              }
+              res.write(JSON.stringify({ error: `Ollama Response Stream Error: ${err.message}` }) + '\n');
+              res.end();
+            } catch (e) {}
+          });
         });
 
-        proxyRes.on('error', (err) => {
+        if (sessionId && dbActiveChatTasks[sessionId]) {
+          dbActiveChatTasks[sessionId].proxyReq = proxyReq;
+        }
+
+        proxyReq.on('timeout', () => {
           if (hasSplicedRefusal || horocycleHalted) return;
+          if (!proxyReq.destroyed) proxyReq.destroy();
+          if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
+            const localManifestModel = resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+            return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
+          }
           if (sessionId && dbActiveChatTasks[sessionId]) {
-            markChatTaskInterrupted(sessionId, err.message || 'Ollama stream interrupted');
+            markChatTaskInterrupted(sessionId, 'Ollama stream timed out (120s)');
           }
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
             if (!res.headersSent) {
-              return sendJSON(res, 502, { error: `Ollama Response Stream Error: ${err.message}` });
+              sendJSON(res, 504, { error: 'Ollama stream timed out (120s)' });
+            } else {
+              if (isStream) {
+                res.write(JSON.stringify({ error: 'Ollama stream timed out (120s)' }) + '\n');
+              }
+              res.end();
             }
-            res.write(JSON.stringify({ error: `Ollama Response Stream Error: ${err.message}` }) + '\n');
+          } catch (_) {}
+        });
+
+        proxyReq.on('error', (err) => {
+          if (hasSplicedRefusal || horocycleHalted) return;
+          if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
+            const localManifestModel = resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+            console.warn(`[Ollama Cloud Failover] Network error on ${targetEndpoint}: ${err.message}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
+            return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
+          }
+          if (sessionId && dbActiveChatTasks[sessionId]) {
+            markChatTaskInterrupted(sessionId, err.message || 'Ollama connection error');
+          }
+          // If client closed or socket was destroyed on abort, suppress write-after-end errors
+          if (clientDisconnected || res.writableEnded || res.destroyed) {
+            return;
+          }
+          try {
+            if (!res.headersSent) {
+              return sendJSON(res, 503, { error: `Ollama Stream Error (offline/unreachable): ${err.message}` });
+            }
+            res.write(JSON.stringify({ error: `Ollama Stream Error: ${err.message}` }) + '\n');
             res.end();
           } catch (e) {}
         });
-      });
 
-      if (sessionId && dbActiveChatTasks[sessionId]) {
-        dbActiveChatTasks[sessionId].proxyReq = proxyReq;
-      }
+        proxyReq.write(postData);
+        proxyReq.end();
+      };
 
-      proxyReq.on('timeout', () => {
-        if (hasSplicedRefusal || horocycleHalted) return;
-        if (sessionId && dbActiveChatTasks[sessionId]) {
-          markChatTaskInterrupted(sessionId, 'Ollama stream timed out (120s)');
-        }
-        if (!proxyReq.destroyed) proxyReq.destroy();
-        if (clientDisconnected || res.writableEnded || res.destroyed) return;
-        try {
-          if (!res.headersSent) {
-            sendJSON(res, 504, { error: 'Ollama stream timed out (120s)' });
-          } else {
-            if (isStream) {
-              res.write(JSON.stringify({ error: 'Ollama stream timed out (120s)' }) + '\n');
-            }
-            res.end();
-          }
-        } catch (_) {}
-      });
-
-      proxyReq.on('error', (err) => {
-        if (hasSplicedRefusal || horocycleHalted) return;
-        if (sessionId && dbActiveChatTasks[sessionId]) {
-          markChatTaskInterrupted(sessionId, err.message || 'Ollama connection error');
-        }
-        // If client closed or socket was destroyed on abort, suppress write-after-end errors
-        if (clientDisconnected || res.writableEnded || res.destroyed) {
-          return;
-        }
-        try {
-          if (!res.headersSent) {
-            return sendJSON(res, 503, { error: `Ollama Stream Error (offline/unreachable): ${err.message}` });
-          }
-          res.write(JSON.stringify({ error: `Ollama Stream Error: ${err.message}` }) + '\n');
-          res.end();
-        } catch (e) {}
-      });
-
-      proxyReq.write(postData);
-      proxyReq.end();
+      dispatchOllamaUpstream(customEndpoint, body.model, rawOllamaKey, true);
     } catch (err) {
       // Pembersihan aman jika terjadi throw sinkron (ERR_INVALID_CHAR, payload error, socket write error)
       if (sessionId && dbActiveChatTasks[sessionId]) {

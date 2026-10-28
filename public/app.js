@@ -182,8 +182,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     { name: 'kimi-k3', model: 'kimi-k3', tag: 'Long Context Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi-k3', parameter_size: '1T' } },
     { name: 'kimi-k2.6', model: 'kimi-k2.6', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi-k2.6', parameter_size: '1T' } },
     { name: 'deepseek-v4.1-flash', model: 'deepseek-v4.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
-    { name: 'deepseek-v4.1-flash:cloud', model: 'deepseek-v4.1-flash:cloud', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
-    { name: 'deepseek-v4-pro:cloud', model: 'deepseek-v4-pro:cloud', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '1T' } },
+    { name: 'deepseek-v4.1-flash:1017', model: 'deepseek-v4.1-flash:1017', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
+    { name: 'deepseek-v4-pro:0813', model: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '1T' } },
     { name: 'glm-5.3', model: 'glm-5.3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm5', parameter_size: '756B' } },
     { name: 'glm-5.3-flash', model: 'glm-5.3-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'glm5', parameter_size: '218B' } },
     { name: 'glm-5.2', model: 'glm-5.2', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm5', parameter_size: '756B' } },
@@ -196,6 +196,11 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
   const VALID_OLLAMA_CLOUD_MODELS = new Set(OFFICIAL_OLLAMA_CLOUD_MODELS.map(m => m.model.toLowerCase()));
 
+  function sanitizeOllamaApiKey(rawKey) {
+    if (!rawKey || typeof rawKey !== 'string') return '';
+    return rawKey.replace(/^Bearer\s+/i, '').replace(/^["']+|["']+$/g, '').trim();
+  }
+
   // Filter keluar model decision/internal yang tidak mendukung endpoint /api/chat (seperti clef:27b yang hanya mendukung /v1/systemone)
   function isUnsupportedOllamaChatModel(m) {
     if (!m) return true;
@@ -207,22 +212,25 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     return false;
   }
 
-  // Remap otomatis model lokal/deprecated/decision ke model aktif resmi di https://ollama.com
+  // Remap otomatis model lokal/deprecated/decision ke model aktif resmi di https://ollama.com (TANPA akhiran :cloud / -cloud)
   function resolveOllamaCloudModel(modelId) {
-    if (!modelId || typeof modelId !== 'string') return 'deepseek-v4.1-flash:cloud';
+    if (!modelId || typeof modelId !== 'string') return 'deepseek-v4.1-flash';
     const raw = modelId.trim();
     const id = raw.toLowerCase();
-    if (id === 'deepseek-v4.1-flash:1017' || id === 'deepseek-v4.1-flash' || id === 'deepseek-v4.1-flash:cloud') return 'deepseek-v4.1-flash:cloud';
-    if (id === 'deepseek-v4-pro:0813' || id === 'deepseek-v4-pro' || id === 'deepseek-v4-pro:cloud') return 'deepseek-v4-pro:cloud';
-    if (id === 'kimi-k2.6' || id === 'kimi-k2.6:cloud') return 'kimi-k2.6:cloud';
-    if (id === 'glm-5.3-flash' || id === 'glm-5.3-flash:cloud') return 'glm-5.3-flash:cloud';
-    if (id === 'nemotron-3-nano:30b' || id === 'nemotron-3-nano:30b-cloud') return 'nemotron-3-nano:30b-cloud';
-    if (id === 'nemotron-3-ultra' || id === 'nemotron-3-ultra:cloud') return 'nemotron-3-ultra:cloud';
-    if (id === 'nemotron-3-super' || id === 'nemotron-3-super:cloud') return 'nemotron-3-super:cloud';
-    if (id === 'mistral-large-3:675b' || id === 'mistral-large-3:675b-cloud') return 'mistral-large-3:675b-cloud';
-    if (id === 'minimax-m2.7' || id === 'minimax-m2.7:cloud') return 'minimax-m2.7:cloud';
-    if (id === 'gpt-oss:120b' || id === 'gpt-oss:120b-cloud') return 'gpt-oss:120b-cloud';
+    if (id === 'deepseek-v4.1-flash:1017') return 'deepseek-v4.1-flash:1017';
+    if (id === 'deepseek-v4.1-flash' || id === 'deepseek-v4.1-flash:cloud' || id === 'deepseek-v4-flash' || id === 'deepseek-v4-flash:cloud') return 'deepseek-v4.1-flash';
+    if (id === 'deepseek-v4-pro:0813' || id === 'deepseek-v4-pro' || id === 'deepseek-v4-pro:cloud') return 'deepseek-v4-pro:0813';
+    if (id === 'kimi-k2.6' || id === 'kimi-k2.6:cloud') return 'kimi-k2.6';
+    if (id === 'glm-5.3-flash' || id === 'glm-5.3-flash:cloud') return 'glm-5.3-flash';
+    if (id === 'nemotron-3-nano:30b' || id === 'nemotron-3-nano:30b-cloud') return 'nemotron-3-nano:30b';
+    if (id === 'nemotron-3-ultra' || id === 'nemotron-3-ultra:cloud') return 'nemotron-3-ultra';
+    if (id === 'nemotron-3-super' || id === 'nemotron-3-super:cloud') return 'nemotron-3-super';
+    if (id === 'mistral-large-3:675b' || id === 'mistral-large-3:675b-cloud') return 'mistral-large-3:675b';
+    if (id === 'minimax-m2.7' || id === 'minimax-m2.7:cloud') return 'minimax-m2.7';
+    if (id === 'gpt-oss:120b' || id === 'gpt-oss:120b-cloud') return 'gpt-oss:120b';
     if (VALID_OLLAMA_CLOUD_MODELS.has(id)) return raw;
+    const stripped = raw.replace(/(?::cloud|-cloud)$/i, '');
+    if (VALID_OLLAMA_CLOUD_MODELS.has(stripped.toLowerCase())) return stripped;
     if (id === 'gemma4:31b-cloud' || id.startsWith('gemma')) return 'gemma4:31b';
     if (id.startsWith('clef')) return 'gemma4:31b';
     if (id.includes('coder') || id.includes('code')) return 'kimi-k2.7-code';
@@ -10871,11 +10879,16 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
   }
 
   async function streamContinuationOllama(session, modelName, promptInstruction, bubbleText, currentFullText, options = {}) {
-    const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+    let ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+    const cleanKey = sanitizeOllamaApiKey(STATE.settings.ollamaApiKey || '');
+    const isLoopbackEp = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(ep);
+    if (cleanKey && isLoopbackEp) {
+      ep = 'https://ollama.com';
+    }
     const headers = { 'Content-Type': 'application/json' };
-    if (STATE.settings.ollamaApiKey) {
-      headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
-      headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+    if (cleanKey) {
+      headers['Authorization'] = `Bearer ${cleanKey}`;
+      headers['x-ollama-key'] = cleanKey;
     }
     if (STATE.settings.openRouterKey) {
       headers['x-openrouter-key'] = STATE.settings.openRouterKey;
@@ -10918,17 +10931,18 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     messagesPayload.push({ role: 'user', content: promptInstruction });
 
-    const chatUrl = IS_GITHUB_PAGES ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
+    const effectiveModel = ep.includes('ollama.com') ? resolveOllamaCloudModel(modelName) : modelName;
+    const chatUrl = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
     const res = await fetch(chatUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: modelName,
+        model: effectiveModel,
         messages: messagesPayload,
         stream: true,
         ...(STATE.settings.useCustomParameters && STATE.settings.temperature !== null ? { options: { temperature: parseFloat(STATE.settings.temperature) } } : {}),
         endpoint: ep,
-        ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {}),
+        ...(cleanKey ? { apiKey: cleanKey, ollamaApiKey: cleanKey } : {}),
         ...(STATE.settings.openRouterKey ? { openRouterKey: STATE.settings.openRouterKey } : {})
       }),
       signal: options.signal || STATE.abortController?.signal
@@ -11861,11 +11875,17 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       };
 
       if (engine === 'ollama') {
-        const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+        let ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+        const cleanKey = sanitizeOllamaApiKey(STATE.settings.ollamaApiKey || '');
+        const isLoopbackEp = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(ep);
+        if (cleanKey && isLoopbackEp) {
+          ep = 'https://ollama.com';
+        }
+        const effectiveModel = ep.includes('ollama.com') ? resolveOllamaCloudModel(model) : model;
         const headers = { 'Content-Type': 'application/json' };
-        if (STATE.settings.ollamaApiKey) {
-          headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
-          headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+        if (cleanKey) {
+          headers['Authorization'] = `Bearer ${cleanKey}`;
+          headers['x-ollama-key'] = cleanKey;
         }
         if (STATE.settings.openRouterKey) headers['x-openrouter-key'] = STATE.settings.openRouterKey;
         const url = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? resolveEndpointUrl(ep, 'api/chat') : '/api/ollama/chat';
@@ -11874,11 +11894,11 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           headers,
           signal,
           body: JSON.stringify({
-            model,
+            model: effectiveModel,
             messages,
             stream: true,
             endpoint: ep,
-            ...(STATE.settings.ollamaApiKey ? { apiKey: STATE.settings.ollamaApiKey } : {}),
+            ...(cleanKey ? { apiKey: cleanKey, ollamaApiKey: cleanKey } : {}),
             ...(STATE.settings.openRouterKey ? { openRouterKey: STATE.settings.openRouterKey } : {})
           })
         });
@@ -22507,14 +22527,15 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
     let isRunning = false;
     try {
       const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+      const cleanOllamaKey = sanitizeOllamaApiKey(STATE.settings.ollamaApiKey || '');
       const headers = {};
-      if (STATE.settings.ollamaApiKey) {
-        headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
-        headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+      if (cleanOllamaKey) {
+        headers['Authorization'] = `Bearer ${cleanOllamaKey}`;
+        headers['x-ollama-key'] = cleanOllamaKey;
       }
 
       // Ollama Discovery: Ambil daftar model lewat gateway proxy atau direct endpoint
-      if (!IS_GITHUB_PAGES || STATE.settings.ollamaApiKey) {
+      if (!IS_GITHUB_PAGES || cleanOllamaKey) {
         try {
           const gwUrl = '/api/ollama/models?endpoint=' + encodeURIComponent(ep);
           const gwRes = await fetch(gwUrl, { headers }).catch(() => null);
@@ -26315,9 +26336,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (STATE.userId) {
         requestBody.userId = STATE.userId;
       }
-      if (STATE.settings.ollamaApiKey) {
-        requestBody.apiKey = STATE.settings.ollamaApiKey;
-        requestBody.ollamaApiKey = STATE.settings.ollamaApiKey;
+      const cleanOllamaKey = sanitizeOllamaApiKey(STATE.settings.ollamaApiKey || '');
+      if (cleanOllamaKey) {
+        requestBody.apiKey = cleanOllamaKey;
+        requestBody.ollamaApiKey = cleanOllamaKey;
       }
       if (STATE.settings.openRouterKey) {
         requestBody.openRouterKey = STATE.settings.openRouterKey;
@@ -26330,27 +26352,24 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (STATE.userId) {
         headers['X-User-ID'] = STATE.userId;
       }
-      if (STATE.settings.ollamaApiKey) {
-        headers['Authorization'] = `Bearer ${STATE.settings.ollamaApiKey}`;
-        headers['x-ollama-key'] = STATE.settings.ollamaApiKey;
+      if (cleanOllamaKey) {
+        headers['Authorization'] = `Bearer ${cleanOllamaKey}`;
+        headers['x-ollama-key'] = cleanOllamaKey;
       }
       if (STATE.settings.openRouterKey) {
         headers['x-openrouter-key'] = STATE.settings.openRouterKey;
       }
 
       let chatUrl = '/api/ollama/chat';
+      const isLoopbackEp = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(ep);
       const isCloudDeployment = Boolean((IS_VERCEL || (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable)) && !DeviceStorage.isDeviceBackendAvailable);
-      const isTargetingOllamaCloud = Boolean((ep || '').includes('ollama.com') || (isCloudDeployment && !DeviceStorage.isDeviceBackendAvailable && (/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep) || STATE.settings.ollamaApiKey)));
+      const isTargetingOllamaCloud = Boolean((ep || '').includes('ollama.com') || (cleanOllamaKey && isLoopbackEp) || (isCloudDeployment && !DeviceStorage.isDeviceBackendAvailable && (isLoopbackEp || cleanOllamaKey)));
       if (isTargetingOllamaCloud) {
         requestBody.endpoint = 'https://ollama.com';
         const resolvedModel = resolveOllamaCloudModel(requestBody.model);
         if (resolvedModel !== requestBody.model) {
           requestBody.model = resolvedModel;
           modelName = resolvedModel;
-          if (STATE.settings.ollamaModel && STATE.settings.ollamaModel !== resolvedModel) {
-            STATE.settings.ollamaModel = resolvedModel;
-            savePersistedState();
-          }
         }
       }
       if (IS_GITHUB_PAGES && !STATE.settings.ollamaApiKey) {
@@ -36436,7 +36455,7 @@ Aturan:
 
     els.testOllamaBtn?.addEventListener('click', async () => {
       const ep = normalizeEndpoint(els.settingOllamaEndpoint?.value.trim() || 'https://ollama.com');
-      const key = els.settingOllamaApiKey ? els.settingOllamaApiKey.value.trim() : '';
+      const key = sanitizeOllamaApiKey(els.settingOllamaApiKey ? els.settingOllamaApiKey.value : '');
       try {
         const headers = {};
         if (key) {
@@ -36491,11 +36510,12 @@ Aturan:
     });
 
     els.testOllamaKeyBtn?.addEventListener('click', async () => {
-      const key = els.settingOllamaApiKey ? els.settingOllamaApiKey.value.trim() : '';
+      const key = sanitizeOllamaApiKey(els.settingOllamaApiKey ? els.settingOllamaApiKey.value : '');
       if (!key) {
         showToast('Masukkan Ollama Cloud API Key terlebih dahulu.', 'error');
         return;
       }
+      if (els.settingOllamaApiKey) els.settingOllamaApiKey.value = key;
       STATE.settings.ollamaApiKey = key;
       savePersistedState();
 
@@ -36599,7 +36619,9 @@ Aturan:
       if (epVal) STATE.settings.ollamaEndpoint = epVal;
 
       if (els.settingOllamaApiKey) {
-        STATE.settings.ollamaApiKey = els.settingOllamaApiKey.value.trim();
+        const cleanKey = sanitizeOllamaApiKey(els.settingOllamaApiKey.value);
+        els.settingOllamaApiKey.value = cleanKey;
+        STATE.settings.ollamaApiKey = cleanKey;
       }
 
       if (els.settingOpenRouterKey) {
