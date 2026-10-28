@@ -10754,9 +10754,6 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             cardCode.textContent = updatedF.rawContent || updatedF.content || '';
             try { if (window.hljs) window.hljs.highlightElement(cardCode); } catch (_) {}
           }
-          if (!isStillIncomplete) {
-            options.targetCard.querySelector('.gemini-canvas-warning-strip')?.remove();
-          }
         }
       }
 
@@ -10772,7 +10769,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       } else {
         if (row) delete row.dataset.rawIncompleteText;
         if (directBtn) {
-          directBtn.closest('.gemini-canvas-warning-strip')?.remove();
+          directBtn.remove();
         }
       }
 
@@ -12869,121 +12866,14 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       return { ok: false, reason: lastReason || 'Tidak ada perubahan yang dapat diterapkan.' };
     },
 
-    // Titik masuk dari Studio: mengelola UI, state, dan memastikan state selalu dipulihkan
-    async runFromStudio({ prompt, selInfo = null, isEditingInCodeMode = false, forceRewrite = false, kind = 'html' }) {
-      const file = activeAIFile;
-      if (!file) {
-        setGeneratingState(false);
-        if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'inline-flex';
-        if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'none';
-        if (activeStudioAssistantBubble) {
-          activeStudioAssistantBubble.innerHTML = '<span style="color:var(--neon-amber);">⚠️ Tidak ada file aktif di pratinjau studio.</span>';
-          activeStudioAssistantBubble = null;
-        }
-        return;
-      }
-      if (this.busy) {
-        showToast('⚠️ Agen masih mengerjakan permintaan sebelumnya...', 'info');
-        setGeneratingState(false);
-        if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'inline-flex';
-        if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'none';
-        if (activeStudioAssistantBubble) {
-          activeStudioAssistantBubble.innerHTML = '<span style="color:var(--neon-amber);">⚠️ Agen masih sibuk memproses tugas sebelumnya. Silakan coba sebentar lagi.</span>';
-          activeStudioAssistantBubble = null;
-        }
-        return;
-      }
-      this.busy = true;
+    // Titik masuk dari Studio (dinonaktifkan sesuai permintaan pengguna)
+    async runFromStudio() {
+      this.busy = false;
       this._userStopped = false;
-      const historyKey = isEditingInCodeMode ? '_editChatHistory' : '_studioChatHistory';
-      const bubble = activeStudioAssistantBubble || appendStudioMessage('assistant', '');
-      activeStudioAssistantBubble = bubble;
-      let lastStatusAt = 0;
-      const setStatus = (text) => {
-        const now = Date.now();
-        if (now - lastStatusAt < 250 && !/…$/.test(text)) return;
-        lastStatusAt = now;
-        if (bubble) bubble.innerHTML = `<span class="typing-cursor"></span> <em>${escapeHtml(text)}</em>`;
-        if (typeof scrollStudioAssistantToBottom === 'function') scrollStudioAssistantToBottom();
-      };
-
-      STATE.abortController = new AbortController();
-      setGeneratingState(true);
-      if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'none';
-      if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'inline-flex';
-      setStatus(`Membaca ${file.name || 'file'}…`);
-
-      let result;
-      try {
-        result = await this.run({ prompt, file, selInfo, forceRewrite, kind, historyKey, setStatus });
-      } catch (e) {
-        result = { ok: false, stopped: Boolean(e && e.userStopped), reason: (e && e.message) || 'Terjadi kesalahan tak terduga.' };
-        if (!result.stopped) console.warn('[StudioEditAgent] error:', e);
-      }
-
-      try {
-        if (result.ok && activeAIFile !== file) {
-          result = { ok: false, reason: 'File aktif berubah saat proses berjalan; perubahan dibatalkan.' };
-        }
-        let finalHtml;
-        if (result.ok) {
-          persistStudioCodeChange(result.code, { forceRevision: true, forceReload: true });
-          if (els.aiFileStudioEditor && typeof renderStudioCodeEditorHighlight === 'function') {
-            try { renderStudioCodeEditorHighlight(result.code, result.ranges || []); } catch (_) {}
-          }
-          const firstLine = result.ranges && result.ranges.length ? result.ranges[0].startLine : 1;
-          const rangeLabel = result.ranges && result.ranges.length
-            ? result.ranges.slice(0, 4).map(r => r.startLine === r.endLine ? `Baris ${r.startLine}` : `Baris ${r.startLine}–${r.endLine}`).join(', ')
-            : 'File utuh';
-          const note = result.skipped ? `<p style="opacity:.8;font-size:.85em;">${result.applied} perubahan diterapkan, ${result.skipped} dilewati karena tidak cocok.</p>` : '';
-          finalHtml = `<p>✅ ${escapeHtml(result.summary)}</p>${note}
-            <div class="surgical-edit-summary-card">
-              <div class="surgical-edit-summary-head"><i class="fa-solid fa-wand-magic-sparkles"></i><span>${escapeHtml(rangeLabel)}</span></div>
-              <div class="surgical-edit-actions">
-                <button type="button" class="surgical-edit-btn" data-surgical-act="view-edit" data-line="${firstLine}"><i class="fa-solid fa-code"></i> Lihat di Edit Kode</button>
-                <button type="button" class="surgical-edit-btn" data-surgical-act="view-preview"><i class="fa-solid fa-play"></i> Pratinjau</button>
-                <button type="button" class="surgical-edit-btn" data-surgical-act="undo-edit"><i class="fa-solid fa-rotate-left"></i> Kembali</button>
-              </div>
-            </div>`;
-          showToast('✅ Perubahan diterapkan ke website.', 'success');
-        } else if (result.stopped) {
-          finalHtml = '<p>⏹ Dihentikan. File tidak diubah.</p>';
-        } else {
-          finalHtml = `<p>⚠️ <strong>Perubahan belum tuntas sepenuhnya:</strong> ${escapeHtml(result.reason)}</p>
-            <div class="surgical-edit-actions" style="margin-top:8px;">
-              <button type="button" class="surgical-edit-btn js-studio-continue-retry"><i class="fa-solid fa-forward-step"></i> Lanjutkan Sampai Selesai</button>
-            </div>`;
-          showToast('⚠️ Proses terhenti sementara: ' + String(result.reason).slice(0, 80), 'warning');
-        }
-        if (bubble) {
-          bubble.innerHTML = finalHtml;
-          const retryBtn = bubble.querySelector('.js-studio-continue-retry');
-          if (retryBtn) {
-            retryBtn.addEventListener('click', () => {
-              if (this.busy) return;
-              this.runFromStudio({ prompt, selInfo, isEditingInCodeMode, forceRewrite: true, kind });
-            });
-          }
-        }
-
-        if (Array.isArray(file[historyKey]) === false) file[historyKey] = [];
-        file[historyKey].push(
-          { role: 'user', content: prompt, displayContent: prompt, timestamp: new Date().toISOString() },
-          { role: 'assistant', content: result.ok ? result.summary : ('Gagal: ' + result.reason), timestamp: new Date().toISOString() }
-        );
-        if (file[historyKey].length > 8) file[historyKey] = file[historyKey].slice(-8);
-        if (typeof savePersistedState === 'function') savePersistedState();
-      } finally {
-        this.busy = false;
-        this._userStopped = false;
-        if (activeStudioAssistantBubble === bubble) activeStudioAssistantBubble = null;
-        STATE.isSending = false;
-        setGeneratingState(false);
-        if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'none';
-        if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'inline-flex';
-        if (typeof finishStudioPreviewStreamHud === 'function') finishStudioPreviewStreamHud(Boolean(result && result.ok));
-        if (typeof scrollStudioAssistantToBottom === 'function') scrollStudioAssistantToBottom();
-      }
+      STATE.isSending = false;
+      setGeneratingState(false);
+      if (els.btnStudioStopFollowup) els.btnStudioStopFollowup.style.display = 'none';
+      if (els.btnStudioSendFollowup) els.btnStudioSendFollowup.style.display = 'inline-flex';
     }
   };
 
@@ -15304,16 +15194,16 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
   const TICK3 = String.fromCharCode(96).repeat(3);
 
   function getFileStudioDirective() {
-    return `### INSTRUKSI SISTEM: AI FILE STUDIO OTONOM
+    return `### INSTRUKSI SISTEM: AI FILE STUDIO & COMPILER OTONOM
 
-0. ATURAN KRUSIAL: KODE PROGRAM HARUS DITAMPILKAN LANGSUNG DI DALAM PERCAKAPAN CHAT (BUKAN TERBUNGKUS PRATINJAU):
+0. ATURAN KRUSIAL: KODE PROGRAM DITAMPILKAN LANGSUNG DI DALAM PERCAKAPAN CHAT:
 - Jika pengguna meminta sebuah PROGRAM KODE, CONTOH KODE, SNIPPET, SCRIPT, FUNGSI, atau ALGORITMA (Python, C++, Java, JS, PHP, Bash, HTML, CSS, SQL, dll.):
   WAJIB tampilkan seluruh kode LANGSUNG di dalam teks percakapan menggunakan blok Markdown standar (\`\`\`python, \`\`\`javascript, \`\`\`html, dll.).
-  DILARANG KERAS membungkus kode program dalam blok protokol <<<ZOZ_FILE atau menyembunyikan kodenya dari percakapan jika pengguna tidak secara spesifik mengaktifkan fitur website atau meminta berkas unduhan terpisah! Pengguna harus dapat membaca, meneliti, dan menyalin kodenya secara langsung di gelembung obrolan chat.
-- HANYA gunakan protokol <<<ZOZ_FILE jika pengguna SECARA EKSPLISIT MENGAKTIFKAN FITUR WEBSITE (misalnya dengan perintah /website, /pratinjau, atau memilih mode pratinjau website) untuk merancang aplikasi web interaktif siap pratinjau, atau mengekspor dokumen resmi (.docx/.pdf):
+  Setiap blok kode akan secara otomatis memiliki tombol Pratinjau interaktif dan tombol Salin bagi pengguna.
+- Gunakan protokol <<<ZOZ_FILE jika pengguna SECARA EKSPLISIT MEMINTA DOKUMEN UNDUHAN RESMI (misalnya laporan, makalah, berkas PDF atau Word .docx):
 
-1. PEMBUATAN & PENGEDITAN BERKAS / DOKUMEN:
-Saat pengguna meminta sebuah berkas atau mengaktifkan fitur website / dokumen:
+1. PEMBUATAN BERKAS DOKUMEN RESMI (PDF & WORD .DOCX):
+Saat pengguna meminta sebuah berkas dokumen:
 <<<ZOZ_FILE name="Nama_Berkas_Spesifik.ekstensi" mime="tipe/mime" lang="bahasa">
 isi lengkap file, siap pakai, tanpa potongan
 <<<END_ZOZ_FILE>>>
@@ -15333,13 +15223,7 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 
 2. ATURAN KONTEN BERSIH TANPA WATERMARK / ATRIBUSI AI:
 - DILARANG KERAS menyertakan teks watermark, header/footer branding, copyright/atribusi palsu, atau kalimat deklaratif penutup seperti 'Dokumen ini dibuat secara otomatis oleh ZOZ AI...', 'Generated by...', 'Dihasilkan oleh AI', dsb.
-- Seluruh isi berkas (baik Dokumen Word/PDF, Aplikasi Web HTML, maupun Skrip) harus 100% murni konten pengguna tanpa atribut branding buatan AI.
-
-Aturan wajib:
-- name : nama file final yang deskriptif dan spesifik berakhiran .docx / .pdf / .html / .jsx / .tsx / .js / dsb.
-- DUKUNGAN PRATINJAU NEXT.JS / REACT (JSX/TSX) LANGSUNG: Zoz Router mendukung pratinjau langsung berkas .jsx / .tsx dan proyek Next.js (App Router) di browser (otomatis dikompilasi menjadi HTML mandiri dengan React 18, Babel Standalone, Tailwind CSS, dan Lucide React). Jika membuat kode Next.js/React, pastikan semua komponen (page.jsx, layout.jsx, komponen pendukung) tersusun lengkap dan saling terhubung, setiap import/export valid, dan komponen utama memiliki export default yang siap dirender tanpa error.
-- KELENGKAPAN PENUH & TANPA BATAS (UNLIMITED / NO CUT-OFF): Tuliskan seluruh kode website, komponen React/Next.js, skrip, atau teks dokumen secara LENGKAP, PENUH, dan TUNTAS dari baris pertama hingga baris terakhir. DILARANG KERAS membatasi hanya 100 baris atau memotong kode di tengah jalan. Dilarang menggunakan placeholder seperti '// sisa kode...', '// lanjutkan di sini...', atau '<!-- konten lainnya -->'.
-- Seluruh tag HTML/JSX, styling CSS, skrip JS, dan elemen UI harus tertulis 100% utuh sampai tag/kurung penutup dan <<<END_ZOZ_FILE>>> agar file dapat langsung dijalankan dan dipratinjau secara nyata.`;
+- Seluruh isi berkas dokumen harus 100% murni konten pengguna tanpa atribut branding buatan AI.`;
   }
 
   // Deteksi niat pengguna yang menolak/melarang pembuatan berkas atau pratinjau (misal: "kodenya saja", "jangan buatkan pratinjau", dll.)
@@ -15355,11 +15239,10 @@ Aturan wajib:
     if (hasNegativeFileOrPreviewIntent(text)) return false;
 
     const t = text.toLowerCase();
-    const isSlashFileCmd = /^\/(?:website|web|pratinjau|dokumen|docx|pdf)\b/i.test(t);
-    const explicitFileWants = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|generate|create|build|write|tulis|rancang|desain|simpan\s+sebagai|unduh|download|export|ekspor|saya\s+butuh\s+file|saya\s+minta\s+file|butuh\s+file|perlukan\s+file|bikinkan\s+file)\s+(?:sebuah\s+|satu\s+)?(?:file|berkas|dokumen|website|websit|wbsite|webiste|web\s*page|webpage|landing\s*page|landingpage|aplikasi\s+web|situs\s+web|game\s+web)\b/i.test(t);
-    const hasExtension = /\b(?:simpan\s+ke|ekspor\s+ke|unduh|download|buatkan\s+file|buat\s+file|bikin\s+file)\s+[a-zA-Z0-9_-]+\.(?:html?|jsx|tsx|css|js|ts|py|bat|ps1|sh|sql|json|csv|xml|ya?ml|md|txt|docx|pdf|xlsx|ipynb|svg)\b/i.test(t);
+    const isSlashFileCmd = /^\/(?:dokumen|docx|pdf)\b/i.test(t);
+    const explicitFileWants = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|generate|create|build|write|tulis|rancang|desain|simpan\s+sebagai|unduh|download|export|ekspor|saya\s+butuh\s+file|saya\s+minta\s+file|butuh\s+file|perlukan\s+file|bikinkan\s+file)\s+(?:sebuah\s+|satu\s+)?(?:file|berkas|dokumen|makalah|laporan|proposal)\b/i.test(t);
+    const hasExtension = /\b(?:simpan\s+ke|ekspor\s+ke|unduh|download|buatkan\s+file|buat\s+file|bikin\s+file)\s+[a-zA-Z0-9_-]+\.(?:docx|pdf|xlsx|csv|txt|md)\b/i.test(t);
     const isExport = /\b(?:simpan sebagai|ekspor ke|export to|unduh|download file)\b/i.test(t);
-    const isWebOrApp = /\b(?:website|websit|wbsite|webiste|web\s*page|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|game\s+web|situs\s+web|simulasi\s+3d)\b/i.test(t);
 
     // Jika direktori lokal aktif dan pengguna menyebut nama berkas yang ada di direktori
     const workspaceMatch = STATE.localWorkspace.enabled && (STATE.localWorkspace.files || []).some(f => {
@@ -15367,7 +15250,7 @@ Aturan wajib:
       return t.includes(f.name.toLowerCase()) || (baseName.length >= 3 && t.includes(baseName));
     });
 
-    return isSlashFileCmd || explicitFileWants || isWebOrApp || hasExtension || isExport || workspaceMatch;
+    return isSlashFileCmd || explicitFileWants || hasExtension || isExport || workspaceMatch;
   }
 
   function formatFileSize(bytes) {
@@ -17007,17 +16890,6 @@ Aturan wajib:
           <pre class="gemini-canvas-code"><code class="language-html"></code></pre>
         </div>
       </div>
-
-      ${isFileIncomplete ? `
-        <div class="gemini-canvas-warning-strip">
-          <div style="display:flex; align-items:center; justify-content:space-between; width:100%; gap:8px; flex-wrap:wrap;">
-            <span><i class="fa-solid fa-triangle-exclamation"></i> Pembuatan kode website terputus di tengah jalan.</span>
-            <button type="button" class="canvas-direct-continue-btn" style="background:rgba(255,204,0,0.18); border:1px solid #ffcc00; color:#ffcc00; font-size:0.75rem; font-weight:600; padding:4px 10px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;">
-              <i class="fa-solid fa-play"></i> Lanjutkan Sekarang
-            </button>
-          </div>
-        </div>
-      ` : ''}
     `;
 
     parentWrap.appendChild(card);
@@ -22213,64 +22085,10 @@ ${blocks}
           ? currentCode
           : StudioEndocrineDiagnostics.buildCodeReference(currentCode, synthesizedGoal, selInfo);
 
-        const isFullRewriteRequested = /\b(?:buat ulang|ulang dari awal|desain ulang total|redesign total|reset total|dari nol|full rewrite)\b/i.test(synthesizedGoal);
-
-        if (isFullRewriteRequested) {
-          followupPrompt = `[ZOZ AUTONOMOUS AGENT — FULL REWRITE BERKAS "${targetName}"]
-${selectedContextBlock}${conversationContext}Berikut adalah KODE SEBELUMNYA dari berkas "${targetName}" (${codeLines.length} baris):
-\`\`\`${lang}
-${codeRefToSend}
-\`\`\`
-
-Instruksi Pengguna: "${synthesizedGoal}"${endocrineFeedback}
-
-MANDAT EKSEKUSI FULL REWRITE:
-Pengguna meminta perancangan ulang total dari awal.
-Tuliskan SELURUH kode dokumen lengkap terbaru (dari awal sampai akhir) di dalam blok:
-<<<ZOZ_FILE name="${targetName}" mime="${activeAIFile.mime || 'text/html'}" lang="${lang}">
-... seluruh kode lengkap terbaru ...
-<<<END_ZOZ_FILE>>>
-MANDAT EKSEKUSI MUTLAK: Tuliskan seluruh kode secara utuh dan fungsional. Mulai respons Anda langsung pada baris pertama!`;
-        } else {
-          followupPrompt = `[ZOZ AUTONOMOUS AGENT — SURGICAL EDIT BERKAS "${targetName}"]
-${endocrineAwareness ? endocrineAwareness + '\n\n' : ''}${selectedContextBlock}${conversationContext}Berikut adalah KODE ARSITEKTUR LENGKAP dari berkas "${targetName}" (${codeLines.length} baris):
-\`\`\`${lang}
-${codeRefToSend}
-\`\`\`
-
-Instruksi Pengguna Terkini: "${synthesizedGoal}"${endocrineFeedback}
-
-MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
-1. Anda adalah Zoz Autonomous Engineer yang bertugas memodifikasi berkas ini secara presisi. Manfaatkan [KESADARAN SPASIAL & ARSITEKTUR ENDORFIN] di atas untuk menemukan posisi baris target secara akurat.
-2. DILARANG MENULIS ULANG SELURUH KODE! Ubah HANYA bagian (CSS style, elemen HTML, teks, atau script) yang diminta pengguna.
-3. RESPON ANDA WAJIB DIMULAI PADA BARIS PERTAMA DENGAN FORMAT PENGGANTIAN BERIKUT:
-<<<<<<< SEARCH
-[salin persis beberapa baris asli yang ingin diubah dari kode di atas]
-=======
-[baris baru perbaikan/penambahan yang diinginkan pengguna]
->>>>>>> REPLACE
-
-(Format <<<ZOZ_EDIT name="${targetName}"> dengan <<<SEARCH>>> dan <<<REPLACE>>> juga didukung penuh).
-4. Pastikan blok SEARCH memuat konteks baris unik di koordinat yang dipetakan agar pencocokan 100% akurat.
-5. Jika menambahkan aturan CSS atau script baru, pilih blok penutup tag </style> atau </script> terkait sebagai jangkar SEARCH.
-6. MANDAT EKSEKUSI MUTLAK: DILARANG KERAS membalas dengan basa-basi, apologi, atau mengubah tugas! Langsung mulai dengan blok kode pada baris pertama!`;
-        }
+        followupPrompt = `[Konteks Berkas: "${targetName}" (${lang})]\n\`\`\`${lang}\n${codeRefToSend}\n\`\`\`\n\nInstruksi Pengguna: "${synthesizedGoal}"`;
       }
     } else {
       followupPrompt = `[Konteks: Pengguna sedang melihat "${targetName}" (${lang}) di Studio Zoz Router]\nPermintaan Pengguna: "${val}"\n\nJawablah secara ramah, santun, dan ringkas dalam teks biasa.`;
-    }
-
-    // Agen edit nyata: patch SEARCH/REPLACE -> validasi -> commit (batas waktu jelas, hasil selalu tampil)
-    if (wantsRevision && !isDiagram && !isDoc && (isHtml || isJsx)) {
-      const isRewrite = isStudioFullRewriteIntent(val, currentCode);
-      StudioEditAgent.runFromStudio({
-        prompt: val,
-        selInfo,
-        isEditingInCodeMode,
-        forceRewrite: isRewrite,
-        kind: isJsx ? 'jsx' : 'html'
-      });
-      return;
     }
 
     // Kirim ke handleSendPrompt dengan mode riwayat terisolasi (terpisah dari History Utama agar tidak penuh!)
@@ -22279,9 +22097,9 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
       displayPrompt: val,
       isStudioIsolated: true,
       studioHistoryMode: isEditingInCodeMode ? 'edit' : 'preview',
-      websiteMode: (wantsRevision && !isDiagram && !isDoc) ? 'preview' : null,
-      isWebCreation: Boolean(wantsRevision && !isDiagram && !isDoc),
-      isWebsiteRevision: Boolean(wantsRevision && !isDiagram && !isDoc),
+      websiteMode: null,
+      isWebCreation: false,
+      isWebsiteRevision: false,
       isDocCreation: Boolean(wantsRevision && isDoc),
       docFormat: (wantsRevision && isDoc) ? (ext === 'pdf' ? 'pdf' : 'docx') : null,
       skipWebsiteCheck: true,
@@ -23515,8 +23333,7 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
   }
 
   // Klasifikasi intent pembuatan sebelum modal/tool dipanggil:
-  // Memisahkan secara tegas antara permintaan pembuatan Website/Aplikasi/UI ('website')
-  // vs Dokumen/Laporan/PDF/Word ('document') vs Diagram ('diagram') vs Kode Murni ('clean_code').
+  // Memisahkan secara tegas antara Dokumen/Laporan/PDF/Word ('document') vs Kode Murni ('clean_code').
   function classifyCreationIntent(text) {
     if (!text || typeof text !== 'string') return 'none';
     const t = text.trim().toLowerCase();
@@ -23533,11 +23350,7 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
       return 'none';
     }
 
-    // 3. Perintah Slash Eksplisit (Prioritas Tertinggi)
-    if (/^\/(?:website|web|webpage|landingpage|pratinjau)\b/i.test(t)) {
-      const rem = t.replace(/^\/(?:website|web|webpage|landingpage|pratinjau)\b/i, '').trim();
-      return rem.length > 0 ? 'website' : 'none';
-    }
+    // 3. Perintah Slash Dokumen Eksplisit (Prioritas Tertinggi)
     if (/^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i.test(t)) {
       const rem = t.replace(/^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i, '').trim();
       return rem.length > 0 ? 'document' : 'none';
@@ -23547,43 +23360,13 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
     const firstLine = (t.split(/\r?\n/)[0] || '').trim();
     const openingClause = firstLine.slice(0, 180);
 
-    // 4. Deteksi Sinyal Kuat Pembuatan Website / Landing Page / Web App
-    const webTargetAfterVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat(?:kan)?|tolong\s+bikin(?:kan)?|rancang(?:kan)?|desain(?:kan)?|bangun|develop|build|create|generate)\s+(?:sebuah\s+|satu\s+|project\s+|proyek\s+|tampilan\s+|halaman\s+|situs\s+|platform\s+)?(?:website|websit|wbsite|webiste|wesbite|web\s*page|webpage|web\s*app|webapp|landing\s*page|landingpage|halaman\s+web|halaman\s+landing|aplikasi\s+web|situs\s+web|situs|portofolio\s+web|toko\s+online|e-commerce|company\s+profile|game\s+web)\b/i;
-
-    const hasWebFrameworkOrCodeSignal = /\b(?:next\.?js|nextjs|react\.?js|reactjs|tailwind\s*css|tailwindcss|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(t);
-
-    const hasWebSectionStructure = /\b(?:navbar|hero\s+section|features?\s+section|pricing\s+section|footer\s+section|cta\s+section|tombol\s+cta)\b/i.test(t);
-
     // Deteksi format dokumen eksplisit (PDF / Word / DOCX) atau objek dokumen langsung setelah kata kerja
     const explicitDocFormatSignal = /\b(?:file\s+pdf|file\s+word|file\s+docx|file\s+doc|berkas\s+pdf|berkas\s+word|berkas\s+docx|format\s+pdf|format\s+word|format\s+docx|berbentuk\s+pdf|berbentuk\s+word|berbentuk\s+docx|bentuk\s+pdf|bentuk\s+word|bentuk\s+docx|dalam\s+format\s+(?:pdf|word|docx)|ekspor\s+ke\s+(?:pdf|word|docx)|[a-z0-9_-]+\.(?:pdf|docx))\b/i.test(t);
 
     const docTargetAfterVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat(?:kan)?|tolong\s+bikin(?:kan)?|susun(?:kan)?|tulis(?:kan)?|rangkumkan|draft|generate|create)\s+(?:sebuah\s+|satu\s+|file\s+|berkas\s+|naskah\s+|draf\s+)?(?:dokumen|dokumentasi|makalah|laporan|proposal|jurnal|karya\s+tulis|paper|skripsi|tesis|disertasi|surat\s+resmi|surat\s+tugas|surat\s+lamaran|modul\s+ajar|pdf|word|docx)\b/i;
 
-    const hasWebKeyword = /\b(?:website|websit|wbsite|webiste|wesbite|web\s+page|webpage|web\s+app|webapp|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|situs\s+web|situs|portofolio\s+web|game\s+web)\b/i.test(t);
-    const hasCreationVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat|tolong\s+bikin|generate|create|build|develop|rancang|desain|susun|pembuatan)\b/i.test(t);
-
     // Jika klausa pembuka secara eksplisit meminta pembuatan dokumen/makalah/laporan/proposal/PDF/Word
-    if (docTargetAfterVerb.test(openingClause) && !hasWebFrameworkOrCodeSignal && !hasWebSectionStructure) {
-      return 'document';
-    }
-    if (explicitDocFormatSignal && !webTargetAfterVerb.test(openingClause) && !hasWebFrameworkOrCodeSignal && !hasWebSectionStructure) {
-      return 'document';
-    }
-
-    // Jika klausa pembuka meminta pembuatan website / landing page / web app
-    if (webTargetAfterVerb.test(openingClause) || webTargetAfterVerb.test(t)) {
-      return 'website';
-    }
-    if (((hasWebFrameworkOrCodeSignal && hasCreationVerb) || (hasWebSectionStructure && (hasCreationVerb || hasWebFrameworkOrCodeSignal))) && !explicitDocFormatSignal) {
-      return 'website';
-    }
-
-    if (((hasWebKeyword && hasCreationVerb) || /\b(?:pembuatan\s+website|pembuatan\s+web)\b/i.test(t)) && !explicitDocFormatSignal && !docTargetAfterVerb.test(openingClause)) {
-      return 'website';
-    }
-
-    // 5. Deteksi Dokumen Eksplisit (hanya jika kata kerja pembuatan diikuti objek dokumen di kalimat yang sama, bukan kata "laporan" di dalam daftar fitur)
-    if (docTargetAfterVerb.test(t) || explicitDocFormatSignal) {
+    if (docTargetAfterVerb.test(openingClause) || explicitDocFormatSignal || docTargetAfterVerb.test(t)) {
       return 'document';
     }
 
@@ -23596,25 +23379,19 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
     AudioEngine.click();
   }
 
-  // ==================== WEBSITE CREATION MODE SELECTION ====================
+  // ==================== WEBSITE CREATION MODE (REMOVED) ====================
   let pendingWebsitePrompt = null;
 
   function isWebsiteCreationPrompt(text) {
-    return classifyCreationIntent(text) === 'website';
+    return false;
   }
 
   function openWebsiteModeModal(promptText) {
-    pendingWebsitePrompt = promptText;
-    openModal('websiteModeModal');
-    AudioEngine.click();
+    // Skill pembuatan website telah dihapus sesuai permintaan
   }
 
   function isWebsiteEditRequest(text) {
-    if (!text || typeof text !== 'string') return false;
-    const t = text.trim().toLowerCase();
-    const hasEditVerb = /\b(?:edit|ubahkan|ubah|gantikan|ganti|perbaiki|benahi|revisi|modifikasi|tambahkan|tambah|update|sesuaikan|hapus|hilangkan)\b/i.test(t);
-    const hasWebNoun = /\b(?:web|website|halaman|landing\s*page|tombol|navbar|header|footer|hero|warna|fitur|desain|tampilan|teks|konten|layout|css|js|javascript|komponen)\b/i.test(t);
-    return hasEditVerb && hasWebNoun;
+    return false;
   }
 
   function getLatestWebsiteFileInSession(session) {
@@ -23739,19 +23516,8 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
       return;
     }
 
-    const currentActiveSession = getActiveSession();
-    const existingWebFile = getLatestWebsiteFileInSession(currentActiveSession);
-    const isEditingExistingWeb = Boolean(existingWebFile && isWebsiteEditRequest(rawText));
-
     // Klasifikasi Intent Pembuatan sebelum tool/modal dipanggil:
-    // Pastikan permintaan website/landing page/aplikasi TIDAK PERNAH memicu modal dokumen!
     const creationIntent = classifyCreationIntent(rawText);
-
-    // Intersepsi Pembuatan Website: arahkan ke alur pembuatan kode website baru secara langsung tanpa modal popup
-    if (!options.skipWebsiteCheck && !options.websiteMode && !isEditingExistingWeb && creationIntent === 'website') {
-      options.websiteMode = 'preview';
-      options.isWebCreation = true;
-    }
 
     // Intersepsi Pembuatan Dokumen: HANYA muncul ketika pengguna secara eksplisit meminta dokumen/laporan/PDF/Word
     if (!options.skipDocCheck && !options.docFormat && creationIntent === 'document') {
@@ -23766,76 +23532,6 @@ MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
     // berpindah sesi selama await berlangsung — pesan tidak boleh mendarat di sesi baru.
     const promptTargetSessionId = STATE.currentSessionId;
     try {
-
-    // Mandat Kaisar: Jika pengguna meminta revisi/edit bagian website pada kode yang sudah jadi di sesi ini,
-    // gunakan pendekatan targeted edit hemat token tanpa mendump ribuan baris kode dari nol
-    if (!options.overrideText && isEditingExistingWeb) {
-      const targetName = existingWebFile.name || 'index.html';
-      const lang = existingWebFile.lang || (targetName.endsWith('.jsx') ? 'jsx' : 'html');
-      const currentCode = existingWebFile.rawContent || existingWebFile.content || '';
-      let endocrineFeedback = '';
-      if (STATE.settings.endocrineCodeEnabled && StudioEndocrineDiagnostics.lastError) {
-        const err = StudioEndocrineDiagnostics.lastError;
-        endocrineFeedback = `\n[Endocrine Code Sensor]: Error runtime: "${err.message || err}"${err.lineno ? ` (baris ${err.lineno})` : ''}.`;
-      }
-      const endocrineAwareness = (lang === 'html' || lang === 'jsx')
-        ? StudioEndocrineDiagnostics.buildSpatialAwarenessContext(currentCode, rawText)
-        : '';
-      const codeLines = currentCode.split('\n');
-      const compactRef = (codeLines.length <= 4000)
-        ? currentCode
-        : StudioEndocrineDiagnostics.buildCodeReference(currentCode, rawText);
-
-      const isFullRewriteRequested = /\b(?:buat ulang|ulang dari awal|desain ulang total|redesign total|reset total|dari nol|full rewrite)\b/i.test(rawText);
-
-      let wrappedEditPrompt = '';
-      if (isFullRewriteRequested) {
-        wrappedEditPrompt = `[ZOZ AUTONOMOUS AGENT — FULL REWRITE BERKAS "${targetName}"]
-Berikut adalah KODE SEBELUMNYA dari berkas "${targetName}" (${codeLines.length} baris):
-\`\`\`${lang}
-${compactRef}
-\`\`\`
-
-Instruksi Pengguna: "${rawText}"${endocrineFeedback}
-
-MANDAT EKSEKUSI FULL REWRITE:
-Pengguna meminta perancangan ulang total dari awal.
-Tuliskan SELURUH kode dokumen lengkap terbaru (dari awal sampai akhir) di dalam blok:
-<<<ZOZ_FILE name="${targetName}" mime="${existingWebFile.mime || 'text/html'}" lang="${lang}">
-... seluruh kode lengkap terbaru ...
-<<<END_ZOZ_FILE>>>
-MANDAT EKSEKUSI MUTLAK: Tuliskan seluruh kode lengkap terbaru secara fungsional dan bebas error. Mulai respons Anda langsung pada baris pertama!`;
-      } else {
-        wrappedEditPrompt = `[ZOZ SURGICAL EDIT — "${targetName}"]
-${endocrineAwareness ? endocrineAwareness + '\n\n' : ''}Berikut adalah KODE LENGKAP ARSITEKTUR berkas "${targetName}" (${codeLines.length} baris):
-\`\`\`${lang}
-${compactRef}
-\`\`\`
-Permintaan Pengguna: "${rawText}"${endocrineFeedback}
-
-MANDAT EKSEKUSI SURGICAL EDIT (SEARCH & REPLACE):
-1. Anda adalah Zoz Autonomous Engineer. Tugas Anda adalah memodifikasi bagian yang diminta pengguna secara presisi. Manfaatkan [KESADARAN SPASIAL & ARSITEKTUR ENDORFIN] di atas untuk menemukan posisi baris target secara akurat.
-2. DILARANG MENULIS ULANG SELURUH KODE! Ubah HANYA bagian (CSS style, elemen HTML, teks, atau script) yang diminta pengguna.
-3. RESPON ANDA WAJIB DIMULAI PADA BARIS PERTAMA DENGAN FORMAT PENGGANTIAN BERIKUT:
-<<<<<<< SEARCH
-[salin persis beberapa baris asli yang ingin diubah dari kode di atas]
-=======
-[baris baru perbaikan/penambahan yang diinginkan pengguna]
->>>>>>> REPLACE
-
-(Format <<<ZOZ_EDIT name="${targetName}"> dengan <<<SEARCH>>> dan <<<REPLACE>>> juga didukung penuh).
-4. Pastikan blok SEARCH memuat konteks baris unik di koordinat yang dipetakan agar pencocokan 100% akurat.
-5. Jika menambahkan aturan CSS atau script baru, pilih blok penutup tag </style> atau </script> terkait sebagai jangkar SEARCH.
-6. MANDAT EKSEKUSI MUTLAK: DILARANG KERAS membalas dengan basa-basi, apologi ("sebagai AI", "tidak bisa"), atau mengubah tugas pengguna! Langsung mulai dengan blok kode pada baris pertama!`;
-      }
-
-      options.overrideText = wrappedEditPrompt;
-      options.displayPrompt = rawText;
-      options.websiteMode = 'preview';
-      options.isWebCreation = true;
-      options.isWebsiteRevision = true;
-      rawText = wrappedEditPrompt;
-    }
 
     // Claude AI resilience: minta izin notifikasi saat pengguna berinteraksi
     requestNotificationPermission();
@@ -26260,21 +25956,6 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       } else {
         // Tetap pastikan perubahan riwayat percakapan studio tersimpan ke disk
         persistStudioCodeChange(activeAIFile.rawContent || activeAIFile.content || '', { session: session });
-
-        // Jalur streaming lama gagal menghasilkan perubahan yang bisa diterapkan: serahkan sekali ke agen edit nyata
-        // (bukan prompt ulang berputar). Agen punya batas waktu & selalu menampilkan hasil/alasan gagal.
-        if (isInterimTurn && wantsCode && !runOptions._isReflexTurn && !StudioEditAgent.busy &&
-            /\.(?:html?|xhtml|jsx|tsx)$/i.test(activeAIFile.name || '')) {
-          const agentKind = /\.(?:jsx|tsx)$/i.test(activeAIFile.name || '') ? 'jsx' : 'html';
-          setTimeout(() => {
-            StudioEditAgent.runFromStudio({
-              prompt: cleanUserText,
-              selInfo: null,
-              isEditingInCodeMode: historyKey === '_editChatHistory',
-              kind: agentKind
-            });
-          }, 150);
-        }
       }
     }
   }
@@ -26319,21 +26000,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     let executedHudHtml = '';
 
     // Deteksi perintah slash eksplisit & klasifikasi intent pembuatan (Website vs Dokumen)
-    const isExplicitWebCmd = /^\/(?:website|web|pratinjau)\b/i.test(promptText.trim());
     const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim()) || Boolean(runOptions.isExplicitCleanCode);
     const isExplicitDocCmd = /^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i.test(promptText.trim());
     const hasNegativePreview = isExplicitCleanCodeCmd || hasNegativeFileOrPreviewIntent(promptText);
     const creationIntent = classifyCreationIntent(promptText);
 
     const isDocRequest = (isExplicitDocCmd || Boolean(runOptions.docFormat) || runOptions.isDocCreation || (creationIntent === 'document' && isDocCreationPrompt(promptText))) &&
-                         creationIntent !== 'website' && !runOptions.websiteMode && !runOptions.isWebCreation && !isExplicitCleanCodeCmd;
+                         !isExplicitCleanCodeCmd;
     if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
-    const isWebRequest = !isDocRequest && (isExplicitWebCmd || creationIntent === 'website' ||
-                         /\b(?:website|websit|wbsite|webiste|web\s*page|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|situs\s+web|game\s+web|simulasi\s+3d)\b/i.test(promptText) ||
-                         runOptions.websiteMode === 'preview' || runOptions.websiteMode === 'code_in_chat' || Boolean(runOptions.isWebCreation)) && !isExplicitCleanCodeCmd;
+    const isWebRequest = false;
 
-    const wantsFile = (isWebRequest || isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
+    const wantsFile = (isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -26408,87 +26086,6 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
    - DILARANG KERAS mencetak, mengulang, membocorkan, atau menuliskan isi teks dokumen di luar blok ZOZ_FILE di dalam percakapan!
    - Di luar blok ZOZ_FILE (sebelum blok ZOZ_FILE), berikan HANYA 1-2 kalimat penjelasan/konfirmasi singkat bahwa dokumen telah selesai disusun dan siap diunduh melalui kartu berkas di bawah.
 5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
-      } else if (isWebRequest && !hasNegativePreview) {
-        const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
-        const isRevision = Boolean(runOptions.isWebsiteRevision);
-        const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);
-
-        if (isRevision) {
-          systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS SURGICAL EDIT WEBSITE (PILIH & GANTI BAGIAN TERKAIT SAJA — DILARANG MENULIS ULANG SELURUH KODE!)
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna sedang MENGEDIT bagian dari website yang SUDAH JADI.
-1. DILARANG KERAS MENULIS ULANG SELURUH KODE DARI AWAL ATAU MENGGUNAKAN <<<ZOZ_FILE>>>!
-   - Anda TIDAK BOLEH mencetak ulang seluruh dokumen HTML dari <!DOCTYPE html> sampai </html>.
-2. PILIH & LIHAT BAGIAN KODE YANG BERKAITAN SAJA:
-   - Periksa referensi kode di prompt, temukan HANYA baris/komponen/CSS/JS yang berkaitan langsung dengan maksud pengguna.
-3. GUNAKAN PROTOKOL SURGICAL PATCH <<<ZOZ_EDIT>>>:
-   - Keluarkan HANYA blok perubahan spesifik menggunakan format berikut:
-<<<ZOZ_EDIT name="index.html">
-<<<SEARCH>>>
-[salin persis baris asli dari kode yang ingin diubah]
-<<<REPLACE>>>
-[baris kode baru pengganti bagian tersebut saja]
-<<<END_ZOZ_EDIT>>>
-(Format Aider / Git: <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE juga didukung penuh).
-   - Anda dapat menyertakan beberapa pasangan SEARCH dan REPLACE bila perubahan menyentuh lebih dari satu titik (misalnya elemen HTML dan aturan CSS-nya), tanpa menulis ulang sisa kode lainnya.
-4. MULAI KELUARKAN BLOK PERUBAHAN LANGSUNG PADA BARIS PERTAMA RESPONS! Jangan menuliskan basa-basi atau kata pengantar sebelum blok kode agar mesin pratinjau langsung memproses perubahan secara seketika (realtime zero-latency).
-5. Berikan penjelasan singkat (1-2 kalimat) di baris setelah blok <<<END_ZOZ_EDIT>>> selesai.`;
-        } else {
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI WEB KELAS DUNIA (FULL FUNCTIONAL & PRATINJAU LANGSUNG)
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF KELAS DUNIA.
-- DILARANG KERAS mengalihkan permintaan ini menjadi pembuatan dokumen PDF/Word!
-
-STANDAR DESAIN & TEKNIKAL SILICON VALLEY TIER (WAJIB DIPATUHI):
-1. ESTETIKA VISUAL MODERN & ELEGAN:
-   - Desain wajib memiliki standar industri modern (Tailwind CSS, Inter/Plus Jakarta Sans typography, palet warna gelap mewah Dark Slate atau minimalis bersih).
-   - Terapkan teknik Glassmorphism (\`backdrop-blur-md bg-slate-900/80 border border-white/10\`), efek pendar lembut (\`shadow-lg shadow-cyan-500/10\`), dan transisi halus pada tombol serta kartu (\`hover:-translate-y-1 transition duration-200\`).
-   - Sertakan Hero Section dengan badge pill ("✨ Versi Terbaru / Fitur Unggulan"), judul teks bergradasi (\`bg-gradient-to-r from-cyan-400 to-indigo-500 bg-clip-text text-transparent\`), dan tombol Call-to-Action (CTA) yang mencolok.
-2. INTERAKTIVITAS & STATE HIDUP PENUH:
-   - Website BUKAN sekadar brosur statis! Tambahkan komponen interaktif nyata: navigasi responsif dengan menu mobile, tab filter konten, modal dialog, formulir fungsional dengan validasi/toast, atau kalkulator/fitur interaktif yang benar-benar bekerja saat diklik.
-   - Sediakan data realistis dan kontekstual (DILARANG KERAS menggunakan teks placeholder mentah seperti "Lorem Ipsum dolor sit amet").
-   - Gunakan ikon modern (FontAwesome 6 atau Lucide React) untuk memperkaya visual fitur.
-
-${isReactNextPrompt ? `[ARSITEKTUR NEXT.JS / REACT (JSX/TSX) DENGAN PRATINJAU LANGSUNG DI BROWSER]
-Zoz Router memiliki mesin kompilator React 18 + Next.js App Router + Tailwind CSS + Lucide React terintegrasi (Babel Standalone Sandbox) yang menjalankan berkas .jsx / .tsx secara langsung di Pratinjau Live tanpa memerlukan server build eksternal.
-Aturan Struktur Kode Next.js / React:
-1. Pembungkus Berkas Utama:
-<<<ZOZ_FILE name="page.jsx" mime="text/jsx" lang="jsx">
-import React, { useState } from 'react';
-import { ... } from 'lucide-react';
-...seluruh komponen pendukung & export default function Page()...
-<<<END_ZOZ_FILE>>>
-2. Validitas Import & Export:
-   - Pastikan setiap import dan export valid. Komponen utama WAJIB diekspor dengan \`export default function ...\` agar dapat dirender langsung tanpa error di pratinjau.
-3. Kelengkapan Kode Tanpa Terpotong (Zero Truncation):
-   - Tuliskan seluruh kode dari baris pertama hingga kurung kurawal penutup terakhir secara UTUH dan TUNTAS.` : `${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI]
-Panduan Pembungkus Berkas:
-1. Format Protokol HTML5 (Direkomendasikan):
-<<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
-<!DOCTYPE html>
-<html lang="id" class="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nama Aplikasi / Website</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <style>body { font-family: 'Plus Jakarta Sans', sans-serif; }</style>
-</head>
-<body class="bg-slate-950 text-slate-100 min-h-screen">
-  ...seluruh struktur Navbar, Hero, Fitur, CTA, Footer, dan JavaScript interaktif lengkap...
-</body>
-</html>
-<<<END_ZOZ_FILE>>>
-(Atau gunakan name="page.jsx" lang="jsx" jika pengguna meminta React / Next.js).
-
-2. Atau Format Blok Kode Standar \`\`\`html ... \`\`\` (Juga didukung & diisolasi otomatis).` : `Panduan Pembungkus Berkas:
-Tuliskan kode HTML5 atau React/Next.js (.jsx) lengkap yang fungsional dan siap jalan dalam blok protokol ZOZ_FILE atau blok kode markdown.`}`}
-3. MANDAT KELENGKAPAN KONTEN & KODE PENUH (DILARANG MEMOTONG KODE):
-   - Anda WAJIB menuliskan SELURUH KODE SECARA UTUH DAN TUNTAS dari awal hingga akhir tanpa ada tag atau kurung kurawal yang belum ditutup.
-   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan seluruh bagian halaman secara lengkap dan fungsional.
-   - DILARANG MENGGUNAKAN PLACEHOLDER PEMOTONG seperti '// kode CSS lainnya di sini...', '// tambahkan fungsi di sini...', atau '<!-- sisa konten -->'.
-4. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
-        }
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
@@ -27224,105 +26821,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         fullText = hideTaskBlocksForDisplay(fullText).trim();
       }
 
-      // ===== AUTO-CONTINUATION ENGINE UNTUK PEMBUATAN WEBSITE & KODE TERPOTONG =====
-      const isWebTask = Boolean(wantsFile || (runOptions && (runOptions.websiteMode || runOptions.isWebCreation)) || isWebsiteCreationPrompt(promptText));
-      const hasCompletedSurgicalEdit = fullText.includes('<<<END_ZOZ_EDIT') ||
-        fullText.includes('<<<END_ZOZ_MODIFY') ||
-        /(?:>>>{1,3}|>{3,})(?:\s*REPLACE\b)?/i.test(fullText) ||
-        Boolean(runOptions && runOptions.isWebsiteRevision && extractGeneratedFiles(fullText, wantsFile).files.length > 0);
-      const initialExtractedFiles = extractGeneratedFiles(fullText, wantsFile, runOptions);
-      const initialWebFile = initialExtractedFiles.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || initialExtractedFiles.files[0];
-      let isWebsiteFullyDone = initialWebFile ? isWebsiteComplete(initialWebFile.rawContent || initialWebFile.content || '', fullText) : false;
-
-      // AUTONOMOUS MULTI-ROUND CONTINUATION (Ollama):
-      // Jika kode website terpotong di tengah jalan (belum lulus isWebsiteComplete),
-      // jalankan loop kelanjutan multi-putaran otonom hingga tuntas tanpa fake-closing!
-      if (isWebTask && !isWebsiteFullyDone && !hasCompletedSurgicalEdit && !STATE.abortController?.signal?.aborted) {
-        console.log('[AutoContinuation Ollama] Kode website belum tuntas. Menjalankan penuntasan otonom...');
-        let continuationRound = 0;
-        const MAX_AUTO_CONTINUATION = 4;
-
-        while (!isWebsiteFullyDone && continuationRound < MAX_AUTO_CONTINUATION && !STATE.abortController?.signal?.aborted) {
-          continuationRound++;
-          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="auto-continue-hud" style="margin: 8px 0; padding: 10px 14px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.84rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 10px;"><i class="fa-solid fa-arrows-rotate fa-spin"></i> <span><strong>Menuntaskan Pembuatan Website (Putaran ${continuationRound}/${MAX_AUTO_CONTINUATION})</strong> &bull; Kode terpotong di tengah jalan. AI sedang menyambung penulisan kode website hingga tuntas...</span></div>`;
-          smartScrollChatToBottom(false);
-
-          const lines = fullText.split('\n');
-          const totalLines = lines.length;
-          const tailLinesCount = Math.min(40, totalLines);
-          const tailLines = lines.slice(-tailLinesCount).join('\n');
-          const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang kode dari baris awal!\nDILARANG memulai dengan <<<ZOZ_FILE, DILARANG menulis <!DOCTYPE html>, <html>, atau <head>!\nDILARANG menyertakan pembukaan, salam, penjelasan, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript persis dari karakter terakhir potongan di atas hingga tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`;
-
-          try {
-            const nextChunk = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, tailLines, { ...runOptions, signal: STATE.abortController?.signal });
-            if (nextChunk && nextChunk.trim()) {
-              fullText = safeAssistantText(stitchContinuationChunk(fullText, nextChunk));
-              const curExtracted = extractGeneratedFiles(fullText, wantsFile, runOptions);
-              const curWebFile = curExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || curExtracted.files[0];
-              isWebsiteFullyDone = curWebFile ? isWebsiteComplete(curWebFile.rawContent || curWebFile.content || '', fullText) : false;
-            } else {
-              break;
-            }
-          } catch (err) {
-            console.warn(`[AutoContinuation Ollama] Putaran ${continuationRound} terhenti:`, err);
-            break;
-          }
-        }
-
-        // Failsafe Dyck Algebraic Closure: Jika model berhenti sebelum menutup tag tetapi konten sudah padat (>250 char)
-        if (!isWebsiteFullyDone) {
-          const curExtracted = extractGeneratedFiles(fullText, wantsFile, runOptions);
-          const curWebFile = curExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || curExtracted.files[0];
-          if (curWebFile) {
-            const rawWeb = curWebFile.rawContent || curWebFile.content || '';
-            if (rawWeb.length > 250 && /<body[\s>]/i.test(rawWeb)) {
-              console.log('[AutoContinuation Ollama] Menuntaskan website dengan Dyck Algebraic Closure...');
-              fullText = safeAssistantText(applyDyckAlgebraicClosure(fullText));
-              const sealedExtracted = extractGeneratedFiles(fullText, wantsFile, runOptions);
-              const sealedWebFile = sealedExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || sealedExtracted.files[0];
-              isWebsiteFullyDone = sealedWebFile ? isWebsiteComplete(sealedWebFile.rawContent || sealedWebFile.content || '', fullText) : false;
-            }
-          }
-        }
-      }
-
       const rawFullTextBeforeStripping = fullText;
 
       // ===== AI FILE STUDIO & WORKSPACE AUTO-SAVE =====
       const extractedAiFiles = extractGeneratedFiles(fullText, wantsFile, runOptions);
       const generatedFiles = extractedAiFiles.files;
-      const finalWebFile = generatedFiles.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || generatedFiles[0];
-      const isFinalHtmlClosed = isWebTask && finalWebFile && isWebsiteComplete(finalWebFile.rawContent || finalWebFile.content || '', fullText);
-      const isFileStillIncomplete = isWebTask ? !isFinalHtmlClosed : Boolean(extractedAiFiles.hasIncompleteFile);
-
-      // Jika sama sekali tidak ada kode website terbentuk (0 byte), reload 1x bersih
-      if (isWebTask && generatedFiles.length === 0 && !runOptions._autoRegenCount && !STATE.abortController?.signal?.aborted) {
-        console.warn('[AutoRegen Website Ollama] Tidak ada berkas website terbentuk. Memuat ulang pembuatan website secara utuh...');
-        showToast('🔄 Respons kosong — memuat ulang pembuatan website...', 'info');
-
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="auto-continue-hud" style="margin: 8px 0; padding: 10px 14px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.84rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 10px;"><i class="fa-solid fa-arrows-rotate fa-spin"></i> <span><strong>Memuat Ulang Pembuatan Website</strong> &bull; Respons kosong. AI sedang merancang ulang kode website dari awal...</span></div>`;
-        smartScrollChatToBottom(true);
-
-        const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
-        const freshWebPrompt = `Buatkan website yang lengkap, menarik, interaktif, dan berfungsi penuh untuk: "${promptBase}".\n\nMANDAT UTAMA:\nTuliskan seluruh kode dokumen HTML5 lengkap dari <!DOCTYPE html> sampai </html> di dalam blok <<<ZOZ_FILE name="index.html" lang="html">. Sertakan styling CSS dan JavaScript interaktif dalam satu berkas mandiri yang bekerja langsung tanpa terpotong!`;
-
-        try { assistantRow.remove(); } catch (_) {}
-        setGeneratingState(false);
-        STATE.isSending = false;
-        setTimeout(() => {
-          handleSendPrompt({
-            ...runOptions,
-            overrideText: freshWebPrompt,
-            displayPrompt: promptBase,
-            _autoRegenCount: 1,
-            websiteMode: 'preview',
-            isWebCreation: true,
-            skipWebsiteCheck: true,
-            skipDocCheck: true
-          });
-        }, 500);
-        return;
-      }
+      const isFileStillIncomplete = Boolean(extractedAiFiles.hasIncompleteFile);
 
       if (isFileStillIncomplete) {
         assistantRow.dataset.rawIncompleteText = rawFullTextBeforeStripping;
@@ -27778,21 +27282,18 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     let executedHudHtml = '';
 
     // Deteksi perintah slash eksplisit & klasifikasi intent pembuatan (Website vs Dokumen)
-    const isExplicitWebCmd = /^\/(?:website|web|pratinjau)\b/i.test(promptText.trim());
     const isExplicitCleanCodeCmd = /^\/(?:kodenya-saja|code)\b/i.test(promptText.trim()) || Boolean(runOptions.isExplicitCleanCode);
     const isExplicitDocCmd = /^\/(?:dokumen|doc|docx|pdf|word|makalah)\b/i.test(promptText.trim());
     const hasNegativePreview = isExplicitCleanCodeCmd || hasNegativeFileOrPreviewIntent(promptText);
     const creationIntent = classifyCreationIntent(promptText);
 
     const isDocRequest = (isExplicitDocCmd || Boolean(runOptions.docFormat) || runOptions.isDocCreation || (creationIntent === 'document' && isDocCreationPrompt(promptText))) &&
-                         creationIntent !== 'website' && !runOptions.websiteMode && !runOptions.isWebCreation && !isExplicitCleanCodeCmd;
+                         !isExplicitCleanCodeCmd;
     if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
-    const isWebRequest = !isDocRequest && (isExplicitWebCmd || creationIntent === 'website' ||
-                         /\b(?:website|websit|wbsite|webiste|web\s*page|webpage|landing\s*page|landingpage|halaman\s+web|aplikasi\s+web|situs\s+web|game\s+web|simulasi\s+3d)\b/i.test(promptText) ||
-                         runOptions.websiteMode === 'preview' || runOptions.websiteMode === 'code_in_chat' || Boolean(runOptions.isWebCreation)) && !isExplicitCleanCodeCmd;
+    const isWebRequest = false;
 
-    const wantsFile = (isWebRequest || isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
+    const wantsFile = (isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -27867,87 +27368,6 @@ Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
    - DILARANG KERAS mencetak, mengulang, membocorkan, atau menuliskan isi teks dokumen di luar blok ZOZ_FILE di dalam percakapan!
    - Di luar blok ZOZ_FILE (sebelum blok ZOZ_FILE), berikan HANYA 1-2 kalimat penjelasan/konfirmasi singkat bahwa dokumen telah selesai disusun dan siap diunduh melalui kartu berkas di bawah.
 5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
-      } else if (isWebRequest && !hasNegativePreview) {
-        const isPreviewOnly = runOptions.websiteMode !== 'code_in_chat';
-        const isRevision = Boolean(runOptions.isWebsiteRevision);
-        const isReactNextPrompt = /\b(?:next\.?js|nextjs|react\.?js|reactjs|jsx|tsx|app\s+router|page\.jsx|page\.tsx|layout\.jsx|layout\.tsx)\b/i.test(promptText);
-
-        if (isRevision) {
-          systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS SURGICAL EDIT WEBSITE (PILIH & GANTI BAGIAN TERKAIT SAJA — DILARANG MENULIS ULANG SELURUH KODE!)
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna sedang MENGEDIT bagian dari website yang SUDAH JADI.
-1. DILARANG KERAS MENULIS ULANG SELURUH KODE DARI AWAL ATAU MENGGUNAKAN <<<ZOZ_FILE>>>!
-   - Anda TIDAK BOLEH mencetak ulang seluruh dokumen HTML dari <!DOCTYPE html> sampai </html>.
-2. PILIH & LIHAT BAGIAN KODE YANG BERKAITAN SAJA:
-   - Periksa referensi kode di prompt, temukan HANYA baris/komponen/CSS/JS yang berkaitan langsung dengan maksud pengguna.
-3. GUNAKAN PROTOKOL SURGICAL PATCH <<<ZOZ_EDIT>>>:
-   - Keluarkan HANYA blok perubahan spesifik menggunakan format berikut:
-<<<ZOZ_EDIT name="index.html">
-<<<SEARCH>>>
-[salin persis baris asli dari kode yang ingin diubah]
-<<<REPLACE>>>
-[baris kode baru pengganti bagian tersebut saja]
-<<<END_ZOZ_EDIT>>>
-(Format Aider / Git: <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE juga didukung penuh).
-   - Anda dapat menyertakan beberapa pasangan SEARCH dan REPLACE bila perubahan menyentuh lebih dari satu titik (misalnya elemen HTML dan aturan CSS-nya), tanpa menulis ulang sisa kode lainnya.
-4. MULAI KELUARKAN BLOK PERUBAHAN LANGSUNG PADA BARIS PERTAMA RESPONS! Jangan menuliskan basa-basi atau kata pengantar sebelum blok kode agar mesin pratinjau langsung memproses perubahan secara seketika (realtime zero-latency).
-5. Berikan penjelasan singkat (1-2 kalimat) di baris setelah blok <<<END_ZOZ_EDIT>>> selesai.`;
-        } else {
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN WEBSITE / APLIKASI WEB KELAS DUNIA (FULL FUNCTIONAL & PRATINJAU LANGSUNG)
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN WEBSITE / LANDING PAGE / APLIKASI WEB INTERAKTIF KELAS DUNIA.
-- DILARANG KERAS mengalihkan permintaan ini menjadi pembuatan dokumen PDF/Word!
-
-STANDAR DESAIN & TEKNIKAL SILICON VALLEY TIER (WAJIB DIPATUHI):
-1. ESTETIKA VISUAL MODERN & ELEGAN:
-   - Desain wajib memiliki standar industri modern (Tailwind CSS, Inter/Plus Jakarta Sans typography, palet warna gelap mewah Dark Slate atau minimalis bersih).
-   - Terapkan teknik Glassmorphism (\`backdrop-blur-md bg-slate-900/80 border border-white/10\`), efek pendar lembut (\`shadow-lg shadow-cyan-500/10\`), dan transisi halus pada tombol serta kartu (\`hover:-translate-y-1 transition duration-200\`).
-   - Sertakan Hero Section dengan badge pill ("✨ Versi Terbaru / Fitur Unggulan"), judul teks bergradasi (\`bg-gradient-to-r from-cyan-400 to-indigo-500 bg-clip-text text-transparent\`), dan tombol Call-to-Action (CTA) yang mencolok.
-2. INTERAKTIVITAS & STATE HIDUP PENUH:
-   - Website BUKAN sekadar brosur statis! Tambahkan komponen interaktif nyata: navigasi responsif dengan menu mobile, tab filter konten, modal dialog, formulir fungsional dengan validasi/toast, atau kalkulator/fitur interaktif yang benar-benar bekerja saat diklik.
-   - Sediakan data realistis dan kontekstual (DILARANG KERAS menggunakan teks placeholder mentah seperti "Lorem Ipsum dolor sit amet").
-   - Gunakan ikon modern (FontAwesome 6 atau Lucide React) untuk memperkaya visual fitur.
-
-${isReactNextPrompt ? `[ARSITEKTUR NEXT.JS / REACT (JSX/TSX) DENGAN PRATINJAU LANGSUNG DI BROWSER]
-Zoz Router memiliki mesin kompilator React 18 + Next.js App Router + Tailwind CSS + Lucide React terintegrasi (Babel Standalone Sandbox) yang menjalankan berkas .jsx / .tsx secara langsung di Pratinjau Live tanpa memerlukan server build eksternal.
-Aturan Struktur Kode Next.js / React:
-1. Pembungkus Berkas Utama:
-<<<ZOZ_FILE name="page.jsx" mime="text/jsx" lang="jsx">
-import React, { useState } from 'react';
-import { ... } from 'lucide-react';
-...seluruh komponen pendukung & export default function Page()...
-<<<END_ZOZ_FILE>>>
-2. Validitas Import & Export:
-   - Pastikan setiap import dan export valid. Komponen utama WAJIB diekspor dengan \`export default function ...\` agar dapat dirender langsung tanpa error di pratinjau.
-3. Kelengkapan Kode Tanpa Terpotong (Zero Truncation):
-   - Tuliskan seluruh kode dari baris pertama hingga kurung kurawal penutup terakhir secara UTUH dan TUNTAS.` : `${isPreviewOnly ? `[MODE EKSPLISIT: PRATINJAU LANGSUNG TERISOLASI]
-Panduan Pembungkus Berkas:
-1. Format Protokol HTML5 (Direkomendasikan):
-<<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
-<!DOCTYPE html>
-<html lang="id" class="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nama Aplikasi / Website</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <style>body { font-family: 'Plus Jakarta Sans', sans-serif; }</style>
-</head>
-<body class="bg-slate-950 text-slate-100 min-h-screen">
-  ...seluruh struktur Navbar, Hero, Fitur, CTA, Footer, dan JavaScript interaktif lengkap...
-</body>
-</html>
-<<<END_ZOZ_FILE>>>
-(Atau gunakan name="page.jsx" lang="jsx" jika pengguna meminta React / Next.js).
-
-2. Atau Format Blok Kode Standar \`\`\`html ... \`\`\` (Juga didukung & diisolasi otomatis).` : `Panduan Pembungkus Berkas:
-Tuliskan kode HTML5 atau React/Next.js (.jsx) lengkap yang fungsional dan siap jalan dalam blok protokol ZOZ_FILE atau blok kode markdown.`}`}
-3. MANDAT KELENGKAPAN KONTEN & KODE PENUH (DILARANG MEMOTONG KODE):
-   - Anda WAJIB menuliskan SELURUH KODE SECARA UTUH DAN TUNTAS dari awal hingga akhir tanpa ada tag atau kurung kurawal yang belum ditutup.
-   - DILARANG MEMBATASI HANYA 100 BARIS! Tuliskan seluruh bagian halaman secara lengkap dan fungsional.
-   - DILARANG MENGGUNAKAN PLACEHOLDER PEMOTONG seperti '// kode CSS lainnya di sini...', '// tambahkan fungsi di sini...', atau '<!-- sisa konten -->'.
-4. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
-        }
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
@@ -29026,105 +28446,12 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         fullText = hideTaskBlocksForDisplay(fullText).trim();
       }
 
-      // ===== AUTO-CONTINUATION ENGINE UNTUK PEMBUATAN WEBSITE & KODE TERPOTONG =====
-      const isWebTask = Boolean(wantsFile || (runOptions && (runOptions.websiteMode || runOptions.isWebCreation)) || isWebsiteCreationPrompt(promptText));
-      const hasCompletedSurgicalEdit = fullText.includes('<<<END_ZOZ_EDIT') ||
-        fullText.includes('<<<END_ZOZ_MODIFY') ||
-        /(?:>>>{1,3}|>{3,})(?:\s*REPLACE\b)?/i.test(fullText) ||
-        Boolean(runOptions && runOptions.isWebsiteRevision && extractGeneratedFiles(fullText, wantsFile).files.length > 0);
-      const initialExtractedFiles = extractGeneratedFiles(fullText, wantsFile, runOptions);
-      const initialWebFile = initialExtractedFiles.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || initialExtractedFiles.files[0];
-      let isWebsiteFullyDone = initialWebFile ? isWebsiteComplete(initialWebFile.rawContent || initialWebFile.content || '', fullText) : false;
-
-      // AUTONOMOUS MULTI-ROUND CONTINUATION (OpenRouter):
-      // Jika kode website terpotong di tengah jalan (belum lulus isWebsiteComplete),
-      // jalankan loop kelanjutan multi-putaran otonom hingga tuntas tanpa fake-closing!
-      if (isWebTask && !isWebsiteFullyDone && !hasCompletedSurgicalEdit && !STATE.abortController?.signal?.aborted) {
-        console.log('[AutoContinuation OpenRouter] Kode website belum tuntas. Menjalankan penuntasan otonom...');
-        let continuationRound = 0;
-        const MAX_AUTO_CONTINUATION = 4;
-
-        while (!isWebsiteFullyDone && continuationRound < MAX_AUTO_CONTINUATION && !STATE.abortController?.signal?.aborted) {
-          continuationRound++;
-          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="auto-continue-hud" style="margin: 8px 0; padding: 10px 14px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.84rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 10px;"><i class="fa-solid fa-arrows-rotate fa-spin"></i> <span><strong>Menuntaskan Pembuatan Website (Putaran ${continuationRound}/${MAX_AUTO_CONTINUATION})</strong> &bull; Kode terpotong di tengah jalan. AI sedang menyambung penulisan kode website hingga tuntas...</span></div>`;
-          smartScrollChatToBottom(false);
-
-          const lines = fullText.split('\n');
-          const totalLines = lines.length;
-          const tailLinesCount = Math.min(40, totalLines);
-          const tailLines = lines.slice(-tailLinesCount).join('\n');
-          const continuePrompt = `[KODE WEBSITE SEDANG DIRANCANG: ${totalLines} baris telah tersusun di pratinjau live.]\n[Berikut adalah ${tailLinesCount} baris kode terakhir sebelum terputus]:\n\`\`\`html\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan kode website persis mulai dari karakter dan baris terakhir di atas!\nDILARANG mengulang kode dari baris awal!\nDILARANG memulai dengan <<<ZOZ_FILE, DILARANG menulis <!DOCTYPE html>, <html>, atau <head>!\nDILARANG menyertakan pembukaan, salam, penjelasan, atau teks basa-basi!\nLangsung tuliskan lanjutan sintaks HTML, CSS, atau JavaScript persis dari karakter terakhir potongan di atas hingga tuntas tertutup sempurna dengan </html> dan penutup <<<END_ZOZ_FILE>>>.`;
-
-          try {
-            const nextChunk = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, { ...runOptions, signal: STATE.abortController?.signal });
-            if (nextChunk && nextChunk.trim()) {
-              fullText = safeAssistantText(stitchContinuationChunk(fullText, nextChunk));
-              const curExtracted = extractGeneratedFiles(fullText, wantsFile, runOptions);
-              const curWebFile = curExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || curExtracted.files[0];
-              isWebsiteFullyDone = curWebFile ? isWebsiteComplete(curWebFile.rawContent || curWebFile.content || '', fullText) : false;
-            } else {
-              break;
-            }
-          } catch (err) {
-            console.warn(`[AutoContinuation OpenRouter] Putaran ${continuationRound} terhenti:`, err);
-            break;
-          }
-        }
-
-        // Failsafe Dyck Algebraic Closure: Jika model berhenti sebelum menutup tag tetapi konten sudah padat (>250 char)
-        if (!isWebsiteFullyDone) {
-          const curExtracted = extractGeneratedFiles(fullText, wantsFile, runOptions);
-          const curWebFile = curExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || curExtracted.files[0];
-          if (curWebFile) {
-            const rawWeb = curWebFile.rawContent || curWebFile.content || '';
-            if (rawWeb.length > 250 && /<body[\s>]/i.test(rawWeb)) {
-              console.log('[AutoContinuation OpenRouter] Menuntaskan website dengan Dyck Algebraic Closure...');
-              fullText = safeAssistantText(applyDyckAlgebraicClosure(fullText));
-              const sealedExtracted = extractGeneratedFiles(fullText, wantsFile, runOptions);
-              const sealedWebFile = sealedExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || sealedExtracted.files[0];
-              isWebsiteFullyDone = sealedWebFile ? isWebsiteComplete(sealedWebFile.rawContent || sealedWebFile.content || '', fullText) : false;
-            }
-          }
-        }
-      }
-
       const rawFullTextBeforeStripping = fullText;
 
       // ===== AI FILE STUDIO & WORKSPACE AUTO-SAVE =====
       const extractedAiFiles = extractGeneratedFiles(fullText, wantsFile, runOptions);
       const generatedFiles = extractedAiFiles.files;
-      const finalWebFile = generatedFiles.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || generatedFiles[0];
-      const isFinalHtmlClosed = isWebTask && finalWebFile && isWebsiteComplete(finalWebFile.rawContent || finalWebFile.content || '', fullText);
-      const isFileStillIncomplete = isWebTask ? !isFinalHtmlClosed : Boolean(extractedAiFiles.hasIncompleteFile);
-
-      // Jika sama sekali tidak ada kode website terbentuk (0 byte), reload 1x bersih
-      if (isWebTask && generatedFiles.length === 0 && !runOptions._autoRegenCount && !STATE.abortController?.signal?.aborted) {
-        console.warn('[AutoRegen Website OpenRouter] Tidak ada berkas website terbentuk. Memuat ulang pembuatan website secara utuh...');
-        showToast('🔄 Respons kosong — memuat ulang pembuatan website...', 'info');
-
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `\n<div class="auto-continue-hud" style="margin: 8px 0; padding: 10px 14px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.84rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 10px;"><i class="fa-solid fa-arrows-rotate fa-spin"></i> <span><strong>Memuat Ulang Pembuatan Website</strong> &bull; Respons kosong. AI sedang merancang ulang kode website dari awal...</span></div>`;
-        smartScrollChatToBottom(true);
-
-        const promptBase = (runOptions && runOptions.displayPrompt) || promptText;
-        const freshWebPrompt = `Buatkan website yang lengkap, menarik, interaktif, dan berfungsi penuh untuk: "${promptBase}".\n\nMANDAT UTAMA:\nTuliskan seluruh kode dokumen HTML5 lengkap dari <!DOCTYPE html> sampai </html> di dalam blok <<<ZOZ_FILE name="index.html" lang="html">. Sertakan styling CSS dan JavaScript interaktif dalam satu berkas mandiri yang bekerja langsung tanpa terpotong!`;
-
-        try { assistantRow.remove(); } catch (_) {}
-        setGeneratingState(false);
-        STATE.isSending = false;
-        setTimeout(() => {
-          handleSendPrompt({
-            ...runOptions,
-            overrideText: freshWebPrompt,
-            displayPrompt: promptBase,
-            _autoRegenCount: 1,
-            websiteMode: 'preview',
-            isWebCreation: true,
-            skipWebsiteCheck: true,
-            skipDocCheck: true
-          });
-        }, 500);
-        return;
-      }
+      const isFileStillIncomplete = Boolean(extractedAiFiles.hasIncompleteFile);
 
       if (isFileStillIncomplete) {
         assistantRow.dataset.rawIncompleteText = rawFullTextBeforeStripping;
@@ -34411,19 +33738,6 @@ Aturan:
   // ==================== SLASH COMMANDS & QUICK TOOLS AUTOCOMPLETE ENGINE ====================
   const SLASH_COMMANDS = [
     {
-      id: 'website',
-      command: '/website',
-      title: 'Pembuatan Website & App',
-      badge: 'HTML / JS / 3D',
-      desc: 'Bikin landing page, simulator interaktif, game, atau Three.js dengan pratinjau live',
-      iconClass: 'fa-solid fa-code',
-      iconColor: '#10b981',
-      iconBg: 'rgba(16, 185, 129, 0.12)',
-      template: '/website ',
-      placeholder: 'Deskripsikan website atau aplikasi web yang ingin dibuat...',
-      aliases: ['web', 'html', 'app', 'aplikasi', 'situs', 'landingpage', 'website', 'pembuatan', 'pembuatan website', 'bikin website', 'skill']
-    },
-    {
       id: 'dokumen',
       command: '/dokumen',
       title: 'Pembuatan Dokumen Resmi',
@@ -34662,12 +33976,10 @@ Aturan:
     }
 
 
-    // Default template insert (e.g. '/diagram ', '/website ', '/dokumen ')
+    // Default template insert (e.g. '/diagram ', '/dokumen ')
     if (els.promptInput) {
       const cur = els.promptInput.value.trim();
-      if (cmd.id === 'website' && cur && isWebsiteCreationPrompt(cur)) {
-        openWebsiteModeModal(cur);
-      } else if (cmd.id === 'dokumen' && cur && isDocCreationPrompt(cur)) {
+      if (cmd.id === 'dokumen' && cur && isDocCreationPrompt(cur)) {
         openDocModeModal(cur);
       } else {
         els.promptInput.value = cmd.template;
@@ -34680,9 +33992,7 @@ Aturan:
     hideSlashCommandsMenu();
     AudioEngine.click();
 
-    if (cmd.id === 'website') {
-      showToast('💻 Mode Website & App Studio Aktif — Ketik aplikasi yang ingin dibuat!');
-    } else if (cmd.id === 'dokumen') {
+    if (cmd.id === 'dokumen') {
       showToast('📄 Mode Dokumen & Laporan Aktif!');
     } else if (cmd.id === 'kodenya-saja') {
       showToast('⚡ Mode Hanya Kode Aktif!');
