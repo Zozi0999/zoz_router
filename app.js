@@ -36503,17 +36503,21 @@ Aturan:
                 pState.autoEnter = (savedAuto === '1');
                 if (pNum === 1 && tTab) tTab.autoEnter = pState.autoEnter;
               }
-              TerminalManager.sendAutoEnterToServer(sId, pState.autoEnter);
               // Periksa jika koneksi WebSocket terputus atau tertidur saat HP keluar/background
               if (TerminalManager.isRemoteConnected || TerminalManager.isWindowsSynced || !pState.isFallbackMode) {
                 pState.isFallbackMode = false;
                 if (!pState.ws || (pState.ws.readyState !== WebSocket.OPEN && pState.ws.readyState !== WebSocket.CONNECTING)) {
+                  TerminalManager.sendAutoEnterToServer(sId, pState.autoEnter);
                   TerminalManager.connectStream(tTab, pState, pNum);
                 } else if (pState.ws && pState.ws.readyState === WebSocket.OPEN) {
                   try {
                     pState.ws.send(JSON.stringify({ type: 'auto-enter', enabled: pState.autoEnter, session: sId }));
-                  } catch (_) {}
+                  } catch (_) {
+                    TerminalManager.sendAutoEnterToServer(sId, pState.autoEnter);
+                  }
                 }
+              } else {
+                TerminalManager.sendAutoEnterToServer(sId, pState.autoEnter);
               }
             }
           });
@@ -38393,15 +38397,19 @@ Aturan:
         localStorage.setItem('zoz_term_auto_enter_last', pane.autoEnter ? '1' : '0');
       } catch (_) {}
 
-      // 1. Sync ke WebSocket server jika terhubung
+      // 1. Sync ke WebSocket server jika terhubung (prioritas utama, 0 latency)
+      let syncedViaWs = false;
       if (pane.ws && pane.ws.readyState === WebSocket.OPEN) {
         try {
           pane.ws.send(JSON.stringify({ type: 'auto-enter', enabled: pane.autoEnter, session: sessionId }));
+          syncedViaWs = true;
         } catch (_) {}
       }
 
-      // 2. Sync via HTTP REST endpoint /api/terminal/auto-enter
-      this.sendAutoEnterToServer(sessionId, pane.autoEnter);
+      // 2. Fallback sync via HTTP REST endpoint hanya jika WS belum/tidak terhubung
+      if (!syncedViaWs) {
+        this.sendAutoEnterToServer(sessionId, pane.autoEnter);
+      }
 
       const paneName = paneNum === 2 ? 'Panel 2' : 'Panel 1';
       showToast(pane.autoEnter ? `⚡ Auto Y/Enter: Aktif (${paneName} - ${tab.title})` : `Auto Y/Enter: Nonaktif (${paneName} - ${tab.title})`);
