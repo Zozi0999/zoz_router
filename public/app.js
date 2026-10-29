@@ -10847,7 +10847,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(m))
       : [effectiveModel];
 
-    const tryDirectFirst = IS_GITHUB_PAGES;
+    const hasUserKey = Boolean(STATE.settings.openRouterKey && String(STATE.settings.openRouterKey).trim());
+    const tryDirectFirst = Boolean(hasUserKey && IS_GITHUB_PAGES);
     const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
 
     let res = null;
@@ -10960,7 +10961,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             }
           } catch (_) {}
           lastErrDetail = attemptErr;
-          if (attemptRes.status === 401 || attemptRes.status === 403 || attemptRes.status === 402) {
+          if (attemptRes.status === 401 || attemptRes.status === 403) {
+            continue;
+          }
+          if (attemptRes.status === 402) {
             break;
           }
         } catch (err) {
@@ -27641,8 +27645,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           }
         }
 
-        // DUAL-PATH RESILIENCE: Coba rute primer, jika terhambat CORS/network/404, otomatis coba rute sekunder
-        const tryDirectFirst = Boolean(IS_CLOUD_HOSTED || IS_GITHUB_PAGES || IS_VERCEL || !DeviceStorage.isDeviceBackendAvailable);
+        // DUAL-PATH RESILIENCE: Coba rute primer, jika terhambat CORS/network/401/404, otomatis coba rute sekunder.
+        // Hanya utamakan 'direct' jika pengguna memang telah memasukkan API Key OpenRouter di pengaturan lokal peramban.
+        const hasUserKey = Boolean(STATE.settings.openRouterKey && String(STATE.settings.openRouterKey).trim());
+        const tryDirectFirst = Boolean(hasUserKey && (IS_GITHUB_PAGES || IS_VERCEL || !DeviceStorage.isDeviceBackendAvailable));
         const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
 
         let routeErrDetail = '';
@@ -27793,12 +27799,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (attemptErr.toLowerCase().includes('resourceexhausted') || attemptErr.toLowerCase().includes('worker local total request limit reached')) {
                 markModelExhausted(currentModel, attemptErr);
               }
-              if (routeType === 'proxy' && (attemptRes.status === 401 || attemptRes.status === 403)) {
-                // Jika rute proxy di Vercel/cloud mengembalikan 401/403 (karena cross-origin atau server API key kosong),
-                // JANGAN batalkan percobaan! Tetap coba rute 'direct' menggunakan API Key milik klien langsung di peramban.
+              if (attemptRes.status === 401 || attemptRes.status === 403) {
+                // Jangan batalkan percobaan jika rute lain (direct <-> proxy) belum dicoba!
+                // Server mungkin memiliki API Key di environment atau sebaliknya pengguna memiliki key di client.
                 continue;
               }
-              if (attemptRes.status === 401 || attemptRes.status === 403 || attemptRes.status === 402) {
+              if (attemptRes.status === 402) {
                 break;
               }
               continue;
