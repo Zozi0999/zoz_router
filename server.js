@@ -2325,6 +2325,7 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   }
 
   const rawModel = (model || '').trim();
+  const isAutoRouterActive = Boolean(isAutoRouter || allowFallbacks);
   // Auto-detect Provider per Model secara cerdas
   let effectiveProvider = provider || 'ollama';
   if (rawModel.includes('/')) {
