@@ -560,24 +560,32 @@ class WhatsAppGateway {
     const isGroup = c.id.endsWith('@g.us');
     const rawName = (c.name || '').trim();
 
-    // Untuk grup WhatsApp: tampilkan jika memiliki nama grup
+    // 1. Cek apakah ada riwayat percakapan / chat (prioritas utama: jika ada chat, pasti kontak aktif!)
+    const numOnly = c.id.split('@')[0];
+    let hasChat = Boolean(
+      (this.messages.has(c.id) && this.messages.get(c.id).length > 0) ||
+      (c.lastMessage && String(c.lastMessage).trim().length > 0)
+    );
+    if (!hasChat && numOnly) {
+      for (const [k, msgs] of this.messages.entries()) {
+        if (k.startsWith(numOnly) && msgs.length > 0) {
+          hasChat = true;
+          break;
+        }
+      }
+    }
+    if (hasChat) return true;
+
+    // 2. Untuk grup WhatsApp tanpa riwayat chat: tampilkan jika memiliki nama grup yang jelas
     if (isGroup) {
       return Boolean(rawName && !/^[\d\s+()\-.]+$/.test(rawName));
     }
 
-    // Untuk kontak individual:
-    // Wajib memiliki nama asli tersimpan di buku telepon (bukan angka/digit mentah, bukan simbol kosong)
+    // 3. Untuk kontak individual tanpa riwayat chat: wajib memiliki nama asli tersimpan di buku telepon
     if (!rawName) return false;
     if (/^[\d\s+()\-.]+$/.test(rawName)) return false;
     if (rawName.length <= 1) return false;
     if (/^[.~!@#$%^&*()_+=[\]{};':",.<>/?]+$/.test(rawName)) return false;
-
-    // Cek apakah ada riwayat percakapan / chat
-    const hasChat = Boolean(
-      (this.messages.has(c.id) && this.messages.get(c.id).length > 0) ||
-      (c.lastMessage && String(c.lastMessage).trim().length > 0)
-    );
-    if (hasChat) return true;
 
     // Jika tanpa riwayat chat: Jika nama sama persis dengan notify (pushname asing), itu adalah anggota grup pasif
     if (c.notify && rawName.toLowerCase() === String(c.notify).trim().toLowerCase()) {
@@ -1261,6 +1269,44 @@ class WhatsAppGateway {
           const jid = await this.resolveLidToPhone(rawJid);
           if (jid.endsWith('@lid')) continue;
 
+          // Penanganan Pesan Dihapus Pengirim (Revoke / Delete for everyone)
+          if (msg.message.protocolMessage && (msg.message.protocolMessage.type === 0 || msg.message.protocolMessage.type === 5)) {
+            const targetMsgId = msg.message.protocolMessage.key?.id;
+            if (targetMsgId) {
+              const list = this.messages.get(jid) || [];
+              const targetMsg = list.find(m => m.id === targetMsgId);
+              if (targetMsg) {
+                targetMsg.text = '🚫 Pesan ini telah dihapus oleh pengirim';
+                targetMsg.isDeleted = true;
+                targetMsg.media = null;
+                const contact = this.contacts.get(jid);
+                if (contact && contact.lastMessage) {
+                  contact.lastMessage = '🚫 Pesan ini telah dihapus';
+                }
+                this.savePersistedData();
+                this.broadcast('message_revoked', { jid, msgId: targetMsgId });
+              }
+            }
+            continue;
+          }
+
+          // Penanganan Reaksi Emoji (reactionMessage)
+          if (msg.message.reactionMessage) {
+            const reaction = msg.message.reactionMessage;
+            const targetMsgId = reaction.key?.id;
+            const emoji = reaction.text || '';
+            if (targetMsgId) {
+              const list = this.messages.get(jid) || [];
+              const targetMsg = list.find(m => m.id === targetMsgId);
+              if (targetMsg) {
+                targetMsg.reaction = emoji;
+                this.savePersistedData();
+                this.broadcast('message_reaction', { jid, msgId: targetMsgId, reaction: emoji });
+              }
+            }
+            continue;
+          }
+
           const fromMe = Boolean(msg.key?.fromMe);
           const text = msg.message.conversation ||
                        msg.message.extendedTextMessage?.text ||
@@ -1652,12 +1698,13 @@ class WhatsAppGateway {
       notify: '',
       phone: cleanPhone,
       unreadCount: 0,
-      lastMessage: '',
+      lastMessage: 'Kontak baru ditambahkan',
       lastTimestamp: Date.now()
     };
 
-    existing.name = name || existing.name;
+    existing.name = name || existing.name || cleanPhone;
     existing.phone = cleanPhone;
+    if (!existing.lastMessage) existing.lastMessage = 'Kontak baru ditambahkan';
     this.contacts.set(jid, existing);
 
     this.savePersistedData();

@@ -42576,6 +42576,40 @@ Aturan:
                 this.messages = [];
                 this.renderMessages();
               }
+            } else if (parsed.event === 'message_revoked') {
+              const rJid = parsed.data?.jid;
+              const rMsgId = parsed.data?.msgId;
+              const bubbleEl = els.messagesList?.querySelector(`[data-msg-id="${rMsgId}"]`);
+              if (bubbleEl) {
+                const textEl = bubbleEl.querySelector('.wa-bubble-text');
+                if (textEl) {
+                  textEl.innerHTML = '<span style="font-style: italic; opacity: 0.65;">🚫 Pesan ini telah dihapus</span>';
+                }
+                const mediaEl = bubbleEl.querySelector('.wa-media-preview-box, .wa-doc-box');
+                if (mediaEl) mediaEl.remove();
+              }
+              const targetMsg = (this.messages || []).find(m => m.id === rMsgId);
+              if (targetMsg) {
+                targetMsg.text = '🚫 Pesan ini telah dihapus';
+                targetMsg.isDeleted = true;
+                targetMsg.media = null;
+              }
+            } else if (parsed.event === 'message_reaction') {
+              const rMsgId = parsed.data?.msgId;
+              const emoji = parsed.data?.reaction;
+              const bubbleEl = els.messagesList?.querySelector(`[data-msg-id="${rMsgId}"]`);
+              if (bubbleEl) {
+                let badge = bubbleEl.querySelector('.wa-bubble-reaction-badge');
+                if (!badge) {
+                  badge = document.createElement('span');
+                  badge.className = 'wa-bubble-reaction-badge';
+                  badge.style.cssText = 'position: absolute; bottom: -8px; right: 8px; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 10px; padding: 1px 6px; font-size: 0.75rem;';
+                  bubbleEl.style.position = 'relative';
+                  bubbleEl.appendChild(badge);
+                }
+                badge.textContent = emoji;
+                if (!emoji) badge.remove();
+              }
             }
           } catch (_) {}
         };
@@ -44059,6 +44093,11 @@ Aturan:
               icon.className = 'fa-solid fa-check-double';
               icon.style.color = '#38bdf8';
             }
+          }
+          const memItem = (this.messages || []).find(m => m.id === tempId);
+          if (memItem) {
+            memItem.id = data.message.id;
+            memItem.status = 'sent';
           }
         }
         this.fetchContacts();
