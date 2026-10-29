@@ -105,8 +105,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261028_v550">
-  <link rel="stylesheet" href="style.css?v=20261028_v550">
+  <link rel="preload" as="style" href="style.css?v=20261028_v551">
+  <link rel="stylesheet" href="style.css?v=20261028_v551">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -3114,10 +3114,15 @@
         </button>
       </div>
 
-      <div style="padding: 8px 18px; background: rgba(0, 0, 0, 0.18); border-bottom: 1px solid rgba(255, 255, 255, 0.06); display: flex; gap: 8px; align-items: center;">
-        <input type="text" id="waSummaryPopupFocusInput" placeholder="Fokus rangkuman khusus (misal: siapa yang kirim tugas / berkas)..." style="flex: 1; padding: 6px 10px; border-radius: 7px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.14); color: #f8fafc; font-size: 0.78rem; outline: none;">
+      <div style="padding: 8px 18px; background: rgba(0, 0, 0, 0.18); border-bottom: 1px solid rgba(255, 255, 255, 0.06); display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 5px;">
+          <span style="font-size: 0.73rem; color: #94a3b8; font-weight: 600; white-space: nowrap;"><i class="fa-solid fa-brain" style="color: #a78bfa;"></i> Model AI:</span>
+          <select id="waSummaryModelSelect" style="padding: 5px 8px; border-radius: 7px; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(16, 185, 129, 0.45); color: #34d399; font-size: 0.74rem; font-weight: 700; outline: none; max-width: 175px;">
+          </select>
+        </div>
+        <input type="text" id="waSummaryPopupFocusInput" placeholder="Fokus rangkuman khusus (misal: siapa yang kirim tugas / berkas)..." style="flex: 1; min-width: 140px; padding: 6px 10px; border-radius: 7px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.14); color: #f8fafc; font-size: 0.78rem; outline: none;">
         <button type="button" class="btn btn-xs btn-outline" id="btnRegenerateWaSummary" style="border-color: rgba(16, 185, 129, 0.45); color: #34d399; font-weight: 600; padding: 6px 11px; white-space: nowrap;">
-          <i class="fa-solid fa-rotate"></i> Rangkum Ulang
+          <i class="fa-solid fa-wand-magic-sparkles"></i> Rangkum AI
         </button>
       </div>
 
@@ -3157,8 +3162,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261028_v550" defer></script>
+  <script src="text-safety.js?v=20261028_v551" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261028_v550" defer></script>
+  <script src="app.js?v=20261028_v551" defer></script>
 </body>
 </html>

@@ -44700,6 +44700,14 @@ Aturan:
         }
       });
 
+      document.getElementById('waSummaryModelSelect')?.addEventListener('change', () => {
+        AudioEngine.click();
+        const newFocus = (document.getElementById('waSummaryPopupFocusInput')?.value || '').trim();
+        if (this.lastApprovedJids && this.lastApprovedJids.length > 0) {
+          this.openSummaryResultPopup(this.lastApprovedJids, newFocus);
+        }
+      });
+
       document.getElementById('waSummaryPopupFocusInput')?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
@@ -44959,6 +44967,61 @@ Aturan:
       return html;
     },
 
+    populateSummaryModelDropdown(selectEl) {
+      if (!selectEl) return;
+      const prevVal = selectEl.value;
+      selectEl.innerHTML = '';
+
+      // Tentukan model bawaan aktif dari pengaturan AI utama
+      const defaultActive = (STATE.mode === 'ollama')
+        ? (STATE.settings.ollamaModel || 'gemma4:31b')
+        : (STATE.settings.openRouterModel || 'openrouter/free');
+
+      const ollamaGroup = document.createElement('optgroup');
+      ollamaGroup.label = '⚡ Model Ollama / Host (Aktif & Cepat)';
+      const ollamaList = [
+        'gemma4:31b',
+        'deepseek-v4.1-flash',
+        'gpt-oss:120b',
+        'kimi-k2.6',
+        'glm-5.3-flash',
+        'nemotron-3-nano:30b',
+        'mistral-large-4'
+      ];
+      ollamaList.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m;
+        opt.textContent = m + (m === STATE.settings.ollamaModel ? ' ★' : '');
+        ollamaGroup.appendChild(opt);
+      });
+      selectEl.appendChild(ollamaGroup);
+
+      const openRouterGroup = document.createElement('optgroup');
+      openRouterGroup.label = '🌐 Model OpenRouter Cloud';
+      const openRouterList = [
+        'openrouter/free',
+        'google/gemini-2.0-flash-exp:free',
+        'meta-llama/llama-3.3-70b-instruct:free',
+        'nvidia/nemotron-3.5-lightning:free',
+        'deepseek/deepseek-chat'
+      ];
+      openRouterList.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m;
+        opt.textContent = m.split('/').pop() + (m === STATE.settings.openRouterModel ? ' ★' : '');
+        openRouterGroup.appendChild(opt);
+      });
+      selectEl.appendChild(openRouterGroup);
+
+      if (prevVal && Array.from(selectEl.options).some(o => o.value === prevVal)) {
+        selectEl.value = prevVal;
+      } else {
+        selectEl.value = defaultActive;
+      }
+    },
+
+    summaryAbortCtrl: null,
+
     async openSummaryResultPopup(approvedJids = [], focusTopic = '', options = {}) {
       this.bindConsentAndSummaryModalListeners();
       const validJids = (Array.isArray(approvedJids) ? approvedJids : []).filter(Boolean);
@@ -44972,12 +45035,18 @@ Aturan:
       const subtitleEl = document.getElementById('waSummaryPopupSubtitle');
       const chipsWrap = document.getElementById('waSummaryApprovedChips');
       const focusInput = document.getElementById('waSummaryPopupFocusInput');
+      const modelSelectEl = document.getElementById('waSummaryModelSelect');
       const bodyEl = document.getElementById('waSummaryOutputBody');
       const statsMeta = document.getElementById('waSummaryStatsMeta');
 
+      // 1. Populasi dan sinkronkan dropdown pilihan model AI di pop-up
+      this.populateSummaryModelDropdown(modelSelectEl);
+      const chosenModel = modelSelectEl?.value || ((STATE.mode === 'ollama') ? (STATE.settings.ollamaModel || 'gemma4:31b') : (STATE.settings.openRouterModel || 'openrouter/free'));
+      const chosenEngine = chosenModel.includes('/') ? 'openrouter' : 'ollama';
+
       if (focusInput) focusInput.value = focusTopic || '';
       if (subtitleEl) {
-        subtitleEl.textContent = `Menghubungkan AI untuk ${validJids.length} nomor yang disetujui...`;
+        subtitleEl.textContent = `Mengambil data chat & menyiapkan AI (${chosenModel})...`;
       }
       if (chipsWrap) {
         chipsWrap.innerHTML = validJids.map(jid => {
@@ -44992,41 +45061,36 @@ Aturan:
 
       if (bodyEl) {
         bodyEl.innerHTML = `
-          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 16px; text-align: center; color: #a7f3d0;">
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 44px 16px; text-align: center; color: #a7f3d0;">
             <i class="fa-solid fa-wand-magic-sparkles fa-spin" style="font-size: 2.2rem; color: #34d399; margin-bottom: 14px;"></i>
-            <div style="font-weight: 700; font-size: 0.98rem; color: #ecfdf5;">AI Sedang Menganalisis Obrolan WhatsApp...</div>
-            <div style="font-size: 0.78rem; color: #6ee7b7; opacity: 0.85; margin-top: 6px;">Membaca riwayat pesan dari nomor yang disetujui & mendeteksi pengiriman berkas/tugas...</div>
+            <div style="font-weight: 700; font-size: 0.98rem; color: #ecfdf5;">Mempersiapkan AI (${escapeHtml(chosenModel)})...</div>
+            <div style="font-size: 0.78rem; color: #6ee7b7; opacity: 0.85; margin-top: 6px;">Membaca riwayat pesan dari nomor yang disetujui &amp; mendeteksi berkas tugas...</div>
           </div>
         `;
       }
-      if (statsMeta) statsMeta.textContent = 'Menganalisis percakapan...';
+      if (statsMeta) statsMeta.textContent = `Model AI: ${chosenModel} • Menghubungkan...`;
       if (modal) modal.style.display = 'flex';
 
-      try {
-        const reqEngine = (STATE.mode === 'ollama') ? 'ollama' : 'openrouter';
-        const reqModel = reqEngine === 'ollama'
-          ? (STATE.settings.ollamaModel || 'gemma4:31b')
-          : (STATE.settings.openRouterModel || 'openrouter/free');
-        const reqOpenRouterKey = STATE.settings.openRouterKey || '';
-        const reqOllamaApiKey = STATE.settings.ollamaApiKey || '';
-        const reqApiKey = (reqEngine === 'ollama' ? reqOllamaApiKey : reqOpenRouterKey) || '';
+      // 2. Batalkan generasi streaming rangkuman sebelumnya jika ada
+      if (this.summaryAbortCtrl) {
+        try { this.summaryAbortCtrl.abort(); } catch (_) {}
+      }
+      this.summaryAbortCtrl = new AbortController();
+      const signal = this.summaryAbortCtrl.signal;
 
+      try {
+        // 3. Ambil data pesan & transkrip bersih dari gateway backend (< 50ms)
         const res = await this.waFetch('/api/wa/summarize', {
           method: 'POST',
           headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             approvedJids: validJids,
             focusTopic: focusTopic || '',
-            engine: reqEngine,
-            provider: reqEngine,
-            model: reqModel,
-            openRouterKey: reqOpenRouterKey,
-            ollamaApiKey: reqOllamaApiKey,
-            apiKey: reqApiKey,
+            transcriptOnly: true,
             userId: this.getUserId(),
             pin: this.getPin()
           }),
-          signal: AbortSignal.timeout(30000)
+          signal: AbortSignal.timeout(15000)
         }, 1);
 
         const data = await res.json().catch(() => null);
@@ -45034,22 +45098,10 @@ Aturan:
           throw new Error(data?.error || `HTTP ${res.status}`);
         }
 
-        this.lastSummaryMarkdown = data.summary || data.fallbackSummary || '';
-        this.lastSummaryMeta = data;
+        const totalMsgs = data.totalMessages || 0;
+        const totalFiles = data.totalFiles || 0;
+        const transcript = (data.combinedTranscript || '').trim();
 
-        if (bodyEl) {
-          bodyEl.innerHTML = `
-            <div class="wa-summary-content-box" style="animation: fadeIn 0.2s ease-out;">
-              ${this.renderMarkdownSummaryToHtml(this.lastSummaryMarkdown)}
-            </div>
-          `;
-        }
-        if (subtitleEl) {
-          subtitleEl.textContent = `Rangkuman selesai • ${data.totalMessages || 0} pesan dianalisis`;
-        }
-        if (statsMeta) {
-          statsMeta.textContent = `Terverifikasi Consent Gate • ${validJids.length} Nomor • ${data.totalMessages || 0} Pesan (${data.totalFiles || 0} Berkas 🔴)`;
-        }
         if (Array.isArray(data.summarizedContacts || data.contacts) && chipsWrap) {
           const list = data.summarizedContacts || data.contacts;
           chipsWrap.innerHTML = list.map(sc => `
@@ -45059,18 +45111,148 @@ Aturan:
           `).join('');
         }
 
-        AudioEngine.success?.() || AudioEngine.click?.();
+        if (totalMsgs === 0) {
+          if (bodyEl) {
+            bodyEl.innerHTML = `
+              <div style="padding: 24px; text-align: center; color: #94a3b8;">
+                <i class="fa-regular fa-comments" style="font-size: 2rem; color: #6ee7b7; margin-bottom: 10px;"></i>
+                <div style="font-weight: 700; color: #f8fafc; font-size: 0.95rem;">Belum Ada Riwayat Pesan</div>
+                <p style="font-size: 0.8rem; margin-top: 6px;">Tidak ditemukan pesan pada nomor/kontak yang Anda pilih.</p>
+              </div>
+            `;
+          }
+          if (subtitleEl) subtitleEl.textContent = 'Tidak ada pesan untuk dirangkum';
+          if (statsMeta) statsMeta.textContent = `${validJids.length} Nomor • 0 Pesan`;
+          return { success: true, summary: 'Belum ada riwayat pesan.' };
+        }
+
+        // 4. Siapkan wadah streaming langsung (Live AI Streaming)
+        if (bodyEl) {
+          bodyEl.innerHTML = `
+            <div style="font-size: 0.73rem; color: #34d399; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; padding: 7px 12px; border-radius: 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35);">
+              <span style="display: flex; align-items: center; gap: 7px;">
+                <i class="fa-solid fa-wand-magic-sparkles fa-spin"></i>
+                <span>Model AI <b>${escapeHtml(chosenModel)}</b> sedang merangkum secara langsung...</span>
+              </span>
+              <span style="font-size: 0.7rem; color: #a7f3d0; opacity: 0.85;">${totalMsgs} pesan • ${totalFiles} berkas 🔴</span>
+            </div>
+            <div id="waSummaryStreamContainer" class="wa-summary-content-box" style="line-height: 1.68;">
+              <span class="typing-cursor" style="display: inline-block; width: 8px; height: 15px; background: #34d399; vertical-align: middle; animation: blink 0.8s infinite;"></span>
+            </div>
+          `;
+        }
+        if (subtitleEl) {
+          subtitleEl.textContent = `Model AI (${chosenModel}) sedang menulis rangkuman...`;
+        }
+
+        // 5. Susun prompt untuk Model AI yang dipilih
+        const sysPrompt = `Anda adalah Asisten AI Peringkas WhatsApp ZOZ Router yang cerdas, teliti, kritis, dan menjaga privasi.
+Tugas Anda: Analisis dan rangkum seluruh transkrip percakapan WhatsApp dari nomor/grup yang telah disetujui berikut secara mendalam, rapi, dan terstruktur dalam Bahasa Indonesia yang profesional.
+Gunakan format Markdown lengkap dengan struktur berikut:
+### 📌 Ringkasan Utama Percakapan
+- Uraikan garis besar obrolan, konteks diskusi, topik sentral, dan dinamika antar pengirim secara komprehensif.
+
+### 💬 Inti Pembicaraan & Kontribusi Tiap Pengirim
+- Rincikan apa saja poin penting, permintaan, atau informasi yang disampaikan oleh masing-masing nama / nomor telepon pengirim.
+
+### 🔴 Laporan Dokumen & Berkas yang Dikirim
+- Sebutkan secara spesifik dan mendetail siapa saja yang mengirim berkas, dokumen (.docx, .pdf, dsb), foto, atau tautan (seperti WPS Office / Google Docs), serta cantumkan nama dokumennya.
+
+### 🎯 Jawaban Fokus ("${focusTopic || 'Hal-Hal Kritis'}")
+- Berikan analisis tajam dan jawaban eksplisit atas fokus pencarian yang diminta.
+
+### ✅ Kesimpulan & Rekomendasi Tindak Lanjut
+- Rangkuman poin tindakan, tenggat waktu (jika ada), atau hal penting yang wajib segera diperhatikan.`;
+
+        const userPrompt = `${focusTopic ? `[FOKUS KHUSUS RANGKUMAN: "${focusTopic}"]\n\n` : ''}Berikut adalah transkrip lengkap chat WhatsApp dari nomor yang disetujui pengguna:\n\n${transcript}\n\nTolong buatkan rangkuman analitis yang lengkap, rapi, dan mendalam sekarang:`;
+
+        const streamBox = document.getElementById('waSummaryStreamContainer');
+        const acc = { text: '' };
+        let streamSuccess = false;
+
+        if (typeof StudioEditAgent !== 'undefined' && typeof StudioEditAgent.streamModel === 'function') {
+          try {
+            await StudioEditAgent.streamModel({
+              engine: chosenEngine,
+              model: chosenModel,
+              messages: [
+                { role: 'system', content: sysPrompt },
+                { role: 'user', content: userPrompt }
+              ],
+              signal,
+              acc,
+              onDelta: () => {
+                if (streamBox && acc.text.trim()) {
+                  streamBox.innerHTML = this.renderMarkdownSummaryToHtml(acc.text);
+                  if (bodyEl) bodyEl.scrollTop = bodyEl.scrollHeight;
+                }
+              }
+            });
+
+            if (acc.text && acc.text.trim().length > 30) {
+              streamSuccess = true;
+            }
+          } catch (aiErr) {
+            console.warn('[WA-Summary] AI stream terputus:', aiErr.message);
+          }
+        }
+
+        // 6. Jika model AI berhasil merangkum secara live
+        if (streamSuccess && acc.text.trim()) {
+          this.lastSummaryMarkdown = acc.text.trim();
+          this.lastSummaryMeta = { model: chosenModel, totalMessages: totalMsgs, totalFiles };
+
+          if (streamBox) {
+            streamBox.innerHTML = this.renderMarkdownSummaryToHtml(this.lastSummaryMarkdown);
+          }
+          if (subtitleEl) {
+            subtitleEl.textContent = `Rangkuman selesai • Dihasilkan oleh AI (${chosenModel})`;
+          }
+          if (statsMeta) {
+            statsMeta.textContent = `Dirangkum oleh AI: ${chosenModel} • ${validJids.length} Nomor • ${totalMsgs} Pesan (${totalFiles} Berkas 🔴)`;
+          }
+
+          AudioEngine.success?.() || AudioEngine.click?.();
+          return {
+            success: true,
+            summary: this.lastSummaryMarkdown,
+            totalMessages: totalMsgs,
+            model: chosenModel
+          };
+        }
+
+        // 7. Jika model AI gagal (misal API key habis atau jaringan model sibuk), gunakan fallback terstruktur instan
+        const finalFallback = acc.text.trim().length > 30 ? acc.text : (data.fallbackSummary || data.summary || '');
+        this.lastSummaryMarkdown = finalFallback;
+
+        if (bodyEl) {
+          bodyEl.innerHTML = `
+            <div style="padding: 9px 13px; margin-bottom: 12px; border-radius: 8px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: #fde68a; font-size: 0.76rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <span><i class="fa-solid fa-triangle-exclamation"></i> Model AI <b>${escapeHtml(chosenModel)}</b> sedang sibuk. Menampilkan ringkasan analitis terstruktur. Anda bisa mengganti Model AI di menu atas.</span>
+            </div>
+            <div class="wa-summary-content-box">
+              ${this.renderMarkdownSummaryToHtml(finalFallback)}
+            </div>
+          `;
+        }
+        if (subtitleEl) {
+          subtitleEl.textContent = `Rangkuman selesai • ${totalMsgs} pesan dianalisis`;
+        }
+        if (statsMeta) {
+          statsMeta.textContent = `${validJids.length} Nomor • ${totalMsgs} Pesan (${totalFiles} Berkas 🔴)`;
+        }
+
+        AudioEngine.click?.();
         return {
           success: true,
-          summary: this.lastSummaryMarkdown,
-          totalMessages: data.totalMessages,
-          summarizedContacts: data.summarizedContacts || data.contacts
+          summary: finalFallback,
+          totalMessages: totalMsgs,
+          fallback: true
         };
       } catch (err) {
-        console.warn('[WA-Summary] Gagal fetch backend summarize:', err.message);
+        console.warn('[WA-Summary] Gagal proses rangkuman:', err.message);
 
-        // Fallback cerdas: Jika request ke backend terputus, jangan biarkan pop-up kosong atau merah!
-        // Susun ringkasan analitis langsung di client dari kontak yang telah disetujui pengguna
+        // Fallback riwayat lokal jika backend tidak terjangkau
         let localFallbackSummary = '';
         try {
           const localLines = [];
