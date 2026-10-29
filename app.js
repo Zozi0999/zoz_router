@@ -42345,9 +42345,19 @@ Aturan:
       });
 
       // Open WA Chat directly from Modal
-      els.btnOpenWaChatDirect?.addEventListener('click', () => {
+      els.btnOpenWaChatDirect?.addEventListener('click', async () => {
         TerminalManager.closeRemoteTunnelModal();
+        if (this.contacts.length === 0) {
+          await this.fetchContacts(false);
+        }
         this.setChatMode('whatsapp');
+        if (this.contacts.length > 0 && !this.activeContact) {
+          const savedJid = localStorage.getItem('zoz_wa_active_jid');
+          const target = (savedJid && this.contacts.find(c => c.id === savedJid)) || this.contacts[0];
+          if (target) {
+            this.selectContact(target);
+          }
+        }
       });
 
       // Save New Contact from Modal
@@ -42567,8 +42577,20 @@ Aturan:
             } else if (parsed.event === 'contacts') {
               this.contacts = parsed.data || [];
               this.contacts.sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+              if (els.waContactCountDisplay) {
+                els.waContactCountDisplay.textContent = `${this.contacts.length} Kontak`;
+              }
+              const emptySelectBtn = document.getElementById('btnEmptyStateSelectContact');
+              if (emptySelectBtn) {
+                emptySelectBtn.innerHTML = `<i class="fa-solid fa-address-book"></i> Pilih Kontak (${this.contacts.length})`;
+              }
               if (STATE.chatMode === 'whatsapp') {
                 this.renderSidebarWaChats();
+                if (!this.activeContact && this.contacts.length > 0) {
+                  const savedJid = localStorage.getItem('zoz_wa_active_jid');
+                  const target = (savedJid && this.contacts.find(c => c.id === savedJid)) || this.contacts[0];
+                  if (target) this.selectContact(target);
+                }
               }
               if (els.waContactDropdownMenu && els.waContactDropdownMenu.style.display === 'block') {
                 this.renderContactDropdownList();
@@ -42705,8 +42727,11 @@ Aturan:
 
     async fetchContacts(notify = false) {
       try {
-        const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
-        const res = await this.waFetch('/api/wa/contacts' + q, { headers: this.getAuthHeaders() }, 2);
+        const q = `?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
+        const res = await this.waFetch('/api/wa/contacts' + q, {
+          headers: this.getAuthHeaders(),
+          cache: 'no-store'
+        }, 2);
         const data = await res.json().catch(() => null);
         if (data && data.success && Array.isArray(data.contacts)) {
           this.contacts = data.contacts;
@@ -43163,6 +43188,9 @@ Aturan:
 
     openContactDropdown() {
       if (!els.waContactDropdownMenu) return;
+      if (this.contacts.length === 0) {
+        this.fetchContacts();
+      }
       this.renderContactDropdownList();
       els.waContactDropdownMenu.style.display = 'block';
       if (els.waContactSearchInput) {
@@ -43459,8 +43487,11 @@ Aturan:
       els.messagesList.appendChild(headerBar);
 
       try {
-        const q = `?jid=${encodeURIComponent(jid)}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
-        const res = await this.waFetch('/api/wa/messages' + q, { headers: this.getAuthHeaders() }, 2);
+        const q = `?t=${Date.now()}&jid=${encodeURIComponent(jid)}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
+        const res = await this.waFetch('/api/wa/messages' + q, {
+          headers: this.getAuthHeaders(),
+          cache: 'no-store'
+        }, 2);
         const data = await res.json().catch(() => null);
         if (this.activeContact?.id !== jid) {
           // Navigasi telah berpindah ke kontak lain, abaikan respon lama

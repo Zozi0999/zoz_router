@@ -835,6 +835,13 @@ class WhatsAppGateway {
         data: this.getStatus()
       });
       res.write(`data: ${initialPayload}\n\n`);
+
+      // Kirim daftar kontak awal seketika jika ada sesi tersimpan / kontak aktif
+      const initialContacts = this.getContacts();
+      if (initialContacts && initialContacts.length > 0) {
+        res.write(`data: ${JSON.stringify({ event: 'contacts', data: initialContacts })}\n\n`);
+      }
+      if (typeof res.flush === 'function') res.flush();
     } catch (_) {
       this.sseClients.delete(res);
     }
