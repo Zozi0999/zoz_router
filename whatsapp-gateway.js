@@ -1600,7 +1600,7 @@ class WhatsAppGateway {
   }
 
   getContacts() {
-    if (!this.status.connected) return [];
+    if (!this.status.connected && !this.hasStoredSession() && this.contacts.size === 0) return [];
     const list = Array.from(this.contacts.values()).filter(c => this.isRealContact(c));
 
     const formatCleanPhone = (num) => {
@@ -1653,7 +1653,7 @@ class WhatsAppGateway {
   }
 
   getMessages(jid) {
-    if (!this.status.connected) return [];
+    if (!this.status.connected && !this.hasStoredSession() && (!this.messages || this.messages.size === 0)) return [];
     if (!jid) return [];
     if (jid.includes('6281234567890')) return [];
     let targetJid = jid;

@@ -43506,7 +43506,7 @@ Aturan:
       headerBar.querySelector('#btnActionSummarizeWaHeader')?.addEventListener('click', (e) => {
         e.stopPropagation();
         AudioEngine.click();
-        this.openSummaryResultPopup([jid], '');
+        this.openToolConsentModal({ preselectedJids: [jid], fromAiTool: false });
       });
       const headerDotsBtn = headerBar.querySelector('#btnActionHeaderDotsMenu');
       if (headerDotsBtn) {
@@ -44557,8 +44557,8 @@ Aturan:
         AudioEngine.click();
         this.closeContactDotsMenu();
         this.closeContactDropdown();
-        // Langsung merangkum nomor ini dan menampilkan pop-up output rangkuman AI
-        this.openSummaryResultPopup([contact.id], '');
+        // Buka modal persetujuan & pemilihan nomor/model agar pengguna bisa memilih kontak sebelum merangkum
+        this.openToolConsentModal({ preselectedJids: [contact.id], fromAiTool: false });
       });
 
       menu.querySelector('[data-action="clear"]')?.addEventListener('click', async (e) => {
@@ -44597,6 +44597,77 @@ Aturan:
         await this.fetchContacts();
       } catch (err) {
         showToast(`⚠️ Gagal membersihkan chat: ${err.message}`, 'error');
+      }
+    },
+
+    activeConsentEngine: 'ollama',
+    activeSummaryEngine: 'ollama',
+
+    populateEngineModelSelect(selectEl, engine = 'ollama', selectedModel = '') {
+      if (!selectEl) return;
+      const prevVal = selectedModel || selectEl.value;
+      selectEl.innerHTML = '';
+
+      if (engine === 'ollama') {
+        const ollamaList = (Array.isArray(STATE.ollamaModels) && STATE.ollamaModels.length > 0)
+          ? STATE.ollamaModels.map(m => m.name || m.model || m.id).filter(Boolean)
+          : [
+              'gemma4:31b',
+              'deepseek-v4.1-flash',
+              'gpt-oss:120b',
+              'kimi-k2.6',
+              'glm-5.3-flash',
+              'nemotron-3-nano:30b',
+              'mistral-large-4',
+              'qwen2.5:7b'
+            ];
+
+        const activeCurrent = STATE.settings?.ollamaModel || 'gemma4:31b';
+        if (!ollamaList.includes(activeCurrent)) {
+          ollamaList.unshift(activeCurrent);
+        }
+
+        ollamaList.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m;
+          opt.textContent = m + (m === activeCurrent ? ' (Aktif)' : '');
+          selectEl.appendChild(opt);
+        });
+
+        const targetVal = (prevVal && ollamaList.includes(prevVal)) ? prevVal : activeCurrent;
+        selectEl.value = targetVal;
+      } else {
+        const brokenSet = (typeof DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS !== 'undefined')
+          ? DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS
+          : new Set();
+
+        const rawList = (Array.isArray(STATE.openRouterModels) && STATE.openRouterModels.length > 0)
+          ? STATE.openRouterModels.filter(m => m && m.id && !brokenSet.has(m.id)).map(m => m.id)
+          : [
+              'openrouter/free',
+              'google/gemini-2.0-flash-exp:free',
+              'meta-llama/llama-3.3-70b-instruct:free',
+              'nvidia/nemotron-3.5-lightning:free',
+              'deepseek/deepseek-chat',
+              'mistralai/mistral-7b-instruct:free',
+              'qwen/qwen-2.5-72b-instruct'
+            ];
+
+        const activeCurrent = STATE.settings?.openRouterModel || 'openrouter/free';
+        if (!rawList.includes(activeCurrent)) {
+          rawList.unshift(activeCurrent);
+        }
+
+        rawList.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m;
+          const label = m.split('/').pop() + (m === activeCurrent ? ' (Aktif)' : (m.includes(':free') ? ' [Free]' : ''));
+          opt.textContent = label;
+          selectEl.appendChild(opt);
+        });
+
+        const targetVal = (prevVal && rawList.includes(prevVal)) ? prevVal : activeCurrent;
+        selectEl.value = targetVal;
       }
     },
 
@@ -44648,6 +44719,35 @@ Aturan:
         this.renderConsentContactChecklist(q);
       });
 
+      // Switcher Mesin AI pada Modal Persetujuan (Consent Gate)
+      const consentOllamaBtn = document.getElementById('waConsentEngineOllama');
+      const consentORBtn = document.getElementById('waConsentEngineOpenRouter');
+      const consentModelSelect = document.getElementById('waConsentModelSelect');
+
+      consentOllamaBtn?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.activeConsentEngine = 'ollama';
+        consentOllamaBtn.classList.add('active');
+        consentORBtn?.classList.remove('active');
+        this.populateEngineModelSelect(consentModelSelect, 'ollama');
+      });
+
+      consentORBtn?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.activeConsentEngine = 'openrouter';
+        consentORBtn.classList.add('active');
+        consentOllamaBtn?.classList.remove('active');
+        this.populateEngineModelSelect(consentModelSelect, 'openrouter');
+      });
+
+      consentModelSelect?.addEventListener('change', (e) => {
+        AudioEngine.click();
+        if (typeof selectModel === 'function' && e.target.value) {
+          selectModel(e.target.value, this.activeConsentEngine, false);
+        }
+      });
+
+      // Tombol "Mulai Rangkuman AI"
       document.getElementById('btnApproveWaConsent')?.addEventListener('click', async () => {
         AudioEngine.click();
         const approvedJids = Array.from(this.consentSelectedJids);
@@ -44655,15 +44755,22 @@ Aturan:
           showToast('⚠️ Pilih minimal 1 nomor WhatsApp untuk dirangkum!', 'warning');
           return;
         }
-        const focusTopic = (document.getElementById('waConsentFocusTopicInput')?.value || '').trim();
+        const focusTopic = (document.getElementById('waConsentFocusInput')?.value || document.getElementById('waConsentFocusTopicInput')?.value || '').trim();
+        const chosenEngine = this.activeConsentEngine || 'ollama';
+        const chosenModel = consentModelSelect?.value || (chosenEngine === 'ollama' ? (STATE.settings?.ollamaModel || 'gemma4:31b') : (STATE.settings?.openRouterModel || 'openrouter/free'));
+
+        if (typeof selectModel === 'function') {
+          selectModel(chosenModel, chosenEngine, true);
+        }
+
         if (consentModal) consentModal.style.display = 'none';
 
         if (this.pendingConsentResolver) {
           const resolve = this.pendingConsentResolver;
           this.pendingConsentResolver = null;
-          resolve({ approved: true, approvedJids, focusTopic });
+          resolve({ approved: true, approvedJids, focusTopic, engine: chosenEngine, model: chosenModel });
         } else {
-          await this.openSummaryResultPopup(approvedJids, focusTopic);
+          await this.openSummaryResultPopup(approvedJids, focusTopic, { engine: chosenEngine, model: chosenModel });
         }
       });
 
@@ -44690,21 +44797,49 @@ Aturan:
         });
       });
 
-      document.getElementById('btnRegenerateWaSummary')?.addEventListener('click', () => {
+      // Switcher Mesin AI pada Pop-Up Hasil Rangkuman
+      const summaryOllamaBtn = document.getElementById('waSummaryEngineOllama');
+      const summaryORBtn = document.getElementById('waSummaryEngineOpenRouter');
+      const summaryModelSelect = document.getElementById('waSummaryModelSelect');
+
+      summaryOllamaBtn?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.activeSummaryEngine = 'ollama';
+        summaryOllamaBtn.classList.add('active');
+        summaryORBtn?.classList.remove('active');
+        this.populateEngineModelSelect(summaryModelSelect, 'ollama');
+      });
+
+      summaryORBtn?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.activeSummaryEngine = 'openrouter';
+        summaryORBtn.classList.add('active');
+        summaryOllamaBtn?.classList.remove('active');
+        this.populateEngineModelSelect(summaryModelSelect, 'openrouter');
+      });
+
+      summaryModelSelect?.addEventListener('change', () => {
         AudioEngine.click();
         const newFocus = (document.getElementById('waSummaryPopupFocusInput')?.value || '').trim();
+        const chosenEngine = this.activeSummaryEngine || 'ollama';
+        const chosenModel = summaryModelSelect?.value || (chosenEngine === 'ollama' ? (STATE.settings?.ollamaModel || 'gemma4:31b') : (STATE.settings?.openRouterModel || 'openrouter/free'));
+        if (typeof selectModel === 'function') {
+          selectModel(chosenModel, chosenEngine, false);
+        }
         if (this.lastApprovedJids && this.lastApprovedJids.length > 0) {
-          this.openSummaryResultPopup(this.lastApprovedJids, newFocus);
-        } else {
-          this.openToolConsentModal({ fromAiTool: false });
+          this.openSummaryResultPopup(this.lastApprovedJids, newFocus, { engine: chosenEngine, model: chosenModel });
         }
       });
 
-      document.getElementById('waSummaryModelSelect')?.addEventListener('change', () => {
+      document.getElementById('btnRegenerateWaSummary')?.addEventListener('click', () => {
         AudioEngine.click();
         const newFocus = (document.getElementById('waSummaryPopupFocusInput')?.value || '').trim();
+        const chosenEngine = this.activeSummaryEngine || 'ollama';
+        const chosenModel = summaryModelSelect?.value || (chosenEngine === 'ollama' ? (STATE.settings?.ollamaModel || 'gemma4:31b') : (STATE.settings?.openRouterModel || 'openrouter/free'));
         if (this.lastApprovedJids && this.lastApprovedJids.length > 0) {
-          this.openSummaryResultPopup(this.lastApprovedJids, newFocus);
+          this.openSummaryResultPopup(this.lastApprovedJids, newFocus, { engine: chosenEngine, model: chosenModel });
+        } else {
+          this.openToolConsentModal({ fromAiTool: false });
         }
       });
 
@@ -44729,17 +44864,36 @@ Aturan:
         }
       });
 
+      // Tombol "Alihkan ke Percakapan Biasa"
       document.getElementById('btnSendWaSummaryToAiChat')?.addEventListener('click', () => {
         AudioEngine.click();
-        if (!this.lastSummaryMarkdown) return;
+        if (!this.lastSummaryMarkdown) {
+          showToast('⚠️ Belum ada teks rangkuman untuk dialihkan ke percakapan biasa.', 'warning');
+          return;
+        }
         closeSummaryPopup();
+
+        // 1. Alihkan mode chat ke percakapan AI biasa
         this.setChatMode('ai');
+
+        // 2. Sinkronkan model dan mesin AI yang dipakai saat merangkum
+        const targetModel = this.lastSummaryMeta?.model || summaryModelSelect?.value || (STATE.settings?.ollamaModel || 'gemma4:31b');
+        const targetEngine = this.lastSummaryMeta?.engine || this.activeSummaryEngine || (targetModel.includes('/') ? 'openrouter' : 'ollama');
+        if (typeof selectModel === 'function') {
+          selectModel(targetModel, targetEngine, true);
+        }
+
+        // 3. Masukkan transkrip rangkuman terstruktur ke dalam input prompt AI
         if (els.promptInput) {
-          els.promptInput.value = `Berikut adalah hasil rangkuman obrolan WhatsApp yang telah saya setujui:\n\n${this.lastSummaryMarkdown}\n\nBerdasarkan rangkuman di atas, tolong analisis lebih lanjut: `;
-          autoResizeTextarea(els.promptInput);
+          const intro = 'Berikut adalah hasil rangkuman chat WhatsApp yang telah saya setujui:\n\n' +
+            this.lastSummaryMarkdown +
+            '\n\n---\nMari lanjutkan percakapan biasa mengenai informasi di atas. Analisis dan berikan saran tindak lanjut yang perlu kita lakukan: ';
+          els.promptInput.value = intro;
+          if (typeof autoResizeTextarea === 'function') autoResizeTextarea(els.promptInput);
           els.promptInput.focus();
         }
-        showToast('💬 Rangkuman dimasukkan ke kolom diskusi AI Chat.', 'info');
+
+        showToast(`💬 Dialihkan ke AI Chat (${targetModel}). Silakan lanjutkan percakapan biasa!`, 'success');
       });
     },
 
@@ -44881,6 +45035,14 @@ Aturan:
       if (searchInput) searchInput.value = '';
       if (focusInput) focusInput.value = focusTopic || '';
 
+      // Inisialisasi engine switcher & dropdown model pada consent gate
+      this.activeConsentEngine = (STATE.mode === 'openrouter') ? 'openrouter' : 'ollama';
+      const cOllama = document.getElementById('waConsentEngineOllama');
+      const cOR = document.getElementById('waConsentEngineOpenRouter');
+      if (cOllama) cOllama.classList.toggle('active', this.activeConsentEngine === 'ollama');
+      if (cOR) cOR.classList.toggle('active', this.activeConsentEngine === 'openrouter');
+      this.populateEngineModelSelect(document.getElementById('waConsentModelSelect'), this.activeConsentEngine);
+
       this.renderConsentContactChecklist('');
       if (modal) modal.style.display = 'flex';
 
@@ -44967,59 +45129,6 @@ Aturan:
       return html;
     },
 
-    populateSummaryModelDropdown(selectEl) {
-      if (!selectEl) return;
-      const prevVal = selectEl.value;
-      selectEl.innerHTML = '';
-
-      // Tentukan model bawaan aktif dari pengaturan AI utama
-      const defaultActive = (STATE.mode === 'ollama')
-        ? (STATE.settings.ollamaModel || 'gemma4:31b')
-        : (STATE.settings.openRouterModel || 'openrouter/free');
-
-      const ollamaGroup = document.createElement('optgroup');
-      ollamaGroup.label = '⚡ Model Ollama / Host (Aktif & Cepat)';
-      const ollamaList = [
-        'gemma4:31b',
-        'deepseek-v4.1-flash',
-        'gpt-oss:120b',
-        'kimi-k2.6',
-        'glm-5.3-flash',
-        'nemotron-3-nano:30b',
-        'mistral-large-4'
-      ];
-      ollamaList.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m;
-        opt.textContent = m + (m === STATE.settings.ollamaModel ? ' ★' : '');
-        ollamaGroup.appendChild(opt);
-      });
-      selectEl.appendChild(ollamaGroup);
-
-      const openRouterGroup = document.createElement('optgroup');
-      openRouterGroup.label = '🌐 Model OpenRouter Cloud';
-      const openRouterList = [
-        'openrouter/free',
-        'google/gemini-2.0-flash-exp:free',
-        'meta-llama/llama-3.3-70b-instruct:free',
-        'nvidia/nemotron-3.5-lightning:free',
-        'deepseek/deepseek-chat'
-      ];
-      openRouterList.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m;
-        opt.textContent = m.split('/').pop() + (m === STATE.settings.openRouterModel ? ' ★' : '');
-        openRouterGroup.appendChild(opt);
-      });
-      selectEl.appendChild(openRouterGroup);
-
-      if (prevVal && Array.from(selectEl.options).some(o => o.value === prevVal)) {
-        selectEl.value = prevVal;
-      } else {
-        selectEl.value = defaultActive;
-      }
-    },
-
     summaryAbortCtrl: null,
 
     async openSummaryResultPopup(approvedJids = [], focusTopic = '', options = {}) {
@@ -45039,10 +45148,18 @@ Aturan:
       const bodyEl = document.getElementById('waSummaryOutputBody');
       const statsMeta = document.getElementById('waSummaryStatsMeta');
 
-      // 1. Populasi dan sinkronkan dropdown pilihan model AI di pop-up
-      this.populateSummaryModelDropdown(modelSelectEl);
-      const chosenModel = modelSelectEl?.value || ((STATE.mode === 'ollama') ? (STATE.settings.ollamaModel || 'gemma4:31b') : (STATE.settings.openRouterModel || 'openrouter/free'));
-      const chosenEngine = chosenModel.includes('/') ? 'openrouter' : 'ollama';
+      // 1. Populasi dan sinkronkan dropdown pilihan mesin & model AI di pop-up
+      const optEngine = options.engine || this.activeSummaryEngine || (options.model && options.model.includes('/') ? 'openrouter' : (STATE.mode === 'openrouter' ? 'openrouter' : 'ollama'));
+      this.activeSummaryEngine = optEngine;
+
+      const sOllama = document.getElementById('waSummaryEngineOllama');
+      const sOR = document.getElementById('waSummaryEngineOpenRouter');
+      if (sOllama) sOllama.classList.toggle('active', this.activeSummaryEngine === 'ollama');
+      if (sOR) sOR.classList.toggle('active', this.activeSummaryEngine === 'openrouter');
+
+      this.populateEngineModelSelect(modelSelectEl, this.activeSummaryEngine, options.model);
+      const chosenModel = modelSelectEl?.value || options.model || (this.activeSummaryEngine === 'ollama' ? (STATE.settings?.ollamaModel || 'gemma4:31b') : (STATE.settings?.openRouterModel || 'openrouter/free'));
+      const chosenEngine = this.activeSummaryEngine;
 
       if (focusInput) focusInput.value = focusTopic || '';
       if (subtitleEl) {
@@ -45200,7 +45317,7 @@ Gunakan format Markdown lengkap dengan struktur berikut:
         // 6. Jika model AI berhasil merangkum secara live
         if (streamSuccess && acc.text.trim()) {
           this.lastSummaryMarkdown = acc.text.trim();
-          this.lastSummaryMeta = { model: chosenModel, totalMessages: totalMsgs, totalFiles };
+          this.lastSummaryMeta = { engine: chosenEngine, model: chosenModel, totalMessages: totalMsgs, totalFiles };
 
           if (streamBox) {
             streamBox.innerHTML = this.renderMarkdownSummaryToHtml(this.lastSummaryMarkdown);
@@ -45224,6 +45341,7 @@ Gunakan format Markdown lengkap dengan struktur berikut:
         // 7. Jika model AI gagal (misal API key habis atau jaringan model sibuk), gunakan fallback terstruktur instan
         const finalFallback = acc.text.trim().length > 30 ? acc.text : (data.fallbackSummary || data.summary || '');
         this.lastSummaryMarkdown = finalFallback;
+        this.lastSummaryMeta = { engine: chosenEngine, model: chosenModel, totalMessages: totalMsgs, totalFiles };
 
         if (bodyEl) {
           bodyEl.innerHTML = `

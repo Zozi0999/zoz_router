@@ -105,8 +105,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261028_v551">
-  <link rel="stylesheet" href="style.css?v=20261028_v551">
+  <link rel="preload" as="style" href="style.css?v=20261029_v552">
+  <link rel="stylesheet" href="style.css?v=20261029_v552">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -3065,6 +3065,25 @@
           <!-- Diisi daftar nomor WhatsApp dengan checkbox -->
         </div>
 
+        <div style="padding: 10px 12px; border-radius: 10px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.12); display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+            <label style="font-size: 0.75rem; font-weight: 700; color: #e2e8f0; margin: 0; display: flex; align-items: center; gap: 5px;">
+              <i class="fa-solid fa-brain" style="color: #a78bfa;"></i> Pilih Mesin &amp; Model AI:
+            </label>
+            <div style="display: inline-flex; border-radius: 8px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.12); padding: 2px;">
+              <button type="button" class="btn btn-xs btn-ghost active wa-engine-btn" id="waConsentEngineOllama" style="padding: 3px 9px; font-size: 0.72rem; border-radius: 6px;">
+                <i class="fa-solid fa-microchip"></i> Ollama
+              </button>
+              <button type="button" class="btn btn-xs btn-ghost wa-engine-btn" id="waConsentEngineOpenRouter" style="padding: 3px 9px; font-size: 0.72rem; border-radius: 6px;">
+                <i class="fa-solid fa-cloud"></i> OpenRouter
+              </button>
+            </div>
+          </div>
+          <select id="waConsentModelSelect" style="width: 100%; padding: 7px 10px; border-radius: 8px; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(168, 85, 247, 0.4); color: #ecfdf5; font-size: 0.8rem; font-weight: 600; outline: none;">
+            <!-- Populated dynamically based on chosen engine -->
+          </select>
+        </div>
+
         <div>
           <label for="waConsentFocusInput" style="font-size: 0.74rem; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 4px;">
             <i class="fa-solid fa-bullseye" style="color: #c084fc; margin-right: 4px;"></i> Fokus Rangkuman (Opsional):
@@ -3077,10 +3096,10 @@
         <span id="waConsentSelectedCount" style="font-size: 0.76rem; color: #c084fc; font-weight: 700;">0 Nomor Dipilih</span>
         <div style="display: flex; gap: 8px; align-items: center;">
           <button type="button" class="btn btn-sm btn-outline" id="btnRejectWaConsent" style="color: #f87171; border-color: rgba(248, 113, 113, 0.35);">
-            <i class="fa-solid fa-ban"></i> <span>Tolak</span>
+            <i class="fa-solid fa-ban"></i> <span>Batal</span>
           </button>
-          <button type="button" class="btn btn-sm btn-primary" id="btnApproveWaConsent" style="background: linear-gradient(135deg, #9333ea, #10b981); border: none; color: #ffffff; font-weight: 700; padding: 7px 14px;">
-            <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Setujui &amp; Rangkum</span>
+          <button type="button" class="btn btn-sm btn-primary" id="btnApproveWaConsent" style="background: linear-gradient(135deg, #9333ea, #10b981); border: none; color: #ffffff; font-weight: 700; padding: 7px 16px;">
+            <i class="fa-solid fa-rocket"></i> <span>Mulai Rangkuman AI</span>
           </button>
         </div>
       </div>
@@ -3115,12 +3134,19 @@
       </div>
 
       <div style="padding: 8px 18px; background: rgba(0, 0, 0, 0.18); border-bottom: 1px solid rgba(255, 255, 255, 0.06); display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-        <div style="display: flex; align-items: center; gap: 5px;">
-          <span style="font-size: 0.73rem; color: #94a3b8; font-weight: 600; white-space: nowrap;"><i class="fa-solid fa-brain" style="color: #a78bfa;"></i> Model AI:</span>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <div style="display: inline-flex; border-radius: 7px; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.14); padding: 2px;">
+            <button type="button" class="btn btn-xs btn-ghost active wa-engine-btn" id="waSummaryEngineOllama" style="padding: 3px 8px; font-size: 0.7rem; border-radius: 5px;">
+              Ollama
+            </button>
+            <button type="button" class="btn btn-xs btn-ghost wa-engine-btn" id="waSummaryEngineOpenRouter" style="padding: 3px 8px; font-size: 0.7rem; border-radius: 5px;">
+              OpenRouter
+            </button>
+          </div>
           <select id="waSummaryModelSelect" style="padding: 5px 8px; border-radius: 7px; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(16, 185, 129, 0.45); color: #34d399; font-size: 0.74rem; font-weight: 700; outline: none; max-width: 175px;">
           </select>
         </div>
-        <input type="text" id="waSummaryPopupFocusInput" placeholder="Fokus rangkuman khusus (misal: siapa yang kirim tugas / berkas)..." style="flex: 1; min-width: 140px; padding: 6px 10px; border-radius: 7px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.14); color: #f8fafc; font-size: 0.78rem; outline: none;">
+        <input type="text" id="waSummaryPopupFocusInput" placeholder="Fokus rangkuman khusus (misal: siapa yang kirim tugas / berkas)..." style="flex: 1; min-width: 130px; padding: 6px 10px; border-radius: 7px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.14); color: #f8fafc; font-size: 0.78rem; outline: none;">
         <button type="button" class="btn btn-xs btn-outline" id="btnRegenerateWaSummary" style="border-color: rgba(16, 185, 129, 0.45); color: #34d399; font-weight: 600; padding: 6px 11px; white-space: nowrap;">
           <i class="fa-solid fa-wand-magic-sparkles"></i> Rangkum AI
         </button>
@@ -3134,13 +3160,13 @@
         <span id="waSummaryStatsMeta" style="font-size: 0.74rem; color: #94a3b8;"></span>
         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
           <button type="button" class="btn btn-sm btn-outline" id="btnCopyWaSummaryOutput" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">
-            <i class="fa-regular fa-copy"></i> <span>Salin Rangkuman</span>
+            <i class="fa-regular fa-copy"></i> <span>Salin</span>
           </button>
-          <button type="button" class="btn btn-sm btn-outline" id="btnSendWaSummaryToAiChat" style="color: #c084fc; border-color: rgba(192, 132, 252, 0.4);">
-            <i class="fa-solid fa-comment-dots"></i> <span>Bahas di AI Chat</span>
+          <button type="button" class="btn btn-sm btn-primary" id="btnSendWaSummaryToAiChat" style="background: linear-gradient(135deg, #9333ea, #3b82f6); border: none; color: #ffffff; font-weight: 700; padding: 7px 14px;">
+            <i class="fa-solid fa-comments"></i> <span>Alihkan ke Percakapan Biasa</span>
           </button>
-          <button type="button" class="btn btn-sm btn-primary" id="btnCloseWaSummaryFooter" style="background: #10b981; border-color: #10b981; color: #052e16; font-weight: 700;">
-            <i class="fa-solid fa-check"></i> <span>Selesai</span>
+          <button type="button" class="btn btn-sm btn-outline" id="btnCloseWaSummaryFooter" style="border-color: rgba(255, 255, 255, 0.2); color: #cbd5e1;">
+            <i class="fa-solid fa-xmark"></i> <span>Tutup</span>
           </button>
         </div>
       </div>
@@ -3162,8 +3188,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261028_v551" defer></script>
+  <script src="text-safety.js?v=20261029_v552" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261028_v551" defer></script>
+  <script src="app.js?v=20261029_v552" defer></script>
 </body>
 </html>
