@@ -1168,13 +1168,16 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
 // Official & Verified Standard Open-Source Models
 const OFFICIAL_OLLAMA_CLOUD_MODELS = [
   { name: 'llama3.2:3b', model: 'llama3.2:3b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'llama', parameter_size: '3B' } },
+  { name: 'llama3.2:1b', model: 'llama3.2:1b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'llama', parameter_size: '1B' } },
   { name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'qwen', parameter_size: '1.5B' } },
-  { name: 'granite4.2:3b', model: 'granite4.2:3b', tag: 'Lokal', isFree: true, cat: 'fast', details: { family: 'granite', parameter_size: '3B' } },
-  { name: 'granite-mind:latest', model: 'granite-mind:latest', tag: 'Lokal', isFree: true, cat: 'flagship', details: { family: 'granite', parameter_size: '3B' } },
-  { name: 'nemotron-analisis:latest', model: 'nemotron-analisis:latest', tag: 'Lokal', isFree: true, cat: 'coding', details: { family: 'nemotron', parameter_size: '3B' } },
+  { name: 'qwen2.5:7b', model: 'qwen2.5:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'qwen', parameter_size: '7B' } },
+  { name: 'qwen2.5-coder:7b', model: 'qwen2.5-coder:7b', tag: 'Coding', isFree: true, cat: 'coding', details: { family: 'qwen', parameter_size: '7B' } },
   { name: 'deepseek-r1:8b', model: 'deepseek-r1:8b', tag: 'Reasoning', isFree: true, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '8B' } },
+  { name: 'deepseek-r1:7b', model: 'deepseek-r1:7b', tag: 'Reasoning', isFree: true, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '7B' } },
   { name: 'mistral:7b', model: 'mistral:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'mistral', parameter_size: '7B' } },
-  { name: 'qwen2.5:7b', model: 'qwen2.5:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'qwen', parameter_size: '7B' } }
+  { name: 'gemma2:9b', model: 'gemma2:9b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'gemma', parameter_size: '9B' } },
+  { name: 'gemma2:2b', model: 'gemma2:2b', tag: 'Lokal', isFree: true, cat: 'fast', details: { family: 'gemma', parameter_size: '2B' } },
+  { name: 'phi4:14b', model: 'phi4:14b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'phi', parameter_size: '14B' } }
 ];
 
 const VALID_OLLAMA_CLOUD_MODELS = new Set(OFFICIAL_OLLAMA_CLOUD_MODELS.map(m => m.model.toLowerCase()));
@@ -5874,15 +5877,16 @@ async function requestHandler(req, res) {
       return sendJSON(res, 400, { success: false, error: 'Parameter msgId wajib diisi.' });
     }
 
+    const safeMsgId = String(msgId).replace(/[^a-zA-Z0-9._-]/g, '_');
     const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const savedFilename = `wa_${msgId}_${cleanFileName}`;
+    const savedFilename = `wa_${safeMsgId}_${cleanFileName}`;
     const filePath = path.join(UPLOADS_DIR, savedFilename);
 
     // 0. Cek apakah ada berkas di UPLOADS_DIR yang cocok dengan ID pesan ini (toleran terhadap spasi/perbedaan nama)
     try {
       if (fs.existsSync(UPLOADS_DIR)) {
         const diskFiles = fs.readdirSync(UPLOADS_DIR);
-        const matching = diskFiles.find(f => f.startsWith(`wa_${msgId}_`));
+        const matching = diskFiles.find(f => f.startsWith(`wa_${safeMsgId}_`));
         if (matching) {
           return sendJSON(res, 200, { success: true, url: `/uploads/${matching}`, ready: true });
         }
@@ -6000,7 +6004,11 @@ async function requestHandler(req, res) {
       return sendJSON(res, 400, { success: false, error: 'Parameter jid dan teks atau media wajib diisi.' });
     }
     try {
-      const message = await tenant.gateway.sendMessage(body.jid, body.text || '', { media: body.media, tempId: body.tempId });
+      const message = await tenant.gateway.sendMessage(body.jid, body.text || '', {
+        media: body.media,
+        tempId: body.tempId,
+        mentions: body.mentions
+      });
       return sendJSON(res, 200, { success: true, message });
     } catch (err) {
       return sendJSON(res, 500, { success: false, error: err.message });
@@ -6454,18 +6462,23 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         userId: tenant.userId
       });
     }
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Private-Network': 'true'
-    });
-    // Cloudflare Edge Proxy stream pad bypass:
-    res.write(`data: ${JSON.stringify({ event: 'pad', pad: ' '.repeat(32768) })}\n\n`);
-    if (typeof res.flushHeaders === 'function') res.flushHeaders();
-    tenant.gateway.addSseClient(res);
+    try {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Private-Network': 'true'
+      });
+      res.on('error', () => {
+        try { tenant.gateway?.sseClients?.delete(res); } catch (_) {}
+      });
+      // Cloudflare Edge Proxy stream pad bypass:
+      res.write(`data: ${JSON.stringify({ event: 'pad', pad: ' '.repeat(32768) })}\n\n`);
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      tenant.gateway.addSseClient(res);
+    } catch (_) {}
     return;
   }
 

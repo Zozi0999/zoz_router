@@ -158,30 +158,33 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
   // Popular OpenRouter Models Catalog (Live Active Free & Flagship Models)
   const DEFAULT_OPENROUTER_MODELS = [
-    { id: 'openrouter/free', name: 'OpenRouter Free Router', tag: 'Free', cat: 'free', desc: 'Rute otomatis cerdas model gratis OpenRouter.' },
-    { id: 'nvidia/nemotron-3.5-lightning:free', name: 'NVIDIA Nemotron 3.5 Lightning (Free)', tag: 'Free', cat: 'free', desc: 'Model instruksi kilat kecepatan tinggi.' },
-    { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'NVIDIA Nemotron 3 Super 120B (Free)', tag: 'Free', cat: 'free', desc: 'Model penalaran & instruksi skala besar 120B.' },
-    { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', name: 'NVIDIA Nemotron 3 Nano Reasoning (Free)', tag: 'Free', cat: 'free', desc: 'Model penalaran rantai pikiran mendalam (Chain-of-Thought).' },
-    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', name: 'NVIDIA Nemotron 3 Ultra 550B (Free)', tag: 'Free', cat: 'free', desc: 'Model penalaran tingkat tinggi NVIDIA 550B.' },
-    { id: 'cohere/north-mini-code:free', name: 'Cohere North Mini Code (Free)', tag: 'Free', cat: 'free', desc: 'Model spesialis koding, debug & arsitektur sistem.' },
-    { id: 'dots-studio/dots-3-note-preview:free', name: 'Dots 3 Note Preview (Free)', tag: 'Free', cat: 'free', desc: 'Model ringkas untuk ringkasan catatan & analisis data.' },
-    { id: 'liquid/lfm-2.5-2.6b:free', name: 'Liquid LFM 2.5 2.6B (Free)', tag: 'Free', cat: 'free', desc: 'Model edge efisien dari Liquid AI.' },
-    { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Meta Llama 3.3 70B', tag: 'Flagship', cat: 'flagship' },
-    { id: 'anthropic/claude-sonnet-4.6', name: 'Anthropic Claude Sonnet 4.6', tag: 'Coding', cat: 'coding' },
-    { id: 'openai/gpt-4o', name: 'OpenAI GPT-4o', tag: 'Vision', cat: 'flagship' },
-    { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat', tag: 'Coding', cat: 'coding' }
+    { id: 'openrouter/auto', name: 'OpenRouter Auto Router', tag: 'Auto', cat: 'flagship', desc: 'Rute otomatis cerdas memilih model terbaik untuk prompt Anda.' },
+    { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Meta Llama 3.3 70B (Free)', tag: 'Free', cat: 'free', desc: 'Model instruksi 70B bertenaga tinggi dari Meta AI.' },
+    { id: 'meta-llama/llama-3.2-3b-instruct:free', name: 'Meta Llama 3.2 3B (Free)', tag: 'Free', cat: 'free', desc: 'Model kilat ringan efisien untuk tugas umum.' },
+    { id: 'deepseek/deepseek-r1:free', name: 'DeepSeek R1 (Free)', tag: 'Free', cat: 'free', desc: 'Model penalaran rantai pikiran (CoT) open-weights terdepan.' },
+    { id: 'deepseek/deepseek-chat:free', name: 'DeepSeek V3 (Free)', tag: 'Free', cat: 'free', desc: 'Model percakapan dan coding multi-tugas performa tinggi.' },
+    { id: 'google/gemini-2.0-flash-exp:free', name: 'Google Gemini 2.0 Flash (Free)', tag: 'Free', cat: 'free', desc: 'Model generasi berikutnya dari Google berkecepatan ultra tinggi.' },
+    { id: 'qwen/qwen-2.5-coder-32b-instruct:free', name: 'Qwen 2.5 Coder 32B (Free)', tag: 'Free', cat: 'free', desc: 'Model spesialis pemrograman, koding, dan arsitektur software.' },
+    { id: 'anthropic/claude-3.5-sonnet', name: 'Anthropic Claude 3.5 Sonnet', tag: 'Coding', cat: 'coding', desc: 'Model flagship Anthropic dengan pemahaman logika mendalam.' },
+    { id: 'openai/gpt-4o', name: 'OpenAI GPT-4o', tag: 'Vision', cat: 'flagship', desc: 'Model multimodal flagship dari OpenAI.' },
+    { id: 'openai/gpt-4o-mini', name: 'OpenAI GPT-4o Mini', tag: 'Fast', cat: 'fast', desc: 'Model cepat, terjangkau, dan cerdas dari OpenAI.' },
+    { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat (V3)', tag: 'Coding', cat: 'coding', desc: 'DeepSeek V3 API resmi performa tinggi.' },
+    { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 Official', tag: 'Reasoning', cat: 'reasoning', desc: 'DeepSeek R1 Official API berkapabilitas reasoning penuh.' }
   ];
 
   // Official & Verified Standard Open-Source Models
   const OFFICIAL_OLLAMA_CLOUD_MODELS = [
     { name: 'llama3.2:3b', model: 'llama3.2:3b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'llama', parameter_size: '3B' } },
+    { name: 'llama3.2:1b', model: 'llama3.2:1b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'llama', parameter_size: '1B' } },
     { name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'qwen', parameter_size: '1.5B' } },
-    { name: 'granite4.2:3b', model: 'granite4.2:3b', tag: 'Lokal', isFree: true, cat: 'fast', details: { family: 'granite', parameter_size: '3B' } },
-    { name: 'granite-mind:latest', model: 'granite-mind:latest', tag: 'Lokal', isFree: true, cat: 'flagship', details: { family: 'granite', parameter_size: '3B' } },
-    { name: 'nemotron-analisis:latest', model: 'nemotron-analisis:latest', tag: 'Lokal', isFree: true, cat: 'coding', details: { family: 'nemotron', parameter_size: '3B' } },
+    { name: 'qwen2.5:7b', model: 'qwen2.5:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'qwen', parameter_size: '7B' } },
+    { name: 'qwen2.5-coder:7b', model: 'qwen2.5-coder:7b', tag: 'Coding', isFree: true, cat: 'coding', details: { family: 'qwen', parameter_size: '7B' } },
     { name: 'deepseek-r1:8b', model: 'deepseek-r1:8b', tag: 'Reasoning', isFree: true, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '8B' } },
+    { name: 'deepseek-r1:7b', model: 'deepseek-r1:7b', tag: 'Reasoning', isFree: true, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '7B' } },
     { name: 'mistral:7b', model: 'mistral:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'mistral', parameter_size: '7B' } },
-    { name: 'qwen2.5:7b', model: 'qwen2.5:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'qwen', parameter_size: '7B' } }
+    { name: 'gemma2:9b', model: 'gemma2:9b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'gemma', parameter_size: '9B' } },
+    { name: 'gemma2:2b', model: 'gemma2:2b', tag: 'Lokal', isFree: true, cat: 'fast', details: { family: 'gemma', parameter_size: '2B' } },
+    { name: 'phi4:14b', model: 'phi4:14b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'phi', parameter_size: '14B' } }
   ];
 
   const VALID_OLLAMA_CLOUD_MODELS = new Set(OFFICIAL_OLLAMA_CLOUD_MODELS.map(m => m.model.toLowerCase()));
@@ -42587,28 +42590,38 @@ Aturan:
                 }
                 const mediaEl = bubbleEl.querySelector('.wa-media-preview-box, .wa-doc-box');
                 if (mediaEl) mediaEl.remove();
+                const badge = bubbleEl.querySelector('.wa-bubble-reaction-badge');
+                if (badge) badge.remove();
               }
               const targetMsg = (this.messages || []).find(m => m.id === rMsgId);
               if (targetMsg) {
                 targetMsg.text = '🚫 Pesan ini telah dihapus';
                 targetMsg.isDeleted = true;
                 targetMsg.media = null;
+                targetMsg.reaction = null;
               }
             } else if (parsed.event === 'message_reaction') {
               const rMsgId = parsed.data?.msgId;
               const emoji = parsed.data?.reaction;
+              const targetMsg = (this.messages || []).find(m => m.id === rMsgId);
+              if (targetMsg) {
+                targetMsg.reaction = emoji;
+              }
               const bubbleEl = els.messagesList?.querySelector(`[data-msg-id="${rMsgId}"]`);
               if (bubbleEl) {
                 let badge = bubbleEl.querySelector('.wa-bubble-reaction-badge');
-                if (!badge) {
-                  badge = document.createElement('span');
-                  badge.className = 'wa-bubble-reaction-badge';
-                  badge.style.cssText = 'position: absolute; bottom: -8px; right: 8px; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 10px; padding: 1px 6px; font-size: 0.75rem;';
-                  bubbleEl.style.position = 'relative';
-                  bubbleEl.appendChild(badge);
+                if (emoji) {
+                  if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'wa-bubble-reaction-badge';
+                    badge.style.cssText = 'position: absolute; bottom: -8px; right: 8px; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 10px; padding: 1px 6px; font-size: 0.75rem; z-index: 2;';
+                    bubbleEl.style.position = 'relative';
+                    bubbleEl.appendChild(badge);
+                  }
+                  badge.textContent = emoji;
+                } else if (badge) {
+                  badge.remove();
                 }
-                badge.textContent = emoji;
-                if (!emoji) badge.remove();
               }
             }
           } catch (_) {}
@@ -43432,30 +43445,40 @@ Aturan:
           return;
         }
         const list = (data && data.messages) || [];
-
-        if (list.length === 0) {
-          const empty = document.createElement('div');
-          empty.style.padding = '40px 20px';
-          empty.style.textAlign = 'center';
-          empty.style.color = 'var(--text-dim)';
-          empty.innerHTML = `
-            <div style="width: 50px; height: 50px; border-radius: 50%; background: rgba(37,211,102,0.1); border: 1px solid rgba(37,211,102,0.3); color: #25D366; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin: 0 auto 12px;">
-              <i class="fa-brands fa-whatsapp"></i>
-            </div>
-            <p style="font-weight: 600; color: var(--text-main); margin-bottom: 4px;">Percakapan WhatsApp dengan ${escapeHtml(this.activeContact?.name || jid)}</p>
-            <p style="font-size: 0.78rem;">Ketik pesan di bawah untuk mulai mengirim pesan WhatsApp sungguhan.</p>
-          `;
-          els.messagesList.appendChild(empty);
-        } else {
-          list.forEach(msg => {
-            this.appendMessageBubble(msg);
-          });
-        }
-
-        if (els.chatViewport) els.chatViewport.scrollTop = els.chatViewport.scrollHeight;
+        this.messages = [...list];
+        this.renderMessages();
       } catch (err) {
         console.warn('[WA-Client] Retry memuat pesan:', err.message);
       }
+    },
+
+    renderMessages() {
+      if (!els.messagesList) return;
+      const bubbles = Array.from(els.messagesList.querySelectorAll('.wa-bubble-wrap'));
+      bubbles.forEach(b => b.remove());
+      const emptyStateEl = els.messagesList.querySelector('.wa-empty-chat-state');
+      if (emptyStateEl) emptyStateEl.remove();
+
+      if (!this.messages || this.messages.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'wa-empty-chat-state';
+        empty.style.padding = '40px 20px';
+        empty.style.textAlign = 'center';
+        empty.style.color = 'var(--text-dim)';
+        empty.innerHTML = `
+          <div style="width: 50px; height: 50px; border-radius: 50%; background: rgba(37,211,102,0.1); border: 1px solid rgba(37,211,102,0.3); color: #25D366; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin: 0 auto 12px;">
+            <i class="fa-brands fa-whatsapp"></i>
+          </div>
+          <p style="font-weight: 600; color: var(--text-main); margin-bottom: 4px;">Percakapan WhatsApp dengan ${escapeHtml(this.activeContact?.name || this.activeContact?.id || '')}</p>
+          <p style="font-size: 0.78rem;">Ketik pesan di bawah untuk mulai mengirim pesan WhatsApp sungguhan.</p>
+        `;
+        els.messagesList.appendChild(empty);
+      } else {
+        this.messages.forEach(msg => {
+          this.appendMessageBubble(msg);
+        });
+      }
+      if (els.chatViewport) els.chatViewport.scrollTop = els.chatViewport.scrollHeight;
     },
 
     renderEmptyWaState() {
@@ -44117,6 +44140,17 @@ Aturan:
     appendMessageBubble(msg) {
       if (!els.messagesList) return;
 
+      const emptyStateEl = els.messagesList.querySelector('.wa-empty-chat-state');
+      if (emptyStateEl) emptyStateEl.remove();
+
+      if (!this.messages) this.messages = [];
+      const existingIdx = this.messages.findIndex(m => m.id === msg.id || (msg.tempId && m.id === msg.tempId));
+      if (existingIdx !== -1) {
+        this.messages[existingIdx] = { ...this.messages[existingIdx], ...msg };
+      } else {
+        this.messages.push(msg);
+      }
+
       // 1. DEDULIKASI KETAT BERDASARKAN ID PESAN
       if (msg.id && els.messagesList.querySelector(`[data-msg-id="${msg.id}"]`)) {
         return; // Sudah tampil di layar, jangan duplikasi!
@@ -44239,6 +44273,15 @@ Aturan:
           ${statusIcon}
         </div>
       `;
+
+      if (msg.reaction) {
+        wrap.style.position = 'relative';
+        const badge = document.createElement('span');
+        badge.className = 'wa-bubble-reaction-badge';
+        badge.style.cssText = 'position: absolute; bottom: -8px; right: 8px; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 10px; padding: 1px 6px; font-size: 0.75rem; z-index: 2;';
+        badge.textContent = msg.reaction;
+        wrap.appendChild(badge);
+      }
 
       els.messagesList.appendChild(wrap);
       if (els.chatViewport) els.chatViewport.scrollTop = els.chatViewport.scrollHeight;

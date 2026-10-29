@@ -116,6 +116,33 @@ class WhatsAppGateway {
     this.initLidCache();
     this.loadConfig();
     this.loadPersistedData();
+    this.cleanOldUploads();
+    this.pruneTimer = setInterval(() => this.cleanOldUploads(), 6 * 3600 * 1000);
+    if (this.pruneTimer.unref) this.pruneTimer.unref();
+  }
+
+  cleanOldUploads(retentionDays = 30) {
+    try {
+      if (!fs.existsSync(this.uploadsDir)) return;
+      const files = fs.readdirSync(this.uploadsDir);
+      const cutoff = Date.now() - (retentionDays * 24 * 60 * 60 * 1000);
+      let pruned = 0;
+      for (const file of files) {
+        const fullPath = path.join(this.uploadsDir, file);
+        try {
+          const stat = fs.statSync(fullPath);
+          if (stat.isFile() && stat.mtimeMs < cutoff) {
+            fs.unlinkSync(fullPath);
+            pruned++;
+          }
+        } catch (_) {}
+      }
+      if (pruned > 0) {
+        console.log(`[WA-Gateway] Pruned ${pruned} berkas media lama (> ${retentionDays} hari) dari uploads.`);
+      }
+    } catch (err) {
+      console.warn('[WA-Gateway] Gagal membersihkan media lama:', err.message);
+    }
   }
 
   initLidCache() {
@@ -328,8 +355,9 @@ class WhatsAppGateway {
           else if (unwrapped.stickerMessage) rawFileName = 'sticker.webp';
           else rawFileName = 'file.bin';
         }
+        const cleanId = String(id).replace(/[^a-zA-Z0-9._-]/g, '_');
         const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const savedFilename = `wa_${id}_${cleanFileName}`;
+        const savedFilename = `wa_${cleanId}_${cleanFileName}`;
 
         const uploadsDir = path.join(__dirname, 'data', 'uploads');
         if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -789,19 +817,27 @@ class WhatsAppGateway {
 
   // Registrasi SSE Listener untuk push event real-time ke web client
   addSseClient(res) {
+    if (!res || res.destroyed || res.writableEnded) return;
     this.sseClients.add(res);
-    res.on('close', () => {
+    const removeClient = () => {
       this.sseClients.delete(res);
-    });
+    };
+    res.on('close', removeClient);
+    res.on('error', removeClient);
+    res.on('finish', removeClient);
 
     this.startSseHeartbeat();
 
     // Kirim status awal langsung saat client connect
-    const initialPayload = JSON.stringify({
-      event: 'status',
-      data: this.getStatus()
-    });
-    res.write(`data: ${initialPayload}\n\n`);
+    try {
+      const initialPayload = JSON.stringify({
+        event: 'status',
+        data: this.getStatus()
+      });
+      res.write(`data: ${initialPayload}\n\n`);
+    } catch (_) {
+      this.sseClients.delete(res);
+    }
   }
 
   startSseHeartbeat() {
@@ -849,6 +885,10 @@ class WhatsAppGateway {
   broadcast(event, data) {
     const payload = JSON.stringify({ event, data });
     for (const client of this.sseClients) {
+      if (client.destroyed || client.writableEnded) {
+        this.sseClients.delete(client);
+        continue;
+      }
       try {
         client.write(`data: ${payload}\n\n`);
       } catch (_) {
@@ -1559,6 +1599,27 @@ class WhatsAppGateway {
     let messageItemMedia = null;
     let outgoingText = text || '';
 
+    // Deteksi mention anggota grup (@628xxx) jika mengirim ke WhatsApp Group
+    const mentions = [];
+    if (options && Array.isArray(options.mentions)) {
+      for (const m of options.mentions) {
+        let clean = String(m).replace(/[^0-9]/g, '');
+        if (clean) mentions.push(clean.includes('@') ? clean : `${clean}@s.whatsapp.net`);
+      }
+    }
+    if (targetJid.endsWith('@g.us') && outgoingText) {
+      const matches = outgoingText.match(/@(\d{9,16})/g);
+      if (matches) {
+        for (const match of matches) {
+          const num = match.replace('@', '');
+          const mentionJid = `${num}@s.whatsapp.net`;
+          if (!mentions.includes(mentionJid)) {
+            mentions.push(mentionJid);
+          }
+        }
+      }
+    }
+
     const media = options && options.media ? options.media : null;
     let mediaBuffer = null;
     if (media && (media.data || media.buffer || media.url)) {
@@ -1606,14 +1667,16 @@ class WhatsAppGateway {
           sent = await this.sock.sendMessage(targetJid, {
             image: mediaBuffer,
             caption: outgoingText,
-            mimetype: mime || 'image/jpeg'
+            mimetype: mime || 'image/jpeg',
+            ...(mentions.length > 0 ? { mentions } : {})
           });
           if (!outgoingText) outgoingText = '📷 [Foto]';
         } else if (isVideo) {
           sent = await this.sock.sendMessage(targetJid, {
             video: mediaBuffer,
             caption: outgoingText,
-            mimetype: mime || 'video/mp4'
+            mimetype: mime || 'video/mp4',
+            ...(mentions.length > 0 ? { mentions } : {})
           });
           if (!outgoingText) outgoingText = '📹 [Video]';
         } else if (isAudio) {
@@ -1628,7 +1691,8 @@ class WhatsAppGateway {
             document: mediaBuffer,
             mimetype: mime || 'application/octet-stream',
             fileName: cleanFileName,
-            caption: outgoingText
+            caption: outgoingText,
+            ...(mentions.length > 0 ? { mentions } : {})
           });
           if (!outgoingText) outgoingText = `📄 [Dokumen: ${cleanFileName}]`;
         }
@@ -1639,7 +1703,10 @@ class WhatsAppGateway {
       if (!outgoingText.trim()) {
         throw new Error('Pesan WhatsApp tidak boleh kosong.');
       }
-      sent = await this.sock.sendMessage(targetJid, { text: outgoingText });
+      sent = await this.sock.sendMessage(targetJid, {
+        text: outgoingText,
+        ...(mentions.length > 0 ? { mentions } : {})
+      });
     }
 
     const ts = Date.now();
