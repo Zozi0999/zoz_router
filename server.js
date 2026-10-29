@@ -2267,7 +2267,7 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Helper untuk memanggil LLM (OpenRouter atau Ollama) dari backend dengan dukungan riwayat pesan & auto-detect provider per model
-async function callLLMBackend({ prompt, system, messages, model, provider, endpoint, apiKey, openRouterKey, ollamaApiKey, isAutoRouter, allowFallbacks }) {
+async function callLLMBackend({ prompt, system, messages, model, provider, endpoint, apiKey, openRouterKey, ollamaApiKey, isAutoRouter, allowFallbacks, skipEnrichment }) {
   let finalMessages = [];
 
   if (Array.isArray(messages) && messages.length > 0) {
@@ -2290,36 +2290,38 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     if (prompt && prompt.trim()) finalMessages.push({ role: 'user', content: prompt.trim() });
   }
 
-  // Auto-enrich YouTube links in user turns with real-time oEmbed metadata
-  try {
-    for (let i = finalMessages.length - 1; i >= 0; i--) {
-      const msg = finalMessages[i];
-      if (msg.role === 'user' && typeof msg.content === 'string' && extractYouTubeVideoIds(msg.content).length > 0) {
-        const enriched = await enrichTextWithYouTubeContext(msg.content);
-        if (enriched.youtubeVideos && enriched.youtubeVideos.length > 0) {
-          msg.content = enriched.text;
-          break;
+  // Auto-enrich YouTube links in user turns with real-time oEmbed metadata (dilewati jika skipEnrichment = true)
+  if (!skipEnrichment) {
+    try {
+      for (let i = finalMessages.length - 1; i >= 0; i--) {
+        const msg = finalMessages[i];
+        if (msg.role === 'user' && typeof msg.content === 'string' && extractYouTubeVideoIds(msg.content).length > 0) {
+          const enriched = await enrichTextWithYouTubeContext(msg.content);
+          if (enriched.youtubeVideos && enriched.youtubeVideos.length > 0) {
+            msg.content = enriched.text;
+            break;
+          }
         }
       }
+    } catch (ytErr) {
+      console.warn('YouTube auto-enrichment warning in callLLMBackend:', ytErr.message);
     }
-  } catch (ytErr) {
-    console.warn('YouTube auto-enrichment warning in callLLMBackend:', ytErr.message);
-  }
 
-  // Auto-enrich Web Page links in user turns with real-time extracted content
-  try {
-    for (let i = finalMessages.length - 1; i >= 0; i--) {
-      const msg = finalMessages[i];
-      if (msg.role === 'user' && typeof msg.content === 'string' && extractWebUrls(msg.content).length > 0) {
-        const enrichedWeb = await enrichTextWithWebPageContext(msg.content);
-        if (enrichedWeb.webPages && enrichedWeb.webPages.length > 0) {
-          msg.content = enrichedWeb.text;
-          break;
+    // Auto-enrich Web Page links in user turns with real-time extracted content (dilewati jika skipEnrichment = true)
+    try {
+      for (let i = finalMessages.length - 1; i >= 0; i--) {
+        const msg = finalMessages[i];
+        if (msg.role === 'user' && typeof msg.content === 'string' && extractWebUrls(msg.content).length > 0) {
+          const enrichedWeb = await enrichTextWithWebPageContext(msg.content);
+          if (enrichedWeb.webPages && enrichedWeb.webPages.length > 0) {
+            msg.content = enrichedWeb.text;
+            break;
+          }
         }
       }
+    } catch (webErr) {
+      console.warn('Web page auto-enrichment warning in callLLMBackend:', webErr.message);
     }
-  } catch (webErr) {
-    console.warn('Web page auto-enrichment warning in callLLMBackend:', webErr.message);
   }
 
   const rawModel = (model || '').trim();
@@ -2369,11 +2371,11 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     const candidateModels = (isAutoRouterActive && isFreeModel)
       ? [
           rawModel,
+          'openrouter/free',
+          'google/gemini-2.0-flash-exp:free',
+          'meta-llama/llama-3.3-70b-instruct:free',
           'nvidia/nemotron-3.5-lightning:free',
-          'nvidia/nemotron-3-super-120b-a12b:free',
-          'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
-          'cohere/north-mini-code:free',
-          'openrouter/free'
+          'cohere/north-mini-code:free'
         ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx)
       : [rawModel];
 
@@ -6250,8 +6252,37 @@ async function requestHandler(req, res) {
       return `=== KONTAK DISETUJUI: ${c.name} (${c.phone}) | Total Pesan: ${c.messageCount} | Berkas: ${c.fileCount} ===\n${c.transcript || '(Tidak ada pesan)'}`;
     }).join('\n\n');
 
+    const fallbackSummaryText = buildStructuredFallbackSummary();
     let aiSummaryText = '';
     let usedEngine = 'local-analytical';
+
+    // Jika client hanya meminta transkrip & analitik cepat
+    if (body.transcriptOnly === true) {
+      return sendJSON(res, 200, {
+        success: true,
+        engine: 'fast-metadata',
+        approvedCount: contactDataList.length,
+        totalMessages: totalMessagesCount,
+        totalFiles: totalFilesCount,
+        contacts: contactDataList.map(c => ({
+          jid: c.jid,
+          name: c.name,
+          phone: c.phone,
+          messageCount: c.messageCount,
+          fileCount: c.fileCount
+        })),
+        summarizedContacts: contactDataList.map(c => ({
+          jid: c.jid,
+          name: c.name,
+          phone: c.phone,
+          messageCount: c.messageCount,
+          fileCount: c.fileCount
+        })),
+        summary: fallbackSummaryText,
+        fallbackSummary: fallbackSummaryText,
+        combinedTranscript: combinedTranscript.slice(-18000)
+      });
+    }
 
     if (totalMessagesCount > 0) {
       try {
@@ -6265,18 +6296,26 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
         const userPrompt = `${focusTopic ? `[FOKUS KHUSUS PENGGUNA: "${focusTopic}"]\n\n` : ''}Berikut adalah transkrip chat WhatsApp dari nomor yang telah disetujui pengguna:\n\n${combinedTranscript.slice(-18000)}\n\nBuatlah rangkuman lengkap dan terstruktur sekarang:`;
 
+        const effectiveProvider = body.provider || body.engine || (body.model && String(body.model).includes('/') ? 'openrouter' : 'ollama');
+        const effectiveModel = body.model || (effectiveProvider === 'ollama' ? 'gemma4:31b' : 'openrouter/free');
+        const effectiveOpenRouterKey = body.openRouterKey || (body.apiKey && String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || process.env.OPENROUTER_API_KEY;
+        const effectiveOllamaApiKey = body.ollamaApiKey || (!effectiveOpenRouterKey ? body.apiKey : null) || process.env.OLLAMA_API_KEY;
+
         const llmPromise = callLLMBackend({
           prompt: userPrompt,
           system: sysPrompt,
-          model: body.model || 'nvidia/nemotron-3-super-120b-a12b:free',
-          provider: body.provider || 'openrouter',
-          openRouterKey: body.openRouterKey || process.env.OPENROUTER_API_KEY,
-          ollamaApiKey: body.ollamaApiKey || process.env.OLLAMA_API_KEY,
+          model: effectiveModel,
+          provider: effectiveProvider,
+          openRouterKey: effectiveOpenRouterKey,
+          ollamaApiKey: effectiveOllamaApiKey,
+          apiKey: body.apiKey,
           isAutoRouter: true,
-          allowFallbacks: true
+          allowFallbacks: true,
+          skipEnrichment: true
         });
 
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('LLM summary timeout')), 14000));
+        // Batas waktu LLM di server adalah 8 detik agar client tidak pernah timeout
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('LLM summary timeout')), 8000));
         const rawLlmResult = await Promise.race([llmPromise, timeoutPromise]);
         if (rawLlmResult && String(rawLlmResult).trim().length > 40) {
           aiSummaryText = String(rawLlmResult).trim();
@@ -6288,7 +6327,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     }
 
     if (!aiSummaryText) {
-      aiSummaryText = buildStructuredFallbackSummary();
+      aiSummaryText = fallbackSummaryText;
     }
 
     return sendJSON(res, 200, {

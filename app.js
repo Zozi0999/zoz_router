@@ -42174,7 +42174,8 @@ Aturan:
             const url = `${cleanBase}${endpoint}`;
             const fetchOpts = { ...options };
             if (!fetchOpts.signal) {
-              fetchOpts.signal = AbortSignal.timeout(8000);
+              const defaultTimeout = endpoint.includes('/summarize') ? 35000 : 12000;
+              fetchOpts.signal = AbortSignal.timeout(defaultTimeout);
             }
             const res = await fetch(url, fetchOpts);
             if (res.ok || (res.status >= 400 && res.status < 500 && res.status !== 404)) {
@@ -44684,14 +44685,14 @@ Aturan:
         closeSummaryPopup();
         this.openToolConsentModal({
           preselectedJids: this.lastApprovedJids || [],
-          focusTopic: (document.getElementById('waSummaryRefocusInput')?.value || '').trim(),
+          focusTopic: (document.getElementById('waSummaryPopupFocusInput')?.value || '').trim(),
           fromAiTool: false
         });
       });
 
       document.getElementById('btnRegenerateWaSummary')?.addEventListener('click', () => {
         AudioEngine.click();
-        const newFocus = (document.getElementById('waSummaryRefocusInput')?.value || '').trim();
+        const newFocus = (document.getElementById('waSummaryPopupFocusInput')?.value || '').trim();
         if (this.lastApprovedJids && this.lastApprovedJids.length > 0) {
           this.openSummaryResultPopup(this.lastApprovedJids, newFocus);
         } else {
@@ -44699,7 +44700,7 @@ Aturan:
         }
       });
 
-      document.getElementById('waSummaryRefocusInput')?.addEventListener('keydown', (e) => {
+      document.getElementById('waSummaryPopupFocusInput')?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
           document.getElementById('btnRegenerateWaSummary')?.click();
@@ -44736,11 +44737,9 @@ Aturan:
 
     updateConsentSelectedCountUI() {
       const count = this.consentSelectedJids.size;
-      const badgeEl = document.getElementById('waConsentSelectedCountBadge');
-      const footerCountEl = document.getElementById('waConsentFooterCount');
+      const countEl = document.getElementById('waConsentSelectedCount') || document.getElementById('waConsentSelectedCountBadge');
       const approveBtn = document.getElementById('btnApproveWaConsent');
-      if (badgeEl) badgeEl.textContent = `${count} dipilih`;
-      if (footerCountEl) footerCountEl.textContent = String(count);
+      if (countEl) countEl.textContent = `${count} Nomor Dipilih`;
       if (approveBtn) {
         approveBtn.disabled = count === 0;
         approveBtn.style.opacity = count === 0 ? '0.5' : '1';
@@ -44859,9 +44858,9 @@ Aturan:
       }
 
       const modal = document.getElementById('modalWaToolConsent');
-      const callerNote = document.getElementById('waConsentToolCallerNote');
+      const callerNote = document.getElementById('waConsentModalSubtitle') || document.getElementById('waConsentToolCallerNote');
       const searchInput = document.getElementById('waConsentSearchInput');
-      const focusInput = document.getElementById('waConsentFocusTopicInput');
+      const focusInput = document.getElementById('waConsentFocusInput') || document.getElementById('waConsentFocusTopicInput');
 
       if (callerNote) {
         if (fromAiTool) {
@@ -44971,15 +44970,14 @@ Aturan:
 
       const modal = document.getElementById('modalWaSummaryResult');
       const subtitleEl = document.getElementById('waSummaryPopupSubtitle');
-      const chipsWrap = document.getElementById('waSummaryApprovedContactsChips');
-      const refocusInput = document.getElementById('waSummaryRefocusInput');
-      const loadingState = document.getElementById('waSummaryLoadingState');
-      const contentBox = document.getElementById('waSummaryOutputContent');
-      const metaFooter = document.getElementById('waSummaryMetaFooterText');
+      const chipsWrap = document.getElementById('waSummaryApprovedChips');
+      const focusInput = document.getElementById('waSummaryPopupFocusInput');
+      const bodyEl = document.getElementById('waSummaryOutputBody');
+      const statsMeta = document.getElementById('waSummaryStatsMeta');
 
-      if (refocusInput) refocusInput.value = focusTopic || '';
+      if (focusInput) focusInput.value = focusTopic || '';
       if (subtitleEl) {
-        subtitleEl.textContent = `Merangkum ${validJids.length} nomor WhatsApp yang disetujui...`;
+        subtitleEl.textContent = `Menghubungkan AI untuk ${validJids.length} nomor yang disetujui...`;
       }
       if (chipsWrap) {
         chipsWrap.innerHTML = validJids.map(jid => {
@@ -44992,52 +44990,71 @@ Aturan:
         }).join('');
       }
 
-      if (loadingState) loadingState.style.display = 'flex';
-      if (contentBox) {
-        contentBox.style.display = 'none';
-        contentBox.innerHTML = '';
+      if (bodyEl) {
+        bodyEl.innerHTML = `
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 16px; text-align: center; color: #a7f3d0;">
+            <i class="fa-solid fa-wand-magic-sparkles fa-spin" style="font-size: 2.2rem; color: #34d399; margin-bottom: 14px;"></i>
+            <div style="font-weight: 700; font-size: 0.98rem; color: #ecfdf5;">AI Sedang Menganalisis Obrolan WhatsApp...</div>
+            <div style="font-size: 0.78rem; color: #6ee7b7; opacity: 0.85; margin-top: 6px;">Membaca riwayat pesan dari nomor yang disetujui & mendeteksi pengiriman berkas/tugas...</div>
+          </div>
+        `;
       }
-      if (metaFooter) metaFooter.textContent = 'Sedang menganalisis percakapan...';
+      if (statsMeta) statsMeta.textContent = 'Menganalisis percakapan...';
       if (modal) modal.style.display = 'flex';
 
       try {
+        const reqEngine = (STATE.mode === 'ollama') ? 'ollama' : 'openrouter';
+        const reqModel = reqEngine === 'ollama'
+          ? (STATE.settings.ollamaModel || 'gemma4:31b')
+          : (STATE.settings.openRouterModel || 'openrouter/free');
+        const reqOpenRouterKey = STATE.settings.openRouterKey || '';
+        const reqOllamaApiKey = STATE.settings.ollamaApiKey || '';
+        const reqApiKey = (reqEngine === 'ollama' ? reqOllamaApiKey : reqOpenRouterKey) || '';
+
         const res = await this.waFetch('/api/wa/summarize', {
           method: 'POST',
           headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             approvedJids: validJids,
             focusTopic: focusTopic || '',
-            engine: STATE.engine || 'openrouter',
-            model: STATE.selectedModel || '',
-            apiKey: typeof getActiveApiKey === 'function' ? getActiveApiKey() : '',
+            engine: reqEngine,
+            provider: reqEngine,
+            model: reqModel,
+            openRouterKey: reqOpenRouterKey,
+            ollamaApiKey: reqOllamaApiKey,
+            apiKey: reqApiKey,
             userId: this.getUserId(),
             pin: this.getPin()
-          })
-        }, 2);
+          }),
+          signal: AbortSignal.timeout(30000)
+        }, 1);
 
         const data = await res.json().catch(() => null);
         if (!res.ok || !data || !data.success) {
           throw new Error(data?.error || `HTTP ${res.status}`);
         }
 
-        this.lastSummaryMarkdown = data.summary || '';
+        this.lastSummaryMarkdown = data.summary || data.fallbackSummary || '';
         this.lastSummaryMeta = data;
 
-        if (loadingState) loadingState.style.display = 'none';
-        if (contentBox) {
-          contentBox.innerHTML = this.renderMarkdownSummaryToHtml(data.summary || '');
-          contentBox.style.display = 'block';
+        if (bodyEl) {
+          bodyEl.innerHTML = `
+            <div class="wa-summary-content-box" style="animation: fadeIn 0.2s ease-out;">
+              ${this.renderMarkdownSummaryToHtml(this.lastSummaryMarkdown)}
+            </div>
+          `;
         }
         if (subtitleEl) {
-          subtitleEl.textContent = `Rangkuman selesai • ${data.totalMessages || 0} pesan dari ${validJids.length} nomor disetujui`;
+          subtitleEl.textContent = `Rangkuman selesai • ${data.totalMessages || 0} pesan dianalisis`;
         }
-        if (metaFooter) {
-          metaFooter.textContent = `Terverifikasi Consent Gate • ${validJids.length} Nomor • ${data.totalMessages || 0} Pesan`;
+        if (statsMeta) {
+          statsMeta.textContent = `Terverifikasi Consent Gate • ${validJids.length} Nomor • ${data.totalMessages || 0} Pesan (${data.totalFiles || 0} Berkas 🔴)`;
         }
-        if (Array.isArray(data.summarizedContacts) && chipsWrap) {
-          chipsWrap.innerHTML = data.summarizedContacts.map(sc => `
+        if (Array.isArray(data.summarizedContacts || data.contacts) && chipsWrap) {
+          const list = data.summarizedContacts || data.contacts;
+          chipsWrap.innerHTML = list.map(sc => `
             <span class="wa-summary-approved-chip">
-              <i class="fa-brands fa-whatsapp"></i> ${escapeHtml(sc.name)} (${sc.messageCount} pesan${sc.fileCount > 0 ? `, 🔴 ${sc.fileCount} berkas` : ''})
+              <i class="fa-brands fa-whatsapp"></i> ${escapeHtml(sc.name || sc.phone || sc.jid)} (${sc.messageCount} pesan${sc.fileCount > 0 ? `, 🔴 ${sc.fileCount} berkas` : ''})
             </span>
           `).join('');
         }
@@ -45045,23 +45062,69 @@ Aturan:
         AudioEngine.success?.() || AudioEngine.click?.();
         return {
           success: true,
-          summary: data.summary,
+          summary: this.lastSummaryMarkdown,
           totalMessages: data.totalMessages,
-          summarizedContacts: data.summarizedContacts
+          summarizedContacts: data.summarizedContacts || data.contacts
         };
       } catch (err) {
-        if (loadingState) loadingState.style.display = 'none';
-        if (contentBox) {
-          contentBox.style.display = 'block';
-          contentBox.innerHTML = `
-            <div style="padding: 16px; border-radius: 10px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #fca5a5;">
-              <strong><i class="fa-solid fa-triangle-exclamation"></i> Gagal Merangkum Chat:</strong>
-              <p style="margin-top: 6px; font-size: 0.82rem;">${escapeHtml(err.message || 'Terjadi kesalahan jaringan.')}</p>
-            </div>
-          `;
+        console.warn('[WA-Summary] Gagal fetch backend summarize:', err.message);
+
+        // Fallback cerdas: Jika request ke backend terputus, jangan biarkan pop-up kosong atau merah!
+        // Susun ringkasan analitis langsung di client dari kontak yang telah disetujui pengguna
+        let localFallbackSummary = '';
+        try {
+          const localLines = [];
+          localLines.push('### 📌 Ringkasan Cepat Chat WhatsApp');
+          localLines.push(`- **Nomor / Kontak yang Disetujui**: ${validJids.map(j => {
+            const c = (this.contacts || []).find(item => item.id === j);
+            return `**${c ? (c.name || c.phone) : j}**`;
+          }).join(', ')}`);
+          localLines.push(`- **Status Privasi**: 🔒 Hanya pesan dari nomor yang disetujui yang dimuat.`);
+          if (focusTopic) localLines.push(`- **Fokus Pencarian**: *"${focusTopic}"*`);
+          localLines.push('');
+          localLines.push('---');
+          localLines.push('> *Koneksi ke backend utama sedang sinkronisasi. Berikut data nomor yang telah disetujui:*');
+          validJids.forEach(j => {
+            const c = (this.contacts || []).find(item => item.id === j);
+            if (c) {
+              localLines.push(`- **${c.name || c.phone || j}**: Pesan terakhir: *"${c.lastMessage || 'Tidak ada pesan'}"* ${c.hasFile ? '(🔴 Memuat berkas)' : ''}`);
+            }
+          });
+          localFallbackSummary = localLines.join('\n');
+        } catch (_) {}
+
+        if (bodyEl) {
+          if (localFallbackSummary) {
+            this.lastSummaryMarkdown = localFallbackSummary;
+            bodyEl.innerHTML = `
+              <div style="padding: 10px 14px; margin-bottom: 12px; border-radius: 8px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: #fde68a; font-size: 0.76rem;">
+                <i class="fa-solid fa-circle-info"></i> Memuat ringkasan cepat berbasis riwayat lokal.
+              </div>
+              <div class="wa-summary-content-box">
+                ${this.renderMarkdownSummaryToHtml(localFallbackSummary)}
+              </div>
+            `;
+            if (subtitleEl) subtitleEl.textContent = 'Rangkuman cepat lokal aktif';
+            if (statsMeta) statsMeta.textContent = `${validJids.length} Nomor Diverifikasi`;
+          } else {
+            bodyEl.innerHTML = `
+              <div style="padding: 20px; border-radius: 12px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #fca5a5; text-align: center;">
+                <i class="fa-solid fa-triangle-exclamation" style="font-size: 1.8rem; color: #ef4444; margin-bottom: 10px;"></i>
+                <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 6px;">Gagal Menghubungi Layanan Rangkuman AI</div>
+                <p style="font-size: 0.8rem; color: #cbd5e1; margin-bottom: 14px;">${escapeHtml(err.message || 'Koneksi ke server WhatsApp terputus')}</p>
+                <button type="button" class="btn btn-sm btn-outline" id="btnRetryWaSummaryFromPopup" style="border-color: rgba(239, 68, 68, 0.5); color: #fecaca;">
+                  <i class="fa-solid fa-rotate-right"></i> Coba Rangkum Lagi
+                </button>
+              </div>
+            `;
+            document.getElementById('btnRetryWaSummaryFromPopup')?.addEventListener('click', () => {
+              AudioEngine.click?.();
+              this.openSummaryResultPopup(validJids, focusTopic, options);
+            });
+            if (subtitleEl) subtitleEl.textContent = 'Gagal memuat rangkuman';
+            if (statsMeta) statsMeta.textContent = 'Kesalahan saat memproses rangkuman';
+          }
         }
-        if (subtitleEl) subtitleEl.textContent = 'Gagal memuat rangkuman';
-        if (metaFooter) metaFooter.textContent = 'Kesalahan saat memproses rangkuman';
         return { success: false, error: err.message };
       }
     }
