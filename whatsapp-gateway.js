@@ -34,6 +34,33 @@ function hashPin(pin) {
   return crypto.createHash('sha256').update(String(pin).trim()).digest('hex');
 }
 
+/**
+ * Unwrap nested / wrapped WAMessage containers (e.g. documentWithCaptionMessage,
+ * viewOnceMessage, viewOnceMessageV2, ephemeralMessage, editedMessage).
+ */
+function unwrapMessage(msg) {
+  if (!msg) return msg;
+  let curr = msg.message || msg;
+  while (curr) {
+    if (curr.ephemeralMessage?.message) {
+      curr = curr.ephemeralMessage.message;
+    } else if (curr.viewOnceMessage?.message) {
+      curr = curr.viewOnceMessage.message;
+    } else if (curr.viewOnceMessageV2?.message) {
+      curr = curr.viewOnceMessageV2.message;
+    } else if (curr.viewOnceMessageV2Extension?.message) {
+      curr = curr.viewOnceMessageV2Extension.message;
+    } else if (curr.documentWithCaptionMessage?.message) {
+      curr = curr.documentWithCaptionMessage.message;
+    } else if (curr.editedMessage?.message) {
+      curr = curr.editedMessage.message;
+    } else {
+      break;
+    }
+  }
+  return curr;
+}
+
 class WhatsAppGateway {
   constructor(userId = 'default', options = {}) {
     this.userId = userId;
@@ -186,8 +213,9 @@ class WhatsAppGateway {
   }
 
   extractMediaFromMessage(msg) {
-    if (!msg || !msg.message) return null;
-    const m = msg.message;
+    if (!msg) return null;
+    const m = unwrapMessage(msg);
+    if (!m) return null;
     if (m.imageMessage) {
       const img = m.imageMessage;
       const thumb = this.safeBufferToBase64(img.jpegThumbnail);
@@ -231,12 +259,25 @@ class WhatsAppGateway {
     }
     if (m.audioMessage) {
       const aud = m.audioMessage;
+      const isM4a = aud.mimetype && aud.mimetype.includes('mp4');
       return {
         type: 'audio',
-        fileName: 'audio.ogg',
+        fileName: isM4a ? 'audio.m4a' : 'audio.ogg',
         mimetype: aud.mimetype || 'audio/ogg',
         size: aud.fileLength ? Number(aud.fileLength.low || aud.fileLength) : 0,
         seconds: aud.seconds ? Number(aud.seconds) : null,
+        thumbnail: null,
+        caption: '',
+        url: null
+      };
+    }
+    if (m.stickerMessage) {
+      const stk = m.stickerMessage;
+      return {
+        type: 'sticker',
+        fileName: 'sticker.webp',
+        mimetype: stk.mimetype || 'image/webp',
+        size: stk.fileLength ? Number(stk.fileLength.low || stk.fileLength) : 0,
         thumbnail: null,
         caption: '',
         url: null
@@ -258,13 +299,16 @@ class WhatsAppGateway {
   }
 
   async downloadAndSaveMedia(msg, messageItem) {
-    if (!msg || !msg.message) return null;
-    const isMedia = Boolean(msg.message.imageMessage || msg.message.documentMessage || msg.message.videoMessage || msg.message.audioMessage || msg.message.stickerMessage);
+    if (!msg) return null;
+    const unwrapped = unwrapMessage(msg);
+    if (!unwrapped) return null;
+    const isMedia = Boolean(unwrapped.imageMessage || unwrapped.documentMessage || unwrapped.videoMessage || unwrapped.audioMessage || unwrapped.stickerMessage);
     if (!isMedia) return null;
 
     try {
+      const normalizedMsg = { ...msg, message: unwrapped };
       const buffer = await downloadMediaMessage(
-        msg,
+        normalizedMsg,
         'buffer',
         {},
         {
@@ -275,7 +319,15 @@ class WhatsAppGateway {
 
       if (buffer && buffer.length > 0) {
         const id = messageItem?.id || msg.key?.id || `media_${Date.now()}`;
-        const rawFileName = messageItem?.media?.fileName || msg.message?.documentMessage?.fileName || (msg.message.imageMessage ? 'photo.jpg' : 'file.bin');
+        let rawFileName = messageItem?.media?.fileName;
+        if (!rawFileName) {
+          if (unwrapped.documentMessage?.fileName) rawFileName = unwrapped.documentMessage.fileName;
+          else if (unwrapped.imageMessage) rawFileName = 'photo.jpg';
+          else if (unwrapped.audioMessage) rawFileName = (unwrapped.audioMessage.mimetype && unwrapped.audioMessage.mimetype.includes('mp4')) ? 'audio.m4a' : 'audio.ogg';
+          else if (unwrapped.videoMessage) rawFileName = 'video.mp4';
+          else if (unwrapped.stickerMessage) rawFileName = 'sticker.webp';
+          else rawFileName = 'file.bin';
+        }
         const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
         const savedFilename = `wa_${id}_${cleanFileName}`;
 
@@ -285,7 +337,7 @@ class WhatsAppGateway {
         fs.writeFileSync(filePath, buffer);
 
         if (!messageItem.media) {
-          messageItem.media = this.extractMediaFromMessage(msg) || {};
+          messageItem.media = this.extractMediaFromMessage(normalizedMsg) || {};
         }
         messageItem.media.url = `/uploads/${savedFilename}`;
         messageItem.media.size = buffer.length;
@@ -808,6 +860,7 @@ class WhatsAppGateway {
       pairingCode: this.status.pairingCode || null,
       contactCount: this.contacts.size,
       hasPin: this.hasConfiguredPin(),
+      hasStoredSession: this.hasStoredSession(),
       userId: this.userId,
       isMaster: this.isMaster,
       updatedAt: this.status.updatedAt
@@ -1047,14 +1100,16 @@ class WhatsAppGateway {
         }
 
         if (Array.isArray(messages)) {
-          for (const msg of messages) {
+          for (const rawMsg of messages) {
+            if (!rawMsg) continue;
+            const msg = { ...rawMsg, message: unwrapMessage(rawMsg) };
             if (!msg.message) continue;
-            const rawJid = msg.key.remoteJid;
+            const rawJid = msg.key?.remoteJid;
             if (!rawJid || rawJid === 'status@broadcast') continue;
             const jid = await this.resolveLidToPhone(rawJid);
             if (jid.endsWith('@lid')) continue;
 
-            const fromMe = Boolean(msg.key.fromMe);
+            const fromMe = Boolean(msg.key?.fromMe);
             const text = msg.message.conversation ||
                          msg.message.extendedTextMessage?.text ||
                          msg.message.imageMessage?.caption ||
@@ -1064,7 +1119,7 @@ class WhatsAppGateway {
                          (msg.message.documentMessage ? `📄 [Dokumen: ${msg.message.documentMessage.fileName || 'file'}]` : '') ||
                          (msg.message.stickerMessage ? '🏷️ [Stiker]' : '') ||
                          '';
-            if (!text) continue;
+            if (!text && !msg.message.imageMessage && !msg.message.audioMessage && !msg.message.documentMessage && !msg.message.videoMessage && !msg.message.stickerMessage) continue;
 
             let ts = Date.now();
             if (msg.messageTimestamp) {
@@ -1197,14 +1252,16 @@ class WhatsAppGateway {
       // Menangani Pesan Masuk / Keluar
       this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
         let hasNew = false;
-        for (const msg of messages) {
+        for (const rawMsg of messages) {
+          if (!rawMsg) continue;
+          const msg = { ...rawMsg, message: unwrapMessage(rawMsg) };
           if (!msg.message) continue;
-          const rawJid = msg.key.remoteJid;
+          const rawJid = msg.key?.remoteJid;
           if (!rawJid || rawJid === 'status@broadcast') continue;
           const jid = await this.resolveLidToPhone(rawJid);
           if (jid.endsWith('@lid')) continue;
 
-          const fromMe = Boolean(msg.key.fromMe);
+          const fromMe = Boolean(msg.key?.fromMe);
           const text = msg.message.conversation ||
                        msg.message.extendedTextMessage?.text ||
                        msg.message.imageMessage?.caption ||
@@ -1215,7 +1272,7 @@ class WhatsAppGateway {
                        (msg.message.stickerMessage ? '🏷️ [Stiker]' : '') ||
                        '';
 
-          if (!text && !msg.message.imageMessage && !msg.message.audioMessage && !msg.message.documentMessage && !msg.message.videoMessage) continue;
+          if (!text && !msg.message.imageMessage && !msg.message.audioMessage && !msg.message.documentMessage && !msg.message.videoMessage && !msg.message.stickerMessage) continue;
 
           let ts = Date.now();
           if (msg.messageTimestamp) {
@@ -1457,18 +1514,23 @@ class WhatsAppGateway {
     let outgoingText = text || '';
 
     const media = options && options.media ? options.media : null;
+    let mediaBuffer = null;
     if (media && (media.data || media.buffer || media.url)) {
-      let mediaBuffer = null;
-      if (Buffer.isBuffer(media.data)) {
-        mediaBuffer = media.data;
-      } else if (Buffer.isBuffer(media.buffer)) {
-        mediaBuffer = media.buffer;
-      } else if (typeof media.data === 'string' && media.data.startsWith('data:')) {
-        const b64 = media.data.replace(/^data:[^;]+;base64,/, '');
-        mediaBuffer = Buffer.from(b64, 'base64');
-      } else if (typeof media.data === 'string' && media.data.startsWith('/uploads/')) {
-        const localPath = path.join(__dirname, 'data', 'uploads', path.basename(media.data));
-        if (fs.existsSync(localPath)) mediaBuffer = fs.readFileSync(localPath);
+      const rawSource = media.data || media.buffer || media.url;
+      if (Buffer.isBuffer(rawSource)) {
+        mediaBuffer = rawSource;
+      } else if (typeof rawSource === 'string') {
+        if (rawSource.startsWith('data:')) {
+          const b64 = rawSource.replace(/^data:[^;]+;base64,/, '');
+          mediaBuffer = Buffer.from(b64, 'base64');
+        } else if (rawSource.startsWith('/uploads/') || rawSource.includes('uploads/')) {
+          const localPath = path.join(__dirname, 'data', 'uploads', path.basename(rawSource));
+          if (fs.existsSync(localPath)) mediaBuffer = fs.readFileSync(localPath);
+        } else if (/^[A-Za-z0-9+/=]+$/.test(rawSource) && rawSource.length > 50) {
+          try {
+            mediaBuffer = Buffer.from(rawSource, 'base64');
+          } catch (_) {}
+        }
       }
 
       if (mediaBuffer && mediaBuffer.length > 0) {
@@ -1528,6 +1590,9 @@ class WhatsAppGateway {
     }
 
     if (!sent) {
+      if (!outgoingText.trim()) {
+        throw new Error('Pesan WhatsApp tidak boleh kosong.');
+      }
       sent = await this.sock.sendMessage(targetJid, { text: outgoingText });
     }
 
@@ -1539,6 +1604,7 @@ class WhatsAppGateway {
       timestamp: ts,
       senderName: 'Saya',
       status: 'sent',
+      ...(options && options.tempId ? { tempId: options.tempId } : {}),
       ...(messageItemMedia ? { media: messageItemMedia } : {})
     };
 

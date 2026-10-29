@@ -5894,9 +5894,17 @@ async function requestHandler(req, res) {
     }
 
     // 1. Cek apakah di memori pesan kontak sudah tercatat URL berkas ini
-    if (jid && tenant.gateway.messages) {
-      const msgList = tenant.gateway.messages.get(jid) || [];
-      const existingMsg = msgList.find(m => m.id === msgId);
+    if (tenant.gateway) {
+      const msgList = (jid && typeof tenant.gateway.getMessages === 'function')
+        ? tenant.gateway.getMessages(jid)
+        : (jid && tenant.gateway.messages ? (tenant.gateway.messages.get(jid) || []) : []);
+      let existingMsg = msgList.find(m => m.id === msgId);
+      if (!existingMsg && tenant.gateway.messages) {
+        for (const list of tenant.gateway.messages.values()) {
+          const found = list.find(m => m.id === msgId);
+          if (found) { existingMsg = found; break; }
+        }
+      }
       if (existingMsg?.media?.url) {
         return sendJSON(res, 200, { success: true, url: existingMsg.media.url, ready: true });
       }
@@ -5955,8 +5963,10 @@ async function requestHandler(req, res) {
 
     // 4. Deteksi tautan WPS / Office Cloud jika tersedia di pesan obrolan
     let cloudDocUrl = null;
-    if (jid && tenant.gateway.messages) {
-      const msgList = tenant.gateway.messages.get(jid) || [];
+    if (tenant.gateway) {
+      const msgList = (jid && typeof tenant.gateway.getMessages === 'function')
+        ? tenant.gateway.getMessages(jid)
+        : (jid && tenant.gateway.messages ? (tenant.gateway.messages.get(jid) || []) : []);
       const cloudRegex = /https?:\/\/(?:[a-zA-Z0-9-]+\.)?(?:wps\.com|live\.com|office\.com|google\.com)\/[^\s<>"']+/i;
       for (const m of msgList) {
         if (m.text) {
@@ -5990,7 +6000,7 @@ async function requestHandler(req, res) {
       return sendJSON(res, 400, { success: false, error: 'Parameter jid dan teks atau media wajib diisi.' });
     }
     try {
-      const message = await tenant.gateway.sendMessage(body.jid, body.text || '', { media: body.media });
+      const message = await tenant.gateway.sendMessage(body.jid, body.text || '', { media: body.media, tempId: body.tempId });
       return sendJSON(res, 200, { success: true, message });
     } catch (err) {
       return sendJSON(res, 500, { success: false, error: err.message });

@@ -42733,19 +42733,32 @@ Aturan:
         this.fetchMobileLinkQr();
         this.fetchConnectedDevices();
       } else {
-        this.contacts = [];
-        this.activeContact = null;
-        this.updateContactChipUI();
-        if (STATE.chatMode === 'whatsapp') {
-          this.renderSidebarWaChats();
-          this.renderEmptyWaState();
+        const isReconnectingOrHasSession = Boolean(status.connecting || status.hasStoredSession || this.status?.hasStoredSession);
+        if (!isReconnectingOrHasSession) {
+          this.contacts = [];
+          this.activeContact = null;
+          this.updateContactChipUI();
+          if (STATE.chatMode === 'whatsapp') {
+            this.renderSidebarWaChats();
+            this.renderEmptyWaState();
+          }
+          if (els.waContactCountDisplay) els.waContactCountDisplay.textContent = '0 Kontak';
+          if (els.waConnectedCard) els.waConnectedCard.style.display = 'none';
+          if (els.waMobileLinkCard) els.waMobileLinkCard.style.display = 'none';
+          if (els.waConnectedDevicesCard) els.waConnectedDevicesCard.style.display = 'none';
+          if (els.waPairMethodNav) els.waPairMethodNav.style.display = 'flex';
+          if (els.waQrSection) els.waQrSection.style.display = 'block';
+        } else {
+          // Sedang reconnect atau ada sesi tersimpan di disk: pertahankan kontak dan obrolan aktif!
+          if (els.waConnectedCard) els.waConnectedCard.style.display = 'flex';
+          if (els.waConnectedPhoneDisplay) els.waConnectedPhoneDisplay.textContent = (status.phone ? `${status.phone} (Menyambung...)` : 'Menyambung ulang...');
+          if (els.waContactCountDisplay) els.waContactCountDisplay.textContent = `${this.contacts.length || status.contactCount || 0} Kontak`;
+          if (els.waPairMethodNav) els.waPairMethodNav.style.display = 'none';
+          if (els.waQrSection) els.waQrSection.style.display = 'none';
+          if (this.contacts.length === 0 && (status.contactCount || 0) > 0) {
+            this.fetchContacts();
+          }
         }
-        if (els.waContactCountDisplay) els.waContactCountDisplay.textContent = '0 Kontak';
-        if (els.waConnectedCard) els.waConnectedCard.style.display = 'none';
-        if (els.waMobileLinkCard) els.waMobileLinkCard.style.display = 'none';
-        if (els.waConnectedDevicesCard) els.waConnectedDevicesCard.style.display = 'none';
-        if (els.waPairMethodNav) els.waPairMethodNav.style.display = 'flex';
-        if (els.waQrSection) els.waQrSection.style.display = 'block';
         if (status.qr) {
           this.handleQrUpdate(status.qr);
         } else if (this.lastValidQr) {
@@ -43380,6 +43393,10 @@ Aturan:
         const q = `?jid=${encodeURIComponent(jid)}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
         const res = await this.waFetch('/api/wa/messages' + q, { headers: this.getAuthHeaders() }, 2);
         const data = await res.json().catch(() => null);
+        if (this.activeContact?.id !== jid) {
+          // Navigasi telah berpindah ke kontak lain, abaikan respon lama
+          return;
+        }
         const list = (data && data.messages) || [];
 
         if (list.length === 0) {
@@ -43792,7 +43809,10 @@ Aturan:
         } catch (_) {}
       }
 
-      const fullUrl = url ? (url.startsWith('http') ? url : `${window.location.origin}${url}`) : '';
+      const baseUrl = (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:'))
+        ? window.location.origin
+        : (this.activeTunnelUrl || 'http://localhost:4040');
+      const fullUrl = url ? (url.startsWith('http') ? url : `${baseUrl}${url}`) : '';
 
       if (btnOpenTab) {
         if (url) {
@@ -43942,7 +43962,10 @@ Aturan:
       if (targetUrl) {
         showToast(`⏳ Mengunduh berkas ${fileName}...`, 'info');
         try {
-          const fetchUrl = targetUrl.startsWith('http') ? targetUrl : `${window.location.origin}${targetUrl}`;
+          const baseUrl = (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:'))
+            ? window.location.origin
+            : (this.activeTunnelUrl || 'http://localhost:4040');
+          const fetchUrl = targetUrl.startsWith('http') ? targetUrl : `${baseUrl}${targetUrl}`;
           const res = await fetch(fetchUrl);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const blob = await res.blob();
