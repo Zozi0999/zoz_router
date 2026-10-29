@@ -17094,3 +17094,11 @@ body.mermaid-has-fullscreen {
     font-weight: 700;
     box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
 }
+
+#waSummaryContactSelect option,
+#waSummaryModelSelect option {
+    background-color: #0f172a;
+    color: #f1f5f9;
+    padding: 8px 12px;
+}
+
