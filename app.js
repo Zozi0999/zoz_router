@@ -42104,24 +42104,26 @@ Aturan:
         if (!this.pin && !localStorage.getItem('zoz_wa_pin')) {
           const rawTermCfg = localStorage.getItem('zoz_remote_terminal_config');
           if (rawTermCfg) {
-            const termCfg = JSON.parse(rawTermCfg);
-            if (termCfg && termCfg.pin && String(termCfg.pin).trim().length >= 4) {
-              const tPin = String(termCfg.pin).trim();
-              this.pin = tPin;
-              this.userId = 'usr_kaisar_master';
-              this.isMaster = true;
-              localStorage.setItem('zoz_wa_pin', tPin);
-              localStorage.setItem('zoz_wa_mobile_pin', tPin);
-              localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
-              if (termCfg.remoteHost && String(termCfg.remoteHost).includes('.trycloudflare.com')) {
-                const cleanTun = String(termCfg.remoteHost).replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/+$/, '');
-                if (!this.isDeadTunnelUrl(cleanTun)) {
-                  this.activeTunnelUrl = cleanTun;
-                  this.apiBaseUrl = cleanTun;
-                  localStorage.setItem('zoz_wa_api_url', cleanTun);
+            try {
+              const termCfg = JSON.parse(rawTermCfg);
+              if (termCfg && termCfg.pin && String(termCfg.pin).trim().length >= 4) {
+                const tPin = String(termCfg.pin).trim();
+                this.pin = tPin;
+                this.userId = 'usr_kaisar_master';
+                this.isMaster = true;
+                localStorage.setItem('zoz_wa_pin', tPin);
+                localStorage.setItem('zoz_wa_mobile_pin', tPin);
+                localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+                if (termCfg.remoteHost && String(termCfg.remoteHost).includes('.trycloudflare.com')) {
+                  const cleanTun = String(termCfg.remoteHost).replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:').replace(/\/+$/, '');
+                  if (!this.isDeadTunnelUrl(cleanTun)) {
+                    this.activeTunnelUrl = cleanTun;
+                    this.apiBaseUrl = cleanTun;
+                    localStorage.setItem('zoz_wa_api_url', cleanTun);
+                  }
                 }
               }
-            }
+            } catch (_) {}
           }
         }
 
@@ -42212,6 +42214,9 @@ Aturan:
     },
 
     attachListeners() {
+      if (this._listenersAttached) return;
+      this._listenersAttached = true;
+
       // Chat mode switcher pills
       els.btnChatModeAi?.addEventListener('click', () => {
         AudioEngine.click();
@@ -44066,31 +44071,49 @@ Aturan:
         const bubble = els.messagesList?.querySelector(`[data-msg-id="${msgId}"]`);
         if (bubble) {
           if (media.type === 'image' && media.url) {
-            const imgThumb = bubble.querySelector('.wa-chat-img-thumb');
-            if (imgThumb) {
-              imgThumb.src = media.url;
-              imgThumb.classList.remove('wa-thumb-blurred');
+            let imgWrap = bubble.querySelector('.wa-bubble-image-wrap');
+            if (!imgWrap) {
+              imgWrap = document.createElement('div');
+              imgWrap.className = 'wa-bubble-image-wrap';
+              imgWrap.style.cssText = 'margin-top: 6px; cursor: pointer; border-radius: 8px; overflow: hidden; max-width: 260px;';
+              imgWrap.innerHTML = `<img src="${escapeHtml(media.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" style="width: 100%; height: auto; display: block; border-radius: 8px;" loading="lazy" />`;
+              bubble.querySelector('.wa-bubble-meta')?.before(imgWrap) || bubble.appendChild(imgWrap);
+            } else {
+              const img = imgWrap.querySelector('img');
+              if (img) img.src = media.url;
             }
-            const overlay = bubble.querySelector('.wa-img-load-overlay');
-            if (overlay) overlay.remove();
-            const placeholder = bubble.querySelector('.wa-media-placeholder-badge');
-            if (placeholder) {
-              const newWrap = document.createElement('div');
-              newWrap.className = 'wa-bubble-image-wrap';
-              newWrap.innerHTML = `<img src="${escapeHtml(media.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" loading="lazy" />`;
-              placeholder.replaceWith(newWrap);
-              newWrap.addEventListener('click', () => {
-                if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([media.url], 0);
-              });
+            imgWrap.onclick = () => {
+              if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([media.url], 0);
+            };
+          } else if (media.type === 'audio' && media.url) {
+            let audioWrap = bubble.querySelector('.wa-bubble-audio-wrap');
+            if (!audioWrap) {
+              audioWrap = document.createElement('div');
+              audioWrap.className = 'wa-bubble-audio-wrap';
+              audioWrap.style.marginTop = '6px';
+              audioWrap.innerHTML = `<audio controls src="${escapeHtml(media.url)}" preload="metadata" style="max-width: 100%; height: 32px; border-radius: 20px; outline: none;"></audio>`;
+              bubble.querySelector('.wa-bubble-meta')?.before(audioWrap) || bubble.appendChild(audioWrap);
+            } else {
+              const a = audioWrap.querySelector('audio');
+              if (a) a.src = media.url;
             }
-          } else if (media.type === 'document' && media.url) {
-            const btnDownload = bubble.querySelector('.btn-wa-doc-download');
-            if (btnDownload) {
-              btnDownload.onclick = (e) => {
-                e.stopPropagation();
-                this.downloadDocument(media.fileName, media.url, msgId);
-              };
+          } else if (media.type === 'document') {
+            let docChip = bubble.querySelector('.wa-bubble-doc-chip');
+            if (!docChip) {
+              docChip = document.createElement('div');
+              docChip.className = 'wa-bubble-doc-chip';
+              docChip.style.cssText = 'margin-top: 6px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer;';
+              docChip.title = 'Klik untuk membuka/mengunduh dokumen';
+              docChip.innerHTML = `
+                <i class="fa-solid fa-file-lines" style="color: #38bdf8; font-size: 1rem;"></i>
+                <span style="font-size: 0.8rem; font-weight: 600; color: #f8fafc; text-decoration: underline;">${escapeHtml(media.fileName || 'dokumen')}</span>
+                <i class="fa-solid fa-download" style="font-size: 0.72rem; opacity: 0.75; margin-left: 4px;"></i>
+              `;
+              bubble.querySelector('.wa-bubble-meta')?.before(docChip) || bubble.appendChild(docChip);
             }
+            docChip.onclick = () => {
+              this.openDocumentPreview(media, { id: msgId });
+            };
           }
         }
       }
@@ -44265,14 +44288,55 @@ Aturan:
         `;
       }
 
+      // Media element rendering
+      let mediaHtml = '';
+      if (msg.media) {
+        if (msg.media.type === 'image' && msg.media.url) {
+          mediaHtml = `
+            <div class="wa-bubble-image-wrap" style="margin-top: 6px; cursor: pointer; border-radius: 8px; overflow: hidden; max-width: 260px;" data-img-url="${escapeHtml(msg.media.url)}">
+              <img src="${escapeHtml(msg.media.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" style="width: 100%; height: auto; display: block; border-radius: 8px;" loading="lazy" />
+            </div>
+          `;
+        } else if (msg.media.type === 'audio' && msg.media.url) {
+          mediaHtml = `
+            <div class="wa-bubble-audio-wrap" style="margin-top: 6px;">
+              <audio controls src="${escapeHtml(msg.media.url)}" preload="metadata" style="max-width: 100%; height: 32px; border-radius: 20px; outline: none;"></audio>
+            </div>
+          `;
+        } else if (msg.media.type === 'document') {
+          const docName = msg.media.fileName || 'dokumen';
+          mediaHtml = `
+            <div class="wa-bubble-doc-chip" style="margin-top: 6px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer;" title="Klik untuk membuka/mengunduh dokumen">
+              <i class="fa-solid fa-file-lines" style="color: #38bdf8; font-size: 1rem;"></i>
+              <span style="font-size: 0.8rem; font-weight: 600; color: #f8fafc; text-decoration: underline;">${escapeHtml(docName)}</span>
+              <i class="fa-solid fa-download" style="font-size: 0.72rem; opacity: 0.75; margin-left: 4px;"></i>
+            </div>
+          `;
+        }
+      }
+
       wrap.innerHTML = `
         ${senderHeaderHtml}
         ${textContent ? `<div class="wa-bubble-text">${escapeHtml(textContent)}</div>` : ''}
+        ${mediaHtml}
         <div class="wa-bubble-meta">
           <span>${timeStr}</span>
           ${statusIcon}
         </div>
       `;
+
+      const imgWrap = wrap.querySelector('.wa-bubble-image-wrap');
+      if (imgWrap && msg.media?.url) {
+        imgWrap.addEventListener('click', () => {
+          if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([msg.media.url], 0);
+        });
+      }
+      const docChip = wrap.querySelector('.wa-bubble-doc-chip');
+      if (docChip && msg.media) {
+        docChip.addEventListener('click', () => {
+          this.openDocumentPreview(msg.media, msg);
+        });
+      }
 
       if (msg.reaction) {
         wrap.style.position = 'relative';
