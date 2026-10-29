@@ -41615,10 +41615,16 @@ Aturan:
     },
 
     getAuthHeaders(customHeaders = {}) {
-      if (customHeaders && customHeaders['Content-Type']) {
-        return { 'Content-Type': 'text/plain;charset=UTF-8' };
+      const headers = { ...customHeaders };
+      const effectivePin = this.getPin();
+      const effectiveUid = this.getUserId();
+      if (effectivePin && !headers['x-wa-pin'] && !headers['X-WA-PIN']) {
+        headers['x-wa-pin'] = effectivePin;
       }
-      return {};
+      if (effectiveUid && !headers['x-wa-user-id'] && !headers['X-WA-USER-ID']) {
+        headers['x-wa-user-id'] = effectiveUid;
+      }
+      return headers;
     },
 
     async saveSecurityPin() {
@@ -42301,7 +42307,7 @@ Aturan:
       });
 
       // Consent Modal & Summary Pop-up Listeners
-      this.bindConsentAndSummaryModalListeners();
+      this.bindSummaryModalListeners();
 
       // Refresh / Sync Contacts Button
       els.btnSyncWaContacts?.addEventListener('click', () => {
@@ -42562,6 +42568,13 @@ Aturan:
               }
               if (els.waContactDropdownMenu && els.waContactDropdownMenu.style.display === 'block') {
                 this.renderContactDropdownList();
+              }
+            } else if (parsed.event === 'chat_cleared') {
+              const clearedJid = parsed.data?.jid;
+              const clearedNum = parsed.data?.numOnly;
+              if (this.activeContact && (this.activeContact.id === clearedJid || (clearedNum && this.activeContact.id.startsWith(clearedNum)))) {
+                this.messages = [];
+                this.renderMessages();
               }
             }
           } catch (_) {}
@@ -44456,7 +44469,7 @@ Aturan:
       selectEl.appendChild(optAll);
 
       const list = Array.isArray(this.contacts) ? [...this.contacts] : [];
-      list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      list.sort((a, b) => (b.lastTimestamp || b.timestamp || 0) - (a.lastTimestamp || a.timestamp || 0));
 
       list.forEach(c => {
         if (!c || !c.id) return;
@@ -44582,6 +44595,10 @@ Aturan:
       }
     },
 
+    bindConsentAndSummaryModalListeners() {
+      this.bindSummaryModalListeners();
+    },
+
     bindSummaryModalListeners() {
       if (this._summaryModalBound) return;
       this._summaryModalBound = true;
@@ -44607,6 +44624,21 @@ Aturan:
       document.getElementById('btnCloseWaSummaryFooter')?.addEventListener('click', () => {
         AudioEngine.click();
         closeSummaryModal(true);
+      });
+
+      // Backdrop click dismissal
+      summaryModal?.addEventListener('click', (e) => {
+        if (e.target === summaryModal) {
+          AudioEngine.click?.();
+          closeSummaryModal(true);
+        }
+      });
+
+      // Escape key dismissal
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && summaryModal && summaryModal.style.display !== 'none') {
+          closeSummaryModal(true);
+        }
       });
 
       const contactSelect = document.getElementById('waSummaryContactSelect');
@@ -44878,6 +44910,13 @@ Aturan:
 
       if (autoStart) {
         this.handleStartSummaryClick();
+      }
+
+      if (this.pendingConsentResolver) {
+        try {
+          this.pendingConsentResolver({ approved: false, approvedJids: [], success: false, text: '[DIBATALKAN]: Permintaan rangkuman baru dibuka.' });
+        } catch (_) {}
+        this.pendingConsentResolver = null;
       }
 
       return new Promise((resolve) => {

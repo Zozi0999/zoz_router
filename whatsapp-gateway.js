@@ -1630,11 +1630,35 @@ class WhatsAppGateway {
       }
 
       const formattedName = isGroup && !displayName.startsWith('👥') ? `👥 ${displayName}` : displayName;
-      const msgs = this.messages.get(c.id) || [];
+      let msgs = this.messages.get(c.id) || [];
+      if (msgs.length === 0) {
+        const numOnly = c.id.split('@')[0];
+        for (const [k, m] of this.messages.entries()) {
+          if (numOnly && k.startsWith(numOnly)) {
+            msgs = m;
+            break;
+          }
+        }
+      }
       const hasFile = Boolean(
         c.hasFile ||
-        msgs.some(m => m.hasFile || m.media || (m.text && (m.text.includes('[Dokumen:') || m.text.includes('[Foto]')))) ||
-        (c.lastMessage && (c.lastMessage.includes('[Dokumen:') || c.lastMessage.includes('[Foto]')))
+        msgs.some(m => m.hasFile || m.media || (m.text && (
+          m.text.includes('[Dokumen:') ||
+          m.text.includes('[Document:') ||
+          m.text.includes('[Foto]') ||
+          m.text.includes('[Photo]') ||
+          m.text.includes('[Audio') ||
+          m.text.includes('[Video') ||
+          m.text.includes('[Stiker]') ||
+          m.text.includes('wps.com')
+        ))) ||
+        (c.lastMessage && (
+          c.lastMessage.includes('[Dokumen:') ||
+          c.lastMessage.includes('[Document:') ||
+          c.lastMessage.includes('[Foto]') ||
+          c.lastMessage.includes('[Photo]') ||
+          c.lastMessage.includes('wps.com')
+        ))
       );
 
       return {
@@ -1716,14 +1740,25 @@ class WhatsAppGateway {
     if (!targetJid.includes('@')) {
       targetJid = `${targetJid.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
     }
-    this.messages.delete(targetJid);
-    const contact = this.contacts.get(targetJid);
-    if (contact) {
-      contact.lastMessage = '';
-      contact.unreadCount = 0;
+    const numOnly = targetJid.split('@')[0];
+    const keysToDelete = [];
+    for (const k of this.messages.keys()) {
+      if (k === targetJid || (numOnly && k.startsWith(numOnly))) {
+        keysToDelete.push(k);
+      }
+    }
+    for (const k of keysToDelete) {
+      this.messages.delete(k);
+    }
+    for (const [k, c] of this.contacts.entries()) {
+      if (k === targetJid || (numOnly && k.startsWith(numOnly))) {
+        c.lastMessage = '';
+        c.unreadCount = 0;
+      }
     }
     this.savePersistedData();
     this.broadcast('contacts', this.getContacts());
+    this.broadcast('chat_cleared', { jid: targetJid, numOnly });
     return true;
   }
 }
