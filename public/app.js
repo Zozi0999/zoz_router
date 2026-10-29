@@ -9423,7 +9423,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       this.lastRenderTime = 0;
       this.isDone = false;
       this.isLoopTerminated = false;
-      this.transportGate = (typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.createEntropyStreamGate === 'function')
+      this.transportGate = (!this.options.skipEntropyGate && typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.createEntropyStreamGate === 'function')
         ? TEXT_SAFETY.createEntropyStreamGate(this.options.userPrompt || '', this.options)
         : null;
     }
@@ -10096,64 +10096,125 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     return code.slice(0, lastScriptIdx) + repairedScriptBody;
   }
 
-  // Pure Mathematical Autoregressive Token Boundary Slicer
-  // Mengeliminasi token parsial yang terputus di tengah kata/karakter secara matematis murni
+  // Pure Mathematical Autoregressive Token Boundary Slicer (Canonical BPE Projection \Pi_BPE)
+  // Mengeliminasi fragmen subword/UTF-8/tag rusak di titik potong & menormalkan batas spasi ekor
+  // agar distribusi autoregresif P(x_{k+1} | x_{1..k}) meregenerasi token utuh tanpa EOS prematur.
   function sliceLastSafeTokenBoundary(text) {
     if (!text || typeof text !== 'string') return text || '';
-    if (text.length < 5) return text;
+    let cleaned = text.replace(/[\uFFFD\uD800-\uDBFF]+$/, '');
+    if (cleaned.length < 5) return cleaned.replace(/[ \t]+$/, '');
 
     // 1. Rollback jika terputus di tengah tag HTML pembuka/penutup yang belum selesai (mis. '<div cla' atau '</sp')
-    const lastLt = text.lastIndexOf('<');
-    const lastGt = text.lastIndexOf('>');
-    if (lastLt > lastGt && (text.length - lastLt) < 40) {
-      return text.slice(0, lastLt);
+    const lastLt = cleaned.lastIndexOf('<');
+    const lastGt = cleaned.lastIndexOf('>');
+    if (lastLt > lastGt && (cleaned.length - lastLt) < 40 && /^<[a-zA-Z/!]/.test(cleaned.slice(lastLt))) {
+      const candidate = cleaned.slice(0, lastLt).replace(/[ \t]+$/, '');
+      if (candidate.length >= 4) return candidate;
     }
 
-    // 2. Rollback jika terputus di dalam string quote yang belum tertutup di ekor
-    const lastQuote = text.lastIndexOf('"');
-    if (lastQuote !== -1 && (text.length - lastQuote) < 25) {
-      const countQuotes = (text.match(/"/g) || []).length;
-      if (countQuotes % 2 !== 0) {
-        return text.slice(0, lastQuote);
+    // 2. Rollback jika terputus di dalam string quote ganda yang belum tertutup pada baris terakhir
+    const lastNlIdx = cleaned.lastIndexOf('\n');
+    const tailLine = lastNlIdx >= 0 ? cleaned.slice(lastNlIdx + 1) : cleaned;
+    const lastQuoteInLine = tailLine.lastIndexOf('"');
+    if (lastQuoteInLine !== -1 && (tailLine.length - lastQuoteInLine) < 28) {
+      const lineQuotes = (tailLine.match(/(?<!\\)"/g) || []).length;
+      if (lineQuotes % 2 !== 0) {
+        const absQuoteIdx = (lastNlIdx >= 0 ? lastNlIdx + 1 : 0) + lastQuoteInLine;
+        const candidate = cleaned.slice(0, absQuoteIdx).replace(/[ \t]+$/, '');
+        if (candidate.length >= 4) return candidate;
       }
     }
 
-    // 3. Mathematical token rollback ke boundary atomik alfanumerik terakhir
-    // Memotong mundur token alfanumerik yang terpotong di tengah kata/variabel
-    const trimmedEnd = text.trimEnd();
+    // 3. Jika sudah berakhir di baris baru atau tanda baca/emoji terminal yang sah, pertahankan token utuh (cukup pangkas spasi horizontal ekor)
+    if (/\n[ \t]*$/.test(cleaned)) {
+      return cleaned.replace(/[ \t]+$/, '');
+    }
+    const trimmedEnd = cleaned.replace(/[ \t]+$/, '');
+    const codePoints = Array.from(trimmedEnd.replace(/\uFE0F+$/, ''));
+    const lastCp = codePoints.length > 0 ? codePoints[codePoints.length - 1] : '';
+    if (lastCp && (/[.!?"'”’)\]}`>;|*_]/.test(lastCp) || /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/u.test(lastCp))) {
+      return trimmedEnd;
+    }
+
+    // 4. Mathematical subword rollback ke boundary atomik non-alfanumerik terakhir (tanpa meninggalkan trailing space yang memicu EOS/400)
     const brokenWordMatch = /([a-zA-Z0-9_\$]{1,35})$/.exec(trimmedEnd);
     if (brokenWordMatch && brokenWordMatch[1]) {
       const cutWord = brokenWordMatch[1];
       const cutIndex = trimmedEnd.length - cutWord.length;
-      if (cutIndex > 0) {
+      if (cutIndex >= 4) {
         const prevChar = trimmedEnd[cutIndex - 1];
-        if (/[\s\n\r,;:()[\]{}=+\-*/<>&|!?.'"]/.test(prevChar)) {
-          return trimmedEnd.slice(0, cutIndex);
+        if (/[\s\n\r,;:()[\]{}=+\-*/<>&|!?.'"`]/.test(prevChar)) {
+          const candidate = trimmedEnd.slice(0, cutIndex).replace(/[ \t]+$/, '');
+          if (candidate.length >= 4) return candidate;
         }
       }
     }
-    return text;
+    return trimmedEnd;
   }
 
-  // Zoz Autonomous Continuation Engine: Menyambungkan potongan kode tanpa merusak sintaks (strip basa-basi, fences, & overlap)
-  function stitchContinuationChunk(existingText, incomingChunk) {
+  // Exact Linear-Time O(M) Knuth-Morris-Pratt (\pi-Automaton) Suffix-Prefix Overlap Calculator
+  function computeKmpOverlapLength(tailStr, headStr) {
+    if (!tailStr || !headStr) return 0;
+    const maxLen = Math.min(2000, tailStr.length, headStr.length);
+    if (maxLen <= 0) return 0;
+    const p = headStr.slice(0, maxLen);
+    const t = tailStr.slice(-maxLen);
+    const combined = p + '\x00' + t;
+    const n = combined.length;
+    const pi = new Int32Array(n);
+    for (let i = 1; i < n; i++) {
+      let j = pi[i - 1];
+      while (j > 0 && combined.charCodeAt(i) !== combined.charCodeAt(j)) {
+        j = pi[j - 1];
+      }
+      if (combined.charCodeAt(i) === combined.charCodeAt(j)) {
+        j++;
+      }
+      pi[i] = j;
+    }
+    return pi[n - 1];
+  }
+
+  // Zoz Autonomous Continuation Engine: Menyambungkan potongan kode/teks tanpa merusak spasi BPE, sintaks, atau overlap
+  function stitchContinuationChunk(existingText, incomingChunk, stitchOpts = {}) {
     if (!incomingChunk || typeof incomingChunk !== 'string') return existingText || '';
     if (!existingText || typeof existingText !== 'string') return incomingChunk;
 
-    let chunk = incomingChunk.trim();
+    const rawNoTrail = incomingChunk.replace(/[ \t\r\n]+$/, '');
+    if (!rawNoTrail.trim()) return existingText;
 
-    // 1. Bersihkan kata pengantar / basa-basi model AI yang sering disisipkan di awal sambungan
-    chunk = chunk.replace(/^(?:[\s\r\n]*)(?:tentu|baik(?:lah)?|pasti|oke|siap|berikut(?:nya)?|ini(?:lah)?|lanjutan|kelanjutan|sambungan|melanjutkan)[^\n]*\n+/i, '');
-    chunk = chunk.replace(/^(?:[\s\r\n]*)(?:here\s+is\s+the\s+continuation|continuing\s+the\s+code|continuation|continued)[^\n]*\n+/i, '');
+    // 0. Deteksi Full-Prefix Echo pada provider yang menggemakan ulang seluruh assistant prefill
+    if (stitchOpts && stitchOpts.isLivePreview && existingText.startsWith(rawNoTrail)) {
+      return existingText;
+    }
+    if (rawNoTrail.startsWith(existingText)) {
+      let deltaAfterEcho = incomingChunk.slice(existingText.length);
+      if (!deltaAfterEcho) return existingText;
+      let mergedEcho = existingText + deltaAfterEcho;
+      if (mergedEcho.includes('<<<ZOZ_FILE') && !mergedEcho.includes('<<<END_ZOZ_FILE') && mergedEcho.includes('</html>')) {
+        mergedEcho += '\n<<<END_ZOZ_FILE>>>';
+      }
+      return mergedEcho;
+    }
+
+    // Pertahankan spasi/newline pembuka asli dari token BPE (mis. " mentah") agar kata tidak menyatu ("datamentah")
+    let chunk = incomingChunk.replace(/\s+$/, '');
+
+    // 1. Bersihkan kata pengantar / basa-basi model AI HANYA jika benar-benar muncul sebagai kalimat pengantar berbaris baru
+    chunk = chunk.replace(/^(?:[\s\r\n]*)(?:tentu[,!.\s]|baik(?:lah)?[,!.\s]|pasti[,!.\s]|oke[,!.\s]|siap[,!.\s]|berikut\s+(?:adalah\s+)?(?:lanjutan|kelanjutan|sambungan)|ini\s+(?:adalah\s+)?(?:lanjutan|kelanjutan|sambungan))[^\n]*\n+/i, '');
+    chunk = chunk.replace(/^(?:[\s\r\n]*)(?:here\s+is\s+the\s+continuation|continuing\s+from\s+where|let'?s\s+continue)[^\n]*\n+/i, '');
     chunk = chunk.replace(/^[\s\r\n]*(?:continue|lanjutkan|lanjutan)\s*:\s*/i, '');
 
-    // 2. Bersihkan pembungkus markdown code fence jika model membungkusnya ulang
-    chunk = chunk.replace(/^```[a-zA-Z0-9_-]*\s*\n?/i, '');
-    chunk = chunk.replace(/\n?```\s*$/i, '');
+    // 2. Bersihkan pembungkus markdown code fence jika model membungkus ulang blok yang sudah terbuka
+    const existingFenceCount = (existingText.match(/```/g) || []).length;
+    if (existingFenceCount % 2 !== 0 && /^\s*```[a-zA-Z0-9_-]*\s*\n/i.test(chunk)) {
+      chunk = chunk.replace(/^\s*```[a-zA-Z0-9_-]*\s*\n?/i, '');
+    } else if (/^\s*```[a-zA-Z0-9_-]*\s*\n[\s\S]*\n```\s*$/i.test(chunk) && existingText.includes('<!DOCTYPE html')) {
+      chunk = chunk.replace(/^\s*```[a-zA-Z0-9_-]*\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+    }
 
     // 3. Strip redundant <<<ZOZ_FILE...>>> headers from continuation chunk (ANTI-WIPEOUT)
-    // Jangan pernah menghapus base text hanya karena chunk memuat header ZOZ_FILE!
-    chunk = chunk.replace(/^<<<ZOZ_(?:FILE|EDIT|MODIFY)[^\n>]*>\s*\n?/i, '');
+    chunk = chunk.replace(/^\s*<<<ZOZ_(?:FILE|EDIT|MODIFY)[^\n>]*>\s*\n?/i, '');
 
     // Hanya jika chunk adalah DOKUMEN LENGKAP UTUH dari awal (ada <!DOCTYPE, <head, <body, dan </html>)
     // dan ukurannya setara/lebih besar dari draf saat ini, barulah ganti dokumen utuh
@@ -10163,9 +10224,36 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       return chunk;
     }
 
+    // 3b. Set-Theoretic Lexical Shingle Subsumption C_W(A, B):
+    // Jika provider OpenRouter tidak mendukung continue_final_message pada template Jinja-nya dan me-regenerasi
+    // jawaban lengkap utuh B \supset A dari awal (|B| >= 1.05 |A|, containment kata A di dalam B >= 0.65,
+    // dan pembuka B mencakup pembuka A), gantikan draf terpotong A dengan sekuens utuh B tanpa duplikasi!
+    if (!existingText.includes('<<<ZOZ_FILE') && !isChunkTrueFullDocument && chunk.trim().length >= existingText.trim().length * 1.05) {
+      const extractWords = (str) => (String(str || '').toLowerCase().match(/[a-z0-9\u00C0-\u024F]{4,}/g) || []);
+      const wordsA = extractWords(existingText);
+      if (wordsA.length >= 4) {
+        const setA = new Set(wordsA);
+        const setB = new Set(extractWords(chunk));
+        let hitAll = 0;
+        setA.forEach(w => { if (setB.has(w)) hitAll++; });
+        const containmentAll = hitAll / setA.size;
+
+        const headWordsA = extractWords(existingText.slice(0, 180));
+        const headSetA = new Set(headWordsA);
+        const headSetB = new Set(extractWords(chunk.slice(0, 360)));
+        let hitHead = 0;
+        headSetA.forEach(w => { if (headSetB.has(w)) hitHead++; });
+        const containmentHead = headSetA.size > 0 ? (hitHead / headSetA.size) : 0;
+
+        if (containmentAll >= 0.65 && containmentHead >= 0.50) {
+          return chunk.trimStart();
+        }
+      }
+    }
+
     // Jika chunk mengulang tag pembuka <!DOCTYPE html> atau <html> di awal tanpa <head>:
-    chunk = chunk.replace(/^<!DOCTYPE\s+html[^>]*>\s*\n?/i, '');
-    chunk = chunk.replace(/^<html\b[^>]*>\s*\n?/i, '');
+    chunk = chunk.replace(/^\s*<!DOCTYPE\s+html[^>]*>\s*\n?/i, '');
+    chunk = chunk.replace(/^\s*<html\b[^>]*>\s*\n?/i, '');
 
     // 4. Bersihkan artefak chevron / diff marker liar (KECUALI <<<END_ZOZ_FILE>>> di ujung)
     chunk = chunk.replace(/(?:^|\n)\s*<{2,}\s*(?:SEARCH|REPLACE)?[^>\n]*>{0,}\s*(?=\n|$)/gi, '\n');
@@ -10201,54 +10289,55 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     if (!chunk.trim()) return existingText;
 
-    // 6. KMP & Suffix-Prefix Longest Overlap Detection (hingga 1200 karakter)
-    const existingTrim = existingText.trimEnd();
-    const chunkTrim = chunk.trimStart();
-
-    const maxOverlapCheck = Math.min(1200, existingTrim.length, chunkTrim.length);
-    let detectedOverlapLen = 0;
-    for (let len = maxOverlapCheck; len >= 1; len--) {
-      const tail = existingTrim.slice(-len);
-      const head = chunkTrim.slice(0, len);
-      if (tail === head) {
-        detectedOverlapLen = len;
-        break;
+    // 6. Linear-Time O(M) KMP Suffix-Prefix Overlap Elimination (bebas false-positive 1-huruf lintas spasi)
+    const rawOverlap = computeKmpOverlapLength(existingText, chunk);
+    const rawOverlapStr = rawOverlap > 0 ? chunk.slice(0, rawOverlap) : '';
+    const isValidRawOverlap = rawOverlap >= 4 || (rawOverlap >= 2 && /[^a-zA-Z0-9_\s]/.test(rawOverlapStr));
+    if (isValidRawOverlap) {
+      chunk = chunk.slice(rawOverlap);
+    } else {
+      const existingTrim = existingText.trimEnd();
+      const chunkTrim = chunk.trimStart();
+      const trimmedOverlap = computeKmpOverlapLength(existingTrim, chunkTrim);
+      const trimmedOverlapStr = trimmedOverlap > 0 ? chunkTrim.slice(0, trimmedOverlap) : '';
+      // Wajib >= 4 karakter (atau >= 3 simbol sintaks) agar akhiran kata seperti 'data' + ' adalah' atau 'komponen' + 'nya' tidak termakan!
+      if (trimmedOverlap >= 4 || (trimmedOverlap >= 3 && /[^a-zA-Z0-9_\s]/.test(trimmedOverlapStr))) {
+        chunk = chunkTrim.slice(trimmedOverlap);
       }
     }
 
-    if (detectedOverlapLen > 0) {
-      chunk = chunkTrim.slice(detectedOverlapLen);
-    }
+    if (!chunk || !chunk.trim()) return existingText;
 
-    // 7. Deteksi overlap baris (fuzzy line matching untuk baris-baris tail)
-    const existingLines = existingText.split('\n').map(l => l.trim()).filter(Boolean);
-    const chunkLinesRaw = chunk.split('\n');
-    let skipLines = 0;
-    for (let i = 0; i < Math.min(15, chunkLinesRaw.length); i++) {
-      const trimmedChunkLine = chunkLinesRaw[i].trim();
-      if (!trimmedChunkLine) {
-        skipLines = i + 1;
-        continue;
-      }
+    // 7. Deteksi overlap baris penuh (untuk blok multi-baris HTML/kode)
+    if (chunk.includes('\n') && existingText.includes('\n')) {
+      const existingLines = existingText.split('\n').map(l => l.trim()).filter(l => l.length >= 6);
+      const chunkLinesRaw = chunk.split('\n');
+      let skipLines = 0;
       const lastExistingTail = existingLines.slice(-10);
-      if (lastExistingTail.includes(trimmedChunkLine)) {
-        skipLines = i + 1;
-      } else {
-        break;
+      for (let i = 0; i < Math.min(12, chunkLinesRaw.length); i++) {
+        const trimmedChunkLine = chunkLinesRaw[i].trim();
+        if (!trimmedChunkLine) {
+          if (skipLines > 0) skipLines = i + 1;
+          continue;
+        }
+        if (trimmedChunkLine.length >= 6 && lastExistingTail.includes(trimmedChunkLine)) {
+          skipLines = i + 1;
+        } else {
+          break;
+        }
+      }
+      if (skipLines > 0) {
+        chunk = chunkLinesRaw.slice(skipLines).join('\n');
       }
     }
-    if (skipLines > 0) {
-      chunk = chunkLinesRaw.slice(skipLines).join('\n');
-    }
 
-    // 8. Tentukan pemisah sintaks
-    const endsWithNewline = existingText.endsWith('\n');
-    const startsWithNewline = chunk.startsWith('\n');
+    if (!chunk || !chunk.trim()) return existingText;
+
+    // 8. Tentukan pemisah sintaks BPE & prosa secara presisi
     const endsWithWhitespace = /\s$/.test(existingText);
     const startsWithWhitespace = /^\s/.test(chunk);
 
-    // Jika terpotong di tengah token/kata (misal 'const nav' + 'Toggle = ...')
-    if (!endsWithWhitespace && !startsWithWhitespace && /^[a-zA-Z0-9_$]/.test(chunk) && /[a-zA-Z0-9_$]$/.test(existingText)) {
+    if (endsWithWhitespace || startsWithWhitespace) {
       let merged = existingText + chunk;
       if (merged.includes('<<<ZOZ_FILE') && !merged.includes('<<<END_ZOZ_FILE') && merged.includes('</html>')) {
         merged += '\n<<<END_ZOZ_FILE>>>';
@@ -10256,9 +10345,21 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       return merged;
     }
 
-    let sep = '';
-    if (!endsWithNewline && !startsWithNewline) {
-      sep = (endsWithWhitespace || startsWithWhitespace) ? '' : '\n';
+    // Jika terpotong tepat di tengah subword/identifier (misal 'terinspi' + 'rasi' atau 'const nav' + 'Toggle')
+    if (/^[a-zA-Z0-9_$]/.test(chunk) && /[a-zA-Z0-9_$]$/.test(existingText)) {
+      let merged = existingText + chunk;
+      if (merged.includes('<<<ZOZ_FILE') && !merged.includes('<<<END_ZOZ_FILE') && merged.includes('</html>')) {
+        merged += '\n<<<END_ZOZ_FILE>>>';
+      }
+      return merged;
+    }
+
+    // Jika existingText berakhir dengan tanda baca klausa inline (, ; :) dan chunk mulai dengan huruf/angka, sisipkan spasi (bukan newline!)
+    let sep = '\n';
+    if (/[,;:]$/.test(existingText) && /^[a-zA-Z0-9_"'(]/.test(chunk)) {
+      sep = ' ';
+    } else if (/[({\[/\\-]$/.test(existingText) || /^[.,;:!?)}\]/>]/.test(chunk)) {
+      sep = '';
     }
 
     let result = existingText + sep + chunk;
@@ -10456,32 +10557,37 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
   if (typeof window !== 'undefined') window.isWebsiteComplete = isWebsiteComplete;
 
   function isOutputTruncated(text, finishReason = null) {
-    if (finishReason === 'length') return true;
+    const normFinish = String(finishReason || '').trim().toLowerCase();
+    if (normFinish === 'length' || normFinish === 'max_tokens' || normFinish === 'incomplete' || normFinish === 'interrupted') return true;
     if (!text) return false;
     const parsed = splitReasoningAndContent(text);
     if (parsed.reasoning && !parsed.content) return true;
     const trimmed = text.trim();
+    if (!trimmed) return false;
 
-    // Check for unclosed markdown code blocks (odd count of ```)
+    // 1. Fragmen UTF-8 rusak atau tag pembuka HTML yang terputus di ekor
+    if (/[\uFFFD\uD800-\uDBFF]$/.test(trimmed)) return true;
+    if (/<[a-zA-Z/!][^>\n]{0,40}$/.test(trimmed)) return true;
+
+    // 2. Check for unclosed markdown code blocks (odd count of ```)
     const backtickCount = (trimmed.match(/```/g) || []).length;
     if (backtickCount % 2 !== 0) return true;
 
-    // Check for HTML document completion
+    // 3. Check for HTML document completion
     const hasClosedHtml = isWebsiteComplete(trimmed);
     if (hasClosedHtml) return false;
 
-    // Check for unclosed ZOZ_FILE block (toleran terhadap tag penutup tanpa chevrons trailing)
+    // 4. Check for unclosed ZOZ_FILE block (toleran terhadap tag penutup tanpa chevrons trailing)
     const zozFileStarts = (trimmed.match(/<<<ZOZ_(?:FILE|EDIT|MODIFY)/g) || []).length;
     const zozFileEnds = (trimmed.match(/<<<END_ZOZ_(?:FILE|EDIT|MODIFY)[^\n>]*(?:>|$)/g) || []).length;
     if (zozFileStarts > zozFileEnds && !hasClosedHtml) return true;
 
-    // Check for unclosed HTML document
+    // 5. Check for unclosed HTML / script / style blocks
     const htmlStarts = (trimmed.match(/<html\b/gi) || []).length;
     const htmlEnds = (trimmed.match(/<\/html>/gi) || []).length;
     if (htmlStarts > htmlEnds) return true;
     if ((trimmed.includes('<!DOCTYPE html') || /<html\b/i.test(trimmed)) && !/<\/html>/i.test(trimmed)) return true;
 
-    // Check for unclosed script or style tag inside HTML
     const scriptStarts = (trimmed.match(/<script\b/gi) || []).length;
     const scriptEnds = (trimmed.match(/<\/script>/gi) || []).length;
     if (scriptStarts > scriptEnds) return true;
@@ -10492,31 +10598,48 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     if (trimmed.length < 50) return false;
 
-    // Check for trailing unfinished punctuation
-    const unfinishedPunctuation = [':', ',', ';', '-', '(', '[', '{'];
+    // 6. Check for trailing unfinished punctuation (kecuali garis horizontal --- / === / ***)
+    const unfinishedPunctuation = [':', ',', ';', '(', '[', '{', '\\'];
     if (unfinishedPunctuation.some(p => trimmed.endsWith(p))) return true;
+    if ((trimmed.endsWith('-') || trimmed.endsWith('—')) && !/[-=*]{3,}$/.test(trimmed)) return true;
 
-    // Check for mid-sentence trailing conjunction words
-    const unfinishedWords = ['dan', 'atau', 'dengan', 'yang', 'untuk', 'pada', 'adalah', 'karena', 'namun', 'tetapi', 'serta'];
+    // 7. Check for mid-sentence trailing conjunction/preposition words
+    const unfinishedWords = ['dan', 'atau', 'dengan', 'yang', 'untuk', 'pada', 'adalah', 'karena', 'namun', 'tetapi', 'serta', 'dari', 'and', 'or', 'with', 'the', 'for'];
     if (unfinishedWords.some(w => new RegExp(`\\b${w}$`, 'i').test(trimmed))) return true;
 
-    // Jika finishReason bukan 'stop' atau 'end_turn' (misal 'length', 'incomplete', atau koneksi terputus tiba-tiba tanpa finishReason),
-    // dan teks tidak diakhiri tanda baca terminal (. ! ? " ' ) ] } ` atau emoji), maka output jelas terpotong di tengah kalimat
-    if (finishReason && finishReason !== 'stop' && finishReason !== 'end_turn') return true;
-    const terminalChars = new Set(['.', '!', '?', '"', "'", ')', ']', '}', '`']);
-    const lastChar = trimmed.slice(-1);
-    if (!finishReason && !terminalChars.has(lastChar)) return true;
+    // 8. Jika model secara eksplisit mengirim sinyal EOS ('stop', 'end_turn', 'eos', 'complete'),
+    // maka output prosa/markdown telah tuntas secara matematis (mis. jawaban kuis "**1-A, 2-B**").
+    if (normFinish === 'stop' || normFinish === 'end_turn' || normFinish === 'eos' || normFinish === 'complete' || normFinish === 'stop_sequence') {
+      return false;
+    }
+    if (normFinish) return true;
 
-    return false;
+    // 9. Jika finishReason absen (null), periksa code-point Unicode terakhir secara utuh (mendukung surrogate pair Emoji & penutup Markdown)
+    const strippedVariation = trimmed.replace(/\uFE0F+$/, '');
+    const codePoints = Array.from(strippedVariation);
+    const lastCp = codePoints.length > 0 ? codePoints[codePoints.length - 1] : '';
+    const terminalChars = new Set(['.', '!', '?', '"', "'", '”', '’', ')', ']', '}', '`', ';', '>', '|', '*', '_']);
+    if (terminalChars.has(lastCp) || /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/u.test(lastCp)) {
+      return false;
+    }
+
+    return true;
   }
 
   // ==================== UNIVERSAL RESPONSE CONTINUATION ENGINE (ANTIGRAVITY CLI STYLE) ====================
   // Autonomous Multi-Turn Agent Loop: Menggunakan SATU model yang sama secara berulang (hingga 5 putaran)
-  // Dilengkapi Tail-Context Prefill Optimization untuk memangkas latency dari menit ke detik.
+  // Dilengkapi Canonical BPE Boundary Projection, Linear KMP Overlap, & Atomic Monoid Commit.
   async function executeResponseContinuation(assistantRow, options = {}) {
     if (STATE.isGenerating || STATE.isSending) {
       if (options.forceTakeover) {
-        stopGeneration();
+        // PENTING: Jangan panggil stopGeneration() saat isAutoContinue aktif!
+        // stopGeneration() mengirim POST /api/chat/stop secara async untuk session.id yang sama
+        // dan justru akan membunuh koneksi stream continuation yang baru saja dimulai (Race Condition).
+        if (!options.isAutoContinue) {
+          stopGeneration();
+        } else if (STATE.abortController) {
+          STATE.abortController = null;
+        }
         setGeneratingState(false);
         STATE.isSending = false;
       } else {
@@ -10581,11 +10704,13 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     let agentRound = 0;
     let currentAccumulated = rawBaseText;
     let isActuallyComplete = false;
+    let lastContFinishReason = null;
 
     const contRunOptions = {
       websiteMode: session?.lastWebsiteMode || 'preview',
       isWebCreation: isWebContinue,
-      hideAllCodeBlocks: false
+      hideAllCodeBlocks: false,
+      skipEntropyGate: true
     };
 
     const updateAgentHud = (statusMsg) => {
@@ -10610,39 +10735,43 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         agentRound++;
         updateAgentHud(`Putaran ${agentRound}/${MAX_AGENT_ROUNDS}: Menyambung respons...`);
 
-        // 1. Pemangkasan token parsial matematis murni: eliminasi pecahan token yang rusak di ujung potongan
+        // 1. Proyeksi Boundary Token BPE Non-Destruktif (\Pi_BPE):
+        // JANGAN memutasi currentAccumulated sebelum token pengganti yang sah diterima (Atomic Monoid Commit)!
         const safeBase = sliceLastSafeTokenBoundary(currentAccumulated);
         if (safeBase && safeBase.length < currentAccumulated.length) {
-          console.log(`[Mathematical Token Boundary] Memangkas ${currentAccumulated.length - safeBase.length} karakter pecahan token rusak di ujung.`);
-          currentAccumulated = safeBase;
+          console.log(`[Mathematical Token Boundary] Proyeksi rollback non-destruktif ${currentAccumulated.length - safeBase.length} karakter fragmen ekor.`);
         }
+        const effectiveBase = (safeBase && safeBase.length >= 4) ? safeBase : currentAccumulated;
 
         // 2. Konteks Penuh Autoregresif: pertahankan seluruh token yang sudah dihasilkan agar model memiliki konteks sintaks & logika utuh
-        const fullContext = (currentAccumulated && currentAccumulated.length > 50000)
-          ? currentAccumulated.slice(-50000)
-          : currentAccumulated;
+        const fullContext = (effectiveBase && effectiveBase.length > 50000)
+          ? effectiveBase.slice(-50000)
+          : effectiveBase;
 
-        // 3. Zero-Persona Mathematical Continuation Prompt: murni instruksi penyambungan langsung
-        const continuePrompt = `Continue:`;
+        // 3. Zero-Persona Mathematical Continuation Signal
+        const continuePrompt = `Continue`;
+        const roundMeta = { finishReason: null };
 
         let appended = '';
         if (engine === 'ollama') {
-          appended = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, fullContext, { ...contRunOptions, signal: STATE.abortController?.signal });
+          appended = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, fullContext, { ...contRunOptions, roundMeta, signal: STATE.abortController?.signal });
         } else {
-          appended = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, fullContext, { ...contRunOptions, signal: STATE.abortController?.signal });
+          appended = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, fullContext, { ...contRunOptions, roundMeta, signal: STATE.abortController?.signal });
         }
+        lastContFinishReason = roundMeta.finishReason || null;
 
         if (!appended || !appended.trim()) {
-          console.warn(`[executeResponseContinuation] Putaran ${agentRound} tidak menghasilkan output teks.`);
+          console.warn(`[executeResponseContinuation] Putaran ${agentRound} tidak menghasilkan output teks (draf asli dipertahankan utuh).`);
           if (agentRound < MAX_AGENT_ROUNDS && !STATE.abortController?.signal?.aborted) {
             updateAgentHud(`Putaran ${agentRound} belum menerima token, mencoba kembali putaran ${agentRound + 1}...`);
-            await new Promise(r => setTimeout(r, 1500));
+            await new Promise(r => setTimeout(r, 1200));
             continue;
           }
           break;
         }
 
-        currentAccumulated = safeAssistantText(stitchContinuationChunk(currentAccumulated, appended));
+        // Atomic Monoid Commit: komit penggabungan KMP / Subsumption di atas effectiveBase HANYA setelah appended valid!
+        currentAccumulated = safeAssistantText(stitchContinuationChunk(effectiveBase, appended));
 
         // Re-ekstrak file dan sinkronkan pratinjau kartu canvas secara langsung
         const reExtracted = extractGeneratedFiles(currentAccumulated, true);
@@ -10671,6 +10800,12 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             isActuallyComplete = isWebsiteComplete(closed, currentAccumulated);
             if (isActuallyComplete) break;
           }
+        } else if (!isWebContinue && !reExtracted.hasIncompleteFile) {
+          // Untuk percakapan biasa / markdown / kode non-website: hentikan loop segera setelah jawaban tuntas secara matematis!
+          if (!isOutputTruncated(currentAccumulated, lastContFinishReason || 'stop')) {
+            isActuallyComplete = true;
+            break;
+          }
         }
       }
 
@@ -10690,7 +10825,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           isActuallyComplete = isWebsiteComplete(finalHtml, currentAccumulated);
         }
       }
-      const isStillIncomplete = isWebContinue ? !isActuallyComplete : Boolean(finalExtracted.hasIncompleteFile || isOutputTruncated(currentAccumulated));
+      const isStillIncomplete = isWebContinue ? !isActuallyComplete : Boolean(finalExtracted.hasIncompleteFile || (!isActuallyComplete && isOutputTruncated(currentAccumulated, lastContFinishReason)));
 
       // Selesaikan task di TaskTracker HANYA jika berkas website sudah benar-benar tuntas!
       if (isActuallyComplete) {
@@ -10910,6 +11045,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         if (STATE.settings.openRouterKey) {
           headers['Authorization'] = `Bearer ${STATE.settings.openRouterKey}`;
         }
+        const isolatedContSessionId = session?.id ? `${session.id}_cont_${Date.now()}_${c}` : null;
+        if (!isDirect && isolatedContSessionId) {
+          headers['X-Session-ID'] = isolatedContSessionId;
+        }
         if (isDirect) {
           headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
           headers['X-Title'] = 'ZOZ Router Continuation';
@@ -10918,7 +11057,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         let body = {
           ...basePayload,
           ...(isDirect ? {} : {
-            sessionId: session?.id || null,
+            sessionId: isolatedContSessionId,
             userId: STATE.userId || null,
             apiKey: STATE.settings.openRouterKey || undefined
           })
@@ -10934,7 +11073,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           if (routeType === 'proxy' && attemptRes.status === 404) {
             continue;
           }
-          // Jika provider menolak payload berakhiran assistant (HTTP 400), tambahkan token user kelanjutan murni
+          // Jika provider menolak payload berakhiran assistant (HTTP 400), tambahkan token kelanjutan murni
           if (attemptRes.status === 400 && body.messages.length > 0 && body.messages[body.messages.length - 1].role === 'assistant') {
             const fallbackMessages = [...body.messages, { role: 'user', content: 'Continue' }];
             const fallbackBody = { ...body, messages: fallbackMessages };
@@ -10946,10 +11085,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             }).catch(() => null);
             if (retryRes && retryRes.ok) {
               attemptRes = retryRes;
+              body = fallbackBody;
             }
           }
           if (attemptRes.ok) {
             res = attemptRes;
+            res._usedEndpoint = endpoint;
+            res._usedHeaders = headers;
+            res._usedBody = body;
             break;
           }
           let attemptErr = `HTTP ${attemptRes.status}`;
@@ -10981,105 +11124,133 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     if (!res || !res.ok) throw new Error(lastErrDetail || 'Gagal melanjutkan streaming OpenRouter');
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    let appended = '';
-
-    // Renderer coalesced: alirkan langsung ke gelembung pesan agar pengguna melihat kelanjutan teks secara mulus real-time
+    const activeSignal = options.signal || STATE.abortController?.signal;
     const renderer = new StreamBufferRenderer(
       bubbleText,
       () => smartScrollChatToBottom(false),
       '',
-      options
+      { ...options, skipEntropyGate: true }
     );
     renderer.text = currentFullText;
-    let seedSep = null;
-    const appendContinuationChunk = (delta) => {
-      if (seedSep === null) {
-        const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
-        const needsSp = !needsNl && !currentFullText.endsWith(' ') && !delta.startsWith(' ') && !delta.startsWith('\n');
-        seedSep = needsNl ? '\n' : (needsSp ? ' ' : '');
-        renderer.append(seedSep + delta);
-      } else {
-        renderer.append(delta);
-      }
-    };
 
-    // Reasoning delta tidak pernah masuk buffer/render/persist. Tetap proses
-    // contentDelta pada event yang sama — beberapa provider mengirim keduanya.
-    const feedContinuationDelta = (contentDelta, _reasoningDelta) => {
-      if (!contentDelta) return;
-      appended += contentDelta;
-      appendContinuationChunk(contentDelta);
-    };
+    const consumeOpenRouterContinuationStream = async (streamRes) => {
+      const reader = streamRes.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let chunkAppended = '';
+      let sseDone = false;
+      let rejectedSafetyModel = false;
 
-    const activeSignal = options.signal || STATE.abortController?.signal;
-    const abortHandler = () => {
-      try { reader.cancel(); } catch (_) {}
-    };
-    if (activeSignal) {
-      if (activeSignal.aborted) {
+      const feedContinuationDelta = (contentDelta) => {
+        if (!contentDelta) return;
+        chunkAppended += contentDelta;
+        renderer.text = stitchContinuationChunk(currentFullText, chunkAppended, { isLivePreview: true });
+        renderer.scheduleRender();
+      };
+
+      const abortHandler = () => {
         try { reader.cancel(); } catch (_) {}
-      } else {
-        activeSignal.addEventListener('abort', abortHandler, { once: true });
-      }
-    }
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (options.heartbeat && typeof options.heartbeat.kick === 'function') {
-          options.heartbeat.kick();
-        }
-        if (done) {
-          buf += decoder.decode();
-          break;
-        }
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop();
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith('data:')) continue;
-          const jsonStr = trimmed.replace(/^data:\s*/, '');
-          if (jsonStr === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const cReasoning = parsed.choices?.[0]?.delta?.reasoning
-              || parsed.choices?.[0]?.delta?.reasoning_content
-              || parsed.choices?.[0]?.delta?.thought
-              || '';
-            feedContinuationDelta(parsed.choices?.[0]?.delta?.content, cReasoning);
-          } catch (e) {}
-        }
-      }
-
-      if (buf && buf.trim() && buf.trim().startsWith('data:')) {
-        const jsonStr = buf.trim().replace(/^data:\s*/, '');
-        if (jsonStr !== '[DONE]') {
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const cReasoning = parsed.choices?.[0]?.delta?.reasoning
-              || parsed.choices?.[0]?.delta?.reasoning_content
-              || parsed.choices?.[0]?.delta?.thought
-              || '';
-            feedContinuationDelta(parsed.choices?.[0]?.delta?.content, cReasoning);
-          } catch (e) {}
-        }
-      }
-    } catch (readErr) {
-      console.warn('[streamContinuationOpenRouter] Stream continuation terputus / dibatalkan:', readErr?.message);
-    } finally {
+      };
       if (activeSignal) {
-        try { activeSignal.removeEventListener('abort', abortHandler); } catch (_) {}
+        if (activeSignal.aborted) {
+          try { reader.cancel(); } catch (_) {}
+        } else {
+          activeSignal.addEventListener('abort', abortHandler, { once: true });
+        }
       }
-      try { reader.cancel(); } catch (_) {}
+
+      try {
+        while (!sseDone) {
+          const { done, value } = await reader.read();
+          if (options.heartbeat && typeof options.heartbeat.kick === 'function') {
+            options.heartbeat.kick();
+          }
+          if (done) {
+            buf += decoder.decode();
+            break;
+          }
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop();
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith('data:')) continue;
+            const jsonStr = trimmed.replace(/^data:\s*/, '');
+            if (jsonStr === '[DONE]') {
+              sseDone = true;
+              break;
+            }
+            try {
+              const parsed = JSON.parse(jsonStr);
+              const upstreamId = String(parsed.model || '').toLowerCase();
+              if (upstreamId && (upstreamId.includes('content-safety') || upstreamId.includes('llama-guard') || upstreamId.includes('shieldgemma'))) {
+                rejectedSafetyModel = true;
+                sseDone = true;
+                break;
+              }
+              if (parsed.choices?.[0]?.finish_reason && options.roundMeta) {
+                options.roundMeta.finishReason = parsed.choices[0].finish_reason;
+              }
+              feedContinuationDelta(parsed.choices?.[0]?.delta?.content);
+            } catch (e) {}
+          }
+        }
+
+        if (!rejectedSafetyModel && buf && buf.trim() && buf.trim().startsWith('data:')) {
+          const jsonStr = buf.trim().replace(/^data:\s*/, '');
+          if (jsonStr !== '[DONE]') {
+            try {
+              const parsed = JSON.parse(jsonStr);
+              if (parsed.choices?.[0]?.finish_reason && options.roundMeta) {
+                options.roundMeta.finishReason = parsed.choices[0].finish_reason;
+              }
+              feedContinuationDelta(parsed.choices?.[0]?.delta?.content);
+            } catch (e) {}
+          }
+        }
+      } catch (readErr) {
+        console.warn('[streamContinuationOpenRouter] Stream continuation terputus / dibatalkan:', readErr?.message);
+      } finally {
+        if (activeSignal) {
+          try { activeSignal.removeEventListener('abort', abortHandler); } catch (_) {}
+        }
+        try { reader.cancel(); } catch (_) {}
+      }
+
+      if (rejectedSafetyModel || /^\s*User Safety:\s*(?:safe|unsafe)\b/i.test(chunkAppended)) {
+        renderer.text = currentFullText;
+        return '';
+      }
+      return chunkAppended;
+    };
+
+    let appended = await consumeOpenRouterContinuationStream(res);
+
+    // Dual-Mode Zero-Token Fallback: Jika template Jinja provider menutup turn assistant (<|eot_id|>) sehingga HTTP 200 mengembalikan 0 token,
+    // jalankan mode transisi kedua secara langsung tanpa membuang putaran!
+    if ((!appended || !appended.trim()) && !activeSignal?.aborted && res._usedBody && Array.isArray(res._usedBody.messages)) {
+      const lastMsg = res._usedBody.messages[res._usedBody.messages.length - 1];
+      if (lastMsg && lastMsg.role === 'assistant') {
+        try {
+          const fallbackBody = {
+            ...res._usedBody,
+            ...(res._usedBody.sessionId ? { sessionId: `${res._usedBody.sessionId}_fb` } : {}),
+            messages: [...res._usedBody.messages, { role: 'user', content: 'Continue' }]
+          };
+          const fbRes = await fetch(res._usedEndpoint, {
+            method: 'POST',
+            headers: res._usedHeaders,
+            body: JSON.stringify(fallbackBody),
+            signal: activeSignal
+          });
+          if (fbRes && fbRes.ok) {
+            appended = await consumeOpenRouterContinuationStream(fbRes);
+          }
+        } catch (_) {}
+      }
     }
-    // render:false → batalkan timer & kembalikan teks saja. Pemanggil
-    // (handler Lanjutkan) merender merged text-nya sendiri tepat setelah ini,
-    // jadi render + hljs di sini hanya akan membuang-buang siklus.
+
     renderer.finish({ render: false });
     return appended;
   }
@@ -11132,6 +11303,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     const effectiveModel = ep.includes('ollama.com') ? resolveOllamaCloudModel(modelName) : modelName;
     const chatUrl = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? resolveEndpointUrl(ep, 'api/chat') : getUniversalApiUrl('/api/ollama/chat');
+    const isolatedOllamaSessionId = session?.id ? `${session.id}_cont_${Date.now()}` : undefined;
     const res = await fetch(chatUrl, {
       method: 'POST',
       headers,
@@ -11139,6 +11311,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         model: effectiveModel,
         messages: messagesPayload,
         stream: true,
+        ...(isolatedOllamaSessionId ? { sessionId: isolatedOllamaSessionId } : {}),
         options: {
           num_ctx: 16384,
           num_predict: 4096,
@@ -11158,25 +11331,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     let buf = '';
     let appended = '';
 
-    // Renderer coalesced: alirkan langsung ke gelembung pesan agar pengguna melihat kelanjutan teks secara mulus real-time
+    // Renderer coalesced: alirkan langsung ke gelembung pesan dengan skipEntropyGate agar spasi BPE terjaga
     const renderer = new StreamBufferRenderer(
       bubbleText,
       () => smartScrollChatToBottom(false),
       '',
-      options
+      { ...options, skipEntropyGate: true }
     );
     renderer.text = currentFullText;
-    let seedSep = null;
-    const appendContinuationChunk = (delta) => {
-      if (seedSep === null) {
-        const needsNl = currentFullText.endsWith('\n') || /[\.\!\?\:\;]\s*$/.test(currentFullText) || /```\w*$/.test(currentFullText);
-        const needsSp = !needsNl && !currentFullText.endsWith(' ') && !delta.startsWith(' ') && !delta.startsWith('\n');
-        seedSep = needsNl ? '\n' : (needsSp ? ' ' : '');
-        renderer.append(seedSep + delta);
-      } else {
-        renderer.append(delta);
-      }
-    };
 
     const activeSignal = options.signal || STATE.abortController?.signal;
     const abortHandler = () => {
@@ -11208,10 +11370,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           if (!line.trim()) continue;
           try {
             const parsed = JSON.parse(line);
+            if (parsed.done_reason && options.roundMeta) {
+              options.roundMeta.finishReason = parsed.done_reason;
+            }
             const chunk = parsed.message?.content || parsed.response || '';
             if (chunk) {
               appended += chunk;
-              appendContinuationChunk(chunk);
+              renderer.text = stitchContinuationChunk(currentFullText, appended, { isLivePreview: true });
+              renderer.scheduleRender();
             }
           } catch (e) {}
         }
@@ -11220,10 +11386,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (buf && buf.trim()) {
         try {
           const parsed = JSON.parse(buf.trim());
+          if (parsed.done_reason && options.roundMeta) {
+            options.roundMeta.finishReason = parsed.done_reason;
+          }
           const chunk = parsed.message?.content || parsed.response || '';
           if (chunk) {
             appended += chunk;
-            appendContinuationChunk(chunk);
+            renderer.text = stitchContinuationChunk(currentFullText, appended, { isLivePreview: true });
+            renderer.scheduleRender();
           }
         } catch (e) {}
       }
@@ -11235,9 +11405,6 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       }
       try { reader.cancel(); } catch (_) {}
     }
-    // render:false → batalkan timer & kembalikan teks saja. Pemanggil
-    // (handler Lanjutkan) merender merged text-nya sendiri tepat setelah ini,
-    // jadi render + hljs di sini hanya akan membuang-buang siklus.
     renderer.finish({ render: false });
     return appended;
   }
@@ -26915,7 +27082,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         fullText = hideTaskBlocksForDisplay(fullText).trim();
       }
 
-      const rawFullTextBeforeStripping = fullText;
+      let rawFullTextBeforeStripping = fullText;
 
       // ===== AI FILE STUDIO & WORKSPACE AUTO-SAVE =====
       const extractedAiFiles = extractGeneratedFiles(fullText, wantsFile, runOptions);
@@ -27181,13 +27348,13 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         } else {
           BioEndocrine.secreteStress(22, `Ollama error: ${err?.message || 'Engine exception'}`);
         }
-        // Auto-Router fallback: bersihkan gelembung sementara dan kembalikan false agar caller langsung beralih ke OpenRouter
-        if (runOptions && runOptions.autoFallback) {
+        // Auto-Router fallback: HANYA jika belum ada 1 pun token yang dihasilkan (jangan pernah menghapus output AI!)
+        if (runOptions && runOptions.autoFallback && tokenCount === 0 && (!streamRenderer || !streamRenderer.text)) {
           try { assistantRow.remove(); } catch (_) {}
           return false;
         }
 
-        // Auto Cloud Fallback (jika model belum di-pull di server Ollama lokal, 404, 401, atau Ollama offline):
+        // Auto Cloud Fallback (jika model belum di-pull di server Ollama lokal, 404, 401, atau Ollama offline & belum ada output):
         const errLower = (err?.message || String(err || '')).toLowerCase();
         const isNotFoundOrOffline = errLower.includes('404') || 
                                     errLower.includes('not found') || 
@@ -27200,7 +27367,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
         const isAutoRouterActive = (STATE.mode === 'auto') || Boolean(runOptions.isAutoRouter) || !DeviceStorage.isDeviceBackendAvailable || Boolean(STATE.settings.openRouterKey);
         const allowCloudFallback = isAutoRouterActive && (runOptions ? (runOptions.autoCloudFallback !== false) : true);
-        if (allowCloudFallback && isNotFoundOrOffline) {
+        if (allowCloudFallback && isNotFoundOrOffline && tokenCount === 0 && (!streamRenderer || !streamRenderer.text)) {
           try { assistantRow.remove(); } catch (_) {}
           const fallbackModel = mapOllamaModelToOpenRouter(modelName);
           console.warn(`[Auto-Router Failover] Model ${modelName} tidak tersedia di server Ollama (${err?.message}). Mengalihkan ke Cloud (${fallbackModel})...`);
@@ -27208,48 +27375,65 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           return await runOpenRouterStreaming(session, promptText, image, fallbackModel, { ...runOptions, isAutoRouter: true });
         }
 
-        // render:false → bubbleText.innerHTML diganti tanpa syarat beberapa baris
-        // di bawah (kartu error), jadi render dari finish hanya akan dibuang.
         const rescuePartial = sanitizePartialResponseWithFiles(streamRenderer ? streamRenderer.finish({ render: false }) : '');
         const partialText = scrubRawToolCallArtifacts(rescuePartial.text);
         const hasPartialText = Boolean(partialText && partialText.trim());
 
-        if (hasPartialText && STATE.sessions.some(s => s.id === session.id)) {
-          const rescuedText = `${partialText.trim()}\n\n*[Koneksi terputus saat streaming]*`;
+        // ZERO RED ERROR BANNER ON PARTIAL STREAM: Pertahankan output bersih & sambung otomatis secara matematis
+        if (hasPartialText) {
+          const cleanRescued = safeAssistantText(partialText.trim());
           const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
-
-          const rescuedContentToSave = appendWebVerificationNote(rescuedText, webSources);
-          session.messages.push({
-            role: 'assistant',
-            content: rescuedContentToSave,
-            model: modelName,
-            engine: 'ollama',
-            sources: webSources,
-            files: rescuePartial.files.length > 0 ? rescuePartial.files : undefined,
-            stats: { duration: totalTime, tokens: tokenCount, interrupted: true },
-            timestamp: new Date().toISOString()
-          });
-          session.updatedAt = new Date().toISOString();
-          savePersistedState();
-          renderChatHistory(els.searchHistoryInput?.value || '');
-
+          bubbleText.innerHTML = renderMarkdown(cleanRescued);
+          enhanceCodeBlocks(bubbleText);
+          enhanceChatImages(bubbleText);
+          renderMessageFiles(assistantRow, rescuePartial.files);
+          if (webSources && webSources.length > 0) {
+            renderMessageSources(assistantRow, webSources, true);
+          }
+          assistantRow.dataset.fullContent = cleanRescued;
           if (metaBox) {
             metaBox.innerHTML = `
               <strong>${escapeHtml(modelName)}</strong>
               <span class="meta-model-badge">Ollama</span>
-              <span>⏱️ ${totalTime}s (Terputus)</span>
+              <span>⏱️ ${totalTime}s</span>
             `;
           }
+          if (STATE.sessions.some(s => s.id === session.id)) {
+            const rescuedContentToSave = appendWebVerificationNote(cleanRescued, webSources);
+            session.messages.push({
+              role: 'assistant',
+              content: rescuedContentToSave,
+              model: modelName,
+              engine: 'ollama',
+              sources: webSources,
+              files: rescuePartial.files.length > 0 ? rescuePartial.files : undefined,
+              stats: { duration: totalTime, tokens: tokenCount },
+              timestamp: new Date().toISOString()
+            });
+            session.updatedAt = new Date().toISOString();
+            savePersistedState();
+            renderChatHistory(els.searchHistoryInput?.value || '');
+          }
+          if (!runOptions._isAutoContinuation) {
+            try {
+              await executeResponseContinuation(assistantRow, {
+                session,
+                modelName,
+                engine: 'ollama',
+                previousText: cleanRescued,
+                isWebsite: isWebTask,
+                forceTakeover: true,
+                isAutoContinue: true
+              });
+            } catch (_) {}
+          }
+          return true;
         }
 
         const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
         const errorHtml = formatModelErrorMessage('ollama', modelName, err, actualHasImage, STATE.webSearchEnabled);
 
-        const rescuedHtml = hasPartialText ? `
-          <div class="partial-rescued-content" style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed rgba(255,255,255,0.15);">
-            ${renderMarkdown(partialText.trim())}
-          </div>
-        ` : '';
+        const rescuedHtml = '';
 
         bubbleText.innerHTML = `
           ${rescuedHtml}
@@ -27578,6 +27762,16 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           candidateModels.push(emergencyBackup);
         }
       }
+      if (effectiveInitialModel === 'openrouter/free' || candidateModels.includes('openrouter/free')) {
+        const safeChatFallbacks = (typeof LIVE_FREE_OPENROUTER_FALLBACKS !== 'undefined' && Array.isArray(LIVE_FREE_OPENROUTER_FALLBACKS))
+          ? LIVE_FREE_OPENROUTER_FALLBACKS.slice(0, 2)
+          : ['nvidia/nemotron-3.5-lightning:free'];
+        safeChatFallbacks.forEach(fb => {
+          if (fb && !candidateModels.includes(fb) && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(fb)) {
+            candidateModels.push(fb);
+          }
+        });
+      }
 
       let lastErrDetail = '';
       let activeMessagesPayload = null;
@@ -27585,6 +27779,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       let activeHeaders = {};
       let activeRouteType = '';
       let finishReason = null;
+      let openRouterUsage = null;
+      let resolvedUpstreamModel = '';
       let streamSucceeded = false;
       let isStreamInterrupted = false;
       const collectedImages = [];
@@ -27822,7 +28018,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             const decoder = new TextDecoder();
             let buffer = '';
             let deadAirTimer = null;
-            let openRouterUsage = null;
+            openRouterUsage = null;
+            resolvedUpstreamModel = '';
+            let sseDone = false;
             const resetDeadAirWatchdog = () => {
               if (deadAirTimer) clearTimeout(deadAirTimer);
               deadAirTimer = setTimeout(() => {
@@ -27834,7 +28032,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             };
 
             try {
-              while (true) {
+              while (!sseDone) {
                 resetDeadAirWatchdog();
                 const { done, value } = await reader.read();
                 resetDeadAirWatchdog();
@@ -27857,7 +28055,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                   }
                   if (!trimmed.startsWith('data:')) continue;
                   const jsonStr = trimmed.replace(/^data:\s*/, '');
-                  if (jsonStr === '[DONE]') break;
+                  if (jsonStr === '[DONE]') {
+                    sseDone = true;
+                    break;
+                  }
 
                   let parsed;
                   try {
@@ -27870,6 +28071,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                     const rawUpstream = parsed.error?.metadata?.raw;
                     const fullErrStr = rawUpstream ? `${errStr} (${rawUpstream})` : errStr;
                     throw new Error(fullErrStr);
+                  }
+                  if (parsed.model && typeof parsed.model === 'string') {
+                    const upLower = parsed.model.toLowerCase();
+                    if (upLower.includes('content-safety') || upLower.includes('llama-guard') || upLower.includes('shieldgemma')) {
+                      throw new Error(`Model moderasi non-chat (${parsed.model}) terpilih oleh router; mengalihkan ke model chat.`);
+                    }
+                    resolvedUpstreamModel = parsed.model;
                   }
                   if (parsed.choices?.[0]?.finish_reason) {
                     finishReason = parsed.choices[0].finish_reason;
@@ -27954,6 +28162,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                         const rawUpstream = parsed.error?.metadata?.raw;
                         throw new Error(rawUpstream ? `${errStr} (${rawUpstream})` : errStr);
                       }
+                      if (parsed.model && typeof parsed.model === 'string' && !parsed.model.toLowerCase().includes('content-safety')) {
+                        resolvedUpstreamModel = parsed.model;
+                      }
                       if (parsed.choices?.[0]?.finish_reason) {
                         finishReason = parsed.choices[0].finish_reason;
                       }
@@ -27972,14 +28183,23 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 }
               }
 
+              if (deadAirTimer) {
+                clearTimeout(deadAirTimer);
+                deadAirTimer = null;
+              }
               clearTimeout(ttftTimer);
               STATE.abortController?.signal?.removeEventListener('abort', onParentAbort);
-              actualModelUsed = currentModel;
+              actualModelUsed = (resolvedUpstreamModel && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(resolvedUpstreamModel))
+                ? resolvedUpstreamModel
+                : currentModel;
               streamSucceeded = true;
               break;
 
             } catch (streamErr) {
-              if (deadAirTimer) clearTimeout(deadAirTimer);
+              if (deadAirTimer) {
+                clearTimeout(deadAirTimer);
+                deadAirTimer = null;
+              }
               clearTimeout(ttftTimer);
               STATE.abortController?.signal?.removeEventListener('abort', onParentAbort);
               try { await reader.cancel(); } catch (_) {}
@@ -27987,12 +28207,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (STATE.abortController?.signal?.aborted) throw streamErr;
 
               const isDeadAir = streamErr?.name === 'AbortError' && attemptController.signal.reason === 'DEAD_AIR_TIMEOUT';
-              const sMsg = isDeadAir ? 'Aliran token terhenti (Dead-Air Timeout 20s)' : (streamErr?.message || String(streamErr));
+              const sMsg = isDeadAir ? 'Aliran token terhenti (Dead-Air Timeout 180s)' : (streamErr?.message || String(streamErr));
               console.warn(`[OpenRouter Stream Error] Model ${currentModel} error saat streaming:`, sMsg);
 
-              if (tokenCount > 0) {
-                // Token sudah diterima dan terlihat oleh pengguna, tandai terputus agar tombol lanjutkan tersedia
-                actualModelUsed = currentModel;
+              if (tokenCount > 0 && !sMsg.includes('Model moderasi non-chat')) {
+                // Token sudah diterima dan terlihat oleh pengguna, tandai terputus agar disambung otomatis
+                actualModelUsed = (resolvedUpstreamModel && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(resolvedUpstreamModel))
+                  ? resolvedUpstreamModel
+                  : currentModel;
                 streamSucceeded = true;
                 isStreamInterrupted = true;
                 console.warn(`[OpenRouter Stream Interrupted] Aliran token terputus di tengah jalan setelah ${tokenCount} token:`, sMsg);
@@ -28587,7 +28809,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         fullText = hideTaskBlocksForDisplay(fullText).trim();
       }
 
-      const rawFullTextBeforeStripping = fullText;
+      let rawFullTextBeforeStripping = fullText;
 
       // ===== AI FILE STUDIO & WORKSPACE AUTO-SAVE =====
       const extractedAiFiles = extractGeneratedFiles(fullText, wantsFile, runOptions);
@@ -28893,44 +29115,65 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         } else {
           BioEndocrine.secreteStress(22, `OpenRouter error: ${err?.message || 'Stream exception'}`);
         }
-        // Auto-Router fallback: bersihkan gelembung sementara dan kembalikan false agar caller langsung beralih ke engine lain
-        if (runOptions && runOptions.autoFallback) {
+        // Auto-Router fallback: HANYA jika belum ada 1 pun token yang dihasilkan (jangan pernah menghapus output AI!)
+        if (runOptions && runOptions.autoFallback && tokenCount === 0 && (!streamRenderer || !streamRenderer.text)) {
           try { assistantRow.remove(); } catch (_) {}
           return false;
         }
 
-        // render:false → bubbleText.innerHTML diganti tanpa syarat beberapa baris
-        // di bawah (kartu error), jadi render dari finish hanya akan dibuang.
         const rescuePartial = sanitizePartialResponseWithFiles(streamRenderer ? streamRenderer.finish({ render: false }) : '');
         const partialText = scrubRawToolCallArtifacts(rescuePartial.text);
         const hasPartialText = Boolean(partialText && partialText.trim());
 
-        if (hasPartialText && STATE.sessions.some(s => s.id === session.id)) {
-          const rescuedText = `${partialText.trim()}\n\n*[Koneksi terputus saat streaming]*`;
+        // ZERO RED ERROR BANNER ON PARTIAL STREAM: Pertahankan output bersih & sambung otomatis secara matematis
+        if (hasPartialText) {
+          const cleanRescued = safeAssistantText(partialText.trim());
           const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
-
-          const rescuedContentToSave = appendWebVerificationNote(rescuedText, webSources);
-          session.messages.push({
-            role: 'assistant',
-            content: rescuedContentToSave,
-            model: displayModel,
-            engine: engineMode,
-            sources: webSources,
-            files: rescuePartial.files.length > 0 ? rescuePartial.files : undefined,
-            stats: { duration: totalTime, tokens: tokenCount, interrupted: true },
-            timestamp: new Date().toISOString()
-          });
-          session.updatedAt = new Date().toISOString();
-          savePersistedState();
-          renderChatHistory(els.searchHistoryInput?.value || '');
-
+          bubbleText.innerHTML = renderMarkdown(cleanRescued);
+          enhanceCodeBlocks(bubbleText);
+          enhanceChatImages(bubbleText);
+          renderMessageFiles(assistantRow, rescuePartial.files);
+          if (webSources && webSources.length > 0) {
+            renderMessageSources(assistantRow, webSources, true);
+          }
+          assistantRow.dataset.fullContent = cleanRescued;
           if (metaBox) {
             metaBox.innerHTML = `
-              <strong>${escapeHtml(displayModel)}</strong>
+              <strong>${escapeHtml(actualModelUsed || displayModel)}</strong>
               <span class="meta-model-badge" style="${engineLabel === 'Ollama Cloud' ? 'background:rgba(0,242,254,0.15); color:var(--neon-cyan);' : 'background:rgba(255,82,0,0.15); color:var(--neon-amber);'}">${engineLabel}</span>
-              <span>⏱️ ${totalTime}s (Terputus)</span>
+              <span>⏱️ ${totalTime}s</span>
             `;
           }
+          if (STATE.sessions.some(s => s.id === session.id)) {
+            const rescuedContentToSave = appendWebVerificationNote(cleanRescued, webSources);
+            session.messages.push({
+              role: 'assistant',
+              content: rescuedContentToSave,
+              model: actualModelUsed || displayModel,
+              engine: engineMode,
+              sources: webSources,
+              files: rescuePartial.files.length > 0 ? rescuePartial.files : undefined,
+              stats: { duration: totalTime, tokens: tokenCount },
+              timestamp: new Date().toISOString()
+            });
+            session.updatedAt = new Date().toISOString();
+            savePersistedState();
+            renderChatHistory(els.searchHistoryInput?.value || '');
+          }
+          if (!runOptions._isAutoContinuation) {
+            try {
+              await executeResponseContinuation(assistantRow, {
+                session,
+                modelName: actualModelUsed || displayModel,
+                engine: engineMode,
+                previousText: cleanRescued,
+                isWebsite: isWebTask,
+                forceTakeover: true,
+                isAutoContinue: true
+              });
+            } catch (_) {}
+          }
+          return true;
         }
 
         const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
@@ -28944,11 +29187,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           ? 'Nemotron 3 Super 120B (Free)' 
           : 'OpenRouter Free Router';
 
-        const rescuedHtml = hasPartialText ? `
-          <div class="partial-rescued-content" style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px dashed rgba(255,255,255,0.15);">
-            ${renderMarkdown(partialText.trim())}
-          </div>
-        ` : '';
+        const rescuedHtml = '';
 
         bubbleText.innerHTML = `
           ${rescuedHtml}
@@ -29024,7 +29263,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       if (policy === 'cloud_heavy' && isLongOrHeavy && canRunOpenRouter) {
         showToast('🔀 Auto-Router: Mengarahkan tugas kompleks ke OpenRouter Cloud...', 'info');
-        const orOk = await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free', { ...runOptions, autoFallback: true });
+        const orOk = await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free', { ...runOptions, autoFallback: Boolean(isOllamaRunnable) });
         if (!orOk && isOllamaRunnable) {
           console.warn('Auto-Router: OpenRouter gagal / tidak merespons, beralih ke Ollama Engine...');
           showToast('🔀 Auto-Router: OpenRouter tidak tersedia, beralih ke Ollama...', 'info');
@@ -29032,7 +29271,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         }
       } else if (policy === 'cloud_first' && canRunOpenRouter) {
         showToast('🔀 Auto-Router: Menggunakan OpenRouter Cloud...', 'info');
-        const orOk = await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free', { ...runOptions, autoFallback: true });
+        const orOk = await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free', { ...runOptions, autoFallback: Boolean(isOllamaRunnable) });
         if (!orOk && isOllamaRunnable) {
           console.warn('Auto-Router: OpenRouter gagal / tidak merespons, beralih ke Ollama Engine...');
           showToast('🔀 Auto-Router: OpenRouter tidak tersedia, beralih ke Ollama...', 'info');
@@ -29040,7 +29279,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         }
       } else if (isOllamaRunnable) {
         showToast('🔀 Auto-Router: Menghubungi Ollama Engine...', 'info');
-        const ollamaOk = await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel, { ...runOptions, autoFallback: true });
+        const ollamaOk = await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel, { ...runOptions, autoFallback: Boolean(canRunOpenRouter) });
         if (!ollamaOk && canRunOpenRouter) {
           console.warn('Auto-Router: Ollama gagal / tidak merespons, otomatis beralih ke OpenRouter Cloud...');
           showToast('🔀 Auto-Router: Ollama tidak tersedia, beralih ke OpenRouter Cloud...', 'info');
