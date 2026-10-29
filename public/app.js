@@ -24114,23 +24114,45 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           required: ['code']
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'summarize_whatsapp_chat',
+        description: 'Membaca dan merangkum obrolan WhatsApp dari nomor atau kontak/grup spesifik dengan gerbang persetujuan (Consent Gate) keamanan pengguna. Tool ini TIDAK membaca seluruh chat WhatsApp secara membabi buta, melainkan akan memunculkan pop-up persetujuan kepada pengguna untuk memilih/menyetujui nomor WhatsApp mana saja yang boleh diakses dan dirangkum oleh AI, lalu menampilkan hasil rangkumannya di pop-up khusus.',
+        parameters: {
+          type: 'object',
+          properties: {
+            target_number_or_name: {
+              type: 'string',
+              description: 'Nama kontak, nama grup, atau nomor WhatsApp spesifik yang ingin dirangkum (opsional, contoh: "almairaa" atau "6287899163076"). Kosongkan jika ingin pengguna memilih langsung di pop-up persetujuan.'
+            },
+            focus_topic: {
+              type: 'string',
+              description: 'Fokus rangkuman atau pertanyaan spesifik tentang isi chat (opsional, contoh: "Siapa saja yang sudah mengumpulkan tugas dokumen?").'
+            }
+          }
+        }
+      }
     }
   ];
 
   // Tool video YouTube selalu aktif — tidak bergantung pada toggle Mode Pencarian Web,
   // sehingga SEMUA model (native tool calling maupun format teks) tetap bisa memakainya.
-// Tool utility lokal (Memori SQLite & Eksekusi Python): diizinkan SELALU
+// Tool utility lokal (Memori SQLite, Eksekusi Python & Rangkum WhatsApp dengan Consent): diizinkan SELALU
   const LOCAL_UTILITY_TOOL_NAMES = [
     'save_memory', 'simpan_memori', 'store_memory',
     'search_memory', 'cari_memori', 'query_memory',
-    'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python'
+    'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python',
+    'summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary'
   ];
 
   // Daftar nama tool lokal yang dikenal sistem (native call maupun parse teks)
   const AUTONOMOUS_TOOL_NAMES = [
     'save_memory', 'simpan_memori', 'store_memory',
     'search_memory', 'cari_memori', 'query_memory',
-    'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python'
+    'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python',
+    'summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary'
   ];
 
   function normalizeToolName(name) {
@@ -24139,6 +24161,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (['save_memory', 'simpan_memori', 'store_memory'].includes(n)) return 'save_memory';
     if (['search_memory', 'cari_memori', 'query_memory'].includes(n)) return 'search_memory';
     if (['execute_python_code', 'execute_code', 'run_python', 'run_code', 'python_code', 'python'].includes(n)) return 'execute_python_code';
+    if (['summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary'].includes(n)) return 'summarize_whatsapp_chat';
     return n;
   }
 
@@ -24148,13 +24171,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     return AUTONOMOUS_TOOL_NAMES.includes(n) || AUTONOMOUS_TOOL_NAMES.includes(normalizeToolName(n));
   }
 
-  // Tool utility lokal (SQLite & Python) selalu diizinkan; tool web ditiadakan permanen
+  // Tool utility lokal (SQLite, Python & WhatsApp Consent) selalu diizinkan; tool web ditiadakan permanen
   function isAutonomousToolAllowed(toolName, webToolsAllowed) {
     const norm = normalizeToolName(toolName) || toolName;
     return LOCAL_UTILITY_TOOL_NAMES.includes(norm) || LOCAL_UTILITY_TOOL_NAMES.includes(toolName);
   }
 
-  // Susun daftar tool yang benar-benar DIKIRIMKAN ke model (hanya utility lokal SQLite & Python)
+  // Susun daftar tool yang benar-benar DIKIRIMKAN ke model (utility lokal SQLite, Python & WhatsApp Consent)
   function getSelectableAutonomousTools(webToolsAllowed) {
     return AUTONOMOUS_WEB_TOOLS.filter((t) => {
       const name = t && t.function ? t.function.name : '';
@@ -24188,6 +24211,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (toolName === 'execute_python_code') {
       const code = (raw && typeof raw === 'object') ? (raw.code || raw.script || raw.python || '') : String(raw || '');
       return `code:${String(code).trim().replace(/\s+/g, ' ').slice(0, 60)}`;
+    }
+    if (toolName === 'summarize_whatsapp_chat') {
+      const target = (raw && typeof raw === 'object') ? (raw.target_number_or_name || raw.target || raw.contact || raw.number || raw.phone || raw.jid || raw.query || '') : String(raw || '');
+      const focus = (raw && typeof raw === 'object') ? (raw.focus_topic || raw.focus || raw.topic || '') : '';
+      return `wa_sum:${String(target).trim().toLowerCase()}:${String(focus).trim().toLowerCase().slice(0, 40)}`;
     }
     let url = '';
     if (raw && typeof raw === 'object') url = raw.url || raw.target || raw.link || raw.href || raw.targetUrl || raw.tautan || raw.alamat || '';
@@ -25111,6 +25139,30 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           success: false
         };
       }
+
+      if (toolName === 'summarize_whatsapp_chat') {
+        const target = (args && typeof args === 'object')
+          ? (args.target_number_or_name || args.target || args.contact || args.number || args.phone || args.jid || args.query || '')
+          : String(rawArgs || '');
+        const focus = (args && typeof args === 'object')
+          ? (args.focus_topic || args.focus || args.topic || '')
+          : '';
+
+        if (typeof WhatsAppController !== 'undefined' && typeof WhatsAppController.requestAiToolSummaryWithConsent === 'function') {
+          const waRes = await WhatsAppController.requestAiToolSummaryWithConsent({
+            targetQuery: String(target || '').trim(),
+            focusTopic: String(focus || '').trim(),
+            promptContext
+          });
+          return waRes;
+        }
+        return {
+          text: 'Error: Modul WhatsAppController belum siap untuk mengakses obrolan.',
+          sources: [],
+          success: false
+        };
+      }
+
       const unknownMsg = `Error: Tool "${toolName}" tidak dikenal.`;
       if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
         BioEndocrine.registerToolIssue({ toolName, error: unknownMsg, status: 404, args: rawArgs });
@@ -25393,7 +25445,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // 6. Function call with JSON argument: search_web({"query": "..."}) or browse_web_page({"url": "..."})
-    const funcJsonRegex = /(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code|run_python|python)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
+    const funcJsonRegex = /(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code|run_python|python|summarize_whatsapp_chat|read_whatsapp_chat|rangkum_whatsapp|baca_whatsapp|whatsapp_summary)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
     let fjm;
     while ((fjm = funcJsonRegex.exec(textWithoutCode)) !== null) {
       const name = fjm[1];
@@ -25490,12 +25542,22 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   }
 
   function getAutonomousSystemDirective() {
-    return '';
+    return `\n[TOOL WHATSAPP PRIVACY GATE TERSEDIA]: Jika pengguna meminta untuk membaca, memeriksa, atau merangkum chat/obrolan WhatsApp (WA), panggil tool \`summarize_whatsapp_chat({"target_number_or_name": "<nama/nomor jika disebut>", "focus_topic": "<fokus rangkuman>"})\`. Sistem akan menampilkan Pop-up Persetujuan (Consent Gate) kepada pengguna untuk memilih nomor mana saja yang diizinkan sebelum data chat dibaca.`;
   }
   const AUTONOMOUS_SYSTEM_DIRECTIVE = '';
 
   function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
     if (status === 'done') return '';
+    const norm = normalizeToolName(toolName);
+    if (norm === 'summarize_whatsapp_chat') {
+      return `
+        <div class="autonomous-search-status" style="border-color: rgba(16, 185, 129, 0.45); background: rgba(6, 78, 59, 0.25); color: #6ee7b7;">
+          <span class="typing-cursor"></span>
+          <i class="fa-brands fa-whatsapp fa-spin"></i>
+          <span>Menunggu persetujuan nomor WhatsApp & menyiapkan rangkuman AI...</span>
+        </div>
+      `;
+    }
     return `
       <div class="autonomous-search-status">
         <span class="typing-cursor"></span>
@@ -42350,6 +42412,38 @@ Aturan:
         setTimeout(() => els.inputWaNewContactName?.focus(), 250);
       });
 
+      // Mode Rangkum AI Buttons (Topbar & Dropdown)
+      document.getElementById('btnTopBarWaAiSummary')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        AudioEngine.click();
+        const preselected = this.activeContact?.id ? [this.activeContact.id] : [];
+        this.openToolConsentModal({
+          preselectedJids: preselected,
+          fromAiTool: false
+        });
+      });
+
+      document.getElementById('btnOpenWaSummarizeConsentFromDropdown')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        AudioEngine.click();
+        this.closeContactDropdown();
+        const preselected = this.activeContact?.id ? [this.activeContact.id] : [];
+        this.openToolConsentModal({
+          preselectedJids: preselected,
+          fromAiTool: false
+        });
+      });
+
+      // Global click to close 3-dots menu
+      document.addEventListener('click', (e) => {
+        if (this.activeDotsMenuEl && !this.activeDotsMenuEl.contains(e.target) && !e.target.closest('.wa-contact-dots-btn')) {
+          this.closeContactDotsMenu();
+        }
+      });
+
+      // Consent Modal & Summary Pop-up Listeners
+      this.bindConsentAndSummaryModalListeners();
+
       // Refresh / Sync Contacts Button
       els.btnSyncWaContacts?.addEventListener('click', () => {
         AudioEngine.click();
@@ -43232,7 +43326,7 @@ Aturan:
             ${initial}
             ${hasFile ? '<span class="wa-contact-file-dot-red" title="Mengirim berkas"></span>' : ''}
           </div>
-          <div class="image-model-info" style="text-align: left;">
+          <div class="image-model-info" style="text-align: left; flex: 1; min-width: 0;">
             <div class="image-model-title-row">
               <span class="image-model-title" style="color: #25D366;">${escapeHtml(cleanName)}</span>
               ${hasFile ? '<span class="wa-file-badge-red" style="font-size:0.65rem; padding:1px 5px; margin-left:6px;"><i class="fa-solid fa-paperclip"></i> [Berkas]</span>' : ''}
@@ -43241,9 +43335,22 @@ Aturan:
             <span class="image-model-desc">${escapeHtml(cleanPhone)} &bull; ${escapeHtml(c.lastMessage || 'Tidak ada pesan')}</span>
           </div>
           ${this.activeContact && this.activeContact.id === c.id ? '<i class="fa-solid fa-check image-model-check"></i>' : ''}
+          <span class="wa-contact-dots-btn" role="button" tabindex="0" title="Opsi Nomor (Rangkum / Bersihkan Chat)">
+            <i class="fa-solid fa-ellipsis-vertical"></i>
+          </span>
         `;
 
-        item.addEventListener('click', () => {
+        const dotsBtn = item.querySelector('.wa-contact-dots-btn');
+        if (dotsBtn) {
+          dotsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.openContactDotsMenu(c, dotsBtn, e);
+          });
+        }
+
+        item.addEventListener('click', (e) => {
+          if (e.target.closest('.wa-contact-dots-btn')) return;
           this.selectContact(c);
         });
 
@@ -43314,7 +43421,7 @@ Aturan:
             ${initial}
             ${hasFile ? '<span class="wa-contact-file-dot-red" title="Mengirim berkas"></span>' : ''}
           </div>
-          <div class="wa-chat-info">
+          <div class="wa-chat-info" style="flex: 1; min-width: 0;">
             <div class="wa-chat-top-row">
               <span class="wa-chat-name">${escapeHtml(cleanName)}</span>
               ${hasFile ? '<span class="wa-file-badge-red" style="font-size:0.62rem; padding:1px 4px; margin-left:4px;"><i class="fa-solid fa-paperclip"></i> [Berkas]</span>' : ''}
@@ -43325,9 +43432,22 @@ Aturan:
               ${c.unreadCount > 0 ? `<span class="wa-chat-unread">${c.unreadCount}</span>` : ''}
             </div>
           </div>
+          <button type="button" class="wa-contact-dots-btn" title="Opsi Nomor (Rangkum / Bersihkan Chat)">
+            <i class="fa-solid fa-ellipsis-vertical"></i>
+          </button>
         `;
 
-        item.addEventListener('click', () => {
+        const dotsBtn = item.querySelector('.wa-contact-dots-btn');
+        if (dotsBtn) {
+          dotsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.openContactDotsMenu(c, dotsBtn, e);
+          });
+        }
+
+        item.addEventListener('click', (e) => {
+          if (e.target.closest('.wa-contact-dots-btn')) return;
           this.selectContact(c);
           if (STATE.chatMode !== 'whatsapp') {
             this.setChatMode('whatsapp');
@@ -43373,23 +43493,29 @@ Aturan:
           <span class="wa-chat-header-phone">(${escapeHtml(headerPhone)})</span>
           ${this.activeContact?.hasFile ? '<span class="wa-active-contact-file-tag">🔴 Ada Berkas</span>' : ''}
         </div>
-        <div class="wa-chat-header-actions">
-          <button type="button" id="btnActionClearWaHistory" title="Bersihkan riwayat pesan kontak ini">
-            <i class="fa-solid fa-trash-can"></i>
+        <div class="wa-chat-header-actions" style="display: flex; align-items: center; gap: 6px;">
+          <button type="button" id="btnActionSummarizeWaHeader" title="Rangkum chat nomor ini dengan AI" style="display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 8px; background: rgba(16, 185, 129, 0.14); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-size: 0.73rem; font-weight: 700; cursor: pointer;">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Rangkum Chat
+          </button>
+          <button type="button" id="btnActionHeaderDotsMenu" class="wa-contact-dots-btn" title="Opsi Nomor (Rangkum / Bersihkan Chat)">
+            <i class="fa-solid fa-ellipsis-vertical"></i>
           </button>
         </div>
       `;
-      headerBar.querySelector('#btnActionClearWaHistory')?.addEventListener('click', async () => {
-        if (confirm(`Hapus riwayat pesan dengan ${this.activeContact?.name || jid}?`)) {
-          await this.waFetch('/api/wa/clear', {
-            method: 'POST',
-            headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ jid, userId: this.getUserId(), pin: this.getPin() })
-          }, 2);
-          this.loadMessagesForContact(jid);
-          this.fetchContacts();
-        }
+      headerBar.querySelector('#btnActionSummarizeWaHeader')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        AudioEngine.click();
+        this.openSummaryResultPopup([jid], '');
       });
+      const headerDotsBtn = headerBar.querySelector('#btnActionHeaderDotsMenu');
+      if (headerDotsBtn) {
+        headerDotsBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const contactObj = this.activeContact || { id: jid, name: headerName, phone: headerPhone };
+          this.openContactDotsMenu(contactObj, headerDotsBtn, e);
+        });
+      }
       els.messagesList.appendChild(headerBar);
 
       try {
@@ -44348,6 +44474,595 @@ Aturan:
         } catch (err) {
           this.handleSendError(tempId, err);
         }
+      }
+    },
+
+    // ==================== THREE-DOTS (⋮) MENU, CONSENT GATE & AI SUMMARY POP-UP ====================
+    activeDotsMenuEl: null,
+    activeDotsBtnEl: null,
+    consentSelectedJids: new Set(),
+    pendingConsentResolver: null,
+    lastApprovedJids: [],
+    lastSummaryMarkdown: '',
+    lastSummaryMeta: null,
+
+    closeContactDotsMenu() {
+      if (this.activeDotsMenuEl) {
+        this.activeDotsMenuEl.remove();
+        this.activeDotsMenuEl = null;
+      }
+      if (this.activeDotsBtnEl) {
+        this.activeDotsBtnEl.classList.remove('active');
+        this.activeDotsBtnEl = null;
+      }
+    },
+
+    openContactDotsMenu(contact, anchorBtn, event) {
+      if (!contact || !contact.id) return;
+
+      // Toggle off if clicking the same button
+      if (this.activeDotsBtnEl === anchorBtn && this.activeDotsMenuEl) {
+        this.closeContactDotsMenu();
+        return;
+      }
+      this.closeContactDotsMenu();
+
+      const isGroup = contact.id.endsWith('@g.us');
+      let cleanName = (contact.name || '').trim();
+      if (isGroup) {
+        cleanName = cleanName.startsWith('👥') ? cleanName : `👥 ${cleanName || 'Grup WhatsApp'}`;
+      } else {
+        cleanName = this.cleanDisplayName(cleanName, contact.phone || contact.id);
+      }
+
+      const menu = document.createElement('div');
+      menu.className = 'wa-contact-dots-menu';
+      menu.innerHTML = `
+        <div class="wa-dots-menu-header" title="${escapeHtml(cleanName)}">
+          <i class="fa-brands fa-whatsapp text-emerald-400"></i> ${escapeHtml(cleanName)}
+        </div>
+        <button type="button" class="wa-dots-menu-item" data-action="summarize">
+          <i class="fa-solid fa-wand-magic-sparkles" style="color: #34d399; width: 16px; text-align: center;"></i>
+          <span>Rangkum Chat (AI)</span>
+        </button>
+        <button type="button" class="wa-dots-menu-item danger" data-action="clear">
+          <i class="fa-solid fa-trash-can" style="color: #f87171; width: 16px; text-align: center;"></i>
+          <span>Bersihkan Chat</span>
+        </button>
+      `;
+
+      document.body.appendChild(menu);
+      this.activeDotsMenuEl = menu;
+      this.activeDotsBtnEl = anchorBtn;
+      anchorBtn?.classList.add('active');
+
+      // Position near anchor button within viewport bounds
+      const rect = anchorBtn ? anchorBtn.getBoundingClientRect() : { bottom: event?.clientY || 120, right: event?.clientX || 200, left: event?.clientX || 180 };
+      const menuRect = menu.getBoundingClientRect();
+      let top = rect.bottom + 6;
+      let left = rect.right - (menuRect.width || 200);
+      if (left < 10) left = Math.max(10, rect.left);
+      if (left + (menuRect.width || 200) > window.innerWidth - 10) {
+        left = window.innerWidth - (menuRect.width || 200) - 10;
+      }
+      if (top + (menuRect.height || 110) > window.innerHeight - 10) {
+        top = Math.max(10, (rect.top || rect.bottom) - (menuRect.height || 110) - 6);
+      }
+      menu.style.top = `${top}px`;
+      menu.style.left = `${left}px`;
+
+      menu.querySelector('[data-action="summarize"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        AudioEngine.click();
+        this.closeContactDotsMenu();
+        this.closeContactDropdown();
+        // Langsung merangkum nomor ini dan menampilkan pop-up output rangkuman AI
+        this.openSummaryResultPopup([contact.id], '');
+      });
+
+      menu.querySelector('[data-action="clear"]')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        AudioEngine.click();
+        this.closeContactDotsMenu();
+        await this.clearContactHistory(contact);
+      });
+    },
+
+    async clearContactHistory(contact) {
+      if (!contact || !contact.id) return;
+      const isGroup = contact.id.endsWith('@g.us');
+      const displayLabel = isGroup
+        ? (contact.name || 'Grup WhatsApp')
+        : this.cleanDisplayName(contact.name, contact.phone || contact.id);
+
+      if (!confirm(`Bersihkan seluruh riwayat pesan WhatsApp dengan "${displayLabel}"?`)) {
+        return;
+      }
+
+      try {
+        await this.waFetch('/api/wa/clear', {
+          method: 'POST',
+          headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            jid: contact.id,
+            userId: this.getUserId(),
+            pin: this.getPin()
+          })
+        }, 2);
+        showToast(`🗑️ Riwayat chat "${displayLabel}" berhasil dibersihkan.`, 'success');
+        if (this.activeContact && this.activeContact.id === contact.id) {
+          this.loadMessagesForContact(contact.id);
+        }
+        await this.fetchContacts();
+      } catch (err) {
+        showToast(`⚠️ Gagal membersihkan chat: ${err.message}`, 'error');
+      }
+    },
+
+    bindConsentAndSummaryModalListeners() {
+      if (this._consentModalBound) return;
+      this._consentModalBound = true;
+
+      const consentModal = document.getElementById('modalWaToolConsent');
+      const summaryModal = document.getElementById('modalWaSummaryResult');
+
+      const closeConsent = (rejected = true) => {
+        if (consentModal) consentModal.style.display = 'none';
+        if (rejected && this.pendingConsentResolver) {
+          const resolve = this.pendingConsentResolver;
+          this.pendingConsentResolver = null;
+          resolve({ approved: false, approvedJids: [], focusTopic: '' });
+        }
+      };
+
+      document.getElementById('btnCloseWaConsentModal')?.addEventListener('click', () => {
+        AudioEngine.click();
+        closeConsent(true);
+      });
+      document.getElementById('btnRejectWaConsent')?.addEventListener('click', () => {
+        AudioEngine.click();
+        closeConsent(true);
+      });
+
+      document.getElementById('waConsentSearchInput')?.addEventListener('input', (e) => {
+        this.renderConsentContactChecklist(e.target.value.trim().toLowerCase());
+      });
+
+      document.getElementById('btnWaConsentSelectAll')?.addEventListener('click', () => {
+        AudioEngine.click();
+        const q = (document.getElementById('waConsentSearchInput')?.value || '').trim().toLowerCase();
+        const list = q
+          ? this.contacts.filter(c => (c.name || '').toLowerCase().includes(q) || (c.phone || '').includes(q) || (c.id || '').toLowerCase().includes(q))
+          : this.contacts;
+        list.forEach(c => {
+          if (c && c.id) this.consentSelectedJids.add(c.id);
+        });
+        this.renderConsentContactChecklist(q);
+      });
+
+      document.getElementById('btnWaConsentClearAll')?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.consentSelectedJids.clear();
+        const q = (document.getElementById('waConsentSearchInput')?.value || '').trim().toLowerCase();
+        this.renderConsentContactChecklist(q);
+      });
+
+      document.getElementById('btnApproveWaConsent')?.addEventListener('click', async () => {
+        AudioEngine.click();
+        const approvedJids = Array.from(this.consentSelectedJids);
+        if (approvedJids.length === 0) {
+          showToast('⚠️ Pilih minimal 1 nomor WhatsApp untuk dirangkum!', 'warning');
+          return;
+        }
+        const focusTopic = (document.getElementById('waConsentFocusTopicInput')?.value || '').trim();
+        if (consentModal) consentModal.style.display = 'none';
+
+        if (this.pendingConsentResolver) {
+          const resolve = this.pendingConsentResolver;
+          this.pendingConsentResolver = null;
+          resolve({ approved: true, approvedJids, focusTopic });
+        } else {
+          await this.openSummaryResultPopup(approvedJids, focusTopic);
+        }
+      });
+
+      // Summary Result Pop-up Listeners
+      const closeSummaryPopup = () => {
+        if (summaryModal) summaryModal.style.display = 'none';
+      };
+      document.getElementById('btnCloseWaSummaryPopup')?.addEventListener('click', () => {
+        AudioEngine.click();
+        closeSummaryPopup();
+      });
+      document.getElementById('btnCloseWaSummaryFooter')?.addEventListener('click', () => {
+        AudioEngine.click();
+        closeSummaryPopup();
+      });
+
+      document.getElementById('btnWaSummaryChangeNumbers')?.addEventListener('click', () => {
+        AudioEngine.click();
+        closeSummaryPopup();
+        this.openToolConsentModal({
+          preselectedJids: this.lastApprovedJids || [],
+          focusTopic: (document.getElementById('waSummaryRefocusInput')?.value || '').trim(),
+          fromAiTool: false
+        });
+      });
+
+      document.getElementById('btnRegenerateWaSummary')?.addEventListener('click', () => {
+        AudioEngine.click();
+        const newFocus = (document.getElementById('waSummaryRefocusInput')?.value || '').trim();
+        if (this.lastApprovedJids && this.lastApprovedJids.length > 0) {
+          this.openSummaryResultPopup(this.lastApprovedJids, newFocus);
+        } else {
+          this.openToolConsentModal({ fromAiTool: false });
+        }
+      });
+
+      document.getElementById('waSummaryRefocusInput')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          document.getElementById('btnRegenerateWaSummary')?.click();
+        }
+      });
+
+      document.getElementById('btnCopyWaSummaryOutput')?.addEventListener('click', () => {
+        AudioEngine.click();
+        if (!this.lastSummaryMarkdown) {
+          showToast('⚠️ Belum ada teks rangkuman untuk disalin.', 'warning');
+          return;
+        }
+        if (typeof copyTextToClipboard === 'function') {
+          copyTextToClipboard(this.lastSummaryMarkdown, null, '📋 Rangkuman WhatsApp berhasil disalin!');
+        } else {
+          navigator.clipboard?.writeText(this.lastSummaryMarkdown);
+          showToast('📋 Rangkuman WhatsApp berhasil disalin!', 'success');
+        }
+      });
+
+      document.getElementById('btnSendWaSummaryToAiChat')?.addEventListener('click', () => {
+        AudioEngine.click();
+        if (!this.lastSummaryMarkdown) return;
+        closeSummaryPopup();
+        this.setChatMode('ai');
+        if (els.promptInput) {
+          els.promptInput.value = `Berikut adalah hasil rangkuman obrolan WhatsApp yang telah saya setujui:\n\n${this.lastSummaryMarkdown}\n\nBerdasarkan rangkuman di atas, tolong analisis lebih lanjut: `;
+          autoResizeTextarea(els.promptInput);
+          els.promptInput.focus();
+        }
+        showToast('💬 Rangkuman dimasukkan ke kolom diskusi AI Chat.', 'info');
+      });
+    },
+
+    updateConsentSelectedCountUI() {
+      const count = this.consentSelectedJids.size;
+      const badgeEl = document.getElementById('waConsentSelectedCountBadge');
+      const footerCountEl = document.getElementById('waConsentFooterCount');
+      const approveBtn = document.getElementById('btnApproveWaConsent');
+      if (badgeEl) badgeEl.textContent = `${count} dipilih`;
+      if (footerCountEl) footerCountEl.textContent = String(count);
+      if (approveBtn) {
+        approveBtn.disabled = count === 0;
+        approveBtn.style.opacity = count === 0 ? '0.5' : '1';
+      }
+    },
+
+    renderConsentContactChecklist(filter = '') {
+      const container = document.getElementById('waConsentContactList');
+      if (!container) return;
+      container.innerHTML = '';
+
+      let list = Array.isArray(this.contacts) ? this.contacts : [];
+      if (filter) {
+        const q = filter.toLowerCase();
+        list = list.filter(c =>
+          (c.name || '').toLowerCase().includes(q) ||
+          (c.phone || '').toLowerCase().includes(q) ||
+          (c.id || '').toLowerCase().includes(q)
+        );
+      }
+
+      if (list.length === 0) {
+        container.innerHTML = `
+          <div style="padding: 20px 12px; text-align: center; color: #94a3b8; font-size: 0.78rem;">
+            ${filter ? `Tidak ada nomor cocok dengan "<b>${escapeHtml(filter)}</b>"` : 'Belum ada daftar kontak WhatsApp yang tersinkron.'}
+          </div>
+        `;
+        this.updateConsentSelectedCountUI();
+        return;
+      }
+
+      const fragment = document.createDocumentFragment();
+      list.slice(0, 60).forEach(c => {
+        const isChecked = this.consentSelectedJids.has(c.id);
+        const isGroup = c.id && c.id.endsWith('@g.us');
+        let cleanName = (c.name || '').trim();
+        if (isGroup) {
+          cleanName = cleanName.startsWith('👥') ? cleanName : `👥 ${cleanName || 'Grup WhatsApp'}`;
+        } else {
+          cleanName = this.cleanDisplayName(cleanName, c.phone || c.id);
+        }
+        const cleanPhone = isGroup ? 'Grup WhatsApp' : (this.formatPhoneNumber(c.phone || c.id) || c.phone || '');
+        const hasFile = Boolean(c.hasFile || (c.lastMessage && (c.lastMessage.includes('[Dokumen:') || c.lastMessage.includes('[Foto]'))));
+
+        const row = document.createElement('label');
+        row.className = 'wa-consent-item' + (isChecked ? ' selected' : '');
+        row.innerHTML = `
+          <input type="checkbox" class="wa-consent-checkbox" ${isChecked ? 'checked' : ''} />
+          <div style="flex: 1; min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <span style="font-size: 0.82rem; font-weight: 700; color: #ecfdf5;">${escapeHtml(cleanName)}</span>
+              <span style="font-size: 0.71rem; color: #6ee7b7; opacity: 0.85;">(${escapeHtml(cleanPhone)})</span>
+              ${hasFile ? '<span class="wa-file-badge-red" style="font-size: 0.62rem; padding: 1px 5px;"><i class="fa-solid fa-paperclip"></i> Berkas</span>' : ''}
+            </div>
+            <div style="font-size: 0.73rem; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;">
+              ${escapeHtml(c.lastMessage || 'Obrolan tersimpan')}
+            </div>
+          </div>
+        `;
+
+        const checkbox = row.querySelector('.wa-consent-checkbox');
+        checkbox?.addEventListener('change', () => {
+          if (checkbox.checked) {
+            this.consentSelectedJids.add(c.id);
+            row.classList.add('selected');
+          } else {
+            this.consentSelectedJids.delete(c.id);
+            row.classList.remove('selected');
+          }
+          this.updateConsentSelectedCountUI();
+        });
+
+        fragment.appendChild(row);
+      });
+
+      container.appendChild(fragment);
+      this.updateConsentSelectedCountUI();
+    },
+
+    async openToolConsentModal(options = {}) {
+      this.bindConsentAndSummaryModalListeners();
+      if (!this.contacts || this.contacts.length === 0) {
+        await this.fetchContacts().catch(() => {});
+      }
+
+      const {
+        preselectedJids = [],
+        targetQuery = '',
+        focusTopic = '',
+        fromAiTool = false
+      } = options;
+
+      this.consentSelectedJids.clear();
+
+      // Match targetQuery if provided by AI tool call
+      if (targetQuery) {
+        const q = String(targetQuery).toLowerCase().trim();
+        const digits = q.replace(/\D/g, '');
+        (this.contacts || []).forEach(c => {
+          const nameMatch = (c.name || '').toLowerCase().includes(q);
+          const phoneMatch = digits.length >= 4 && ((c.phone || '').includes(digits) || (c.id || '').includes(digits));
+          const idMatch = (c.id || '').toLowerCase() === q;
+          if (nameMatch || phoneMatch || idMatch) {
+            this.consentSelectedJids.add(c.id);
+          }
+        });
+      }
+
+      preselectedJids.forEach(jid => {
+        if (jid) this.consentSelectedJids.add(jid);
+      });
+
+      // Fallback preselect activeContact if none matched yet
+      if (this.consentSelectedJids.size === 0 && this.activeContact?.id) {
+        this.consentSelectedJids.add(this.activeContact.id);
+      }
+
+      const modal = document.getElementById('modalWaToolConsent');
+      const callerNote = document.getElementById('waConsentToolCallerNote');
+      const searchInput = document.getElementById('waConsentSearchInput');
+      const focusInput = document.getElementById('waConsentFocusTopicInput');
+
+      if (callerNote) {
+        if (fromAiTool) {
+          callerNote.innerHTML = `🤖 <b>Tool Calling AI (<code>summarize_whatsapp_chat</code>) Meminta Izin:</b> AI tidak diizinkan melihat seluruh chat WhatsApp Anda. Silakan pilih dan setujui nomor mana saja yang boleh diakses AI${targetQuery ? ` (Permintaan AI: <b>"${escapeHtml(targetQuery)}"</b>)` : ''}.`;
+        } else {
+          callerNote.innerHTML = `🔒 <b>Keamanan Privasi Aktif:</b> AI hanya akan membaca dan merangkum obrolan dari nomor WhatsApp yang Anda centang dan setujui di bawah ini.`;
+        }
+      }
+
+      if (searchInput) searchInput.value = '';
+      if (focusInput) focusInput.value = focusTopic || '';
+
+      this.renderConsentContactChecklist('');
+      if (modal) modal.style.display = 'flex';
+
+      return new Promise((resolve) => {
+        this.pendingConsentResolver = resolve;
+      });
+    },
+
+    async requestAiToolSummaryWithConsent({ targetQuery = '', focusTopic = '', promptContext = null } = {}) {
+      showToast('🛡️ AI meminta persetujuan nomor WhatsApp yang akan dirangkum...', 'info');
+      const consent = await this.openToolConsentModal({
+        targetQuery,
+        focusTopic,
+        fromAiTool: true
+      });
+
+      if (!consent || !consent.approved || !Array.isArray(consent.approvedJids) || consent.approvedJids.length === 0) {
+        showToast('🚫 Akses rangkuman WhatsApp ditolak oleh pengguna.', 'warning');
+        return {
+          text: '[AKSES DITOLAK PENGGUNA]: Pengguna menolak atau membatalkan persetujuan akses nomor WhatsApp pada Consent Gate. Beritahu pengguna dengan sopan bahwa tidak ada data WhatsApp yang dibaca demi menjaga privasi.',
+          sources: [],
+          success: false
+        };
+      }
+
+      const summaryRes = await this.openSummaryResultPopup(consent.approvedJids, consent.focusTopic || focusTopic, {
+        fromAiTool: true
+      });
+
+      if (summaryRes && summaryRes.success) {
+        return {
+          text: `[HASIL RANGKUMAN WHATSAPP YANG DISETUJUI PENGGUNA (${consent.approvedJids.length} NOMOR)]:\n${summaryRes.summary}\n\n(Catatan: Pop-up hasil rangkuman juga telah ditampilkan langsung di layar pengguna.)`,
+          sources: [],
+          success: true
+        };
+      }
+
+      return {
+        text: `Gagal merangkum chat WhatsApp: ${summaryRes?.error || 'Tidak dapat menghubungi endpoint rangkuman.'}`,
+        sources: [],
+        success: false
+      };
+    },
+
+    renderMarkdownSummaryToHtml(md) {
+      if (!md) return '';
+      if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
+        try {
+          return marked.parse(md);
+        } catch (_) {}
+      }
+      // Lightweight clean markdown formatter
+      const lines = String(md).split('\n');
+      let html = '';
+      let inList = false;
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+          if (inList) { html += '</ul>'; inList = false; }
+          continue;
+        }
+        let safe = escapeHtml(line)
+          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+          .replace(/`([^`]+)`/g, '<code style="background:rgba(16,185,129,0.15);padding:1px 5px;border-radius:4px;color:#6ee7b7;">$1</code>');
+
+        if (safe.startsWith('### ')) {
+          if (inList) { html += '</ul>'; inList = false; }
+          html += `<h3>${safe.slice(4)}</h3>`;
+        } else if (safe.startsWith('## ')) {
+          if (inList) { html += '</ul>'; inList = false; }
+          html += `<h2>${safe.slice(3)}</h2>`;
+        } else if (safe.startsWith('# ')) {
+          if (inList) { html += '</ul>'; inList = false; }
+          html += `<h1>${safe.slice(2)}</h1>`;
+        } else if (safe.startsWith('- ') || safe.startsWith('* ')) {
+          if (!inList) { html += '<ul>'; inList = true; }
+          html += `<li>${safe.slice(2)}</li>`;
+        } else {
+          if (inList) { html += '</ul>'; inList = false; }
+          html += `<p>${safe}</p>`;
+        }
+      }
+      if (inList) html += '</ul>';
+      return html;
+    },
+
+    async openSummaryResultPopup(approvedJids = [], focusTopic = '', options = {}) {
+      this.bindConsentAndSummaryModalListeners();
+      const validJids = (Array.isArray(approvedJids) ? approvedJids : []).filter(Boolean);
+      if (validJids.length === 0) {
+        return this.openToolConsentModal({ focusTopic, fromAiTool: false });
+      }
+
+      this.lastApprovedJids = validJids;
+
+      const modal = document.getElementById('modalWaSummaryResult');
+      const subtitleEl = document.getElementById('waSummaryPopupSubtitle');
+      const chipsWrap = document.getElementById('waSummaryApprovedContactsChips');
+      const refocusInput = document.getElementById('waSummaryRefocusInput');
+      const loadingState = document.getElementById('waSummaryLoadingState');
+      const contentBox = document.getElementById('waSummaryOutputContent');
+      const metaFooter = document.getElementById('waSummaryMetaFooterText');
+
+      if (refocusInput) refocusInput.value = focusTopic || '';
+      if (subtitleEl) {
+        subtitleEl.textContent = `Merangkum ${validJids.length} nomor WhatsApp yang disetujui...`;
+      }
+      if (chipsWrap) {
+        chipsWrap.innerHTML = validJids.map(jid => {
+          const c = (this.contacts || []).find(item => item.id === jid);
+          const isGroup = jid.endsWith('@g.us');
+          const label = c
+            ? (isGroup ? (c.name || 'Grup WhatsApp') : this.cleanDisplayName(c.name, c.phone || jid))
+            : this.cleanDisplayName('', jid);
+          return `<span class="wa-summary-approved-chip"><i class="fa-brands fa-whatsapp"></i> ${escapeHtml(label)}</span>`;
+        }).join('');
+      }
+
+      if (loadingState) loadingState.style.display = 'flex';
+      if (contentBox) {
+        contentBox.style.display = 'none';
+        contentBox.innerHTML = '';
+      }
+      if (metaFooter) metaFooter.textContent = 'Sedang menganalisis percakapan...';
+      if (modal) modal.style.display = 'flex';
+
+      try {
+        const res = await this.waFetch('/api/wa/summarize', {
+          method: 'POST',
+          headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            approvedJids: validJids,
+            focusTopic: focusTopic || '',
+            engine: STATE.engine || 'openrouter',
+            model: STATE.selectedModel || '',
+            apiKey: typeof getActiveApiKey === 'function' ? getActiveApiKey() : '',
+            userId: this.getUserId(),
+            pin: this.getPin()
+          })
+        }, 2);
+
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.success) {
+          throw new Error(data?.error || `HTTP ${res.status}`);
+        }
+
+        this.lastSummaryMarkdown = data.summary || '';
+        this.lastSummaryMeta = data;
+
+        if (loadingState) loadingState.style.display = 'none';
+        if (contentBox) {
+          contentBox.innerHTML = this.renderMarkdownSummaryToHtml(data.summary || '');
+          contentBox.style.display = 'block';
+        }
+        if (subtitleEl) {
+          subtitleEl.textContent = `Rangkuman selesai • ${data.totalMessages || 0} pesan dari ${validJids.length} nomor disetujui`;
+        }
+        if (metaFooter) {
+          metaFooter.textContent = `Terverifikasi Consent Gate • ${validJids.length} Nomor • ${data.totalMessages || 0} Pesan`;
+        }
+        if (Array.isArray(data.summarizedContacts) && chipsWrap) {
+          chipsWrap.innerHTML = data.summarizedContacts.map(sc => `
+            <span class="wa-summary-approved-chip">
+              <i class="fa-brands fa-whatsapp"></i> ${escapeHtml(sc.name)} (${sc.messageCount} pesan${sc.fileCount > 0 ? `, 🔴 ${sc.fileCount} berkas` : ''})
+            </span>
+          `).join('');
+        }
+
+        AudioEngine.success?.() || AudioEngine.click?.();
+        return {
+          success: true,
+          summary: data.summary,
+          totalMessages: data.totalMessages,
+          summarizedContacts: data.summarizedContacts
+        };
+      } catch (err) {
+        if (loadingState) loadingState.style.display = 'none';
+        if (contentBox) {
+          contentBox.style.display = 'block';
+          contentBox.innerHTML = `
+            <div style="padding: 16px; border-radius: 10px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #fca5a5;">
+              <strong><i class="fa-solid fa-triangle-exclamation"></i> Gagal Merangkum Chat:</strong>
+              <p style="margin-top: 6px; font-size: 0.82rem;">${escapeHtml(err.message || 'Terjadi kesalahan jaringan.')}</p>
+            </div>
+          `;
+        }
+        if (subtitleEl) subtitleEl.textContent = 'Gagal memuat rangkuman';
+        if (metaFooter) metaFooter.textContent = 'Kesalahan saat memproses rangkuman';
+        return { success: false, error: err.message };
       }
     }
   };

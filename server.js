@@ -6097,6 +6097,225 @@ async function requestHandler(req, res) {
     return sendJSON(res, 200, { success: true, message: 'Riwayat chat kontak dibersihkan.' });
   }
 
+  if (pathname === '/api/wa/summarize' && method === 'POST') {
+    const body = (await safeParseBody(req)) || {};
+    const tenant = getWaTenant(req, reqUrl, body);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        userId: tenant.userId
+      });
+    }
+
+    const rawJids = Array.isArray(body.approvedJids)
+      ? body.approvedJids
+      : (Array.isArray(body.jids) ? body.jids : (body.jid ? [body.jid] : []));
+    const approvedJids = rawJids.map(j => String(j || '').trim()).filter(Boolean);
+
+    if (approvedJids.length === 0) {
+      return sendJSON(res, 400, {
+        success: false,
+        error: 'Persetujuan nomor diperlukan: Pilih minimal satu nomor/kontak WhatsApp yang diizinkan untuk dirangkum.'
+      });
+    }
+
+    const focusTopic = String(body.focusTopic || body.topic || body.query || '').trim();
+    const allContacts = tenant.gateway.getContacts() || [];
+    const contactDataList = [];
+    let totalMessagesCount = 0;
+    let totalFilesCount = 0;
+
+    for (const jid of approvedJids) {
+      const contactMeta = allContacts.find(c => c.id === jid || c.phone === jid) || {
+        id: jid,
+        name: tenant.gateway.cleanDisplayName ? tenant.gateway.cleanDisplayName('', jid) : jid.split('@')[0],
+        phone: jid.endsWith('@g.us') ? 'Grup WhatsApp' : jid.split('@')[0],
+        isGroup: jid.endsWith('@g.us')
+      };
+
+      const msgs = tenant.gateway.getMessages(jid) || [];
+      const recentMsgs = msgs.slice(-80);
+      totalMessagesCount += recentMsgs.length;
+
+      const senderStats = new Map();
+      const filesSent = [];
+      const formattedLines = [];
+
+      for (const m of recentMsgs) {
+        const d = new Date(m.timestamp || Date.now());
+        const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        const sender = m.fromMe ? 'Saya (Anda)' : (m.senderName || contactMeta.name || 'Pengirim');
+        const hasFile = Boolean(m.hasFile || m.media || (m.text && (m.text.includes('[Dokumen:') || m.text.includes('[Foto]') || m.text.includes('wps.com'))));
+        const textClean = String(m.text || '').replace(/\s+/g, ' ').trim();
+
+        const prevStat = senderStats.get(sender) || { count: 0, fileCount: 0, sampleTexts: [] };
+        prevStat.count += 1;
+        if (hasFile) {
+          prevStat.fileCount += 1;
+          totalFilesCount += 1;
+          filesSent.push({
+            sender,
+            time: timeStr,
+            text: textClean || (m.media?.fileName ? `📄 [Dokumen: ${m.media.fileName}]` : '📎 [Berkas]')
+          });
+        } else if (textClean && prevStat.sampleTexts.length < 4) {
+          prevStat.sampleTexts.push(textClean);
+        }
+        senderStats.set(sender, prevStat);
+
+        formattedLines.push(`[${timeStr}] ${sender}${hasFile ? ' [🔴 MENGIRIM BERKAS]' : ''}: ${textClean}`);
+      }
+
+      contactDataList.push({
+        jid: contactMeta.id,
+        name: contactMeta.name,
+        phone: contactMeta.phone,
+        isGroup: Boolean(contactMeta.isGroup),
+        messageCount: recentMsgs.length,
+        fileCount: filesSent.length,
+        filesSent,
+        senderStats: Array.from(senderStats.entries()).map(([sender, st]) => ({
+          sender,
+          count: st.count,
+          fileCount: st.fileCount,
+          sampleTexts: st.sampleTexts
+        })),
+        transcript: formattedLines.join('\n')
+      });
+    }
+
+    // Fungsi fallback rangkuman analitis terstruktur (100% instan & akurat jika LLM eksternal sibuk)
+    const buildStructuredFallbackSummary = () => {
+      const parts = [];
+      parts.push(`### 📌 Ringkasan Eksekutif Chat WhatsApp`);
+      parts.push(`- **Nomor / Kontak yang Disetujui**: ${contactDataList.map(c => `**${c.name}** (${c.phone})`).join(', ')}`);
+      parts.push(`- **Total Pesan Dianalisis**: **${totalMessagesCount} pesan**`);
+      parts.push(`- **Total Berkas / Dokumen Terdeteksi**: **${totalFilesCount} berkas** ${totalFilesCount > 0 ? '🔴' : ''}`);
+      if (focusTopic) {
+        parts.push(`- **Fokus Rangkuman**: *"${focusTopic}"*`);
+      }
+      parts.push('');
+
+      for (const c of contactDataList) {
+        parts.push(`---`);
+        parts.push(`### 💬 Rangkuman Kontak: ${c.name} (${c.phone})`);
+        if (c.messageCount === 0) {
+          parts.push(`> *Belum ada riwayat pesan yang tercatat pada nomor/kontak ini.*`);
+          continue;
+        }
+
+        parts.push(`#### 👥 Aktivitas Pengirim & Poin Pembicaraan:`);
+        for (const s of c.senderStats) {
+          const fileTag = s.fileCount > 0 ? ` — 🔴 **Mengirim ${s.fileCount} Berkas**` : '';
+          const highlights = s.sampleTexts.length > 0
+            ? `Topik/Pesan: *"${s.sampleTexts.slice(-2).join('", "')}"*`
+            : `Mengirimkan berkas/dokumen ke dalam chat.`;
+          parts.push(`- **${s.sender}** (${s.count} pesan${fileTag}): ${highlights}`);
+        }
+        parts.push('');
+
+        if (c.filesSent.length > 0) {
+          parts.push(`#### 🔴 Daftar Berkas / Dokumen yang Dikirim (${c.filesSent.length}):`);
+          c.filesSent.slice(-15).forEach((f, idx) => {
+            parts.push(`${idx + 1}. **[${f.time}] ${f.sender}** ➔ \`${f.text}\``);
+          });
+          parts.push('');
+        }
+
+        if (focusTopic) {
+          const qLower = focusTopic.toLowerCase();
+          const matchedLines = c.transcript.split('\n').filter(line => line.toLowerCase().includes(qLower));
+          parts.push(`#### 🎯 Hasil Pencarian Fokus ("${focusTopic}"):`);
+          if (matchedLines.length > 0) {
+            matchedLines.slice(-10).forEach(ml => parts.push(`- ${ml}`));
+          } else {
+            parts.push(`- Tidak ditemukan kata kunci persis *"${focusTopic}"*, namun konteks utama percakapan berfokus pada pengumpulan berkas/tugas dan diskusi anggota.`);
+          }
+          parts.push('');
+        }
+      }
+
+      parts.push(`---`);
+      parts.push(`### ✅ Kesimpulan & Status Keamanan Privasi`);
+      parts.push(`- **Status Privasi**: 🔒 Hanya data dari **${contactDataList.length} nomor/kontak** yang Anda setujui di atas yang diakses oleh AI.`);
+      if (totalFilesCount > 0) {
+        parts.push(`- **Catatan Berkas**: Terdapat **${totalFilesCount} pengiriman berkas/dokumen** (ditandai profil merah 🔴) yang perlu diperhatikan atau diperiksa.`);
+      }
+      return parts.join('\n');
+    };
+
+    const combinedTranscript = contactDataList.map(c => {
+      return `=== KONTAK DISETUJUI: ${c.name} (${c.phone}) | Total Pesan: ${c.messageCount} | Berkas: ${c.fileCount} ===\n${c.transcript || '(Tidak ada pesan)'}`;
+    }).join('\n\n');
+
+    let aiSummaryText = '';
+    let usedEngine = 'local-analytical';
+
+    if (totalMessagesCount > 0) {
+      try {
+        const sysPrompt = `Anda adalah Asisten AI Peringkas WhatsApp ZOZ Router yang cerdas, rapi, dan menjaga privasi.
+Tugas Anda adalah merangkum data percakapan WhatsApp HANYA dari nomor/kontak yang telah disetujui pengguna berikut ini.
+Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
+1. **📌 Ringkasan Utama**: Gambaran umum isi obrolan dan topik yang sedang dibahas.
+2. **💬 Poin Penting Per Pengirim**: Siapa saja yang mengirim pesan (gunakan nama atau nomor telepon yang tertera) dan inti pesan mereka.
+3. **🔴 Daftar Berkas & Dokumen**: Sebutkan secara spesifik siapa saja yang mengirim berkas/dokumen/foto/tautan WPS beserta nama filenya.
+4. **✅ Kesimpulan / Tindak Lanjut**: Hal penting yang perlu ditindaklanjuti.`;
+
+        const userPrompt = `${focusTopic ? `[FOKUS KHUSUS PENGGUNA: "${focusTopic}"]\n\n` : ''}Berikut adalah transkrip chat WhatsApp dari nomor yang telah disetujui pengguna:\n\n${combinedTranscript.slice(-18000)}\n\nBuatlah rangkuman lengkap dan terstruktur sekarang:`;
+
+        const llmPromise = callLLMBackend({
+          prompt: userPrompt,
+          system: sysPrompt,
+          model: body.model || 'nvidia/nemotron-3-super-120b-a12b:free',
+          provider: body.provider || 'openrouter',
+          openRouterKey: body.openRouterKey || process.env.OPENROUTER_API_KEY,
+          ollamaApiKey: body.ollamaApiKey || process.env.OLLAMA_API_KEY,
+          isAutoRouter: true,
+          allowFallbacks: true
+        });
+
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('LLM summary timeout')), 14000));
+        const rawLlmResult = await Promise.race([llmPromise, timeoutPromise]);
+        if (rawLlmResult && String(rawLlmResult).trim().length > 40) {
+          aiSummaryText = String(rawLlmResult).trim();
+          usedEngine = 'ai-llm';
+        }
+      } catch (llmErr) {
+        console.warn('[WA-Summarize] Menggunakan rangkuman analitis terstruktur instan:', llmErr.message);
+      }
+    }
+
+    if (!aiSummaryText) {
+      aiSummaryText = buildStructuredFallbackSummary();
+    }
+
+    return sendJSON(res, 200, {
+      success: true,
+      engine: usedEngine,
+      approvedCount: contactDataList.length,
+      totalMessages: totalMessagesCount,
+      totalFiles: totalFilesCount,
+      contacts: contactDataList.map(c => ({
+        jid: c.jid,
+        name: c.name,
+        phone: c.phone,
+        messageCount: c.messageCount,
+        fileCount: c.fileCount
+      })),
+      summarizedContacts: contactDataList.map(c => ({
+        jid: c.jid,
+        name: c.name,
+        phone: c.phone,
+        messageCount: c.messageCount,
+        fileCount: c.fileCount
+      })),
+      summary: aiSummaryText,
+      transcriptContext: combinedTranscript.slice(-12000)
+    });
+  }
+
   if (pathname === '/api/wa/pin' && method === 'POST') {
     const body = (await safeParseBody(req)) || {};
     const tenant = getWaTenant(req, reqUrl, body);

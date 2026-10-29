@@ -16906,3 +16906,167 @@ body.mermaid-has-fullscreen {
 
 
 
+
+
+/* =========================================================================
+   WHATSAPP THREE-DOTS MENU, CONSENT GATE & AI SUMMARY POP-UP
+   ========================================================================= */
+.wa-contact-dots-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    background: rgba(15, 23, 42, 0.55);
+    color: #94a3b8;
+    font-size: 0.78rem;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.16s ease;
+    margin-left: 4px;
+}
+
+.wa-contact-dots-btn:hover,
+.wa-contact-dots-btn.active {
+    background: rgba(16, 185, 129, 0.16);
+    border-color: rgba(16, 185, 129, 0.45);
+    color: #34d399;
+}
+
+.wa-contact-dots-menu {
+    position: fixed;
+    z-index: 99999;
+    min-width: 195px;
+    background: rgba(15, 23, 42, 0.98);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 12px;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.65);
+    padding: 6px;
+    backdrop-filter: blur(14px);
+    animation: waDotsMenuFadeIn 0.14s ease-out;
+}
+
+@keyframes waDotsMenuFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.wa-dots-menu-header {
+    padding: 6px 10px 7px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    margin-bottom: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #cbd5e1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 210px;
+}
+
+.wa-dots-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: #e2e8f0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.14s ease, color 0.14s ease;
+}
+
+.wa-dots-menu-item:hover {
+    background: rgba(16, 185, 129, 0.15);
+    color: #6ee7b7;
+}
+
+.wa-dots-menu-item.danger {
+    color: #fca5a5;
+}
+
+.wa-dots-menu-item.danger:hover {
+    background: rgba(239, 68, 68, 0.16);
+    color: #fecaca;
+}
+
+.wa-consent-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 11px;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    background: rgba(15, 23, 42, 0.65);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+}
+
+.wa-consent-item:hover {
+    border-color: rgba(16, 185, 129, 0.35);
+    background: rgba(16, 185, 129, 0.07);
+}
+
+.wa-consent-item.selected {
+    border-color: rgba(16, 185, 129, 0.55);
+    background: rgba(16, 185, 129, 0.13);
+}
+
+.wa-consent-checkbox {
+    width: 17px;
+    height: 17px;
+    accent-color: #10b981;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.wa-summary-content-box h1,
+.wa-summary-content-box h2,
+.wa-summary-content-box h3,
+.wa-summary-content-box h4 {
+    color: #6ee7b7;
+    margin-top: 12px;
+    margin-bottom: 6px;
+    font-size: 0.95rem;
+}
+
+.wa-summary-content-box ul,
+.wa-summary-content-box ol {
+    padding-left: 20px;
+    margin: 6px 0 10px;
+}
+
+.wa-summary-content-box li {
+    margin-bottom: 4px;
+}
+
+.wa-summary-content-box p {
+    margin: 6px 0;
+}
+
+.wa-summary-approved-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    background: rgba(16, 185, 129, 0.14);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    color: #6ee7b7;
+}

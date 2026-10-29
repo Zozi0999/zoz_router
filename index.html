@@ -105,8 +105,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261028_v548">
-  <link rel="stylesheet" href="style.css?v=20261028_v548">
+  <link rel="preload" as="style" href="style.css?v=20261028_v549">
+  <link rel="stylesheet" href="style.css?v=20261028_v549">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -467,20 +467,28 @@
       </div>
 
       <!-- Mode 2: WhatsApp Contact Picker (Posisinya sama persis dengan AI model picker) -->
-      <div class="relative group model-picker-container" id="singleWaContactPickerWrap" style="display: none;">
+      <div class="relative group model-picker-container" id="singleWaContactPickerWrap" style="display: none; align-items: center; gap: 6px;">
         <button class="flex items-center space-x-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-3 py-1 rounded-lg transition-all duration-150 text-[11.5px] font-mono cursor-pointer model-picker-chip" id="waContactPickerChip" title="Pilih Kontak WhatsApp" type="button">
           <i class="fa-brands fa-whatsapp text-emerald-400 chip-icon"></i>
           <span class="text-emerald-200 font-medium current-model-name" id="currentWaContactLabel">Pilih Kontak WA</span>
           <svg class="lucide lucide-chevron-down w-3 h-3 text-emerald-400 chip-arrow" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="m6 9 6 6 6-6"></path></svg>
         </button>
 
+        <button class="flex items-center space-x-1.5 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/40 text-purple-200 px-2.5 py-1 rounded-lg transition-all duration-150 text-[11px] font-semibold cursor-pointer" id="btnTopBarWaAiSummary" title="Mode Rangkum Chat WhatsApp dengan AI (Persetujuan Nomor Spesifik)" type="button" style="white-space: nowrap;">
+          <i class="fa-solid fa-wand-magic-sparkles text-purple-400"></i>
+          <span>Rangkum AI</span>
+        </button>
+
         <div class="model-dropdown-menu wa-contact-dropdown-menu" id="waContactDropdownMenu" style="display: none;">
           <div class="dropdown-header" style="padding: 8px 10px;">
             <input type="text" id="waContactSearchInput" placeholder="Cari nama atau nomor kontak WA...">
           </div>
-          <div style="padding: 0 10px 6px 10px; display: flex; gap: 6px;">
-            <button type="button" class="btn btn-xs btn-outline" id="btnOpenAddContactFromDropdown" style="flex: 1; border-color: rgba(16,185,129,0.4); color: #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600;">
-              <i class="fa-solid fa-user-plus"></i> + Tambah Kontak
+          <div style="padding: 0 10px 6px 10px; display: flex; gap: 6px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-xs btn-outline" id="btnOpenAddContactFromDropdown" style="flex: 1; border-color: rgba(16,185,129,0.4); color: #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: center; gap: 5px; font-weight: 600;">
+              <i class="fa-solid fa-user-plus"></i> + Kontak
+            </button>
+            <button type="button" class="btn btn-xs btn-outline" id="btnOpenWaSummarizeConsentFromDropdown" style="flex: 1; border-color: rgba(168,85,247,0.45); color: #d8b4fe; background: rgba(168,85,247,0.12); display: flex; align-items: center; justify-content: center; gap: 5px; font-weight: 600;" title="Pilih Nomor Spesifik untuk Dirangkum AI">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Rangkum AI
             </button>
             <button type="button" class="btn btn-xs btn-outline" id="btnSyncWaContacts" style="border-color: rgba(255,255,255,0.2); color: var(--text-dim);" title="Refresh Kontak">
               <i class="fa-solid fa-rotate"></i>
@@ -3023,6 +3031,117 @@
     </div>
   </div>
 
+  <!-- WhatsApp AI Tool Calling Permission / Consent Gate Modal -->
+  <div class="modal-backdrop" id="modalWaToolConsent" style="display: none; z-index: 10050;" role="dialog" aria-modal="true" aria-labelledby="waConsentModalTitle">
+    <div class="modal-dialog wa-consent-dialog" style="max-width: 560px; width: 94%; max-height: 88vh; display: flex; flex-direction: column; background: rgba(15, 23, 42, 0.98); border: 1px solid rgba(168, 85, 247, 0.45); border-radius: 16px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85); backdrop-filter: blur(22px); overflow: hidden;">
+      <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); background: linear-gradient(90deg, rgba(168, 85, 247, 0.16), rgba(16, 185, 129, 0.1));">
+        <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+          <div style="width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); flex-shrink: 0;">
+            <i class="fa-solid fa-shield-halved"></i>
+          </div>
+          <div style="min-width: 0;">
+            <h3 id="waConsentModalTitle" style="font-size: 0.95rem; font-weight: 700; margin: 0; color: #f8fafc;">Persetujuan Nomor WhatsApp (Tool AI)</h3>
+            <span id="waConsentModalSubtitle" style="font-size: 0.72rem; color: #cbd5e1; display: block;">Pilih nomor spesifik yang diizinkan untuk dilihat &amp; dirangkum oleh AI</span>
+          </div>
+        </div>
+        <button type="button" class="tb-btn icon-only" id="btnCloseWaConsentModal" title="Batal / Tutup">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding: 14px 18px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 10px;">
+        <div style="padding: 9px 12px; border-radius: 10px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); font-size: 0.75rem; color: #a7f3d0; line-height: 1.45;">
+          <i class="fa-solid fa-lock" style="margin-right: 5px; color: #34d399;"></i>
+          <strong>Keamanan Privasi Aktif:</strong> AI <u>tidak</u> dapat melihat seluruh chat WhatsApp Anda. Hanya nomor yang Anda centang di bawah ini yang datanya akan dibaca untuk dirangkum.
+        </div>
+
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input type="text" id="waConsentSearchInput" placeholder="Cari nama atau nomor telepon WhatsApp..." style="flex: 1; padding: 8px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.16); color: #f8fafc; font-size: 0.8rem; outline: none;">
+          <button type="button" class="btn btn-xs btn-outline" id="btnWaConsentSelectAll" style="white-space: nowrap; font-size: 0.72rem; padding: 6px 10px;">Pilih Semua</button>
+          <button type="button" class="btn btn-xs btn-outline" id="btnWaConsentClearAll" style="white-space: nowrap; font-size: 0.72rem; padding: 6px 10px;">Reset</button>
+        </div>
+
+        <div id="waConsentContactList" style="max-height: 250px; min-height: 140px; overflow-y: auto; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; background: rgba(0, 0, 0, 0.25); padding: 6px; display: flex; flex-direction: column; gap: 5px;">
+          <!-- Diisi daftar nomor WhatsApp dengan checkbox -->
+        </div>
+
+        <div>
+          <label for="waConsentFocusInput" style="font-size: 0.74rem; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 4px;">
+            <i class="fa-solid fa-bullseye" style="color: #c084fc; margin-right: 4px;"></i> Fokus Rangkuman (Opsional):
+          </label>
+          <input type="text" id="waConsentFocusInput" placeholder="Contoh: Rangkum tugas, berkas yang dikirim, atau jadwal..." style="width: 100%; padding: 8px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.16); color: #f8fafc; font-size: 0.8rem; outline: none;">
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-top: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0, 0, 0, 0.3); gap: 10px; flex-wrap: wrap;">
+        <span id="waConsentSelectedCount" style="font-size: 0.76rem; color: #c084fc; font-weight: 700;">0 Nomor Dipilih</span>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button type="button" class="btn btn-sm btn-outline" id="btnRejectWaConsent" style="color: #f87171; border-color: rgba(248, 113, 113, 0.35);">
+            <i class="fa-solid fa-ban"></i> <span>Tolak</span>
+          </button>
+          <button type="button" class="btn btn-sm btn-primary" id="btnApproveWaConsent" style="background: linear-gradient(135deg, #9333ea, #10b981); border: none; color: #ffffff; font-weight: 700; padding: 7px 14px;">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Setujui &amp; Rangkum</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WhatsApp AI Summary Output Pop-Up Modal -->
+  <div class="modal-backdrop" id="modalWaSummaryResult" style="display: none; z-index: 10060;" role="dialog" aria-modal="true" aria-labelledby="waSummaryPopupTitle">
+    <div class="modal-dialog wa-summary-popup-dialog" style="max-width: 720px; width: 95%; max-height: 90vh; display: flex; flex-direction: column; background: rgba(15, 23, 42, 0.98); border: 1px solid rgba(16, 185, 129, 0.45); border-radius: 16px; box-shadow: 0 25px 65px rgba(0, 0, 0, 0.88); backdrop-filter: blur(24px); overflow: hidden;">
+      <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); background: linear-gradient(90deg, rgba(16, 185, 129, 0.16), rgba(168, 85, 247, 0.14));">
+        <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+          <div style="width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); flex-shrink: 0; font-size: 1.1rem;">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+          </div>
+          <div style="min-width: 0;">
+            <h3 id="waSummaryPopupTitle" style="font-size: 0.96rem; font-weight: 700; margin: 0; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Hasil Rangkuman AI — Chat WhatsApp</h3>
+            <span id="waSummaryPopupSubtitle" style="font-size: 0.72rem; color: #6ee7b7; display: block;">🔒 Hanya menampilkan rangkuman dari nomor yang disetujui</span>
+          </div>
+        </div>
+        <button type="button" class="tb-btn icon-only" id="btnCloseWaSummaryPopup" title="Tutup Pop-up Rangkuman">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div style="padding: 10px 18px; background: rgba(0, 0, 0, 0.28); border-bottom: 1px solid rgba(255, 255, 255, 0.08); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;">
+        <div id="waSummaryApprovedChips" style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.74rem; color: #e2e8f0;">
+          <!-- Chips nomor yang dirangkum -->
+        </div>
+        <button type="button" class="btn btn-xs btn-outline" id="btnWaSummaryChangeNumbers" style="border-color: rgba(168, 85, 247, 0.45); color: #d8b4fe; font-size: 0.72rem; padding: 4px 9px;">
+          <i class="fa-solid fa-shield-halved"></i> Pilih / Ubah Nomor
+        </button>
+      </div>
+
+      <div style="padding: 8px 18px; background: rgba(0, 0, 0, 0.18); border-bottom: 1px solid rgba(255, 255, 255, 0.06); display: flex; gap: 8px; align-items: center;">
+        <input type="text" id="waSummaryPopupFocusInput" placeholder="Fokus rangkuman khusus (misal: siapa yang kirim tugas / berkas)..." style="flex: 1; padding: 6px 10px; border-radius: 7px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.14); color: #f8fafc; font-size: 0.78rem; outline: none;">
+        <button type="button" class="btn btn-xs btn-outline" id="btnRegenerateWaSummary" style="border-color: rgba(16, 185, 129, 0.45); color: #34d399; font-weight: 600; padding: 6px 11px; white-space: nowrap;">
+          <i class="fa-solid fa-rotate"></i> Rangkum Ulang
+        </button>
+      </div>
+
+      <div class="modal-body" id="waSummaryOutputBody" style="flex: 1; overflow-y: auto; padding: 16px 20px; min-height: 260px; max-height: 58vh; background: rgba(0, 0, 0, 0.22); color: #f1f5f9; font-size: 0.86rem; line-height: 1.65;">
+        <!-- Output isi rangkuman dari AI -->
+      </div>
+
+      <div class="modal-footer" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-top: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0, 0, 0, 0.3); gap: 8px; flex-wrap: wrap;">
+        <span id="waSummaryStatsMeta" style="font-size: 0.74rem; color: #94a3b8;"></span>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <button type="button" class="btn btn-sm btn-outline" id="btnCopyWaSummaryOutput" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">
+            <i class="fa-regular fa-copy"></i> <span>Salin Rangkuman</span>
+          </button>
+          <button type="button" class="btn btn-sm btn-outline" id="btnSendWaSummaryToAiChat" style="color: #c084fc; border-color: rgba(192, 132, 252, 0.4);">
+            <i class="fa-solid fa-comment-dots"></i> <span>Bahas di AI Chat</span>
+          </button>
+          <button type="button" class="btn btn-sm btn-primary" id="btnCloseWaSummaryFooter" style="background: #10b981; border-color: #10b981; color: #052e16; font-weight: 700;">
+            <i class="fa-solid fa-check"></i> <span>Selesai</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
@@ -3038,8 +3157,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
-  <script src="text-safety.js?v=20261028_v548" defer></script>
+  <script src="text-safety.js?v=20261028_v549" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261028_v548" defer></script>
+  <script src="app.js?v=20261028_v549" defer></script>
 </body>
 </html>
