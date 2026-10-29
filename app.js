@@ -975,6 +975,9 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     mainContent: $('#mainContent'),
     appContainer: $('.app-container'),
     sidebarTerminalBtn: $('#sidebarTerminalBtn'),
+    sidebarWhatsAppBtn: $('#sidebarWhatsAppBtn'),
+    btnTermModalBottomSwitchWa: $('#btnTermModalBottomSwitchWa'),
+    modalWaLocalhostOnly: $('#modalWaLocalhostOnly'),
     endocrineChatV2Card: $('#endocrineChatV2Card'),
     endocrineChatStatusText: $('#endocrineChatStatusText'),
     btnOpenEndocrineTelemetry: $('#btnOpenEndocrineTelemetry'),
@@ -34806,6 +34809,16 @@ Aturan:
       if (isMobile()) closeMobileSidebar(false);
       TerminalManager.toggle();
     });
+    els.sidebarWhatsAppBtn?.addEventListener('click', () => {
+      if (isMobile()) closeMobileSidebar(false);
+      if (typeof WhatsAppController !== 'undefined') {
+        if (STATE.chatMode === 'whatsapp') {
+          WhatsAppController.setChatMode('ai');
+        } else {
+          WhatsAppController.setChatMode('whatsapp');
+        }
+      }
+    });
 
     // Pengontrol Cybernetic Endocrine Chat v2 di Bawah Tombol Terminal
     const handleToggleEndocrineChatV2 = (e) => {
@@ -41944,6 +41957,56 @@ Aturan:
       }
     },
 
+    isLocalHost() {
+      if (typeof window === 'undefined' || !window.location) return false;
+      const h = (window.location.hostname || '').toLowerCase();
+      return h === 'localhost' || h === '127.0.0.1' || h === '[::1]';
+    },
+
+    showLocalhostOnlyModal() {
+      const modal = document.getElementById('modalWaLocalhostOnly');
+      if (modal) {
+        modal.style.display = 'flex';
+      }
+    },
+
+    closeLocalhostOnlyModal() {
+      const modal = document.getElementById('modalWaLocalhostOnly');
+      if (modal) {
+        modal.style.display = 'none';
+      }
+    },
+
+    updateModeButtonsUI(mode = 'ai') {
+      const isWa = mode === 'whatsapp';
+      const sideWaText = document.getElementById('sidebarWaBtnText');
+      const sideWaBtn = document.getElementById('sidebarWhatsAppBtn');
+      const sideWaIcon = document.getElementById('sidebarWaIcon');
+      const termWaText = document.getElementById('btnTermModalBottomSwitchWaText');
+      if (sideWaText) {
+        sideWaText.textContent = isWa ? 'MODE AI CHAT' : 'WHATSAPP CHAT';
+      }
+      if (sideWaIcon) {
+        if (isWa) {
+          sideWaIcon.className = 'fa-solid fa-brain text-[11px]';
+        } else {
+          sideWaIcon.className = 'fa-brands fa-whatsapp text-[11px]';
+        }
+      }
+      if (sideWaBtn) {
+        if (isWa) {
+          sideWaBtn.classList.remove('border-emerald-500/60', 'hover:border-emerald-400', 'shadow-glow-emerald/20', 'hover:shadow-glow-emerald');
+          sideWaBtn.classList.add('border-teal-400/60', 'hover:border-teal-400', 'shadow-glow-cyan/20', 'hover:shadow-glow-cyan');
+        } else {
+          sideWaBtn.classList.remove('border-teal-400/60', 'hover:border-teal-400', 'shadow-glow-cyan/20', 'hover:shadow-glow-cyan');
+          sideWaBtn.classList.add('border-emerald-500/60', 'hover:border-emerald-400', 'shadow-glow-emerald/20', 'hover:shadow-glow-emerald');
+        }
+      }
+      if (termWaText) {
+        termWaText.textContent = isWa ? 'KEMBALI KE AI CHAT' : 'MODE CHAT WHATSAPP';
+      }
+    },
+
     isLocalHostOrTunnelOrigin() {
       if (typeof window === 'undefined' || !window.location) return false;
       const h = (window.location.hostname || '').toLowerCase();
@@ -42116,7 +42179,14 @@ Aturan:
             this.isMaster = true;
           }
         }
-        if (pMode === 'whatsapp') localStorage.setItem('zoz_chat_mode', 'whatsapp');
+        if (pMode === 'whatsapp') {
+          if (this.isLocalHost()) {
+            localStorage.setItem('zoz_chat_mode', 'whatsapp');
+          } else {
+            localStorage.setItem('zoz_chat_mode', 'ai');
+            setTimeout(() => this.showLocalhostOnlyModal(), 500);
+          }
+        }
 
         // 0b. Jika perangkat ini sudah memindai QR Terminal Laptop sebelumnya (tersimpan di zoz_remote_terminal_config),
         // otomatis sinkronkan WhatsApp Gateway dengan sesi Master Laptop tanpa perlu scan ulang!
@@ -42162,8 +42232,12 @@ Aturan:
       // 2. Pasang semua listener secara sinkron & instan (0ms)
       this.attachListeners();
 
-      // 3. Restore mode dari localStorage
-      const savedMode = localStorage.getItem('zoz_chat_mode') || 'ai';
+      // 3. Restore mode dari localStorage (Locked to AI if not Localhost)
+      let savedMode = localStorage.getItem('zoz_chat_mode') || 'ai';
+      if (savedMode === 'whatsapp' && !this.isLocalHost()) {
+        savedMode = 'ai';
+        try { localStorage.setItem('zoz_chat_mode', 'ai'); } catch (_) {}
+      }
       this.setChatMode(savedMode, false);
 
       // 4. Konfigurasi instan URL API (Host-Aware)
@@ -42239,6 +42313,59 @@ Aturan:
     attachListeners() {
       if (this._listenersAttached) return;
       this._listenersAttached = true;
+
+      // WhatsApp Mode Switchers (Sidebar & Terminal Bottom Bar)
+      document.getElementById('sidebarWhatsAppBtn')?.addEventListener('click', () => {
+        AudioEngine.click();
+        if (typeof isMobile === 'function' && isMobile()) {
+          if (typeof closeMobileSidebar === 'function') closeMobileSidebar(false);
+        }
+        if (STATE.chatMode === 'whatsapp') {
+          this.setChatMode('ai');
+        } else {
+          this.setChatMode('whatsapp');
+        }
+      });
+      document.getElementById('btnTermModalBottomSwitchWa')?.addEventListener('click', () => {
+        AudioEngine.click();
+        if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.closeModal === 'function') {
+          TerminalManager.closeModal();
+        }
+        if (STATE.chatMode === 'whatsapp') {
+          this.setChatMode('ai');
+        } else {
+          this.setChatMode('whatsapp');
+        }
+      });
+
+      // Localhost Only Warning Modal Listeners
+      document.getElementById('btnCloseWaLocalhostModal')?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.closeLocalhostOnlyModal();
+      });
+      document.getElementById('btnWaLocalhostReturnAi')?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.closeLocalhostOnlyModal();
+        this.setChatMode('ai');
+      });
+      document.getElementById('btnWaLocalhostCopyUrl')?.addEventListener('click', () => {
+        AudioEngine.click();
+        const locUrl = 'http://localhost:4040';
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(locUrl).then(() => {
+            showToast('Copied to clipboard: ' + locUrl, 'success');
+          }).catch(() => {
+            prompt('Copy Localhost URL:', locUrl);
+          });
+        } else {
+          prompt('Copy Localhost URL:', locUrl);
+        }
+      });
+      document.getElementById('modalWaLocalhostOnly')?.addEventListener('click', (e) => {
+        if (e.target.id === 'modalWaLocalhostOnly') {
+          this.closeLocalhostOnlyModal();
+        }
+      });
 
       // Chat mode switcher pills
       els.btnChatModeAi?.addEventListener('click', () => {
@@ -42355,6 +42482,10 @@ Aturan:
 
       // Open WA Chat directly from Modal
       els.btnOpenWaChatDirect?.addEventListener('click', async () => {
+        if (!this.isLocalHost()) {
+          this.showLocalhostOnlyModal();
+          return;
+        }
         TerminalManager.closeRemoteTunnelModal();
         if (this.contacts.length === 0) {
           await this.fetchContacts(false);
@@ -43085,6 +43216,10 @@ Aturan:
       if (els.paneQrWhatsApp) els.paneQrWhatsApp.style.display = !isTerminal ? 'block' : 'none';
 
       if (!isTerminal) {
+        const remoteBanner = document.getElementById('waLocalhostRemoteBanner');
+        if (remoteBanner) {
+          remoteBanner.style.display = this.isLocalHost() ? 'none' : 'block';
+        }
         if (this.lastValidQr) {
           this.handleQrUpdate(this.lastValidQr);
         }
@@ -43107,12 +43242,22 @@ Aturan:
     },
 
     setChatMode(mode = 'ai', render = true) {
+      if (mode === 'whatsapp' && !this.isLocalHost()) {
+        this.showLocalhostOnlyModal();
+        mode = 'ai';
+        STATE.chatMode = 'ai';
+        try { localStorage.setItem('zoz_chat_mode', 'ai'); } catch (_) {}
+        this.updateModeButtonsUI('ai');
+        return;
+      }
+
       STATE.chatMode = mode;
       localStorage.setItem('zoz_chat_mode', mode);
 
       const isAi = mode === 'ai';
       if (els.btnChatModeAi) els.btnChatModeAi.classList.toggle('active', isAi);
       if (els.btnChatModeWa) els.btnChatModeWa.classList.toggle('active', !isAi);
+      this.updateModeButtonsUI(mode);
 
       if (isAi) {
         if (els.singleModelPickerWrap) els.singleModelPickerWrap.style.display = 'block';
@@ -43250,6 +43395,10 @@ Aturan:
     },
 
     selectContact(contact) {
+      if (!this.isLocalHost()) {
+        this.showLocalhostOnlyModal();
+        return;
+      }
       this.activeContact = contact;
       try {
         if (contact && contact.id) localStorage.setItem('zoz_wa_active_jid', contact.id);
@@ -43456,6 +43605,10 @@ Aturan:
     },
 
     async loadMessagesForContact(jid) {
+      if (!this.isLocalHost()) {
+        this.showLocalhostOnlyModal();
+        return;
+      }
       if (!els.messagesList) return;
       if (els.welcomeHero) els.welcomeHero.style.display = 'none';
       els.messagesList.innerHTML = '';
