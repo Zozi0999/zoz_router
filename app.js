@@ -34812,6 +34812,10 @@ Aturan:
     els.sidebarWhatsAppBtn?.addEventListener('click', () => {
       if (isMobile()) closeMobileSidebar(false);
       if (typeof WhatsAppController !== 'undefined') {
+        if (!WhatsAppController.isAllowedAccess()) {
+          WhatsAppController.showLocalhostOnlyModal();
+          return;
+        }
         if (STATE.chatMode === 'whatsapp') {
           WhatsAppController.setChatMode('ai');
         } else {
@@ -38137,6 +38141,7 @@ Aturan:
 
         // 1. Simpan sesi & PIN di storage HP
         localStorage.setItem('zoz_wa_user_id', waUserId);
+        localStorage.setItem('zoz_wa_paired_via_qr', 'true');
         if (waPin) {
           localStorage.setItem('zoz_wa_pin', waPin);
           localStorage.setItem('zoz_wa_mobile_pin', waPin);
@@ -41963,6 +41968,22 @@ Aturan:
       return h === 'localhost' || h === '127.0.0.1' || h === '[::1]';
     },
 
+    isPairedViaHostQr() {
+      try {
+        const paired = localStorage.getItem('zoz_wa_paired_via_qr') === 'true';
+        const pin = localStorage.getItem('zoz_wa_pin') || localStorage.getItem('zoz_wa_mobile_pin') || this.pin;
+        const uid = localStorage.getItem('zoz_wa_user_id') || this.userId;
+        const tun = localStorage.getItem('zoz_last_tunnel_url') || this.activeTunnelUrl;
+        return (paired || Boolean(uid && pin)) && Boolean(tun);
+      } catch (_) {
+        return false;
+      }
+    },
+
+    isAllowedAccess() {
+      return this.isLocalHost() || this.isPairedViaHostQr();
+    },
+
     showLocalhostOnlyModal() {
       const modal = document.getElementById('modalWaLocalhostOnly');
       if (modal) {
@@ -41979,31 +42000,54 @@ Aturan:
 
     updateModeButtonsUI(mode = 'ai') {
       const isWa = mode === 'whatsapp';
+      const isAllowed = this.isAllowedAccess();
       const sideWaText = document.getElementById('sidebarWaBtnText');
       const sideWaBtn = document.getElementById('sidebarWhatsAppBtn');
       const sideWaIcon = document.getElementById('sidebarWaIcon');
-      const termWaText = document.getElementById('btnTermModalBottomSwitchWaText');
+      const sideWaIconWrap = document.getElementById('sidebarWaIconWrap');
+
+      if (!isAllowed) {
+        // Tombol Peringatan Khusus untuk Akses di Luar Localhost (Perlu Scan QR)
+        if (sideWaText) {
+          sideWaText.innerHTML = 'LOCALHOST ONLY <span style="font-size: 8.5px; opacity: 0.85; display: block; font-weight: 600;">(SCAN QR)</span>';
+          sideWaText.className = 'text-[10px] font-mono tracking-wider font-bold text-amber-400 group-hover:text-amber-300 transition-colors leading-tight';
+        }
+        if (sideWaIcon) {
+          sideWaIcon.className = 'fa-solid fa-triangle-exclamation text-[11px] text-amber-400';
+        }
+        if (sideWaIconWrap) {
+          sideWaIconWrap.className = 'w-4 h-4 rounded-full bg-amber-500/20 border border-amber-400 flex items-center justify-center text-amber-400 group-hover:text-white group-hover:bg-amber-400/30 transition-colors shrink-0';
+        }
+        if (sideWaBtn) {
+          sideWaBtn.className = 'group w-full mt-2 py-2 px-3 rounded-xl bg-[#080a11] hover:bg-[#130f08] border border-amber-500/60 hover:border-amber-400 shadow-glow-amber/20 hover:shadow-glow-amber text-white font-semibold text-xs tracking-wide flex items-center justify-center space-x-2 transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0 wa-top-btn';
+          sideWaBtn.title = 'Localhost Only: Pindai QR dari Laptop untuk Menggunakan WhatsApp';
+        }
+        return;
+      }
+
+      // Akses Normal di Localhost atau setelah Scan QR Host
       if (sideWaText) {
         sideWaText.textContent = isWa ? 'MODE AI CHAT' : 'WHATSAPP CHAT';
+        sideWaText.className = isWa
+          ? 'text-[11px] font-mono tracking-wider font-bold text-teal-300 group-hover:text-white transition-colors'
+          : 'text-[11px] font-mono tracking-wider font-bold text-emerald-400 group-hover:text-white transition-colors';
       }
       if (sideWaIcon) {
-        if (isWa) {
-          sideWaIcon.className = 'fa-solid fa-brain text-[11px]';
-        } else {
-          sideWaIcon.className = 'fa-brands fa-whatsapp text-[11px]';
-        }
+        sideWaIcon.className = isWa ? 'fa-solid fa-brain text-[11px]' : 'fa-brands fa-whatsapp text-[11px]';
+      }
+      if (sideWaIconWrap) {
+        sideWaIconWrap.className = isWa
+          ? 'w-4 h-4 rounded-full bg-teal-500/20 border border-teal-400 flex items-center justify-center text-teal-300 group-hover:text-white group-hover:bg-teal-400/30 transition-colors shrink-0'
+          : 'w-4 h-4 rounded-full bg-emerald-500/20 border border-emerald-400 flex items-center justify-center text-emerald-400 group-hover:text-white group-hover:bg-emerald-400/30 transition-colors shrink-0';
       }
       if (sideWaBtn) {
         if (isWa) {
-          sideWaBtn.classList.remove('border-emerald-500/60', 'hover:border-emerald-400', 'shadow-glow-emerald/20', 'hover:shadow-glow-emerald');
-          sideWaBtn.classList.add('border-teal-400/60', 'hover:border-teal-400', 'shadow-glow-cyan/20', 'hover:shadow-glow-cyan');
+          sideWaBtn.className = 'group w-full mt-2 py-2 px-3 rounded-xl bg-[#080a11] hover:bg-[#0c101d] border border-teal-400/60 hover:border-teal-400 shadow-glow-cyan/20 hover:shadow-glow-cyan text-white font-semibold text-xs tracking-wide flex items-center justify-center space-x-2 transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0 wa-top-btn';
+          sideWaBtn.title = 'Kembali ke Mode Chat AI';
         } else {
-          sideWaBtn.classList.remove('border-teal-400/60', 'hover:border-teal-400', 'shadow-glow-cyan/20', 'hover:shadow-glow-cyan');
-          sideWaBtn.classList.add('border-emerald-500/60', 'hover:border-emerald-400', 'shadow-glow-emerald/20', 'hover:shadow-glow-emerald');
+          sideWaBtn.className = 'group w-full mt-2 py-2 px-3 rounded-xl bg-[#080a11] hover:bg-[#0c101d] border border-emerald-500/60 hover:border-emerald-400 shadow-glow-emerald/20 hover:shadow-glow-emerald text-white font-semibold text-xs tracking-wide flex items-center justify-center space-x-2 transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0 wa-top-btn';
+          sideWaBtn.title = 'Mode Chat WhatsApp';
         }
-      }
-      if (termWaText) {
-        termWaText.textContent = isWa ? 'KEMBALI KE AI CHAT' : 'MODE CHAT WHATSAPP';
       }
     },
 
@@ -42180,7 +42224,7 @@ Aturan:
           }
         }
         if (pMode === 'whatsapp') {
-          if (this.isLocalHost()) {
+          if (this.isAllowedAccess()) {
             localStorage.setItem('zoz_chat_mode', 'whatsapp');
           } else {
             localStorage.setItem('zoz_chat_mode', 'ai');
@@ -42232,13 +42276,14 @@ Aturan:
       // 2. Pasang semua listener secara sinkron & instan (0ms)
       this.attachListeners();
 
-      // 3. Restore mode dari localStorage (Locked to AI if not Localhost)
+      // 3. Restore mode dari localStorage (Locked to AI if not Allowed Access)
       let savedMode = localStorage.getItem('zoz_chat_mode') || 'ai';
-      if (savedMode === 'whatsapp' && !this.isLocalHost()) {
+      if (savedMode === 'whatsapp' && !this.isAllowedAccess()) {
         savedMode = 'ai';
         try { localStorage.setItem('zoz_chat_mode', 'ai'); } catch (_) {}
       }
       this.setChatMode(savedMode, false);
+      this.updateModeButtonsUI(savedMode);
 
       // 4. Konfigurasi instan URL API (Host-Aware)
       if (this.isLocalHostOrTunnelOrigin()) {
@@ -42314,11 +42359,15 @@ Aturan:
       if (this._listenersAttached) return;
       this._listenersAttached = true;
 
-      // WhatsApp Mode Switchers (Sidebar & Terminal Bottom Bar)
+      // WhatsApp Mode Switcher (Sidebar)
       document.getElementById('sidebarWhatsAppBtn')?.addEventListener('click', () => {
         AudioEngine.click();
         if (typeof isMobile === 'function' && isMobile()) {
           if (typeof closeMobileSidebar === 'function') closeMobileSidebar(false);
+        }
+        if (!this.isAllowedAccess()) {
+          this.showLocalhostOnlyModal();
+          return;
         }
         if (STATE.chatMode === 'whatsapp') {
           this.setChatMode('ai');
@@ -42364,6 +42413,13 @@ Aturan:
       document.getElementById('modalWaLocalhostOnly')?.addEventListener('click', (e) => {
         if (e.target.id === 'modalWaLocalhostOnly') {
           this.closeLocalhostOnlyModal();
+        }
+      });
+      document.getElementById('btnWaLocalhostScanQr')?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.closeLocalhostOnlyModal();
+        if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.openQrScannerModal === 'function') {
+          TerminalManager.openQrScannerModal({ title: 'Pindai QR Host Laptop (Sinkron WhatsApp)' });
         }
       });
 
@@ -42482,7 +42538,7 @@ Aturan:
 
       // Open WA Chat directly from Modal
       els.btnOpenWaChatDirect?.addEventListener('click', async () => {
-        if (!this.isLocalHost()) {
+        if (!this.isAllowedAccess()) {
           this.showLocalhostOnlyModal();
           return;
         }
@@ -43218,7 +43274,7 @@ Aturan:
       if (!isTerminal) {
         const remoteBanner = document.getElementById('waLocalhostRemoteBanner');
         if (remoteBanner) {
-          remoteBanner.style.display = this.isLocalHost() ? 'none' : 'block';
+          remoteBanner.style.display = this.isAllowedAccess() ? 'none' : 'block';
         }
         if (this.lastValidQr) {
           this.handleQrUpdate(this.lastValidQr);
@@ -43242,7 +43298,7 @@ Aturan:
     },
 
     setChatMode(mode = 'ai', render = true) {
-      if (mode === 'whatsapp' && !this.isLocalHost()) {
+      if (mode === 'whatsapp' && !this.isAllowedAccess()) {
         this.showLocalhostOnlyModal();
         mode = 'ai';
         STATE.chatMode = 'ai';
@@ -43317,8 +43373,8 @@ Aturan:
     setSidebarHistoryTab(tab = 'ai', syncChatMode = false) {
       const isAi = tab === 'ai';
 
-      // Jika remote host dan mencoba membuka tab WhatsApp, munculkan peringatan Localhost Only
-      if (!isAi && !this.isLocalHost()) {
+      // Jika remote host dan mencoba membuka tab WhatsApp sebelum pairing QR host
+      if (!isAi && !this.isAllowedAccess()) {
         this.showLocalhostOnlyModal();
         if (els.tabSidebarAiHistory) els.tabSidebarAiHistory.classList.add('active');
         if (els.tabSidebarWaHistory) els.tabSidebarWaHistory.classList.remove('active');
@@ -43430,7 +43486,7 @@ Aturan:
     },
 
     selectContact(contact) {
-      if (!this.isLocalHost()) {
+      if (!this.isAllowedAccess()) {
         this.showLocalhostOnlyModal();
         return;
       }
@@ -43640,7 +43696,7 @@ Aturan:
     },
 
     async loadMessagesForContact(jid) {
-      if (!this.isLocalHost()) {
+      if (!this.isAllowedAccess()) {
         this.showLocalhostOnlyModal();
         return;
       }

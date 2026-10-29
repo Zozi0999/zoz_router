@@ -2656,14 +2656,6 @@
         <button class="term-chip" type="button" data-cmd="help">help</button>
         <button class="term-chip" type="button" data-cmd="cls">cls</button>
       </div>
-
-      <!-- WhatsApp Mode Switch Bar (Di bawah Terminal, panjang sama persis dengan terminal) -->
-      <div class="terminal-bottom-wa-bar" id="termBottomWaBar" style="padding: 8px 14px 10px; background: rgba(8, 10, 17, 0.95); border-top: 1px solid rgba(255, 255, 255, 0.08); border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;">
-        <button type="button" class="group w-full py-2 px-3 rounded-xl bg-[#080a11] hover:bg-[#0c101d] border border-emerald-500/60 hover:border-emerald-400 shadow-glow-emerald/20 hover:shadow-glow-emerald text-white font-semibold text-xs tracking-wide flex items-center justify-center space-x-2 transition-all duration-200" id="btnTermModalBottomSwitchWa" title="Beralih ke Mode WhatsApp Chat">
-          <i class="fa-brands fa-whatsapp" style="color: #25D366; font-size: 0.85rem;"></i>
-          <span class="text-[11px] font-mono tracking-wider font-bold text-emerald-400 group-hover:text-white transition-colors" id="btnTermModalBottomSwitchWaText">MODE CHAT WHATSAPP</span>
-        </button>
-      </div>
     </div>
   </div>
 
@@ -3168,12 +3160,33 @@
         <div style="display: flex; gap: 12px; margin-bottom: 16px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 12px; padding: 14px;">
           <i class="fa-solid fa-triangle-exclamation" style="color: #f87171; font-size: 1.2rem; margin-top: 2px;"></i>
           <div style="font-size: 0.84rem; color: #fecaca; line-height: 1.5;">
-            <strong>WhatsApp Gateway is restricted to Localhost.</strong> Direct chat synchronization and Baileys session controls are disabled on remote domains and WAN tunnels to protect end-to-end encryption keys and ensure message privacy.
+            <strong>WhatsApp Gateway is restricted to Localhost.</strong> Direct chat synchronization and Baileys session controls are locked on remote WAN domains to protect end-to-end encryption keys and preserve message privacy.
           </div>
         </div>
 
-        <p style="margin-bottom: 14px; color: #94a3b8; font-size: 0.85rem;">
-          To access and manage WhatsApp chats, please open ZOZ Router directly on the host machine using the local interface:
+        <!-- Scan Host QR Instruction Box (Scan QR to use WhatsApp on this remote device) -->
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 12px; padding: 14px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #34d399; font-size: 0.86rem; margin-bottom: 6px;">
+            <i class="fa-solid fa-qrcode"></i>
+            <span>Scan QR from Host Machine to Use Here</span>
+          </div>
+          <p style="font-size: 0.82rem; color: #d1fae5; line-height: 1.5; margin-bottom: 8px;">
+            To access and synchronize WhatsApp chats on this remote device, please scan the <b>Mobile Pairing QR Code</b> displayed on your host computer:
+          </p>
+          <ol style="font-size: 0.78rem; color: #a7f3d0; margin-left: 18px; margin-bottom: 12px; line-height: 1.55; list-style-type: decimal;">
+            <li>Open <b>http://localhost:4040</b> on your host computer.</li>
+            <li>Click <b>Gerbang QR & Remote</b> &gt; tab <b>WhatsApp Gateway</b>.</li>
+            <li>Look at <b>"Tautkan Sesi ini ke Handphone"</b> QR code.</li>
+            <li>Click the button below to scan the QR code with your camera:</li>
+          </ol>
+          <button type="button" class="btn btn-sm w-full" id="btnWaLocalhostScanQr" style="background: linear-gradient(135deg, #059669, #10b981); border: none; color: #ffffff; font-weight: 700; padding: 9px 16px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);">
+            <i class="fa-solid fa-camera"></i>
+            <span>Scan Host QR Code from Computer</span>
+          </button>
+        </div>
+
+        <p style="margin-bottom: 8px; color: #94a3b8; font-size: 0.8rem;">
+          Or open ZOZ Router directly on the host machine:
         </p>
 
         <div style="background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 10px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px;">
@@ -3187,7 +3200,7 @@
         </div>
 
         <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px;">
-          <button type="button" class="btn btn-sm btn-primary" id="btnWaLocalhostReturnAi" style="background: linear-gradient(135deg, #0284c7, #2563eb); border: none; color: #ffffff; font-weight: 700; padding: 8px 18px; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35);">
+          <button type="button" class="btn btn-sm btn-outline" id="btnWaLocalhostReturnAi" style="border: 1px solid rgba(255, 255, 255, 0.2); color: #cbd5e1; font-weight: 600; padding: 7px 16px; border-radius: 8px; cursor: pointer;">
             <i class="fa-solid fa-brain"></i> Return to AI Chat
           </button>
         </div>
@@ -3212,6 +3225,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261029_v561" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261029_v568" defer></script>
+  <script src="app.js?v=20261029_v569" defer></script>
 </body>
 </html>
