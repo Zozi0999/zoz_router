@@ -42203,8 +42203,11 @@ Aturan:
         localStorage.setItem('zoz_wa_api_url', this.activeTunnelUrl);
       }
 
-      // 5. Deferred non-blocking background initialization (0ms impact on critical render path)
-      const scheduleBg = window.requestIdleCallback || ((fn) => setTimeout(fn, 600));
+      // 5. Segera sinkronkan status & kontak WhatsApp (0ms lag)
+      this.fetchStatus(true).catch(() => {});
+      this.fetchContacts(false).catch(() => {});
+
+      const scheduleBg = window.requestIdleCallback || ((fn) => setTimeout(fn, 250));
       scheduleBg(() => {
         this.bootstrapBackground();
       });
@@ -42586,7 +42589,6 @@ Aturan:
         try { this.sse.close(); } catch (_) {}
         this.sse = null;
       }
-      if (!this.apiBaseUrl) return; // Lindungi dari request SSE ke origin statis 404
 
       try {
         const sseUrl = this.getApiUrl(`/api/wa/events?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`);
@@ -42699,24 +42701,12 @@ Aturan:
     },
 
     async fetchContacts(notify = false) {
-      if (!this.status || !this.status.connected) {
-        this.contacts = [];
-        this.activeContact = null;
-        if (els.waContactCountDisplay) {
-          els.waContactCountDisplay.textContent = '0 Kontak';
-        }
-        if (STATE.chatMode === 'whatsapp') {
-          this.renderSidebarWaChats();
-          this.renderEmptyWaState();
-        }
-        return;
-      }
       try {
         const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
         const res = await this.waFetch('/api/wa/contacts' + q, { headers: this.getAuthHeaders() }, 2);
         const data = await res.json().catch(() => null);
-        if (data && data.success) {
-          this.contacts = data.contacts || [];
+        if (data && data.success && Array.isArray(data.contacts)) {
+          this.contacts = data.contacts;
           this.contacts.sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
 
           if (els.waContactCountDisplay) {
@@ -42727,15 +42717,24 @@ Aturan:
             emptySelectBtn.innerHTML = `<i class="fa-solid fa-address-book"></i> Pilih Kontak (${this.contacts.length})`;
           }
 
-          // Hanya render sidebar jika Mode WhatsApp aktif atau tab sidebar WA sedang terbuka
+          // Render sidebar jika Mode WhatsApp aktif atau tab sidebar WA terbuka
           if (STATE.chatMode === 'whatsapp' || (els.waChatHistoryList && els.waChatHistoryList.style.display !== 'none')) {
             this.renderSidebarWaChats();
           }
-          // Hanya render dropdown jika menu dropdown sedang terbuka
+          // Render dropdown jika menu dropdown terbuka
           if (els.waContactDropdownMenu && els.waContactDropdownMenu.style.display === 'block') {
             this.renderContactDropdownList();
           }
           if (notify) showToast(`Kontak WhatsApp tersinkron (${this.contacts.length} kontak)`, 'success');
+        } else if (!this.status || !this.status.connected) {
+          if (this.contacts.length === 0) {
+            this.activeContact = null;
+            if (els.waContactCountDisplay) els.waContactCountDisplay.textContent = '0 Kontak';
+            if (STATE.chatMode === 'whatsapp') {
+              this.renderSidebarWaChats();
+              this.renderEmptyWaState();
+            }
+          }
         }
       } catch (_) {}
     },
