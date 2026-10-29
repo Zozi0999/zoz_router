@@ -9444,16 +9444,16 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     }
 
     detectRepetitionLoop() {
-      if (!this.text || this.text.length < 32) return false;
-      const tail = this.text.slice(-320);
+      if (!this.text || this.text.length < 150) return false;
+      const tail = this.text.slice(-400);
 
-      // 1. Single character repetition: e.g. '&&&&&&&&&&&&&&&&&&&&' (>= 18 kali beruntun)
-      const singleCharMatch = /(.)\1{17,}$/.exec(tail);
+      // 1. Single character repetition: e.g. '&&&&&&&&&&&&&&&&&&&&' (>= 35 kali beruntun)
+      const singleCharMatch = /(.)\1{34,}$/.exec(tail);
       if (singleCharMatch) {
         const char = singleCharMatch[1];
         const isWhitespaceOrDivider = /[\s\-=_*|.#]/.test(char);
-        // Karakter divider markdown dan spasi inden hanya dihentikan jika repetisinya ekstrem (>= 80 karakter beruntun)
-        if (!isWhitespaceOrDivider || singleCharMatch[0].length >= 80) {
+        // Karakter divider markdown dan spasi inden hanya dihentikan jika repetisinya ekstrem (>= 120 karakter beruntun)
+        if (!isWhitespaceOrDivider || singleCharMatch[0].length >= 120) {
           const excessLen = singleCharMatch[0].length - 3;
           if (excessLen > 0) {
             this.text = this.text.slice(0, -excessLen);
@@ -9463,8 +9463,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       }
 
       // 2. Multi-character pattern repetition: pola berulang (2 s.d. 30 karakter)
+      // Wajib memerlukan pengulangan masif (>= 10-25 kali berturut-turut) agar tidak memotong tabel atau daftar item normal
       for (let L = 2; L <= 30; L++) {
-        if (tail.length < L * 5) continue;
+        if (tail.length < L * 8) continue;
         const pattern = tail.slice(-L);
         // Abaikan pola tanpa karakter alfanumerik (misal: spasi indentasi, '|---|', '====', '----')
         if (!/[a-zA-Z0-9\u00C0-\u024F]/.test(pattern)) continue;
@@ -9475,8 +9476,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           count++;
           pos -= L;
         }
-        const minRepeats = L <= 3 ? 12 : (L <= 8 ? 8 : 5);
-        if (count >= minRepeats) {
+        const minRepeats = L <= 4 ? 25 : (L <= 10 ? 16 : 10);
+        if (count >= minRepeats && (count * L) >= 120) {
           const excessRepeats = count - 2;
           if (excessRepeats > 0) {
             this.text = this.text.slice(0, -(excessRepeats * L));
@@ -9496,12 +9497,6 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
       if (this.transportGate) {
         const gated = this.transportGate.push(str, false);
-        const diag = this.transportGate.getDiagnostics ? this.transportGate.getDiagnostics() : null;
-        if (diag && diag.horocycleTrapped) {
-          this.isLoopTerminated = true;
-          this.scheduleRender();
-          return;
-        }
         str = gated;
         if (!str) return;
       }
@@ -9509,7 +9504,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       this.text += str;
 
       if (this.detectRepetitionLoop()) {
-        this.isLoopTerminated = true;
+        console.warn('[StreamBufferRenderer] Repetisi terdeteksi; memotong pengulangan berlebih tanpa memutus stream.');
+        // Hanya tandai loop terminated jika repetisi masif dan panjang teks sudah besar
+        if (this.text.length > 500 && this.detectRepetitionLoop()) {
+          this.isLoopTerminated = true;
+        }
         this.scheduleRender();
         return;
       }
@@ -10465,6 +10464,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     // Check for mid-sentence trailing conjunction words
     const unfinishedWords = ['dan', 'atau', 'dengan', 'yang', 'untuk', 'pada', 'adalah', 'karena', 'namun', 'tetapi', 'serta'];
     if (unfinishedWords.some(w => new RegExp(`\\b${w}$`, 'i').test(trimmed))) return true;
+
+    // Jika finishReason bukan 'stop' atau 'end_turn' (misal 'length', 'incomplete', atau koneksi terputus tiba-tiba tanpa finishReason),
+    // dan teks tidak diakhiri tanda baca terminal (. ! ? " ' ) ] } ` atau emoji), maka output jelas terpotong di tengah kalimat
+    if (finishReason && finishReason !== 'stop' && finishReason !== 'end_turn') return true;
+    const terminalChars = new Set(['.', '!', '?', '"', "'", ')', ']', '}', '`']);
+    const lastChar = trimmed.slice(-1);
+    if (!finishReason && !terminalChars.has(lastChar)) return true;
+
     return false;
   }
 
@@ -27573,6 +27580,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       let activeRouteType = '';
       let finishReason = null;
       let streamSucceeded = false;
+      let isStreamInterrupted = false;
       const collectedImages = [];
       const accumulatedToolCalls = [];
       const selectedAutonomousTools = getSelectableAutonomousTools(canRunAutonomous);
@@ -27810,11 +27818,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             const resetDeadAirWatchdog = () => {
               if (deadAirTimer) clearTimeout(deadAirTimer);
               deadAirTimer = setTimeout(() => {
-                console.warn(`[OpenRouter Dead-Air] Model ${currentModel} tidak mengirim token selama 60 detik (stalled). Menghentikan stream reader.`);
+                console.warn(`[OpenRouter Dead-Air] Model ${currentModel} tidak mengirim token selama 180 detik (stalled). Menghentikan stream reader.`);
                 try {
                   attemptController.abort('DEAD_AIR_TIMEOUT');
                 } catch (_) {}
-              }, 60000);
+              }, 180000);
             };
 
             try {
@@ -27833,7 +27841,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
                 for (const line of lines) {
                   const trimmed = line.trim();
-                  if (!trimmed || !trimmed.startsWith('data:')) continue;
+                  if (!trimmed) continue;
+                  if (trimmed.startsWith(':')) {
+                    // SSE heartbeat/keepalive dari server atau OpenRouter, segarkan timer watchdog
+                    resetDeadAirWatchdog();
+                    continue;
+                  }
+                  if (!trimmed.startsWith('data:')) continue;
                   const jsonStr = trimmed.replace(/^data:\s*/, '');
                   if (jsonStr === '[DONE]') break;
 
@@ -27974,9 +27988,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               console.warn(`[OpenRouter Stream Error] Model ${currentModel} error saat streaming:`, sMsg);
 
               if (tokenCount > 0) {
-                // Token sudah diterima dan terlihat oleh pengguna, jangan hapus
+                // Token sudah diterima dan terlihat oleh pengguna, tandai terputus agar tombol lanjutkan tersedia
                 actualModelUsed = currentModel;
                 streamSucceeded = true;
+                isStreamInterrupted = true;
+                console.warn(`[OpenRouter Stream Interrupted] Aliran token terputus di tengah jalan setelah ${tokenCount} token:`, sMsg);
                 break;
               }
 
@@ -28711,7 +28727,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       assistantRow.dataset.fullContent = fullText;
 
       // Check if output is cut in half and provide one-click continuation button
-      if (isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, finishReason)) {
+      if (isFileStillIncomplete || isStreamInterrupted || isOutputTruncated(rawFullTextBeforeStripping, finishReason)) {
+        if (isStreamInterrupted) {
+          showToast('⚠️ Koneksi streaming terputus di tengah jalan. Gunakan tombol "Lanjutkan Jawaban" di bawah pesan untuk meneruskan.', 'warning');
+        }
         attachContinuationButton(
           assistantRow.querySelector('.message-content-box') || assistantRow,
           session,

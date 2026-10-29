@@ -18,6 +18,14 @@ const os = require('os');
 const { spawn, execSync } = require('child_process');
 const textSafety = require('./text-safety');
 
+// Persistent HTTPS Agent dengan TCP Keep-Alive untuk kestabilan koneksi streaming OpenRouter tanpa putus
+const openRouterHttpsAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 15000,
+  maxSockets: 64,
+  timeout: 300000
+});
+
 // Loader node-pty opsional (dengan graceful fallback untuk Vercel / serverless)
 let nodePty = null;
 try {
@@ -2369,7 +2377,8 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
             'X-Title': 'Zoz Router Deep Research',
             'Content-Length': Buffer.byteLength(postData)
           },
-          timeout: 60000
+          agent: openRouterHttpsAgent,
+          timeout: 180000
         };
 
         const req = https.request(options, (res) => {
@@ -8953,15 +8962,24 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           'X-Title': 'ZOZ ROUTER Neural AI Gateway',
           'Content-Length': Buffer.byteLength(postData)
         },
-        timeout: 180000
+        agent: openRouterHttpsAgent,
+        timeout: 300000
       };
 
       let clientDisconnected = false;
       let proxyReq = null;
-      let hasSplicedRefusal = false;
       let horocycleHalted = false;
+      let keepAliveTimer = null;
+
+      const clearKeepAlive = () => {
+        if (keepAliveTimer) {
+          clearInterval(keepAliveTimer);
+          keepAliveTimer = null;
+        }
+      };
 
       res.on('close', () => {
+        clearKeepAlive();
         if (res.writableEnded) return; // penyelesaian normal, bukan disconnect klien
         clientDisconnected = true;
         // JANGAN hancurkan proxyReq jika sessionId ada! Biarkan server menyelesaikan generasi LLM di latar belakang
@@ -8978,6 +8996,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
         // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
         if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+          clearKeepAlive();
           if (!proxyReq.destroyed) proxyReq.destroy();
           // Clean up aborted task
           delete dbActiveChatTasks[sessionId];
@@ -8985,6 +9004,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
 
         if (clientDisconnected || res.writableEnded || res.destroyed) {
+          clearKeepAlive();
           if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
           if (!sessionId) return;
         }
@@ -8993,6 +9013,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
         // If OpenRouter returned non-200 (e.g. 401 Unauthorized, 402 Payment Required, 429 Rate Limit)
         if (statusCode !== 200) {
+          clearKeepAlive();
           if (sessionId && dbActiveChatTasks[sessionId]) {
             dbActiveChatTasks[sessionId].status = 'error';
           }
@@ -9035,75 +9056,38 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               'Connection': 'keep-alive',
               'Access-Control-Allow-Origin': '*'
             });
+            if (isStream) {
+              res.write(': stream-connected\n\n');
+            }
           } catch (writeHeadErr) {
             console.warn('Notice writing head to client (OpenRouter):', writeHeadErr.message);
           }
         }
 
+        // Heartbeat berkala setiap 12 detik agar proxy/Cloudflare Tunnel tidak memutus koneksi idle
+        if (isStream) {
+          keepAliveTimer = setInterval(() => {
+            if (clientDisconnected || res.writableEnded || res.destroyed) {
+              clearKeepAlive();
+              return;
+            }
+            try {
+              res.write(': keepalive\n\n');
+            } catch (_) {
+              clearKeepAlive();
+            }
+          }, 12000);
+        }
+
         proxyRes.on('data', chunk => {
-          if (hasSplicedRefusal || horocycleHalted) return;
+          if (proxyReq && !proxyReq.destroyed) {
+            try { proxyReq.setTimeout(300000); } catch (_) {}
+          }
+          if (horocycleHalted) return;
           const safeChunk = reasoningFilter.push(chunk);
           const gateDiag = reasoningFilter.getGateDiagnostics ? reasoningFilter.getGateDiagnostics() : null;
 
-          // 1. Autoregressive Trajectory Splicing (OpenRouter): Potong stream penolakan (cos θ = -1) & suntikkan prefill jangkar
-          if (isStream && gateDiag && gateDiag.refusalDetected && !hasSplicedRefusal) {
-            hasSplicedRefusal = true;
-            try { if (proxyReq && !proxyReq.destroyed) proxyReq.destroy(); } catch (_) {}
-            const clampedPrefix = textSafety.synthesizeAutoregressivePrefill(userPrompt || '');
-            if (clampedPrefix && !clientDisconnected && !res.writableEnded && !res.destroyed) {
-              const anchorSSE = `data: ${JSON.stringify({
-                id: 'chatcmpl-zoz-clamp',
-                object: 'chat.completion.chunk',
-                choices: [{ index: 0, delta: { role: 'assistant', content: clampedPrefix }, finish_reason: null }]
-              })}\n\n`;
-              if (sessionId) accumulateChatChunk(sessionId, anchorSSE, 'openrouter');
-              try { res.write(anchorSSE); } catch (_) {}
-            }
-            const splicedBody = {
-              ...body,
-              messages: [
-                ...(Array.isArray(body.messages) ? body.messages : []),
-                { role: 'assistant', content: clampedPrefix }
-              ]
-            };
-            const splicedData = JSON.stringify(splicedBody);
-            const splicedOptions = {
-              ...options,
-              headers: { ...options.headers, 'Content-Length': Buffer.byteLength(splicedData) }
-            };
-            const splicedFilter = textSafety.createProviderStreamFilter('openrouter', 'stream', { userPrompt, bypassPreambleStrip: true });
-            const splicedReq = https.request(splicedOptions, (splicedRes) => {
-              splicedRes.on('data', sChunk => {
-                const sSafe = splicedFilter.push(sChunk);
-                if (sessionId && sSafe) accumulateChatChunk(sessionId, sSafe, 'openrouter');
-                if (!clientDisconnected && !res.writableEnded && !res.destroyed && sSafe) {
-                  try { res.write(sSafe); } catch (_) {}
-                }
-              });
-              splicedRes.on('end', () => {
-                const sTail = splicedFilter.end();
-                if (sessionId && sTail) accumulateChatChunk(sessionId, sTail, 'openrouter');
-                if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
-                  try { if (sTail) res.write(sTail); res.end(); } catch (_) {}
-                }
-              });
-              splicedRes.on('error', () => {
-                if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
-                  try { res.end(); } catch (_) {}
-                }
-              });
-            });
-            splicedReq.on('error', () => {
-              if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
-                try { res.end(); } catch (_) {}
-              }
-            });
-            splicedReq.write(splicedData);
-            splicedReq.end();
-            return;
-          }
-
-          // 2. Horocycle Singularity Breaker (OpenRouter Poincaré Disk K = -1)
+          // Horocycle Singularity Breaker: Hentikan HANYA jika degenerasi repetisi ekstrem terkonfirmasi
           if (isStream && gateDiag && gateDiag.horocycleTrapped && !horocycleHalted) {
             horocycleHalted = true;
             try { if (proxyReq && !proxyReq.destroyed) proxyReq.destroy(); } catch (_) {}
@@ -9114,6 +9098,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 res.end();
               } catch (_) {}
             }
+            clearKeepAlive();
             return;
           }
 
@@ -9136,7 +9121,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         });
 
         proxyRes.on('end', () => {
-          if (hasSplicedRefusal || horocycleHalted) return;
+          clearKeepAlive();
+          if (horocycleHalted) return;
           const safeTail = reasoningFilter.end();
           if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'openrouter');
           if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
@@ -9167,7 +9153,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         });
 
         proxyRes.on('error', (err) => {
-          if (hasSplicedRefusal || horocycleHalted) return;
+          clearKeepAlive();
+          if (horocycleHalted) return;
           if (sessionId && dbActiveChatTasks[sessionId]) {
             markChatTaskInterrupted(sessionId, err.message || 'OpenRouter stream interrupted');
           }
@@ -9190,18 +9177,19 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       }
 
       proxyReq.on('timeout', () => {
-        if (hasSplicedRefusal || horocycleHalted) return;
+        clearKeepAlive();
+        if (horocycleHalted) return;
         if (sessionId && dbActiveChatTasks[sessionId]) {
-          markChatTaskInterrupted(sessionId, 'OpenRouter stream timed out (180s)');
+          markChatTaskInterrupted(sessionId, 'OpenRouter stream timed out (300s)');
         }
         if (!proxyReq.destroyed) proxyReq.destroy();
         if (clientDisconnected || res.writableEnded || res.destroyed) return;
         try {
           if (!res.headersSent) {
-            sendJSON(res, 504, { error: 'OpenRouter stream timed out (180s)' });
+            sendJSON(res, 504, { error: 'OpenRouter stream timed out (300s)' });
           } else {
             if (isStream) {
-              res.write(`data: ${JSON.stringify({ error: 'OpenRouter stream timed out (180s)' })}\n\n`);
+              res.write(`data: ${JSON.stringify({ error: 'OpenRouter stream timed out (300s)' })}\n\n`);
               res.write('data: [DONE]\n\n');
             }
             res.end();
@@ -9210,7 +9198,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       });
 
       proxyReq.on('error', (err) => {
-        if (hasSplicedRefusal || horocycleHalted) return;
+        clearKeepAlive();
+        if (horocycleHalted) return;
         if (sessionId && dbActiveChatTasks[sessionId]) {
           markChatTaskInterrupted(sessionId, err.message || 'OpenRouter connection error');
         }

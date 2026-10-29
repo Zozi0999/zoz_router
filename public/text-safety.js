@@ -28,7 +28,8 @@
     'bukan', 'belum', 'jangan', 'jika', 'kalau', 'bila', 'karena', 'sebab', 'jadi', 'maka',
     'the', 'a', 'an', 'of', 'in', 'to', 'for', 'with', 'on', 'at', 'from', 'by', 'about', 'as',
     'is', 'are', 'was', 'were', 'be', 'been', 'please', 'can', 'could', 'would', 'should', 'you',
-    'make', 'create', 'explain', 'tell', 'write', 'give', 'show', 'how', 'what', 'why', 'who'
+    'make', 'create', 'explain', 'tell', 'write', 'give', 'show', 'how', 'what', 'why', 'who', 'maaf',
+    'tidak bisa', 'safety', 'hal lain', 'melanggar'
   ]);
 
   const LOW_ENTROPY_FILLERS = new Set([
@@ -896,7 +897,7 @@
       return pt;
     }
 
-    function detectHorocycleTrap(windowSize = 16) {
+    function detectHorocycleTrap(windowSize = 32) {
       if (history.length < windowSize) return { trapped: false, busemannVariance: 1 };
       const win = history.slice(-windowSize);
 
@@ -914,9 +915,11 @@
       const joined = win.map(p => p.token).join('');
       // Abaikan karakter formatting, spasi inden, pemisah tabel (|---|), strip (-) dan simbol syntax
       const substantiveChars = joined.replace(/[\s\-=_*|.#]+/g, '');
-      const hasSubstantivePeriodicOrbit = substantiveChars.length >= 32 && /([a-zA-Z0-9\u00C0-\u024F]{3,80})\1{2,}$/s.test(substantiveChars);
+      // Deteksi loop degenerasi sejati: pola harus berulang minimal 8 kali dan panjang substantif minimal 150 karakter
+      // Mencegah false-positive memotong jawaban normal yang berisi tabel, daftar item, CSS, atau kata berulang normal
+      const hasSubstantivePeriodicOrbit = substantiveChars.length >= 150 && /([a-zA-Z0-9\u00C0-\u024F]{3,80})\1{7,}$/s.test(substantiveChars);
 
-      const trapped = hasSubstantivePeriodicOrbit || (busemannVariance < 1e-9 && win[0].token.length >= 6 && /[a-zA-Z0-9]/.test(win[0].token) && win.every(p => p.token === win[0].token));
+      const trapped = hasSubstantivePeriodicOrbit || (busemannVariance < 1e-12 && win.length >= 24 && win[0].token.length >= 4 && win.every(p => p.token === win[0].token));
       return { trapped, busemannVariance, radius: lastPoint.r };
     }
 
