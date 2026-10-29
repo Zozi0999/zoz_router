@@ -9064,7 +9064,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           }
         }
 
-        // Heartbeat berkala setiap 12 detik agar proxy/Cloudflare Tunnel tidak memutus koneksi idle
+        // Heartbeat berkala setiap 10 detik agar proxy/Cloudflare Tunnel tidak memutus koneksi idle
         if (isStream) {
           keepAliveTimer = setInterval(() => {
             if (clientDisconnected || res.writableEnded || res.destroyed) {
@@ -9076,30 +9076,20 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             } catch (_) {
               clearKeepAlive();
             }
-          }, 12000);
+          }, 10000);
         }
 
         proxyRes.on('data', chunk => {
           if (proxyReq && !proxyReq.destroyed) {
             try { proxyReq.setTimeout(300000); } catch (_) {}
           }
-          if (horocycleHalted) return;
           const safeChunk = reasoningFilter.push(chunk);
           const gateDiag = reasoningFilter.getGateDiagnostics ? reasoningFilter.getGateDiagnostics() : null;
 
-          // Horocycle Singularity Breaker: Hentikan HANYA jika degenerasi repetisi ekstrem terkonfirmasi
+          // Diagnostic log only: Never kill or truncate active user chat stream based on heuristic manifold
           if (isStream && gateDiag && gateDiag.horocycleTrapped && !horocycleHalted) {
             horocycleHalted = true;
-            try { if (proxyReq && !proxyReq.destroyed) proxyReq.destroy(); } catch (_) {}
-            if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
-              try {
-                if (safeChunk) res.write(safeChunk);
-                res.write('data: [DONE]\n\n');
-                res.end();
-              } catch (_) {}
-            }
-            clearKeepAlive();
-            return;
+            console.warn(`[OpenRouter Stream Diagnostics] Potential repetition orbit detected for session ${sessionId || 'anon'}. Allowing stream to continue.`);
           }
 
           // Background task menerima frame yang sama setelah reasoning dihapus.
@@ -9112,17 +9102,22 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           try {
             if (!safeChunk) return;
             const flushed = res.write(safeChunk);
-            // M27: backpressure — hentikan baca upstream saat klien lambat.
+            // Resilient backpressure: pause only if client buffer is congested, with automatic 150ms resume safety
             if (flushed === false && typeof proxyRes.pause === 'function') {
               proxyRes.pause();
-              res.once('drain', () => { try { proxyRes.resume(); } catch (_) {} });
+              const resumeTimer = setTimeout(() => {
+                try { if (typeof proxyRes.resume === 'function') proxyRes.resume(); } catch (_) {}
+              }, 150);
+              res.once('drain', () => {
+                clearTimeout(resumeTimer);
+                try { if (typeof proxyRes.resume === 'function') proxyRes.resume(); } catch (_) {}
+              });
             }
           } catch (e) {}
         });
 
         proxyRes.on('end', () => {
           clearKeepAlive();
-          if (horocycleHalted) return;
           const safeTail = reasoningFilter.end();
           if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'openrouter');
           if (!clientDisconnected && !res.writableEnded && !res.destroyed) {

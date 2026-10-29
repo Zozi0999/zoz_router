@@ -9503,11 +9503,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       this.text += str;
 
       if (this.detectRepetitionLoop()) {
-        console.warn('[StreamBufferRenderer] Repetisi terdeteksi; memotong pengulangan berlebih tanpa memutus stream.');
-        // Hanya tandai loop terminated jika repetisi masif dan panjang teks sudah besar
-        if (this.text.length > 500 && this.detectRepetitionLoop()) {
-          this.isLoopTerminated = true;
-        }
+        console.warn('[StreamBufferRenderer] Repetisi visual terdeteksi; merapikan pengulangan berlebih.');
         this.scheduleRender();
         return;
       }
@@ -26472,11 +26468,6 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 BioEndocrine.secreteDopamine(0.3, 'Ollama streaming aktif');
               }
               streamRenderer.append(chunk);
-              if (streamRenderer.isLoopTerminated) {
-                console.warn('[Ollama] Model token degeneration loop detected and gracefully halted.');
-                try { await reader.cancel(); } catch (_) {}
-                break;
-              }
             }
             if (parsed.message?.tool_calls && Array.isArray(parsed.message.tool_calls)) {
               mergeToolCallsInto(accumulatedToolCalls, parsed.message.tool_calls);
@@ -27061,19 +27052,6 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
       assistantRow.dataset.fullContent = fullText;
 
-      // Check if output is cut in half and provide one-click continuation button
-      if (isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, doneReason === 'length' ? 'length' : null)) {
-        attachContinuationButton(
-          assistantRow.querySelector('.message-content-box') || assistantRow,
-          session,
-          assistantRow,
-          modelName,
-          'ollama',
-          rawFullTextBeforeStripping,
-          { isWebsite: isWebTask }
-        );
-      }
-
       // Save to isolated Studio/Edit history or main session
       if (isStudioIsolated) {
         persistStudioIsolatedTurn(session, promptText, fullText, generatedFiles, {
@@ -27097,6 +27075,42 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         session.updatedAt = new Date().toISOString();
         savePersistedState();
         renderChatHistory(els.searchHistoryInput?.value || '');
+      }
+
+      // SEAMLESS AUTO-CONTINUATION: Jika output terpotong, sambung otomatis tanpa putus
+      const needsOllamaContinuation = !STATE.abortController?.signal?.aborted && !runOptions._isAutoContinuation && (isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, doneReason === 'length' ? 'length' : null));
+      if (needsOllamaContinuation) {
+        console.log('[Ollama Auto-Recovery] Respons terpotong di tengah jalan. Memulai penyambungan otomatis...');
+        showToast('⚡ Menyambung kelanjutan jawaban secara otomatis...', 'info');
+        try {
+          await executeResponseContinuation(assistantRow, {
+            session,
+            modelName,
+            engine: 'ollama',
+            previousText: rawFullTextBeforeStripping,
+            isWebsite: isWebTask,
+            forceTakeover: true
+          });
+          if (assistantRow.dataset.fullContent) {
+            fullText = assistantRow.dataset.fullContent;
+            rawFullTextBeforeStripping = fullText;
+          }
+        } catch (autoContErr) {
+          console.warn('[Ollama Seamless Auto-Continuation Notice]:', autoContErr);
+        }
+      }
+
+      // Check if output is STILL cut in half after auto-continuation and provide fallback button
+      if (isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, doneReason === 'length' ? 'length' : null)) {
+        attachContinuationButton(
+          assistantRow.querySelector('.message-content-box') || assistantRow,
+          session,
+          assistantRow,
+          modelName,
+          'ollama',
+          rawFullTextBeforeStripping,
+          { isWebsite: isWebTask }
+        );
       }
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + modelName, fullText);
@@ -27935,11 +27949,6 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                     if (tokenCount % 25 === 0) {
                       BioEndocrine.secreteDopamine(0.3, 'Streaming token lancar');
                     }
-                    if (streamRenderer.isLoopTerminated) {
-                      console.warn('[OpenRouter] Model token degeneration loop detected and gracefully halted.');
-                      try { await reader.cancel(); } catch (_) {}
-                      break;
-                    }
                   }
                 }
               }
@@ -28729,23 +28738,29 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         <span title="${promptTokens ? `${promptTokens} prompt + ${evalTokens} completion token` : `${evalTokens} completion token`}">⚡ ${tps} tps (${evalTokens} tok)</span>
       `;
 
-      assistantRow.dataset.fullContent = fullText;
-
-      // Check if output is cut in half and provide one-click continuation button
-      if (isFileStillIncomplete || isStreamInterrupted || isOutputTruncated(rawFullTextBeforeStripping, finishReason)) {
-        if (isStreamInterrupted) {
-          showToast('⚠️ Koneksi streaming terputus di tengah jalan. Gunakan tombol "Lanjutkan Jawaban" di bawah pesan untuk meneruskan.', 'warning');
-        }
-        attachContinuationButton(
-          assistantRow.querySelector('.message-content-box') || assistantRow,
-          session,
-          assistantRow,
-          actualModelUsed || displayModel,
-          engineMode,
-          rawFullTextBeforeStripping,
-          { isWebsite: isWebTask }
-        );
+      // Recovery sisa token dari background task server jika stream terputus di tengah jalan
+      if (isStreamInterrupted && session?.id && DeviceStorage.isDeviceBackendAvailable) {
+        try {
+          const bgRes = await fetch(`/api/chat/status?sessionId=${encodeURIComponent(session.id)}`, {
+            headers: { 'X-User-ID': STATE.userId }
+          }).catch(() => null);
+          if (bgRes && bgRes.ok) {
+            const bgData = await bgRes.json().catch(() => null);
+            if (bgData && bgData.text && bgData.text.length > fullText.length) {
+              fullText = safeAssistantText(bgData.text);
+              assistantRow.dataset.fullContent = fullText;
+              rawFullTextBeforeStripping = fullText;
+              if (bubbleText) {
+                bubbleText.innerHTML = renderMarkdown(hideFileBlocksForDisplay(fullText, runOptions));
+              }
+              isStreamInterrupted = false;
+              console.log('[OpenRouter Auto-Recovery] Berhasil menyerap sisa token dari background server:', fullText.length, 'karakter.');
+            }
+          }
+        } catch (_) {}
       }
+
+      assistantRow.dataset.fullContent = fullText;
 
       // Save to isolated Studio/Edit history or main session
       if (isStudioIsolated) {
@@ -28772,6 +28787,46 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         session.updatedAt = new Date().toISOString();
         savePersistedState();
         renderChatHistory(els.searchHistoryInput?.value || '');
+      }
+
+      // SEAMLESS AUTO-CONTINUATION: Jika output terputus atau terpotong di tengah jalan, sambung otomatis tanpa putus
+      const needsOpenRouterContinuation = !STATE.abortController?.signal?.aborted && !runOptions._isAutoContinuation && (isFileStillIncomplete || isStreamInterrupted || isOutputTruncated(rawFullTextBeforeStripping, finishReason));
+      if (needsOpenRouterContinuation) {
+        console.log('[OpenRouter Auto-Recovery] Respons terputus/terpotong di tengah jalan. Memulai penyambungan otomatis...');
+        showToast('⚡ Menyambung kelanjutan jawaban secara otomatis...', 'info');
+        try {
+          await executeResponseContinuation(assistantRow, {
+            session,
+            modelName: actualModelUsed || displayModel,
+            engine: engineMode,
+            previousText: rawFullTextBeforeStripping,
+            isWebsite: isWebTask,
+            forceTakeover: true
+          });
+          if (assistantRow.dataset.fullContent) {
+            fullText = assistantRow.dataset.fullContent;
+            rawFullTextBeforeStripping = fullText;
+            isStreamInterrupted = false;
+          }
+        } catch (autoContErr) {
+          console.warn('[OpenRouter Seamless Auto-Continuation Notice]:', autoContErr);
+        }
+      }
+
+      // Check if output is STILL cut in half after auto-continuation and provide fallback button
+      if (isFileStillIncomplete || isStreamInterrupted || isOutputTruncated(rawFullTextBeforeStripping, finishReason)) {
+        if (isStreamInterrupted) {
+          showToast('⚠️ Aliran token terputus. Gunakan tombol "Lanjutkan Jawaban" jika masih ingin meneruskan.', 'warning');
+        }
+        attachContinuationButton(
+          assistantRow.querySelector('.message-content-box') || assistantRow,
+          session,
+          assistantRow,
+          actualModelUsed || displayModel,
+          engineMode,
+          rawFullTextBeforeStripping,
+          { isWebsite: isWebTask }
+        );
       }
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + (actualModelUsed || displayModel), fullText);
