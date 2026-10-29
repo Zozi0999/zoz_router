@@ -1165,30 +1165,16 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
   });
 }
 
-// Official Ollama Cloud Flagship & Popular Standard Models (Included Free Usage & Usage Credits)
+// Official & Verified Standard Open-Source Models
 const OFFICIAL_OLLAMA_CLOUD_MODELS = [
-  { name: 'gemma4:31b', model: 'gemma4:31b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gemma4', parameter_size: '30.7B' } },
-  { name: 'beam', model: 'beam', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'beam', parameter_size: '35B' } },
-  { name: 'muse-spark-open', model: 'muse-spark-open', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'muse_spark', parameter_size: '36.6B' } },
-  { name: 'gpt-oss:120b', model: 'gpt-oss:120b', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'gptoss', parameter_size: '116.8B' } },
-  { name: 'gpt-oss:20b', model: 'gpt-oss:20b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'gptoss', parameter_size: '20.9B' } },
-  { name: 'nemotron-3-super', model: 'nemotron-3-super', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron', parameter_size: '124B' } },
-  { name: 'nemotron-3-ultra', model: 'nemotron-3-ultra', tag: 'Free Flagship Cloud', isFree: true, cat: 'flagship', details: { family: 'nemotron', parameter_size: '253B' } },
-  { name: 'nemotron-3-nano:30b', model: 'nemotron-3-nano:30b', tag: 'Free Fast Cloud', isFree: true, cat: 'fast', details: { family: 'nemotron', parameter_size: '31.6B' } },
-  { name: 'kimi-k2.7-code', model: 'kimi-k2.7-code', tag: 'Coding Cloud', isFree: false, cat: 'coding', details: { family: 'kimi', parameter_size: '757B' } },
-  { name: 'kimi-k3', model: 'kimi-k3', tag: 'Long Context Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi-k3', parameter_size: '1T' } },
-  { name: 'kimi-k2.6', model: 'kimi-k2.6', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'kimi-k2.6', parameter_size: '1T' } },
-  { name: 'deepseek-v4.1-flash', model: 'deepseek-v4.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
-  { name: 'deepseek-v4.1-flash:1017', model: 'deepseek-v4.1-flash:1017', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'deepseek', parameter_size: '300B' } },
-  { name: 'deepseek-v4-pro:0813', model: 'deepseek-v4-pro:0813', tag: 'Reasoning Cloud', isFree: false, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '1T' } },
-  { name: 'glm-5.3', model: 'glm-5.3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm5', parameter_size: '756B' } },
-  { name: 'glm-5.3-flash', model: 'glm-5.3-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'glm5', parameter_size: '218B' } },
-  { name: 'glm-5.2', model: 'glm-5.2', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'glm5', parameter_size: '756B' } },
-  { name: 'minimax-m3', model: 'minimax-m3', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax', parameter_size: '330B' } },
-  { name: 'minimax-m3.1-flash', model: 'minimax-m3.1-flash', tag: 'Fast Cloud', isFree: false, cat: 'fast', details: { family: 'minimax', parameter_size: '196B' } },
-  { name: 'minimax-m2.7', model: 'minimax-m2.7', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'minimax-m2', parameter_size: '230B' } },
-  { name: 'mistral-large-4', model: 'mistral-large-4', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'mistral4', parameter_size: '705B' } },
-  { name: 'mistral-large-3:675b', model: 'mistral-large-3:675b', tag: 'Flagship Cloud', isFree: false, cat: 'flagship', details: { family: 'mistral3', parameter_size: '675B' } }
+  { name: 'llama3.2:3b', model: 'llama3.2:3b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'llama', parameter_size: '3B' } },
+  { name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'qwen', parameter_size: '1.5B' } },
+  { name: 'granite4.2:3b', model: 'granite4.2:3b', tag: 'Lokal', isFree: true, cat: 'fast', details: { family: 'granite', parameter_size: '3B' } },
+  { name: 'granite-mind:latest', model: 'granite-mind:latest', tag: 'Lokal', isFree: true, cat: 'flagship', details: { family: 'granite', parameter_size: '3B' } },
+  { name: 'nemotron-analisis:latest', model: 'nemotron-analisis:latest', tag: 'Lokal', isFree: true, cat: 'coding', details: { family: 'nemotron', parameter_size: '3B' } },
+  { name: 'deepseek-r1:8b', model: 'deepseek-r1:8b', tag: 'Reasoning', isFree: true, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '8B' } },
+  { name: 'mistral:7b', model: 'mistral:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'mistral', parameter_size: '7B' } },
+  { name: 'qwen2.5:7b', model: 'qwen2.5:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'qwen', parameter_size: '7B' } }
 ];
 
 const VALID_OLLAMA_CLOUD_MODELS = new Set(OFFICIAL_OLLAMA_CLOUD_MODELS.map(m => m.model.toLowerCase()));
@@ -1208,97 +1194,27 @@ function isUnsupportedOllamaChatModel(m) {
   return false;
 }
 
-// Resolusi ke nama model resmi di https://ollama.com (TANPA akhiran :cloud / -cloud lokal)
+// Model Resolver: Pertahankan nama model asli yang dipilih pengguna
 function resolveOllamaCloudModel(modelId) {
-  if (!modelId || typeof modelId !== 'string') return 'deepseek-v4.1-flash';
-  const raw = modelId.trim();
-  const id = raw.toLowerCase();
-  if (id === 'deepseek-v4.1-flash:1017') return 'deepseek-v4.1-flash:1017';
-  if (id === 'deepseek-v4.1-flash' || id === 'deepseek-v4.1-flash:cloud' || id === 'deepseek-v4-flash' || id === 'deepseek-v4-flash:cloud') return 'deepseek-v4.1-flash';
-  if (id === 'deepseek-v4-pro:0813' || id === 'deepseek-v4-pro' || id === 'deepseek-v4-pro:cloud') return 'deepseek-v4-pro:0813';
-  if (id === 'kimi-k2.6' || id === 'kimi-k2.6:cloud') return 'kimi-k2.6';
-  if (id === 'glm-5.3-flash' || id === 'glm-5.3-flash:cloud') return 'glm-5.3-flash';
-  if (id === 'nemotron-3-nano:30b' || id === 'nemotron-3-nano:30b-cloud') return 'nemotron-3-nano:30b';
-  if (id === 'nemotron-3-ultra' || id === 'nemotron-3-ultra:cloud') return 'nemotron-3-ultra';
-  if (id === 'nemotron-3-super' || id === 'nemotron-3-super:cloud') return 'nemotron-3-super';
-  if (id === 'mistral-large-3:675b' || id === 'mistral-large-3:675b-cloud') return 'mistral-large-3:675b';
-  if (id === 'minimax-m2.7' || id === 'minimax-m2.7:cloud') return 'minimax-m2.7';
-  if (id === 'gpt-oss:120b' || id === 'gpt-oss:120b-cloud') return 'gpt-oss:120b';
-  if (VALID_OLLAMA_CLOUD_MODELS.has(id)) return raw;
-  const stripped = raw.replace(/(?::cloud|-cloud)$/i, '');
-  if (VALID_OLLAMA_CLOUD_MODELS.has(stripped.toLowerCase())) return stripped;
-  if (id === 'gemma4:31b-cloud' || id.startsWith('gemma')) return 'gemma4:31b';
-  if (id.startsWith('clef')) return 'gemma4:31b';
-  if (id.includes('coder') || id.includes('code')) return 'kimi-k2.7-code';
-  if (id.startsWith('qwen')) return 'gemma4:31b';
-  if (id.startsWith('phi')) return 'gemma4:31b';
-  if (id.startsWith('llama')) return 'gpt-oss:120b';
-  if (id.startsWith('deepseek-r1') || id.startsWith('deepseek')) return 'deepseek-v4.1-flash';
-  if (id.startsWith('mistral')) return 'mistral-large-4';
-  return 'gemma4:31b';
+  if (!modelId || typeof modelId !== 'string') return 'llama3.2:3b';
+  return modelId.trim();
 }
 
-// Resolusi ke manifest Cloud Relay yang terpasang pada daemon lokal (http://127.0.0.1:11434)
+// Model Resolver Lokal Daemon: Pertahankan nama model asli yang terpasang di Ollama lokal
 function resolveLocalDaemonCloudManifest(modelId) {
-  if (!modelId || typeof modelId !== 'string') return 'deepseek-v4.1-flash:cloud';
-  const raw = modelId.trim();
-  const id = raw.toLowerCase();
-  const localNativeModels = new Set([
-    'nemotron-analisis:latest', 'nemotron-analisis',
-    'granite-mind:latest', 'granite-mind',
-    'granite4.2:3b', 'llama3.2:3b', 'qwen2.5:1.5b',
-    'grok-custom:latest', 'grok-custom',
-    'rose-cloud:latest', 'rose-cloud',
-    'clound:latest', 'clound'
-  ]);
-  if (localNativeModels.has(id)) return raw;
-  if (id === 'deepseek-v4.1-flash:1017' || id === 'deepseek-v4.1-flash' || id === 'deepseek-v4.1-flash:cloud') return 'deepseek-v4.1-flash:cloud';
-  if (id === 'deepseek-v4-flash' || id === 'deepseek-v4-flash:cloud') return 'deepseek-v4-flash:cloud';
-  if (id === 'deepseek-v4-pro:0813' || id === 'deepseek-v4-pro' || id === 'deepseek-v4-pro:cloud') return 'deepseek-v4-pro:cloud';
-  if (id === 'kimi-k2.6' || id === 'kimi-k2.6:cloud' || id === 'kimi-k2.7-code' || id === 'kimi-k3') return 'kimi-k2.6:cloud';
-  if (id === 'glm-5.3-flash' || id === 'glm-5.3-flash:cloud' || id === 'glm-5.3' || id === 'glm-5.2') return 'glm-5.3-flash:cloud';
-  if (id === 'nemotron-3-nano:30b' || id === 'nemotron-3-nano:30b-cloud') return 'nemotron-3-nano:30b-cloud';
-  if (id === 'nemotron-3-ultra' || id === 'nemotron-3-ultra:cloud') return 'nemotron-3-ultra:cloud';
-  if (id === 'nemotron-3-super' || id === 'nemotron-3-super:cloud') return 'nemotron-3-super:cloud';
-  if (id === 'mistral-large-3:675b' || id === 'mistral-large-3:675b-cloud' || id === 'mistral-large-4') return 'mistral-large-3:675b-cloud';
-  if (id === 'minimax-m2.7' || id === 'minimax-m2.7:cloud' || id === 'minimax-m3' || id === 'minimax-m3.1-flash') return 'minimax-m2.7:cloud';
-  if (id === 'gpt-oss:120b' || id === 'gpt-oss:120b-cloud' || id === 'gpt-oss:20b' || id === 'gemma4:31b' || id === 'beam' || id === 'muse-spark-open') return 'gpt-oss:120b-cloud';
-  if (id.endsWith(':cloud') || id.endsWith('-cloud')) return raw;
-  return 'deepseek-v4.1-flash:cloud';
+  if (!modelId || typeof modelId !== 'string') return 'llama3.2:3b';
+  return modelId.trim();
 }
 
 function mapOllamaModelToOpenRouter(modelId) {
   if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
   const id = modelId.toLowerCase().trim();
   if (id.includes('/')) return modelId;
-
-  if (id.includes('gemma')) {
-    return 'nvidia/nemotron-3.5-lightning:free';
-  }
-  if (id.includes('nemotron-3-super') || id.includes('gpt-oss:120b') || id.includes('nemotron-3-ultra')) {
-    return 'nvidia/nemotron-3-super-120b-a12b:free';
-  }
-  if (id.includes('nemotron-3-nano') || id.includes('reasoning') || id.includes('deepseek-r1') || id.includes('deepseek-v4-pro')) {
-    return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
-  }
-  if (id.includes('nemotron-3.5') || id.includes('nemotron')) {
-    return 'nvidia/nemotron-3.5-lightning:free';
-  }
-  if (id.includes('gpt-oss')) {
-    return 'nvidia/nemotron-3-super-120b-a12b:free';
-  }
-  if (id.includes('qwen2.5-coder') || id.includes('coder') || id.includes('code') || id.includes('kimi-k2.7-code')) {
-    return 'cohere/north-mini-code:free';
-  }
-  if (id.includes('dots')) return 'dots-studio/dots-3-note-preview:free';
-  if (id.includes('liquid') || id.includes('lfm')) return 'liquid/lfm-2.5-2.6b:free';
-  if (id.includes('deepseek')) return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
-  if (id.includes('llama')) return 'nvidia/nemotron-3.5-lightning:free';
-  if (id.includes('qwen')) return 'nvidia/nemotron-3.5-lightning:free';
-  if (id.includes('mistral')) return 'nvidia/nemotron-3.5-lightning:free';
-  if (id.includes('phi')) return 'openrouter/free';
-
-  return 'nvidia/nemotron-3.5-lightning:free';
+  if (id.includes('llama')) return 'meta-llama/llama-3.3-70b-instruct:free';
+  if (id.includes('qwen')) return 'qwen/qwen-2.5-72b-instruct';
+  if (id.includes('deepseek')) return 'deepseek/deepseek-chat';
+  if (id.includes('mistral')) return 'mistralai/mistral-7b-instruct:free';
+  return 'openrouter/free';
 }
 
 // ==================== GLOBAL SEARCH & ENGLISH QUERY ADAPTER ====================
@@ -2613,19 +2529,16 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   };
 
   const isCloudOllama = rawEp.includes('ollama.com');
-  const isLoopbackOllama = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(rawEp);
-  const resolvedPrimaryModel = isCloudOllama
-    ? resolveOllamaCloudModel(rawModel || 'gemma4:31b')
-    : (isLoopbackOllama ? resolveLocalDaemonCloudManifest(rawModel || 'deepseek-v4.1-flash:cloud') : (rawModel || 'qwen2.5:1.5b'));
+  const resolvedPrimaryModel = rawModel || 'llama3.2:3b';
 
   try {
     return await executeOllamaOnce(rawEp, resolvedPrimaryModel, activeOllamaKey);
   } catch (primaryErr) {
     // Jika panggilan ke https://ollama.com gagal (misal API key kedaluwarsa/kuota habis/401/404),
-    // otomatis fallback ke daemon Cloud Relay lokal (127.0.0.1:11434)
+    // otomatis fallback ke daemon lokal (127.0.0.1:11434)
     if (isCloudOllama && !process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
       try {
-        const localFallbackModel = resolveLocalDaemonCloudManifest(rawModel || resolvedPrimaryModel);
+        const localFallbackModel = rawModel || resolvedPrimaryModel || 'llama3.2:3b';
         return await executeOllamaOnce('http://127.0.0.1:11434', localFallbackModel, null);
       } catch (_) {}
     }
@@ -6298,7 +6211,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         const userPrompt = `${focusTopic ? `[FOKUS KHUSUS PENGGUNA: "${focusTopic}"]\n\n` : ''}Berikut adalah transkrip chat WhatsApp dari nomor yang telah disetujui pengguna:\n\n${combinedTranscript.slice(-18000)}\n\nBuatlah rangkuman lengkap dan terstruktur sekarang:`;
 
         const effectiveProvider = body.provider || body.engine || (body.model && String(body.model).includes('/') ? 'openrouter' : 'ollama');
-        const effectiveModel = body.model || (effectiveProvider === 'ollama' ? 'gemma4:31b' : 'openrouter/free');
+        const effectiveModel = body.model || (effectiveProvider === 'ollama' ? 'llama3.2:3b' : 'openrouter/free');
         const effectiveOpenRouterKey = body.openRouterKey || (body.apiKey && String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || process.env.OPENROUTER_API_KEY;
         const effectiveOllamaApiKey = body.ollamaApiKey || (!effectiveOpenRouterKey ? body.apiKey : null) || process.env.OLLAMA_API_KEY;
 
@@ -7717,23 +7630,15 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       if (!dnsVerdict.ok) return sendJSON(res, 400, { error: dnsVerdict.msg });
     }
 
-    // Fast-Path Cloud Architecture:
-    // Jika endpoint mengarah ke loopback (127.0.0.1/localhost) atau ollama.com tanpa auth header khusus:
-    // - Jika ada API key: alihkan target loopback ke ollama.com resmi
-    // - Jika tanpa API key: segera kembalikan katalog resmi Ollama Cloud (< 5ms) tanpa menahan latensi connection timeout.
     const isServerlessEnv = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION || req.headers['x-vercel-id']);
-    const isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(rawEndpoint);
-    if (!authHeader && (isLoopbackTarget || rawEndpoint.includes('ollama.com'))) {
+    if (isServerlessEnv && !authHeader && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(rawEndpoint)) {
       return sendJSON(res, 200, {
         models: OFFICIAL_OLLAMA_CLOUD_MODELS,
-        server_running: true,
-        cloud_ready: true,
+        server_running: false,
+        cloud_ready: false,
         cloud_auth: false,
-        note: 'Loaded from official Ollama Cloud catalog'
+        note: 'Serverless environment: local Ollama not reachable'
       });
-    }
-    if (authHeader && isLoopbackTarget) {
-      rawEndpoint = 'https://ollama.com';
     }
 
     const tryFetchTags = (endpointUrl) => {
@@ -7816,31 +7721,22 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       }
 
       if (result && result.models && result.models.length > 0) {
-        // Gabungkan model discovery live (kecuali model decision internal seperti clef:27b) dengan model resmi Ollama Cloud
-        const mergedModels = result.models.filter(m => !isUnsupportedOllamaChatModel(m));
-        const existingNames = new Set(mergedModels.map(m => (m.name || m.model || m.id || '').toLowerCase()));
-        OFFICIAL_OLLAMA_CLOUD_MODELS.forEach(om => {
-          const omName = (om.name || om.model || om.id || '').toLowerCase();
-          if (!existingNames.has(omName)) {
-            mergedModels.push(om);
-            existingNames.add(omName);
-          }
-        });
+        const liveModels = result.models.filter(m => !isUnsupportedOllamaChatModel(m));
         return sendJSON(res, 200, {
-          models: mergedModels,
+          models: liveModels,
           server_running: true,
           cloud_ready: true,
           cloud_auth: Boolean(authHeader)
         });
       }
 
-      // If remote returned empty or failed, fallback to official Ollama Cloud catalog
+      // If remote returned empty or failed, fallback to official open models
       return sendJSON(res, 200, {
         models: OFFICIAL_OLLAMA_CLOUD_MODELS,
-        server_running: true,
-        cloud_ready: true,
+        server_running: false,
+        cloud_ready: false,
         cloud_auth: Boolean(authHeader),
-        note: 'Loaded from official Ollama Cloud catalog'
+        note: 'Ollama offline atau tidak ada model terpasang'
       });
     })().catch(err => {
       if (!res.headersSent) {
@@ -8179,17 +8075,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         return;
       }
 
-      // Resolusi nama model yang tepat sesuai target endpoint:
-      // - Untuk https://ollama.com (Official Cloud via API Key): gunakan ID resmi tanpa akhiran :cloud / -cloud
-      // - Untuk http://127.0.0.1:11434 (Local Daemon Cloud Relay): petakan ke manifest :cloud / -cloud lokal
       const rawReqModel = String(body.model || '').trim();
-      if (customEndpoint.includes('ollama.com')) {
-        body.model = resolveOllamaCloudModel(rawReqModel || 'deepseek-v4.1-flash');
-      } else if (isLoopbackTarget) {
-        body.model = resolveLocalDaemonCloudManifest(rawReqModel || 'deepseek-v4.1-flash:cloud');
-      } else if (!body.model) {
-        body.model = 'deepseek-v4.1-flash';
-      }
+      body.model = rawReqModel || 'llama3.2:3b';
 
       sessionId = sanitizeTaskKey(body.sessionId || req.headers['x-session-id'] || null);
       const chatUserId = reqUserId;
