@@ -42380,11 +42380,11 @@ Aturan:
       // Dual Sidebar History Tabs
       els.tabSidebarAiHistory?.addEventListener('click', () => {
         AudioEngine.click();
-        this.setSidebarHistoryTab('ai');
+        this.setSidebarHistoryTab('ai', true);
       });
       els.tabSidebarWaHistory?.addEventListener('click', () => {
         AudioEngine.click();
-        this.setSidebarHistoryTab('whatsapp');
+        this.setSidebarHistoryTab('whatsapp', true);
       });
 
       // QR Modal Tabs
@@ -43265,14 +43265,14 @@ Aturan:
         if (els.promptInput) {
           els.promptInput.placeholder = "";
         }
-        this.setSidebarHistoryTab('ai');
+        this.setSidebarHistoryTab('ai', false);
         if (render) {
           renderCurrentSession();
         }
       } else {
         if (els.singleModelPickerWrap) els.singleModelPickerWrap.style.display = 'none';
         if (els.singleWaContactPickerWrap) els.singleWaContactPickerWrap.style.display = 'block';
-        this.setSidebarHistoryTab('whatsapp');
+        this.setSidebarHistoryTab('whatsapp', false);
 
         if (els.waUnreadBadgeDot) els.waUnreadBadgeDot.style.display = 'none';
 
@@ -43314,8 +43314,20 @@ Aturan:
       }
     },
 
-    setSidebarHistoryTab(tab = 'ai') {
+    setSidebarHistoryTab(tab = 'ai', syncChatMode = false) {
       const isAi = tab === 'ai';
+
+      // Jika remote host dan mencoba membuka tab WhatsApp, munculkan peringatan Localhost Only
+      if (!isAi && !this.isLocalHost()) {
+        this.showLocalhostOnlyModal();
+        if (els.tabSidebarAiHistory) els.tabSidebarAiHistory.classList.add('active');
+        if (els.tabSidebarWaHistory) els.tabSidebarWaHistory.classList.remove('active');
+        if (els.historyLabelTitle) els.historyLabelTitle.textContent = 'Riwayat AI';
+        if (els.chatHistoryList) els.chatHistoryList.style.display = 'block';
+        if (els.waChatHistoryList) els.waChatHistoryList.style.display = 'none';
+        return;
+      }
+
       if (els.tabSidebarAiHistory) els.tabSidebarAiHistory.classList.toggle('active', isAi);
       if (els.tabSidebarWaHistory) els.tabSidebarWaHistory.classList.toggle('active', !isAi);
       if (els.historyLabelTitle) {
@@ -43327,6 +43339,29 @@ Aturan:
       if (!isAi) {
         if (els.sidebarWaUnreadDot) els.sidebarWaUnreadDot.style.display = 'none';
         this.renderSidebarWaChats();
+      }
+
+      // v568: Sinkronkan tampilan layar percakapan utama secara otomatis saat tab riwayat dipindah
+      if (syncChatMode) {
+        const targetMode = isAi ? 'ai' : 'whatsapp';
+        if (STATE.chatMode !== targetMode) {
+          this.setChatMode(targetMode, true);
+        } else {
+          // Jika sudah dalam mode tersebut, pastikan percakapan aktif tampil di layar
+          if (isAi) {
+            if (typeof renderCurrentSession === 'function') renderCurrentSession();
+          } else {
+            if (this.activeContact) {
+              this.loadMessagesForContact(this.activeContact.id);
+            } else if (this.contacts.length > 0) {
+              const savedJid = localStorage.getItem('zoz_wa_active_jid');
+              const target = (savedJid && this.contacts.find(c => c.id === savedJid)) || this.contacts[0];
+              if (target) this.selectContact(target);
+            } else {
+              this.renderEmptyWaState();
+            }
+          }
+        }
       }
     },
 
