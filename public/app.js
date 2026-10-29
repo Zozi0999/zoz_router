@@ -10100,20 +10100,34 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
   // Mengeliminasi token parsial yang terputus di tengah kata/karakter secara matematis murni
   function sliceLastSafeTokenBoundary(text) {
     if (!text || typeof text !== 'string') return text || '';
-    if (text.length < 15) return text;
+    if (text.length < 5) return text;
 
+    // 1. Rollback jika terputus di tengah tag HTML pembuka/penutup yang belum selesai (mis. '<div cla' atau '</sp')
+    const lastLt = text.lastIndexOf('<');
+    const lastGt = text.lastIndexOf('>');
+    if (lastLt > lastGt && (text.length - lastLt) < 40) {
+      return text.slice(0, lastLt);
+    }
+
+    // 2. Rollback jika terputus di dalam string quote yang belum tertutup di ekor
+    const lastQuote = text.lastIndexOf('"');
+    if (lastQuote !== -1 && (text.length - lastQuote) < 25) {
+      const countQuotes = (text.match(/"/g) || []).length;
+      if (countQuotes % 2 !== 0) {
+        return text.slice(0, lastQuote);
+      }
+    }
+
+    // 3. Mathematical token rollback ke boundary atomik alfanumerik terakhir
+    // Memotong mundur token alfanumerik yang terpotong di tengah kata/variabel
     const trimmedEnd = text.trimEnd();
-    const tail = trimmedEnd.slice(-50);
-
-    // Jika ujung teks terputus di tengah token alfanumerik (mis. "functio", "calc", "dala", "mer")
-    // tanpa spasi atau tanda baca penutup terminal (. ! ? \n ; } > ] ) , " ' `)
-    const brokenWordMatch = /([a-zA-Z0-9_\$]{1,35})$/.exec(tail);
+    const brokenWordMatch = /([a-zA-Z0-9_\$]{1,35})$/.exec(trimmedEnd);
     if (brokenWordMatch && brokenWordMatch[1]) {
       const cutWord = brokenWordMatch[1];
       const cutIndex = trimmedEnd.length - cutWord.length;
       if (cutIndex > 0) {
         const prevChar = trimmedEnd[cutIndex - 1];
-        if (/\s|[\.\,\;\:\(\[\{\=\+\-\*\/\<\>\&\|\!\?]/.test(prevChar)) {
+        if (/[\s\n\r,;:()[\]{}=+\-*/<>&|!?.'"]/.test(prevChar)) {
           return trimmedEnd.slice(0, cutIndex);
         }
       }
@@ -10571,7 +10585,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     const contRunOptions = {
       websiteMode: session?.lastWebsiteMode || 'preview',
       isWebCreation: isWebContinue,
-      hideAllCodeBlocks: true
+      hideAllCodeBlocks: false
     };
 
     const updateAgentHud = (statusMsg) => {
@@ -10603,20 +10617,19 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           currentAccumulated = safeBase;
         }
 
-        // 2. Optimasi Tail-Context: Hanya ambil 40 baris terakhir dari safeBase
-        const lines = currentAccumulated.split('\n');
-        const totalLines = lines.length;
-        const tailLinesCount = Math.min(40, totalLines);
-        const tailLines = lines.slice(-tailLinesCount).join('\n');
+        // 2. Konteks Penuh Autoregresif: pertahankan seluruh token yang sudah dihasilkan agar model memiliki konteks sintaks & logika utuh
+        const fullContext = (currentAccumulated && currentAccumulated.length > 50000)
+          ? currentAccumulated.slice(-50000)
+          : currentAccumulated;
 
         // 3. Zero-Persona Mathematical Continuation Prompt: murni instruksi penyambungan langsung
         const continuePrompt = `Continue:`;
 
         let appended = '';
         if (engine === 'ollama') {
-          appended = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, tailLines, { ...contRunOptions, signal: STATE.abortController?.signal });
+          appended = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, fullContext, { ...contRunOptions, signal: STATE.abortController?.signal });
         } else {
-          appended = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, tailLines, { ...contRunOptions, signal: STATE.abortController?.signal });
+          appended = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, fullContext, { ...contRunOptions, signal: STATE.abortController?.signal });
         }
 
         if (!appended || !appended.trim()) {
@@ -10690,68 +10703,15 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         renderTaskTrackerUI();
       }
 
-      let finalDisplayContent = currentAccumulated;
-      if (finalExtracted.files.length > 0) {
-        finalDisplayContent = stripGeneratedFileBlocks(currentAccumulated, finalExtracted.rawBlocks, {
-          ...contRunOptions,
-          isIncomplete: isStillIncomplete
-        });
-
-        // Imunisasi Total: Bersihkan sisa kebocoran kode mentah JavaScript, HTML yatim, dan komentar
-        finalDisplayContent = finalDisplayContent
-          .replace(/<script\b[\s\S]*?<\/script>/gi, '')
-          .replace(/<\/script>/gi, '')
-          .replace(/<\/html>/gi, '')
-          .replace(/<\/body>/gi, '')
-          .replace(/<!DOCTYPE\s+html>/gi, '')
-          .replace(/<!--[\s\S]*?-->/g, '')
-          .replace(/(?:^|\n)\s*(?:window\.addEventListener|document\.(?:getElementById|querySelector|addEventListener)|setInterval|setTimeout|function\s+[a-zA-Z0-9_$]+|const\s+[a-zA-Z0-9_$]+\s*=|let\s+[a-zA-Z0-9_$]+\s*=|var\s+[a-zA-Z0-9_$]+\s*=)[\s\S]*?(?=\n\n|$)/gi, '')
-          .replace(/(?:^|\n)\s*\/\*[\s\S]*?\*\/\s*(?=\n|$)/g, '')
-          .replace(/(?:^|\n)\s*[a-zA-Z0-9_$]+\s*\([^)]*\);?\s*(?=\n|$)/g, '')
-          .replace(/<{2,5}>{1,5}|<{1,5}>{2,5}/g, '')
-          .replace(/<<>>|< < > >|<<<>>|<<>>>/g, '')
-          .trim();
-
-        if (!finalDisplayContent || finalDisplayContent.length < 25 || /^[\s\n\r]*[{}();,<>/]+[\s\n\r]*$/.test(finalDisplayContent)) {
-          finalDisplayContent = isStillIncomplete
-            ? `⚠️ **Generasi Terputus**\n\nSebagian kode telah diamankan di kartu di bawah. Klik tombol **Lanjutkan Sekarang** untuk menyelesaikan sisa kode.`
-            : `💻 **Generasi Selesai**\n\nKode telah berhasil dibuat dan diamankan di kartu di bawah. Klik tombol **Pratinjau** pada kartu untuk membukanya.`;
+      // Render dan persisten: Pertahankan teks hasil komputasi model AI secara utuh tanpa pemotongan destruktif
+      if (bubbleText) {
+        if (finalExtracted.files.length > 0) {
+          bubbleText.innerHTML = renderMarkdown(hideFileBlocksForDisplay(currentAccumulated, contRunOptions));
+          if (row) renderMessageFiles(row, finalExtracted.files);
+        } else {
+          bubbleText.innerHTML = renderMarkdown(currentAccumulated);
         }
-
-        if (bubbleText) {
-          bubbleText.innerHTML = renderMarkdown(finalDisplayContent);
-          enhanceCodeBlocks(bubbleText);
-        }
-        if (row) renderMessageFiles(row, finalExtracted.files);
-      } else {
-        finalDisplayContent = stripGeneratedFileBlocks(currentAccumulated, [], {
-          ...contRunOptions,
-          isIncomplete: isStillIncomplete
-        });
-        finalDisplayContent = finalDisplayContent
-          .replace(/<script\b[\s\S]*?<\/script>/gi, '')
-          .replace(/<\/script>/gi, '')
-          .replace(/<\/html>/gi, '')
-          .replace(/<\/body>/gi, '')
-          .replace(/<!DOCTYPE\s+html>/gi, '')
-          .replace(/<!--[\s\S]*?-->/g, '')
-          .replace(/(?:^|\n)\s*(?:window\.addEventListener|document\.(?:getElementById|querySelector|addEventListener)|setInterval|setTimeout|function\s+[a-zA-Z0-9_$]+|const\s+[a-zA-Z0-9_$]+\s*=|let\s+[a-zA-Z0-9_$]+\s*=|var\s+[a-zA-Z0-9_$]+\s*=)[\s\S]*?(?=\n\n|$)/gi, '')
-          .replace(/(?:^|\n)\s*\/\*[\s\S]*?\*\/\s*(?=\n|$)/g, '')
-          .replace(/(?:^|\n)\s*[a-zA-Z0-9_$]+\s*\([^)]*\);?\s*(?=\n|$)/g, '')
-          .replace(/<{2,5}>{1,5}|<{1,5}>{2,5}/g, '')
-          .replace(/<<>>|< < > >|<<<>>|<<>>>/g, '')
-          .trim();
-
-        if (!finalDisplayContent || finalDisplayContent.length < 25 || /^[\s\n\r]*[{}();,<>/]+[\s\n\r]*$/.test(finalDisplayContent)) {
-          finalDisplayContent = isStillIncomplete
-            ? `⚠️ **Generasi Terputus**\n\nSebagian kode telah diamankan di kartu di bawah. Klik tombol **Lanjutkan Sekarang** untuk menyelesaikan sisa kode.`
-            : `💻 **Generasi Selesai**\n\nKode telah berhasil dibuat dan diamankan di kartu di bawah. Klik tombol **Pratinjau** pada kartu untuk membukanya.`;
-        }
-
-        if (bubbleText) {
-          bubbleText.innerHTML = renderMarkdown(finalDisplayContent);
-          enhanceCodeBlocks(bubbleText);
-        }
+        enhanceCodeBlocks(bubbleText);
       }
 
       if (options.targetCard && finalExtracted.files.length > 0) {
@@ -10783,7 +10743,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         }
       }
 
-      // Persist hasil akhir ke sesi
+      // Persist hasil akhir ke sesi secara utuh tanpa penggantian placeholder
       let targetMsg = null;
       if (Array.isArray(session.messages)) {
         for (let i = session.messages.length - 1; i >= 0; i--) {
@@ -10796,16 +10756,16 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         }
       }
       if (targetMsg) {
-        targetMsg.content = safeAssistantText(finalDisplayContent);
+        targetMsg.content = safeAssistantText(currentAccumulated);
         if (finalExtracted.files.length > 0) targetMsg.files = finalExtracted.files;
       } else {
         const lastMsg = (session.messages && session.messages.length > 0) ? session.messages[session.messages.length - 1] : null;
         if (lastMsg && lastMsg.role === 'assistant') {
-          lastMsg.content = safeAssistantText(finalDisplayContent);
+          lastMsg.content = safeAssistantText(currentAccumulated);
           if (finalExtracted.files.length > 0) lastMsg.files = finalExtracted.files;
         }
       }
-      if (row) row.dataset.fullContent = safeAssistantText(finalDisplayContent);
+      if (row) row.dataset.fullContent = safeAssistantText(currentAccumulated);
       session.updatedAt = new Date().toISOString();
       savePersistedState();
       renderChatHistory(els.searchHistoryInput?.value || '');
@@ -10905,13 +10865,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         hasAssistantTail = true;
       }
 
-      // Optimasi Tail-Context: Kirim konteks ekor (maksimal 40 baris terakhir)
-      // agar model tidak menanggung beban prefill ribuan token yang membuat respons terasa macet
+      // Konteks Lengkap Autoregresif: pertahankan seluruh riwayat dan tail tanpa pemotongan kerdil 40 baris
       let effectiveTail = currentFullText || '';
-      if (typeof effectiveTail === 'string' && effectiveTail.length > 1500) {
-        const tailLines = effectiveTail.split('\n').slice(-40).join('\n');
-        effectiveTail = tailLines;
-      }
 
       historyMessages.forEach((m, idx) => {
         const isTail = (idx === historyMessages.length - 1);
@@ -10923,15 +10878,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       });
 
       if (!hasAssistantTail && effectiveTail) {
-        // Mandat API: Dilarang menyisipkan role 'assistant' jika belum ada pesan 'user' sebelumnya
-        // (Anthropic, OpenAI, dan OpenRouter melempar HTTP 400 jika percakapan diawali assistant).
         if (messagesPayload.some(m => m.role === 'user')) {
           messagesPayload.push({ role: 'assistant', content: effectiveTail });
         }
       }
-
-      const userInstruction = promptInstruction || 'Continue:';
-      messagesPayload.push({ role: 'user', content: userInstruction });
 
       const isLiquid = Boolean(curModel && (curModel.includes('liquid') || curModel.includes('lfm-')));
       const isReasoning = Boolean(curModel && (curModel.includes('/o1') || curModel.includes('/o3')));
@@ -10965,7 +10915,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           headers['X-Title'] = 'ZOZ Router Continuation';
         }
 
-        const body = {
+        let body = {
           ...basePayload,
           ...(isDirect ? {} : {
             sessionId: session?.id || null,
@@ -10975,7 +10925,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         };
 
         try {
-          const attemptRes = await fetch(endpoint, {
+          let attemptRes = await fetch(endpoint, {
             method: 'POST',
             headers,
             body: JSON.stringify(body),
@@ -10983,6 +10933,20 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           });
           if (routeType === 'proxy' && attemptRes.status === 404) {
             continue;
+          }
+          // Jika provider menolak payload berakhiran assistant (HTTP 400), tambahkan token user kelanjutan murni
+          if (attemptRes.status === 400 && body.messages.length > 0 && body.messages[body.messages.length - 1].role === 'assistant') {
+            const fallbackMessages = [...body.messages, { role: 'user', content: 'Continue' }];
+            const fallbackBody = { ...body, messages: fallbackMessages };
+            const retryRes = await fetch(endpoint, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(fallbackBody),
+              signal: options.signal || STATE.abortController?.signal
+            }).catch(() => null);
+            if (retryRes && retryRes.ok) {
+              attemptRes = retryRes;
+            }
           }
           if (attemptRes.ok) {
             res = attemptRes;
@@ -11022,18 +10986,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     let buf = '';
     let appended = '';
 
-    // Renderer coalesced: mengganti renderMarkdown sinkron per token (O(n²)) dengan
-    // StreamBufferRenderer. Jika kontinuitas website aktif, jangan menumpahkan tailLines mentah ke gelembung chat!
-    const isWebContinue = Boolean(options && (options.isWebCreation || options.isWebsite));
+    // Renderer coalesced: alirkan langsung ke gelembung pesan agar pengguna melihat kelanjutan teks secara mulus real-time
     const renderer = new StreamBufferRenderer(
-      isWebContinue ? null : bubbleText,
+      bubbleText,
       () => smartScrollChatToBottom(false),
       '',
       options
     );
-    if (!isWebContinue) {
-      renderer.text = currentFullText;
-    }
+    renderer.text = currentFullText;
     let seedSep = null;
     const appendContinuationChunk = (delta) => {
       if (seedSep === null) {
@@ -11151,13 +11111,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       hasAssistantTail = true;
     }
 
-    // Optimasi Tail-Context untuk Ollama: Kirim 40 baris terakhir agar model CPU/lokal
-    // tidak terjebak KV evaluation ribuan token selama bermenit-menit
+    // Konteks Lengkap Autoregresif untuk Ollama: pertahankan seluruh token konteks agar tidak merusak AST & logika
     let effectiveTail = currentFullText || '';
-    if (typeof effectiveTail === 'string' && effectiveTail.length > 1500) {
-      const tailLines = effectiveTail.split('\n').slice(-40).join('\n');
-      effectiveTail = tailLines;
-    }
 
     historyMessages.forEach((m, idx) => {
       const isTail = (idx === historyMessages.length - 1);
@@ -11174,8 +11129,6 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         messagesPayload.push({ role: 'assistant', content: effectiveTail });
       }
     }
-
-    messagesPayload.push({ role: 'user', content: promptInstruction });
 
     const effectiveModel = ep.includes('ollama.com') ? resolveOllamaCloudModel(modelName) : modelName;
     const chatUrl = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? resolveEndpointUrl(ep, 'api/chat') : getUniversalApiUrl('/api/ollama/chat');
@@ -11205,18 +11158,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     let buf = '';
     let appended = '';
 
-    // Renderer coalesced: mengganti renderMarkdown sinkron per token (O(n²)) dengan
-    // StreamBufferRenderer. Jika kontinuitas website aktif, jangan menumpahkan tailLines mentah ke gelembung chat!
-    const isWebContinue = Boolean(options && (options.isWebCreation || options.isWebsite));
+    // Renderer coalesced: alirkan langsung ke gelembung pesan agar pengguna melihat kelanjutan teks secara mulus real-time
     const renderer = new StreamBufferRenderer(
-      isWebContinue ? null : bubbleText,
+      bubbleText,
       () => smartScrollChatToBottom(false),
       '',
       options
     );
-    if (!isWebContinue) {
-      renderer.text = currentFullText;
-    }
+    renderer.text = currentFullText;
     let seedSep = null;
     const appendContinuationChunk = (delta) => {
       if (seedSep === null) {
