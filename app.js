@@ -976,7 +976,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     appContainer: $('.app-container'),
     sidebarTerminalBtn: $('#sidebarTerminalBtn'),
     sidebarWhatsAppBtn: $('#sidebarWhatsAppBtn'),
-    btnTermModalBottomSwitchWa: $('#btnTermModalBottomSwitchWa'),
     modalWaLocalhostOnly: $('#modalWaLocalhostOnly'),
     endocrineChatV2Card: $('#endocrineChatV2Card'),
     endocrineChatStatusText: $('#endocrineChatStatusText'),
@@ -42284,17 +42283,6 @@ Aturan:
         if (!this.isAllowedAccess()) {
           this.showLocalhostOnlyModal();
           return;
-        }
-        if (STATE.chatMode === 'whatsapp') {
-          this.setChatMode('ai');
-        } else {
-          this.setChatMode('whatsapp');
-        }
-      });
-      document.getElementById('btnTermModalBottomSwitchWa')?.addEventListener('click', () => {
-        AudioEngine.click();
-        if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.closeModal === 'function') {
-          TerminalManager.closeModal();
         }
         if (STATE.chatMode === 'whatsapp') {
           this.setChatMode('ai');
