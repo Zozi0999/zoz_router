@@ -474,23 +474,15 @@
           <svg class="lucide lucide-chevron-down w-3 h-3 text-emerald-400 chip-arrow" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="m6 9 6 6 6-6"></path></svg>
         </button>
 
-        <button class="flex items-center space-x-1.5 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/40 text-purple-200 px-2.5 py-1 rounded-lg transition-all duration-150 text-[11px] font-semibold cursor-pointer" id="btnTopBarWaAiSummary" title="Mode Rangkum Chat WhatsApp dengan AI (Persetujuan Nomor Spesifik)" type="button" style="white-space: nowrap;">
-          <i class="fa-solid fa-wand-magic-sparkles text-purple-400"></i>
-          <span>Rangkum AI</span>
-        </button>
-
         <div class="model-dropdown-menu wa-contact-dropdown-menu" id="waContactDropdownMenu" style="display: none;">
           <div class="dropdown-header" style="padding: 8px 10px;">
             <input type="text" id="waContactSearchInput" placeholder="Cari nama atau nomor kontak WA...">
           </div>
-          <div style="padding: 0 10px 6px 10px; display: flex; gap: 6px; flex-wrap: wrap;">
+          <div style="padding: 0 10px 6px 10px; display: flex; gap: 6px;">
             <button type="button" class="btn btn-xs btn-outline" id="btnOpenAddContactFromDropdown" style="flex: 1; border-color: rgba(16,185,129,0.4); color: #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: center; gap: 5px; font-weight: 600;">
-              <i class="fa-solid fa-user-plus"></i> + Kontak
+              <i class="fa-solid fa-user-plus"></i> + Kontak Baru
             </button>
-            <button type="button" class="btn btn-xs btn-outline" id="btnOpenWaSummarizeConsentFromDropdown" style="flex: 1; border-color: rgba(168,85,247,0.45); color: #d8b4fe; background: rgba(168,85,247,0.12); display: flex; align-items: center; justify-content: center; gap: 5px; font-weight: 600;" title="Pilih Nomor Spesifik untuk Dirangkum AI">
-              <i class="fa-solid fa-wand-magic-sparkles"></i> Rangkum AI
-            </button>
-            <button type="button" class="btn btn-xs btn-outline" id="btnSyncWaContacts" style="border-color: rgba(255,255,255,0.2); color: var(--text-dim);" title="Refresh Kontak">
+            <button type="button" class="btn btn-xs btn-outline" id="btnSyncWaContacts" style="border-color: rgba(255,255,255,0.2); color: var(--text-dim); padding: 0 10px;" title="Segarkan Kontak">
               <i class="fa-solid fa-rotate"></i>
             </button>
           </div>
@@ -3144,6 +3136,6 @@
   <!-- Reasoning suppression stream sanitizer (must load before app.js) -->
   <script src="text-safety.js?v=20261029_v561" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261029_v563" defer></script>
+  <script src="app.js?v=20261029_v564" defer></script>
 </body>
 </html>

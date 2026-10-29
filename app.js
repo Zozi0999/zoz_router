@@ -32,15 +32,31 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://roommate-flashers-flags-briefly.trycloudflare.com';
+
+  function isValidTunnelUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    const s = url.toLowerCase().trim();
+    if (!s.includes('.trycloudflare.com')) return false;
+    return s.includes('roommate-flashers-flags-briefly');
+  }
+
+  function getActiveTunnelUrl() {
+    try {
+      const saved = localStorage.getItem('zoz_last_tunnel_url') || localStorage.getItem('zoz_wa_api_url') || '';
+      if (isValidTunnelUrl(saved)) {
+        return saved.replace(/\/+$/, '');
+      }
+    } catch (_) {}
+    return ACTIVE_CLOUDFLARE_TUNNEL;
+  }
 
   function getUniversalApiUrl(path) {
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
     const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
     const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
     if (isLocal) return cleanPath;
-    const tunnelBase = (typeof WhatsAppController !== 'undefined' && WhatsAppController.activeTunnelUrl && WhatsAppController.activeTunnelUrl.includes('.trycloudflare.com'))
-      ? WhatsAppController.activeTunnelUrl.replace(/\/+$/, '')
-      : (localStorage.getItem('zoz_last_tunnel_url') || 'https://roommate-flashers-flags-briefly.trycloudflare.com');
+    const tunnelBase = getActiveTunnelUrl();
     return (tunnelBase || VERCEL_BACKEND_GATEWAY) + cleanPath;
   }
 
@@ -848,10 +864,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           // Pada domain publik/statis (z21.zozdocs.com, github.io, pages.dev, dll), arahkan ke Active Cloudflare Tunnel Gateway jika tersedia
           if (!isLocal && !isVercel && typeof url === 'string') {
             if (url.startsWith('/api/')) {
-              const tunnelBase = (typeof WhatsAppController !== 'undefined' && WhatsAppController.activeTunnelUrl && WhatsAppController.activeTunnelUrl.includes('.trycloudflare.com'))
-                ? WhatsAppController.activeTunnelUrl.replace(/\/+$/, '')
-                : (localStorage.getItem('zoz_last_tunnel_url') || 'https://roommate-flashers-flags-briefly.trycloudflare.com');
-              const targetBase = tunnelBase || 'https://zoz-router.vercel.app';
+              const targetBase = getActiveTunnelUrl();
               if (targetBase) {
                 url = targetBase + url;
                 if (typeof input === 'string') {
@@ -41930,25 +41943,28 @@ Aturan:
       }
     },
 
+    isLocalHostOrTunnelOrigin() {
+      if (typeof window === 'undefined' || !window.location) return false;
+      const h = (window.location.hostname || '').toLowerCase();
+      return h === 'localhost' || h === '127.0.0.1' || h.endsWith('.trycloudflare.com');
+    },
+
     isDeadTunnelUrl(u) {
-      if (!u) return true;
-      const s = String(u).toLowerCase();
-      const activeSub = (this.activeTunnelUrl || '').toLowerCase().replace(/^https?:\/\//, '').split('.')[0];
-      if (s.includes('.trycloudflare.com') && !s.includes('roommate-flashers-flags-briefly') && (!activeSub || !s.includes(activeSub))) {
-        return true;
-      }
-      return false;
+      return !isValidTunnelUrl(u);
     },
 
     async resolveApiBase() {
-      // Selalu gunakan path relatif (same-origin) jika dibuka dari browser web
-      if (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:')) {
+      if (this.isLocalHostOrTunnelOrigin()) {
         this.apiBaseUrl = '';
-        localStorage.setItem('zoz_wa_api_url', '');
+        try { localStorage.setItem('zoz_wa_api_url', ''); } catch (_) {}
         return '';
       }
 
-      this.apiBaseUrl = this.activeTunnelUrl;
+      this.apiBaseUrl = getActiveTunnelUrl();
+      try {
+        localStorage.setItem('zoz_wa_api_url', this.apiBaseUrl);
+        localStorage.setItem('zoz_last_tunnel_url', this.apiBaseUrl);
+      } catch (_) {}
       return this.apiBaseUrl;
     },
 
@@ -41960,15 +41976,13 @@ Aturan:
       if (els.waQrPlaceholderText && !this.lastValidQr) {
         els.waQrPlaceholderText.textContent = 'Memuat kode QR WhatsApp...';
       }
-      const tunnelBases = [
-        '',
-        (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.startsWith('file:')) ? window.location.origin : '',
-        this.activeTunnelUrl,
-        'http://localhost:4040',
-        'http://127.0.0.1:4040'
-      ].filter(b => b !== null && b !== undefined);
+      const tunnel = this.activeTunnelUrl || getActiveTunnelUrl();
+      const isLocalOrTunnel = this.isLocalHostOrTunnelOrigin();
+      const tunnelBases = isLocalOrTunnel
+        ? ['', 'http://localhost:4040', 'http://127.0.0.1:4040', tunnel]
+        : [tunnel, ''];
 
-      const unique = [...new Set(tunnelBases)];
+      const unique = [...new Set(tunnelBases.filter(b => b !== null && b !== undefined))];
       for (const base of unique) {
         try {
           const clean = base ? base.replace(/\/+$/, '') : '';
@@ -42015,34 +42029,30 @@ Aturan:
     },
 
     getApiUrl(endpoint) {
-      if (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:')) {
+      if (this.isLocalHostOrTunnelOrigin()) {
         return endpoint;
       }
-      if (this.apiBaseUrl && !this.isDeadTunnelUrl(this.apiBaseUrl)) {
-        return `${this.apiBaseUrl}${endpoint}`;
-      }
-      return endpoint;
+      const base = this.apiBaseUrl || this.activeTunnelUrl || getActiveTunnelUrl();
+      const cleanBase = String(base).replace(/\/+$/, '');
+      const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+      return `${cleanBase}${cleanEndpoint}`;
     },
 
     async waFetch(endpoint, options = {}, retries = 2) {
-      const currentOrigin = (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:'))
-        ? window.location.origin.replace(/\/+$/, '')
-        : '';
-      const bases = [
-        '',
-        currentOrigin,
-        'http://localhost:4040',
-        'http://127.0.0.1:4040',
-        this.activeTunnelUrl
-      ].filter(b => b !== null && b !== undefined);
-      const uniqueBases = [...new Set(bases)];
+      const isLocalOrTunnel = this.isLocalHostOrTunnelOrigin();
+      const tunnel = this.activeTunnelUrl || getActiveTunnelUrl();
+      const bases = isLocalOrTunnel
+        ? ['', 'http://localhost:4040', 'http://127.0.0.1:4040', tunnel]
+        : [tunnel, ''];
+      const uniqueBases = [...new Set(bases.filter(b => b !== null && b !== undefined))];
       let lastErr = null;
 
       for (let attempt = 0; attempt <= retries; attempt++) {
         for (const base of uniqueBases) {
           try {
             const cleanBase = base ? String(base).replace(/\/+$/, '') : '';
-            const url = `${cleanBase}${endpoint}`;
+            const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+            const url = `${cleanBase}${cleanEndpoint}`;
             const fetchOpts = { ...options };
             if (!fetchOpts.signal) {
               const defaultTimeout = endpoint.includes('/summarize') ? 35000 : 12000;
@@ -42057,7 +42067,7 @@ Aturan:
           }
         }
         if (attempt < retries) {
-          await new Promise(r => setTimeout(r, 350 * (attempt + 1)));
+          await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
         }
       }
       if (lastErr) throw lastErr;
@@ -42147,13 +42157,17 @@ Aturan:
       const savedMode = localStorage.getItem('zoz_chat_mode') || 'ai';
       this.setChatMode(savedMode, false);
 
-      // 4. Konfigurasi instan URL API (Same-Origin priority)
-      if (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:')) {
+      // 4. Konfigurasi instan URL API (Host-Aware)
+      if (this.isLocalHostOrTunnelOrigin()) {
         this.apiBaseUrl = '';
-        localStorage.setItem('zoz_wa_api_url', '');
+        try { localStorage.setItem('zoz_wa_api_url', ''); } catch (_) {}
       } else {
-        this.apiBaseUrl = this.activeTunnelUrl;
-        localStorage.setItem('zoz_wa_api_url', this.activeTunnelUrl);
+        this.apiBaseUrl = getActiveTunnelUrl();
+        this.activeTunnelUrl = this.apiBaseUrl;
+        try {
+          localStorage.setItem('zoz_wa_api_url', this.apiBaseUrl);
+          localStorage.setItem('zoz_last_tunnel_url', this.apiBaseUrl);
+        } catch (_) {}
       }
 
       // 5. Segera sinkronkan status & kontak WhatsApp (0ms lag)
@@ -42287,25 +42301,7 @@ Aturan:
         setTimeout(() => els.inputWaNewContactName?.focus(), 250);
       });
 
-      // Mode Rangkum AI Buttons (Topbar & Dropdown)
-      document.getElementById('btnTopBarWaAiSummary')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        AudioEngine.click();
-        this.openSummaryModal({
-          preselectedJid: this.activeContact?.id || '',
-          fromAiTool: false
-        });
-      });
 
-      document.getElementById('btnOpenWaSummarizeConsentFromDropdown')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        AudioEngine.click();
-        this.closeContactDropdown();
-        this.openSummaryModal({
-          preselectedJid: this.activeContact?.id || '',
-          fromAiTool: false
-        });
-      });
 
       // Global click to close 3-dots menu
       document.addEventListener('click', (e) => {
@@ -42724,6 +42720,15 @@ Aturan:
             emptySelectBtn.innerHTML = `<i class="fa-solid fa-address-book"></i> Pilih Kontak (${this.contacts.length})`;
           }
 
+          // Auto-select contact jika belum ada yang aktif dan sedang dalam mode WhatsApp
+          if (!this.activeContact && this.contacts.length > 0 && STATE.chatMode === 'whatsapp') {
+            const savedJid = localStorage.getItem('zoz_wa_active_jid');
+            const target = (savedJid && this.contacts.find(c => c.id === savedJid)) || this.contacts[0];
+            if (target) {
+              this.selectContact(target);
+            }
+          }
+
           // Render sidebar jika Mode WhatsApp aktif atau tab sidebar WA terbuka
           if (STATE.chatMode === 'whatsapp' || (els.waChatHistoryList && els.waChatHistoryList.style.display !== 'none')) {
             this.renderSidebarWaChats();
@@ -43103,11 +43108,28 @@ Aturan:
         this.updateContactChipUI();
 
         if (render) {
+          if (!this.activeContact && this.contacts.length > 0) {
+            const savedJid = localStorage.getItem('zoz_wa_active_jid');
+            const target = (savedJid && this.contacts.find(c => c.id === savedJid)) || this.contacts[0];
+            if (target) {
+              this.selectContact(target);
+              return;
+            }
+          }
           if (this.activeContact) {
             this.loadMessagesForContact(this.activeContact.id);
           } else {
             this.renderEmptyWaState();
           }
+        }
+        if (this.contacts.length === 0) {
+          this.fetchContacts().then(() => {
+            if (this.contacts.length > 0 && !this.activeContact && STATE.chatMode === 'whatsapp') {
+              const savedJid = localStorage.getItem('zoz_wa_active_jid');
+              const target = (savedJid && this.contacts.find(c => c.id === savedJid)) || this.contacts[0];
+              if (target) this.selectContact(target);
+            }
+          }).catch(() => {});
         }
         this.renderSidebarWaChats();
       }
@@ -43192,6 +43214,9 @@ Aturan:
 
     selectContact(contact) {
       this.activeContact = contact;
+      try {
+        if (contact && contact.id) localStorage.setItem('zoz_wa_active_jid', contact.id);
+      } catch (_) {}
       contact.unreadCount = 0;
       this.updateContactChipUI();
       this.closeContactDropdown();
@@ -43417,19 +43442,11 @@ Aturan:
           ${this.activeContact?.hasFile ? '<span class="wa-active-contact-file-tag">🔴 Ada Berkas</span>' : ''}
         </div>
         <div class="wa-chat-header-actions" style="display: flex; align-items: center; gap: 6px;">
-          <button type="button" id="btnActionSummarizeWaHeader" title="Rangkum chat nomor ini dengan AI" style="display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 8px; background: rgba(16, 185, 129, 0.14); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; font-size: 0.73rem; font-weight: 700; cursor: pointer;">
-            <i class="fa-solid fa-wand-magic-sparkles"></i> Rangkum Chat
-          </button>
           <button type="button" id="btnActionHeaderDotsMenu" class="wa-contact-dots-btn" title="Opsi Nomor (Rangkum / Bersihkan Chat)">
             <i class="fa-solid fa-ellipsis-vertical"></i>
           </button>
         </div>
       `;
-      headerBar.querySelector('#btnActionSummarizeWaHeader')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        AudioEngine.click();
-        this.openSummaryModal({ preselectedJid: jid, fromAiTool: false });
-      });
       const headerDotsBtn = headerBar.querySelector('#btnActionHeaderDotsMenu');
       if (headerDotsBtn) {
         headerDotsBtn.addEventListener('click', (e) => {
