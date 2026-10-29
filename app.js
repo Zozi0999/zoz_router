@@ -1408,22 +1408,9 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     inputWaSecurityPin: $('#inputWaSecurityPin'),
     btnSaveWaSecurityPin: $('#btnSaveWaSecurityPin'),
     btnDirectUnlockMaster: $('#btnDirectUnlockMaster'),
-    waMobileLinkCard: $('#waMobileLinkCard'),
-    waMobilePinSetupPane: $('#waMobilePinSetupPane'),
-    inputWaCreateMobilePin: $('#inputWaCreateMobilePin'),
-    btnCreatePinAndGetQr: $('#btnCreatePinAndGetQr'),
-    waMobileQrActivePane: $('#waMobileQrActivePane'),
-    waMobileActivePinDisplay: $('#waMobileActivePinDisplay'),
-    btnChangeMobilePin: $('#btnChangeMobilePin'),
-    waMobileQrContainer: $('#waMobileQrContainer'),
-    waMobileLinkQrImg: $('#waMobileLinkQrImg'),
-    waMobileQrPlaceholder: $('#waMobileQrPlaceholder'),
-    btnCopyWaMobileLink: $('#btnCopyWaMobileLink'),
-    btnRefreshWaMobileQr: $('#btnRefreshWaMobileQr'),
     waConnectedDevicesCard: $('#waConnectedDevicesCard'),
     btnRefreshConnectedDevices: $('#btnRefreshConnectedDevices'),
     waDevicesList: $('#waDevicesList'),
-    btnWaModalCameraScan: $('#btnWaModalCameraScan'),
     modalWaDocPreview: $('#modalWaDocPreview'),
     btnCloseWaDocPreview: $('#btnCloseWaDocPreview'),
     waDocPreviewIconBox: $('#waDocPreviewIconBox'),
@@ -41805,100 +41792,8 @@ Aturan:
 
     mobileLinkUrl: '',
 
-    async fetchMobileLinkQr(force = false, customPin = '') {
-      if (!this.status.connected) return;
-      if (els.waMobileLinkCard) els.waMobileLinkCard.style.display = 'block';
-
-      const effectivePin = customPin || localStorage.getItem('zoz_wa_mobile_pin') || '';
-
-      // MANDAT KAISAR: Pengguna disuruh membuat PIN terlebih dahulu sebelum bisa mendapatkan QR!
-      if (!effectivePin) {
-        if (els.waMobilePinSetupPane) els.waMobilePinSetupPane.style.display = 'block';
-        if (els.waMobileQrActivePane) els.waMobileQrActivePane.style.display = 'none';
-        return;
-      }
-
-      // Jika PIN sudah ada atau baru saja dibuat
-      if (els.waMobilePinSetupPane) els.waMobilePinSetupPane.style.display = 'none';
-      if (els.waMobileQrActivePane) els.waMobileQrActivePane.style.display = 'block';
-      if (els.waMobileActivePinDisplay) {
-        els.waMobileActivePinDisplay.textContent = '•'.repeat(Math.max(4, effectivePin.length));
-      }
-      if (els.waMobileQrPlaceholder) els.waMobileQrPlaceholder.style.display = 'flex';
-      if (els.waMobileLinkQrImg) els.waMobileLinkQrImg.style.display = 'none';
-
-      // 1. Konstruksi URL kanonikal Tautan Handphone (selalu gunakan domain publik z21.zozdocs.com agar HP bisa membuka)
-      const currentHost = (typeof window !== 'undefined' && window.location && window.location.host) || 'z21.zozdocs.com';
-      let cleanHost = currentHost.replace(/^https?:\/\//, '').replace(/\/+$/, '');
-      if (cleanHost.includes('localhost') || cleanHost.includes('127.0.0.1') || cleanHost.includes('.trycloudflare.com')) {
-        cleanHost = 'z21.zozdocs.com';
-      }
-      const effectiveUid = (this.isMaster || this.getPin() === '210560' || localStorage.getItem('zoz_wa_user_id') === 'usr_kaisar_master')
-        ? 'usr_kaisar_master'
-        : this.getUserId();
-      const tunnelParam = this.activeTunnelUrl ? `&tunnel=${encodeURIComponent(this.activeTunnelUrl)}` : '';
-      const mobileUrl = `https://${cleanHost}/?userId=${encodeURIComponent(effectiveUid)}&pin=${encodeURIComponent(effectivePin)}${tunnelParam}&mode=whatsapp`;
-      this.mobileLinkUrl = mobileUrl;
-
-      // 2. Render instan gambar QR via client loader (0 delay, anti-stuck)
-      if (els.waMobileLinkQrImg) {
-        const instantQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=${encodeURIComponent(mobileUrl)}`;
-        els.waMobileLinkQrImg.src = instantQrUrl;
-        els.waMobileLinkQrImg.onload = () => {
-          if (els.waMobileLinkQrImg) els.waMobileLinkQrImg.style.display = 'block';
-          if (els.waMobileQrPlaceholder) els.waMobileQrPlaceholder.style.display = 'none';
-        };
-        els.waMobileLinkQrImg.onerror = () => {
-          console.warn('[WA-Client] Gagal memuat image QR instan, mencoba backend...');
-        };
-      }
-
-      // 3. Permintaan ke backend untuk mengambil QR Data URL resmi & mencatat status
-      const candidates = [
-        this.apiBaseUrl,
-        this.activeTunnelUrl,
-        localStorage.getItem('zoz_wa_api_url'),
-        localStorage.getItem('zoz_last_tunnel_url'),
-        ''
-      ].filter(v => v !== null && v !== undefined);
-      const unique = [...new Set(candidates)];
-
-      for (const base of unique) {
-        try {
-          const cleanBase = base ? base.replace(/\/+$/, '') : '';
-          const q = `?userId=${encodeURIComponent(effectiveUid)}&pin=${encodeURIComponent(effectivePin)}${force ? '&f=1' : ''}`;
-          const res = await fetch(`${cleanBase}/api/wa/mobile-link${q}`, {
-            headers: this.getAuthHeaders({ 'X-WA-PIN': effectivePin }),
-            signal: AbortSignal.timeout(3000)
-          });
-          if (res.ok) {
-            const data = await res.json().catch(() => null);
-            if (data && data.success) {
-              if (data.url) this.mobileLinkUrl = data.url;
-              if (data.qr && els.waMobileLinkQrImg) {
-                els.waMobileLinkQrImg.src = data.qr;
-                els.waMobileLinkQrImg.style.display = 'block';
-                if (els.waMobileQrPlaceholder) els.waMobileQrPlaceholder.style.display = 'none';
-              }
-              if (cleanBase) {
-                this.apiBaseUrl = cleanBase;
-                localStorage.setItem('zoz_wa_api_url', cleanBase);
-              }
-              break;
-            } else if (data && data.requiresPinCreation) {
-              if (els.waMobilePinSetupPane) els.waMobilePinSetupPane.style.display = 'block';
-              if (els.waMobileQrActivePane) els.waMobileQrActivePane.style.display = 'none';
-              return;
-            }
-          }
-        } catch (_) {}
-      }
-
-      // Pastikan placeholder spinner disembunyikan jika gambar sudah termuat
-      if (els.waMobileLinkQrImg && els.waMobileLinkQrImg.src) {
-        els.waMobileLinkQrImg.style.display = 'block';
-        if (els.waMobileQrPlaceholder) els.waMobileQrPlaceholder.style.display = 'none';
-      }
+    async fetchMobileLinkQr() {
+      return;
     },
 
     async fetchConnectedDevices() {
@@ -41968,20 +41863,8 @@ Aturan:
       return h === 'localhost' || h === '127.0.0.1' || h === '[::1]';
     },
 
-    isPairedViaHostQr() {
-      try {
-        const paired = localStorage.getItem('zoz_wa_paired_via_qr') === 'true';
-        const pin = localStorage.getItem('zoz_wa_pin') || localStorage.getItem('zoz_wa_mobile_pin') || this.pin;
-        const uid = localStorage.getItem('zoz_wa_user_id') || this.userId;
-        const tun = localStorage.getItem('zoz_last_tunnel_url') || this.activeTunnelUrl;
-        return (paired || Boolean(uid && pin)) && Boolean(tun);
-      } catch (_) {
-        return false;
-      }
-    },
-
     isAllowedAccess() {
-      return this.isLocalHost() || this.isPairedViaHostQr();
+      return this.isLocalHost();
     },
 
     showLocalhostOnlyModal() {
@@ -42007,20 +41890,20 @@ Aturan:
       const sideWaIconWrap = document.getElementById('sidebarWaIconWrap');
 
       if (!isAllowed) {
-        // Tombol Peringatan Khusus untuk Akses di Luar Localhost (Perlu Scan QR)
+        // Tombol Peringatan Khusus untuk Akses di Luar Localhost
         if (sideWaText) {
-          sideWaText.innerHTML = 'LOCALHOST ONLY <span style="font-size: 8.5px; opacity: 0.85; display: block; font-weight: 600;">(SCAN QR)</span>';
+          sideWaText.innerHTML = 'LOCALHOST ONLY <span style="font-size: 8.5px; opacity: 0.85; display: block; font-weight: 600;">(LOCKED)</span>';
           sideWaText.className = 'text-[10px] font-mono tracking-wider font-bold text-amber-400 group-hover:text-amber-300 transition-colors leading-tight';
         }
         if (sideWaIcon) {
-          sideWaIcon.className = 'fa-solid fa-triangle-exclamation text-[11px] text-amber-400';
+          sideWaIcon.className = 'fa-solid fa-lock text-[11px] text-amber-400';
         }
         if (sideWaIconWrap) {
           sideWaIconWrap.className = 'w-4 h-4 rounded-full bg-amber-500/20 border border-amber-400 flex items-center justify-center text-amber-400 group-hover:text-white group-hover:bg-amber-400/30 transition-colors shrink-0';
         }
         if (sideWaBtn) {
           sideWaBtn.className = 'group w-full mt-2 py-2 px-3 rounded-xl bg-[#080a11] hover:bg-[#130f08] border border-amber-500/60 hover:border-amber-400 shadow-glow-amber/20 hover:shadow-glow-amber text-white font-semibold text-xs tracking-wide flex items-center justify-center space-x-2 transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0 wa-top-btn';
-          sideWaBtn.title = 'Localhost Only: Pindai QR dari Laptop untuk Menggunakan WhatsApp';
+          sideWaBtn.title = 'Restricted: WhatsApp Gateway is Localhost Only (http://localhost:4040)';
         }
         return;
       }
@@ -42415,13 +42298,6 @@ Aturan:
           this.closeLocalhostOnlyModal();
         }
       });
-      document.getElementById('btnWaLocalhostScanQr')?.addEventListener('click', () => {
-        AudioEngine.click();
-        this.closeLocalhostOnlyModal();
-        if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.openQrScannerModal === 'function') {
-          TerminalManager.openQrScannerModal({ title: 'Pindai QR Host Laptop (Sinkron WhatsApp)' });
-        }
-      });
 
       // Chat mode switcher pills
       els.btnChatModeAi?.addEventListener('click', () => {
@@ -42575,139 +42451,6 @@ Aturan:
           e.preventDefault();
           this.saveSecurityPin();
         }
-      });
-
-      // Buat PIN & Terbitkan QR Handphone
-      els.btnCreatePinAndGetQr?.addEventListener('click', async () => {
-        AudioEngine.click();
-        const pinInput = els.inputWaCreateMobilePin?.value?.trim();
-        if (!pinInput || pinInput.length < 4) {
-          showToast('PIN minimal 4 karakter (angka/huruf).', 'warning');
-          els.inputWaCreateMobilePin?.focus();
-          return;
-        }
-
-        const isMasterDevice = Boolean(
-          this.isMaster ||
-          this.getUserId() === 'usr_kaisar_master' ||
-          (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
-        );
-
-        // Setel lokal seketika & render QR seketika tanpa menunggu jaringan
-        this.pin = pinInput;
-        localStorage.setItem('zoz_wa_mobile_pin', pinInput);
-        localStorage.setItem('zoz_wa_pin', pinInput);
-        if (isMasterDevice) {
-          localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
-          this.userId = 'usr_kaisar_master';
-          this.isMaster = true;
-        }
-        this.updateSecurityUI({ isMaster: isMasterDevice, hasPin: true });
-        showToast('🔒 PIN Berhasil Disimpan! QR Code Tautan Ponsel Diterbitkan.', 'success');
-        this.fetchMobileLinkQr(true, pinInput);
-
-        try {
-          if (els.btnCreatePinAndGetQr) {
-            els.btnCreatePinAndGetQr.disabled = true;
-            els.btnCreatePinAndGetQr.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menyimpan...';
-          }
-
-          const candidates = [
-            this.apiBaseUrl,
-            this.activeTunnelUrl,
-            localStorage.getItem('zoz_wa_api_url'),
-            localStorage.getItem('zoz_last_tunnel_url'),
-            ''
-          ].filter(v => v !== null && v !== undefined);
-          const unique = [...new Set(candidates)];
-
-          for (const base of unique) {
-            try {
-              const cleanBase = base ? base.replace(/\/+$/, '') : '';
-              const res = await fetch(`${cleanBase}/api/wa/pin`, {
-                method: 'POST',
-                headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
-                body: JSON.stringify({
-                  userId: isMasterDevice ? 'usr_kaisar_master' : this.getUserId(),
-                  pin: pinInput,
-                  newPin: pinInput,
-                  currentPin: this.getPin(),
-                  masterPin: isMasterDevice ? '210560' : ''
-                }),
-                signal: AbortSignal.timeout(3500)
-              });
-              if (res.ok) {
-                const data = await res.json().catch(() => null);
-                if (data && data.success) {
-                  if (data.isMaster || data.userId === 'usr_kaisar_master') {
-                    localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
-                    this.userId = 'usr_kaisar_master';
-                    this.isMaster = true;
-                  }
-                  if (cleanBase) {
-                    this.apiBaseUrl = cleanBase;
-                    localStorage.setItem('zoz_wa_api_url', cleanBase);
-                  }
-                  await this.fetchMobileLinkQr(true, pinInput);
-                  await this.fetchContacts(true);
-                  break;
-                }
-              }
-            } catch (_) {}
-          }
-        } catch (err) {
-          console.warn('[WA-Client] Warning simpan PIN server:', err.message);
-        } finally {
-          if (els.btnCreatePinAndGetQr) {
-            els.btnCreatePinAndGetQr.disabled = false;
-            els.btnCreatePinAndGetQr.innerHTML = '<i class="fa-solid fa-shield-halved"></i> Simpan PIN & Terbitkan QR';
-          }
-        }
-      });
-      els.inputWaCreateMobilePin?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          els.btnCreatePinAndGetQr?.click();
-        }
-      });
-
-      // Tombol Ganti PIN di Kartu QR Handphone
-      els.btnChangeMobilePin?.addEventListener('click', () => {
-        AudioEngine.click();
-        if (els.waMobilePinSetupPane) els.waMobilePinSetupPane.style.display = 'block';
-        if (els.waMobileQrActivePane) els.waMobileQrActivePane.style.display = 'none';
-        if (els.inputWaCreateMobilePin) {
-          els.inputWaCreateMobilePin.value = '';
-          els.inputWaCreateMobilePin.focus();
-        }
-      });
-
-      // Tombol Kamera di Modal Tab WhatsApp
-      els.btnWaModalCameraScan?.addEventListener('click', () => {
-        AudioEngine.click();
-        if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.openQrScannerModal === 'function') {
-          TerminalManager.openQrScannerModal({ title: 'Pindai QR Sesi Desktop dari Kamera HP' });
-        }
-      });
-
-      // Salin Tautan Handphone
-      els.btnCopyWaMobileLink?.addEventListener('click', () => {
-        AudioEngine.click();
-        if (this.mobileLinkUrl) {
-          navigator.clipboard?.writeText(this.mobileLinkUrl).then(() => {
-            showToast('🔗 Tautan HP berhasil disalin ke clipboard!', 'success');
-          }).catch(() => {
-            prompt('Salin tautan ini di browser HP Anda:', this.mobileLinkUrl);
-          });
-        } else {
-          this.fetchMobileLinkQr(true);
-        }
-      });
-
-      // Refresh QR Handphone
-      els.btnRefreshWaMobileQr?.addEventListener('click', () => {
-        AudioEngine.click();
-        this.fetchMobileLinkQr(true);
       });
 
       // Segarkan Daftar Perangkat Terhubung
@@ -43003,12 +42746,10 @@ Aturan:
         if (els.waConnectedCard) els.waConnectedCard.style.display = 'flex';
         if (els.waConnectedPhoneDisplay) els.waConnectedPhoneDisplay.textContent = status.phone || '-';
         if (els.waContactCountDisplay) els.waContactCountDisplay.textContent = `${this.contacts.length || status.contactCount || 0} Kontak`;
-        if (els.waMobileLinkCard) els.waMobileLinkCard.style.display = 'block';
         if (els.waConnectedDevicesCard) els.waConnectedDevicesCard.style.display = 'block';
         if (this.contacts.length === 0 && (status.contactCount || 0) > 0) {
           this.fetchContacts();
         }
-        this.fetchMobileLinkQr();
         this.fetchConnectedDevices();
       } else {
         const isReconnectingOrHasSession = Boolean(status.connecting || status.hasStoredSession || this.status?.hasStoredSession);
@@ -43022,7 +42763,6 @@ Aturan:
           }
           if (els.waContactCountDisplay) els.waContactCountDisplay.textContent = '0 Kontak';
           if (els.waConnectedCard) els.waConnectedCard.style.display = 'none';
-          if (els.waMobileLinkCard) els.waMobileLinkCard.style.display = 'none';
           if (els.waConnectedDevicesCard) els.waConnectedDevicesCard.style.display = 'none';
           if (els.waPairMethodNav) els.waPairMethodNav.style.display = 'flex';
           if (els.waQrSection) els.waQrSection.style.display = 'block';
@@ -43803,11 +43543,8 @@ Aturan:
             <button type="button" class="btn btn-sm btn-primary" id="btnEmptyStateSelectContact" style="background: #25D366; border-color: #25D366; color: #052e16; font-weight: 600; padding: 7px 16px;">
               <i class="fa-solid fa-address-book"></i> Pilih Kontak (${this.contacts.length})
             </button>
-            <button type="button" class="btn btn-sm btn-outline" id="btnEmptyStateCameraScan" style="border-color: rgba(56,189,248,0.5); color: #38bdf8; padding: 7px 16px;">
-              <i class="fa-solid fa-camera"></i> Scan QR dari Desktop
-            </button>
             <button type="button" class="btn btn-sm btn-outline" id="btnEmptyStateOpenQr" style="border-color: rgba(37,211,102,0.5); color: #25D366; padding: 7px 16px;">
-              <i class="fa-solid fa-qrcode"></i> Pairing / QR Sesi
+              <i class="fa-solid fa-qrcode"></i> Pindai QR WhatsApp Web
             </button>
           </div>
         </div>
@@ -43815,12 +43552,6 @@ Aturan:
       document.getElementById('btnEmptyStateSelectContact')?.addEventListener('click', () => {
         AudioEngine.click();
         this.openContactDropdown();
-      });
-      document.getElementById('btnEmptyStateCameraScan')?.addEventListener('click', () => {
-        AudioEngine.click();
-        if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.openQrScannerModal === 'function') {
-          TerminalManager.openQrScannerModal({ title: 'Pindai QR Sesi Desktop dari Kamera HP' });
-        }
       });
       document.getElementById('btnEmptyStateOpenQr')?.addEventListener('click', () => {
         AudioEngine.click();
