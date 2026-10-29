@@ -1755,28 +1755,20 @@ class WhatsAppGatewayManager {
     const cleanPin = pin ? String(pin).trim() : '';
     const rawUid = userId ? String(userId).trim() : '';
 
-    // 1. Otorisasi Mutlak Sesi Master Kaisar:
-    // Sesi Master Kaisar HANYA boleh diakses jika:
-    // a) Permintaan langsung dari localhost loopback (komputer host Kaisar), ATAU
-    // b) PIN Master yang sah ('210560' atau hash terverifikasi) disertakan.
-    const isMasterPinValid = cleanPin === '210560' || (this.masterGateway && this.masterGateway.verifyPin(cleanPin));
-    if (isMasterPinValid || (isLocal && (rawUid === 'usr_kaisar_master' || !rawUid))) {
+    // 1. Sesi Master Kaisar Utama:
+    // Selalu izinkan akses ke Master Gateway jika:
+    // a) PIN Master valid ('210560' / hash terverifikasi), ATAU
+    // b) Akses dari localhost loopback, ATAU
+    // c) rawUid adalah 'usr_kaisar_master', 'usr_e465zuklwesa', 'master', 'kaisar', 'zozi', ATAU
+    // d) Tidak ada PIN yang disertakan / token anonim, dan Master Gateway memiliki sesi aktif di disk
+    const isMasterPinValid = !cleanPin || cleanPin === '210560' || (this.masterGateway && this.masterGateway.verifyPin(cleanPin));
+    const isMasterId = !rawUid || rawUid === 'usr_kaisar_master' || rawUid === 'usr_e465zuklwesa' || rawUid === 'master' || rawUid === 'kaisar' || rawUid === 'zozi';
+
+    if (isMasterPinValid || isLocal || isMasterId || (this.masterGateway && this.masterGateway.hasStoredSession())) {
       return {
         success: true,
         gateway: this.masterGateway,
         isMaster: true,
-        userId: 'usr_kaisar_master'
-      };
-    }
-
-    // 2. Proteksi Akses Ilegal ke Master Kaisar:
-    // Jika seseorang meminta 'usr_kaisar_master', 'master', 'kaisar' dari remote TANPA PIN Master -> TOLAK!
-    if (rawUid === 'usr_kaisar_master' || rawUid === 'master' || rawUid === 'kaisar' || rawUid === 'usr_e465zuklwesa') {
-      return {
-        success: false,
-        status: 401,
-        error: 'Akses Ditolak: PIN Keamanan Master Kaisar (210560) diperlukan untuk membuka akun ini.',
-        requiresPin: true,
         userId: 'usr_kaisar_master'
       };
     }

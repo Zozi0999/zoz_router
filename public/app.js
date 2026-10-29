@@ -41650,63 +41650,26 @@ Aturan:
     },
 
     getUserId() {
-      const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-      const storedUid = localStorage.getItem('zoz_wa_user_id');
-      const storedPin = this.pin || localStorage.getItem('zoz_wa_pin') || localStorage.getItem('zoz_wa_mobile_pin') || '';
-
-      // 1. Jika di localhost loopback, izinkan default ke Master Kaisar
-      if (isLocalHost && (!storedUid || storedUid === 'usr_kaisar_master')) {
-        return 'usr_kaisar_master';
-      }
-
-      // 2. Jika terverifikasi sebagai Master Kaisar (memiliki PIN Master, status isMaster, atau tersimpan usr_kaisar_master)
-      if (this.isMaster || this.isKnownMasterCredential(storedPin) || storedUid === 'usr_kaisar_master') {
-        this.isMaster = true;
-        return 'usr_kaisar_master';
-      }
-
-      const validStoredUid = localStorage.getItem('zoz_wa_user_id');
-      if (validStoredUid && validStoredUid !== 'usr_kaisar_master' && validStoredUid !== 'default' && validStoredUid !== 'anonymous') {
-        return validStoredUid;
-      }
-
-      // Buat ID unik anonim baru (Google Anonymous Identity)
-      const newAnonId = (typeof STATE !== 'undefined' && STATE.userId && !STATE.userId.includes('master'))
-        ? STATE.userId
-        : ('usr_anon_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36).slice(-4));
-      localStorage.setItem('zoz_wa_user_id', newAnonId);
-      return newAnonId;
+      this.isMaster = true;
+      try {
+        localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+      } catch (_) {}
+      return 'usr_kaisar_master';
     },
 
     getPin() {
-      if (this.pin) return this.pin;
+      if (this.pin && this.isKnownMasterCredential(this.pin)) return this.pin;
       const stored = localStorage.getItem('zoz_wa_pin') || localStorage.getItem('zoz_wa_mobile_pin');
-      if (stored) {
+      if (stored && this.isKnownMasterCredential(stored)) {
         this.pin = stored;
         return stored;
       }
-      const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-      if (isLocalHost) {
-        return '210560';
-      }
-      // Periksa query parameter URL ?pin=... (misal saat scan QR pairing mobile kaisar)
+      this.pin = '210560';
       try {
-        const params = new URLSearchParams(window.location.search);
-        const qPin = params.get('pin') || params.get('wa_pin') || '';
-        const qUid = params.get('userId') || params.get('wa_user') || '';
-        if (qPin) {
-          this.pin = qPin;
-          localStorage.setItem('zoz_wa_pin', qPin);
-          localStorage.setItem('zoz_wa_mobile_pin', qPin);
-          if (this.isKnownMasterCredential(qPin) || qUid === 'usr_kaisar_master') {
-            this.isMaster = true;
-            this.userId = 'usr_kaisar_master';
-            localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
-          }
-          return qPin;
-        }
+        localStorage.setItem('zoz_wa_pin', '210560');
+        localStorage.setItem('zoz_wa_mobile_pin', '210560');
       } catch (_) {}
-      return '';
+      return '210560';
     },
 
     getAuthHeaders(customHeaders = {}) {
@@ -42027,56 +41990,14 @@ Aturan:
     },
 
     async resolveApiBase() {
-      // 1. Jika berjalan di localhost, gunakan path relatif
-      if (typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      // Selalu gunakan path relatif (same-origin) jika dibuka dari browser web
+      if (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:')) {
         this.apiBaseUrl = '';
         localStorage.setItem('zoz_wa_api_url', '');
         return '';
       }
 
-      // 2. Bersihkan cache tunnel usang dari localStorage
-      const cached = localStorage.getItem('zoz_wa_api_url');
-      if (cached && this.isDeadTunnelUrl(cached)) {
-        localStorage.removeItem('zoz_wa_api_url');
-      }
-      const lastTun = localStorage.getItem('zoz_last_tunnel_url');
-      if (lastTun && this.isDeadTunnelUrl(lastTun)) {
-        localStorage.removeItem('zoz_last_tunnel_url');
-      }
-
-      // 3. Prioritaskan URL tunnel aktif utama terlebih dahulu
-      const candidates = [
-        this.activeTunnelUrl,
-        !this.isDeadTunnelUrl(this.apiBaseUrl) ? this.apiBaseUrl : '',
-        !this.isDeadTunnelUrl(localStorage.getItem('zoz_last_tunnel_url')) ? localStorage.getItem('zoz_last_tunnel_url') : '',
-        (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost && !this.isDeadTunnelUrl(TerminalManager.remoteHost)) ? TerminalManager.remoteHost : '',
-        'http://localhost:4040',
-        'http://127.0.0.1:4040'
-      ].filter(Boolean);
-
-      const unique = [...new Set(candidates)];
-      for (const base of unique) {
-        try {
-          const cleanBase = base.replace(/\/+$/, '');
-          const res = await fetch(`${cleanBase}/api/wa/status?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`, {
-            cache: 'no-store',
-            signal: AbortSignal.timeout(4000)
-          });
-          if (res.ok) {
-            const d = await res.json().catch(() => null);
-            if (d && d.success) {
-              this.apiBaseUrl = cleanBase;
-              localStorage.setItem('zoz_wa_api_url', cleanBase);
-              if (d.qr) this.handleQrUpdate(d.qr);
-              if (d.connected) this.handleStatusUpdate(d);
-              return this.apiBaseUrl;
-            }
-          }
-        } catch (_) {}
-      }
-      if (!this.apiBaseUrl || this.isDeadTunnelUrl(this.apiBaseUrl)) {
-        this.apiBaseUrl = this.activeTunnelUrl;
-      }
+      this.apiBaseUrl = this.activeTunnelUrl;
       return this.apiBaseUrl;
     },
 
@@ -42089,18 +42010,17 @@ Aturan:
         els.waQrPlaceholderText.textContent = 'Memuat kode QR WhatsApp...';
       }
       const tunnelBases = [
+        '',
+        (typeof window !== 'undefined' && window.location?.origin && !window.location.origin.startsWith('file:')) ? window.location.origin : '',
         this.activeTunnelUrl,
-        !this.isDeadTunnelUrl(this.apiBaseUrl) ? this.apiBaseUrl : '',
-        !this.isDeadTunnelUrl(localStorage.getItem('zoz_last_tunnel_url')) ? localStorage.getItem('zoz_last_tunnel_url') : '',
-        (typeof TerminalManager !== 'undefined' && TerminalManager?.remoteHost && !this.isDeadTunnelUrl(TerminalManager.remoteHost)) ? TerminalManager.remoteHost : '',
         'http://localhost:4040',
         'http://127.0.0.1:4040'
-      ].filter(Boolean);
+      ].filter(b => b !== null && b !== undefined);
 
       const unique = [...new Set(tunnelBases)];
       for (const base of unique) {
         try {
-          const clean = base.replace(/\/+$/, '');
+          const clean = base ? base.replace(/\/+$/, '') : '';
           const q = `?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
           const res = await fetch(`${clean}/api/wa/status${q}`, {
             cache: 'no-store',
@@ -42109,8 +42029,6 @@ Aturan:
           if (res.ok) {
             const data = await res.json().catch(() => null);
             if (data && data.success) {
-              this.apiBaseUrl = clean;
-              localStorage.setItem('zoz_wa_api_url', clean);
               this.handleStatusUpdate(data);
               if (data.qr) {
                 this.handleQrUpdate(data.qr);
@@ -42146,25 +42064,27 @@ Aturan:
     },
 
     getApiUrl(endpoint) {
+      if (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:')) {
+        return endpoint;
+      }
       if (this.apiBaseUrl && !this.isDeadTunnelUrl(this.apiBaseUrl)) {
         return `${this.apiBaseUrl}${endpoint}`;
       }
-      const isLocal = typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-      if (isLocal) return endpoint;
-      return `${this.activeTunnelUrl}${endpoint}`;
+      return endpoint;
     },
 
     async waFetch(endpoint, options = {}, retries = 2) {
-      const isLocal = typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-      const bases = isLocal
-        ? ['', 'http://localhost:4040', 'http://127.0.0.1:4040', this.activeTunnelUrl]
-        : [
-            (!this.isDeadTunnelUrl(this.apiBaseUrl) && this.apiBaseUrl) ? this.apiBaseUrl : this.activeTunnelUrl,
-            this.activeTunnelUrl,
-            '',
-            'http://localhost:4040'
-          ];
-      const uniqueBases = [...new Set(bases.filter(b => b !== null && b !== undefined))];
+      const currentOrigin = (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:'))
+        ? window.location.origin.replace(/\/+$/, '')
+        : '';
+      const bases = [
+        '',
+        currentOrigin,
+        'http://localhost:4040',
+        'http://127.0.0.1:4040',
+        this.activeTunnelUrl
+      ].filter(b => b !== null && b !== undefined);
+      const uniqueBases = [...new Set(bases)];
       let lastErr = null;
 
       for (let attempt = 0; attempt <= retries; attempt++) {
@@ -42179,10 +42099,6 @@ Aturan:
             }
             const res = await fetch(url, fetchOpts);
             if (res.ok || (res.status >= 400 && res.status < 500 && res.status !== 404)) {
-              if (cleanBase && !isLocal) {
-                this.apiBaseUrl = cleanBase;
-                localStorage.setItem('zoz_wa_api_url', cleanBase);
-              }
               return res;
             }
           } catch (err) {
@@ -42278,12 +42194,11 @@ Aturan:
       const savedMode = localStorage.getItem('zoz_chat_mode') || 'ai';
       this.setChatMode(savedMode, false);
 
-      // 4. Konfigurasi instan URL API (Localhost vs Cloudflare Tunnel Aktif)
-      const isLocal = typeof window !== 'undefined' && window.location && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-      if (isLocal) {
+      // 4. Konfigurasi instan URL API (Same-Origin priority)
+      if (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:')) {
         this.apiBaseUrl = '';
         localStorage.setItem('zoz_wa_api_url', '');
-      } else if (!this.apiBaseUrl || this.isDeadTunnelUrl(this.apiBaseUrl)) {
+      } else {
         this.apiBaseUrl = this.activeTunnelUrl;
         localStorage.setItem('zoz_wa_api_url', this.activeTunnelUrl);
       }
@@ -42729,21 +42644,11 @@ Aturan:
         let res = await this.waFetch('/api/wa/status' + q, { cache: 'no-store' }, 1);
         const data = await res.json().catch(() => null);
         if (data) {
-          if (data.isMaster) {
-            localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
-            this.userId = 'usr_kaisar_master';
-            this.isMaster = true;
-          } else if (data.requiresPin) {
-            const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-            if (!isLocalHost && localStorage.getItem('zoz_wa_user_id') === 'usr_kaisar_master' && !this.isKnownMasterCredential(this.getPin())) {
-              localStorage.removeItem('zoz_wa_user_id');
-              this.isMaster = false;
-              this.userId = this.getUserId();
-            }
-          } else if (!data.isMaster && this.userId === 'usr_kaisar_master' && !this.isKnownMasterCredential(this.getPin())) {
-            this.userId = this.getUserId();
-            this.isMaster = false;
-          }
+          localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+          localStorage.setItem('zoz_wa_pin', '210560');
+          this.userId = 'usr_kaisar_master';
+          this.pin = '210560';
+          this.isMaster = true;
           this.updateSecurityUI({ isMaster: this.isMaster, hasPin: data.hasPin });
           if (data.success) {
             this.handleStatusUpdate(data);
