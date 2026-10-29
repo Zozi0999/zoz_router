@@ -25654,7 +25654,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (img.startsWith('data:image')) return img;
     if (img.startsWith('/uploads/') || img.includes('/uploads/')) {
       try {
-        const resp = await fetch(img);
+        const fetchTarget = (img.startsWith('http://') || img.startsWith('https://')) ? img : getUniversalApiUrl(img);
+        const resp = await fetch(fetchTarget);
         if (resp.ok) {
           const blob = await resp.blob();
           return await new Promise((resolve) => {
@@ -42029,6 +42030,10 @@ Aturan:
     },
 
     getApiUrl(endpoint) {
+      if (!endpoint || typeof endpoint !== 'string') return '';
+      if (endpoint.startsWith('http://') || endpoint.startsWith('https://') || endpoint.startsWith('data:') || endpoint.startsWith('blob:')) {
+        return endpoint;
+      }
       if (this.isLocalHostOrTunnelOrigin()) {
         return endpoint;
       }
@@ -42036,6 +42041,10 @@ Aturan:
       const cleanBase = String(base).replace(/\/+$/, '');
       const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
       return `${cleanBase}${cleanEndpoint}`;
+    },
+
+    resolveMediaUrl(url) {
+      return this.getApiUrl(url);
     },
 
     async waFetch(endpoint, options = {}, retries = 2) {
@@ -43919,10 +43928,7 @@ Aturan:
         } catch (_) {}
       }
 
-      const baseUrl = (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:'))
-        ? window.location.origin
-        : (this.activeTunnelUrl || 'http://localhost:4040');
-      const fullUrl = url ? (url.startsWith('http') ? url : `${baseUrl}${url}`) : '';
+      const fullUrl = url ? this.resolveMediaUrl(url) : '';
 
       if (btnOpenTab) {
         if (url) {
@@ -43956,8 +43962,9 @@ Aturan:
 
       if (ext === 'pdf') {
         if (url) {
+          const pdfUrl = this.resolveMediaUrl(url);
           bodyEl.innerHTML = `
-            <iframe src="${escapeHtml(url)}#view=FitH" style="width: 100%; height: 75vh; border: none; border-radius: 8px; background: #fff;" title="${escapeHtml(fileName)}"></iframe>
+            <iframe src="${escapeHtml(pdfUrl)}#view=FitH" style="width: 100%; height: 75vh; border: none; border-radius: 8px; background: #fff;" title="${escapeHtml(fileName)}"></iframe>
           `;
         } else {
           bodyEl.innerHTML = `
@@ -44072,10 +44079,7 @@ Aturan:
       if (targetUrl) {
         showToast(`⏳ Mengunduh berkas ${fileName}...`, 'info');
         try {
-          const baseUrl = (typeof window !== 'undefined' && window.location && window.location.origin && !window.location.origin.startsWith('file:'))
-            ? window.location.origin
-            : (this.activeTunnelUrl || 'http://localhost:4040');
-          const fetchUrl = targetUrl.startsWith('http') ? targetUrl : `${baseUrl}${targetUrl}`;
+          const fetchUrl = this.resolveMediaUrl(targetUrl);
           const res = await fetch(fetchUrl);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const blob = await res.blob();
@@ -44091,7 +44095,8 @@ Aturan:
           AudioEngine.success?.() || AudioEngine.click?.();
         } catch (blobErr) {
           console.warn('Fallback direct link download:', blobErr.message);
-          const dlUrl = targetUrl.includes('?') ? `${targetUrl}&download=1` : `${targetUrl}?download=1`;
+          const fullDirectUrl = this.resolveMediaUrl(targetUrl);
+          const dlUrl = fullDirectUrl.includes('?') ? `${fullDirectUrl}&download=1` : `${fullDirectUrl}?download=1`;
           const a = document.createElement('a');
           a.href = dlUrl;
           a.download = fileName || 'dokumen.bin';
@@ -44099,7 +44104,6 @@ Aturan:
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
-          showToast(`✅ Berkas ${fileName} sedang diunduh.`, 'success');
         }
       } else {
         const cloudDocUrl = this.findCloudDocLinkInChat();
@@ -44119,31 +44123,33 @@ Aturan:
         const bubble = els.messagesList?.querySelector(`[data-msg-id="${msgId}"]`);
         if (bubble) {
           if (media.type === 'image' && media.url) {
+            const resolvedImgUrl = this.resolveMediaUrl(media.url);
             let imgWrap = bubble.querySelector('.wa-bubble-image-wrap');
             if (!imgWrap) {
               imgWrap = document.createElement('div');
               imgWrap.className = 'wa-bubble-image-wrap';
               imgWrap.style.cssText = 'margin-top: 6px; cursor: pointer; border-radius: 8px; overflow: hidden; max-width: 260px;';
-              imgWrap.innerHTML = `<img src="${escapeHtml(media.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" style="width: 100%; height: auto; display: block; border-radius: 8px;" loading="lazy" />`;
+              imgWrap.innerHTML = `<img src="${escapeHtml(resolvedImgUrl)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" style="width: 100%; height: auto; display: block; border-radius: 8px;" loading="lazy" />`;
               bubble.querySelector('.wa-bubble-meta')?.before(imgWrap) || bubble.appendChild(imgWrap);
             } else {
               const img = imgWrap.querySelector('img');
-              if (img) img.src = media.url;
+              if (img) img.src = resolvedImgUrl;
             }
             imgWrap.onclick = () => {
-              if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([media.url], 0);
+              if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([resolvedImgUrl], 0);
             };
           } else if (media.type === 'audio' && media.url) {
+            const resolvedAudioUrl = this.resolveMediaUrl(media.url);
             let audioWrap = bubble.querySelector('.wa-bubble-audio-wrap');
             if (!audioWrap) {
               audioWrap = document.createElement('div');
               audioWrap.className = 'wa-bubble-audio-wrap';
               audioWrap.style.marginTop = '6px';
-              audioWrap.innerHTML = `<audio controls src="${escapeHtml(media.url)}" preload="metadata" style="max-width: 100%; height: 32px; border-radius: 20px; outline: none;"></audio>`;
+              audioWrap.innerHTML = `<audio controls src="${escapeHtml(resolvedAudioUrl)}" preload="metadata" style="max-width: 100%; height: 32px; border-radius: 20px; outline: none;"></audio>`;
               bubble.querySelector('.wa-bubble-meta')?.before(audioWrap) || bubble.appendChild(audioWrap);
             } else {
               const a = audioWrap.querySelector('audio');
-              if (a) a.src = media.url;
+              if (a) a.src = resolvedAudioUrl;
             }
           } else if (media.type === 'document') {
             let docChip = bubble.querySelector('.wa-bubble-doc-chip');
@@ -44340,15 +44346,17 @@ Aturan:
       let mediaHtml = '';
       if (msg.media) {
         if (msg.media.type === 'image' && msg.media.url) {
+          const resolvedImgUrl = this.resolveMediaUrl(msg.media.url);
           mediaHtml = `
-            <div class="wa-bubble-image-wrap" style="margin-top: 6px; cursor: pointer; border-radius: 8px; overflow: hidden; max-width: 260px;" data-img-url="${escapeHtml(msg.media.url)}">
-              <img src="${escapeHtml(msg.media.url)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" style="width: 100%; height: auto; display: block; border-radius: 8px;" loading="lazy" />
+            <div class="wa-bubble-image-wrap" style="margin-top: 6px; cursor: pointer; border-radius: 8px; overflow: hidden; max-width: 260px;" data-img-url="${escapeHtml(resolvedImgUrl)}">
+              <img src="${escapeHtml(resolvedImgUrl)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" style="width: 100%; height: auto; display: block; border-radius: 8px;" loading="lazy" />
             </div>
           `;
         } else if (msg.media.type === 'audio' && msg.media.url) {
+          const resolvedAudioUrl = this.resolveMediaUrl(msg.media.url);
           mediaHtml = `
             <div class="wa-bubble-audio-wrap" style="margin-top: 6px;">
-              <audio controls src="${escapeHtml(msg.media.url)}" preload="metadata" style="max-width: 100%; height: 32px; border-radius: 20px; outline: none;"></audio>
+              <audio controls src="${escapeHtml(resolvedAudioUrl)}" preload="metadata" style="max-width: 100%; height: 32px; border-radius: 20px; outline: none;"></audio>
             </div>
           `;
         } else if (msg.media.type === 'document') {
@@ -44375,8 +44383,9 @@ Aturan:
 
       const imgWrap = wrap.querySelector('.wa-bubble-image-wrap');
       if (imgWrap && msg.media?.url) {
+        const resolvedImgUrl = this.resolveMediaUrl(msg.media.url);
         imgWrap.addEventListener('click', () => {
-          if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([msg.media.url], 0);
+          if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([resolvedImgUrl], 0);
         });
       }
       const docChip = wrap.querySelector('.wa-bubble-doc-chip');
