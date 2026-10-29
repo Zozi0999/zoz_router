@@ -10096,6 +10096,31 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     return code.slice(0, lastScriptIdx) + repairedScriptBody;
   }
 
+  // Pure Mathematical Autoregressive Token Boundary Slicer
+  // Mengeliminasi token parsial yang terputus di tengah kata/karakter secara matematis murni
+  function sliceLastSafeTokenBoundary(text) {
+    if (!text || typeof text !== 'string') return text || '';
+    if (text.length < 15) return text;
+
+    const trimmedEnd = text.trimEnd();
+    const tail = trimmedEnd.slice(-50);
+
+    // Jika ujung teks terputus di tengah token alfanumerik (mis. "functio", "calc", "dala", "mer")
+    // tanpa spasi atau tanda baca penutup terminal (. ! ? \n ; } > ] ) , " ' `)
+    const brokenWordMatch = /([a-zA-Z0-9_\$]{1,35})$/.exec(tail);
+    if (brokenWordMatch && brokenWordMatch[1]) {
+      const cutWord = brokenWordMatch[1];
+      const cutIndex = trimmedEnd.length - cutWord.length;
+      if (cutIndex > 0) {
+        const prevChar = trimmedEnd[cutIndex - 1];
+        if (/\s|[\.\,\;\:\(\[\{\=\+\-\*\/\<\>\&\|\!\?]/.test(prevChar)) {
+          return trimmedEnd.slice(0, cutIndex);
+        }
+      }
+    }
+    return text;
+  }
+
   // Zoz Autonomous Continuation Engine: Menyambungkan potongan kode tanpa merusak sintaks (strip basa-basi, fences, & overlap)
   function stitchContinuationChunk(existingText, incomingChunk) {
     if (!incomingChunk || typeof incomingChunk !== 'string') return existingText || '';
@@ -10106,6 +10131,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     // 1. Bersihkan kata pengantar / basa-basi model AI yang sering disisipkan di awal sambungan
     chunk = chunk.replace(/^(?:[\s\r\n]*)(?:tentu|baik(?:lah)?|pasti|oke|siap|berikut(?:nya)?|ini(?:lah)?|lanjutan|kelanjutan|sambungan|melanjutkan)[^\n]*\n+/i, '');
     chunk = chunk.replace(/^(?:[\s\r\n]*)(?:here\s+is\s+the\s+continuation|continuing\s+the\s+code|continuation|continued)[^\n]*\n+/i, '');
+    chunk = chunk.replace(/^[\s\r\n]*(?:continue|lanjutkan|lanjutan)\s*:\s*/i, '');
 
     // 2. Bersihkan pembungkus markdown code fence jika model membungkusnya ulang
     chunk = chunk.replace(/^```[a-zA-Z0-9_-]*\s*\n?/i, '');
@@ -10167,7 +10193,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     const maxOverlapCheck = Math.min(1200, existingTrim.length, chunkTrim.length);
     let detectedOverlapLen = 0;
-    for (let len = maxOverlapCheck; len >= 3; len--) {
+    for (let len = maxOverlapCheck; len >= 1; len--) {
       const tail = existingTrim.slice(-len);
       const head = chunkTrim.slice(0, len);
       if (tail === head) {
@@ -10487,7 +10513,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
     const session = options.session || getActiveSession();
     if (!session) {
-      showToast('Sesi tidak ditemukan untuk melanjutkan respons.', 'error');
+      if (!options.isAutoContinue) showToast('Sesi tidak ditemukan untuk melanjutkan respons.', 'error');
       return;
     }
 
@@ -10513,7 +10539,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     }
 
     if (!rawBaseText) {
-      showToast('⚠️ Tidak dapat mendeteksi potongan kode yang terputus.', 'warning');
+      if (!options.isAutoContinue) showToast('⚠️ Tidak dapat mendeteksi potongan kode yang terputus.', 'warning');
       return;
     }
 
@@ -10557,7 +10583,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         directBtn.style.color = 'var(--neon-cyan)';
       }
       if (bubbleText) {
-        const hudHtml = `<div class="auto-continue-hud" style="margin: 8px 0; padding: 8px 12px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.82rem; color: var(--neon-cyan); display: flex; align-items: center; justify-content: space-between; gap: 8px;"><div style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-bolt fa-bounce"></i> <span><strong>Melanjutkan kode</strong> &bull; ${escapeHtml(statusMsg)}</span></div><span class="typing-cursor"></span></div>`;
+        const hudHtml = options.isAutoContinue
+          ? '<span class="typing-cursor"></span>'
+          : `<div class="auto-continue-hud" style="margin: 8px 0; padding: 8px 12px; background: rgba(0, 242, 254, 0.08); border: 1px dashed rgba(0, 242, 254, 0.4); border-radius: 8px; font-size: 0.82rem; color: var(--neon-cyan); display: flex; align-items: center; justify-content: space-between; gap: 8px;"><div style="display:flex; align-items:center; gap:8px;"><i class="fa-solid fa-bolt fa-bounce"></i> <span><strong>Melanjutkan kode</strong> &bull; ${escapeHtml(statusMsg)}</span></div><span class="typing-cursor"></span></div>`;
         bubbleText.innerHTML = renderMarkdown(hideFileBlocksForDisplay(currentAccumulated, contRunOptions)) + hudHtml;
         smartScrollChatToBottom(false);
       }
@@ -10568,13 +10596,21 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         agentRound++;
         updateAgentHud(`Putaran ${agentRound}/${MAX_AGENT_ROUNDS}: Menyambung respons...`);
 
-        // Optimasi Tail-Context: Hanya ambil 40 baris terakhir kode yang terputus
+        // 1. Pemangkasan token parsial matematis murni: eliminasi pecahan token yang rusak di ujung potongan
+        const safeBase = sliceLastSafeTokenBoundary(currentAccumulated);
+        if (safeBase && safeBase.length < currentAccumulated.length) {
+          console.log(`[Mathematical Token Boundary] Memangkas ${currentAccumulated.length - safeBase.length} karakter pecahan token rusak di ujung.`);
+          currentAccumulated = safeBase;
+        }
+
+        // 2. Optimasi Tail-Context: Hanya ambil 40 baris terakhir dari safeBase
         const lines = currentAccumulated.split('\n');
         const totalLines = lines.length;
         const tailLinesCount = Math.min(40, totalLines);
         const tailLines = lines.slice(-tailLinesCount).join('\n');
 
-        const continuePrompt = `[Berikut adalah potongan teks/kode terakhir sebelum terputus]:\n\`\`\`\n${tailLines}\n\`\`\`\n\n[MANDAT KONTINUASI]:\nLanjutkan penulisan penjelasan/kode secara persis mulai dari kata/karakter terakhir yang terpotong.\nDILARANG mengulang teks atau kode dari baris awal!\nDILARANG menyertakan pembukaan, salam, penjelasan pengantar, atau teks basa-basi!\nLangsung teruskan kelanjutan isinya persis dari potongan terakhir di atas hingga selesai tuntas.`;
+        // 3. Zero-Persona Mathematical Continuation Prompt: murni instruksi penyambungan langsung
+        const continuePrompt = `Continue:`;
 
         let appended = '';
         if (engine === 'ollama') {
@@ -10781,7 +10817,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
       const msgSuccess = `✅ Berkas selesai sempurna dalam ${agentRound} putaran agen (${modelName})!`;
       const msgStill = `⚠️ Kode telah disambung hingga putaran ${agentRound}, tekan Lanjutkan jika masih ada bagian yang diinginkan.`;
-      showToast(isStillIncomplete ? msgStill : msgSuccess, isStillIncomplete ? 'info' : 'success');
+      if (!options.isAutoContinue) {
+        showToast(isStillIncomplete ? msgStill : msgSuccess, isStillIncomplete ? 'info' : 'success');
+      }
       AudioEngine.click();
     } catch (err) {
       if (directBtn) {
@@ -10791,7 +10829,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         directBtn.style.borderColor = '';
         directBtn.style.color = '';
       }
-      showToast('Gagal melanjutkan: ' + err.message, 'error');
+      if (!options.isAutoContinue) {
+        showToast('Gagal melanjutkan: ' + err.message, 'error');
+      } else {
+        console.warn('[Auto-Continuation Notice]:', err.message);
+      }
     } finally {
       setGeneratingState(false);
     }
@@ -10866,9 +10908,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       // Optimasi Tail-Context: Kirim konteks ekor (maksimal 40 baris terakhir)
       // agar model tidak menanggung beban prefill ribuan token yang membuat respons terasa macet
       let effectiveTail = currentFullText || '';
-      if (typeof effectiveTail === 'string' && effectiveTail.length > 1200) {
+      if (typeof effectiveTail === 'string' && effectiveTail.length > 1500) {
         const tailLines = effectiveTail.split('\n').slice(-40).join('\n');
-        effectiveTail = `<!-- ... [bagian awal kode sudah selesai disusun] ... -->\n${tailLines}`;
+        effectiveTail = tailLines;
       }
 
       historyMessages.forEach((m, idx) => {
@@ -10888,9 +10930,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         }
       }
 
-      const userInstruction = (!supportsSystem && STATE.settings.systemPrompt)
-        ? `[Instruksi Sistem: ${STATE.settings.systemPrompt}]\n\n${promptInstruction}`
-        : promptInstruction;
+      const userInstruction = promptInstruction || 'Continue:';
       messagesPayload.push({ role: 'user', content: userInstruction });
 
       const isLiquid = Boolean(curModel && (curModel.includes('liquid') || curModel.includes('lfm-')));
@@ -11114,9 +11154,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     // Optimasi Tail-Context untuk Ollama: Kirim 40 baris terakhir agar model CPU/lokal
     // tidak terjebak KV evaluation ribuan token selama bermenit-menit
     let effectiveTail = currentFullText || '';
-    if (typeof effectiveTail === 'string' && effectiveTail.length > 1200) {
+    if (typeof effectiveTail === 'string' && effectiveTail.length > 1500) {
       const tailLines = effectiveTail.split('\n').slice(-40).join('\n');
-      effectiveTail = `/* ... [bagian awal isi/kode sudah disusun sebelumnya] ... */\n${tailLines}`;
+      effectiveTail = tailLines;
     }
 
     historyMessages.forEach((m, idx) => {
@@ -27080,8 +27120,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       // SEAMLESS AUTO-CONTINUATION: Jika output terpotong, sambung otomatis tanpa putus
       const needsOllamaContinuation = !STATE.abortController?.signal?.aborted && !runOptions._isAutoContinuation && (isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, doneReason === 'length' ? 'length' : null));
       if (needsOllamaContinuation) {
-        console.log('[Ollama Auto-Recovery] Respons terpotong di tengah jalan. Memulai penyambungan otomatis...');
-        showToast('⚡ Menyambung kelanjutan jawaban secara otomatis...', 'info');
+        console.log('[Ollama Auto-Recovery] Respons terpotong di tengah jalan. Menyambung otomatis...');
         try {
           await executeResponseContinuation(assistantRow, {
             session,
@@ -27089,7 +27128,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             engine: 'ollama',
             previousText: rawFullTextBeforeStripping,
             isWebsite: isWebTask,
-            forceTakeover: true
+            forceTakeover: true,
+            isAutoContinue: true
           });
           if (assistantRow.dataset.fullContent) {
             fullText = assistantRow.dataset.fullContent;
@@ -28792,8 +28832,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       // SEAMLESS AUTO-CONTINUATION: Jika output terputus atau terpotong di tengah jalan, sambung otomatis tanpa putus
       const needsOpenRouterContinuation = !STATE.abortController?.signal?.aborted && !runOptions._isAutoContinuation && (isFileStillIncomplete || isStreamInterrupted || isOutputTruncated(rawFullTextBeforeStripping, finishReason));
       if (needsOpenRouterContinuation) {
-        console.log('[OpenRouter Auto-Recovery] Respons terputus/terpotong di tengah jalan. Memulai penyambungan otomatis...');
-        showToast('⚡ Menyambung kelanjutan jawaban secara otomatis...', 'info');
+        console.log('[OpenRouter Auto-Recovery] Respons terputus/terpotong di tengah jalan. Menyambung otomatis...');
         try {
           await executeResponseContinuation(assistantRow, {
             session,
@@ -28801,7 +28840,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             engine: engineMode,
             previousText: rawFullTextBeforeStripping,
             isWebsite: isWebTask,
-            forceTakeover: true
+            forceTakeover: true,
+            isAutoContinue: true
           });
           if (assistantRow.dataset.fullContent) {
             fullText = assistantRow.dataset.fullContent;
@@ -28813,11 +28853,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         }
       }
 
-      // Check if output is STILL cut in half after auto-continuation and provide fallback button
+      // Check if output is STILL cut in half after auto-continuation and provide fallback button (tanpa toast error)
       if (isFileStillIncomplete || isStreamInterrupted || isOutputTruncated(rawFullTextBeforeStripping, finishReason)) {
-        if (isStreamInterrupted) {
-          showToast('⚠️ Aliran token terputus. Gunakan tombol "Lanjutkan Jawaban" jika masih ingin meneruskan.', 'warning');
-        }
         attachContinuationButton(
           assistantRow.querySelector('.message-content-box') || assistantRow,
           session,
