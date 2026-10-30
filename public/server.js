@@ -1199,11 +1199,59 @@ function resolveOllamaCloudModel(modelId) {
   return modelId.trim();
 }
 
-// Model Resolver Lokal Daemon: Pertahankan nama model asli yang terpasang di Ollama lokal
-function resolveLocalDaemonCloudManifest(modelId) {
-  if (!modelId || typeof modelId !== 'string') return '';
-  return modelId.trim();
+// Model Resolver Lokal Daemon: Petakan nama model ke tag terpasang (misal :cloud atau :latest)
+let localDaemonTagsCache = { tags: [], fetchedAt: 0 };
+async function fetchLocalOllamaTags() {
+  const now = Date.now();
+  if (localDaemonTagsCache.tags.length > 0 && (now - localDaemonTagsCache.fetchedAt < 30000)) {
+    return localDaemonTagsCache.tags;
+  }
+  return new Promise((resolve) => {
+    try {
+      const req = http.get('http://127.0.0.1:11434/api/tags', { timeout: 1500 }, (res) => {
+        let raw = '';
+        res.on('data', chunk => { raw += chunk; });
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(raw);
+            if (Array.isArray(data?.models)) {
+              localDaemonTagsCache = { tags: data.models, fetchedAt: Date.now() };
+              return resolve(data.models);
+            }
+          } catch (_) {}
+          resolve(localDaemonTagsCache.tags);
+        });
+      });
+      req.on('error', () => resolve(localDaemonTagsCache.tags));
+      req.on('timeout', () => { req.destroy(); resolve(localDaemonTagsCache.tags); });
+    } catch (_) {
+      resolve(localDaemonTagsCache.tags);
+    }
+  });
 }
+
+async function resolveLocalDaemonCloudManifest(modelId) {
+  if (!modelId || typeof modelId !== 'string') return '';
+  const clean = modelId.trim();
+  let models = localDaemonTagsCache.tags;
+  if (!models || models.length === 0) {
+    models = await fetchLocalOllamaTags();
+  }
+  // 1. Exact match
+  const exact = models.find(m => m.name === clean || m.model === clean);
+  if (exact) return exact.name;
+  // 2. Remote model match (e.g. remote_model === clean)
+  const remote = models.find(m => m.remote_model === clean);
+  if (remote) return remote.name;
+  // 3. Name with :cloud tag match
+  const cloudVariant = models.find(m => m.name === `${clean}:cloud` || m.model === `${clean}:cloud`);
+  if (cloudVariant) return cloudVariant.name;
+  // 4. Base name match (prefix before colon)
+  const baseMatch = models.find(m => m.name.split(':')[0] === clean || m.model.split(':')[0] === clean);
+  if (baseMatch) return baseMatch.name;
+  return clean;
+}
+fetchLocalOllamaTags().catch(() => {});
 
 function mapOllamaModelToOpenRouter(modelId) {
   if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
@@ -2601,108 +2649,115 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     : ['arxiv.org', 'github.com', 'cna.al', 'cnn.com', 'bloomberg.com', 'reddit.com'];
 
   const results = [];
+  const searchTasks = [];
 
-  // 1. Search arXiv
+  // 1. Search arXiv (Paralel)
   if (targets.some(t => t.includes('arxiv.org'))) {
-    try {
-      const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(cleanQ)}&start=0&max_results=${Math.min(safeLimit, 5)}`;
-      const res = await fetch(arxivUrl, { signal: AbortSignal.timeout(5000) });
-      if (res.ok) {
-        const xml = await res.text();
-        const entries = xml.split(/<entry>/gi).slice(1);
-        entries.forEach((entry, idx) => {
-          const tMatch = entry.match(/<title>([\s\S]*?)<\/title>/i);
-          const sMatch = entry.match(/<summary>([\s\S]*?)<\/summary>/i);
-          const idMatch = entry.match(/<id>([\s\S]*?)<\/id>/i);
-          const pubMatch = entry.match(/<published>([\s\S]*?)<\/published>/i);
-
-          if (tMatch && idMatch) {
-            const rawTitle = tMatch[1].replace(/\s+/g, ' ').trim();
-            const rawUrl = idMatch[1].trim().replace(/^http:/, 'https:');
-            const rawSnippet = sMatch ? sMatch[1].replace(/\s+/g, ' ').trim().slice(0, 300) + '...' : '';
-            const pubDate = pubMatch ? pubMatch[1].slice(0, 10) : '';
-
-            results.push({
-              title: rawTitle,
-              url: rawUrl,
-              snippet: rawSnippet,
-              published_date: pubDate,
-              source_name: 'arXiv',
-              relevance_score: Number((0.96 - (idx * 0.04)).toFixed(2))
-            });
-          }
-        });
-      }
-    } catch (_) {}
-  }
-
-  // 2. Search GitHub
-  if (targets.some(t => t.includes('github.com')) && results.length < safeLimit) {
-    try {
-      const ghUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(cleanQ)}&per_page=${Math.min(safeLimit, 5)}`;
-      const res = await fetch(ghUrl, {
-        headers: { 'User-Agent': 'ZOZ-Router-Grounding-Agent' },
-        signal: AbortSignal.timeout(5000)
-      });
-      if (res.ok) {
-        const json = await res.json();
-        const items = Array.isArray(json.items) ? json.items : [];
-        items.forEach((item, idx) => {
-          results.push({
-            title: `${item.name} (${item.full_name})`,
-            url: item.html_url,
-            snippet: item.description || `Repositori GitHub open-source: ${item.full_name} (${item.stargazers_count} bintang).`,
-            published_date: item.updated_at ? item.updated_at.slice(0, 10) : '',
-            source_name: 'GitHub',
-            relevance_score: Number((0.92 - (idx * 0.04)).toFixed(2))
-          });
-        });
-      }
-    } catch (_) {}
-  }
-
-  // 3. Search CNA Albania
-  if (targets.some(t => t.includes('cna.al')) && results.length < safeLimit) {
-    try {
-      const cnaSearchUrl = `https://r.jina.ai/https://www.cna.al/search?q=${encodeURIComponent(cleanQ)}`;
-      const res = await fetch(cnaSearchUrl, {
-        headers: { 'Accept': 'text/plain' },
-        signal: AbortSignal.timeout(6000)
-      });
-      if (res.ok) {
-        const text = await res.text();
-        const linkMatches = text.match(/\[([^\]]+)\]\((https?:\/\/(?:www\.)?cna\.al\/[^\s\)]+)\)/gi) || [];
-        linkMatches.slice(0, 3).forEach((lm, idx) => {
-          const m = lm.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/i);
-          if (m && !results.some(r => r.url === m[2])) {
-            results.push({
-              title: m[1].trim(),
-              url: m[2].trim(),
-              snippet: `Berita dan laporan resmi dari CNA Albania mengenai: ${m[1].trim()}`,
-              published_date: 'Terkini',
-              source_name: 'CNA Albania',
-              relevance_score: Number((0.88 - (idx * 0.03)).toFixed(2))
-            });
-          }
-        });
-      }
-    } catch (_) {}
-  }
-
-  // 4. Search CNN / Bloomberg / Reddit via Jina Search
-  for (const t of targets) {
-    if (results.length >= safeLimit) break;
-    if (['edition.cnn.com', 'cnn.com', 'bloomberg.com', 'reddit.com'].some(d => t.includes(d))) {
+    searchTasks.push((async () => {
       try {
-        const searchDomain = t.includes('cnn') ? 'edition.cnn.com' : (t.includes('bloomberg') ? 'bloomberg.com' : 'reddit.com');
-        const jinaSearchUrl = `https://r.jina.ai/https://${searchDomain}/search?q=${encodeURIComponent(cleanQ)}`;
-        const res = await fetch(jinaSearchUrl, {
+        const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(cleanQ)}&start=0&max_results=${Math.min(safeLimit, 5)}`;
+        const res = await fetch(arxivUrl, { signal: AbortSignal.timeout(3500) });
+        if (res.ok) {
+          const xml = await res.text();
+          const entries = xml.split(/<entry>/gi).slice(1);
+          entries.forEach((entry, idx) => {
+            const tMatch = entry.match(/<title>([\s\S]*?)<\/title>/i);
+            const sMatch = entry.match(/<summary>([\s\S]*?)<\/summary>/i);
+            const idMatch = entry.match(/<id>([\s\S]*?)<\/id>/i);
+            const pubMatch = entry.match(/<published>([\s\S]*?)<\/published>/i);
+
+            if (tMatch && idMatch) {
+              const rawTitle = tMatch[1].replace(/\s+/g, ' ').trim();
+              const rawUrl = idMatch[1].trim().replace(/^http:/, 'https:');
+              const rawSnippet = sMatch ? sMatch[1].replace(/\s+/g, ' ').trim().slice(0, 300) + '...' : '';
+              const pubDate = pubMatch ? pubMatch[1].slice(0, 10) : '';
+
+              results.push({
+                title: rawTitle,
+                url: rawUrl,
+                snippet: rawSnippet,
+                published_date: pubDate,
+                source_name: 'arXiv',
+                relevance_score: Number((0.96 - (idx * 0.04)).toFixed(2))
+              });
+            }
+          });
+        }
+      } catch (_) {}
+    })());
+  }
+
+  // 2. Search GitHub (Paralel)
+  if (targets.some(t => t.includes('github.com'))) {
+    searchTasks.push((async () => {
+      try {
+        const ghUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(cleanQ)}&per_page=${Math.min(safeLimit, 5)}`;
+        const res = await fetch(ghUrl, {
+          headers: { 'User-Agent': 'ZOZ-Router-Grounding-Agent' },
+          signal: AbortSignal.timeout(3500)
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const items = Array.isArray(json.items) ? json.items : [];
+          items.forEach((item, idx) => {
+            results.push({
+              title: `${item.name} (${item.full_name})`,
+              url: item.html_url,
+              snippet: item.description || `Repositori GitHub open-source: ${item.full_name} (${item.stargazers_count} bintang).`,
+              published_date: item.updated_at ? item.updated_at.slice(0, 10) : '',
+              source_name: 'GitHub',
+              relevance_score: Number((0.92 - (idx * 0.04)).toFixed(2))
+            });
+          });
+        }
+      } catch (_) {}
+    })());
+  }
+
+  // 3. Search CNA Albania (Paralel)
+  if (targets.some(t => t.includes('cna.al'))) {
+    searchTasks.push((async () => {
+      try {
+        const cnaSearchUrl = `https://r.jina.ai/https://www.cna.al/search?q=${encodeURIComponent(cleanQ)}`;
+        const res = await fetch(cnaSearchUrl, {
           headers: { 'Accept': 'text/plain' },
-          signal: AbortSignal.timeout(6000)
+          signal: AbortSignal.timeout(4000)
         });
         if (res.ok) {
           const text = await res.text();
-          const linkMatches = text.match(new RegExp(`\\[([^\\]]+)\\]\\((https?:\\/\\/(?:www\\.|edition\\.)?${searchDomain.replace('.', '\\.')}\\/[^\\s\\)]+)\\)`, 'gi')) || [];
+          const linkMatches = text.match(/\[([^\]]+)\]\((https?:\/\/(?:www\.)?cna\.al\/[^\s\)]+)\)/gi) || [];
+          linkMatches.slice(0, 3).forEach((lm, idx) => {
+            const m = lm.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/i);
+            if (m && !results.some(r => r.url === m[2])) {
+              results.push({
+                title: m[1].trim(),
+                url: m[2].trim(),
+                snippet: `Berita dan laporan resmi dari CNA Albania mengenai: ${m[1].trim()}`,
+                published_date: 'Terkini',
+                source_name: 'CNA Albania',
+                relevance_score: Number((0.88 - (idx * 0.03)).toFixed(2))
+              });
+            }
+          });
+        }
+      } catch (_) {}
+    })());
+  }
+
+  // 4. Search CNN / Bloomberg / Reddit via Jina Search (Paralel)
+  const otherDomains = targets.filter(t => ['edition.cnn.com', 'cnn.com', 'bloomberg.com', 'reddit.com'].some(d => t.includes(d)));
+  if (otherDomains.length > 0) {
+    const selectedDomain = otherDomains[0].includes('cnn') ? 'edition.cnn.com' : (otherDomains[0].includes('bloomberg') ? 'bloomberg.com' : 'reddit.com');
+    searchTasks.push((async () => {
+      try {
+        const jinaSearchUrl = `https://r.jina.ai/https://${selectedDomain}/search?q=${encodeURIComponent(cleanQ)}`;
+        const res = await fetch(jinaSearchUrl, {
+          headers: { 'Accept': 'text/plain' },
+          signal: AbortSignal.timeout(4000)
+        });
+        if (res.ok) {
+          const text = await res.text();
+          const linkMatches = text.match(new RegExp(`\\[([^\\]]+)\\]\\((https?:\\/\\/(?:www\\.|edition\\.)?${selectedDomain.replace('.', '\\.')}\\/[^\\s\\)]+)\\)`, 'gi')) || [];
           linkMatches.slice(0, 3).forEach((lm, idx) => {
             const m = lm.match(new RegExp(`\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s\\)]+)\\)`, 'i'));
             if (m && !results.some(r => r.url === m[2])) {
@@ -2718,7 +2773,12 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
           });
         }
       } catch (_) {}
-    }
+    })());
+  }
+
+  // Eksekusi seluruh pencarian secara simultan (Promise.allSettled) demi latensi ultra-rendah
+  if (searchTasks.length > 0) {
+    await Promise.allSettled(searchTasks);
   }
 
   return {
@@ -5587,9 +5647,33 @@ async function requestHandler(req, res) {
   // ===== RESOLUSI IDENTITAS (sekali per request, sebelum semua rute) =====
   // Menolak lebih awal request dengan identitas tidak valid / token salah, agar
   // seluruh rute di bawah ini hanya melihat reqUserId yang sudah tervalidasi.
+  // Pengecualian: Route utilitas publik (grounding, video, tools, health, info)
+  // tetap diizinkan berjalan sebagai anonymous tanpa memblokir klien web/mobile yang tokennya berbeda.
   const identityResult = resolveRequestIdentity(req, reqUrl);
   if (identityResult.error) {
-    if (!pathname.startsWith('/api/wa/')) {
+    const isPublicUtility = (
+      pathname === '/api' || pathname === '/api/' ||
+      pathname === '/api/health' ||
+      pathname === '/api/ping' ||
+      pathname === '/api/models' ||
+      pathname === '/api/tags' ||
+      pathname === '/api/youtube-info' ||
+      pathname === '/api/youtube-search' ||
+      pathname === '/api/video/info' ||
+      pathname === '/api/video-probe' ||
+      pathname === '/api/video-search' ||
+      pathname === '/api/tools/related-videos' ||
+      pathname === '/api/tools/search-web' ||
+      pathname === '/api/tools/browse-page' ||
+      pathname === '/api/tools/search-web-sources' ||
+      pathname === '/api/tools/fetch-url-content' ||
+      pathname === '/api/tools/summarize-sources' ||
+      pathname === '/api/extract-web' ||
+      pathname === '/api/read-url' ||
+      pathname === '/api/scrape-url' ||
+      pathname.startsWith('/api/wa/')
+    );
+    if (!isPublicUtility) {
       return sendJSON(res, identityResult.status || 400, { error: identityResult.error });
     }
   }
@@ -9658,7 +9742,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
       });
 
-      const dispatchOllamaUpstream = (targetEndpoint, targetModel, targetAuthKey, allowLocalFallback) => {
+      const dispatchOllamaUpstream = async (targetEndpoint, targetModel, targetAuthKey, allowLocalFallback) => {
         body.model = targetModel;
         if (sessionId && dbActiveChatTasks[sessionId]) {
           dbActiveChatTasks[sessionId].model = targetModel;
@@ -9706,7 +9790,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             proxyRes.on('data', chunk => {
               if (!clientDisconnected) errData += chunk;
             });
-            proxyRes.on('end', () => {
+            proxyRes.on('end', async () => {
               // Auto-retry tanpa tools jika model menolak parameter tools
               if (Array.isArray(body.tools) && body.tools.length > 0 && (statusCode === 400 || statusCode === 422 || statusCode === 500) && /tool/i.test(errData) && !res.headersSent && !clientDisconnected) {
                 delete body.tools;
@@ -9717,7 +9801,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               // Multi-Tier Fallback: Jika https://ollama.com mengembalikan HTTP >= 400 (misal 401/403/404/429/500),
               // otomatis alihkan ke daemon Cloud Relay lokal (http://127.0.0.1:11434) tanpa menggagalkan permintaan pengguna!
               if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
-                const localManifestModel = resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+                const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
                 console.warn(`[Ollama Cloud Failover] Upstream ${targetEndpoint} (${targetModel}) returned HTTP ${statusCode}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
                 return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
               }
@@ -9733,9 +9817,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 return sendJSON(res, statusCode, { error: errMsg, details: parsedErr || errData });
               } catch (e) {}
             });
-            proxyRes.on('error', (err) => {
+            proxyRes.on('error', async (err) => {
               if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
-                const localManifestModel = resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+                const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
                 return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
               }
               if (sessionId) {
@@ -9918,11 +10002,11 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           dbActiveChatTasks[sessionId].proxyReq = proxyReq;
         }
 
-        proxyReq.on('timeout', () => {
+        proxyReq.on('timeout', async () => {
           if (hasSplicedRefusal || horocycleHalted) return;
           if (!proxyReq.destroyed) proxyReq.destroy();
           if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
-            const localManifestModel = resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+            const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
             return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
           }
           if (sessionId && dbActiveChatTasks[sessionId]) {
@@ -9941,10 +10025,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           } catch (_) {}
         });
 
-        proxyReq.on('error', (err) => {
+        proxyReq.on('error', async (err) => {
           if (hasSplicedRefusal || horocycleHalted) return;
           if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
-            const localManifestModel = resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+            const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
             console.warn(`[Ollama Cloud Failover] Network error on ${targetEndpoint}: ${err.message}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
             return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
           }

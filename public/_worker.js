@@ -382,104 +382,111 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     : ['arxiv.org', 'github.com', 'cna.al', 'cnn.com', 'bloomberg.com', 'reddit.com'];
 
   const results = [];
+  const searchTasks = [];
 
-  // 1. Search arXiv
+  // 1. Search arXiv (Paralel)
   if (targets.some(t => t.includes('arxiv.org'))) {
-    try {
-      const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(cleanQ)}&start=0&max_results=${Math.min(safeLimit, 5)}`;
-      const res = await fetch(arxivUrl, { signal: AbortSignal.timeout(5000) });
-      if (res.ok) {
-        const xml = await res.text();
-        const entries = xml.split(/<entry>/gi).slice(1);
-        entries.forEach((entry, idx) => {
-          const tMatch = entry.match(/<title>([\s\S]*?)<\/title>/i);
-          const sMatch = entry.match(/<summary>([\s\S]*?)<\/summary>/i);
-          const idMatch = entry.match(/<id>([\s\S]*?)<\/id>/i);
-          const pubMatch = entry.match(/<published>([\s\S]*?)<\/published>/i);
-
-          if (tMatch && idMatch) {
-            const rawTitle = tMatch[1].replace(/\s+/g, ' ').trim();
-            const rawUrl = idMatch[1].trim().replace(/^http:/, 'https:');
-            const rawSnippet = sMatch ? sMatch[1].replace(/\s+/g, ' ').trim().slice(0, 300) + '...' : '';
-            const pubDate = pubMatch ? pubMatch[1].slice(0, 10) : '';
-
-            results.push({
-              title: rawTitle,
-              url: rawUrl,
-              snippet: rawSnippet,
-              published_date: pubDate,
-              source_name: 'arXiv',
-              relevance_score: Number((0.96 - (idx * 0.04)).toFixed(2))
-            });
-          }
-        });
-      }
-    } catch (_) {}
-  }
-
-  // 2. Search GitHub
-  if (targets.some(t => t.includes('github.com')) && results.length < safeLimit) {
-    try {
-      const ghUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(cleanQ)}&per_page=${Math.min(safeLimit, 5)}`;
-      const res = await fetch(ghUrl, {
-        headers: { 'User-Agent': 'ZOZ-Router-Grounding-Agent' },
-        signal: AbortSignal.timeout(5000)
-      });
-      if (res.ok) {
-        const json = await res.json();
-        const items = Array.isArray(json.items) ? json.items : [];
-        items.forEach((item, idx) => {
-          results.push({
-            title: `${item.name} (${item.full_name})`,
-            url: item.html_url,
-            snippet: item.description || `Repositori GitHub open-source: ${item.full_name} (${item.stargazers_count} bintang).`,
-            published_date: item.updated_at ? item.updated_at.slice(0, 10) : '',
-            source_name: 'GitHub',
-            relevance_score: Number((0.92 - (idx * 0.04)).toFixed(2))
-          });
-        });
-      }
-    } catch (_) {}
-  }
-
-  // 3. Search CNA Albania
-  if (targets.some(t => t.includes('cna.al')) && results.length < safeLimit) {
-    try {
-      const cnaSearchUrl = `https://r.jina.ai/https://www.cna.al/search?q=${encodeURIComponent(cleanQ)}`;
-      const res = await fetch(cnaSearchUrl, {
-        headers: { 'Accept': 'text/plain' },
-        signal: AbortSignal.timeout(6000)
-      });
-      if (res.ok) {
-        const text = await res.text();
-        const linkMatches = text.match(/\[([^\]]+)\]\((https?:\/\/(?:www\.)?cna\.al\/[^\s\)]+)\)/gi) || [];
-        linkMatches.slice(0, 3).forEach((lm, idx) => {
-          const m = lm.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/i);
-          if (m && !results.some(r => r.url === m[2])) {
-            results.push({
-              title: m[1].trim(),
-              url: m[2].trim(),
-              snippet: `Berita dan laporan resmi dari CNA Albania mengenai: ${m[1].trim()}`,
-              published_date: 'Terkini',
-              source_name: 'CNA Albania',
-              relevance_score: Number((0.88 - (idx * 0.03)).toFixed(2))
-            });
-          }
-        });
-      }
-    } catch (_) {}
-  }
-
-  // 4. Search CNN / Bloomberg / Reddit via Jina Search
-  for (const t of targets) {
-    if (results.length >= safeLimit) break;
-    if (['edition.cnn.com', 'cnn.com', 'bloomberg.com', 'reddit.com'].some(d => t.includes(d))) {
+    searchTasks.push((async () => {
       try {
-        const searchDomain = t.includes('cnn') ? 'edition.cnn.com' : (t.includes('bloomberg') ? 'bloomberg.com' : 'reddit.com');
-        const jinaSearchUrl = `https://r.jina.ai/https://${searchDomain}/search?q=${encodeURIComponent(cleanQ)}`;
+        const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(cleanQ)}&start=0&max_results=${Math.min(safeLimit, 5)}`;
+        const res = await fetch(arxivUrl, { signal: AbortSignal.timeout(3500) });
+        if (res.ok) {
+          const xml = await res.text();
+          const entries = xml.split(/<entry>/gi).slice(1);
+          entries.forEach((entry, idx) => {
+            const tMatch = entry.match(/<title>([\s\S]*?)<\/title>/i);
+            const sMatch = entry.match(/<summary>([\s\S]*?)<\/summary>/i);
+            const idMatch = entry.match(/<id>([\s\S]*?)<\/id>/i);
+            const pubMatch = entry.match(/<published>([\s\S]*?)<\/published>/i);
+
+            if (tMatch && idMatch) {
+              const rawTitle = tMatch[1].replace(/\s+/g, ' ').trim();
+              const rawUrl = idMatch[1].trim().replace(/^http:/, 'https:');
+              const rawSnippet = sMatch ? sMatch[1].replace(/\s+/g, ' ').trim().slice(0, 300) + '...' : '';
+              const pubDate = pubMatch ? pubMatch[1].slice(0, 10) : '';
+
+              results.push({
+                title: rawTitle,
+                url: rawUrl,
+                snippet: rawSnippet,
+                published_date: pubDate,
+                source_name: 'arXiv',
+                relevance_score: Number((0.96 - (idx * 0.04)).toFixed(2))
+              });
+            }
+          });
+        }
+      } catch (_) {}
+    })());
+  }
+
+  // 2. Search GitHub (Paralel)
+  if (targets.some(t => t.includes('github.com'))) {
+    searchTasks.push((async () => {
+      try {
+        const ghUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(cleanQ)}&per_page=${Math.min(safeLimit, 5)}`;
+        const res = await fetch(ghUrl, {
+          headers: { 'User-Agent': 'ZOZ-Router-Grounding-Agent' },
+          signal: AbortSignal.timeout(3500)
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const items = Array.isArray(json.items) ? json.items : [];
+          items.forEach((item, idx) => {
+            results.push({
+              title: `${item.name} (${item.full_name})`,
+              url: item.html_url,
+              snippet: item.description || `Repositori GitHub open-source: ${item.full_name} (${item.stargazers_count} bintang).`,
+              published_date: item.updated_at ? item.updated_at.slice(0, 10) : '',
+              source_name: 'GitHub',
+              relevance_score: Number((0.92 - (idx * 0.04)).toFixed(2))
+            });
+          });
+        }
+      } catch (_) {}
+    })());
+  }
+
+  // 3. Search CNA Albania (Paralel)
+  if (targets.some(t => t.includes('cna.al'))) {
+    searchTasks.push((async () => {
+      try {
+        const cnaSearchUrl = `https://r.jina.ai/https://www.cna.al/search?q=${encodeURIComponent(cleanQ)}`;
+        const res = await fetch(cnaSearchUrl, {
+          headers: { 'Accept': 'text/plain' },
+          signal: AbortSignal.timeout(4000)
+        });
+        if (res.ok) {
+          const text = await res.text();
+          const linkMatches = text.match(/\[([^\]]+)\]\((https?:\/\/(?:www\.)?cna\.al\/[^\s\)]+)\)/gi) || [];
+          linkMatches.slice(0, 3).forEach((lm, idx) => {
+            const m = lm.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/i);
+            if (m && !results.some(r => r.url === m[2])) {
+              results.push({
+                title: m[1].trim(),
+                url: m[2].trim(),
+                snippet: `Berita dan laporan resmi dari CNA Albania mengenai: ${m[1].trim()}`,
+                published_date: 'Terkini',
+                source_name: 'CNA Albania',
+                relevance_score: Number((0.88 - (idx * 0.03)).toFixed(2))
+              });
+            }
+          });
+        }
+      } catch (_) {}
+    })());
+  }
+
+  // 4. Search CNN / Bloomberg / Reddit via Jina Search (Paralel)
+  const otherDomains = targets.filter(t => ['edition.cnn.com', 'cnn.com', 'bloomberg.com', 'reddit.com'].some(d => t.includes(d)));
+  if (otherDomains.length > 0) {
+    const selectedDomain = otherDomains[0].includes('cnn') ? 'edition.cnn.com' : (otherDomains[0].includes('bloomberg') ? 'bloomberg.com' : 'reddit.com');
+    searchTasks.push((async () => {
+      try {
+        const jinaSearchUrl = `https://r.jina.ai/https://${selectedDomain}/search?q=${encodeURIComponent(cleanQ)}`;
         const res = await fetch(jinaSearchUrl, {
           headers: { 'Accept': 'text/plain' },
-          signal: AbortSignal.timeout(6000)
+          signal: AbortSignal.timeout(4000)
         });
         if (res.ok) {
           const text = await res.text();
@@ -499,7 +506,12 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
           });
         }
       } catch (_) {}
-    }
+    })());
+  }
+
+  // Eksekusi seluruh pencarian secara simultan (Promise.allSettled) demi latensi ultra-rendah
+  if (searchTasks.length > 0) {
+    await Promise.allSettled(searchTasks);
   }
 
   return {
@@ -3060,21 +3072,106 @@ export default {
           });
         }
 
-        // Intersep khusus untuk URL YouTube agar mengembalikan data judul & channel resmi via oEmbed
+        // Intersep khusus untuk URL YouTube agar mengekstrak metadata mendalam, deskripsi, & transkrip via YouTube InnerTube
         const ytMatch = cleanTarget.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|v\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
         if (ytMatch && ytMatch[1]) {
+          const vidId = ytMatch[1];
           try {
-            const ytInfoRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${ytMatch[1]}`)}&format=json`, {
-              signal: AbortSignal.timeout(8000),
+            const innerClientVer = '20.10.38';
+            const innerUserAgent = `com.google.android.youtube/${innerClientVer} (Linux; U; Android 14)`;
+            const innerRes = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'User-Agent': innerUserAgent },
+              body: JSON.stringify({
+                context: { client: { clientName: 'ANDROID', clientVersion: innerClientVer } },
+                videoId: vidId
+              }),
+              signal: AbortSignal.timeout(8000)
+            });
+            if (innerRes.ok) {
+              const innerData = await innerRes.json();
+              const details = innerData.videoDetails || {};
+              let ytTitle = details.title || '';
+              let ytChannel = details.author || 'YouTube Creator';
+              let ytDesc = details.shortDescription || '';
+              let transcript = '';
+
+              const captionTracks = innerData.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+              if (Array.isArray(captionTracks) && captionTracks.length > 0) {
+                const selectedTrack = captionTracks.find(t => t.languageCode === 'id') ||
+                                      captionTracks.find(t => t.languageCode === 'en') ||
+                                      captionTracks[0];
+                if (selectedTrack && selectedTrack.baseUrl) {
+                  try {
+                    const json3Url = selectedTrack.baseUrl.includes('&fmt=')
+                      ? selectedTrack.baseUrl.replace(/&fmt=[^&]+/, '&fmt=json3')
+                      : (selectedTrack.baseUrl + '&fmt=json3');
+                    const tRes = await fetch(json3Url, {
+                      headers: { 'User-Agent': innerUserAgent },
+                      signal: AbortSignal.timeout(6000)
+                    });
+                    if (tRes.ok) {
+                      const tText = await tRes.text();
+                      try {
+                        const jd = JSON.parse(tText);
+                        if (Array.isArray(jd.events)) {
+                          const words = [];
+                          for (const ev of jd.events) {
+                            if (Array.isArray(ev.segs)) {
+                              const line = ev.segs.map(s => s.utf8 || '').join('').trim();
+                              if (line) words.push(line);
+                            }
+                          }
+                          transcript = words.join(' ').replace(/\s+/g, ' ').trim();
+                        }
+                      } catch (_) {
+                        const re = /<text[^>]*>([^<]+)<\/text>/g;
+                        let m;
+                        const words = [];
+                        while ((m = re.exec(tText)) !== null) {
+                          words.push(m[1].replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"'));
+                        }
+                        if (words.length > 0) transcript = words.join(' ').replace(/\s+/g, ' ').trim();
+                      }
+                    }
+                  } catch (_) {}
+                }
+              }
+
+              let ytBody = `[DATA TERVERIFIKASI VIDEO YOUTUBE]\n- URL: https://www.youtube.com/watch?v=${vidId}\n- Judul Video: "${ytTitle}"\n- Channel / Pembuat: "${ytChannel}"\n- Thumbnail: https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`;
+              if (ytDesc) ytBody += `\n- Deskripsi Resmi:\n"""\n${ytDesc.slice(0, 2000)}\n"""`;
+              if (transcript) {
+                ytBody += `\n- TRANSKRIP PERCAKAPAN LENGKAP REAL-TIME:\n"""\n${transcript.slice(0, 15000)}\n"""`;
+              } else {
+                ytBody += `\n- Status Transkrip: Tidak tersedia langsung pada video ini (gunakan deskripsi resmi di atas untuk merangkum).`;
+              }
+              ytBody += `\n\n### PANDUAN ASISTEN AI:\nRangkum dan jelaskan materi video secara mendalam berdasarkan informasi dan transkrip di atas. Dilarang menolak jika deskripsi atau transkrip tersedia.`;
+
+              return new Response(JSON.stringify({
+                success: true,
+                content: ytBody,
+                videoIds: [vidId],
+                charCount: ytBody.length
+              }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+              });
+            }
+          } catch (_) {}
+
+          // Fallback oEmbed jika InnerTube gagal
+          try {
+            const ytInfoRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${vidId}`)}&format=json`, {
+              signal: AbortSignal.timeout(6000),
               headers: { 'User-Agent': YT_SEARCH_UA }
             });
             if (ytInfoRes.ok) {
               const ytData = await ytInfoRes.json();
               return new Response(JSON.stringify({
                 success: true,
-                content: `[DATA TERVERIFIKASI VIDEO YOUTUBE]\n- URL: https://www.youtube.com/watch?v=${ytMatch[1]}\n- Judul Video: "${ytData.title}"\n- Nama Channel / Pembuat: "${ytData.author_name || 'Kreator YouTube'}" (${ytData.author_url || 'N/A'})\n- Thumbnail: ${ytData.thumbnail_url || `https://i.ytimg.com/vi/${ytMatch[1]}/hqdefault.jpg`}\n- Status Transkrip: Tidak tersedia dalam metadata oEmbed.\n\n### PANDUAN INTEGRITAS & ANTI-HALUSINASI UNTUK ASISTEN AI:\n1. Informasi di atas adalah metadata resmi terverifikasi real-time via YouTube oEmbed.\n2. BATASAN DATA: Data di atas HANYA memuat judul dan nama channel/kreator, dan TIDAK MEMUAT transkrip/rekaman isi suara video.\n3. DILARANG BERHALUSINASI: Dilarang mengarang, menebak, atau mereka-reka isi dialog, kesimpulan, atau alur adegan detail dari video di atas semata-mata berdasarkan judulnya.\n4. JAWABAN JUJUR: Jika pengguna meminta "Rangkum isi video ini" atau "Apa kesimpulan video ini?", jelaskan fakta judul dan kreatornya, lalu sampaikan secara transparan kepada pengguna bahwa transkrip penuh percakapan di dalam video tidak tersedia.`,
-                videoIds: [ytMatch[1]],
-                charCount: 650
+                content: `[DATA TERVERIFIKASI VIDEO YOUTUBE]\n- URL: https://www.youtube.com/watch?v=${vidId}\n- Judul Video: "${ytData.title}"\n- Nama Channel / Pembuat: "${ytData.author_name || 'Kreator YouTube'}" (${ytData.author_url || 'N/A'})\n- Thumbnail: ${ytData.thumbnail_url || `https://i.ytimg.com/vi/${vidId}/hqdefault.jpg`}\n\n### PANDUAN ASISTEN AI:\nJelaskan topik video secara informatif dan ramah berdasarkan judul dan nama kreator resmi di atas.`,
+                videoIds: [vidId],
+                charCount: 450
               }), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }

@@ -5772,8 +5772,23 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       }
     }
 
+    // Fallback: jika regex teks tool tidak menghasilkan artikel, ekstrak langsung dari array sources
+    if (articles.length === 0 && Array.isArray(sources) && sources.length > 0) {
+      sources.forEach(s => {
+        if (s && s.title) {
+          articles.push({
+            title: s.title,
+            domain: s.domain || (s.url ? extractDomainSafe(s.url) : 'Sumber Web'),
+            url: s.url || '',
+            pubDate: '',
+            content: s.snippet || s.description || `Dokumen publik dari ${s.domain || 'sumber web'}.`
+          });
+        }
+      });
+    }
+
     if (articles.length === 0) {
-      return 'Berdasarkan penelusuran mandiri terkini, belum ditemukan data spesifik yang relevan dengan topik tersebut.';
+      return 'Berdasarkan penelusuran mandiri terkini, sistem belum menemukan data spesifik dari domain yang dipilih. Anda dapat memberikan kata kunci yang lebih spesifik atau menyebutkan nama model/sumber tertentu (misal: DeepSeek, Llama, Qwen, atau arXiv) untuk penelusuran mendalam langsung.';
     }
 
     let out = 'Berdasarkan data penelusuran mandiri terkini, berikut ulasan komprehensif mengenai perkembangan dan rilis model AI terbaru:\n\n';
@@ -21010,18 +21025,35 @@ ${organicBlock}
 
     let result = null;
 
-    // 1. Try local server endpoint first if not github pages
-    if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
+    // 1. Prioritaskan server backend/tunnel universal gateway (dukungan yt-dlp & InnerTube transkrip penuh)
+    const primaryYtEndpoint = getUniversalApiUrl(`/api/youtube-info?url=${encodeURIComponent(canonicalUrl)}`);
+    try {
+      const resp = await fetch(primaryYtEndpoint, {
+        signal: AbortSignal.timeout(10000)
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.success) {
+          result = data;
+        }
+      }
+    } catch (err) {
+      console.warn('Primary YouTube info gateway fetch error, trying relative endpoint:', err?.message || err);
+    }
+
+    // 1b. Fallback ke endpoint relatif jika gateway universal berbeda
+    if (!result || !result.success) {
       try {
-        const resp = await fetch(`/api/youtube-info?url=${encodeURIComponent(canonicalUrl)}`, {
+        const respRel = await fetch(`/api/youtube-info?url=${encodeURIComponent(canonicalUrl)}`, {
           signal: AbortSignal.timeout(8000)
         });
-        if (resp.ok) {
-          result = await resp.json();
+        if (respRel.ok) {
+          const dataRel = await respRel.json();
+          if (dataRel && dataRel.success) {
+            result = dataRel;
+          }
         }
-      } catch (err) {
-        console.warn('Backend YouTube info fetch failed, trying direct oEmbed fallback:', err?.message || err);
-      }
+      } catch (_) {}
     }
 
     // 2. Fallback to direct YouTube oEmbed API
@@ -21203,7 +21235,8 @@ ${blocks}
 1. Data di atas memuat metadata resmi, deskripsi lengkap, serta transkrip percakapan suara nyata yang diekstrak secara real-time dari tautan video yang dikirim oleh pengguna.
 2. JELASKAN & RANGKUM ISI VIDEO SECARA MENDALAM: Jika pengguna bertanya "Apa ini?", "Rangkum video ini", "Apa isinya?", atau menanyakan hal terkait isi video, manfaatkan transkrip percakapan dan deskripsi resmi di atas untuk menjawab secara detail, komprehensif, dan tepat.
 3. DILARANG MENOLAK MERANGKUM jika transkrip atau deskripsi tersedia di atas. Dilarang meminta pengguna menyalin transkrip secara manual karena data transkrip dan informasinya sudah disediakan lengkap di atas untuk Anda.
-4. Jika transkrip tidak tersedia namun deskripsi ada, jelaskan ringkasan materi video berdasarkan deskripsi resmi dan metadata yang disediakan.`;
+4. Jika transkrip tidak tersedia namun deskripsi ada, jelaskan ringkasan materi video berdasarkan deskripsi resmi dan metadata yang disediakan.
+5. JIKA TRANSKRIP TIDAK TERSEDIA: Jangan pernah meminta pengguna menyalin atau menyediakan transkrip sendiri. Jelaskan dengan lugas dan informatif latar belakang topik video ini berdasarkan judul, tokoh/narasumber, subjek keilmuan, serta kanal resminya secara komprehensif.`;
 
     return {
       groundingContext,
@@ -25682,7 +25715,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query, sources, max_results, language }),
-            signal: makeToolSignal(10000)
+            signal: makeToolSignal(15000)
           });
           if (res.ok) searchRes = await res.json();
           else {
@@ -25731,7 +25764,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, extract_mode }),
-            signal: makeToolSignal(10000)
+            signal: makeToolSignal(15000)
           });
           if (res.ok) fetchRes = await res.json();
           else {
@@ -25779,7 +25812,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query, urls, summary_style, include_citations }),
-            signal: makeToolSignal(12000)
+            signal: makeToolSignal(18000)
           });
           if (res.ok) sumRes = await res.json();
           else {
