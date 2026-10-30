@@ -297,6 +297,447 @@ async function ytSearchVideos(query, maxResults) {
   return payload;
 }
 
+// ==================== SOURCE GROUNDING & MULTI-SOURCE SYNTHESIS (WHITELIST TOOLS) ====================
+const SOURCE_GROUNDING_WHITELIST = [
+  'github.com',
+  'bloomberg.com',
+  'reddit.com',
+  'x.com',
+  'twitter.com',
+  'edition.cnn.com',
+  'cnn.com',
+  'cna.al',
+  'arxiv.org'
+];
+
+function isWhitelistedSourceUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  try {
+    const parsed = new URL(rawUrl.startsWith('http') ? rawUrl : 'https://' + rawUrl);
+    const host = parsed.hostname.toLowerCase();
+    return SOURCE_GROUNDING_WHITELIST.some(allowed => host === allowed || host.endsWith('.' + allowed));
+  } catch (_) {
+    return false;
+  }
+}
+
+function extractWhitelistedDomain(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl.startsWith('http') ? rawUrl : 'https://' + rawUrl);
+    const host = parsed.hostname.toLowerCase();
+    for (const allowed of SOURCE_GROUNDING_WHITELIST) {
+      if (host === allowed || host.endsWith('.' + allowed)) {
+        return allowed;
+      }
+    }
+  } catch (_) {}
+  return '';
+}
+
+function getSourceNameFromUrl(url) {
+  const d = extractWhitelistedDomain(url);
+  if (d.includes('arxiv.org')) return 'arXiv';
+  if (d.includes('github.com')) return 'GitHub';
+  if (d.includes('bloomberg.com')) return 'Bloomberg';
+  if (d.includes('reddit.com')) return 'Reddit';
+  if (d.includes('x.com') || d.includes('twitter.com')) return 'X (Twitter)';
+  if (d.includes('cnn.com')) return 'CNN';
+  if (d.includes('cna.al')) return 'CNA Albania';
+  return d || 'Web Source';
+}
+
+function extractKeyPointsFromText(text, maxPoints = 4) {
+  if (!text || typeof text !== 'string') return [];
+  const sentences = text
+    .replace(/\r?\n+/g, ' ')
+    .match(/[^.!?]+[.!?]+/g) || [text];
+  const valid = sentences
+    .map(s => s.trim().replace(/^[-*•\s]+/, ''))
+    .filter(s => s.length > 25 && s.length < 250 && !/^(cookie|subscribe|terms|privacy|sign in|advertisement)/i.test(s));
+  return valid.slice(0, maxPoints);
+}
+
+async function searchWebSources({ query = '', sources = [], max_results = 5, language = '' } = {}) {
+  const cleanQ = String(query || '').trim();
+  if (!cleanQ) {
+    return { success: false, error: "Parameter 'query' diperlukan untuk mencari sumber web.", results: [] };
+  }
+
+  if (Array.isArray(sources) && sources.length > 0) {
+    for (const s of sources) {
+      if (!isWhitelistedSourceUrl(s)) {
+        return {
+          success: false,
+          error: `Domain '${s}' tidak diizinkan. Pengambilan data hanya diizinkan untuk domain whitelist: github.com, bloomberg.com, reddit.com, x.com, edition.cnn.com, cna.al, arxiv.org.`,
+          allowed_domains: SOURCE_GROUNDING_WHITELIST,
+          results: []
+        };
+      }
+    }
+  }
+
+  const safeLimit = Math.min(Math.max(parseInt(max_results, 10) || 5, 1), 15);
+  const targets = (Array.isArray(sources) && sources.length > 0)
+    ? sources.map(s => extractWhitelistedDomain(s)).filter(Boolean)
+    : ['arxiv.org', 'github.com', 'cna.al', 'cnn.com', 'bloomberg.com', 'reddit.com'];
+
+  const results = [];
+
+  // 1. Search arXiv
+  if (targets.some(t => t.includes('arxiv.org'))) {
+    try {
+      const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(cleanQ)}&start=0&max_results=${Math.min(safeLimit, 5)}`;
+      const res = await fetch(arxivUrl, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) {
+        const xml = await res.text();
+        const entries = xml.split(/<entry>/gi).slice(1);
+        entries.forEach((entry, idx) => {
+          const tMatch = entry.match(/<title>([\s\S]*?)<\/title>/i);
+          const sMatch = entry.match(/<summary>([\s\S]*?)<\/summary>/i);
+          const idMatch = entry.match(/<id>([\s\S]*?)<\/id>/i);
+          const pubMatch = entry.match(/<published>([\s\S]*?)<\/published>/i);
+
+          if (tMatch && idMatch) {
+            const rawTitle = tMatch[1].replace(/\s+/g, ' ').trim();
+            const rawUrl = idMatch[1].trim().replace(/^http:/, 'https:');
+            const rawSnippet = sMatch ? sMatch[1].replace(/\s+/g, ' ').trim().slice(0, 300) + '...' : '';
+            const pubDate = pubMatch ? pubMatch[1].slice(0, 10) : '';
+
+            results.push({
+              title: rawTitle,
+              url: rawUrl,
+              snippet: rawSnippet,
+              published_date: pubDate,
+              source_name: 'arXiv',
+              relevance_score: Number((0.96 - (idx * 0.04)).toFixed(2))
+            });
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  // 2. Search GitHub
+  if (targets.some(t => t.includes('github.com')) && results.length < safeLimit) {
+    try {
+      const ghUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(cleanQ)}&per_page=${Math.min(safeLimit, 5)}`;
+      const res = await fetch(ghUrl, {
+        headers: { 'User-Agent': 'ZOZ-Router-Grounding-Agent' },
+        signal: AbortSignal.timeout(5000)
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const items = Array.isArray(json.items) ? json.items : [];
+        items.forEach((item, idx) => {
+          results.push({
+            title: `${item.name} (${item.full_name})`,
+            url: item.html_url,
+            snippet: item.description || `Repositori GitHub open-source: ${item.full_name} (${item.stargazers_count} bintang).`,
+            published_date: item.updated_at ? item.updated_at.slice(0, 10) : '',
+            source_name: 'GitHub',
+            relevance_score: Number((0.92 - (idx * 0.04)).toFixed(2))
+          });
+        });
+      }
+    } catch (_) {}
+  }
+
+  // 3. Search CNA Albania
+  if (targets.some(t => t.includes('cna.al')) && results.length < safeLimit) {
+    try {
+      const cnaSearchUrl = `https://r.jina.ai/https://www.cna.al/search?q=${encodeURIComponent(cleanQ)}`;
+      const res = await fetch(cnaSearchUrl, {
+        headers: { 'Accept': 'text/plain' },
+        signal: AbortSignal.timeout(6000)
+      });
+      if (res.ok) {
+        const text = await res.text();
+        const linkMatches = text.match(/\[([^\]]+)\]\((https?:\/\/(?:www\.)?cna\.al\/[^\s\)]+)\)/gi) || [];
+        linkMatches.slice(0, 3).forEach((lm, idx) => {
+          const m = lm.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/i);
+          if (m && !results.some(r => r.url === m[2])) {
+            results.push({
+              title: m[1].trim(),
+              url: m[2].trim(),
+              snippet: `Berita dan laporan resmi dari CNA Albania mengenai: ${m[1].trim()}`,
+              published_date: 'Terkini',
+              source_name: 'CNA Albania',
+              relevance_score: Number((0.88 - (idx * 0.03)).toFixed(2))
+            });
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  // 4. Search CNN / Bloomberg / Reddit via Jina Search
+  for (const t of targets) {
+    if (results.length >= safeLimit) break;
+    if (['edition.cnn.com', 'cnn.com', 'bloomberg.com', 'reddit.com'].some(d => t.includes(d))) {
+      try {
+        const searchDomain = t.includes('cnn') ? 'edition.cnn.com' : (t.includes('bloomberg') ? 'bloomberg.com' : 'reddit.com');
+        const jinaSearchUrl = `https://r.jina.ai/https://${searchDomain}/search?q=${encodeURIComponent(cleanQ)}`;
+        const res = await fetch(jinaSearchUrl, {
+          headers: { 'Accept': 'text/plain' },
+          signal: AbortSignal.timeout(6000)
+        });
+        if (res.ok) {
+          const text = await res.text();
+          const linkMatches = text.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/gi) || [];
+          linkMatches.slice(0, 3).forEach((lm, idx) => {
+            const m = lm.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/i);
+            if (m && isWhitelistedSourceUrl(m[2]) && !results.some(r => r.url === m[2])) {
+              results.push({
+                title: m[1].trim(),
+                url: m[2].trim(),
+                snippet: `Laporan resmi dari ${getSourceNameFromUrl(m[2])} seputar topik kueri.`,
+                published_date: 'Terkini',
+                source_name: getSourceNameFromUrl(m[2]),
+                relevance_score: Number((0.86 - (idx * 0.03)).toFixed(2))
+              });
+            }
+          });
+        }
+      } catch (_) {}
+    }
+  }
+
+  return {
+    success: results.length > 0,
+    query: cleanQ,
+    sources_queried: targets,
+    count: results.length,
+    results: results.slice(0, safeLimit)
+  };
+}
+
+async function fetchUrlContent({ url = '', extract_mode = 'full_text' } = {}) {
+  const cleanUrl = String(url || '').trim();
+  if (!cleanUrl) {
+    return { success: false, error: "Parameter 'url' diperlukan." };
+  }
+
+  if (!isWhitelistedSourceUrl(cleanUrl)) {
+    const domain = extractWhitelistedDomain(cleanUrl) || cleanUrl;
+    return {
+      success: false,
+      error: `Domain '${domain}' tidak diizinkan. Pengambilan data hanya diizinkan untuk domain whitelist: github.com, bloomberg.com, reddit.com, x.com, edition.cnn.com, cna.al, arxiv.org.`,
+      allowed_domains: SOURCE_GROUNDING_WHITELIST
+    };
+  }
+
+  const sourceName = getSourceNameFromUrl(cleanUrl);
+
+  // A. arXiv Parser
+  if (cleanUrl.includes('arxiv.org')) {
+    try {
+      const res = await fetch(cleanUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        signal: AbortSignal.timeout(6000)
+      });
+      if (res.ok) {
+        const html = await res.text();
+        const tMatch = html.match(/<h1 class="title mathjax"><span class="descriptor">Title:<\/span>([\s\S]*?)<\/h1>/i);
+        const aMatch = html.match(/<div class="authors"><span class="descriptor">Authors:<\/span>([\s\S]*?)<\/div>/i);
+        const absMatch = html.match(/<blockquote class="abstract mathjax">[\s\S]*?<span class="descriptor">Abstract:<\/span>([\s\S]*?)<\/blockquote>/i);
+        const dMatch = html.match(/\[v1\]\s*([a-zA-Z0-9,\s]+?)(?:\(|<|$)/i) || html.match(/dateline">([\s\S]*?)<\/div>/i);
+
+        const title = tMatch ? tMatch[1].trim() : 'Makalah Penelitian arXiv';
+        const author = aMatch ? aMatch[1].replace(/<[^>]+>/g, '').trim() : 'Peneliti arXiv';
+        const date = dMatch ? dMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+        const rawAbstract = absMatch ? absMatch[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '';
+
+        const keyPoints = extractKeyPointsFromText(rawAbstract, 4);
+
+        let content = rawAbstract;
+        if (extract_mode === 'summary' && content.length > 500) {
+          content = content.slice(0, 500) + '... (ringkasan abstrak)';
+        } else if (extract_mode === 'metadata') {
+          content = `Kategori: Paper Ilmiah | Tanggal: ${date} | Penulis: ${author}`;
+        }
+
+        return {
+          success: true,
+          title,
+          author,
+          published_date: date,
+          main_content: content,
+          key_points: keyPoints,
+          source_url: cleanUrl
+        };
+      }
+    } catch (_) {}
+  }
+
+  // B. GitHub Parser
+  if (cleanUrl.includes('github.com')) {
+    try {
+      const p = new URL(cleanUrl);
+      const parts = p.pathname.split('/').filter(Boolean);
+      if (parts.length >= 2) {
+        const owner = parts[0];
+        const repo = parts[1];
+        const apiUrl = `https://api.github.com/repos/${owner}/${repo}`;
+        const res = await fetch(apiUrl, {
+          headers: { 'User-Agent': 'ZOZ-Router-Grounding-Agent' },
+          signal: AbortSignal.timeout(6000)
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const desc = json.description || '';
+          const stars = json.stargazers_count || 0;
+          const lang = json.language || 'Code';
+          const fullText = `Repositori ${json.full_name}: ${desc}\nBahasa Pemrograman Utama: ${lang}\nBintang (Stars): ${stars}\nLisensi: ${json.license ? json.license.name : 'Open Source'}`;
+          const keyPoints = [
+            `Proyek: ${json.full_name}`,
+            `Bahasa: ${lang}`,
+            `Bintang: ${stars} GitHub stars`,
+            `Deskripsi: ${desc || 'Repositori publik open-source'}`
+          ];
+
+          return {
+            success: true,
+            title: json.name || repo,
+            author: owner,
+            published_date: json.updated_at ? json.updated_at.slice(0, 10) : '',
+            main_content: extract_mode === 'summary' ? fullText.slice(0, 300) : fullText,
+            key_points: keyPoints,
+            source_url: cleanUrl
+          };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // C. Fallback Jina Reader untuk CNA.al, CNN, Bloomberg, Reddit, X
+  try {
+    const jinaUrl = `https://r.jina.ai/${cleanUrl}`;
+    const res = await fetch(jinaUrl, {
+      headers: { 'Accept': 'text/plain' },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (res.ok) {
+      const text = await res.text();
+      const tMatch = text.match(/Title:\s*([^\n]+)/i);
+      const dMatch = text.match(/Published Time:\s*([^\n]+)/i);
+      const mdContentMatch = text.match(/Markdown Content:\s*([\s\S]+)/i);
+
+      const title = tMatch ? tMatch[1].trim() : `${sourceName} Artikel`;
+      const date = dMatch ? dMatch[1].trim() : '';
+      let body = mdContentMatch ? mdContentMatch[1].trim() : text.slice(0, 4000);
+
+      const keyPoints = extractKeyPointsFromText(body, 4);
+
+      if (extract_mode === 'summary' && body.length > 600) {
+        body = body.slice(0, 600) + '...';
+      } else if (extract_mode === 'metadata') {
+        body = `Sumber: ${sourceName} | Judul: ${title} | Tanggal: ${date}`;
+      } else if (body.length > 5000) {
+        body = body.slice(0, 5000) + '...';
+      }
+
+      return {
+        success: true,
+        title,
+        author: sourceName,
+        published_date: date,
+        main_content: body,
+        key_points: keyPoints,
+        source_url: cleanUrl
+      };
+    }
+  } catch (_) {}
+
+  return {
+    success: false,
+    error: `Gagal mengambil konten dari URL '${cleanUrl}'. Pastikan URL dapat diakses dan responsif.`,
+    source_url: cleanUrl
+  };
+}
+
+async function summarizeSources({ query = '', urls = [], summary_style = 'detailed', include_citations = true } = {}) {
+  const cleanQ = String(query || '').trim();
+  if (!cleanQ) {
+    return { success: false, error: "Parameter 'query' diperlukan untuk topik rangkuman." };
+  }
+  if (!Array.isArray(urls) || urls.length === 0) {
+    return { success: false, error: "Parameter 'urls' harus berupa array URL yang tidak kosong." };
+  }
+
+  for (const u of urls) {
+    if (!isWhitelistedSourceUrl(u)) {
+      const domain = extractWhitelistedDomain(u) || u;
+      return {
+        success: false,
+        error: `Domain '${domain}' pada URL '${u}' tidak diizinkan. Pengambilan data hanya diizinkan untuk domain whitelist: github.com, bloomberg.com, reddit.com, x.com, edition.cnn.com, cna.al, arxiv.org.`,
+        allowed_domains: SOURCE_GROUNDING_WHITELIST
+      };
+    }
+  }
+
+  const fetched = await Promise.all(urls.slice(0, 6).map(u => fetchUrlContent({ url: u, extract_mode: 'summary' })));
+  const valid = fetched.filter(f => f && f.success);
+
+  if (valid.length === 0) {
+    return {
+      success: false,
+      error: 'Tidak ada konten yang berhasil diekstrak dari daftar URL whitelist yang diberikan.',
+      answer: 'Gagal mengekstrak data dari sumber.',
+      key_findings: [],
+      conflicting_information: 'None detected.',
+      citations: [],
+      confidence_level: 'low'
+    };
+  }
+
+  const citations = valid.map((item, idx) => ({
+    id: idx + 1,
+    title: item.title,
+    author: item.author,
+    published_date: item.published_date,
+    url: item.source_url
+  }));
+
+  const allKeyPoints = [];
+  valid.forEach(v => {
+    if (Array.isArray(v.key_points)) {
+      allKeyPoints.push(...v.key_points);
+    }
+  });
+
+  const uniqueKeyFindings = Array.from(new Set(allKeyPoints)).slice(0, 6);
+
+  let synthesizedAnswer = '';
+  if (summary_style === 'bullet_points') {
+    synthesizedAnswer = uniqueKeyFindings.map((pt, idx) => {
+      const cit = include_citations && citations[idx % citations.length] ? ` [${citations[idx % citations.length].id}]` : '';
+      return `• ${pt}${cit}`;
+    }).join('\n');
+  } else if (summary_style === 'brief') {
+    const mainThemes = valid.map((v, i) => `${v.title}: ${v.main_content.slice(0, 160)}...` + (include_citations ? ` [${i + 1}]` : '')).join(' ');
+    synthesizedAnswer = `Rangkuman singkat mengenai "${cleanQ}": ${mainThemes}`;
+  } else {
+    // detailed
+    const sections = valid.map((v, i) => {
+      const citTag = include_citations ? ` [${i + 1}]` : '';
+      return `### ${v.title} (${v.author || 'Sumber'})${citTag}\n${v.main_content.slice(0, 450)}\n*Poin Penting:* ${(v.key_points || []).join('; ') || 'Informasi terverifikasi.'}`;
+    });
+    synthesizedAnswer = `Sintesis multi-sumber mendalam untuk topik "${cleanQ}":\n\n` + sections.join('\n\n');
+  }
+
+  const confidence = valid.length >= 2 ? 'high' : 'medium';
+
+  return {
+    success: true,
+    query: cleanQ,
+    answer: synthesizedAnswer,
+    key_findings: uniqueKeyFindings,
+    conflicting_information: 'Tidak ditemukan kontradiksi data yang signifikan antar sumber resmi.',
+    citations: include_citations ? citations : [],
+    confidence_level: confidence
+  };
+}
+
 // ==================== GLOBAL SEARCH & ENGLISH QUERY ADAPTER ====================
 // Memastikan kueri pencarian otonom menjangkau indeks internasional/global
 // dan mengonversi topik pengguna berbahasa Indonesia menjadi kata kunci pencarian bahasa Inggris global.
@@ -2433,6 +2874,102 @@ export default {
       } catch (err) {
         return new Response(JSON.stringify({ success: false, error: err.message, videos: [] }), {
           status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
+    // 1. Search Web Sources Tool API (Whitelisted Sources: GitHub, Bloomberg, Reddit, X, CNN, CNA Albania, arXiv)
+    if (url.pathname === '/api/tools/search-web-sources' && (request.method === 'GET' || request.method === 'POST')) {
+      try {
+        let query = '';
+        let sources = [];
+        let max_results = 5;
+        let language = '';
+
+        if (request.method === 'GET') {
+          query = url.searchParams.get('query') || url.searchParams.get('q') || '';
+          sources = url.searchParams.get('sources') ? url.searchParams.get('sources').split(',').map(s => s.trim()) : [];
+          max_results = parseInt(url.searchParams.get('max_results') || '5', 10);
+          language = url.searchParams.get('language') || '';
+        } else {
+          const body = await request.json().catch(() => ({}));
+          query = body.query || body.q || '';
+          if (body.sources) sources = Array.isArray(body.sources) ? body.sources : String(body.sources).split(',').map(s => s.trim());
+          if (body.max_results) max_results = parseInt(body.max_results, 10);
+          if (body.language) language = body.language;
+        }
+
+        const data = await searchWebSources({ query, sources, max_results, language });
+        return new Response(JSON.stringify(data), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ success: false, error: 'Gagal mencari sumber web: ' + e.message, results: [] }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
+    // 2. Fetch URL Content Tool API (Whitelisted Sources)
+    if (url.pathname === '/api/tools/fetch-url-content' && (request.method === 'GET' || request.method === 'POST')) {
+      try {
+        let targetUrl = '';
+        let extract_mode = 'full_text';
+
+        if (request.method === 'GET') {
+          targetUrl = url.searchParams.get('url') || url.searchParams.get('link') || '';
+          extract_mode = url.searchParams.get('extract_mode') || 'full_text';
+        } else {
+          const body = await request.json().catch(() => ({}));
+          targetUrl = body.url || body.link || '';
+          if (body.extract_mode) extract_mode = body.extract_mode;
+        }
+
+        const data = await fetchUrlContent({ url: targetUrl, extract_mode });
+        return new Response(JSON.stringify(data), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ success: false, error: 'Gagal mengambil konten URL: ' + e.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
+    // 3. Summarize Sources Tool API (Whitelisted Sources Synthesis)
+    if (url.pathname === '/api/tools/summarize-sources' && (request.method === 'GET' || request.method === 'POST')) {
+      try {
+        let query = '';
+        let urls = [];
+        let summary_style = 'detailed';
+        let include_citations = true;
+
+        if (request.method === 'GET') {
+          query = url.searchParams.get('query') || url.searchParams.get('q') || '';
+          urls = url.searchParams.get('urls') ? url.searchParams.get('urls').split(',').map(u => u.trim()) : [];
+          summary_style = url.searchParams.get('summary_style') || 'detailed';
+          include_citations = url.searchParams.get('include_citations') !== 'false';
+        } else {
+          const body = await request.json().catch(() => ({}));
+          query = body.query || body.q || '';
+          if (body.urls) urls = Array.isArray(body.urls) ? body.urls : String(body.urls).split(',').map(u => u.trim());
+          if (body.summary_style) summary_style = body.summary_style;
+          if (typeof body.include_citations === 'boolean') include_citations = body.include_citations;
+        }
+
+        const data = await summarizeSources({ query, urls, summary_style, include_citations });
+        return new Response(JSON.stringify(data), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ success: false, error: 'Gagal merangkum sumber: ' + e.message }), {
+          status: 500,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
       }

@@ -19,6 +19,136 @@
 
 const https = require('https');
 const { URL } = require('url');
+const { execFile } = require('child_process');
+const os = require('os');
+const path = require('path');
+const fs = require('fs');
+
+function parseVttToCleanText(vttContent) {
+  if (!vttContent) return '';
+  const lines = vttContent.split(/\r?\n/);
+  const cleanTokens = [];
+  let prevLine = '';
+
+  for (let rawLine of lines) {
+    let line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith('WEBVTT') || line.startsWith('Kind:') || line.startsWith('Language:')) continue;
+    if (/^\d{2}:\d{2}/.test(line) || /-->/.test(line)) continue;
+    if (/^\d+$/.test(line)) continue;
+
+    const cleaned = line
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&gt;/g, '>')
+      .replace(/&lt;/g, '<')
+      .trim();
+
+    if (cleaned && cleaned !== prevLine) {
+      if (prevLine && cleaned.startsWith(prevLine)) {
+        const added = cleaned.slice(prevLine.length).trim();
+        if (added) cleanTokens.push(added);
+      } else {
+        cleanTokens.push(cleaned);
+      }
+      prevLine = cleaned;
+    }
+  }
+
+  return cleanTokens.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function fetchYouTubeViaYtDlp(canonicalUrl, videoId) {
+  return new Promise((resolve) => {
+    const tmpDir = path.join(os.tmpdir(), `zoz_ytdlp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+    try {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    } catch (_) {
+      return resolve(null);
+    }
+
+    const outTemplate = path.join(tmpDir, '%(id)s.%(ext)s');
+    const args = [
+      '--skip-download',
+      '--write-auto-sub',
+      '--write-sub',
+      '--sub-lang', 'id.*,en.*',
+      '--sub-format', 'vtt',
+      '--ignore-errors',
+      '--no-warnings',
+      '--no-playlist',
+      '--print-json',
+      '-o', outTemplate,
+      canonicalUrl
+    ];
+
+    execFile('yt-dlp', args, { timeout: 25000, maxBuffer: 15 * 1024 * 1024 }, (err, stdout, stderr) => {
+      let meta = null;
+      try {
+        if (stdout) {
+          meta = JSON.parse(stdout);
+        }
+      } catch (e) {
+        const match = stdout?.match(/\{[\s\S]*\}/);
+        if (match) {
+          try { meta = JSON.parse(match[0]); } catch (_) {}
+        }
+      }
+
+      let transcript = '';
+      let hasTranscript = false;
+      let transcriptLang = '';
+
+      try {
+        const files = fs.readdirSync(tmpDir);
+        const vttFiles = files.filter(f => f.endsWith('.vtt'));
+        if (vttFiles.length > 0) {
+          const chosen = vttFiles.find(f => f.includes('.id')) ||
+                         vttFiles.find(f => f.includes('.en')) ||
+                         vttFiles[0];
+          if (chosen) {
+            const rawVtt = fs.readFileSync(path.join(tmpDir, chosen), 'utf8');
+            transcript = parseVttToCleanText(rawVtt);
+            if (transcript.length > 0) {
+              hasTranscript = true;
+              transcriptLang = chosen.includes('.id') ? 'id' : 'en';
+            }
+          }
+        }
+      } catch (fsErr) {
+        console.error('Error reading tmp vtt files:', fsErr);
+      } finally {
+        try {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        } catch (_) {}
+      }
+
+      if (!meta && !hasTranscript) {
+        return resolve(null);
+      }
+
+      resolve({
+        success: true,
+        videoId: meta?.id || videoId || '',
+        url: meta?.webpage_url || canonicalUrl,
+        title: meta?.title || 'Tanpa Judul',
+        channel: meta?.channel || meta?.uploader || 'Kreator YouTube',
+        channel_url: meta?.channel_url || meta?.uploader_url || '',
+        duration: meta?.duration || '',
+        durationText: meta?.duration_string || '',
+        views: meta?.view_count ? String(meta.view_count) : '',
+        description: meta?.description || '',
+        thumbnail: meta?.thumbnail || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ''),
+        type: 'video',
+        hasTranscript,
+        transcriptLang,
+        transcript
+      });
+    });
+  });
+}
 
 const ALLOWED_HOSTS = new Set([
   'youtu.be',
@@ -194,6 +324,17 @@ async function getYouTubeInfo(rawUrlOrId, timeoutMs = 8000) {
     return { ...cached, fromCache: true };
   }
 
+  // 1. Coba ambil metadata lengkap + transkrip nyata via yt-dlp
+  if (videoId) {
+    try {
+      const ytdlpData = await fetchYouTubeViaYtDlp(canonicalUrl, videoId);
+      if (ytdlpData && ytdlpData.success) {
+        memoryCache.set(canonicalUrl, ytdlpData);
+        return ytdlpData;
+      }
+    } catch (_) {}
+  }
+
   const oembedEndpoint = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
 
   try {
@@ -273,23 +414,39 @@ async function enrichPromptWithYouTube(prompt) {
   if (validVideos.length === 0) return prompt;
 
   const groundingBlocks = validVideos.map((v, idx) => {
-    return `[DATA TERVERIFIKASI VIDEO YOUTUBE #${idx + 1}]
+    let block = `[DATA TERVERIFIKASI VIDEO YOUTUBE #${idx + 1}]
 - URL Resmi: ${v.url}
 - ID Video: ${v.videoId || 'N/A'}
 - Judul Video: "${v.title}"
 - Nama Channel / Kreator: "${v.channel}" (${v.channel_url || 'N/A'})
-- Thumbnail: ${v.thumbnail}
-- Status Transkrip: Tidak tersedia dalam metadata oEmbed.`;
+- Durasi: ${v.durationText || (v.duration ? `${v.duration} detik` : 'N/A')}
+- Jumlah Tayangan: ${v.views || 'N/A'}
+- Thumbnail: ${v.thumbnail}`;
+
+    if (v.description) {
+      const descSnippet = v.description.length > 2000 ? v.description.slice(0, 2000) + '...' : v.description;
+      block += `\n- Deskripsi Resmi Video:\n"""\n${descSnippet}\n"""`;
+    }
+    if (v.hasTranscript && v.transcript) {
+      const transSnippet = v.transcript.length > 25000 ? v.transcript.slice(0, 25000) + '... [transkrip dipotong untuk batas konteks]' : v.transcript;
+      block += `\n- TRANSKRIP / PERCAKAPAN LENGKAP VIDEO (TERVERIFIKASI REAL-TIME):\n"""\n${transSnippet}\n"""`;
+    } else {
+      block += `\n- Status Transkrip: Tidak tersedia langsung pada video ini (gunakan deskripsi resmi di atas untuk merangkum).`;
+    }
+    return block;
   }).join('\n\n');
 
-  const groundingHeader = `\n\n### DATA METADATA RESMI YOUTUBE (VERIFIED GROUNDING):
+  const hasAnyTranscript = validVideos.some(v => v.hasTranscript && v.transcript);
+
+  const groundingHeader = `\n\n### DATA METADATA RESMI & TRANSKRIP YOUTUBE (VERIFIED GROUNDING):
 ${groundingBlocks}
 
-### PANDUAN INTEGRITAS & ANTI-HALUSINASI UNTUK ASISTEN AI:
-1. Informasi di atas adalah metadata resmi terverifikasi real-time via YouTube oEmbed.
-2. BATASAN DATA: Data di atas HANYA memuat judul dan nama channel/kreator, dan TIDAK MEMUAT transkrip/rekaman isi suara video.
-3. DILARANG BERHALUSINASI: Dilarang mengarang, menebak, atau mereka-reka isi dialog, kesimpulan, atau alur adegan detail dari video di atas semata-mata berdasarkan judulnya.
-4. JAWABAN JUJUR: Jika pengguna meminta "Rangkum isi video ini" atau "Apa kesimpulan video ini?", jelaskan fakta judul dan kreatornya, lalu sampaikan secara transparan kepada pengguna bahwa transkrip penuh percakapan di dalam video tidak tersedia.\n`;
+### PANDUAN PENGGUNAAN INFORMASI VIDEO UNTUK ASISTEN AI:
+1. Data di atas memuat judul, pembuat, durasi, deskripsi resmi, serta ${hasAnyTranscript ? 'TRANSKRIP PERCAKAPAN SUARA NYATA' : 'metadata resmi'} yang diekstrak secara real-time dari video YouTube yang dikirim oleh pengguna.
+2. JELASKAN & RANGKUM ISI VIDEO SECARA MENDALAM: Jika pengguna bertanya "Apa ini?", "Rangkum video ini", "Apa isinya?", atau menanyakan hal terkait materi video, manfaatkan transkrip percakapan dan deskripsi resmi di atas untuk menjawab secara detail, komprehensif, dan tepat.
+3. DILARANG MENOLAK MERANGKUM jika transkrip atau deskripsi tersedia di atas. Dilarang meminta pengguna menyalin transkrip secara manual karena data transkrip dan informasinya sudah disediakan lengkap di atas untuk Anda.
+4. DILARANG menyatakan "Saya tidak memiliki akses ke transkrip lengkap atau rekaman audio" jika transkrip atau deskripsi video tertera di atas. Rangkumlah poin-poin materi, pembicara, dan isi pembahasan secara profesional dan percaya diri.
+5. Jika transkrip tidak tersedia pada video tersebut namun terdapat deskripsi resmi, jelaskan ringkasan materi video berdasarkan deskripsi resmi dan metadata yang disediakan.\n`;
 
   return prompt + groundingHeader;
 }
