@@ -24358,13 +24358,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       type: 'function',
       function: {
         name: 'find_related_videos',
-        description: 'Mencari atau merekomendasikan video lain yang relevan/terkait dari tautan video sebelumnya yang telah dibahas atau berdasarkan topik/kata kunci yang diminta pengguna (mendukung YouTube, XVideos, dan platform video lain). Tool ini mengembalikan daftar video nyata terverifikasi lengkap dengan URL asli yang langsung dapat diputar di percakapan (In-Chat Player). Panggil tool ini KAPAN SAJA pengguna meminta rekomendasi video, video lanjutan, video serupa, atau video terkait.',
+        description: 'Mencari atau merekomendasikan video lain yang relevan/terkait dari tautan video sebelumnya yang telah dibahas atau berdasarkan topik/kata kunci yang diminta pengguna di seluruh penjuru video di bumi/internet (mendukung YouTube, Dailymotion, Vimeo, TikTok, Bilibili, XVideos, dan video web lainnya). Tool ini mengembalikan daftar video nyata terverifikasi lengkap dengan URL asli yang langsung dapat diputar di percakapan (In-Chat Player). Panggil tool ini KAPAN SAJA pengguna meminta rekomendasi video, video lanjutan, video serupa, atau video terkait tanpa perlu menu UI khusus.',
         parameters: {
           type: 'object',
           properties: {
             video_url: {
               type: 'string',
-              description: 'Tautan URL video sebelumnya yang ingin dicari rekomendasi atau lanjutannya (contoh: "https://youtu.be/c50HtBe632Y" atau tautan video di obrolan sebelumnya). Kosongkan jika mencari video baru berdasarkan topik query.'
+              description: 'Tautan URL video sebelumnya yang ingin dicari rekomendasi atau lanjutannya (contoh: "https://youtu.be/c50HtBe632Y", tautan Dailymotion, XVideos, atau tautan video di obrolan sebelumnya). Kosongkan jika mencari video baru berdasarkan topik query.'
             },
             query: {
               type: 'string',
@@ -24379,9 +24379,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             },
             platform: {
               type: 'string',
-              enum: ['auto', 'youtube', 'xvideos'],
+              enum: ['auto', 'all', 'youtube', 'dailymotion', 'vimeo', 'xvideos', 'web'],
               default: 'auto',
-              description: 'Platform video target. Gunakan "auto" untuk otomatis mengikuti platform dari tautan video sebelumnya.'
+              description: 'Platform video target. Gunakan "auto" untuk otomatis mengikuti platform dari tautan video sebelumnya atau "all" untuk mencari lintas platform di bumi.'
             }
           }
         }
@@ -25892,7 +25892,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
   function getAutonomousSystemDirective() {
     return `\n[TOOL WHATSAPP PRIVACY GATE TERSEDIA]: Jika pengguna meminta untuk membaca, memeriksa, atau merangkum chat/obrolan WhatsApp (WA), panggil tool \`summarize_whatsapp_chat({"target_number_or_name": "<nama/nomor jika disebut>", "focus_topic": "<fokus rangkuman>"})\`. Sistem akan menampilkan Pop-up Persetujuan (Consent Gate) kepada pengguna untuk memilih nomor mana saja yang diizinkan sebelum data chat dibaca.
-[TOOL PENCARIAN & REKOMENDASI VIDEO TERSEDIA]: Jika pengguna meminta untuk mencari, merekomendasikan, atau menemukan video lain yang terkait/mirip dengan video yang baru saja dibahas atau berdasarkan topik tertentu, Anda DAPAT dan WAJIB memanggil tool \`find_related_videos({"video_url": "<URL video sebelumnya jika ada>", "query": "<kata kunci/topik video yang dicari>", "limit": 5})\`. Tool ini akan mengembalikan daftar video nyata terverifikasi (YouTube/XVideos/dll.) lengkap dengan tautan asli yang langsung dapat ditonton di percakapan pengguna.`;
+[TOOL PENCARIAN & REKOMENDASI VIDEO TERSEDIA (SELURUH VIDEO DI BUMI)]: Jika pengguna meminta untuk mencari, merekomendasikan, atau menemukan video lain yang terkait/mirip/lanjutan dari video yang baru saja dibahas atau berdasarkan topik tertentu (YouTube, Dailymotion, Vimeo, TikTok, Bilibili, XVideos, dan tautan video mana pun di bumi), Anda DAPAT dan WAJIB memanggil tool \`find_related_videos({"video_url": "<URL video sebelumnya jika ada>", "query": "<kata kunci/topik video yang dicari>", "platform": "auto", "limit": 5})\`. Tool ini beroperasi secara otonom kapan saja tanpa memerlukan menu UI khusus dan mengembalikan daftar video nyata terverifikasi lengkap dengan tautan asli yang langsung dapat ditonton di percakapan (In-Chat Video Player).`;
   }
   const AUTONOMOUS_SYSTEM_DIRECTIVE = '';
 
@@ -26534,9 +26534,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           systemContent = `${systemContent}\n\n${endocrineContext}`;
         }
       }
-      if (canRunAutonomous) {
-        systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
-      }
+      // Direktif tool pencarian/rekomendasi video & utilitas otonom selalu disuntikkan tanpa memerlukan menu UI
+      systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
       // Tool video YouTube hanya diumumkan bila toggle "Cari Video YouTube" aktif
       // (agar model tidak memanggil tool yang tidak dikirim).
 
@@ -27393,7 +27392,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       fullText = cleanFinalText;
 
       if (!fullText) {
-        if (!canRunAutonomousSearch && (extractInlineToolCalls(rawTextBeforeScrub).length > 0 || currentRoundNativeCalls.length > 0)) {
+        const unallowedCalls = [...extractInlineToolCalls(rawTextBeforeScrub), ...currentRoundNativeCalls].filter(tc => tc && tc.function && !isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
+        if (unallowedCalls.length > 0) {
           fullText = 'Model mencoba melakukan penelusuran web untuk menjawab pertanyaan ini, namun fitur **Pencarian Web** saat ini sedang nonaktif. Silakan aktifkan ikon bola dunia (🌐 Pencarian Web) pada bilah kontrol di bawah untuk mengizinkan penelusuran data langsung.';
         } else if (webSources && webSources.length > 0) {
           fullText = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
@@ -27881,9 +27881,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           systemContent = `${systemContent}\n\n${endocrineContext}`;
         }
       }
-      if (canRunAutonomous) {
-        systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
-      }
+      // Direktif tool pencarian/rekomendasi video & utilitas otonom selalu disuntikkan tanpa memerlukan menu UI
+      systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
       // Tool video YouTube hanya diumumkan bila toggle "Cari Video YouTube" aktif
       // (agar model tidak memanggil tool yang tidak dikirim).
 
@@ -29097,7 +29096,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       fullText = cleanFinalText;
 
       if (!fullText) {
-        if (!canRunAutonomousSearch && (extractInlineToolCalls(rawTextBeforeScrub).length > 0 || accumulatedToolCalls.length > 0)) {
+        const unallowedCalls = [...extractInlineToolCalls(rawTextBeforeScrub), ...accumulatedToolCalls].filter(tc => tc && tc.function && !isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
+        if (unallowedCalls.length > 0) {
           fullText = 'Model mencoba melakukan penelusuran web untuk menjawab pertanyaan ini, namun fitur **Pencarian Web** saat ini sedang nonaktif. Silakan aktifkan ikon bola dunia (🌐 Pencarian Web) pada bilah kontrol di bawah untuk mengizinkan penelusuran data langsung.';
         } else if (webSources && webSources.length > 0) {
           fullText = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);

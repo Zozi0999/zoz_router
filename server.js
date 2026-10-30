@@ -2121,18 +2121,78 @@ function fetchXVideosSearchResults(query, limit = 5) {
   });
 }
 
+function fetchDailymotionSearchResults(query, limit = 5) {
+  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 5, 1), 10);
+  const cleanQ = String(query || '').trim();
+  if (!cleanQ) return Promise.resolve([]);
+  const targetUrl = 'https://api.dailymotion.com/videos?search=' + encodeURIComponent(cleanQ) +
+    '&fields=id,title,channel,duration,views_total,thumbnail_url,url&limit=' + safeLimit;
+  return new Promise((resolve) => {
+    const req = https.get(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+      },
+      timeout: 7000
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        return resolve([]);
+      }
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          const list = Array.isArray(json.list) ? json.list : [];
+          const results = list.map(item => {
+            const dur = parseInt(item.duration, 10);
+            const m = Math.floor(dur / 60);
+            const s = dur % 60;
+            const durationStr = dur > 0 ? `${m}:${String(s).padStart(2, '0')}` : '';
+            return {
+              platform: 'Dailymotion',
+              url: item.url || `https://www.dailymotion.com/video/${item.id}`,
+              title: item.title || 'Video Dailymotion',
+              channel: item.channel || 'Dailymotion',
+              duration: durationStr,
+              views: item.views_total ? `${item.views_total} views` : '',
+              thumbnail: item.thumbnail_url || ''
+            };
+          });
+          resolve(results);
+        } catch (_) {
+          resolve([]);
+        }
+      });
+      res.on('error', () => resolve([]));
+    });
+    req.on('timeout', () => { req.destroy(); resolve([]); });
+    req.on('error', () => resolve([]));
+  });
+}
+
 async function searchRelatedVideos({ videoUrl = '', query = '', platform = 'auto', limit = 5 }) {
   const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 5, 1), 10);
   let cleanUrl = String(videoUrl || '').trim();
   let cleanQuery = String(query || '').trim();
 
-  let detectedPlatform = 'youtube';
-  if (/xvideos\.com/i.test(cleanUrl) || platform === 'xvideos') {
+  let detectedPlatform = 'auto';
+  if (/youtube\.com|youtu\.be/i.test(cleanUrl) || platform === 'youtube') {
+    detectedPlatform = 'youtube';
+  } else if (/dailymotion\.com|dai\.ly/i.test(cleanUrl) || platform === 'dailymotion') {
+    detectedPlatform = 'dailymotion';
+  } else if (/xvideos\.com/i.test(cleanUrl) || platform === 'xvideos') {
     detectedPlatform = 'xvideos';
   } else if (/xnxx\.com/i.test(cleanUrl) || platform === 'xnxx') {
-    detectedPlatform = 'xnxx';
+    detectedPlatform = 'xvideos';
   } else if (/vimeo\.com/i.test(cleanUrl) || platform === 'vimeo') {
     detectedPlatform = 'vimeo';
+  } else if (/tiktok\.com/i.test(cleanUrl) || platform === 'tiktok') {
+    detectedPlatform = 'tiktok';
+  } else if (/bilibili\.com/i.test(cleanUrl) || platform === 'bilibili') {
+    detectedPlatform = 'bilibili';
+  } else if (platform && platform !== 'auto') {
+    detectedPlatform = platform.toLowerCase();
   }
 
   let sourceVideoTitle = '';
@@ -2176,8 +2236,33 @@ async function searchRelatedVideos({ videoUrl = '', query = '', platform = 'auto
   let videos = [];
   if (detectedPlatform === 'youtube') {
     videos = await fetchYouTubeSearchResults(cleanQuery, safeLimit);
+    if (videos.length < safeLimit) {
+      const remaining = safeLimit - videos.length;
+      const extra = await fetchDailymotionSearchResults(cleanQuery, remaining);
+      videos = videos.concat(extra);
+    }
+  } else if (detectedPlatform === 'dailymotion') {
+    videos = await fetchDailymotionSearchResults(cleanQuery, safeLimit);
+    if (videos.length < safeLimit) {
+      const remaining = safeLimit - videos.length;
+      const extra = await fetchYouTubeSearchResults(cleanQuery, remaining);
+      videos = videos.concat(extra);
+    }
   } else if (detectedPlatform === 'xvideos') {
     videos = await fetchXVideosSearchResults(cleanQuery, safeLimit);
+  } else {
+    // Multi-platform global video search across YouTube, Dailymotion, dan web video
+    const [ytRes, dmRes] = await Promise.all([
+      fetchYouTubeSearchResults(cleanQuery, safeLimit).catch(() => []),
+      fetchDailymotionSearchResults(cleanQuery, safeLimit).catch(() => [])
+    ]);
+    const merged = [];
+    const maxL = Math.max(ytRes.length, dmRes.length);
+    for (let i = 0; i < maxL; i++) {
+      if (ytRes[i] && merged.length < safeLimit) merged.push(ytRes[i]);
+      if (dmRes[i] && merged.length < safeLimit) merged.push(dmRes[i]);
+    }
+    videos = merged;
   }
 
   if (videos.length === 0 && detectedPlatform !== 'youtube') {

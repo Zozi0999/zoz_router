@@ -2312,21 +2312,54 @@ export default {
         }
         if (!effectiveQuery) effectiveQuery = 'popular trending videos';
 
-        const data = await ytSearchVideos(effectiveQuery, limit);
-        const mapped = (data && Array.isArray(data.results)) ? data.results.map(v => ({
-          platform: 'YouTube',
-          videoId: v.videoId,
-          url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`,
-          title: v.title,
-          channel: v.channel,
-          duration: v.durationText || '',
-          views: v.viewText || '',
-          thumbnail: v.thumbnail || ''
-        })) : [];
+        let mapped = [];
+        const isDailymotion = /dailymotion\.com|dai\.ly/i.test(videoUrl) || platform === 'dailymotion';
+
+        if (isDailymotion) {
+          try {
+            const dmRes = await fetch('https://api.dailymotion.com/videos?search=' + encodeURIComponent(effectiveQuery) + '&fields=id,title,channel,duration,views_total,thumbnail_url,url&limit=' + limit, { signal: AbortSignal.timeout(6000) });
+            if (dmRes.ok) {
+              const dmJson = await dmRes.json();
+              if (Array.isArray(dmJson.list)) {
+                mapped = dmJson.list.map(item => {
+                  const dur = parseInt(item.duration, 10);
+                  const m = Math.floor(dur / 60);
+                  const s = dur % 60;
+                  return {
+                    platform: 'Dailymotion',
+                    url: item.url || `https://www.dailymotion.com/video/${item.id}`,
+                    title: item.title || 'Video Dailymotion',
+                    channel: item.channel || 'Dailymotion',
+                    duration: dur > 0 ? `${m}:${String(s).padStart(2, '0')}` : '',
+                    views: item.views_total ? `${item.views_total} views` : '',
+                    thumbnail: item.thumbnail_url || ''
+                  };
+                });
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (mapped.length < limit) {
+          try {
+            const data = await ytSearchVideos(effectiveQuery, limit - mapped.length);
+            const ytMapped = (data && Array.isArray(data.results)) ? data.results.map(v => ({
+              platform: 'YouTube',
+              videoId: v.videoId,
+              url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`,
+              title: v.title,
+              channel: v.channel,
+              duration: v.durationText || '',
+              views: v.viewText || '',
+              thumbnail: v.thumbnail || ''
+            })) : [];
+            mapped = mapped.concat(ytMapped);
+          } catch (_) {}
+        }
 
         return new Response(JSON.stringify({
           success: mapped.length > 0,
-          platform: 'YouTube',
+          platform: isDailymotion ? 'Dailymotion' : 'YouTube',
           query: effectiveQuery,
           sourceVideoUrl: videoUrl || null,
           count: mapped.length,
