@@ -23462,7 +23462,7 @@ ${blocks}
   }
 
   function openWebsiteModeModal(promptText) {
-    // Skill pembuatan website telah dihapus sesuai permintaan
+    return false;
   }
 
   function isWebsiteEditRequest(text) {
