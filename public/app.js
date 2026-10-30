@@ -25582,6 +25582,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const jsonCodeBlockRegex = new RegExp(`\`\`\`(?:tool_call|json)?\\s*\\{[\\s\\S]*?"(?:name|function|tool)"\\s*:\\s*"(?:${toolPattern})"[\\s\\S]*?\\}\\s*\`\`\``, 'gi');
     const callPreambleRegex = new RegExp(`(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\\s+(?:${toolPattern})[\\s\\S]*?(?:\\.|\\n|$)`, 'gi');
     const funcCallRegex = new RegExp(`(?:${toolPattern})\\s*\\(\\s*\\{[\\s\\S]*?\\}\\s*\\)`, 'gi');
+    const funcCallEmptyRegex = new RegExp(`(?:${toolPattern})\\s*\\(\\s*\\)`, 'gi');
     const funcCallArgsRegex = new RegExp(`(?:${toolPattern})\\s*\\(\\s*(?:(?:query|url|q|code|topic|content|script|link|target|isi|kata_kunci|topik)\\s*[:=]\\s*)?(["'\`])[\\s\\S]*?\\1\\s*\\)`, 'gi');
     const funcCallTwoArgsRegex = /(?:save_memory|simpan_memori|store_memory)\s*\(\s*(?:[a-zA-Z_]+\s*[:=]\s*)?(["'`])[\s\S]*?\1\s*,\s*(?:[a-zA-Z_]+\s*[:=]\s*)?(["'`])[\s\S]*?\2\s*\)/gi;
 
@@ -25595,24 +25596,36 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       .replace(/<\/?start_of_turn>(?:model|user)?\s*/gi, '')
       .replace(/<\/?end_of_turn>\s*/gi, '');
 
+    // Bersihkan sintaks pemanggilan fungsi sebelum extractBalancedJsonObjects agar kurung fungsi tidak tertinggal
+    cleaned = cleaned
+      .replace(funcCallRegex, '')
+      .replace(funcCallArgsRegex, '')
+      .replace(funcCallTwoArgsRegex, '');
+
     // Hapus blok JSON seimbang yang merepresentasikan pemanggilan tool mentah
     const jsonBlocks = extractBalancedJsonObjects(cleaned);
     for (const block of jsonBlocks) {
       try {
         const p = JSON.parse(block.json);
-        const name = p.name || p.function || p.tool;
-        if (isKnownAutonomousTool(name)) {
+        let name = p.name || p.function || p.tool;
+        if (!name) {
+          if (p.video_url || (p.query && (p.platform || p.limit !== undefined))) {
+            name = 'find_related_videos';
+          } else if (p.target_number_or_name || (p.focus_topic && (p.target || p.contact))) {
+            name = 'summarize_whatsapp_chat';
+          }
+        }
+        if (name && isKnownAutonomousTool(name)) {
           cleaned = cleaned.replace(block.json, '');
         }
       } catch (_) {}
     }
 
-    // Bersihkan residu teks bocor seperti "We will call search_web for ..."
+    // Bersihkan sisa empty code blocks, sisa fungsi kosong, dan residu teks bocor
     cleaned = cleaned
+      .replace(/```(?:json|tool_call)?\s*```/gi, '')
+      .replace(funcCallEmptyRegex, '')
       .replace(callPreambleRegex, '')
-      .replace(funcCallRegex, '')
-      .replace(funcCallArgsRegex, '')
-      .replace(funcCallTwoArgsRegex, '')
       .trim();
 
     return cleaned;
@@ -25651,10 +25664,21 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (['browse_web_page', 'extract_web', 'read_url'].includes(normalizedName)) {
         const urlVal = parsedArgs.url || parsedArgs.target || parsedArgs.link || parsedArgs.href || parsedArgs.targetUrl || parsedArgs.tautan || parsedArgs.alamat || '';
         parsedArgs = { url: String(urlVal).trim() };
-        parsedArgs = { query: String(qVal).trim(), max_results: parsedArgs.max_results || 6 };
       } else if (normalizedName === 'search_web') {
         const qVal = parsedArgs.query || parsedArgs.q || parsedArgs.keyword || parsedArgs.search || parsedArgs.topic || parsedArgs.cari || parsedArgs.kata_kunci || '';
-        parsedArgs = { query: String(qVal).trim() };
+        parsedArgs = { query: String(qVal).trim(), max_results: parsedArgs.max_results || 6 };
+      } else if (normalizedName === 'find_related_videos') {
+        parsedArgs = {
+          video_url: String(parsedArgs.video_url || parsedArgs.url || parsedArgs.link || parsedArgs.target || '').trim(),
+          query: String(parsedArgs.query || parsedArgs.q || parsedArgs.topic || parsedArgs.search || parsedArgs.keyword || '').trim(),
+          platform: String(parsedArgs.platform || 'auto').trim(),
+          limit: Math.max(1, Math.min(10, parseInt(parsedArgs.limit || parsedArgs.max_results || 5, 10) || 5))
+        };
+      } else if (normalizedName === 'summarize_whatsapp_chat') {
+        parsedArgs = {
+          target_number_or_name: String(parsedArgs.target_number_or_name || parsedArgs.target || parsedArgs.number || parsedArgs.contact || '').trim(),
+          focus_topic: String(parsedArgs.focus_topic || parsedArgs.focus || parsedArgs.topic || '').trim()
+        };
       } else if (normalizedName === 'save_memory') {
         parsedArgs = {
           topic: String(parsedArgs.topic || parsedArgs.title || parsedArgs.key || parsedArgs.topik || 'catatan').trim(),
@@ -25734,14 +25758,23 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // 4. Fenced codeblock ```json ... ``` or ```tool_call ... ```
-    const codeBlockRegex = new RegExp(`\`\`\`(?:json|tool_call)?\\s*(\\{\\s*"(?:name|function|tool)"\\s*:\\s*"(?:${toolPattern})"[\\s\\S]*?\\})\\s*\`\`\``, 'gi');
+    const codeBlockRegex = /```(?:json|tool_call)?\s*(\{[\s\S]*?\})\s*```/gi;
     let cm;
     while ((cm = codeBlockRegex.exec(text)) !== null) {
       try {
         const p = JSON.parse(cm[1]);
-        const name = p.name || p.function || p.tool;
-        const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? {};
-        addCall(name, args, cm[0]);
+        let name = p.name || p.function || p.tool;
+        if (!name) {
+          if (p.video_url || (p.query && (p.platform || p.limit !== undefined))) {
+            name = 'find_related_videos';
+          } else if (p.target_number_or_name || (p.focus_topic && (p.target || p.contact))) {
+            name = 'summarize_whatsapp_chat';
+          }
+        }
+        if (name && isKnownAutonomousTool(name)) {
+          const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? (name === 'find_related_videos' && !p.arguments && (p.video_url || p.query) ? p : {});
+          addCall(name, args, cm[0]);
+        }
       } catch (_) {}
     }
 
@@ -25779,11 +25812,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     for (const block of jsonBlocks) {
       try {
         const p = JSON.parse(block.json);
-        const name = p.name || p.function || p.tool;
+        let name = p.name || p.function || p.tool;
+        if (!name) {
+          if (p.video_url || (p.query && (p.platform || p.limit !== undefined))) {
+            name = 'find_related_videos';
+          } else if (p.target_number_or_name || (p.focus_topic && (p.target || p.contact))) {
+            name = 'summarize_whatsapp_chat';
+          }
+        }
         const normName = normalizeToolName(name);
         if (isLongCompleteText && block.start > 220 && normName === 'search_web') continue;
-        if (isKnownAutonomousTool(name)) {
-          const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? {};
+        if (name && isKnownAutonomousTool(name)) {
+          const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? (name === 'find_related_videos' && !p.arguments && (p.video_url || p.query) ? p : {});
           addCall(name, args, block.json);
         }
       } catch (_) {}

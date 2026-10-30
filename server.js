@@ -2088,7 +2088,7 @@ function fetchXVideosSearchResults(query, limit = 5) {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
       },
-      timeout: 8000
+      timeout: 3500
     }, (res) => {
       if (res.statusCode !== 200) {
         res.resume();
@@ -2200,23 +2200,17 @@ async function searchRelatedVideos({ videoUrl = '', query = '', platform = 'auto
     if (detectedPlatform === 'youtube') {
       try {
         const info = await fetchYouTubeInfo(cleanUrl);
-        if (info && info.title) {
-          sourceVideoTitle = info.title;
-          const extractedTerms = cleanTitleForQuery(info.title);
-          if (!cleanQuery) {
-            cleanQuery = extractedTerms;
-          } else {
-            cleanQuery = `${extractedTerms} ${cleanQuery}`.trim();
-          }
-        }
+        if (info && info.title) sourceVideoTitle = info.title;
       } catch (_) {}
     } else {
       sourceVideoTitle = titleFromSlug(cleanUrl);
-      if (!cleanQuery) cleanQuery = sourceVideoTitle;
-      else cleanQuery = `${sourceVideoTitle} ${cleanQuery}`.trim();
     }
   }
 
+  // Jika query tidak disediakan, ambil kata kunci dari judul video sumber
+  if (!cleanQuery && sourceVideoTitle) {
+    cleanQuery = cleanTitleForQuery(sourceVideoTitle);
+  }
   if (!cleanQuery && cleanUrl) {
     cleanQuery = titleFromSlug(cleanUrl) || 'video';
   }
@@ -2229,32 +2223,48 @@ async function searchRelatedVideos({ videoUrl = '', query = '', platform = 'auto
     };
   }
 
-  const cacheKey = `${detectedPlatform}:${cleanQuery.toLowerCase()}:${safeLimit}`;
+  // Bersihkan dan batasi kueri agar efektif untuk mesin pencari video (maksimal 6 kata kunci penting)
+  let searchTerms = cleanTitleForQuery(cleanQuery);
+  const words = searchTerms.split(/\s+/).filter(w => w.length > 1);
+  if (words.length > 6) {
+    searchTerms = words.slice(0, 6).join(' ');
+  }
+  if (!searchTerms) searchTerms = cleanQuery || 'video';
+
+  const cacheKey = `${detectedPlatform}:${searchTerms.toLowerCase()}:${safeLimit}`;
   const hit = RELATED_VIDEOS_CACHE.get(cacheKey);
   if (hit && hit.exp > Date.now()) return hit.data;
 
   let videos = [];
   if (detectedPlatform === 'youtube') {
-    videos = await fetchYouTubeSearchResults(cleanQuery, safeLimit);
+    videos = await fetchYouTubeSearchResults(searchTerms, safeLimit);
     if (videos.length < safeLimit) {
       const remaining = safeLimit - videos.length;
-      const extra = await fetchDailymotionSearchResults(cleanQuery, remaining);
+      const extra = await fetchDailymotionSearchResults(searchTerms, remaining);
       videos = videos.concat(extra);
     }
   } else if (detectedPlatform === 'dailymotion') {
-    videos = await fetchDailymotionSearchResults(cleanQuery, safeLimit);
+    videos = await fetchDailymotionSearchResults(searchTerms, safeLimit);
     if (videos.length < safeLimit) {
       const remaining = safeLimit - videos.length;
-      const extra = await fetchYouTubeSearchResults(cleanQuery, remaining);
+      const extra = await fetchYouTubeSearchResults(searchTerms, remaining);
       videos = videos.concat(extra);
     }
   } else if (detectedPlatform === 'xvideos') {
-    videos = await fetchXVideosSearchResults(cleanQuery, safeLimit);
+    videos = await fetchXVideosSearchResults(searchTerms, safeLimit);
+    if (videos.length === 0) {
+      // Fallback ke Dailymotion dan YouTube jika XVideos diblokir ISP lokal atau kosong
+      const [dmFallback, ytFallback] = await Promise.all([
+        fetchDailymotionSearchResults(searchTerms, safeLimit).catch(() => []),
+        fetchYouTubeSearchResults(searchTerms, safeLimit).catch(() => [])
+      ]);
+      videos = dmFallback.length > 0 ? dmFallback : ytFallback;
+    }
   } else {
     // Multi-platform global video search across YouTube, Dailymotion, dan web video
     const [ytRes, dmRes] = await Promise.all([
-      fetchYouTubeSearchResults(cleanQuery, safeLimit).catch(() => []),
-      fetchDailymotionSearchResults(cleanQuery, safeLimit).catch(() => [])
+      fetchYouTubeSearchResults(searchTerms, safeLimit).catch(() => []),
+      fetchDailymotionSearchResults(searchTerms, safeLimit).catch(() => [])
     ]);
     const merged = [];
     const maxL = Math.max(ytRes.length, dmRes.length);
@@ -2266,7 +2276,7 @@ async function searchRelatedVideos({ videoUrl = '', query = '', platform = 'auto
   }
 
   if (videos.length === 0 && detectedPlatform !== 'youtube') {
-    videos = await fetchYouTubeSearchResults(cleanQuery, safeLimit);
+    videos = await fetchYouTubeSearchResults(searchTerms, safeLimit);
   }
 
   const resultData = {
