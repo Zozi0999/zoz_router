@@ -12,7 +12,7 @@
     "llm",
     "chat",
     "router",
-    "cyberpunk"
+    "neural-terminal"
   ],
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc14",
