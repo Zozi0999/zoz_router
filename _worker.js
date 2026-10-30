@@ -2041,6 +2041,123 @@ export default {
       }
     }
 
+    // Universal Video Link Probe API (deteksi video dari URL apa pun pada Cloudflare Pages / Workers)
+    if (url.pathname === '/api/video-probe' && (request.method === 'GET' || request.method === 'POST')) {
+      try {
+        let target = '';
+        if (request.method === 'GET') {
+          target = (url.searchParams.get('url') || '').trim();
+        } else {
+          const b = await request.json().catch(() => ({}));
+          target = (b.url || '').trim();
+        }
+        if (!target) {
+          return new Response(JSON.stringify({ success: false, error: 'Parameter url diperlukan.' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+        let clean = target;
+        if (!/^https?:\/\//i.test(clean)) clean = 'https://' + clean;
+        const parsed = new URL(clean);
+        const host = parsed.hostname.toLowerCase();
+        if (/^(?:localhost|127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|0\.0\.0\.0|169\.254\.)/.test(host) || host.endsWith('.local') || host.endsWith('.internal')) {
+          return new Response(JSON.stringify({ success: false, error: 'Akses ke host lokal / intranet diblokir (SSRF Protection).' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        const extRe = /\.(?:mp4|m4v|webm|ogv|mov|mkv|m3u8)(?:$|[?#])/i;
+        const resp = await fetch(clean, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,video/*;q=0.9,*/*;q=0.5',
+            'Range': 'bytes=0-524287'
+          },
+          redirect: 'follow',
+          signal: AbortSignal.timeout(9000)
+        });
+
+        if (!resp.ok && resp.status !== 206) {
+          return new Response(JSON.stringify({ success: false, error: `HTTP ${resp.status}`, url: clean }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        const ctype = String(resp.headers.get('content-type') || '').toLowerCase();
+        const finalUrl = resp.url || clean;
+        const finalParsed = new URL(finalUrl);
+
+        if (/^video\//.test(ctype) || /mpegurl|application\/ogg/.test(ctype) || (/octet-stream/.test(ctype) && extRe.test(finalParsed.pathname))) {
+          const fileName = decodeURIComponent(finalParsed.pathname.split('/').filter(Boolean).pop() || finalParsed.hostname);
+          return new Response(JSON.stringify({
+            success: true,
+            kind: 'file',
+            fileUrl: finalUrl,
+            url: clean,
+            site: finalParsed.hostname,
+            title: fileName,
+            hls: /mpegurl/.test(ctype) || /\.m3u8(?:$|[?#])/i.test(finalParsed.pathname)
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=600' }
+          });
+        }
+
+        const html = await resp.text();
+        const getMeta = (prop) => {
+          const m = html.match(new RegExp(`<meta\\b[^>]*(?:property|name)=["'](?:og:|twitter:)?${prop}["'][^>]*content=["']([^"']*)["']`, 'i')) ||
+                    html.match(new RegExp(`<meta\\b[^>]*content=["']([^"']*)["'][^>]*(?:property|name)=["'](?:og:|twitter:)?${prop}["']`, 'i'));
+          return m ? m[1] : '';
+        };
+
+        const titleMatch = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+        const title = getMeta('title') || (titleMatch ? titleMatch[1].trim() : finalParsed.hostname);
+        const thumbnail = getMeta('image');
+        const site = getMeta('site_name') || finalParsed.hostname;
+        const vUrl = getMeta('video:secure_url') || getMeta('video:url') || getMeta('video');
+        const vType = getMeta('video:type');
+        const player = getMeta('player');
+
+        let result = null;
+        if (vUrl && (/^video\//.test(vType) || extRe.test(vUrl))) {
+          result = { kind: 'file', fileUrl: vUrl, hls: /\.m3u8(?:$|[?#])/i.test(vUrl) };
+        } else {
+          const embed = player || (vUrl && /^https:/i.test(vUrl) ? vUrl : '');
+          if (embed && /^https:\/\//i.test(embed) && embed !== clean) {
+            result = { kind: 'embed', embedUrl: embed };
+          }
+        }
+
+        if (!result) {
+          return new Response(JSON.stringify({ success: false, error: 'Halaman ini tidak memuat video yang dapat disematkan.', url: clean }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          ...result,
+          url: clean,
+          title,
+          thumbnail: /^https?:\/\//i.test(thumbnail) ? thumbnail : '',
+          site
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=600' }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ success: false, error: err.message, url: target }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
     // YouTube Live Search (penunjang tool search_youtube, zero API key)
     if (url.pathname === '/api/youtube-search' && (request.method === 'GET' || request.method === 'POST')) {
       try {

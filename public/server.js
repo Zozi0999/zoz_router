@@ -2265,13 +2265,22 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
     // Cek apakah pesan asisten ini sudah tersimpan sebelumnya (hindari duplikasi)
     const lastMsg = msgs[msgs.length - 1];
     if (lastMsg && lastMsg.role === 'assistant') {
+      const isRefusalOrError = /^(?:maaf|mohon\s+maaf|sorry|error|i\s+cannot|i\s+am\s+unable|i\s+apologize)/i.test(trimmedContent);
+      if (isRefusalOrError && lastMsg.content && lastMsg.content.length > 10) {
+        // Jangan timpa respons yang sudah berhasil di browser dengan pesan penolakan/error dari background task
+        return true;
+      }
+
       const msgAgeMs = lastMsg.timestamp ? (Date.now() - new Date(lastMsg.timestamp).getTime()) : 0;
       const isRecent = msgAgeMs < 10 * 60 * 1000;
       const isSamePrefix = lastMsg.content && trimmedContent.startsWith(lastMsg.content) && (isRecent || lastMsg.backgroundCompleted);
 
-      if (lastMsg.content === trimmedContent || isSamePrefix) {
-        lastMsg.content = trimmedContent;
-        lastMsg.model = modelName || lastMsg.model;
+      // Selalu perbarui lastMsg daripada menambahkan asisten ganda berturut-turut dalam satu giliran chat
+      if (lastMsg.content === trimmedContent || isSamePrefix || trimmedContent.length >= (lastMsg.content || '').length || !lastMsg.content) {
+        if (trimmedContent.length >= (lastMsg.content || '').length || !lastMsg.content) {
+          lastMsg.content = trimmedContent;
+          lastMsg.model = modelName || lastMsg.model;
+        }
         lastMsg.backgroundCompleted = true;
         if (extraMeta && typeof extraMeta === 'object') {
           if (extraMeta.chatSummary) lastMsg.chatSummary = extraMeta.chatSummary;
@@ -2297,6 +2306,18 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
         }
         return true;
       }
+
+      // Jika lastMsg sudah lebih panjang dan valid, cukup tandai selesai tanpa menimpa atau menduplikasi
+      lastMsg.backgroundCompleted = true;
+      sessData.updatedAt = new Date().toISOString();
+      const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      try {
+        await fsp.writeFile(tempFile, JSON.stringify(sessData, null, 2), 'utf8');
+        safeAtomicRenameSync(tempFile, sessFile);
+      } catch (err) {
+        try { fs.unlinkSync(tempFile); } catch {}
+      }
+      return true;
     }
 
     const newMsg = {

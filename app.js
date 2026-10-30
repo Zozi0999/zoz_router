@@ -21034,23 +21034,25 @@ ${blocks}
       if (!host) host = parsed.hostname;
     } catch (_) {}
     const safeTitle = escapeHtml(fileName);
-    const safeHost = escapeHtml(host || 'Video Kustom URL');
-    const isHls = opts.hls || /\.m3u8(?:$|[?#])/i.test(videoUrl);
-    const poster = opts.thumbnail ? ` poster="${escapeHtml(opts.thumbnail)}"` : '';
-    const videoTag = isHls
-      ? `<video controls preload="metadata" playsinline data-hls-src="${safeUrl}"${poster} style="width:100%; height:100%; max-height:280px; object-fit:contain; background:#000;"></video>`
-      : `<video controls preload="metadata" playsinline${poster} style="width:100%; height:100%; max-height:280px; object-fit:contain; background:#000;"><source src="${safeUrl}"></video>`;
+    const safeHost = escapeHtml(host || 'Video File');
+    const isHls = Boolean(opts.hls || /\.m3u8(?:$|[?#])/i.test(videoUrl));
+    const safeThumb = opts.thumbnail ? escapeHtml(opts.thumbnail) : '';
+    const ext = videoUrl.match(/\.(mp4|webm|ogv|mov|mkv|m3u8)(?:$|[?#])/i)?.[1]?.toUpperCase() || (isHls ? 'HLS' : 'VIDEO');
+    const badgeText = isHls ? 'HLS Stream' : `${ext} Video`;
 
     return `
-      <div class="youtube-preview-card custom-direct-video-card yt-card-playing" style="flex-direction: column; max-width: 500px;">
-        <div class="yt-embed-frame" style="background:#000; display:flex; align-items:center; justify-content:center;">
-          ${videoTag}
+      <div class="youtube-preview-card custom-direct-video-card" data-video-url="${safeUrl}" data-hls="${isHls ? '1' : '0'}" data-title="${safeTitle}">
+        <div class="yt-card-thumb-wrap video-embed-poster${safeThumb ? '' : ' video-embed-poster-ph'}" data-action="play-direct-video" style="cursor:pointer;" title="Klik untuk putar langsung di percakapan">
+          ${safeThumb ? `<img src="${safeThumb}" alt="${safeTitle}" class="yt-card-thumb" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : `<i class="fa-solid fa-file-video video-embed-poster-icon"></i>`}
+          <div class="yt-card-badge video-provider-badge"><i class="fa-solid fa-file-video"></i> ${badgeText}</div>
+          <button type="button" class="yt-thumb-play" data-action="play-direct-video" title="Putar langsung di percakapan"><i class="fa-solid fa-play"></i></button>
         </div>
-        <div class="yt-card-info" style="padding: 10px 14px;">
-          <h4 class="yt-card-title" title="${safeTitle}" style="font-size:0.85rem;"><i class="fa-solid fa-file-video" style="color:var(--neon-cyan);"></i> ${safeTitle}</h4>
-          <div class="yt-card-channel" style="font-size:0.75rem;"><i class="fa-solid fa-link"></i> ${safeHost}</div>
-          <div class="yt-card-actions" style="margin-top:6px;">
-            <a href="${openUrl}" target="_blank" rel="noopener noreferrer" class="yt-card-btn open-yt-btn" style="font-size:0.75rem;"><i class="fa-solid fa-arrow-up-right-from-square"></i> Buka Tautan Asli</a>
+        <div class="yt-card-info">
+          <h4 class="yt-card-title" title="${safeTitle}">${safeTitle}</h4>
+          <div class="yt-card-channel"><i class="fa-solid fa-link"></i> ${safeHost}</div>
+          <div class="yt-card-actions">
+            <button type="button" class="yt-card-btn play-chat-btn" data-action="play-direct-video"><i class="fa-solid fa-play"></i> Putar di Chat</button>
+            <a href="${openUrl}" target="_blank" rel="noopener noreferrer" class="yt-card-btn open-yt-btn"><i class="fa-solid fa-arrow-up-right-from-square"></i> Buka Tautan Asli</a>
           </div>
         </div>
       </div>
@@ -21275,6 +21277,59 @@ ${blocks}
       initDirectVideoPlayers(cardsContainer);
     }
   }
+
+  // Delegasi klik: putar video langsung (.mp4, .webm, HLS, dll.) di dalam percakapan
+  document.addEventListener('click', (e) => {
+    const playBtn = e.target.closest ? e.target.closest('[data-action="play-direct-video"]') : null;
+    if (!playBtn) return;
+    const card = playBtn.closest('.custom-direct-video-card');
+    if (!card || card.classList.contains('yt-card-playing')) return;
+    const videoUrl = card.dataset.videoUrl || '';
+    if (!videoUrl) return;
+    const isHls = card.dataset.hls === '1';
+    const title = card.dataset.title || 'Video';
+    const poster = card.querySelector('.yt-card-thumb-wrap');
+    if (!poster) return;
+
+    card.classList.add('yt-card-playing');
+    const frame = document.createElement('div');
+    frame.className = 'yt-embed-frame';
+    frame.style.background = '#000';
+    frame.style.display = 'flex';
+    frame.style.alignItems = 'center';
+    frame.style.justifyContent = 'center';
+
+    const videoEl = document.createElement('video');
+    videoEl.controls = true;
+    videoEl.autoplay = true;
+    videoEl.playsInline = true;
+    videoEl.preload = 'auto';
+    videoEl.style.cssText = 'width:100%; height:100%; max-height:360px; object-fit:contain; background:#000;';
+
+    if (isHls) {
+      if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+        videoEl.src = videoUrl;
+      } else {
+        loadHlsJsOnDemand().then((Hls) => {
+          if (!Hls.isSupported()) return showVideoPlaybackFallback(videoEl);
+          const hls = new Hls({ enableWorker: true });
+          hls.loadSource(videoUrl);
+          hls.attachMedia(videoEl);
+          hls.on(Hls.Events.ERROR, (_, data) => { if (data && data.fatal) { hls.destroy(); showVideoPlaybackFallback(videoEl); } });
+        }).catch(() => showVideoPlaybackFallback(videoEl));
+      }
+    } else {
+      videoEl.src = videoUrl;
+    }
+
+    frame.appendChild(videoEl);
+    poster.replaceWith(frame);
+
+    card.querySelector('.play-chat-btn')?.remove();
+    AudioEngine.click();
+    showToast(`▶ Memutar "${title}" di dalam percakapan`);
+    try { videoEl.play().catch(() => {}); } catch (_) {}
+  });
 
   // Delegasi klik: putar video sematan (Vimeo, TikTok, Facebook, situs lain, dst.) langsung di dalam percakapan
   document.addEventListener('click', (e) => {
@@ -28872,8 +28927,9 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         renderChatHistory(els.searchHistoryInput?.value || '');
       }
 
-      // SEAMLESS AUTO-CONTINUATION: Jika output terputus atau terpotong di tengah jalan, sambung otomatis tanpa putus
-      const needsOpenRouterContinuation = !STATE.abortController?.signal?.aborted && !runOptions._isAutoContinuation && (isFileStillIncomplete || isStreamInterrupted || isOutputTruncated(rawFullTextBeforeStripping, finishReason));
+      // SEAMLESS AUTO-CONTINUATION: Hanya picu auto-continuation jika output benar-benar terpotong/tidak tuntas secara matematis
+      const isOpenRouterActuallyTruncated = Boolean(isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, finishReason));
+      const needsOpenRouterContinuation = !STATE.abortController?.signal?.aborted && !runOptions._isAutoContinuation && isOpenRouterActuallyTruncated;
       if (needsOpenRouterContinuation) {
         console.log('[OpenRouter Auto-Recovery] Respons terputus/terpotong di tengah jalan. Menyambung otomatis...');
         try {
@@ -28897,7 +28953,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
       }
 
       // Check if output is STILL cut in half after auto-continuation and provide fallback button (tanpa toast error)
-      if (isFileStillIncomplete || isStreamInterrupted || isOutputTruncated(rawFullTextBeforeStripping, finishReason)) {
+      if (isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, finishReason)) {
         attachContinuationButton(
           assistantRow.querySelector('.message-content-box') || assistantRow,
           session,

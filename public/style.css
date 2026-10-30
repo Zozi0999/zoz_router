@@ -9744,6 +9744,27 @@ body.is-assistant-dragging #aiFileStudioFrame {
   color: #04121a;
 }
 
+.custom-direct-video-card .video-provider-badge {
+  background: linear-gradient(135deg, #00f0ff, #0077ff);
+  color: #04121a;
+}
+
+.custom-direct-video-card .yt-thumb-play {
+  background: linear-gradient(135deg, #00f0ff, #0077ff);
+  color: #04121a;
+}
+
+.custom-direct-video-card .play-chat-btn {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.9), rgba(112, 0, 255, 0.85));
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 240, 255, 0.3);
+}
+
+.custom-direct-video-card .play-chat-btn:hover {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 1), rgba(112, 0, 255, 1));
+  box-shadow: 0 4px 14px rgba(0, 240, 255, 0.5);
+}
+
 /* Video vertikal (TikTok / Instagram Reels): tinggi lebih besar agar tidak terpotong */
 .yt-embed-frame.yt-embed-portrait {
   aspect-ratio: 9 / 14;
