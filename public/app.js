@@ -152,359 +152,48 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     { id: 'turbo', name: 'SDXL Turbo', provider: 'pollinations', cat: 'fast', tag: 'Fast • Turbo' }
   ];
 
-  // Dedicated OpenRouter Curated Image Engines (Official OpenRouter Images API)
-  const CURATED_OPENROUTER_IMAGE_MODELS = [
-    {
-      id: 'qwen/qwen-image-2.1-pro',
-      name: 'Qwen: Qwen Image 2.1 Pro',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'Qwen • Flagship Pro',
-      desc: 'Model generasi & edit visual presisi tinggi dari Qwen (resolusi 1K/2K, multi-referensi, render teks detail)'
-    },
-    {
-      id: 'qwen/qwen-image-2.1-turbo',
-      name: 'Qwen: Qwen Image 2.1 Turbo',
-      provider: 'openrouter',
-      cat: 'fast',
-      tag: 'Qwen • Ultra Fast',
-      desc: 'Varian cepat & efisien dari seri Qwen Image 2.1 untuk throughput tinggi dan generasi instan'
-    },
-    {
-      id: 'qwen/qwen-image-3-pro',
-      name: 'Qwen: Qwen Image 3 Pro',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'Qwen • Image 3 Pro',
-      desc: 'Generasi visual generasi ke-3 dari Qwen dengan estetika fotorealistik tingkat lanjut'
-    },
-    {
-      id: 'qwen/qwen-image-3',
-      name: 'Qwen: Qwen Image 3',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'Qwen • Image 3',
-      desc: 'Model terpadu text-to-image & image-to-image generasi ke-3 Qwen'
-    },
-    {
-      id: 'black-forest-labs/flux-3-image',
-      name: 'Black Forest Labs: FLUX 3 Image',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'FLUX.3 • Flagship',
-      desc: 'Model generasi dan pengeditan gambar generasi baru paling mutakhir dari Black Forest Labs'
-    },
-    {
-      id: 'black-forest-labs/flux-3-image-klein',
-      name: 'Black Forest Labs: FLUX 3 Image Klein',
-      provider: 'openrouter',
-      cat: 'fast',
-      tag: 'FLUX.3 • Fast Klein',
-      desc: 'Varian cepat dan efisien dari keluarga FLUX.3 dengan latensi rendah'
-    },
-    {
-      id: 'black-forest-labs/flux.2-pro',
-      name: 'Black Forest Labs: FLUX.2 Pro',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'FLUX.2 • Pro Studio',
-      desc: 'Model frontier dengan fidelitas visual tertinggi dan pemahaman prompt kompleks'
-    },
-    {
-      id: 'black-forest-labs/flux.2-max',
-      name: 'Black Forest Labs: FLUX.2 Max',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'FLUX.2 • Max Quality',
-      desc: 'Model kualitas visual puncak FLUX.2 dengan rendering tipografi dan detail tinggi'
-    },
-    {
-      id: 'black-forest-labs/flux-1-schnell',
-      name: 'Flux.1 Schnell (Cloud)',
-      provider: 'openrouter',
-      cat: 'fast',
-      tag: 'Fast • High Quality',
-      desc: 'Black Forest Labs Flux 1 Schnell via OpenRouter'
-    },
-    {
-      id: 'black-forest-labs/flux-1-dev',
-      name: 'Flux.1 Dev',
-      provider: 'openrouter',
-      cat: 'cloud',
-      tag: 'Pro • Dev',
-      desc: 'Kualitas fotorealistik tinggi dari Black Forest Labs'
-    },
-    {
-      id: 'google/gemini-nano-banana-2.1',
-      name: 'Google: Nano Banana 2.1',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'Google • Nano Banana 2.1',
-      desc: 'Model generasi dan editing visual mutakhir Gemini Nano Banana 2.1 dari Google'
-    },
-    {
-      id: 'google/gemini-3.1-flash-image',
-      name: 'Google: Gemini 3.1 Flash Image',
-      provider: 'openrouter',
-      cat: 'fast',
-      tag: 'Google • Nano Banana 2',
-      desc: 'Generasi gambar state-of-the-art berbasis Gemini 3.1 Flash'
-    },
-    {
-      id: 'google/gemini-3-pro-image',
-      name: 'Google: Gemini 3 Pro Image',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'Google • Nano Banana Pro',
-      desc: 'Model generasi & editing visual tingkat pro berbasis Gemini 3 Pro'
-    },
-    {
-      id: 'openai/gpt-image-2',
-      name: 'OpenAI: GPT Image 2',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'OpenAI • Flagship',
-      desc: 'Model generasi dan pengeditan visual terbaru resmi OpenAI Images API'
-    },
-    {
-      id: 'openai/gpt-image-2.5-sunburst',
-      name: 'OpenAI: GPT Image 2.5 Sunburst',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'OpenAI • Sunburst',
-      desc: 'Generasi gambar berorientasi presisi fotorealistik tinggi dari OpenAI'
-    },
-    {
-      id: 'openai/gpt-image-2.5-flare',
-      name: 'OpenAI: GPT Image 2.5 Flare',
-      provider: 'openrouter',
-      cat: 'fast',
-      tag: 'OpenAI • Flare Speed',
-      desc: 'Model generasi gambar cepat & responsif dari OpenAI'
-    },
-    {
-      id: 'openai/gpt-image-1',
-      name: 'OpenAI: GPT Image 1',
-      provider: 'openrouter',
-      cat: 'cloud',
-      tag: 'OpenAI • Dedicated',
-      desc: 'Generasi visual resolusi tinggi dengan akurasi teks dan detail tinggi'
-    },
-    {
-      id: 'openai/gpt-image-1-mini',
-      name: 'OpenAI: GPT Image 1 Mini',
-      provider: 'openrouter',
-      cat: 'fast',
-      tag: 'OpenAI • Mini Fast',
-      desc: 'Varian efisien dan hemat latensi dari GPT Image 1'
-    },
-    {
-      id: 'bytedance-seed/seedream-5-0-pro',
-      name: 'ByteDance: Seedream 5.0 Pro',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'ByteDance • Pro Visual',
-      desc: 'Generasi visual estetika tinggi dari tim ByteDance Seed'
-    },
-    {
-      id: 'bytedance-seed/seedream-5-0-flash',
-      name: 'ByteDance: Seedream 5.0 Flash',
-      provider: 'openrouter',
-      cat: 'fast',
-      tag: 'ByteDance • Flash Speed',
-      desc: 'Model generasi visual ultra-cepat ByteDance Seed'
-    },
-    {
-      id: 'recraft/recraft-v4.1',
-      name: 'Recraft: Recraft V4.1',
-      provider: 'openrouter',
-      cat: 'cloud',
-      tag: 'Recraft • High Aesthetics',
-      desc: 'Model generasi visual & ilustrasi estetika tinggi dari Recraft'
-    },
-    {
-      id: 'recraft/recraft-v4.1-pro',
-      name: 'Recraft: Recraft V4.1 Pro',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'Recraft • Pro',
-      desc: 'Model profesional estetika grafis, rendering teks, dan komposisi'
-    },
-    {
-      id: 'recraft/recraft-v4.1-vector',
-      name: 'Recraft: Recraft V4.1 Vector',
-      provider: 'openrouter',
-      cat: 'cloud',
-      tag: 'Recraft • Vector SVG',
-      desc: 'Desain vektor SVG murni, ikon grafis, dan ilustrasi scalable'
-    },
-    {
-      id: 'x-ai/grok-imagine-image-quality',
-      name: 'xAI: Grok Imagine Image Quality',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'xAI • Grok Quality',
-      desc: 'Model generasi & editing visual kecepatan tinggi & fidelity tinggi xAI'
-    },
-    {
-      id: 'krea/krea-2-large',
-      name: 'Krea: Krea 2 Large',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'Krea • Large',
-      desc: 'Model generasi gambar berkapabilitas tinggi dari Krea'
-    },
-    {
-      id: 'krea/k3-edit',
-      name: 'Krea: K3 Edit',
-      provider: 'openrouter',
-      cat: 'cloud',
-      tag: 'Krea • Image-to-Image',
-      desc: 'Model editing foto berbasis multi-referensi dari Krea'
-    },
-    {
-      id: 'microsoft/mai-image-2.6',
-      name: 'Microsoft AI: MAI-Image-2.6',
-      provider: 'openrouter',
-      cat: 'flagship',
-      tag: 'Microsoft • Precision',
-      desc: 'Model generasi visual presisi tinggi dari Microsoft AI Azure'
-    },
-    {
-      id: 'meta/muse-image',
-      name: 'Meta: Muse Image',
-      provider: 'openrouter',
-      cat: 'cloud',
-      tag: 'Meta • Agentic Visual',
-      desc: 'Model generasi dan pengeditan gambar agentic dari Meta'
-    },
-    {
-      id: 'tencent/hy-image-v3.5-preview',
-      name: 'Tencent: Hy Image 3.5 Preview',
-      provider: 'openrouter',
-      cat: 'cloud',
-      tag: 'Tencent • Anime/Photo',
-      desc: 'Model terpadu text-to-image & image-to-image Tencent'
-    }
-  ];
+  // Kriteria penyaring model generator visual dari OpenRouter API
+  function isOpenRouterImageModel(m) {
+    if (!m || !m.id) return false;
+    const arch = m.architecture || {};
+    const outMods = Array.isArray(arch.output_modalities) ? arch.output_modalities : [];
+    const modality = String(arch.modality || '').toLowerCase();
+    const id = String(m.id).toLowerCase();
+
+    const hasImageOutput = outMods.includes('image') ||
+                           modality.includes('->image') ||
+                           modality.endsWith('image') ||
+                           (modality.includes('->') && modality.split('->')[1].includes('image')) ||
+                           id.includes('flux') || id.includes('sdxl') || id.includes('recraft') || id.includes('dall-e');
+
+    const isInputOnlyVision = modality.endsWith('->text') && !id.includes('flux') && !id.includes('image') && !id.includes('sdxl') && !id.includes('recraft');
+    return hasImageOutput && !isInputOnlyVision;
+  }
+
+  // Kriteria penyaring model sintesis audio & musik dari OpenRouter API
+  function isOpenRouterAudioModel(m) {
+    if (!m || !m.id) return false;
+    const arch = m.architecture || {};
+    const outMods = Array.isArray(arch.output_modalities) ? arch.output_modalities : [];
+    const modality = String(arch.modality || '').toLowerCase();
+    const id = String(m.id).toLowerCase();
+
+    const hasAudioOutput = outMods.includes('audio') ||
+                           modality.includes('->audio') ||
+                           modality.endsWith('audio') ||
+                           (modality.includes('->') && modality.split('->')[1].includes('audio')) ||
+                           id.includes('lyria') || id.includes('music') || id.includes('audio') || id.includes('voxtral');
+
+    const isInputOnlyAudio = modality.endsWith('->text') && !id.includes('lyria') && !id.includes('music') && !id.includes('audio');
+    return hasAudioOutput && !isInputOnlyAudio;
+  }
 
   function normalizeImageModelId(rawId) {
     if (!rawId || typeof rawId !== 'string') return 'flux';
     const clean = rawId.trim();
-    const low = clean.toLowerCase();
-    if (low === 'off') return 'off';
-
-    // Qwen Image normalizations
-    if (low === 'qwen/qwen-image-2.1-pro' || low === 'qwen: qwen image 2.1 pro' || low === 'qwen-image-2.1-pro' || low === 'qwen image 2.1 pro' || low === 'qwen 2.1 pro') {
-      return 'qwen/qwen-image-2.1-pro';
-    }
-    if (low === 'qwen/qwen-image-2.1-turbo' || low === 'qwen: qwen image 2.1 turbo' || low === 'qwen-image-2.1-turbo' || low === 'qwen image 2.1 turbo' || low === 'qwen 2.1 turbo') {
-      return 'qwen/qwen-image-2.1-turbo';
-    }
-    if (low === 'qwen/qwen-image-3-pro' || low === 'qwen: qwen image 3 pro' || low === 'qwen-image-3-pro' || low === 'qwen image 3 pro') {
-      return 'qwen/qwen-image-3-pro';
-    }
-    if (low === 'qwen/qwen-image-3' || low === 'qwen: qwen image 3' || low === 'qwen-image-3' || low === 'qwen image 3') {
-      return 'qwen/qwen-image-3';
-    }
-
-    // Flux normalizations
-    if (low === 'flux-3' || low === 'flux.3' || low === 'flux 3 image' || low === 'black-forest-labs/flux-3-image') {
-      return 'black-forest-labs/flux-3-image';
-    }
-    if (low === 'flux-3-klein' || low === 'flux.3-klein' || low === 'black-forest-labs/flux-3-image-klein') {
-      return 'black-forest-labs/flux-3-image-klein';
-    }
-    if (low === 'flux.2-pro' || low === 'flux-2-pro' || low === 'black-forest-labs/flux.2-pro') {
-      return 'black-forest-labs/flux.2-pro';
-    }
-    if (low === 'flux.2-max' || low === 'flux-2-max' || low === 'black-forest-labs/flux.2-max') {
-      return 'black-forest-labs/flux.2-max';
-    }
-
-    // Google Gemini Nano Banana normalizations
-    if (low === 'nano-banana-2.1' || low === 'gemini-nano-banana-2.1' || low === 'nano banana 2.1' || low === 'google/gemini-nano-banana-2.1') {
-      return 'google/gemini-nano-banana-2.1';
-    }
-    if (low === 'gemini-3.1-flash-image' || low === 'google/gemini-3.1-flash-image') {
-      return 'google/gemini-3.1-flash-image';
-    }
-    if (low === 'gemini-3-pro-image' || low === 'google/gemini-3-pro-image') {
-      return 'google/gemini-3-pro-image';
-    }
-
-    // OpenAI image normalizations
-    if (low === 'gpt-image-2' || low === 'gpt image 2' || low === 'openai/gpt-image-2') {
-      return 'openai/gpt-image-2';
-    }
-    if (low === 'gpt-image-2.5-sunburst' || low === 'openai/gpt-image-2.5-sunburst') {
-      return 'openai/gpt-image-2.5-sunburst';
-    }
-    if (low === 'gpt-image-2.5-flare' || low === 'openai/gpt-image-2.5-flare') {
-      return 'openai/gpt-image-2.5-flare';
-    }
-    if (low === 'gpt-image-1' || low === 'openai/gpt-image-1') {
-      return 'openai/gpt-image-1';
-    }
-
-    // Legacy vendor alias fixes
-    if (low === 'recraft-ai/recraft-v3') return 'recraft/recraft-v3';
-    if (low === 'tencent/hunyuan-image-v3.5') return 'tencent/hy-image-v3.5-preview';
-
+    if (clean.toLowerCase() === 'off') return 'off';
     return clean;
   }
-
-  // Model pembuat musik/audio ASLI resmi terverifikasi di OpenRouter
-  const CURATED_OPENROUTER_MUSIC_MODELS = [
-    {
-      id: 'google/lyria-3-clip-preview',
-      name: 'Google Lyria 3 Clip',
-      provider: 'openrouter',
-      cat: 'audio',
-      tag: 'Google DeepMind • Music Clip',
-      desc: 'Model musik generatif AI resmi Google DeepMind (klip audio instrumen & melodi 30 detik kualitas studio)'
-    },
-    {
-      id: 'google/lyria-3-pro-preview',
-      name: 'Google Lyria 3 Pro',
-      provider: 'openrouter',
-      cat: 'audio',
-      tag: 'Google DeepMind • Pro Studio',
-      desc: 'Model arsitek harmoni & komposisi musik terlengkap dari Google DeepMind'
-    },
-    {
-      id: 'openai/gpt-audio',
-      name: 'OpenAI GPT Audio',
-      provider: 'openrouter',
-      cat: 'audio',
-      tag: 'OpenAI • Audio Synth',
-      desc: 'Generasi audio biner multimodal resmi dari OpenAI (pcm16/wav)'
-    },
-    {
-      id: 'openai/gpt-audio-mini',
-      name: 'OpenAI GPT Audio Mini',
-      provider: 'openrouter',
-      cat: 'audio',
-      tag: 'OpenAI • Fast Audio',
-      desc: 'Model sintesis audio biner cepat dengan latensi rendah dari OpenAI'
-    },
-    {
-      id: 'mistralai/voxtral-small-24b-2507',
-      name: 'Mistral Voxtral 24B',
-      provider: 'openrouter',
-      cat: 'audio',
-      tag: 'Mistral • Audio & Voice',
-      desc: 'Model audio multimodal 24B resmi dari Mistral AI'
-    },
-    {
-      id: 'qwen/qwen3.8-omni-flash',
-      name: 'Qwen 3.8 Omni Flash',
-      provider: 'openrouter',
-      cat: 'audio',
-      tag: 'Alibaba • Omni Audio',
-      desc: 'Model multimodal omni dari Alibaba Qwen dengan output audio biner instan'
-    }
-  ];
 
   // Persistent Unique Client / User Identity Token for Strict User Isolation
   function getOrCreateUserId() {
@@ -660,6 +349,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     soundEnabled: false,
     ollamaModels: [],
     openRouterModels: [],
+    openRouterImageModels: [],
+    openRouterMusicModels: [],
     availableImageModels: [...DEFAULT_IMAGE_MODELS],
     settings: {
       ollamaEndpoint: 'http://127.0.0.1:11434',
@@ -22971,17 +22662,19 @@ ${blocks}
           res = await fetch('https://openrouter.ai/api/v1/models', { headers }).catch(() => null);
         }
       }
+
+      const dynamicImgMap = new Map();
+      const dynamicMusicMap = new Map();
+
       if (res && res.ok) {
         const data = await res.json();
         if (data.data && Array.isArray(data.data)) {
-          // Ambil seluruh model secara live langsung dari OpenRouter API
+          // 1. Ambil seluruh model chat/komputasi secara live langsung dari OpenRouter API
           const mapped = data.data
             .filter(m => m && m.id)
             .map(m => {
-            const arch = m.architecture || {};
-            const outMods = arch.output_modalities || [];
-            const modalityStr = String(arch.modality || '');
-            const hasImageOutput = outMods.includes('image') || modalityStr.includes('->image') || modalityStr.endsWith('image');
+            const hasImageOutput = isOpenRouterImageModel(m);
+            const hasAudioOutput = isOpenRouterAudioModel(m);
             const supportedParams = Array.isArray(m.supported_parameters) ? m.supported_parameters : [];
             const supportsTools = supportedParams.includes('tools');
             return {
@@ -22990,13 +22683,56 @@ ${blocks}
               description: m.description || '',
               context_length: m.context_length || null,
               hasImageOutput: hasImageOutput,
-              hasAudioOutput: outMods.includes('audio') || modalityStr.endsWith('audio'),
+              hasAudioOutput: hasAudioOutput,
               supportsTools: supportsTools,
               tag: (m.id.includes(':free') || m.id.endsWith('/free') || m.id === 'openrouter/free' || (m.pricing && parseFloat(m.pricing.prompt) === 0 && parseFloat(m.pricing.completion) === 0)) ? 'Free' : 'Cloud',
               cat: (m.id.includes(':free') || m.id.endsWith('/free') || m.id === 'openrouter/free' || (m.pricing && parseFloat(m.pricing.prompt) === 0 && parseFloat(m.pricing.completion) === 0)) ? 'free' : 'flagship'
             };
           });
           STATE.openRouterModels = mapped;
+
+          // 2. Saring model visual/gambar secara dinamis dari endpoint
+          data.data.filter(isOpenRouterImageModel).forEach(im => {
+            const idLow = (im.id || '').toLowerCase();
+            let tag = 'OpenRouter • Image';
+            if (idLow.includes('qwen')) tag = 'Qwen • Image';
+            else if (idLow.includes('flux')) tag = 'FLUX • Image';
+            else if (idLow.includes('gemini') || idLow.includes('banana')) tag = 'Google • Image';
+            else if (idLow.includes('gpt') || idLow.includes('openai')) tag = 'OpenAI • Image';
+            else if (idLow.includes('seedream')) tag = 'ByteDance • Image';
+            else if (idLow.includes('recraft')) tag = 'Recraft • Image';
+            else if (idLow.includes('grok')) tag = 'xAI • Image';
+            else if (idLow.includes('krea')) tag = 'Krea • Image';
+            else if (idLow.includes('mai')) tag = 'Microsoft • Image';
+            dynamicImgMap.set(im.id, {
+              id: im.id,
+              name: im.name || im.id,
+              provider: 'openrouter',
+              cat: 'flagship',
+              tag: tag,
+              desc: im.description || `Model generasi & editing visual resmi OpenRouter: ${im.name || im.id}`
+            });
+          });
+
+          // 3. Saring model audio/musik secara dinamis dari endpoint
+          data.data.filter(isOpenRouterAudioModel).forEach(am => {
+            const idLow = (am.id || '').toLowerCase();
+            let tag = 'OpenRouter • Audio';
+            if (idLow.includes('lyria')) tag = 'Google DeepMind • Music';
+            else if (idLow.includes('gpt') || idLow.includes('openai')) tag = 'OpenAI • Audio';
+            else if (idLow.includes('mistral') || idLow.includes('voxtral')) tag = 'Mistral • Audio';
+            else if (idLow.includes('qwen')) tag = 'Alibaba • Audio';
+            dynamicMusicMap.set(am.id, {
+              id: am.id,
+              name: am.name || am.id,
+              provider: 'openrouter',
+              cat: 'audio',
+              tag: tag,
+              desc: am.description || `Model sintesis audio & musik AI resmi OpenRouter: ${am.name || am.id}`
+            });
+          });
+          STATE.openRouterMusicModels = Array.from(dynamicMusicMap.values());
+
           if (els.badgeOpenRouterCount) {
             els.badgeOpenRouterCount.innerText = mapped.length;
           }
@@ -23010,7 +22746,7 @@ ${blocks}
         }
       }
 
-      // Ambil katalog model khusus Image Generation OpenRouter secara live
+      // Ambil katalog model khusus Image Generation OpenRouter secara live jika ada endpoint terdedikasi
       try {
         const imgUrl = IS_GITHUB_PAGES ? 'https://openrouter.ai/api/v1/images/models' : '/api/openrouter/images/models';
         let imgRes = await fetch(imgUrl, { headers }).catch(() => null);
@@ -23022,7 +22758,8 @@ ${blocks}
         if (imgRes && imgRes.ok) {
           const imgData = await imgRes.json();
           if (imgData && Array.isArray(imgData.data)) {
-            const mappedImgModels = imgData.data.map(im => {
+            imgData.data.forEach(im => {
+              if (!im || !im.id || dynamicImgMap.has(im.id)) return;
               const idLow = (im.id || '').toLowerCase();
               let tag = 'OpenRouter • Image';
               if (idLow.includes('qwen')) tag = 'Qwen • Image';
@@ -23034,24 +22771,27 @@ ${blocks}
               else if (idLow.includes('grok')) tag = 'xAI • Image';
               else if (idLow.includes('krea')) tag = 'Krea • Image';
               else if (idLow.includes('mai')) tag = 'Microsoft • Image';
-              return {
+              dynamicImgMap.set(im.id, {
                 id: im.id,
                 name: im.name || im.id,
                 provider: 'openrouter',
                 cat: 'flagship',
                 tag: tag,
-                desc: im.description || 'OpenRouter Dedicated Image Synthesis Model'
-              };
+                desc: im.description || `Model visual terdedikasi OpenRouter: ${im.name || im.id}`
+              });
             });
-            const pollinationsOnly = DEFAULT_IMAGE_MODELS.filter(dm => dm.provider === 'pollinations');
-            STATE.availableImageModels = [...pollinationsOnly, ...mappedImgModels];
-            if (els.paneOpenRouter && els.paneOpenRouter.style.display !== 'none') {
-              populateOpenRouterImageModels(els.imageModelSearchInput?.value || '');
-            }
           }
         }
       } catch (imgErr) {
         console.warn('Could not fetch dynamic OpenRouter image models:', imgErr);
+      }
+
+      // Update state image models
+      STATE.openRouterImageModels = Array.from(dynamicImgMap.values());
+      const pollinationsOnly = DEFAULT_IMAGE_MODELS.filter(dm => dm.provider === 'pollinations');
+      STATE.availableImageModels = [...pollinationsOnly, ...STATE.openRouterImageModels];
+      if (els.paneOpenRouter && els.paneOpenRouter.style.display !== 'none') {
+        populateOpenRouterImageModels(els.imageModelSearchInput?.value || '');
       }
     } catch (e) {
       console.warn('Could not fetch dynamic OpenRouter model catalog:', e);
@@ -29753,8 +29493,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     if (!modelId || modelId === 'off') return 'Nonaktif (Mode Obrolan)';
     modelId = normalizeImageModelId(modelId);
     const found = DEFAULT_IMAGE_MODELS.find(m => m.id === modelId) || 
-                  CURATED_OPENROUTER_IMAGE_MODELS.find(m => m.id === modelId) ||
-                  (STATE.availableImageModels && STATE.availableImageModels.find(m => m.id === modelId));
+                  (STATE.availableImageModels && STATE.availableImageModels.find(m => m.id === modelId)) ||
+                  (STATE.openRouterImageModels && STATE.openRouterImageModels.find(m => m.id === modelId));
     if (found) return found.name || found.id;
     const m = String(modelId).toLowerCase();
     if (m === 'flux') return 'Flux.1 Schnell';
@@ -29764,10 +29504,6 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
     if (m === 'turbo') return 'SDXL Turbo';
     if (m === 'flux-pro') return 'Flux.1 Pro';
     if (m === 'midjourney') return 'Midjourney Style';
-    if (m === 'qwen/qwen-image-2.1-pro' || m.includes('qwen-image-2.1-pro')) return 'Qwen: Qwen Image 2.1 Pro';
-    if (m === 'qwen/qwen-image-2.1-turbo' || m.includes('qwen-image-2.1-turbo')) return 'Qwen: Qwen Image 2.1 Turbo';
-    if (m === 'qwen/qwen-image-3-pro' || m.includes('qwen-image-3-pro')) return 'Qwen: Qwen Image 3 Pro';
-    if (m === 'qwen/qwen-image-3' || m.includes('qwen-image-3')) return 'Qwen: Qwen Image 3';
     if (m.includes('/')) {
       const parts = modelId.split('/');
       return parts[1] ? parts[1].replace(/[-_]/g, ' ') : modelId;
@@ -31038,10 +30774,10 @@ Aturan:
 
   function getMusicModelDisplayName(modelId) {
     if (!modelId || modelId === 'off') return 'Nonaktif (Mode Obrolan)';
+    const foundMusic = (STATE.openRouterMusicModels || []).find(m => m.id === modelId);
+    if (foundMusic) return foundMusic.name || foundMusic.id;
     const foundOR = (STATE.openRouterModels || []).find(m => m.id === modelId);
     if (foundOR) return foundOR.name || foundOR.id;
-    const foundCurated = CURATED_OPENROUTER_MUSIC_MODELS.find(m => m.id === modelId);
-    if (foundCurated) return foundCurated.name;
     const foundOllama = (STATE.ollamaModels || []).find(m => (m.id || m.name || m.model) === modelId);
     if (foundOllama) return foundOllama.name || foundOllama.model || foundOllama.id;
     const m = String(modelId).toLowerCase();
@@ -31208,11 +30944,11 @@ Aturan:
     const isMusicMode = Boolean(STATE.isMusicGenMode);
     const cat = STATE.musicOpenRouterCatFilter || 'all';
 
-    // Ambil seluruh model resmi yang terdaftar dari OpenRouter API (STATE.openRouterModels)
+    // Ambil seluruh model audio/musik resmi yang disaring secara dinamis dari OpenRouter API
     const allModelsMap = new Map();
-
-    // Masukkan curated rekomendasi awal sebagai base enrichment jika ada
-    CURATED_OPENROUTER_MUSIC_MODELS.forEach(m => allModelsMap.set(m.id, m));
+    if (Array.isArray(STATE.openRouterMusicModels) && STATE.openRouterMusicModels.length > 0) {
+      STATE.openRouterMusicModels.forEach(m => allModelsMap.set(m.id, m));
+    }
 
     // Masukkan SELURUH 468+ model resmi dari OpenRouter
     if (Array.isArray(STATE.openRouterModels) && STATE.openRouterModels.length > 0) {
@@ -31531,15 +31267,26 @@ Aturan:
     if (!els.imageModelOpenRouterList) return;
     const q = (searchQuery || '').toLowerCase().trim();
     
-    // Gabungkan model terkurasi dan hasil fetch live OpenRouter
+    // Ambil model generator gambar dari API OpenRouter yang tersaring dinamis
     const allModelsMap = new Map();
-    CURATED_OPENROUTER_IMAGE_MODELS.forEach(m => allModelsMap.set(m.id, m));
+    if (Array.isArray(STATE.openRouterImageModels) && STATE.openRouterImageModels.length > 0) {
+      STATE.openRouterImageModels.forEach(m => allModelsMap.set(m.id, m));
+    }
     if (Array.isArray(STATE.availableImageModels)) {
       STATE.availableImageModels.forEach(m => {
         if (m.provider === 'openrouter' || (m.id && m.id.includes('/'))) {
           if (!allModelsMap.has(m.id)) allModelsMap.set(m.id, m);
         }
       });
+    }
+
+    // Jika model belum dimuat dari API, picu pengambilan langsung dari endpoint
+    if (allModelsMap.size === 0) {
+      fetchOpenRouterModelsList().then(() => {
+        if (STATE.openRouterImageModels && STATE.openRouterImageModels.length > 0) {
+          populateOpenRouterImageModels(searchQuery);
+        }
+      }).catch(() => {});
     }
 
     // Pastikan model kustom aktif yang dipilih pengguna tetap muncul di daftar jika belum ada
