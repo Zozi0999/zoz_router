@@ -20769,15 +20769,122 @@ ${organicBlock}
   function extractDirectVideoUrlsClient(text) {
     if (!text || typeof text !== 'string') return [];
     const urls = [];
-    const re = /https?:\/\/[^\s<>"'`]+?\.(?:mp4|webm|ogv|mov)(?:\?[^\s<>"'`]*)?/gi;
+    const re = /https?:\/\/[^\s<>"'`]+?\.(?:mp4|m4v|webm|ogv|mov|mkv|m3u8)(?:\?[^\s<>"'`]*)?(?![a-z0-9])/gi;
     let match;
     while ((match = re.exec(text)) !== null) {
-      let u = match[0].replace(/[.,;:!?)]+$/, '');
+      let u = match[0].replace(/[.,;:!?)\]]+$/, '');
       if (u && !urls.includes(u)) {
         urls.push(u);
       }
     }
     return urls;
+  }
+
+  // ---- Resolver penyedia video: URL halaman -> URL embed (tanpa server, tanpa API key) ----
+  // Setiap resolver mengembalikan { id, label, icon, embed(autoplay), portrait? } atau null.
+  const VIDEO_PROVIDER_RESOLVERS = [
+    { id: 'vimeo', label: 'Vimeo', icon: 'fa-brands fa-vimeo-v',
+      re: /https?:\/\/(?:www\.|player\.)?vimeo\.com\/(?:channels\/[\w-]+\/|groups\/[\w-]+\/videos\/|album\/\d+\/video\/|video\/)?(\d{6,12})(?:\/([a-f0-9]{10}))?/i,
+      embed: (m, ap) => `https://player.vimeo.com/video/${m[1]}?${m[2] ? `h=${m[2]}&` : ''}autoplay=${ap ? 1 : 0}&dnt=1` },
+    { id: 'dailymotion', label: 'Dailymotion', icon: 'fa-solid fa-circle-play',
+      re: /https?:\/\/(?:www\.)?(?:dailymotion\.com\/(?:video|embed\/video)\/|dai\.ly\/)([a-z0-9]+)/i,
+      embed: (m, ap) => `https://www.dailymotion.com/embed/video/${m[1]}?autoplay=${ap ? 1 : 0}` },
+    { id: 'twitch', label: 'Twitch', icon: 'fa-brands fa-twitch',
+      re: /https?:\/\/(?:www\.|m\.)?twitch\.tv\/videos\/(\d+)/i,
+      embed: (m, ap) => `https://player.twitch.tv/?video=v${m[1]}&parent=${encodeURIComponent(location.hostname || 'localhost')}&autoplay=${ap ? 'true' : 'false'}` },
+    { id: 'twitch-clip', label: 'Twitch Clip', icon: 'fa-brands fa-twitch',
+      re: /https?:\/\/(?:clips\.twitch\.tv\/(?:embed\?clip=)?|(?:www\.|m\.)?twitch\.tv\/[\w-]+\/clip\/)([\w-]+)/i,
+      embed: (m, ap) => `https://clips.twitch.tv/embed?clip=${m[1]}&parent=${encodeURIComponent(location.hostname || 'localhost')}&autoplay=${ap ? 'true' : 'false'}` },
+    { id: 'streamable', label: 'Streamable', icon: 'fa-solid fa-film',
+      re: /https?:\/\/(?:www\.)?streamable\.com\/(?:e\/|o\/)?([a-z0-9]{5,8})(?![\w/])/i,
+      embed: (m, ap) => `https://streamable.com/e/${m[1]}?autoplay=${ap ? 1 : 0}` },
+    { id: 'tiktok', label: 'TikTok', icon: 'fa-brands fa-tiktok', portrait: true,
+      re: /https?:\/\/(?:www\.|m\.)?tiktok\.com\/@[\w.-]+\/video\/(\d+)/i,
+      embed: (m) => `https://www.tiktok.com/embed/v2/${m[1]}` },
+    { id: 'instagram', label: 'Instagram', icon: 'fa-brands fa-instagram', portrait: true,
+      re: /https?:\/\/(?:www\.)?instagram\.com\/(?:[\w.]+\/)?(?:p|reel|reels|tv)\/([\w-]+)/i,
+      embed: (m) => `https://www.instagram.com/p/${m[1]}/embed/` },
+    { id: 'facebook', label: 'Facebook', icon: 'fa-brands fa-facebook',
+      re: /https?:\/\/(?:(?:www|m|web)\.)?(?:facebook\.com\/(?:watch\/?\?(?:[^\s]*&)?v=\d+|[\w.-]+\/videos\/[^\s]+|reel\/\d+|share\/[vr]\/[\w-]+)|fb\.watch\/[\w-]+)/i,
+      embed: (m, ap) => `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(m[0])}&show_text=false&autoplay=${ap ? 'true' : 'false'}` },
+    { id: 'bilibili', label: 'Bilibili', icon: 'fa-solid fa-tv',
+      re: /https?:\/\/(?:www\.|m\.)?bilibili\.com\/video\/(BV[\w]+)/i,
+      embed: (m, ap) => `https://player.bilibili.com/player.html?bvid=${m[1]}&autoplay=${ap ? 1 : 0}&high_quality=1` },
+    { id: 'loom', label: 'Loom', icon: 'fa-solid fa-video',
+      re: /https?:\/\/(?:www\.)?loom\.com\/(?:share|embed)\/([a-f0-9]{32})/i,
+      embed: (m, ap) => `https://www.loom.com/embed/${m[1]}?autoplay=${ap ? 1 : 0}` },
+    { id: 'gdrive', label: 'Google Drive', icon: 'fa-brands fa-google-drive',
+      re: /https?:\/\/drive\.google\.com\/file\/d\/([\w-]+)/i,
+      embed: (m) => `https://drive.google.com/file/d/${m[1]}/preview` }
+  ];
+
+  // Ekstrak semua tautan video milik penyedia dikenal dari teks (urutan kemunculan, tanpa duplikat).
+  function extractProviderVideosClient(text) {
+    if (!text || typeof text !== 'string') return [];
+    const out = [];
+    const seen = new Set();
+    const urlRe = /https?:\/\/[^\s<>"'`]+/gi;
+    let um;
+    while ((um = urlRe.exec(text)) !== null) {
+      const url = um[0].replace(/[.,;:!?)\]]+$/, '');
+      for (const p of VIDEO_PROVIDER_RESOLVERS) {
+        const m = url.match(p.re);
+        if (m) {
+          const key = p.id + ':' + m[1] + (p.id === 'facebook' ? m[0] : '');
+          if (!seen.has(key)) {
+            seen.add(key);
+            out.push({ provider: p, match: m, url });
+          }
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
+  // Tautan "umum" kandidat video yang belum dikenali (dipakai untuk probe server, hanya pesan pengguna).
+  function extractGenericLinkCandidatesClient(text, limit = 3) {
+    if (!text || typeof text !== 'string') return [];
+    const known = new Set();
+    extractDirectVideoUrlsClient(text).forEach((u) => known.add(u));
+    const out = [];
+    const urlRe = /https?:\/\/[^\s<>"'`]+/gi;
+    let um;
+    while ((um = urlRe.exec(text)) !== null && out.length < limit) {
+      const url = um[0].replace(/[.,;:!?)\]]+$/, '');
+      if (known.has(url) || out.includes(url)) continue;
+      if (YOUTUBE_URL_REGEX_CLIENT.test(url)) { YOUTUBE_URL_REGEX_CLIENT.lastIndex = 0; continue; }
+      YOUTUBE_URL_REGEX_CLIENT.lastIndex = 0;
+      if (VIDEO_PROVIDER_RESOLVERS.some((p) => p.re.test(url))) continue;
+      if (/\.(?:png|jpe?g|gif|webp|svg|avif|bmp|pdf|docx?|xlsx?|pptx?|zip|rar|7z|txt|csv|json|js|css|mp3|wav|ogg|flac|m4a)(?:[?#]|$)/i.test(url)) continue;
+      try {
+        const host = new URL(url).hostname;
+        if (/^(?:localhost|127\.|10\.|192\.168\.|0\.0\.0\.0)/.test(host)) continue;
+      } catch (_) { continue; }
+      out.push(url);
+    }
+    return out;
+  }
+
+  const clientVideoProbeCache = new Map();
+  async function probeVideoLinkClient(url) {
+    const hit = clientVideoProbeCache.get(url);
+    if (hit && (hit.success || (hit._exp && hit._exp > Date.now()))) return hit;
+    let result = null;
+    if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
+      try {
+        const resp = await fetch(`/api/video-probe?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(12000) });
+        if (resp.ok) result = await resp.json();
+      } catch (_) { result = null; }
+    }
+    // Hanya cache hasil sukses secara permanen; kegagalan di-cache singkat (2 menit)
+    // agar memuat ulang riwayat chat tidak memicu probe berulang untuk tautan non-video.
+    if (result && result.success) {
+      clientVideoProbeCache.set(url, result);
+    } else {
+      clientVideoProbeCache.set(url, { success: false, _exp: Date.now() + 120000 });
+    }
+    return result;
   }
 
   async function fetchYouTubeInfoClient(rawUrlOrId) {
@@ -20912,35 +21019,126 @@ ${blocks}
     };
   }
 
-  function buildDirectVideoPreviewCardHtml(videoUrl) {
+  function buildDirectVideoPreviewCardHtml(videoUrl, opts = {}) {
     if (!videoUrl) return '';
     const safeUrl = escapeHtml(videoUrl);
-    let fileName = 'Video Kustom';
+    const openUrl = escapeHtml(opts.openUrl || videoUrl);
+    let fileName = opts.title || 'Video Kustom';
+    let host = opts.site || '';
     try {
       const parsed = new URL(videoUrl);
-      const name = parsed.pathname.split('/').filter(Boolean).pop();
-      if (name) fileName = decodeURIComponent(name);
+      if (!opts.title) {
+        const name = parsed.pathname.split('/').filter(Boolean).pop();
+        if (name) fileName = decodeURIComponent(name);
+      }
+      if (!host) host = parsed.hostname;
     } catch (_) {}
     const safeTitle = escapeHtml(fileName);
+    const safeHost = escapeHtml(host || 'Video Kustom URL');
+    const isHls = opts.hls || /\.m3u8(?:$|[?#])/i.test(videoUrl);
+    const poster = opts.thumbnail ? ` poster="${escapeHtml(opts.thumbnail)}"` : '';
+    const videoTag = isHls
+      ? `<video controls preload="metadata" playsinline data-hls-src="${safeUrl}"${poster} style="width:100%; height:100%; max-height:280px; object-fit:contain; background:#000;"></video>`
+      : `<video controls preload="metadata" playsinline${poster} style="width:100%; height:100%; max-height:280px; object-fit:contain; background:#000;"><source src="${safeUrl}"></video>`;
 
     return `
       <div class="youtube-preview-card custom-direct-video-card yt-card-playing" style="flex-direction: column; max-width: 500px;">
         <div class="yt-embed-frame" style="background:#000; display:flex; align-items:center; justify-content:center;">
-          <video controls preload="metadata" playsinline style="width:100%; height:100%; max-height:280px; object-fit:contain; background:#000;">
-            <source src="${safeUrl}">
-            Browser Anda tidak mendukung pemutar video HTML5.
-          </video>
+          ${videoTag}
         </div>
         <div class="yt-card-info" style="padding: 10px 14px;">
           <h4 class="yt-card-title" title="${safeTitle}" style="font-size:0.85rem;"><i class="fa-solid fa-file-video" style="color:var(--neon-cyan);"></i> ${safeTitle}</h4>
-          <div class="yt-card-channel" style="font-size:0.75rem;"><i class="fa-solid fa-link"></i> Video Kustom URL</div>
+          <div class="yt-card-channel" style="font-size:0.75rem;"><i class="fa-solid fa-link"></i> ${safeHost}</div>
           <div class="yt-card-actions" style="margin-top:6px;">
-            <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="yt-card-btn open-yt-btn" style="font-size:0.75rem;"><i class="fa-solid fa-arrow-up-right-from-square"></i> Buka File Video Asli</a>
+            <a href="${openUrl}" target="_blank" rel="noopener noreferrer" class="yt-card-btn open-yt-btn" style="font-size:0.75rem;"><i class="fa-solid fa-arrow-up-right-from-square"></i> Buka Tautan Asli</a>
           </div>
         </div>
       </div>
     `;
   }
+
+  // Kartu video sematan (iframe) untuk penyedia dikenal & halaman dengan og:video / twitter:player.
+  // Player baru dimuat saat diklik (hemat bandwidth + tidak melacak pengguna sebelum interaksi).
+  function buildEmbedVideoCardHtml({ label, icon, title, site, thumbnail, embedSrc, openUrl, portrait, sandbox }) {
+    if (!embedSrc) return '';
+    const safeTitle = escapeHtml(title || label || 'Video');
+    const safeLabel = escapeHtml(label || 'Video');
+    const safeSite = escapeHtml(site || label || '');
+    const safeIcon = escapeHtml(icon || 'fa-solid fa-circle-play');
+    const safeThumb = thumbnail ? escapeHtml(thumbnail) : '';
+    return `
+      <div class="youtube-preview-card video-embed-card" data-embed-src="${escapeHtml(embedSrc)}" data-title="${safeTitle}" data-portrait="${portrait ? '1' : '0'}" data-sandbox="${sandbox ? '1' : '0'}">
+        <div class="yt-card-thumb-wrap video-embed-poster${safeThumb ? '' : ' video-embed-poster-ph'}" data-action="play-embed" style="cursor:pointer;" title="Klik untuk putar langsung di percakapan">
+          ${safeThumb ? `<img src="${safeThumb}" alt="${safeTitle}" class="yt-card-thumb" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : `<i class="${safeIcon} video-embed-poster-icon"></i>`}
+          <div class="yt-card-badge video-provider-badge"><i class="${safeIcon}"></i> ${safeLabel}</div>
+          <button type="button" class="yt-thumb-play" data-action="play-embed" title="Putar langsung di percakapan"><i class="fa-solid fa-play"></i></button>
+        </div>
+        <div class="yt-card-info">
+          <h4 class="yt-card-title" title="${safeTitle}">${safeTitle}</h4>
+          <div class="yt-card-channel"><i class="fa-solid fa-circle-user"></i> ${safeSite}</div>
+          <div class="yt-card-actions">
+            <button type="button" class="yt-card-btn play-chat-btn" data-action="play-embed"><i class="fa-solid fa-play"></i> Putar di Chat</button>
+            <a href="${escapeHtml(openUrl || embedSrc)}" target="_blank" rel="noopener noreferrer" class="yt-card-btn open-yt-btn"><i class="fa-solid fa-arrow-up-right-from-square"></i> Buka Tautan Asli</a>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Muat hls.js sekali saja (hanya saat ada video .m3u8 dan peramban tidak mendukung HLS native).
+  let hlsJsLoadPromise = null;
+  function loadHlsJsOnDemand() {
+    if (window.Hls) return Promise.resolve(window.Hls);
+    if (hlsJsLoadPromise) return hlsJsLoadPromise;
+    hlsJsLoadPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js';
+      s.async = true;
+      s.onload = () => (window.Hls ? resolve(window.Hls) : reject(new Error('hls.js tidak tersedia')));
+      s.onerror = () => { hlsJsLoadPromise = null; reject(new Error('Gagal memuat hls.js')); };
+      document.head.appendChild(s);
+    });
+    return hlsJsLoadPromise;
+  }
+
+  function showVideoPlaybackFallback(videoEl) {
+    const card = videoEl && videoEl.closest ? videoEl.closest('.custom-direct-video-card') : null;
+    if (!card || card.dataset.videoFailed === '1') return;
+    card.dataset.videoFailed = '1';
+    const frame = card.querySelector('.yt-embed-frame');
+    if (frame) {
+      frame.style.minHeight = '90px';
+      frame.innerHTML = '<div style="padding:18px 14px; color:#cbd5e1; font-size:0.78rem; text-align:center; line-height:1.5;"><i class="fa-solid fa-triangle-exclamation" style="color:#fbbf24;"></i> Video tidak dapat diputar langsung di sini (format/codec tidak didukung atau tautan memblokir pemutaran sematan). Gunakan tombol di bawah untuk membukanya.</div>';
+    }
+  }
+
+  function initDirectVideoPlayers(scope) {
+    if (!scope || !scope.querySelectorAll) return;
+    scope.querySelectorAll('video[data-hls-src]').forEach((video) => {
+      const src = video.getAttribute('data-hls-src');
+      video.removeAttribute('data-hls-src');
+      if (!src) return;
+      if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = src;
+        return;
+      }
+      loadHlsJsOnDemand().then((Hls) => {
+        if (!Hls.isSupported()) return showVideoPlaybackFallback(video);
+        const hls = new Hls({ enableWorker: true });
+        hls.loadSource(src);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.ERROR, (_, data) => { if (data && data.fatal) { hls.destroy(); showVideoPlaybackFallback(video); } });
+      }).catch(() => showVideoPlaybackFallback(video));
+    });
+  }
+
+  // Error media tidak bubble -> pakai fase capture. <source> gagal = video tak bisa diputar.
+  document.addEventListener('error', (e) => {
+    const t = e.target;
+    if (!t || !t.tagName) return;
+    if (t.tagName === 'VIDEO') showVideoPlaybackFallback(t);
+    else if (t.tagName === 'SOURCE' && t.parentElement && t.parentElement.tagName === 'VIDEO') showVideoPlaybackFallback(t.parentElement);
+  }, true);
 
   function buildYouTubePreviewCardHtml(video) {
     if (!video) return '';
@@ -20975,15 +21173,33 @@ ${blocks}
 
   async function renderYouTubeCardsForMessage(row, text, extraIds = []) {
     if (!row) return;
+    const rawText = (typeof text === 'string') ? text : '';
+    const directVideoUrls = rawText ? extractDirectVideoUrlsClient(rawText) : [];
+    const providerVideos = rawText ? extractProviderVideosClient(rawText) : [];
+
+    // Cegah false-positive: URL penyedia lain / file langsung tidak boleh dibaca sebagai ID YouTube
+    // (mis. facebook.com/watch/?v=1234567890123 cocok dengan pola ?v= berpanjang 11 karakter).
+    let ytScanText = rawText;
+    for (const u of directVideoUrls) ytScanText = ytScanText.split(u).join(' ');
+    for (const pv of providerVideos) ytScanText = ytScanText.split(pv.url).join(' ');
+
     const ids = Array.isArray(extraIds) ? extraIds.filter(Boolean) : [];
-    if (typeof text === 'string' && text) {
-      extractYouTubeVideoIdsClient(text).forEach((id) => { if (id && !ids.includes(id)) ids.push(id); });
+    if (ytScanText) {
+      extractYouTubeVideoIdsClient(ytScanText).forEach((id) => { if (id && !ids.includes(id)) ids.push(id); });
     }
-    const directVideoUrls = (typeof text === 'string' && text) ? extractDirectVideoUrlsClient(text) : [];
-    if (ids.length === 0 && directVideoUrls.length === 0) return;
+
+    // Tautan umum (situs apa pun) hanya diprobe pada pesan pengguna agar tautan di jawaban AI tidak memicu fetch massal.
+    const isUserRow = row.classList && row.classList.contains('user');
+    const genericCandidates = (isUserRow && rawText)
+      ? extractGenericLinkCandidatesClient(ytScanText).filter((u) => !ids.some((id) => u.includes(id)))
+      : [];
+
+    if (ids.length === 0 && directVideoUrls.length === 0 && providerVideos.length === 0 && genericCandidates.length === 0) return;
     const bubble = row.querySelector('.message-bubble');
     if (!bubble) return;
     if (bubble.querySelector('.msg-youtube-cards-wrap')) return;
+
+    const probePromise = Promise.all(genericCandidates.map((u) => probeVideoLinkClient(u).then((r) => ({ url: u, r })).catch(() => ({ url: u, r: null }))));
 
     const cardResults = await Promise.all(
       ids.map(async (vidId) => {
@@ -21006,33 +21222,101 @@ ${blocks}
         };
       })
     );
+    const probeResults = await probePromise;
 
     if (!row.isConnected || bubble.querySelector('.msg-youtube-cards-wrap')) return;
 
     const cardsContainer = document.createElement('div');
     cardsContainer.className = 'msg-youtube-cards-wrap';
-
-    for (const cardData of cardResults) {
+    const appendHtml = (html) => {
+      if (!html) return;
       const cardWrapper = document.createElement('div');
-      cardWrapper.innerHTML = buildYouTubePreviewCardHtml(cardData);
-      if (cardWrapper.firstElementChild) {
-        cardsContainer.appendChild(cardWrapper.firstElementChild);
-      }
+      cardWrapper.innerHTML = html;
+      if (cardWrapper.firstElementChild) cardsContainer.appendChild(cardWrapper.firstElementChild);
+    };
+
+    for (const cardData of cardResults) appendHtml(buildYouTubePreviewCardHtml(cardData));
+
+    for (const pv of providerVideos) {
+      appendHtml(buildEmbedVideoCardHtml({
+        label: pv.provider.label,
+        icon: pv.provider.icon,
+        title: `Video ${pv.provider.label}`,
+        site: pv.provider.label,
+        embedSrc: pv.provider.embed(pv.match, false),
+        openUrl: pv.url,
+        portrait: !!pv.provider.portrait,
+        sandbox: false
+      }));
     }
 
-    for (const directUrl of directVideoUrls) {
-      const cardWrapper = document.createElement('div');
-      cardWrapper.innerHTML = buildDirectVideoPreviewCardHtml(directUrl);
-      if (cardWrapper.firstElementChild) {
-        cardsContainer.appendChild(cardWrapper.firstElementChild);
+    for (const directUrl of directVideoUrls) appendHtml(buildDirectVideoPreviewCardHtml(directUrl));
+
+    for (const { url, r } of probeResults) {
+      if (!r || !r.success) continue;
+      if (r.kind === 'file' && r.fileUrl) {
+        appendHtml(buildDirectVideoPreviewCardHtml(r.fileUrl, { title: r.title, site: r.site, thumbnail: r.thumbnail, hls: r.hls, openUrl: url }));
+      } else if (r.kind === 'embed' && r.embedUrl) {
+        appendHtml(buildEmbedVideoCardHtml({
+          label: r.site || 'Video',
+          icon: 'fa-solid fa-circle-play',
+          title: r.title || r.site || 'Video',
+          site: r.site || '',
+          thumbnail: r.thumbnail,
+          embedSrc: r.embedUrl,
+          openUrl: url,
+          sandbox: true
+        }));
       }
     }
 
     if (cardsContainer.children.length > 0) {
       bubble.insertBefore(cardsContainer, bubble.firstChild);
+      initDirectVideoPlayers(cardsContainer);
     }
   }
 
+  // Delegasi klik: putar video sematan (Vimeo, TikTok, Facebook, situs lain, dst.) langsung di dalam percakapan
+  document.addEventListener('click', (e) => {
+    const playBtn = e.target.closest ? e.target.closest('[data-action="play-embed"]') : null;
+    if (!playBtn) return;
+    const card = playBtn.closest('.video-embed-card');
+    if (!card || card.classList.contains('yt-card-playing')) return;
+    const baseSrc = card.dataset.embedSrc || '';
+    if (!/^https:\/\//i.test(baseSrc)) return;
+    const title = card.dataset.title || 'Video';
+    const poster = card.querySelector('.video-embed-poster');
+    if (!poster) return;
+
+    let src = baseSrc;
+    try {
+      // Aktifkan autoplay hanya untuk penyedia yang mendukung parameter standar (klik pengguna = gesture valid)
+      const u = new URL(baseSrc);
+      if (/vimeo\.com|dailymotion\.com|streamable\.com|loom\.com|bilibili\.com/.test(u.hostname)) u.searchParams.set('autoplay', '1');
+      else if (/twitch\.tv/.test(u.hostname)) u.searchParams.set('autoplay', 'true');
+      else if (/facebook\.com/.test(u.hostname)) u.searchParams.set('autoplay', 'true');
+      src = u.toString();
+    } catch (_) {}
+
+    card.classList.add('yt-card-playing');
+    const frame = document.createElement('div');
+    frame.className = 'yt-embed-frame' + (card.dataset.portrait === '1' ? ' yt-embed-portrait' : '');
+    const iframe = document.createElement('iframe');
+    iframe.src = src;
+    iframe.title = title;
+    iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen');
+    iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    iframe.setAttribute('allowfullscreen', '');
+    if (card.dataset.sandbox === '1') {
+      iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation allow-popups allow-forms');
+    }
+    frame.appendChild(iframe);
+    poster.replaceWith(frame);
+
+    card.querySelector('.play-chat-btn')?.remove();
+    AudioEngine.click();
+    showToast(`▶ Memutar "${title}" di dalam percakapan`);
+  });
 
 
   // Delegasi klik: putar video YouTube langsung DI DALAM percakapan (embed iframe)

@@ -9723,6 +9723,38 @@ body.is-assistant-dragging #aiFileStudioFrame {
   border: 0;
 }
 
+/* Video sematan universal (Vimeo, TikTok, Facebook, dll.) — poster placeholder tanpa thumbnail */
+.video-embed-card .video-provider-badge {
+  background: rgba(0, 240, 255, 0.88);
+  color: #04121a;
+}
+
+.video-embed-poster-ph {
+  background: linear-gradient(135deg, #0b1020 0%, #1b1f3a 55%, #12263a 100%);
+  min-height: 110px;
+}
+
+.video-embed-poster-icon {
+  font-size: 2.2rem;
+  color: rgba(255, 255, 255, 0.18);
+}
+
+.video-embed-card .yt-thumb-play {
+  background: rgba(0, 240, 255, 0.92);
+  color: #04121a;
+}
+
+/* Video vertikal (TikTok / Instagram Reels): tinggi lebih besar agar tidak terpotong */
+.yt-embed-frame.yt-embed-portrait {
+  aspect-ratio: 9 / 14;
+  max-height: 560px;
+  min-height: 360px;
+}
+
+.custom-direct-video-card .yt-embed-frame video {
+  display: block;
+}
+
 /* ==================== FULLSCREEN VIDEO YOUTUBE (perbaikan video kecil) ====================
    Akar masalah: saat iframe video di-fullscreen, CSS author (position:absolute;
    width:100%; height:100%) MENANG di atas UA stylesheet :-webkit-full-screen, sehingga

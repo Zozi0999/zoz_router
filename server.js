@@ -1475,6 +1475,167 @@ function resolveEndpointUrl(baseEndpoint, targetPath) {
   return parsed;
 }
 
+// ==================== UNIVERSAL VIDEO LINK PROBE ====================
+// Menentukan apakah sebuah URL arbitrer adalah video yang bisa diputar di dalam chat:
+//   - respons langsung video/* atau playlist HLS  -> kind: 'file'  (diputar via <video>)
+//   - halaman HTML dengan og:video / twitter:player -> kind: 'embed' (diputar via <iframe>)
+// Dilindungi SSRF (blokir host privat + anti DNS-rebinding di setiap hop redirect).
+const VIDEO_PROBE_CACHE = new Map();
+const VIDEO_PROBE_FILE_EXT_RE = /\.(?:mp4|m4v|webm|ogv|mov|mkv|m3u8)(?:$|[?#])/i;
+
+function decodeProbeHtmlEntities(str) {
+  return String(str || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;/g, "'")
+    .replace(/&#x27;/gi, "'")
+    .trim();
+}
+
+function extractProbeMeta(html) {
+  const meta = {};
+  const tagRe = /<meta\b[^>]*>/gi;
+  let m;
+  while ((m = tagRe.exec(html)) !== null) {
+    const tag = m[0];
+    const key = (tag.match(/\b(?:property|name)\s*=\s*["']([^"']+)["']/i) || [])[1];
+    const val = (tag.match(/\bcontent\s*=\s*["']([^"']*)["']/i) || [])[1];
+    if (key && val !== undefined) {
+      const k = key.toLowerCase();
+      if (!(k in meta)) meta[k] = decodeProbeHtmlEntities(val);
+    }
+  }
+  const t = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+  if (t && !meta['og:title']) meta['og:title'] = decodeProbeHtmlEntities(t[1].replace(/\s+/g, ' '));
+  return meta;
+}
+
+function probeVideoUrl(targetUrl, redirectCount = 0) {
+  let clean = String(targetUrl || '').trim();
+  if (!/^https?:\/\//i.test(clean)) {
+    return Promise.resolve({ success: false, error: 'URL tidak valid.' });
+  }
+  const cached = VIDEO_PROBE_CACHE.get(clean);
+  if (cached && cached.exp > Date.now()) return Promise.resolve(cached.value);
+  const remember = (value, ttlMs) => {
+    if (redirectCount === 0) {
+      if (VIDEO_PROBE_CACHE.size > 300) VIDEO_PROBE_CACHE.delete(VIDEO_PROBE_CACHE.keys().next().value);
+      VIDEO_PROBE_CACHE.set(clean, { value, exp: Date.now() + ttlMs });
+    }
+    return value;
+  };
+  const fail = (error) => remember({ success: false, error, url: clean }, 120000);
+
+  return assertResolvesPublic(clean).then((verdict) => {
+    if (!verdict.ok) return fail(verdict.msg);
+    return new Promise((resolve) => {
+      try {
+        if (redirectCount > 4) return resolve(fail('Terlalu banyak redirect.'));
+        const parsed = new URL(clean);
+        if (isPrivateHost(parsed.hostname, parsed.port)) {
+          return resolve(fail('Akses ke host lokal / intranet diblokir (SSRF Protection).'));
+        }
+        const client = parsed.protocol === 'https:' ? https : http;
+        let settled = false;
+        const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+
+        const req = client.request({
+          hostname: parsed.hostname,
+          port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+          path: parsed.pathname + parsed.search,
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,video/*;q=0.9,*/*;q=0.5',
+            'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Range': 'bytes=0-524287'
+          },
+          timeout: 8000
+        }, (res) => {
+          if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+            res.resume();
+            try {
+              const next = new URL(res.headers.location, clean).toString();
+              return probeVideoUrl(next, redirectCount + 1).then((r) => done(redirectCount === 0 ? remember(r, r.success ? 600000 : 120000) : r));
+            } catch (e) {
+              return done(fail('Redirect error: ' + e.message));
+            }
+          }
+          if (res.statusCode < 200 || res.statusCode >= 400) {
+            res.resume();
+            return done(fail(`HTTP ${res.statusCode}`));
+          }
+          const ctype = String(res.headers['content-type'] || '').toLowerCase();
+          if (/^video\//.test(ctype) || /mpegurl|application\/ogg/.test(ctype) || (/octet-stream/.test(ctype) && VIDEO_PROBE_FILE_EXT_RE.test(parsed.pathname))) {
+            res.destroy();
+            return done(remember({ success: true, kind: 'file', fileUrl: clean, url: clean, site: parsed.hostname, title: decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || parsed.hostname), hls: /mpegurl/.test(ctype) || /\.m3u8(?:$|[?#])/i.test(parsed.pathname) }, 600000));
+          }
+          if (!/text\/html|application\/xhtml/.test(ctype)) {
+            res.destroy();
+            return done(fail('Bukan video / halaman web.'));
+          }
+
+          let stream = res;
+          const enc = String(res.headers['content-encoding'] || '').toLowerCase();
+          if (enc === 'gzip') stream = res.pipe(zlib.createGunzip());
+          else if (enc === 'deflate') stream = res.pipe(zlib.createInflate());
+          else if (enc === 'br') stream = res.pipe(zlib.createBrotliDecompress());
+
+          let html = '';
+          const finish = () => {
+            try {
+              const meta = extractProbeMeta(html);
+              const title = meta['og:title'] || meta['twitter:title'] || parsed.hostname;
+              const thumbnail = meta['og:image'] || meta['twitter:image'] || '';
+              const site = meta['og:site_name'] || parsed.hostname;
+              const abs = (u) => { if (!u) return ''; try { return new URL(u, clean).toString(); } catch (_) { return ''; } };
+              const vUrl = abs(meta['og:video:secure_url'] || meta['og:video:url'] || meta['og:video'] || '');
+              const vType = String(meta['og:video:type'] || '').toLowerCase();
+              const playerUrl = abs(meta['twitter:player'] || '');
+
+              let result = null;
+              if (vUrl && (/^video\//.test(vType) || /mpegurl/.test(vType) || (!vType.includes('html') && VIDEO_PROBE_FILE_EXT_RE.test(vUrl)))) {
+                result = { kind: 'file', fileUrl: vUrl, hls: /mpegurl/.test(vType) || /\.m3u8(?:$|[?#])/i.test(vUrl) };
+              } else {
+                const embed = playerUrl || (vUrl && /^https:/i.test(vUrl) ? vUrl : '');
+                if (embed && /^https:\/\//i.test(embed) && embed !== clean) result = { kind: 'embed', embedUrl: embed };
+              }
+              if (!result) return done(fail('Halaman ini tidak memuat video yang dapat disematkan.'));
+              if (result.fileUrl && !/^https?:\/\//i.test(result.fileUrl)) return done(fail('URL video tidak valid.'));
+              try {
+                const target = new URL(result.fileUrl || result.embedUrl);
+                if (isPrivateHost(target.hostname, target.port)) return done(fail('URL video mengarah ke host privat.'));
+              } catch (_) { return done(fail('URL video tidak valid.')); }
+
+              done(remember({ success: true, ...result, url: clean, title, thumbnail: /^https?:\/\//i.test(thumbnail) ? thumbnail : '', site }, 600000));
+            } catch (e) {
+              done(fail(e.message));
+            }
+          };
+          stream.on('data', (chunk) => {
+            if (settled) return;
+            html += chunk.toString('utf8');
+            if (html.length > 400000 || /<\/head>/i.test(html)) {
+              res.destroy();
+              finish();
+            }
+          });
+          stream.on('end', () => { if (!settled) finish(); });
+          stream.on('error', () => { if (!settled) finish(); });
+        });
+        req.on('timeout', () => { req.destroy(); done(fail('Timeout saat memeriksa tautan.')); });
+        req.on('error', (e) => done(fail('Network error: ' + e.message)));
+        req.end();
+      } catch (e) {
+        resolve(fail(e.message));
+      }
+    });
+  }).catch((e) => fail(e && e.message ? e.message : 'Probe gagal.'));
+}
+
 // ==================== YOUTUBE OEMBED METADATA GROUNDING ENGINE ====================
 const YOUTUBE_ALLOWED_HOSTS = new Set([
   'youtu.be',
@@ -4160,6 +4321,7 @@ async function requestHandler(req, res) {
   const isExemptCrossOriginPath = pathname === '/api/ping' ||
                                  pathname === '/api/health' ||
                                  pathname === '/api/youtube-info' ||
+                                 pathname === '/api/video-probe' ||
                                  pathname.startsWith('/api/tools/') ||
                                  pathname === '/api/extract-web' ||
                                  pathname === '/api/read-url' ||
@@ -6651,6 +6813,19 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     }
   }
 
+
+  // ----------------------------------------------------
+  // UNIVERSAL VIDEO LINK PROBE API (deteksi video dari URL apa pun)
+  // ----------------------------------------------------
+  if (pathname === '/api/video-probe' && method === 'GET') {
+    const target = (reqUrl.searchParams.get('url') || '').trim();
+    if (!target) return sendJSON(res, 400, { success: false, error: 'Parameter url diperlukan.' });
+    try {
+      return sendJSON(res, 200, await probeVideoUrl(target));
+    } catch (err) {
+      return sendJSON(res, 200, { success: false, error: err.message, url: target });
+    }
+  }
 
   // ----------------------------------------------------
   // WEB PAGE CONTENT EXTRACTOR / READER TOOL API
