@@ -188,23 +188,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 Official', tag: 'Reasoning', cat: 'reasoning', desc: 'DeepSeek R1 Official API berkapabilitas reasoning penuh.' }
   ];
 
-  // Official & Verified Standard Open-Source Models
-  const OFFICIAL_OLLAMA_CLOUD_MODELS = [
-    { name: 'llama3.2:3b', model: 'llama3.2:3b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'llama', parameter_size: '3B' } },
-    { name: 'llama3.2:1b', model: 'llama3.2:1b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'llama', parameter_size: '1B' } },
-    { name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'qwen', parameter_size: '1.5B' } },
-    { name: 'qwen2.5:7b', model: 'qwen2.5:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'qwen', parameter_size: '7B' } },
-    { name: 'qwen2.5-coder:7b', model: 'qwen2.5-coder:7b', tag: 'Coding', isFree: true, cat: 'coding', details: { family: 'qwen', parameter_size: '7B' } },
-    { name: 'deepseek-r1:8b', model: 'deepseek-r1:8b', tag: 'Reasoning', isFree: true, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '8B' } },
-    { name: 'deepseek-r1:7b', model: 'deepseek-r1:7b', tag: 'Reasoning', isFree: true, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '7B' } },
-    { name: 'mistral:7b', model: 'mistral:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'mistral', parameter_size: '7B' } },
-    { name: 'gemma2:9b', model: 'gemma2:9b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'gemma', parameter_size: '9B' } },
-    { name: 'gemma2:2b', model: 'gemma2:2b', tag: 'Lokal', isFree: true, cat: 'fast', details: { family: 'gemma', parameter_size: '2B' } },
-    { name: 'phi4:14b', model: 'phi4:14b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'phi', parameter_size: '14B' } }
-  ];
-
-  const VALID_OLLAMA_CLOUD_MODELS = new Set(OFFICIAL_OLLAMA_CLOUD_MODELS.map(m => m.model.toLowerCase()));
-
   function sanitizeOllamaApiKey(rawKey) {
     if (!rawKey || typeof rawKey !== 'string') return '';
     return rawKey.replace(/^Bearer\s+/i, '').replace(/^["']+|["']+$/g, '').trim();
@@ -223,7 +206,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
   // Model Resolver: Pertahankan nama model asli yang dipilih pengguna
   function resolveOllamaCloudModel(modelId) {
-    if (!modelId || typeof modelId !== 'string') return 'llama3.2:3b';
+    if (!modelId || typeof modelId !== 'string') return '';
     return modelId.trim();
   }
 
@@ -775,7 +758,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     isSending: false, // Guard anti pengiriman ganda (Enter berulang saat masih ada await)
     abortController: null,
     soundEnabled: false,
-    ollamaModels: [...OFFICIAL_OLLAMA_CLOUD_MODELS],
+    ollamaModels: [],
     openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
     availableImageModels: [...DEFAULT_IMAGE_MODELS],
     settings: {
@@ -22773,11 +22756,6 @@ ${blocks}
         }
       }
 
-      if (rawModels.length === 0) {
-        rawModels = [...OFFICIAL_OLLAMA_CLOUD_MODELS];
-        isRunning = false;
-      }
-
       if (rawModels.length > 0) {
         STATE.ollamaModels = rawModels;
         const statusText = isRunning ? `Ollama (${rawModels.length} Model Aktif)` : `Ollama (${rawModels.length} Model Siap)`;
@@ -22790,7 +22768,7 @@ ${blocks}
         if (!STATE.settings.ollamaModel || !modelNamesLower.has(String(STATE.settings.ollamaModel).toLowerCase()) || STATE.settings.ollamaModel.startsWith('gemma4') || STATE.settings.ollamaModel === 'beam' || STATE.settings.ollamaModel === 'muse-spark-open') {
           const preferredModel = modelNames.find(n => n.includes('llama3.2') || n.includes('qwen') || n.includes('granite'))
             || modelNames[0]
-            || 'llama3.2:3b';
+            || '';
           STATE.settings.ollamaModel = preferredModel;
           safeLocalStorage.setItem('zoz_ollama_model', preferredModel);
           savePersistedState();
@@ -45028,30 +45006,40 @@ Aturan:
       if (engine === 'ollama') {
         const rawOllamaList = (Array.isArray(STATE.ollamaModels) && STATE.ollamaModels.length > 0)
           ? STATE.ollamaModels.map(m => m.name || m.model || m.id).filter(Boolean)
-          : [
-              'llama3.2:3b',
-              'qwen2.5:1.5b',
-              'granite4.2:3b',
-              'granite-mind:latest',
-              'nemotron-analisis:latest'
-            ];
+          : [];
 
         // Singkirkan model palsu/fiktif
         const ollamaList = rawOllamaList.filter(id => !id.startsWith('gemma4') && id !== 'beam' && id !== 'muse-spark-open');
 
-        const activeCurrent = (STATE.settings?.ollamaModel && ollamaList.includes(STATE.settings.ollamaModel))
-          ? STATE.settings.ollamaModel
-          : (ollamaList[0] || 'llama3.2:3b');
-
-        ollamaList.forEach(m => {
+        if (ollamaList.length === 0) {
           const opt = document.createElement('option');
-          opt.value = m;
-          opt.textContent = m + (m === activeCurrent ? ' (Aktif)' : '');
+          opt.value = '';
+          opt.textContent = 'Tidak ada model Ollama (Offline)';
+          opt.disabled = true;
+          opt.selected = true;
           selectEl.appendChild(opt);
-        });
+          if (typeof fetchOllamaModelsList === 'function') {
+            fetchOllamaModelsList().then(() => {
+              if (this.activeSummaryEngine === 'ollama' && selectEl && selectEl.parentElement) {
+                this.populateEngineModelSelect(selectEl, 'ollama', selectEl.value);
+              }
+            }).catch(() => {});
+          }
+        } else {
+          const activeCurrent = (STATE.settings?.ollamaModel && ollamaList.includes(STATE.settings.ollamaModel))
+            ? STATE.settings.ollamaModel
+            : ollamaList[0];
 
-        const targetVal = (prevVal && ollamaList.includes(prevVal)) ? prevVal : activeCurrent;
-        selectEl.value = targetVal;
+          ollamaList.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m + (m === activeCurrent ? ' (Aktif)' : '');
+            selectEl.appendChild(opt);
+          });
+
+          const targetVal = (prevVal && ollamaList.includes(prevVal)) ? prevVal : activeCurrent;
+          selectEl.value = targetVal;
+        }
       } else {
         const brokenSet = (typeof DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS !== 'undefined')
           ? DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS

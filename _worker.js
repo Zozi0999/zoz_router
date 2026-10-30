@@ -54,20 +54,6 @@ function isOllamaEndpointForbidden(endpointUrl) {
   return checkOllamaEndpoint(endpointUrl).forbidden;
 }
 
-// Official & Verified Standard Open-Source Models
-const OFFICIAL_OLLAMA_CLOUD_MODELS = [
-  { name: 'llama3.2:3b', model: 'llama3.2:3b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'llama', parameter_size: '3B' } },
-  { name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'qwen', parameter_size: '1.5B' } },
-  { name: 'granite4.2:3b', model: 'granite4.2:3b', tag: 'Lokal', isFree: true, cat: 'fast', details: { family: 'granite', parameter_size: '3B' } },
-  { name: 'granite-mind:latest', model: 'granite-mind:latest', tag: 'Lokal', isFree: true, cat: 'flagship', details: { family: 'granite', parameter_size: '3B' } },
-  { name: 'nemotron-analisis:latest', model: 'nemotron-analisis:latest', tag: 'Lokal', isFree: true, cat: 'coding', details: { family: 'nemotron', parameter_size: '3B' } },
-  { name: 'deepseek-r1:8b', model: 'deepseek-r1:8b', tag: 'Reasoning', isFree: true, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '8B' } },
-  { name: 'mistral:7b', model: 'mistral:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'mistral', parameter_size: '7B' } },
-  { name: 'qwen2.5:7b', model: 'qwen2.5:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'qwen', parameter_size: '7B' } }
-];
-
-const VALID_OLLAMA_CLOUD_MODELS = new Set(OFFICIAL_OLLAMA_CLOUD_MODELS.map(m => m.model.toLowerCase()));
-
 function sanitizeOllamaApiKey(rawKey) {
   if (!rawKey || typeof rawKey !== 'string') return '';
   return rawKey.replace(/^Bearer\s+/i, '').replace(/^["']+|["']+$/g, '').trim();
@@ -85,7 +71,7 @@ function isUnsupportedOllamaChatModel(m) {
 
 // Model Resolver: Pertahankan nama model asli yang dipilih pengguna
 function resolveOllamaCloudModel(modelId) {
-  if (!modelId || typeof modelId !== 'string') return 'llama3.2:3b';
+  if (!modelId || typeof modelId !== 'string') return '';
   return modelId.trim();
 }
 
@@ -1035,21 +1021,9 @@ export default {
         let cleanEndpoint = (endpoint || '').trim();
         // Pada Cloudflare Edge, jika endpoint loopback atau ollama.com default diminta:
         // - Jika ada authHeader: alihkan ke https://ollama.com resmi
-        // - Jika tanpa authHeader: segera kembalikan katalog resmi Ollama Cloud (< 5ms)
         if (cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1') || cleanEndpoint.includes('ollama.com')) {
           if (authHeader && !cleanEndpoint.includes('ollama.com')) {
             cleanEndpoint = 'https://ollama.com';
-          } else if (!authHeader) {
-            return new Response(JSON.stringify({
-              models: OFFICIAL_OLLAMA_CLOUD_MODELS,
-              server_running: true,
-              cloud_ready: true,
-              cloud_auth: false,
-              note: 'Loaded from official Ollama Cloud catalog'
-            }), {
-              status: 200,
-              headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-            });
           }
         }
 
@@ -1060,11 +1034,11 @@ export default {
         const endpointCheck = checkOllamaEndpoint(cleanEndpoint);
         if (endpointCheck.forbidden) {
           return new Response(JSON.stringify({
-            models: OFFICIAL_OLLAMA_CLOUD_MODELS,
-            server_running: true,
-            cloud_ready: true,
+            models: [],
+            server_running: false,
+            cloud_ready: false,
             cloud_auth: Boolean(authHeader),
-            note: 'Loaded from official Ollama Cloud catalog'
+            note: 'Endpoint Ollama lokal tidak dapat dijangkau dari Cloudflare Edge'
           }), {
             status: 200,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
@@ -1142,22 +1116,22 @@ export default {
 
         // Fallback jika response bukan 200 atau models kosong
         return new Response(JSON.stringify({
-          models: OFFICIAL_OLLAMA_CLOUD_MODELS,
-          server_running: true,
-          cloud_ready: true,
+          models: [],
+          server_running: false,
+          cloud_ready: false,
           cloud_auth: Boolean(authHeader),
-          note: 'Loaded from official Ollama Cloud catalog'
+          note: 'Ollama offline atau tidak ada model terpasang'
         }), {
           status: 200,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
       } catch (e) {
         return new Response(JSON.stringify({
-          models: OFFICIAL_OLLAMA_CLOUD_MODELS,
-          server_running: true,
-          cloud_ready: true,
+          models: [],
+          server_running: false,
+          cloud_ready: false,
           cloud_auth: false,
-          note: 'Loaded from official Ollama Cloud catalog'
+          note: 'Gagal terhubung ke Ollama'
         }), {
           status: 200,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }

@@ -1178,23 +1178,6 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
   });
 }
 
-// Official & Verified Standard Open-Source Models
-const OFFICIAL_OLLAMA_CLOUD_MODELS = [
-  { name: 'llama3.2:3b', model: 'llama3.2:3b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'llama', parameter_size: '3B' } },
-  { name: 'llama3.2:1b', model: 'llama3.2:1b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'llama', parameter_size: '1B' } },
-  { name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b', tag: 'Lokal/Cloud', isFree: true, cat: 'fast', details: { family: 'qwen', parameter_size: '1.5B' } },
-  { name: 'qwen2.5:7b', model: 'qwen2.5:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'qwen', parameter_size: '7B' } },
-  { name: 'qwen2.5-coder:7b', model: 'qwen2.5-coder:7b', tag: 'Coding', isFree: true, cat: 'coding', details: { family: 'qwen', parameter_size: '7B' } },
-  { name: 'deepseek-r1:8b', model: 'deepseek-r1:8b', tag: 'Reasoning', isFree: true, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '8B' } },
-  { name: 'deepseek-r1:7b', model: 'deepseek-r1:7b', tag: 'Reasoning', isFree: true, cat: 'reasoning', details: { family: 'deepseek', parameter_size: '7B' } },
-  { name: 'mistral:7b', model: 'mistral:7b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'mistral', parameter_size: '7B' } },
-  { name: 'gemma2:9b', model: 'gemma2:9b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'gemma', parameter_size: '9B' } },
-  { name: 'gemma2:2b', model: 'gemma2:2b', tag: 'Lokal', isFree: true, cat: 'fast', details: { family: 'gemma', parameter_size: '2B' } },
-  { name: 'phi4:14b', model: 'phi4:14b', tag: 'Standard', isFree: true, cat: 'flagship', details: { family: 'phi', parameter_size: '14B' } }
-];
-
-const VALID_OLLAMA_CLOUD_MODELS = new Set(OFFICIAL_OLLAMA_CLOUD_MODELS.map(m => m.model.toLowerCase()));
-
 function sanitizeOllamaApiKey(rawKey) {
   if (!rawKey || typeof rawKey !== 'string') return '';
   return rawKey.replace(/^Bearer\s+/i, '').replace(/^["']+|["']+$/g, '').trim();
@@ -1212,13 +1195,13 @@ function isUnsupportedOllamaChatModel(m) {
 
 // Model Resolver: Pertahankan nama model asli yang dipilih pengguna
 function resolveOllamaCloudModel(modelId) {
-  if (!modelId || typeof modelId !== 'string') return 'llama3.2:3b';
+  if (!modelId || typeof modelId !== 'string') return '';
   return modelId.trim();
 }
 
 // Model Resolver Lokal Daemon: Pertahankan nama model asli yang terpasang di Ollama lokal
 function resolveLocalDaemonCloudManifest(modelId) {
-  if (!modelId || typeof modelId !== 'string') return 'llama3.2:3b';
+  if (!modelId || typeof modelId !== 'string') return '';
   return modelId.trim();
 }
 
@@ -7674,7 +7657,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     const isServerlessEnv = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION || req.headers['x-vercel-id']);
     if (isServerlessEnv && !authHeader && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(rawEndpoint)) {
       return sendJSON(res, 200, {
-        models: OFFICIAL_OLLAMA_CLOUD_MODELS,
+        models: [],
         server_running: false,
         cloud_ready: false,
         cloud_auth: false,
@@ -7771,9 +7754,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         });
       }
 
-      // If remote returned empty or failed, fallback to official open models
+      // If remote returned empty or failed, return empty array
       return sendJSON(res, 200, {
-        models: OFFICIAL_OLLAMA_CLOUD_MODELS,
+        models: [],
         server_running: false,
         cloud_ready: false,
         cloud_auth: Boolean(authHeader),
