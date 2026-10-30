@@ -9174,7 +9174,15 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         displayText = '*Sedang berpikir...*';
       }
       if (displayText && typeof scrubRawToolCallArtifacts === 'function') {
-        const scrubbed = scrubRawToolCallArtifacts(displayText);
+        let streamSafeText = displayText;
+        if (!this.isDone) {
+          streamSafeText = streamSafeText
+            .replace(/<(?:tool_call|function_call)\b[\s\S]*$/i, '')
+            .replace(/\[TOOL_CALLS\][\s\S]*$/i, '')
+            .replace(/```(?:tool_call|json)?\s*\{\s*"(?:tool|name|function)"\s*:[\s\S]*$/i, '')
+            .replace(/^\s*\{\s*"(?:tool|name|function)"\s*:\s*"[\s\S]*$/i, '');
+        }
+        const scrubbed = scrubRawToolCallArtifacts(streamSafeText);
         if (!scrubbed.trim() && displayText.trim()) {
           displayText = '*Membaca dan menyintesis data web...*';
         } else if (scrubbed.trim()) {
@@ -24336,28 +24344,112 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (liveModel && typeof liveModel.supportsTools === 'boolean') {
       return liveModel.supportsTools;
     }
+    const ollamaModel = (STATE.ollamaModels || []).find(m => (typeof m === 'string' ? m === modelName : (m.name === modelName || m.model === modelName)));
+    if (ollamaModel && typeof ollamaModel === 'object') {
+      if (typeof ollamaModel.supportsTools === 'boolean') return ollamaModel.supportsTools;
+      if (Array.isArray(ollamaModel.capabilities) && ollamaModel.capabilities.includes('tools')) return true;
+    }
     const lower = modelName.toLowerCase();
     return (
       lower.includes('gpt-') ||
+      lower.includes('gpt-oss') ||
       lower.includes('claude-') ||
       lower.includes('gemini-') ||
+      lower.includes('gemma') ||
       lower.includes('qwen') ||
+      lower.includes('qwq') ||
       lower.includes('mistral') ||
+      lower.includes('ministral') ||
+      lower.includes('magistral') ||
+      lower.includes('codestral') ||
+      lower.includes('devstral') ||
+      lower.includes('pixtral') ||
       lower.includes('llama') ||
       lower.includes('nemotron') ||
       lower.includes('hermes') ||
       lower.includes('command-r') ||
       lower.includes('deepseek') ||
+      lower.includes('glm') ||
+      lower.includes('zhipu') ||
+      lower.includes('chatglm') ||
+      lower.includes('kimi') ||
+      lower.includes('moonshot') ||
+      lower.includes('minimax') ||
+      lower.includes('granite') ||
+      lower.includes('grok') ||
+      lower.includes('xai') ||
+      lower.includes('step') ||
+      lower.includes('hunyuan') ||
+      lower.includes('doubao') ||
+      lower.includes('seed') ||
+      lower.includes('ernie') ||
+      lower.includes('nova') ||
+      lower.includes('jamba') ||
+      lower.includes('olmo') ||
+      lower.includes('internlm') ||
+      lower.includes('solar') ||
+      lower.includes('reka') ||
+      lower.includes('aya') ||
+      lower.includes('arctic') ||
+      lower.includes('cogito') ||
+      lower.includes('exaone') ||
       lower.includes('mimo') ||
       lower.includes('xiaomi') ||
       lower.includes('phi-') ||
       lower.includes('yi-') ||
-      lower.includes('cohere')
+      lower.includes('cohere') ||
+      /\/o[134]\b/.test(lower)
     );
   }
 
-  // ==================== LOCAL UTILITY TOOLS (MEMORY & PYTHON ENGINE) ====================
+  // ==================== AUTONOMOUS WEB SEARCH, WHITELIST GROUNDING & LOCAL UTILITY TOOLS ====================
   const AUTONOMOUS_WEB_TOOLS = [
+    {
+      type: 'function',
+      function: {
+        name: 'search_web',
+        description: 'Melakukan pencarian informasi real-time di seluruh internet (berita terkini, rilis model AI/teknologi terbaru, fakta mutakhir, harga, dokumentasi, tokoh, atau peristiwa apa pun). Panggil tool ini KAPAN SAJA pengguna meminta pencarian di web atau menanyakan informasi terbaru tanpa memerlukan menu UI khusus.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Kata kunci pencarian internet yang spesifik dan relevan (contoh: "latest AI model releases 2026", "rilis teknologi terbaru hari ini").'
+            },
+            max_results: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 12,
+              default: 8,
+              description: 'Jumlah maksimal hasil pencarian web yang ingin diambil (default 8).'
+            }
+          },
+          required: ['query']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'browse_web_page',
+        description: 'Membuka dan mengekstrak isi teks lengkap dari halaman URL publik mana pun di internet ketika pengguna memberikan tautan web atau ketika Anda ingin membaca artikel hasil pencarian secara utuh.',
+        parameters: {
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description: 'Alamat URL lengkap halaman web yang ingin dibaca (contoh: "https://techcrunch.com/...").'
+            },
+            max_chars: {
+              type: 'integer',
+              default: 8000,
+              description: 'Batas maksimal karakter teks bersih yang diekstrak (default 8000).'
+            }
+          },
+          required: ['url']
+        }
+      }
+    },
     {
       type: 'function',
       function: {
@@ -24562,8 +24654,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
   ];
 
-  // Tool utility lokal (Memori SQLite, Eksekusi Python, Rangkum WhatsApp Consent, Rekomendasi Video & Whitelist Grounding): diizinkan SELALU tanpa perlu menu UI
+  // Seluruh tool otonom (Pencarian Web Real-Time, Pembacaan URL, Whitelist Grounding, Rekomendasi Video, Memori SQLite, Python & WhatsApp Consent): diizinkan SELALU tanpa perlu menu UI
   const LOCAL_UTILITY_TOOL_NAMES = [
+    'search_web', 'web_search', 'search', 'google_search', 'internet_search', 'pencarian_web', 'cari_web',
+    'browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url', 'baca_web', 'ambil_web',
     'save_memory', 'simpan_memori', 'store_memory',
     'search_memory', 'cari_memori', 'query_memory',
     'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python',
@@ -24574,8 +24668,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     'summarize_sources', 'summarize_urls', 'multi_source_summary'
   ];
 
-  // Daftar nama tool lokal yang dikenal sistem (native call maupun parse teks)
+  // Daftar nama tool otonom yang dikenal sistem (native call maupun parse teks)
   const AUTONOMOUS_TOOL_NAMES = [
+    'search_web', 'web_search', 'search', 'google_search', 'internet_search', 'pencarian_web', 'cari_web',
+    'browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url', 'baca_web', 'ambil_web',
     'save_memory', 'simpan_memori', 'store_memory',
     'search_memory', 'cari_memori', 'query_memory',
     'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python',
@@ -24589,6 +24685,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   function normalizeToolName(name) {
     if (!name) return '';
     const n = String(name).toLowerCase().trim();
+    if (['search_web', 'web_search', 'search', 'google_search', 'internet_search', 'pencarian_web', 'cari_web'].includes(n)) return 'search_web';
+    if (['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url', 'baca_web', 'ambil_web'].includes(n)) return 'browse_web_page';
     if (['save_memory', 'simpan_memori', 'store_memory'].includes(n)) return 'save_memory';
     if (['search_memory', 'cari_memori', 'query_memory'].includes(n)) return 'search_memory';
     if (['execute_python_code', 'execute_code', 'run_python', 'run_code', 'python_code', 'python'].includes(n)) return 'execute_python_code';
@@ -25915,24 +26013,68 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     return results;
   }
 
+  function extractToolNameFromParsedJson(p) {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return '';
+    let name = '';
+    if (typeof p.name === 'string') name = p.name;
+    else if (typeof p.function === 'string') name = p.function;
+    else if (p.function && typeof p.function === 'object' && typeof p.function.name === 'string') name = p.function.name;
+    else if (typeof p.tool === 'string') name = p.tool;
+    else if (p.tool && typeof p.tool === 'object' && typeof p.tool.name === 'string') name = p.tool.name;
+    else if (typeof p.tool_name === 'string') name = p.tool_name;
+    else if (typeof p.action === 'string') name = p.action;
+
+    if (!name) {
+      if (p.video_url || (p.query && (p.platform || p.limit !== undefined))) {
+        name = 'find_related_videos';
+      } else if (p.target_number_or_name || (p.focus_topic && (p.target || p.contact))) {
+        name = 'summarize_whatsapp_chat';
+      }
+    }
+    return name;
+  }
+
+  function extractToolArgsFromParsedJson(p) {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return {};
+    const nestedFnArgs = (p.function && typeof p.function === 'object')
+      ? (p.function.arguments ?? p.function.parameters ?? p.function.args ?? p.function.input)
+      : undefined;
+    const nestedToolArgs = (p.tool && typeof p.tool === 'object')
+      ? (p.tool.arguments ?? p.tool.parameters ?? p.tool.args ?? p.tool.input)
+      : undefined;
+    const explicit = p.arguments ?? p.parameters ?? p.args ?? p.input ?? p.action_input ?? nestedFnArgs ?? nestedToolArgs;
+    if (explicit !== undefined && explicit !== null) {
+      return explicit;
+    }
+    // Dukungan format flat JSON (contoh: {"tool": "search", "query": "latest AI model releases 2026 October", "max_results": 10})
+    const metaKeys = new Set(['name', 'function', 'tool', 'tool_name', 'action', 'type', 'id', 'call_id', 'tool_call_id', 'index']);
+    const flatArgs = {};
+    for (const [k, v] of Object.entries(p)) {
+      if (!metaKeys.has(k) && v !== undefined) {
+        flatArgs[k] = v;
+      }
+    }
+    return flatArgs;
+  }
+
   function scrubRawToolCallArtifacts(text) {
     if (!text || typeof text !== 'string') return '';
     const toolPattern = AUTONOMOUS_TOOL_NAMES.join('|');
     const invokeRegex = new RegExp(`<invoke\\s+name=["'](?:${toolPattern})["']>[\\s\\S]*?<\\/invoke>`, 'gi');
-    const jsonCodeBlockRegex = new RegExp(`\`\`\`(?:tool_call|json)?\\s*\\{[\\s\\S]*?"(?:name|function|tool)"\\s*:\\s*"(?:${toolPattern})"[\\s\\S]*?\\}\\s*\`\`\``, 'gi');
+    const jsonCodeBlockRegex = new RegExp(`\`\`\`(?:tool_call|json)?\\s*\\{[\\s\\S]*?"(?:name|function|tool|tool_name|action)"\\s*:\\s*"(?:${toolPattern})"[\\s\\S]*?\\}\\s*\`\`\``, 'gi');
     const callPreambleRegex = new RegExp(`(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\\s+(?:${toolPattern})[\\s\\S]*?(?:\\.|\\n|$)`, 'gi');
-    const funcCallRegex = new RegExp(`(?:${toolPattern})\\s*\\(\\s*\\{[\\s\\S]*?\\}\\s*\\)`, 'gi');
-    const funcCallEmptyRegex = new RegExp(`(?:${toolPattern})\\s*\\(\\s*\\)`, 'gi');
-    const funcCallArgsRegex = new RegExp(`(?:${toolPattern})\\s*\\(\\s*(?:(?:query|url|q|code|topic|content|script|link|target|isi|kata_kunci|topik)\\s*[:=]\\s*)?(["'\`])[\\s\\S]*?\\1\\s*\\)`, 'gi');
-    const funcCallTwoArgsRegex = /(?:save_memory|simpan_memori|store_memory)\s*\(\s*(?:[a-zA-Z_]+\s*[:=]\s*)?(["'`])[\s\S]*?\1\s*,\s*(?:[a-zA-Z_]+\s*[:=]\s*)?(["'`])[\s\S]*?\2\s*\)/gi;
+    const funcCallRegex = new RegExp(`\\b(?:${toolPattern})\\s*\\(\\s*\\{[\\s\\S]*?\\}\\s*\\)`, 'gi');
+    const funcCallEmptyRegex = new RegExp(`\\b(?:${toolPattern})\\s*\\(\\s*\\)`, 'gi');
+    const funcCallArgsRegex = new RegExp(`\\b(?:${toolPattern})\\s*\\(\\s*(?:(?:query|url|q|code|topic|content|script|link|target|isi|kata_kunci|topik)\\s*[:=]\\s*)?(["'\`])[\\s\\S]*?\\1\\s*\\)`, 'gi');
+    const funcCallTwoArgsRegex = /\b(?:save_memory|simpan_memori|store_memory)\s*\(\s*(?:[a-zA-Z_]+\s*[:=]\s*)?(["'`])[\s\S]*?\1\s*,\s*(?:[a-zA-Z_]+\s*[:=]\s*)?(["'`])[\s\S]*?\2\s*\)/gi;
 
     let cleaned = text
       .replace(/<(?:tool_call|function_call)>[\s\S]*?<\/(?:tool_call|function_call)>/gi, '')
       .replace(invokeRegex, '')
       .replace(/\[TOOL_CALLS\][\s\S]*?(?:\[\/TOOL_CALLS\]|(?=\n\n)|$)/gi, '')
       .replace(jsonCodeBlockRegex, '')
-      .replace(/(?:call:)?(?:search_web|web_search|search)\s*(?:query\s*[:=]?|:\s*query\s*=|\s*[:=]\s*)?\s*(?:["'][^"']+["']|[^\n<{}>]+?)(?:<\/?|>|$)/gi, '')
-      .replace(/(?:call:)?(?:browse_web_page|browse_web|extract_web|read_url)\s*(?:url\s*[:=]?|:\s*url\s*=|\s*[:=]\s*)?\s*(?:["'][^"']+["']|(?:https?:\/\/[^\s\n<{}]+|[^\n<{}>]+?))(?:<\/?|>|$)/gi, '')
+      .replace(/(?:call:(?:search_web|web_search|search)|\b(?:search_web|web_search))\s*(?:query\s*[:=]|:\s*query\s*=)\s*(?:["'][^"']+["']|[^\n<{}>]+?)(?:<\/?|>|$)/gi, '')
+      .replace(/(?:call:(?:browse_web_page|browse_web|extract_web|read_url)|\b(?:browse_web_page|browse_web|extract_web|read_url))\s*(?:url\s*[:=]|:\s*url\s*=)\s*(?:["'][^"']+["']|(?:https?:\/\/[^\s\n<{}]+|[^\n<{}>]+?))(?:<\/?|>|$)/gi, '')
       .replace(/<\/?start_of_turn>(?:model|user)?\s*/gi, '')
       .replace(/<\/?end_of_turn>\s*/gi, '');
 
@@ -25947,22 +26089,17 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     for (const block of jsonBlocks) {
       try {
         const p = JSON.parse(block.json);
-        let name = p.name || p.function || p.tool;
-        if (!name) {
-          if (p.video_url || (p.query && (p.platform || p.limit !== undefined))) {
-            name = 'find_related_videos';
-          } else if (p.target_number_or_name || (p.focus_topic && (p.target || p.contact))) {
-            name = 'summarize_whatsapp_chat';
-          }
-        }
+        const name = extractToolNameFromParsedJson(p);
         if (name && isKnownAutonomousTool(name)) {
           cleaned = cleaned.replace(block.json, '');
         }
       } catch (_) {}
     }
 
-    // Bersihkan sisa empty code blocks, sisa fungsi kosong, dan residu teks bocor
+    // Bersihkan sisa empty code blocks, tag tool_call yatim (tanpa tag penutup), sisa fungsi kosong, dan residu teks bocor
     cleaned = cleaned
+      .replace(/<\/?(?:tool_call|function_call)\b[^>]*>/gi, '')
+      .replace(/\[\/?TOOL_CALLS\]/gi, '')
       .replace(/```(?:json|tool_call)?\s*```/gi, '')
       .replace(funcCallEmptyRegex, '')
       .replace(callPreambleRegex, '')
@@ -25986,7 +26123,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         try {
           parsedArgs = JSON.parse(trimmed);
         } catch (_) {
-          if (['browse_web_page', 'extract_web', 'read_url'].includes(normalizedName)) {
+          if (['browse_web_page', 'extract_web', 'read_url', 'fetch_url_content'].includes(normalizedName)) {
             parsedArgs = { url: trimmed };
           } else if (normalizedName === 'save_memory') {
             parsedArgs = { topic: 'catatan', content: trimmed };
@@ -26003,10 +26140,44 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       // Normalisasi properti argumen
       if (['browse_web_page', 'extract_web', 'read_url'].includes(normalizedName)) {
         const urlVal = parsedArgs.url || parsedArgs.target || parsedArgs.link || parsedArgs.href || parsedArgs.targetUrl || parsedArgs.tautan || parsedArgs.alamat || '';
-        parsedArgs = { url: String(urlVal).trim() };
+        parsedArgs = {
+          url: String(urlVal).trim(),
+          ...(parsedArgs.max_chars || parsedArgs.maxChars ? { max_chars: parseInt(parsedArgs.max_chars || parsedArgs.maxChars, 10) || 8000 } : {})
+        };
       } else if (normalizedName === 'search_web') {
         const qVal = parsedArgs.query || parsedArgs.q || parsedArgs.keyword || parsedArgs.search || parsedArgs.topic || parsedArgs.cari || parsedArgs.kata_kunci || '';
-        parsedArgs = { query: String(qVal).trim(), max_results: parsedArgs.max_results || 6 };
+        parsedArgs = {
+          query: String(qVal).trim(),
+          max_results: parseInt(parsedArgs.max_results || parsedArgs.maxResults || parsedArgs.limit, 10) || 8
+        };
+      } else if (normalizedName === 'search_web_sources') {
+        const qVal = parsedArgs.query || parsedArgs.q || parsedArgs.keyword || parsedArgs.search || parsedArgs.topic || '';
+        const normSources = Array.isArray(parsedArgs.sources)
+          ? parsedArgs.sources
+          : (parsedArgs.sources ? String(parsedArgs.sources).split(',').map(s => s.trim()).filter(Boolean) : undefined);
+        parsedArgs = {
+          query: String(qVal).trim(),
+          ...(normSources && normSources.length > 0 ? { sources: normSources } : {}),
+          max_results: parseInt(parsedArgs.max_results || parsedArgs.limit || 5, 10) || 5,
+          ...(parsedArgs.language ? { language: String(parsedArgs.language).trim() } : {})
+        };
+      } else if (normalizedName === 'fetch_url_content') {
+        const urlVal = parsedArgs.url || parsedArgs.link || parsedArgs.target || '';
+        parsedArgs = {
+          url: String(urlVal).trim(),
+          extract_mode: String(parsedArgs.extract_mode || 'full_text').trim()
+        };
+      } else if (normalizedName === 'summarize_sources') {
+        const qVal = parsedArgs.query || parsedArgs.q || parsedArgs.topic || '';
+        const normUrls = Array.isArray(parsedArgs.urls)
+          ? parsedArgs.urls
+          : (parsedArgs.urls ? String(parsedArgs.urls).split(',').map(u => u.trim()).filter(Boolean) : []);
+        parsedArgs = {
+          query: String(qVal).trim(),
+          urls: normUrls,
+          summary_style: String(parsedArgs.summary_style || 'detailed').trim(),
+          include_citations: parsedArgs.include_citations !== false
+        };
       } else if (normalizedName === 'find_related_videos') {
         parsedArgs = {
           video_url: String(parsedArgs.video_url || parsedArgs.url || parsedArgs.link || parsedArgs.target || '').trim(),
@@ -26055,9 +26226,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       try {
         const clean = tm[1].replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
         const p = JSON.parse(clean);
-        const name = p.name || p.function || p.tool;
-        const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? {};
-        addCall(name, args, tm[0]);
+        const items = Array.isArray(p) ? p : [p];
+        items.forEach(item => {
+          const name = extractToolNameFromParsedJson(item);
+          if (name) {
+            addCall(name, extractToolArgsFromParsedJson(item), tm[0]);
+          }
+        });
       } catch (_) {}
     }
 
@@ -26070,8 +26245,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         const parsed = JSON.parse(block);
         const items = Array.isArray(parsed) ? parsed : [parsed];
         items.forEach(it => {
-          if (it && (it.name || it.function)) {
-            addCall(it.name || it.function, it.arguments ?? it.parameters ?? it.args ?? {}, mtm[0]);
+          const name = extractToolNameFromParsedJson(it);
+          if (name) {
+            addCall(name, extractToolArgsFromParsedJson(it), mtm[0]);
           }
         });
       } catch (_) {}
@@ -26087,7 +26263,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const paramMatch = inner.match(/<parameter\s+name=["'](?:query|q|url|target|link|href|code|topic|content)["']>([\s\S]*?)<\/parameter>/i);
       const val = paramMatch ? paramMatch[1].trim() : inner.replace(/<[^>]+>/g, '').trim();
       if (val) {
-        const isUrlTool = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(name.toLowerCase());
+        const isUrlTool = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url', 'fetch_url_content'].includes(name.toLowerCase());
         const isCodeTool = ['execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python'].includes(name.toLowerCase());
         const isSaveMem = ['save_memory', 'simpan_memori', 'store_memory'].includes(name.toLowerCase());
         if (isUrlTool) addCall(name, { url: val }, ivm[0]);
@@ -26103,23 +26279,15 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     while ((cm = codeBlockRegex.exec(text)) !== null) {
       try {
         const p = JSON.parse(cm[1]);
-        let name = p.name || p.function || p.tool;
-        if (!name) {
-          if (p.video_url || (p.query && (p.platform || p.limit !== undefined))) {
-            name = 'find_related_videos';
-          } else if (p.target_number_or_name || (p.focus_topic && (p.target || p.contact))) {
-            name = 'summarize_whatsapp_chat';
-          }
-        }
+        const name = extractToolNameFromParsedJson(p);
         if (name && isKnownAutonomousTool(name)) {
-          const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? (name === 'find_related_videos' && !p.arguments && (p.video_url || p.query) ? p : {});
-          addCall(name, args, cm[0]);
+          addCall(name, extractToolArgsFromParsedJson(p), cm[0]);
         }
       } catch (_) {}
     }
 
-    // 4b. Gemma / compact pseudo-syntax: search_webquery<query></ or search_web query: <query> or call:search_web{...}
-    const gemmaSearchRegex = /(?:call:)?(?:search_web|web_search|search)\s*(?:query\s*[:=]?|:\s*query\s*=|\s*[:=]\s*)?\s*(?:["']([^"']+)["']|([^\n<{}>]+?)(?:<\/?|>|$))/gi;
+    // 4b. Gemma / compact pseudo-syntax: search_web query: <query> or call:search_web{...}
+    const gemmaSearchRegex = /(?:call:(?:search_web|web_search|search)|\b(?:search_web|web_search))\s*(?:query\s*[:=]|:\s*query\s*=)\s*(?:["']([^"']+)["']|([^\n<{}>]+?)(?:<\/?|>|$))/gi;
     let gm;
     while ((gm = gemmaSearchRegex.exec(text)) !== null) {
       const q = (gm[1] || gm[2] || '').trim();
@@ -26127,7 +26295,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         addCall('search_web', { query: q }, gm[0]);
       }
     }
-    const gemmaBrowseRegex = /(?:call:)?(?:browse_web_page|browse_web|extract_web|read_url)\s*(?:url\s*[:=]?|:\s*url\s*=|\s*[:=]\s*)?\s*(?:["']([^"']+)["']|(https?:\/\/[^\s\n<{}]+|[^\n<{}>]+?)(?:<\/?|>|$))/gi;
+    const gemmaBrowseRegex = /(?:call:(?:browse_web_page|browse_web|extract_web|read_url)|\b(?:browse_web_page|browse_web|extract_web|read_url))\s*(?:url\s*[:=]|:\s*url\s*=)\s*(?:["']([^"']+)["']|(https?:\/\/[^\s\n<{}]+|[^\n<{}>]+?)(?:<\/?|>|$))/gi;
     let gbm;
     while ((gbm = gemmaBrowseRegex.exec(text)) !== null) {
       const u = (gbm[1] || gbm[2] || '').trim();
@@ -26152,25 +26320,17 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     for (const block of jsonBlocks) {
       try {
         const p = JSON.parse(block.json);
-        let name = p.name || p.function || p.tool;
-        if (!name) {
-          if (p.video_url || (p.query && (p.platform || p.limit !== undefined))) {
-            name = 'find_related_videos';
-          } else if (p.target_number_or_name || (p.focus_topic && (p.target || p.contact))) {
-            name = 'summarize_whatsapp_chat';
-          }
-        }
+        const name = extractToolNameFromParsedJson(p);
         const normName = normalizeToolName(name);
         if (isLongCompleteText && block.start > 220 && normName === 'search_web') continue;
         if (name && isKnownAutonomousTool(name)) {
-          const args = p.arguments ?? p.parameters ?? p.args ?? p.input ?? (name === 'find_related_videos' && !p.arguments && (p.video_url || p.query) ? p : {});
-          addCall(name, args, block.json);
+          addCall(name, extractToolArgsFromParsedJson(p), block.json);
         }
       } catch (_) {}
     }
 
     // 6. Function call with JSON argument: search_web({"query": "..."}) or browse_web_page({"url": "..."})
-    const funcJsonRegex = /(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code|run_python|python|summarize_whatsapp_chat|read_whatsapp_chat|rangkum_whatsapp|baca_whatsapp|whatsapp_summary|find_related_videos|search_related_videos|recommend_related_videos|recommend_videos|cari_video_terkait|rekomendasi_video|search_web_sources|web_sources|search_sources|fetch_url_content|fetch_url|get_url_content|fetch_content|summarize_sources|summarize_urls|multi_source_summary)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
+    const funcJsonRegex = new RegExp(`\\b(${toolPattern})\\s*\\(\\s*(\\{[\\s\\S]*?\\})\\s*\\)`, 'gi');
     let fjm;
     while ((fjm = funcJsonRegex.exec(textWithoutCode)) !== null) {
       const name = fjm[1];
@@ -26203,7 +26363,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // 7a. Two-argument function call syntax: save_memory("topik", "konten fakta") or save_memory(topic="...", content="...")
-    const funcTwoArgsRegex = /(save_memory|simpan_memori|store_memory)\s*\(\s*(?:([a-zA-Z_]+)\s*[:=]\s*)?(["'`])([\s\S]*?)\3\s*,\s*(?:([a-zA-Z_]+)\s*[:=]\s*)?(["'`])([\s\S]*?)\6\s*\)/gi;
+    const funcTwoArgsRegex = /\b(save_memory|simpan_memori|store_memory)\s*\(\s*(?:([a-zA-Z_]+)\s*[:=]\s*)?(["'`])([\s\S]*?)\3\s*,\s*(?:([a-zA-Z_]+)\s*[:=]\s*)?(["'`])([\s\S]*?)\6\s*\)/gi;
     let ftm;
     while ((ftm = funcTwoArgsRegex.exec(textWithoutCode)) !== null) {
       const name = ftm[1];
@@ -26225,7 +26385,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
     // 7b. Single-argument function call syntax: search_web("query") or browse_web_page("url")
     // Jika teks sangat panjang (> 300 kata), batasi search_web di awal teks (< 220 karakter), namun izinkan tool spesifik lain (browse_web_page, execute_python_code, save_memory, search_memory, find_related_videos)
-    const funcRegex = new RegExp(`(${toolPattern})\\s*\\(\\s*(?:(?:query|url|video_url|q|link|target|code|topic|content|isi|kata_kunci|topik|script|cari|tautan|konten)\\s*[:=]\\s*)?(["'\`])([\\s\\S]*?)\\2\\s*\\)`, 'gi');
+    const funcRegex = new RegExp(`\\b(${toolPattern})\\s*\\(\\s*(?:(?:query|url|video_url|q|link|target|code|topic|content|isi|kata_kunci|topik|script|cari|tautan|konten)\\s*[:=]\\s*)?(["'\`])([\\s\\S]*?)\\2\\s*\\)`, 'gi');
     let fm;
     while ((fm = funcRegex.exec(textWithoutCode)) !== null) {
       const name = fm[1];
@@ -26233,7 +26393,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (isLongCompleteText && fm.index > 220 && normName === 'search_web') continue;
       const val = fm[3].trim();
       if (val) {
-        const isUrlTool = ['browse_web_page', 'extract_web'].includes(normName);
+        const isUrlTool = ['browse_web_page', 'extract_web', 'fetch_url_content'].includes(normName);
         const isCodeTool = ['execute_python_code', 'run_python', 'python'].includes(normName);
         const isSaveMem = normName === 'save_memory';
         const isVideoTool = normName === 'find_related_videos';
@@ -26255,7 +26415,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (isLongCompleteText && cvm.index > 220) continue;
       const val = cvm[3].trim();
       if (val) {
-        const isUrlTool = ['browse_web_page', 'extract_web'].includes(normName);
+        const isUrlTool = ['browse_web_page', 'extract_web', 'fetch_url_content'].includes(normName);
         const isCodeTool = normName === 'execute_python_code';
         const isSaveMem = normName === 'save_memory';
         const isVideoTool = normName === 'find_related_videos';
@@ -26271,12 +26431,19 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   }
 
   function getAutonomousSystemDirective() {
-    return `\n[TOOL WHATSAPP PRIVACY GATE TERSEDIA]: Jika pengguna meminta untuk membaca, memeriksa, atau merangkum chat/obrolan WhatsApp (WA), panggil tool \`summarize_whatsapp_chat({"target_number_or_name": "<nama/nomor jika disebut>", "focus_topic": "<fokus rangkuman>"})\`. Sistem akan menampilkan Pop-up Persetujuan (Consent Gate) kepada pengguna untuk memilih nomor mana saja yang diizinkan sebelum data chat dibaca.
-[TOOL PENCARIAN & REKOMENDASI VIDEO TERSEDIA (SELURUH VIDEO DI BUMI)]: Jika pengguna meminta untuk mencari, merekomendasikan, atau menemukan video lain yang terkait/mirip/lanjutan dari video yang baru saja dibahas atau berdasarkan topik tertentu (YouTube, Dailymotion, Vimeo, TikTok, Bilibili, XVideos, dan tautan video mana pun di bumi), Anda DAPAT dan WAJIB memanggil tool \`find_related_videos({"video_url": "<URL video sebelumnya jika ada>", "query": "<kata kunci/topik video yang dicari>", "platform": "auto", "limit": 5})\`. Tool ini beroperasi secara otonom kapan saja tanpa memerlukan menu UI khusus dan mengembalikan daftar video nyata terverifikasi lengkap dengan tautan asli yang langsung dapat ditonton di percakapan (In-Chat Video Player).
-[TOOL GROUNDING SUMBER WHITELIST TERSEDIA]: Anda memiliki akses ke alat pencarian dan sintesis data khusus untuk domain whitelist resmi (github.com, bloomberg.com, reddit.com, x.com, edition.cnn.com, cna.al, arxiv.org):
-1. \`search_web_sources({"query": "<kata kunci>", "sources": ["arxiv.org", "github.com"], "max_results": 5})\`: Mencari informasi dari sumber resmi whitelist.
-2. \`fetch_url_content({"url": "<URL dari whitelist>", "extract_mode": "full_text"})\`: Mengambil konten bersih dari domain whitelist yang diizinkan.
-3. \`summarize_sources({"query": "<topik>", "urls": ["<url1>", "<url2>"], "summary_style": "detailed", "include_citations": true})\`: Merangkum multi-sumber resmi whitelist menjadi satu jawaban koheren dengan sitasi [1], [2].`;
+    return `\n[SISTEM TOOL CALLING PENCARIAN WEB REAL-TIME & MULTI-SUMBER AKTIF SECARA OTONOM]:
+Anda MEMILIKI koneksi pencarian internet real-time langsung yang selalu siap dieksekusi kapan saja tanpa memerlukan menu/tombol UI apa pun. DILARANG KERAS mengatakan bahwa Anda tidak memiliki akses internet atau tidak bisa mencari di web!
+- CARA MEMANGGIL TOOL: Gunakan fitur native tool/function calling jika tersedia. Apabila jalur model Anda saat ini tidak menyediakan native tool API, panggil tool secara langsung dengan menuliskan HANYA blok:
+  \`<tool_call>{"name": "<nama_tool>", "arguments": {<parameter_json>}}</tool_call>\`
+  (tanpa teks pengantar lain) agar mesin Zoz Router langsung mengeksekusinya di latar belakang dan mengirimkan datanya untuk Anda sintesis.
+- DAFTAR TOOL PENCARIAN WEB & SUMBER TERVERIFIKASI:
+  1. \`search_web({"query": "<kata kunci pencarian>", "max_results": 8})\`: Pencarian real-time di seluruh internet untuk rilis model AI terbaru, berita terkini, fakta mutakhir, harga, dokumentasi, atau topik umum apa pun. WAJIB panggil tool ini saat pengguna meminta "cari di web" atau menanyakan peristiwa/rilis terbaru!
+  2. \`browse_web_page({"url": "<https://...>"})\`: Membaca isi teks penuh halaman URL publik mana pun di internet.
+  3. \`search_web_sources({"query": "<kata kunci>", "sources": ["github.com", "arxiv.org"], "max_results": 5})\`: Mencari informasi spesifik dari sumber whitelist resmi (github.com, bloomberg.com, reddit.com, x.com, edition.cnn.com, cna.al, arxiv.org). Gunakan ketika pengguna meminta repositori GitHub, paper arXiv, diskusi Reddit/X, atau berita Bloomberg/CNN/CNA Albania.
+  4. \`fetch_url_content({"url": "<URL dari domain whitelist>", "extract_mode": "full_text"})\`: Mengambil isi bersih beserta poin penting dari URL domain whitelist resmi.
+  5. \`summarize_sources({"query": "<topik>", "urls": ["<url1>", "<url2>"], "summary_style": "detailed", "include_citations": true})\`: Merangkum beberapa URL whitelist resmi menjadi satu jawaban koheren lengkap dengan sitasi [1], [2].
+  6. \`find_related_videos({"video_url": "<URL video sebelumnya jika ada>", "query": "<kata kunci/topik video>", "platform": "auto", "limit": 5})\`: Mencari & merekomendasikan video terkait lintas platform di seluruh bumi (YouTube, Dailymotion, Vimeo, TikTok, Bilibili, XVideos, dll.) yang langsung dapat diputar di percakapan.
+  7. \`summarize_whatsapp_chat({"target_number_or_name": "<nama/nomor>", "focus_topic": "<fokus>"})\`: Membaca & merangkum obrolan WhatsApp melalui Pop-up Persetujuan (Consent Gate).`;
   }
   const AUTONOMOUS_SYSTEM_DIRECTIVE = '';
 
@@ -27317,7 +27484,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // ==================== OLLAMA AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
-      const maxAutonomousRounds = 3;
+      const maxAutonomousRounds = 4;
       let autonomousRound = 0;
       let consecutiveFailedRounds = 0;
       let preambleHtml = '';
@@ -27517,15 +27684,16 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const hasExecutedPython = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'execute_python_code');
         const hasExecutedMemory = detectedAutonomousCalls.some(c => c && c.function && ['save_memory', 'search_memory'].includes(normalizeToolName(c.function.name)));
         const hasExecutedVideo = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'find_related_videos');
+        const hasExecutedSourceSummary = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'summarize_sources');
         const hasExecutedGrounding = detectedAutonomousCalls.some(c => c && c.function && ['search_web_sources', 'fetch_url_content', 'summarize_sources'].includes(normalizeToolName(c.function.name)));
-        const isLastRound = circuitBreakerTripped || hasBrowsedWeb || hasExecutedVideo || hasExecutedGrounding || (autonomousRound >= maxAutonomousRounds - 1);
+        const isLastRound = circuitBreakerTripped || hasBrowsedWeb || hasExecutedVideo || hasExecutedSourceSummary || (autonomousRound >= maxAutonomousRounds - 1);
         const currentDateObj = new Date();
         const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
         const roundInstruction = (isLastRound || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasExecutedGrounding)
           ? `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
 WAKTU SISTEM SAAT INI: ${currentFormattedDate} (Tahun ${currentDateObj.getFullYear()}).
 
-${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : (hasExecutedGrounding ? 'Gunakan hasil pencarian, ekstraksi konten, dan sintesis multi-sumber resmi di atas untuk LANGSUNG menyusun jawaban akhir yang akurat, ringkas, berbobot, dan menyertakan nomor sitasi [1], [2] ke URL sumber.' : (hasExecutedVideo ? 'Gunakan daftar rekomendasi video nyata di atas untuk memberikan ulasan dan rekomendasi video kepada pengguna lengkap dengan tautan URL aslinya. Sajikan dalam format Markdown yang rapi dan informatif sehingga kartu pemutar video interaktif dapat langsung diputar oleh pengguna di dalam obrolan.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan hasil eksekusi kode Python sandbox di atas untuk menjawab pertanyaan atau menyelesaikan perhitungan pengguna secara akurat, jelas, dan tuntas dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil operasi memori jangka panjang di atas untuk menjawab pengguna secara langsung, ramah, dan akurat dalam Bahasa Indonesia.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'))))}
+${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : (hasExecutedGrounding ? (isLastRound ? 'Gunakan hasil pencarian, ekstraksi konten, dan sintesis multi-sumber resmi di atas untuk LANGSUNG menyusun jawaban akhir yang akurat, ringkas, berbobot, dan menyertakan nomor sitasi [1], [2] ke URL sumber.' : 'Jika data hasil pencarian sumber whitelist di atas sudah cukup lengkap untuk menjawab pengguna, LANGSUNG susun jawaban akhir yang akurat, berbobot, dan menyertakan sitasi URL sumber. Apabila Anda membutuhkan isi lengkap artikel/repositori/paper tertentu dari daftar URL di atas, Anda boleh memanggil fetch_url_content atau summarize_sources.') : (hasExecutedVideo ? 'Gunakan daftar rekomendasi video nyata di atas untuk memberikan ulasan dan rekomendasi video kepada pengguna lengkap dengan tautan URL aslinya. Sajikan dalam format Markdown yang rapi dan informatif sehingga kartu pemutar video interaktif dapat langsung diputar oleh pengguna di dalam obrolan.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan hasil eksekusi kode Python sandbox di atas untuk menjawab pertanyaan atau menyelesaikan perhitungan pengguna secara akurat, jelas, dan tuntas dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil operasi memori jangka panjang di atas untuk menjawab pengguna secara langsung, ramah, dan akurat dalam Bahasa Indonesia.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'))))}
 
 
 PANDUAN NILAI GUNA & INTEGRITAS FAKTA:
@@ -27570,12 +27738,23 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         currentRoundNativeCalls = [];
 
         try {
-          const digestionRes = await fetch(chatUrl, {
+          let digestionRes = await fetch(chatUrl, {
             method: 'POST',
             headers,
             body: JSON.stringify(digestionBody),
             signal: STATE.abortController?.signal
           });
+
+          if (!digestionRes.ok && digestionBody.tools && (digestionRes.status === 400 || digestionRes.status === 422 || digestionRes.status === 500)) {
+            console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Model returned HTTP ${digestionRes.status} with tools. Retrying without tools...`);
+            delete digestionBody.tools;
+            digestionRes = await fetch(chatUrl, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(digestionBody),
+              signal: STATE.abortController?.signal
+            });
+          }
 
           if (!digestionRes.ok) {
             let errDetail = `HTTP ${digestionRes.status}`;
@@ -28466,9 +28645,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           basePayload.modalities = ['text', 'image'];
         }
 
-        // Pasang tools HANYA jika bukan model gratis, API key ada, dan model mendukung tools
+        // Pasang tools jika bukan model gratis dan model mendukung tools (berlaku baik menggunakan key client maupun key proxy server)
         const canUseTools = doesModelSupportTools(currentModel);
-        if (!currentIsFree && canUseTools && STATE.settings.openRouterKey) {
+        if (!currentIsFree && canUseTools) {
           const validFunctionTools = (selectedAutonomousTools || []).filter(t => t && t.type === 'function' && t.function && t.function.name);
           if (validFunctionTools.length > 0) {
             basePayload.tools = validFunctionTools;
@@ -28544,8 +28723,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               signal: attemptController.signal
             });
 
-            // Resiliensi HTTP 400 & 404: Tangani penolakan tools, top_p, modalities, dsb.
-            if (attemptRes.status === 400 || (attemptRes.status === 404 && targetBody.modalities)) {
+            // Resiliensi HTTP 400, 404 & 422: Tangani penolakan tools, top_p, modalities, dsb.
+            if (attemptRes.status === 400 || attemptRes.status === 422 || (attemptRes.status === 404 && (targetBody.modalities || targetBody.tools))) {
               let shouldRetry = false;
               if (targetBody.models) {
                 delete targetBody.models;
@@ -28908,7 +29087,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // ==================== UNIVERSAL AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
-      const maxAutonomousRounds = 3;
+      const maxAutonomousRounds = 4;
       let autonomousRound = 0;
       let consecutiveFailedRounds = 0;
       let preambleHtml = '';
@@ -29108,15 +29287,16 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const hasExecutedPython = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'execute_python_code');
         const hasExecutedMemory = detectedAutonomousCalls.some(c => c && c.function && ['save_memory', 'search_memory'].includes(normalizeToolName(c.function.name)));
         const hasExecutedVideo = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'find_related_videos');
+        const hasExecutedSourceSummary = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'summarize_sources');
         const hasExecutedGrounding = detectedAutonomousCalls.some(c => c && c.function && ['search_web_sources', 'fetch_url_content', 'summarize_sources'].includes(normalizeToolName(c.function.name)));
-        const isLastRound = circuitBreakerTripped || hasBrowsedWeb || hasExecutedVideo || hasExecutedGrounding || (autonomousRound >= maxAutonomousRounds - 1);
+        const isLastRound = circuitBreakerTripped || hasBrowsedWeb || hasExecutedVideo || hasExecutedSourceSummary || (autonomousRound >= maxAutonomousRounds - 1);
         const currentDateObj = new Date();
         const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
         const roundInstruction = (isLastRound || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasExecutedGrounding)
           ? `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
 WAKTU SISTEM SAAT INI: ${currentFormattedDate} (Tahun ${currentDateObj.getFullYear()}).
 
-${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : (hasExecutedGrounding ? 'Gunakan hasil pencarian, ekstraksi konten, dan sintesis multi-sumber resmi di atas untuk LANGSUNG menyusun jawaban akhir yang akurat, ringkas, berbobot, dan menyertakan nomor sitasi [1], [2] ke URL sumber.' : (hasExecutedVideo ? 'Gunakan daftar rekomendasi video nyata di atas untuk memberikan ulasan dan rekomendasi video kepada pengguna lengkap dengan tautan URL aslinya. Sajikan dalam format Markdown yang rapi dan informatif sehingga kartu pemutar video interaktif dapat langsung diputar oleh pengguna di dalam obrolan.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan hasil eksekusi kode Python sandbox di atas untuk menjawab pertanyaan atau menyelesaikan perhitungan pengguna secara akurat, jelas, dan tuntas dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil operasi memori jangka panjang di atas untuk menjawab pengguna secara langsung, ramah, dan akurat dalam Bahasa Indonesia.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'))))}
+${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : (hasExecutedGrounding ? (isLastRound ? 'Gunakan hasil pencarian, ekstraksi konten, dan sintesis multi-sumber resmi di atas untuk LANGSUNG menyusun jawaban akhir yang akurat, ringkas, berbobot, dan menyertakan nomor sitasi [1], [2] ke URL sumber.' : 'Jika data hasil pencarian sumber whitelist di atas sudah cukup lengkap untuk menjawab pengguna, LANGSUNG susun jawaban akhir yang akurat, berbobot, dan menyertakan sitasi URL sumber. Apabila Anda membutuhkan isi lengkap artikel/repositori/paper tertentu dari daftar URL di atas, Anda boleh memanggil fetch_url_content atau summarize_sources.') : (hasExecutedVideo ? 'Gunakan daftar rekomendasi video nyata di atas untuk memberikan ulasan dan rekomendasi video kepada pengguna lengkap dengan tautan URL aslinya. Sajikan dalam format Markdown yang rapi dan informatif sehingga kartu pemutar video interaktif dapat langsung diputar oleh pengguna di dalam obrolan.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan hasil eksekusi kode Python sandbox di atas untuk menjawab pertanyaan atau menyelesaikan perhitungan pengguna secara akurat, jelas, dan tuntas dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil operasi memori jangka panjang di atas untuk menjawab pengguna secara langsung, ramah, dan akurat dalam Bahasa Indonesia.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'))))}
 
 
 PANDUAN NILAI GUNA & INTEGRITAS FAKTA:
@@ -29154,7 +29334,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           activeDigestionModel === 'openrouter/free' ||
           (STATE.openRouterModels || []).some(m => m.id === activeDigestionModel && (m.cat === 'free' || m.tag === 'Free'))
         );
-        if (!isLastRound && !hasBrowsedWeb && !hasExecutedSearch && !isDigestionFree && canDigestionUseTools && STATE.settings.openRouterKey && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
+        if (!isLastRound && !hasBrowsedWeb && !hasExecutedSearch && !isDigestionFree && canDigestionUseTools && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
           const validFunctionTools = selectedAutonomousTools.filter(t => {
             if (!t || t.type !== 'function' || !t.function?.name) return false;
             if (['search_web', 'web_search', 'search'].includes(normalizeToolName(t.function.name))) return false;
@@ -29204,8 +29384,8 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
             signal: STATE.abortController?.signal
           });
 
-          // Fallback resiliensi: jika model menolak tools di putaran lanjutan (HTTP 400/422)
-          if (!digestionRes.ok && digestionRequestBody.tools && (digestionRes.status === 400 || digestionRes.status === 422)) {
+          // Fallback resiliensi: jika model menolak tools di putaran lanjutan (HTTP 400/404/422)
+          if (!digestionRes.ok && digestionRequestBody.tools && (digestionRes.status === 400 || digestionRes.status === 404 || digestionRes.status === 422)) {
             console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Model returned HTTP ${digestionRes.status} with tools. Retrying without tools...`);
             delete digestionRequestBody.tools;
             delete digestionRequestBody.tool_choice;

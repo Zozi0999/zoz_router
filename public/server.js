@@ -9743,6 +9743,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       });
 
       const dispatchOllamaUpstream = async (targetEndpoint, targetModel, targetAuthKey, allowLocalFallback) => {
+        if (/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])/i.test(targetEndpoint || '')) {
+          targetModel = await resolveLocalDaemonCloudManifest(targetModel);
+        }
         body.model = targetModel;
         if (sessionId && dbActiveChatTasks[sessionId]) {
           dbActiveChatTasks[sessionId].model = targetModel;
