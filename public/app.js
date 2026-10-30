@@ -20815,8 +20815,52 @@ ${organicBlock}
       embed: (m, ap) => `https://www.loom.com/embed/${m[1]}?autoplay=${ap ? 1 : 0}` },
     { id: 'gdrive', label: 'Google Drive', icon: 'fa-brands fa-google-drive',
       re: /https?:\/\/drive\.google\.com\/file\/d\/([\w-]+)/i,
-      embed: (m) => `https://drive.google.com/file/d/${m[1]}/preview` }
+      embed: (m) => `https://drive.google.com/file/d/${m[1]}/preview` },
+    { id: 'xvideos', label: 'XVIDEOS', icon: 'fa-solid fa-play',
+      re: /https?:\/\/(?:www\.|m\.)?xvideos\.com\/(?:video(?:[._\/-])?([0-9a-zA-Z_]+)|embedframe\/([0-9a-zA-Z_]+))/i,
+      embed: (m) => `https://www.xvideos.com/embedframe/${m[1] || m[2]}` },
+    { id: 'xnxx', label: 'XNXX', icon: 'fa-solid fa-play',
+      re: /https?:\/\/(?:www\.|m\.)?xnxx\.com\/(?:video(?:[._\/-])?([0-9a-zA-Z_]+)|embedframe\/([0-9a-zA-Z_]+))/i,
+      embed: (m) => `https://www.xnxx.com/embedframe/${m[1] || m[2]}` },
+    { id: 'pornhub', label: 'Pornhub', icon: 'fa-solid fa-play',
+      re: /https?:\/\/(?:www\.|m\.)?pornhub\.com\/view_video\.php\?(?:.*&)?viewkey=([a-zA-Z0-9]+)/i,
+      embed: (m) => `https://www.pornhub.com/embed/${m[1]}` }
   ];
+
+  // Helper pemeriksa universal: Apakah URL merupakan tautan video (YouTube, provider resolver, ekstensi berkas video, atau platform streaming)?
+  function isAnyVideoUrlClient(u) {
+    if (!u || typeof u !== 'string') return false;
+    try {
+      const p = new URL(u);
+      const h = p.hostname.toLowerCase();
+      const pathname = p.pathname.toLowerCase();
+      if (h.includes('youtube.com') || h.includes('youtu.be')) return true;
+      if (/\.(mp4|webm|m3u8|mov|mkv|avi|flv|wmv|ogv|ts|m4v)(?:[?#]|$)/i.test(pathname + p.search)) return true;
+      if (Array.isArray(VIDEO_PROVIDER_RESOLVERS) && VIDEO_PROVIDER_RESOLVERS.some(prov => prov.re.test(u))) return true;
+      if (/(?:xvideos|xnxx|pornhub|vimeo|tiktok|dailymotion|twitch|streamable|bilibili|loom|rumble|odysee|redgifs)\.com/i.test(h)) return true;
+      if (/twitch\.tv|youtu\.be|dai\.ly|fb\.watch/i.test(h)) return true;
+    } catch (_) {}
+    return false;
+  }
+
+  // Ekstrak judul representatif dari slug URL video jika metadata oEmbed/OpenGraph belum siap
+  function titleFromVideoUrl(url) {
+    if (!url || typeof url !== 'string') return '';
+    try {
+      const p = new URL(url);
+      const parts = p.pathname.split('/').filter(Boolean);
+      if (parts.length > 0) {
+        const last = parts[parts.length - 1];
+        if (last && last.length > 2 && !/^[0-9a-f]{16,}$/i.test(last)) {
+          return decodeURIComponent(last)
+            .replace(/[._-]+/g, ' ')
+            .replace(/\b\w/g, c => c.toUpperCase())
+            .trim();
+        }
+      }
+    } catch (_) {}
+    return '';
+  }
 
   // Ekstrak semua tautan video milik penyedia dikenal dari teks (urutan kemunculan, tanpa duplikat).
   function extractProviderVideosClient(text) {
@@ -20975,33 +21019,97 @@ ${organicBlock}
     return result;
   }
 
-  async function getYouTubeGroundingContext(promptText, hudElement = null) {
+  async function getVideoGroundingContext(promptText, hudElement = null) {
     if (!promptText || typeof promptText !== 'string') return null;
-    const ids = extractYouTubeVideoIdsClient(promptText);
-    if (ids.length === 0) return null;
+    const ytIds = extractYouTubeVideoIdsClient(promptText);
+    const providerVideos = extractProviderVideosClient(promptText);
+    const directVideos = extractDirectVideoUrlsClient(promptText);
 
-    if (hudElement && ids.length > 0) {
+    const totalCount = ytIds.length + providerVideos.length + directVideos.length;
+    if (totalCount === 0) return null;
+
+    if (hudElement && totalCount > 0) {
       hudElement.innerHTML = `
         <div class="web-search-hud">
-          <i class="fa-brands fa-youtube" style="color:#ff0033; font-size:1.1rem;"></i>
-          <span><strong>Video Grounding:</strong> Mengambil metadata ${ids.length} video via oEmbed...</span>
+          <i class="fa-solid fa-circle-play" style="color:#00f0ff; font-size:1.1rem;"></i>
+          <span><strong>Video Grounding:</strong> Mengambil metadata ${totalCount} video...</span>
         </div>
       `;
     }
 
-    const videoInfos = await Promise.all(ids.map(id => fetchYouTubeInfoClient(id)));
-    const validVideos = videoInfos.filter(v => v && v.success && v.title);
+    const validVideos = [];
+
+    // 1. Video YouTube via oEmbed
+    if (ytIds.length > 0) {
+      const ytInfos = await Promise.all(ytIds.map(id => fetchYouTubeInfoClient(id)));
+      ytInfos.forEach(v => {
+        if (v && v.success && v.title) {
+          validVideos.push({
+            url: v.url,
+            platform: 'YouTube',
+            title: v.title,
+            channel: v.channel || 'YouTube',
+            thumbnail: v.thumbnail || ''
+          });
+        }
+      });
+    }
+
+    // 2. Video Provider (XVIDEOS, XNXX, Pornhub, Vimeo, TikTok, Bilibili, dst.)
+    if (providerVideos.length > 0) {
+      await Promise.all(providerVideos.map(async (pv) => {
+        let title = titleFromVideoUrl(pv.url) || `Video ${pv.provider.label}`;
+        let channel = pv.provider.label;
+        let thumbnail = '';
+        try {
+          const probe = await probeVideoLinkClient(pv.url);
+          if (probe && probe.success) {
+            if (probe.title) title = probe.title;
+            if (probe.site) channel = probe.site;
+            if (probe.thumbnail) thumbnail = probe.thumbnail;
+          }
+        } catch (_) {}
+        validVideos.push({
+          url: pv.url,
+          platform: pv.provider.label,
+          title,
+          channel,
+          thumbnail
+        });
+      }));
+    }
+
+    // 3. Berkas Video Langsung (.mp4, .webm, .m3u8, dst.)
+    if (directVideos.length > 0) {
+      directVideos.forEach((du) => {
+        let title = 'Berkas Video';
+        let channel = '';
+        try {
+          const p = new URL(du);
+          title = decodeURIComponent(p.pathname.split('/').filter(Boolean).pop() || 'Video');
+          channel = p.hostname;
+        } catch (_) {}
+        validVideos.push({
+          url: du,
+          platform: 'Direct Video',
+          title,
+          channel,
+          thumbnail: ''
+        });
+      });
+    }
 
     if (validVideos.length === 0) return null;
 
     const blocks = validVideos.map((v, idx) => {
-      return `[DATA TERVERIFIKASI VIDEO YOUTUBE #${idx + 1}]
+      return `[DATA TERVERIFIKASI TAUTAN VIDEO #${idx + 1}]
 - URL: ${v.url}
+- Platform: ${v.platform}
 - Judul Video: "${v.title}"
-- Nama Channel / Pembuat: "${v.channel}" (${v.channel_url || 'N/A'})
-- Thumbnail: ${v.thumbnail}
-- Status Transkrip: Tidak tersedia dalam metadata oEmbed.
-(Informasi resmi ini diambil secara real-time via YouTube oEmbed)`;
+- Nama Channel / Penyedia: "${v.channel}"
+- Thumbnail: ${v.thumbnail || 'Tidak tersedia'}
+- Status Transkrip: Tidak tersedia dalam metadata oEmbed / OpenGraph.
+(Informasi resmi ini diambil secara real-time via video grounding)`;
     }).join('\n\n');
 
     const groundingContext = `### DATA METADATA RESMI VIDEO (VERIFIED GROUNDING):
@@ -21009,14 +21117,19 @@ ${blocks}
 
 ### PANDUAN INTEGRITAS & ANTI-HALUSINASI UNTUK ASISTEN AI:
 1. Informasi di atas adalah metadata resmi terverifikasi real-time via video grounding.
-2. BATASAN DATA: Data di atas HANYA memuat judul dan nama channel/kreator/URL, dan TIDAK MEMUAT transkrip/rekaman isi suara video lengkap kecuali disediakan pengguna.
+2. BATASAN DATA: Data di atas HANYA memuat judul, platform, dan kreator/URL, dan TIDAK MEMUAT transkrip/rekaman isi percakapan suara video lengkap kecuali disediakan pengguna.
 3. DILARANG BERHALUSINASI: Dilarang mengarang atau mereka-reka isi dialog atau kesimpulan detail dari video di atas semata-mata berdasarkan judulnya.
-4. JAWABAN JUJUR: Jika pengguna meminta "Rangkum isi video ini" atau "Apa kesimpulan video ini?", jelaskan fakta judul dan kreator/tautannya, lalu sampaikan secara transparan kepada pengguna jika transkrip penuh percakapan di dalam video belum disertakan.`;
+4. JAWABAN JUJUR: Jika pengguna meminta "Rangkum isi video ini" atau "Apa kesimpulan video ini?", jelaskan fakta judul dan platform/tautannya, lalu sampaikan secara transparan kepada pengguna jika transkrip penuh percakapan di dalam video belum disertakan.`;
 
     return {
       groundingContext,
       videos: validVideos
     };
+  }
+
+  // Kompatibilitas mundur dengan nama fungsi sebelumnya
+  async function getYouTubeGroundingContext(promptText, hudElement = null) {
+    return getVideoGroundingContext(promptText, hudElement);
   }
 
   function buildDirectVideoPreviewCardHtml(videoUrl, opts = {}) {
@@ -21201,7 +21314,10 @@ ${blocks}
     if (!bubble) return;
     if (bubble.querySelector('.msg-youtube-cards-wrap')) return;
 
-    const probePromise = Promise.all(genericCandidates.map((u) => probeVideoLinkClient(u).then((r) => ({ url: u, r })).catch(() => ({ url: u, r: null }))));
+    const probeTargets = isUserRow ? [...genericCandidates, ...providerVideos.map(pv => pv.url)] : [];
+    const probePromise = (probeTargets.length > 0)
+      ? Promise.all(probeTargets.map((u) => probeVideoLinkClient(u).then((r) => ({ url: u, r })).catch(() => ({ url: u, r: null }))))
+      : Promise.resolve([]);
 
     const cardResults = await Promise.all(
       ids.map(async (vidId) => {
@@ -21240,11 +21356,18 @@ ${blocks}
     for (const cardData of cardResults) appendHtml(buildYouTubePreviewCardHtml(cardData));
 
     for (const pv of providerVideos) {
+      const probeItem = probeResults.find(pr => pr && pr.url === pv.url);
+      const pr = (probeItem && probeItem.r && probeItem.r.success) ? probeItem.r : clientVideoProbeCache.get(pv.url);
+      const videoTitle = (pr && pr.title) ? pr.title : (titleFromVideoUrl(pv.url) || `Video ${pv.provider.label}`);
+      const videoThumb = (pr && pr.thumbnail) ? pr.thumbnail : '';
+      const videoSite = (pr && pr.site) ? pr.site : pv.provider.label;
+
       appendHtml(buildEmbedVideoCardHtml({
         label: pv.provider.label,
         icon: pv.provider.icon,
-        title: `Video ${pv.provider.label}`,
-        site: pv.provider.label,
+        title: videoTitle,
+        site: videoSite,
+        thumbnail: videoThumb,
         embedSrc: pv.provider.embed(pv.match, false),
         openUrl: pv.url,
         portrait: !!pv.provider.portrait,
@@ -21256,6 +21379,7 @@ ${blocks}
 
     for (const { url, r } of probeResults) {
       if (!r || !r.success) continue;
+      if (providerVideos.some(pv => pv.url === url)) continue;
       if (r.kind === 'file' && r.fileUrl) {
         appendHtml(buildDirectVideoPreviewCardHtml(r.fileUrl, { title: r.title, site: r.site, thumbnail: r.thumbnail, hls: r.hls, openUrl: url }));
       } else if (r.kind === 'embed' && r.embedUrl) {
@@ -21350,6 +21474,7 @@ ${blocks}
       if (/vimeo\.com|dailymotion\.com|streamable\.com|loom\.com|bilibili\.com/.test(u.hostname)) u.searchParams.set('autoplay', '1');
       else if (/twitch\.tv/.test(u.hostname)) u.searchParams.set('autoplay', 'true');
       else if (/facebook\.com/.test(u.hostname)) u.searchParams.set('autoplay', 'true');
+      else if (/xvideos\.com|xnxx\.com/.test(u.hostname)) u.searchParams.set('autoplay', '1');
       src = u.toString();
     } catch (_) {}
 
@@ -21360,7 +21485,8 @@ ${blocks}
     iframe.src = src;
     iframe.title = title;
     iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen');
-    iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    const isNoRefHost = /xvideos\.com|xnxx\.com|pornhub\.com/.test(src);
+    iframe.setAttribute('referrerpolicy', isNoRefHost ? 'no-referrer' : 'strict-origin-when-cross-origin');
     iframe.setAttribute('allowfullscreen', '');
     if (card.dataset.sandbox === '1') {
       iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation allow-popups allow-forms');
@@ -22502,7 +22628,9 @@ ${blocks}
         const p = new URL(u);
         const h = p.hostname.toLowerCase();
         const pathname = p.pathname.toLowerCase();
-        if (h.includes('youtube.com') || h.includes('youtu.be')) return false;
+        // Abaikan tautan video (YouTube, XVIDEOS, XNXX, TikTok, Vimeo, file video langsung, dll.)
+        // agar tidak diekstrak sebagai teks/artikel dokumen web melainkan diputar langsung di chat
+        if (isAnyVideoUrlClient(u)) return false;
         // Abaikan CDN, font, dan library asset eksternal dalam kode
         if (h.includes('cdn.') || h.includes('cdnjs.') || h.includes('jsdelivr.') || h.includes('unpkg.com') || h.includes('googleapis.com') || h.includes('gstatic.com')) return false;
         // Abaikan file asset, script, style, binary

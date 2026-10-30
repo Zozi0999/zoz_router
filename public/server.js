@@ -1603,6 +1603,14 @@ function probeVideoUrl(targetUrl, redirectCount = 0) {
                 const embed = playerUrl || (vUrl && /^https:/i.test(vUrl) ? vUrl : '');
                 if (embed && /^https:\/\//i.test(embed) && embed !== clean) result = { kind: 'embed', embedUrl: embed };
               }
+              if (!result) {
+                const xvM = clean.match(/https?:\/\/(?:www\.|m\.)?xvideos\.com\/(?:video(?:[._\/-])?([0-9a-zA-Z_]+)|embedframe\/([0-9a-zA-Z_]+))/i);
+                const xnM = clean.match(/https?:\/\/(?:www\.|m\.)?xnxx\.com\/(?:video(?:[._\/-])?([0-9a-zA-Z_]+)|embedframe\/([0-9a-zA-Z_]+))/i);
+                const phM = clean.match(/https?:\/\/(?:www\.|m\.)?pornhub\.com\/view_video\.php\?(?:.*&)?viewkey=([a-zA-Z0-9]+)/i);
+                if (xvM) result = { kind: 'embed', embedUrl: `https://www.xvideos.com/embedframe/${xvM[1] || xvM[2]}` };
+                else if (xnM) result = { kind: 'embed', embedUrl: `https://www.xnxx.com/embedframe/${xnM[1] || xnM[2]}` };
+                else if (phM) result = { kind: 'embed', embedUrl: `https://www.pornhub.com/embed/${phM[1]}` };
+              }
               if (!result) return done(fail('Halaman ini tidak memuat video yang dapat disematkan.'));
               if (result.fileUrl && !/^https?:\/\//i.test(result.fileUrl)) return done(fail('URL video tidak valid.'));
               try {
