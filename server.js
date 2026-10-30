@@ -1207,12 +1207,8 @@ function resolveLocalDaemonCloudManifest(modelId) {
 
 function mapOllamaModelToOpenRouter(modelId) {
   if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
-  const id = modelId.toLowerCase().trim();
-  if (id.includes('/')) return modelId;
-  if (id.includes('llama')) return 'meta-llama/llama-3.3-70b-instruct:free';
-  if (id.includes('qwen')) return 'qwen/qwen-2.5-72b-instruct';
-  if (id.includes('deepseek')) return 'deepseek/deepseek-chat';
-  if (id.includes('mistral')) return 'mistralai/mistral-7b-instruct:free';
+  const id = modelId.trim();
+  if (id.includes('/')) return id;
   return 'openrouter/free';
 }
 
@@ -2284,16 +2280,10 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
 
     const isAutoRouterActive = Boolean(isAutoRouter || allowFallbacks);
     const isFreeModel = (rawModel || '').includes(':free') || (rawModel || '').endsWith('/free') || rawModel === 'openrouter/free';
-    const candidateModels = (isAutoRouterActive && isFreeModel)
-      ? [
-          rawModel,
-          'openrouter/free',
-          'google/gemini-2.0-flash-exp:free',
-          'meta-llama/llama-3.3-70b-instruct:free',
-          'nvidia/nemotron-3.5-lightning:free',
-          'cohere/north-mini-code:free'
-        ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx)
-      : [rawModel];
+    const candidateModels = [rawModel];
+    if (isAutoRouterActive && isFreeModel && rawModel !== 'openrouter/free') {
+      candidateModels.push('openrouter/free');
+    }
 
     const tryCallOpenRouter = (targetModel) => {
       // Pastikan pesan disesuaikan dengan kapabilitas system role model target

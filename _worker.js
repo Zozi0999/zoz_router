@@ -76,37 +76,10 @@ function resolveOllamaCloudModel(modelId) {
 }
 
 function mapOllamaModelToOpenRouter(modelId) {
-  if (!modelId || typeof modelId !== 'string') return 'nvidia/nemotron-3.5-lightning:free';
-  const id = modelId.toLowerCase().trim();
-  if (id.includes('/')) return modelId;
-
-  if (id.includes('gemma')) {
-    return 'nvidia/nemotron-3.5-lightning:free';
-  }
-  if (id.includes('nemotron-3-super') || id.includes('gpt-oss:120b') || id.includes('nemotron-3-ultra')) {
-    return 'nvidia/nemotron-3-super-120b-a12b:free';
-  }
-  if (id.includes('nemotron-3-nano') || id.includes('reasoning') || id.includes('deepseek-r1') || id.includes('deepseek-v4-pro')) {
-    return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
-  }
-  if (id.includes('nemotron-3.5') || id.includes('nemotron')) {
-    return 'nvidia/nemotron-3.5-lightning:free';
-  }
-  if (id.includes('gpt-oss')) {
-    return 'nvidia/nemotron-3-super-120b-a12b:free';
-  }
-  if (id.includes('qwen2.5-coder') || id.includes('coder') || id.includes('code') || id.includes('kimi-k2.7-code')) {
-    return 'cohere/north-mini-code:free';
-  }
-  if (id.includes('dots')) return 'dots-studio/dots-3-note-preview:free';
-  if (id.includes('liquid') || id.includes('lfm')) return 'liquid/lfm-2.5-2.6b:free';
-  if (id.includes('deepseek')) return 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
-  if (id.includes('llama')) return 'nvidia/nemotron-3.5-lightning:free';
-  if (id.includes('qwen')) return 'nvidia/nemotron-3.5-lightning:free';
-  if (id.includes('mistral')) return 'nvidia/nemotron-3.5-lightning:free';
-  if (id.includes('phi')) return 'openrouter/free';
-
-  return 'nvidia/nemotron-3.5-lightning:free';
+  if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
+  const id = modelId.trim();
+  if (id.includes('/')) return id;
+  return 'openrouter/free';
 }
 
 // ==================== YOUTUBE LIVE SEARCH (ZERO API KEY) ====================

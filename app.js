@@ -113,81 +113,6 @@ You are a Master Security Specialist, Penetration Tester, and Cryptographer.
 Execute exhaustive first-principles reasoning. Examine all theoretical, technical, philosophical, and mechanical angles with unconstrained intellectual honesty, rigorous logic, and absolute depth.`
   };
 
-  // Daftar model OpenRouter yang dinonaktifkan (karena error upstream 429/404/403 atau bukan chat model)
-  const DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS = new Set([
-    // Error upstream HTTP 429 (Provider returned error / rate limited)
-    'google/gemma-4-31b-it:free',
-    'google/gemma-4-26b-a4b-it:free',
-    'poolside/laguna-s-2.1:free',
-    'poolside/laguna-xs-2.1:free',
-    // Error HTTP 403 (Hanya tersedia di agentic harness khusus)
-    'thinkingmachines/inkling-small:free',
-    'thinkingmachines/inkling:free',
-    // Model moderasi & non-chat
-    'nvidia/nemotron-3.5-content-safety:free',
-    'meta-llama/musicgen-large',
-    // Model gratis lama yang sudah dihapus / tidak tersedia lagi (HTTP 404)
-    'deepseek/deepseek-r1:free',
-    'qwen/qwen3.8-27b:free',
-    'meta-llama/llama-3.3-70b-instruct:free',
-    'deepseek/deepseek-chat:free',
-    'nvidia/llama-3.1-nemotron-70b-instruct:free',
-    'google/gemini-2.0-flash-exp:free',
-    'qwen/qwen-2.5-72b-instruct:free',
-    'meta-llama/llama-3.2-11b-vision-instruct:free',
-    'apodex/apodex-1.1-mini:free'
-  ]);
-
-  // Model OpenRouter yang terdeteksi sementara mengalami ResourceExhausted atau timeout upstream
-  const RUNTIME_EXHAUSTED_OPENROUTER_MODELS = new Set();
-  function markModelExhausted(modelId, reason = '') {
-    if (!modelId || typeof modelId !== 'string') return;
-    RUNTIME_EXHAUSTED_OPENROUTER_MODELS.add(modelId);
-    console.warn(`[OpenRouter Resiliency] Model ${modelId} ditandai ResourceExhausted/lambat (${reason}). Dialihkan sementara.`);
-    setTimeout(() => {
-      RUNTIME_EXHAUSTED_OPENROUTER_MODELS.delete(modelId);
-    }, 300000); // 5 menit
-  }
-
-  // Fallback resmi model gratis OpenRouter yang 100% aktif, responsif, dan terverifikasi live
-  // openrouter/free diprioritaskan utama karena secara dinamis merutekan ke provider gratis yang sehat & berkapasitas
-  const LIVE_FREE_OPENROUTER_FALLBACKS = [
-    'openrouter/free',
-    'dots-studio/dots-3-note-preview:free',
-    'cohere/north-mini-code:free',
-    'liquid/lfm-2.5-2.6b:free',
-    'nvidia/nemotron-3.5-lightning:free',
-    'nvidia/nemotron-3-super-120b-a12b:free',
-    'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
-    'nvidia/nemotron-3-ultra-550b-a55b:free'
-  ];
-
-  // Fallback resmi model kredit / pengguna API Key (High-Availability & Latensi Terendah dengan puluhan penyedia)
-  const HIGH_AVAILABILITY_OPENROUTER_FALLBACKS = [
-    'openrouter/auto',
-    'deepseek/deepseek-chat',
-    'meta-llama/llama-3.3-70b-instruct',
-    'google/gemini-2.0-flash-001',
-    'openai/gpt-4o-mini',
-    'openrouter/free'
-  ];
-
-  // Popular OpenRouter Models Catalog (Live Active Free & Flagship Models)
-  const DEFAULT_OPENROUTER_MODELS = [
-    { id: 'openrouter/auto', name: 'OpenRouter Auto Router', tag: 'Auto', cat: 'flagship', desc: 'Rute otomatis cerdas memilih model terbaik untuk prompt Anda.' },
-    { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Meta Llama 3.3 70B (Free)', tag: 'Free', cat: 'free', desc: 'Model instruksi 70B bertenaga tinggi dari Meta AI.' },
-    { id: 'meta-llama/llama-3.2-3b-instruct:free', name: 'Meta Llama 3.2 3B (Free)', tag: 'Free', cat: 'free', desc: 'Model kilat ringan efisien untuk tugas umum.' },
-    { id: 'deepseek/deepseek-r1:free', name: 'DeepSeek R1 (Free)', tag: 'Free', cat: 'free', desc: 'Model penalaran rantai pikiran (CoT) open-weights terdepan.' },
-    { id: 'deepseek/deepseek-chat:free', name: 'DeepSeek V3 (Free)', tag: 'Free', cat: 'free', desc: 'Model percakapan dan coding multi-tugas performa tinggi.' },
-    { id: 'google/gemini-2.0-flash-exp:free', name: 'Google Gemini 2.0 Flash (Free)', tag: 'Free', cat: 'free', desc: 'Model generasi berikutnya dari Google berkecepatan ultra tinggi.' },
-    { id: 'qwen/qwen-2.5-coder-32b-instruct:free', name: 'Qwen 2.5 Coder 32B (Free)', tag: 'Free', cat: 'free', desc: 'Model spesialis pemrograman, koding, dan arsitektur software.' },
-    { id: 'anthropic/claude-3.5-sonnet', name: 'Anthropic Claude 3.5 Sonnet', tag: 'Coding', cat: 'coding', desc: 'Model flagship Anthropic dengan pemahaman logika mendalam.' },
-    { id: 'openai/gpt-4o', name: 'OpenAI GPT-4o', tag: 'Vision', cat: 'flagship', desc: 'Model multimodal flagship dari OpenAI.' },
-    { id: 'openai/gpt-4o-mini', name: 'OpenAI GPT-4o Mini', tag: 'Fast', cat: 'fast', desc: 'Model cepat, terjangkau, dan cerdas dari OpenAI.' },
-    { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat (V3)', tag: 'Coding', cat: 'coding', desc: 'DeepSeek V3 API resmi performa tinggi.' },
-    { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 Official', tag: 'Reasoning', cat: 'reasoning', desc: 'DeepSeek R1 Official API berkapabilitas reasoning penuh.' }
-  ];
-
   function sanitizeOllamaApiKey(rawKey) {
     if (!rawKey || typeof rawKey !== 'string') return '';
     return rawKey.replace(/^Bearer\s+/i, '').replace(/^["']+|["']+$/g, '').trim();
@@ -213,33 +138,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
   // Universal Model Mapper: Memetakan model Ollama/Cloud ke ekuivalen OpenRouter Cloud resmi
   function mapOllamaModelToOpenRouter(modelId) {
     if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
-    const id = modelId.toLowerCase().trim();
-    if (id.includes('/')) {
-      if (DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(modelId) || RUNTIME_EXHAUSTED_OPENROUTER_MODELS.has(modelId)) {
-        return 'openrouter/free';
-      }
-      return modelId;
-    }
-
-    if (id.includes('qwen2.5-coder') || id.includes('coder') || id.includes('code') || id.includes('kimi-k2.7-code')) {
-      return 'cohere/north-mini-code:free';
-    }
-    if (id.includes('dots')) return 'dots-studio/dots-3-note-preview:free';
-    if (id.includes('liquid') || id.includes('lfm')) return 'liquid/lfm-2.5-2.6b:free';
-    if (id.includes('reasoning') || id.includes('deepseek-r1') || id.includes('deepseek-v4-pro')) {
-      return RUNTIME_EXHAUSTED_OPENROUTER_MODELS.has('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free')
-        ? 'openrouter/free'
-        : 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
-    }
-    if (id.includes('nemotron-3-super') || id.includes('gpt-oss:120b') || id.includes('nemotron-3-ultra')) {
-      return RUNTIME_EXHAUSTED_OPENROUTER_MODELS.has('nvidia/nemotron-3-super-120b-a12b:free')
-        ? 'openrouter/free'
-        : 'nvidia/nemotron-3-super-120b-a12b:free';
-    }
-    if (id.includes('phi') || id.includes('gemma') || id.includes('llama') || id.includes('qwen') || id.includes('mistral')) {
-      return 'openrouter/free';
-    }
-
+    const id = modelId.trim();
+    if (id.includes('/')) return id;
     return 'openrouter/free';
   }
 
@@ -759,7 +659,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     abortController: null,
     soundEnabled: false,
     ollamaModels: [],
-    openRouterModels: [...DEFAULT_OPENROUTER_MODELS],
+    openRouterModels: [],
     availableImageModels: [...DEFAULT_IMAGE_MODELS],
     settings: {
       ollamaEndpoint: 'http://127.0.0.1:11434',
@@ -5120,9 +5020,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         safeLocalStorage.setItem('zoz_ollama_model', 'llama3.2:3b');
       }
 
-      // Auto-Migration: Alihkan model OpenRouter lama / rusak / mati ke model aktif terpercaya
-      if (!STATE.settings.openRouterModel || DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(STATE.settings.openRouterModel)) {
-        STATE.settings.openRouterModel = 'nvidia/nemotron-3.5-lightning:free';
+      // Pastikan model OpenRouter default valid
+      if (!STATE.settings.openRouterModel) {
+        STATE.settings.openRouterModel = 'openrouter/free';
       }
 
       // Jika baru pertama kali dibuka di cloud (Vercel) dan mode masih default 'ollama',
@@ -10955,12 +10855,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
 
     const isAutoRouterActive = (STATE.mode === 'auto') || Boolean(options.isAutoRouter);
-    const candidateModels = isAutoRouterActive
-      ? [
-          effectiveModel,
-          ...LIVE_FREE_OPENROUTER_FALLBACKS
-        ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(m))
-      : [effectiveModel];
+    const candidateModels = [effectiveModel];
+    if (isAutoRouterActive && effectiveModel !== 'openrouter/free') {
+      candidateModels.push('openrouter/free');
+    }
 
     const hasUserKey = Boolean(STATE.settings.openRouterKey && String(STATE.settings.openRouterKey).trim());
     const tryDirectFirst = Boolean(hasUserKey && IS_GITHUB_PAGES);
@@ -12270,13 +12168,11 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       const routes = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? ['direct', 'proxy'] : ['proxy', 'direct'];
       const errors = [];
       const key = STATE.settings.openRouterKey || '';
-      const candidateModels = [
-        model && model.includes('/') ? model : (mapOllamaModelToOpenRouter(model) || 'openrouter/free'),
-        'openrouter/free',
-        'google/gemini-2.0-flash-exp:free',
-        'meta-llama/llama-3.3-70b-instruct:free',
-        'deepseek/deepseek-chat'
-      ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx);
+      const initialModel = model && model.includes('/') ? model : (mapOllamaModelToOpenRouter(model) || 'openrouter/free');
+      const candidateModels = [initialModel];
+      if (initialModel !== 'openrouter/free') {
+        candidateModels.push('openrouter/free');
+      }
 
       for (let c = 0; c < candidateModels.length; c++) {
         const curModel = candidateModels[c];
@@ -20389,16 +20285,13 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
     return mutated;
   }
 
-  // ==================== NEMOTRON FREE AUTONOMOUS CODE SCRUBBER AGENT ====================
-  // Mengintegrasikan model gratis OpenRouter (nvidia/nemotron-3-ultra-550b-a55b:free / super:free)
-  // untuk mendeteksi kode yang tercecer di gelembung obrolan dan membersihkannya secara otomatis
+  // ==================== AUTONOMOUS CODE SCRUBBER AGENT ====================
+  // Membersihkan kode yang tercecer di gelembung obrolan secara otomatis
   const ZozNemotronAutonomousScrubber = {
-    MODELS: [
-      'nvidia/nemotron-3-ultra-550b-a55b:free',
-      'nvidia/nemotron-3-super-120b-a12b:free',
-      'meta-llama/llama-3.3-70b-instruct:free',
-      'google/gemini-2.0-flash-exp:free'
-    ],
+    get MODELS() {
+      const active = STATE.settings.openRouterModel || 'openrouter/free';
+      return [active, 'openrouter/free', 'openrouter/auto'].filter((m, i, a) => a.indexOf(m) === i);
+    },
 
     hasScatteredCode(text) {
       if (!text || typeof text !== 'string') return false;
@@ -23081,9 +22974,9 @@ ${blocks}
       if (res && res.ok) {
         const data = await res.json();
         if (data.data && Array.isArray(data.data)) {
-          // Ambil seluruh model secara live dengan menyaring model yang dinonaktifkan/rusak
+          // Ambil seluruh model secara live langsung dari OpenRouter API
           const mapped = data.data
-            .filter(m => m && m.id && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(m.id))
+            .filter(m => m && m.id)
             .map(m => {
             const arch = m.architecture || {};
             const outMods = arch.output_modalities || [];
@@ -23227,7 +23120,7 @@ ${blocks}
       }
     } else {
       models = (STATE.openRouterModels || [])
-        .filter(m => m && m.id && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(m.id))
+        .filter(m => m && m.id)
         .map(m => ({
           id: m.id,
           name: m.name || m.id,
@@ -25742,7 +25635,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     } else if (isContextLength) {
       title = `Batas Panjang Konteks Terlampaui`;
       desc = `Jumlah teks prompt, dokumen, atau hasil pencarian web melebihi kapasitas context window model <code>${escapeHtml(modelName)}</code>.`;
-      advice = `💡 <strong>Solusi:</strong> Ringkas teks prompt Anda atau gunakan model dengan context window besar seperti <code>kimi-k3</code> atau <code>google/gemini-2.0-flash-exp:free</code>.`;
+      advice = `💡 <strong>Solusi:</strong> Ringkas teks prompt Anda atau gunakan model dengan context window yang lebih besar.`;
     }
 
     return `
@@ -27736,19 +27629,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const candidateModels = [effectiveInitialModel];
       if (isAutoRouterActive) {
         const emergencyBackup = hasClientKey ? 'openrouter/auto' : 'openrouter/free';
-        if (effectiveInitialModel !== emergencyBackup && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(emergencyBackup)) {
+        if (effectiveInitialModel !== emergencyBackup) {
           candidateModels.push(emergencyBackup);
         }
-      }
-      if (effectiveInitialModel === 'openrouter/free' || candidateModels.includes('openrouter/free')) {
-        const safeChatFallbacks = (typeof LIVE_FREE_OPENROUTER_FALLBACKS !== 'undefined' && Array.isArray(LIVE_FREE_OPENROUTER_FALLBACKS))
-          ? LIVE_FREE_OPENROUTER_FALLBACKS.slice(0, 2)
-          : ['nvidia/nemotron-3.5-lightning:free'];
-        safeChatFallbacks.forEach(fb => {
-          if (fb && !candidateModels.includes(fb) && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(fb)) {
-            candidateModels.push(fb);
-          }
-        });
       }
 
       let lastErrDetail = '';
@@ -27972,9 +27855,6 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 } catch (_) {}
               }
               routeErrDetail = attemptErr;
-              if (attemptErr.toLowerCase().includes('resourceexhausted') || attemptErr.toLowerCase().includes('worker local total request limit reached')) {
-                markModelExhausted(currentModel, attemptErr);
-              }
               if (attemptRes.status === 401 || attemptRes.status === 403) {
                 // Jangan batalkan percobaan jika rute lain (direct <-> proxy) belum dicoba!
                 // Server mungkin memiliki API Key di environment atau sebaliknya pengguna memiliki key di client.
@@ -28167,9 +28047,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               }
               clearTimeout(ttftTimer);
               STATE.abortController?.signal?.removeEventListener('abort', onParentAbort);
-              actualModelUsed = (resolvedUpstreamModel && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(resolvedUpstreamModel))
-                ? resolvedUpstreamModel
-                : currentModel;
+              actualModelUsed = resolvedUpstreamModel || currentModel;
               streamSucceeded = true;
               break;
 
@@ -28190,18 +28068,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
               if (tokenCount > 0 && !sMsg.includes('Model moderasi non-chat')) {
                 // Token sudah diterima dan terlihat oleh pengguna, tandai terputus agar disambung otomatis
-                actualModelUsed = (resolvedUpstreamModel && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(resolvedUpstreamModel))
-                  ? resolvedUpstreamModel
-                  : currentModel;
+                actualModelUsed = resolvedUpstreamModel || currentModel;
                 streamSucceeded = true;
                 isStreamInterrupted = true;
                 console.warn(`[OpenRouter Stream Interrupted] Aliran token terputus di tengah jalan setelah ${tokenCount} token:`, sMsg);
                 break;
               }
 
-              if (sMsg.toLowerCase().includes('resourceexhausted') || sMsg.toLowerCase().includes('worker local total request limit reached')) {
-                markModelExhausted(currentModel, sMsg);
-              }
               routeErrDetail = sMsg;
               continue;
             }
@@ -28215,9 +28088,6 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             const isTimeout = netErr?.name === 'AbortError' && attemptController.signal.reason === 'TTFT_TIMEOUT';
             const netMsg = isTimeout ? 'Respons model terlalu lambat (timeout 45 detik tanpa token)' : (netErr.message || String(netErr));
             console.warn(`[OpenRouter Attempt Failed] Model ${currentModel} (${routeType}):`, netMsg);
-            if (isTimeout) {
-              markModelExhausted(currentModel, 'TTFT Timeout 45s');
-            }
             routeErrDetail = netMsg;
             continue;
           }
@@ -29159,10 +29029,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
 
         const isFreeModel = Boolean(modelName && (modelName.includes(':free') || modelName.endsWith('/free') || modelName === 'openrouter/free'));
         const fallbackModelCandidate = (modelName === 'openrouter/free') 
-          ? 'nvidia/nemotron-3-super-120b-a12b:free' 
+          ? 'openrouter/auto' 
           : 'openrouter/free';
         const fallbackLabel = (modelName === 'openrouter/free') 
-          ? 'Nemotron 3 Super 120B (Free)' 
+          ? 'OpenRouter Auto Router' 
           : 'OpenRouter Free Router';
 
         const rescuedHtml = '';
@@ -33852,7 +33722,7 @@ Aturan:
       });
     } else {
       list = (STATE.openRouterModels || [])
-        .filter(m => m && m.id && !DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS.has(m.id))
+        .filter(m => m && m.id)
         .map(m => {
         const idLower = (m.id || '').toLowerCase();
         const isFree = Boolean(m.id && (m.id.includes(':free') || m.id.endsWith('/free') || m.id === 'openrouter/free' || m.tag === 'Free' || m.cat === 'free'));
@@ -36030,7 +35900,7 @@ Aturan:
         setMusicModel(val);
         if (els.customOpenRouterMusicModelInput) els.customOpenRouterMusicModelInput.value = '';
       } else {
-        showToast('⚠️ Masukkan model ID OpenRouter (misal: google/gemini-2.0-flash-exp:free)');
+        showToast('⚠️ Masukkan model ID OpenRouter (misal: openrouter/auto)');
       }
     });
 
@@ -36043,7 +35913,7 @@ Aturan:
           setMusicModel(val);
           els.customOpenRouterMusicModelInput.value = '';
         } else {
-          showToast('⚠️ Masukkan model ID OpenRouter (misal: google/gemini-2.0-flash-exp:free)');
+          showToast('⚠️ Masukkan model ID OpenRouter (misal: openrouter/auto)');
         }
       }
     });
@@ -45041,25 +44911,12 @@ Aturan:
           selectEl.value = targetVal;
         }
       } else {
-        const brokenSet = (typeof DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS !== 'undefined')
-          ? DEACTIVATED_OR_BROKEN_OPENROUTER_MODELS
-          : new Set();
-
         const rawList = (Array.isArray(STATE.openRouterModels) && STATE.openRouterModels.length > 0)
-          ? STATE.openRouterModels.filter(m => m && m.id && !brokenSet.has(m.id)).map(m => m.id)
-          : [
-              'openrouter/free',
-              'google/gemini-2.0-flash-exp:free',
-              'meta-llama/llama-3.3-70b-instruct:free',
-              'nvidia/nemotron-3.5-lightning:free',
-              'deepseek/deepseek-chat',
-              'mistralai/mistral-7b-instruct:free',
-              'qwen/qwen-2.5-72b-instruct',
-              'openai/gpt-4o'
-            ];
+          ? STATE.openRouterModels.filter(m => m && m.id).map(m => m.id)
+          : [];
 
         // Jika daftar OpenRouter belum di-fetch dari API, trigger live fetch di latar belakang
-        if (!STATE.openRouterModels || STATE.openRouterModels.length <= 10) {
+        if (!STATE.openRouterModels || STATE.openRouterModels.length === 0) {
           fetchOpenRouterModelsList().then(() => {
             if (this.activeSummaryEngine === 'openrouter' && selectEl && selectEl.parentElement) {
               this.populateEngineModelSelect(selectEl, 'openrouter', selectEl.value);
