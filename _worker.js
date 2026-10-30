@@ -1990,6 +1990,119 @@ export default {
         if (plMatch && plMatch[1]) playlistId = plMatch[1];
         const canonicalUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : parsedUrl.href;
 
+        // 1. Coba ambil metadata lengkap (deskripsi, durasi, view count, transkrip nyata) via YouTube InnerTube
+        if (videoId) {
+          try {
+            const innerClientVer = '20.10.38';
+            const innerUserAgent = `com.google.android.youtube/${innerClientVer} (Linux; U; Android 14)`;
+            const innerRes = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': innerUserAgent
+              },
+              body: JSON.stringify({
+                context: { client: { clientName: 'ANDROID', clientVersion: innerClientVer } },
+                videoId: videoId
+              }),
+              signal: AbortSignal.timeout(8000)
+            });
+            if (innerRes.ok) {
+              const innerData = await innerRes.json();
+              const details = innerData.videoDetails;
+              if (details && details.title) {
+                let transcript = '';
+                let hasTranscript = false;
+                let transcriptLang = '';
+                const captionTracks = innerData.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+                if (Array.isArray(captionTracks) && captionTracks.length > 0) {
+                  const selectedTrack = captionTracks.find(t => t.languageCode === 'id') ||
+                                        captionTracks.find(t => t.languageCode === 'en') ||
+                                        captionTracks[0];
+                  if (selectedTrack && selectedTrack.baseUrl) {
+                    transcriptLang = selectedTrack.languageCode || '';
+                    try {
+                      const json3Url = selectedTrack.baseUrl.includes('&fmt=')
+                        ? selectedTrack.baseUrl.replace(/&fmt=[^&]+/, '&fmt=json3')
+                        : (selectedTrack.baseUrl + '&fmt=json3');
+                      const tRes = await fetch(json3Url, {
+                        headers: { 'User-Agent': innerUserAgent },
+                        signal: AbortSignal.timeout(8000)
+                      });
+                      if (tRes.ok) {
+                        const tText = await tRes.text();
+                        try {
+                          const jd = JSON.parse(tText);
+                          if (Array.isArray(jd.events)) {
+                            const words = [];
+                            for (const ev of jd.events) {
+                              if (Array.isArray(ev.segs)) {
+                                const line = ev.segs.map(s => s.utf8 || '').join('').trim();
+                                if (line) words.push(line);
+                              }
+                            }
+                            transcript = words.join(' ').replace(/\s+/g, ' ').trim();
+                            if (transcript.length > 0) hasTranscript = true;
+                          }
+                        } catch (_) {
+                          const re = /<text[^>]*>([^<]+)<\/text>/g;
+                          let m;
+                          const words = [];
+                          while ((m = re.exec(tText)) !== null) {
+                            words.push(m[1].replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"'));
+                          }
+                          if (words.length > 0) {
+                            transcript = words.join(' ').replace(/\s+/g, ' ').trim();
+                            hasTranscript = true;
+                          }
+                        }
+                      }
+                    } catch (_) {}
+                  }
+                }
+
+                const s = parseInt(details.lengthSeconds, 10);
+                let durationText = '';
+                if (!isNaN(s) && s > 0) {
+                  const h = Math.floor(s / 3600);
+                  const m = Math.floor((s % 3600) / 60);
+                  const sec = s % 60;
+                  durationText = h > 0 ? `${h} jam ${m} menit ${sec} detik` : (m > 0 ? `${m} menit ${sec} detik` : `${sec} detik`);
+                }
+
+                return new Response(JSON.stringify({
+                  success: true,
+                  url: canonicalUrl,
+                  videoId,
+                  playlistId,
+                  title: details.title || 'Tanpa Judul',
+                  channel: details.author || 'Kreator YouTube',
+                  channel_url: details.channelId ? `https://www.youtube.com/channel/${details.channelId}` : '',
+                  thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+                  type: 'video',
+                  duration: details.lengthSeconds || '',
+                  durationText,
+                  views: details.viewCount || '',
+                  description: details.shortDescription || '',
+                  hasTranscript,
+                  transcriptLang,
+                  transcript,
+                  html: ''
+                }), {
+                  status: 200,
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Cache-Control': 'public, max-age=7200, s-maxage=14400, stale-while-revalidate=86400',
+                    'Vary': 'Accept-Encoding'
+                  }
+                });
+              }
+            }
+          } catch (_) {}
+        }
+
+        // 2. Fallback ke endpoint YouTube oEmbed resmi
         const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
         const ytRes = await fetch(oembedUrl, {
           signal: AbortSignal.timeout(8000),
@@ -2161,6 +2274,69 @@ export default {
         });
       } catch (err) {
         return new Response(JSON.stringify({ success: false, error: err.message, url: target }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
+    // Related & Recommended Videos Tool API (Cloudflare Worker)
+    if ((url.pathname === '/api/tools/related-videos' || url.pathname === '/api/tools/search-videos') && (request.method === 'GET' || request.method === 'POST')) {
+      try {
+        let videoUrl = '';
+        let query = '';
+        let limit = 5;
+        let platform = 'auto';
+        if (request.method === 'GET') {
+          videoUrl = url.searchParams.get('video_url') || url.searchParams.get('url') || url.searchParams.get('link') || '';
+          query = url.searchParams.get('query') || url.searchParams.get('q') || url.searchParams.get('search') || url.searchParams.get('topic') || '';
+          limit = parseInt(url.searchParams.get('limit') || url.searchParams.get('max_results') || '5', 10);
+          platform = url.searchParams.get('platform') || 'auto';
+        } else {
+          const body = await request.json().catch(() => ({}));
+          videoUrl = body.video_url || body.videoUrl || body.url || body.link || '';
+          query = body.query || body.q || body.search || body.topic || '';
+          if (body.limit || body.max_results) limit = parseInt(body.limit || body.max_results, 10);
+          if (body.platform) platform = body.platform;
+        }
+
+        let effectiveQuery = String(query || '').trim();
+        if (!effectiveQuery && videoUrl) {
+          try {
+            const p = new URL(videoUrl);
+            const slug = p.pathname.split('/').filter(Boolean).pop();
+            if (slug && slug.length > 2 && !/^[0-9a-f]{16,}$/i.test(slug)) {
+              effectiveQuery = decodeURIComponent(slug).replace(/[._-]+/g, ' ').trim();
+            }
+          } catch (_) {}
+        }
+        if (!effectiveQuery) effectiveQuery = 'popular trending videos';
+
+        const data = await ytSearchVideos(effectiveQuery, limit);
+        const mapped = (data && Array.isArray(data.results)) ? data.results.map(v => ({
+          platform: 'YouTube',
+          videoId: v.videoId,
+          url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`,
+          title: v.title,
+          channel: v.channel,
+          duration: v.durationText || '',
+          views: v.viewText || '',
+          thumbnail: v.thumbnail || ''
+        })) : [];
+
+        return new Response(JSON.stringify({
+          success: mapped.length > 0,
+          platform: 'YouTube',
+          query: effectiveQuery,
+          sourceVideoUrl: videoUrl || null,
+          count: mapped.length,
+          videos: mapped
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ success: false, error: err.message, videos: [] }), {
           status: 200,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });

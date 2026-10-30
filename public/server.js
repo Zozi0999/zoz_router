@@ -1672,6 +1672,150 @@ function extractYouTubeVideoIds(text) {
   return ids;
 }
 
+const INNERTUBE_CLIENT_VERSION = '20.10.38';
+const INNERTUBE_USER_AGENT = `com.google.android.youtube/${INNERTUBE_CLIENT_VERSION} (Linux; U; Android 14)`;
+
+function formatYouTubeDuration(seconds) {
+  const s = parseInt(seconds, 10);
+  if (isNaN(s) || s <= 0) return '';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h} jam ${m} menit ${sec} detik`;
+  if (m > 0) return `${m} menit ${sec} detik`;
+  return `${sec} detik`;
+}
+
+async function fetchYouTubeDetails(videoId) {
+  if (!videoId || !/^[a-zA-Z0-9_-]{11}$/.test(videoId)) return null;
+
+  try {
+    const postBody = JSON.stringify({
+      context: {
+        client: {
+          clientName: 'ANDROID',
+          clientVersion: INNERTUBE_CLIENT_VERSION,
+        },
+      },
+      videoId: videoId,
+    });
+
+    const res = await new Promise((resolve) => {
+      const req = https.request({
+        hostname: 'www.youtube.com',
+        path: '/youtubei/v1/player?prettyPrint=false',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postBody),
+          'User-Agent': INNERTUBE_USER_AGENT,
+        },
+        timeout: 8000
+      }, (r) => {
+        let body = '';
+        r.on('data', chunk => body += chunk);
+        r.on('end', () => resolve({ status: r.statusCode, body }));
+      });
+      req.on('timeout', () => { req.destroy(); resolve({ status: 408, body: '' }); });
+      req.on('error', () => resolve({ status: 500, body: '' }));
+      req.write(postBody);
+      req.end();
+    });
+
+    if (res.status !== 200 || !res.body) return null;
+    let data;
+    try {
+      data = JSON.parse(res.body);
+    } catch (_) {
+      return null;
+    }
+    const details = data.videoDetails;
+    if (!details || !details.title) return null;
+
+    let transcript = '';
+    let hasTranscript = false;
+    let transcriptLang = '';
+
+    const captionTracks = data.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+    if (Array.isArray(captionTracks) && captionTracks.length > 0) {
+      // Prioritaskan Bahasa Indonesia (id), kemudian Inggris (en), atau trek pertama
+      const selectedTrack = captionTracks.find(t => t.languageCode === 'id') ||
+                            captionTracks.find(t => t.languageCode === 'en') ||
+                            captionTracks[0];
+      if (selectedTrack && selectedTrack.baseUrl) {
+        transcriptLang = selectedTrack.languageCode || '';
+        try {
+          const json3Url = selectedTrack.baseUrl.includes('&fmt=')
+            ? selectedTrack.baseUrl.replace(/&fmt=[^&]+/, '&fmt=json3')
+            : (selectedTrack.baseUrl + '&fmt=json3');
+
+          const tRes = await new Promise((resolve) => {
+            const treq = https.get(json3Url, {
+              headers: { 'User-Agent': INNERTUBE_USER_AGENT },
+              timeout: 8000
+            }, (tr) => {
+              let tBody = '';
+              tr.on('data', chunk => tBody += chunk);
+              tr.on('end', () => resolve(tBody));
+            });
+            treq.on('timeout', () => { treq.destroy(); resolve(''); });
+            treq.on('error', () => resolve(''));
+          });
+
+          if (tRes) {
+            try {
+              const jd = JSON.parse(tRes);
+              if (Array.isArray(jd.events)) {
+                const words = [];
+                for (const ev of jd.events) {
+                  if (Array.isArray(ev.segs)) {
+                    const line = ev.segs.map(s => s.utf8 || '').join('').trim();
+                    if (line) words.push(line);
+                  }
+                }
+                transcript = words.join(' ').replace(/\s+/g, ' ').trim();
+                if (transcript.length > 0) hasTranscript = true;
+              }
+            } catch (_) {
+              const re = /<text[^>]*>([^<]+)<\/text>/g;
+              let m;
+              const words = [];
+              while ((m = re.exec(tRes)) !== null) {
+                words.push(m[1].replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"'));
+              }
+              if (words.length > 0) {
+                transcript = words.join(' ').replace(/\s+/g, ' ').trim();
+                hasTranscript = true;
+              }
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    return {
+      success: true,
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+      videoId: videoId,
+      title: details.title || 'Tanpa Judul',
+      channel: details.author || 'Kreator YouTube',
+      channelId: details.channelId || '',
+      channel_url: details.channelId ? `https://www.youtube.com/channel/${details.channelId}` : '',
+      duration: details.lengthSeconds || '',
+      durationText: formatYouTubeDuration(details.lengthSeconds),
+      views: details.viewCount || '',
+      description: details.shortDescription || '',
+      thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+      type: 'video',
+      hasTranscript,
+      transcriptLang,
+      transcript
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
 async function fetchYouTubeInfo(rawUrl) {
   if (!rawUrl || typeof rawUrl !== 'string') {
     throw new Error('URL video YouTube tidak valid');
@@ -1711,6 +1855,22 @@ async function fetchYouTubeInfo(rawUrl) {
     youtubeInfoCache.delete(canonicalUrl);
   }
 
+  // 1. Coba ambil metadata lengkap (deskripsi, durasi, view count, transkrip nyata) via YouTube InnerTube
+  if (videoId) {
+    try {
+      const details = await fetchYouTubeDetails(videoId);
+      if (details && details.success) {
+        if (youtubeInfoCache.size > 200) {
+          const firstKey = youtubeInfoCache.keys().next().value;
+          youtubeInfoCache.delete(firstKey);
+        }
+        youtubeInfoCache.set(canonicalUrl, { data: details, cachedAt: Date.now() });
+        return details;
+      }
+    } catch (_) {}
+  }
+
+  // 2. Fallback ke endpoint YouTube oEmbed resmi
   const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
 
   return new Promise((resolve) => {
@@ -1761,6 +1921,13 @@ async function fetchYouTubeInfo(rawUrl) {
             channel_url: parsed.author_url || '',
             thumbnail: parsed.thumbnail_url || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ''),
             type: parsed.type || 'video',
+            duration: '',
+            durationText: '',
+            views: '',
+            description: '',
+            hasTranscript: false,
+            transcriptLang: '',
+            transcript: '',
             html: parsed.html || ''
           };
           if (youtubeInfoCache.size > 200) {
@@ -1810,6 +1977,231 @@ async function fetchYouTubeInfo(rawUrl) {
   });
 }
 
+// ==================== RELATED VIDEOS RECOMMENDATION & SEARCH ENGINE ====================
+const RELATED_VIDEOS_CACHE = new Map();
+
+function cleanTitleForQuery(title) {
+  if (!title) return '';
+  return String(title)
+    .replace(/[#@]/g, '')
+    .replace(/[\[\(][^\]\)]*[\]\)]/g, ' ')
+    .replace(/[|—–_\\/]/g, ' ')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function titleFromSlug(url) {
+  try {
+    const p = new URL(url);
+    const parts = p.pathname.split('/').filter(Boolean);
+    if (parts.length > 0) {
+      const last = parts[parts.length - 1];
+      if (last && last.length > 2 && !/^[0-9a-f]{16,}$/i.test(last)) {
+        return decodeURIComponent(last).replace(/[._-]+/g, ' ').trim();
+      }
+    }
+  } catch (_) {}
+  return '';
+}
+
+function fetchYouTubeSearchResults(query, limit = 5) {
+  return new Promise((resolve) => {
+    const cleanQ = String(query || '').trim();
+    if (!cleanQ) return resolve([]);
+    const targetUrl = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(cleanQ);
+    const req = https.get(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cookie': 'SOCS=CAI'
+      },
+      timeout: 8000
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        return resolve([]);
+      }
+      let html = '';
+      res.on('data', chunk => {
+        html += chunk;
+        if (html.length > 2500000) { res.destroy(); }
+      });
+      res.on('end', () => {
+        const results = [];
+        const startTag = 'var ytInitialData = ';
+        let startIdx = html.indexOf(startTag);
+        if (startIdx === -1) {
+          startIdx = html.indexOf('ytInitialData = ');
+          if (startIdx !== -1) startIdx += 'ytInitialData = '.length;
+        } else {
+          startIdx += startTag.length;
+        }
+        if (startIdx !== -1) {
+          const endIdx = html.indexOf(';</script>', startIdx);
+          const jsonStr = html.slice(startIdx, endIdx !== -1 ? endIdx : undefined);
+          try {
+            const data = JSON.parse(jsonStr);
+            const contents = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+            for (const section of contents) {
+              const items = section.itemSectionRenderer?.contents || [];
+              for (const item of items) {
+                const vr = item.videoRenderer;
+                if (vr && vr.videoId) {
+                  const title = vr.title?.runs?.map(r => r.text).join('') || vr.title?.simpleText || '';
+                  const channel = vr.ownerText?.runs?.map(r => r.text).join('') || vr.longBylineText?.runs?.map(r => r.text).join('') || '';
+                  const duration = vr.lengthText?.simpleText || '';
+                  const views = vr.viewCountText?.simpleText || '';
+                  const thumb = vr.thumbnail?.thumbnails?.[0]?.url || (`https://i.ytimg.com/vi/${vr.videoId}/hqdefault.jpg`);
+                  results.push({
+                    platform: 'YouTube',
+                    videoId: vr.videoId,
+                    url: `https://www.youtube.com/watch?v=${vr.videoId}`,
+                    title,
+                    channel,
+                    duration,
+                    views,
+                    thumbnail: thumb
+                  });
+                  if (results.length >= limit) break;
+                }
+              }
+              if (results.length >= limit) break;
+            }
+          } catch (_) {}
+        }
+        resolve(results);
+      });
+      res.on('error', () => resolve([]));
+    });
+    req.on('timeout', () => { req.destroy(); resolve([]); });
+    req.on('error', () => resolve([]));
+  });
+}
+
+function fetchXVideosSearchResults(query, limit = 5) {
+  return new Promise((resolve) => {
+    const cleanQ = String(query || '').trim();
+    if (!cleanQ) return resolve([]);
+    const targetUrl = 'https://www.xvideos.com/?k=' + encodeURIComponent(cleanQ);
+    const req = https.get(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+      },
+      timeout: 8000
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        return resolve([]);
+      }
+      let html = '';
+      res.on('data', chunk => {
+        html += chunk;
+        if (html.length > 600000) { res.destroy(); }
+      });
+      res.on('end', () => {
+        const results = [];
+        const re = /<div id="video_([0-9a-zA-Z]+)"[\s\S]*?<a href="([^"]+)" title="([^"]+)"/gi;
+        let m;
+        while ((m = re.exec(html)) !== null && results.length < limit) {
+          results.push({
+            platform: 'XVIDEOS',
+            videoId: m[1],
+            url: `https://www.xvideos.com${m[2]}`,
+            title: m[3],
+            channel: 'XVIDEOS'
+          });
+        }
+        resolve(results);
+      });
+      res.on('error', () => resolve([]));
+    });
+    req.on('timeout', () => { req.destroy(); resolve([]); });
+    req.on('error', () => resolve([]));
+  });
+}
+
+async function searchRelatedVideos({ videoUrl = '', query = '', platform = 'auto', limit = 5 }) {
+  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 5, 1), 10);
+  let cleanUrl = String(videoUrl || '').trim();
+  let cleanQuery = String(query || '').trim();
+
+  let detectedPlatform = 'youtube';
+  if (/xvideos\.com/i.test(cleanUrl) || platform === 'xvideos') {
+    detectedPlatform = 'xvideos';
+  } else if (/xnxx\.com/i.test(cleanUrl) || platform === 'xnxx') {
+    detectedPlatform = 'xnxx';
+  } else if (/vimeo\.com/i.test(cleanUrl) || platform === 'vimeo') {
+    detectedPlatform = 'vimeo';
+  }
+
+  let sourceVideoTitle = '';
+  if (cleanUrl) {
+    if (detectedPlatform === 'youtube') {
+      try {
+        const info = await fetchYouTubeInfo(cleanUrl);
+        if (info && info.title) {
+          sourceVideoTitle = info.title;
+          const extractedTerms = cleanTitleForQuery(info.title);
+          if (!cleanQuery) {
+            cleanQuery = extractedTerms;
+          } else {
+            cleanQuery = `${extractedTerms} ${cleanQuery}`.trim();
+          }
+        }
+      } catch (_) {}
+    } else {
+      sourceVideoTitle = titleFromSlug(cleanUrl);
+      if (!cleanQuery) cleanQuery = sourceVideoTitle;
+      else cleanQuery = `${sourceVideoTitle} ${cleanQuery}`.trim();
+    }
+  }
+
+  if (!cleanQuery && cleanUrl) {
+    cleanQuery = titleFromSlug(cleanUrl) || 'video';
+  }
+
+  if (!cleanQuery) {
+    return {
+      success: false,
+      error: 'Parameter video_url atau query diperlukan untuk mencari video terkait.',
+      videos: []
+    };
+  }
+
+  const cacheKey = `${detectedPlatform}:${cleanQuery.toLowerCase()}:${safeLimit}`;
+  const hit = RELATED_VIDEOS_CACHE.get(cacheKey);
+  if (hit && hit.exp > Date.now()) return hit.data;
+
+  let videos = [];
+  if (detectedPlatform === 'youtube') {
+    videos = await fetchYouTubeSearchResults(cleanQuery, safeLimit);
+  } else if (detectedPlatform === 'xvideos') {
+    videos = await fetchXVideosSearchResults(cleanQuery, safeLimit);
+  }
+
+  if (videos.length === 0 && detectedPlatform !== 'youtube') {
+    videos = await fetchYouTubeSearchResults(cleanQuery, safeLimit);
+  }
+
+  const resultData = {
+    success: videos.length > 0,
+    platform: detectedPlatform,
+    query: cleanQuery,
+    sourceVideoTitle: sourceVideoTitle || null,
+    sourceVideoUrl: cleanUrl || null,
+    count: videos.length,
+    videos
+  };
+
+  if (videos.length > 0) {
+    if (RELATED_VIDEOS_CACHE.size > 200) RELATED_VIDEOS_CACHE.delete(RELATED_VIDEOS_CACHE.keys().next().value);
+    RELATED_VIDEOS_CACHE.set(cacheKey, { data: resultData, exp: Date.now() + 3600000 });
+  }
+
+  return resultData;
+}
+
 // Universal Grounding Enricher: injects real-time YouTube metadata for 100% of LLM models
 async function enrichTextWithYouTubeContext(text) {
   if (!text || typeof text !== 'string') return { text, youtubeVideos: [] };
@@ -1825,23 +2217,36 @@ async function enrichTextWithYouTubeContext(text) {
   if (validVideos.length === 0) return { text, youtubeVideos: [] };
 
   const contextBlocks = validVideos.map((v, idx) => {
-    return `[DATA TERVERIFIKASI VIDEO YOUTUBE #${idx + 1}]
+    let details = `[DATA TERVERIFIKASI VIDEO YOUTUBE #${idx + 1}]
 - URL: ${v.url}
 - Judul Video: "${v.title}"
 - Nama Channel / Pembuat: "${v.channel}" (${v.channel_url || 'N/A'})
-- Thumbnail: ${v.thumbnail}
-- Status Transkrip: Tidak tersedia dalam metadata oEmbed.
-(Informasi resmi ini diambil secara real-time via endpoint YouTube oEmbed)`;
+- Durasi: ${v.durationText || (v.duration ? `${v.duration} detik` : 'N/A')}
+- Jumlah Tayangan: ${v.views || 'N/A'}
+- Thumbnail: ${v.thumbnail}`;
+
+    if (v.description) {
+      const descSnippet = v.description.length > 2000 ? v.description.slice(0, 2000) + '...' : v.description;
+      details += `\n- Deskripsi Resmi Video:\n"""\n${descSnippet}\n"""`;
+    }
+    if (v.hasTranscript && v.transcript) {
+      const transSnippet = v.transcript.length > 25000 ? v.transcript.slice(0, 25000) + '... [transkrip dipotong untuk batas konteks]' : v.transcript;
+      details += `\n- TRANSKRIP / PERCAKAPAN LENGKAP VIDEO (TERVERIFIKASI REAL-TIME):\n"""\n${transSnippet}\n"""`;
+    } else {
+      details += `\n- Status Transkrip: Tidak tersedia langsung pada video ini (gunakan deskripsi resmi di atas untuk merangkum).`;
+    }
+
+    return details;
   }).join('\n\n');
 
-  const groundingPrompt = `\n\n### DATA METADATA RESMI YOUTUBE (VERIFIED GROUNDING):
+  const groundingPrompt = `\n\n### DATA METADATA RESMI & TRANSKRIP YOUTUBE (VERIFIED GROUNDING):
 ${contextBlocks}
 
-### PANDUAN INTEGRITAS & ANTI-HALUSINASI UNTUK ASISTEN AI:
-1. Informasi di atas adalah metadata resmi terverifikasi real-time via YouTube oEmbed.
-2. BATASAN DATA: Data di atas HANYA memuat judul dan nama channel/kreator, dan TIDAK MEMUAT transkrip/rekaman isi suara video.
-3. DILARANG BERHALUSINASI: Dilarang mengarang, menebak, atau mereka-reka isi dialog, kesimpulan, atau alur adegan detail dari video di atas semata-mata berdasarkan judulnya.
-4. JAWABAN JUJUR: Jika pengguna meminta "Rangkum isi video ini" atau "Apa kesimpulan video ini?", jelaskan fakta judul dan kreatornya, lalu sampaikan secara transparan kepada pengguna bahwa transkrip penuh percakapan di dalam video tidak tersedia.`;
+### PANDUAN PENGGUNAAN INFORMASI VIDEO UNTUK ASISTEN AI:
+1. Data di atas memuat judul, pembuat, durasi, deskripsi resmi, serta transkrip percakapan suara nyata yang diekstrak secara real-time dari video YouTube yang dikirim oleh pengguna.
+2. JELASKAN & RANGKUM ISI VIDEO SECARA MENDALAM: Jika pengguna bertanya "Apa ini?", "Rangkum video ini", "Apa isinya?", atau menanyakan hal terkait materi video, manfaatkan transkrip percakapan dan deskripsi resmi di atas untuk menjawab secara detail, komprehensif, dan tepat.
+3. DILARANG MENOLAK MERANGKUM jika transkrip atau deskripsi tersedia di atas. Dilarang meminta pengguna menyalin transkrip secara manual karena data transkrip dan informasinya sudah disediakan lengkap di atas untuk Anda.
+4. Jika transkrip tidak tersedia pada video tersebut namun terdapat deskripsi resmi, jelaskan ringkasan materi video berdasarkan deskripsi resmi dan metadata yang disediakan.`;
 
   return {
     text: text + groundingPrompt,
@@ -3749,10 +4154,18 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
       if (YOUTUBE_ALLOWED_HOSTS.has(parsedUrl.hostname.toLowerCase())) {
         return fetchYouTubeInfo(cleanTarget).then(ytInfo => {
           if (ytInfo && ytInfo.success) {
+            let ytBody = `[INFORMASI TERVERIFIKASI VIDEO YOUTUBE]\n- Judul: "${ytInfo.title}"\n- Channel / Pembuat: "${ytInfo.channel}" (${ytInfo.channel_url || 'N/A'})\n- URL: ${ytInfo.url}\n- Thumbnail: ${ytInfo.thumbnail}`;
+            if (ytInfo.durationText) ytBody += `\n- Durasi: ${ytInfo.durationText}`;
+            if (ytInfo.views) ytBody += `\n- Tayangan: ${ytInfo.views}`;
+            if (ytInfo.description) ytBody += `\n- Deskripsi:\n${ytInfo.description.slice(0, 1500)}`;
+            if (ytInfo.hasTranscript && ytInfo.transcript) {
+              ytBody += `\n- Transkrip Percakapan:\n${ytInfo.transcript.slice(0, 15000)}`;
+            }
+            ytBody += `\n(Diambil secara real-time via YouTube Engine)`;
             return resolve({
               url: ytInfo.url || cleanTarget,
               title: ytInfo.title,
-              text: `[INFORMASI TERVERIFIKASI VIDEO YOUTUBE]\n- Judul: "${ytInfo.title}"\n- Channel / Pembuat: "${ytInfo.channel}" (${ytInfo.channel_url || 'N/A'})\n- URL: ${ytInfo.url}\n- Thumbnail: ${ytInfo.thumbnail}\n(Diambil secara real-time via YouTube oEmbed)`,
+              text: ytBody,
               links: ytInfo.channel_url ? [{ title: ytInfo.channel, url: ytInfo.channel_url }] : [],
               videoIds: ytInfo.videoId ? [ytInfo.videoId] : []
             });
@@ -4994,6 +5407,30 @@ async function requestHandler(req, res) {
       return sendJSON(res, 200, { success: true, ...data });
     } catch (e) {
       return sendJSON(res, 500, { error: 'Gagal melakukan pencarian web berdaulat: ' + e.message });
+    }
+  }
+
+  // Related & Recommended Videos Search Tool Endpoint (Universal In-Chat Video Grounding)
+  if ((pathname === '/api/tools/related-videos' || pathname === '/api/tools/search-videos') && (method === 'GET' || method === 'POST')) {
+    try {
+      let videoUrl = reqUrl.searchParams.get('video_url') || reqUrl.searchParams.get('url') || reqUrl.searchParams.get('link') || reqUrl.searchParams.get('target') || '';
+      let query = reqUrl.searchParams.get('query') || reqUrl.searchParams.get('q') || reqUrl.searchParams.get('search') || reqUrl.searchParams.get('topic') || reqUrl.searchParams.get('keyword') || '';
+      let limit = parseInt(reqUrl.searchParams.get('limit') || reqUrl.searchParams.get('max_results') || '5', 10);
+      let platform = reqUrl.searchParams.get('platform') || 'auto';
+
+      if (method === 'POST') {
+        const body = await safeParseBody(req);
+        if (!body) return;
+        videoUrl = body.video_url || body.videoUrl || body.url || body.link || body.target || videoUrl;
+        query = body.query || body.q || body.search || body.topic || body.keyword || query;
+        if (body.limit || body.max_results) limit = parseInt(body.limit || body.max_results, 10);
+        if (body.platform) platform = body.platform;
+      }
+
+      const result = await searchRelatedVideos({ videoUrl, query, platform, limit });
+      return sendJSON(res, 200, result);
+    } catch (e) {
+      return sendJSON(res, 500, { success: false, error: 'Gagal mencari video terkait: ' + e.message, videos: [] });
     }
   }
 

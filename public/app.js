@@ -20989,6 +20989,12 @@ ${organicBlock}
             channel_url: parsed.author_url || '',
             thumbnail: parsed.thumbnail_url || (videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ''),
             type: parsed.type || 'video',
+            duration: '',
+            durationText: '',
+            views: '',
+            description: '',
+            hasTranscript: false,
+            transcript: '',
             provider: parsed.provider_name || 'YouTube'
           };
         }
@@ -21007,6 +21013,12 @@ ${organicBlock}
         channel: 'YouTube',
         channel_url: '',
         thumbnail: videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : '',
+        duration: '',
+        durationText: '',
+        views: '',
+        description: '',
+        hasTranscript: false,
+        transcript: '',
         type: 'video'
       };
     }
@@ -21039,7 +21051,7 @@ ${organicBlock}
 
     const validVideos = [];
 
-    // 1. Video YouTube via oEmbed
+    // 1. Video YouTube via oEmbed / InnerTube Details
     if (ytIds.length > 0) {
       const ytInfos = await Promise.all(ytIds.map(id => fetchYouTubeInfoClient(id)));
       ytInfos.forEach(v => {
@@ -21049,7 +21061,13 @@ ${organicBlock}
             platform: 'YouTube',
             title: v.title,
             channel: v.channel || 'YouTube',
-            thumbnail: v.thumbnail || ''
+            channel_url: v.channel_url || '',
+            thumbnail: v.thumbnail || '',
+            durationText: v.durationText || '',
+            views: v.views || '',
+            description: v.description || '',
+            hasTranscript: Boolean(v.hasTranscript),
+            transcript: v.transcript || ''
           });
         }
       });
@@ -21102,24 +21120,37 @@ ${organicBlock}
     if (validVideos.length === 0) return null;
 
     const blocks = validVideos.map((v, idx) => {
-      return `[DATA TERVERIFIKASI TAUTAN VIDEO #${idx + 1}]
+      let b = `[DATA TERVERIFIKASI TAUTAN VIDEO #${idx + 1}]
 - URL: ${v.url}
 - Platform: ${v.platform}
 - Judul Video: "${v.title}"
 - Nama Channel / Penyedia: "${v.channel}"
-- Thumbnail: ${v.thumbnail || 'Tidak tersedia'}
-- Status Transkrip: Tidak tersedia dalam metadata oEmbed / OpenGraph.
-(Informasi resmi ini diambil secara real-time via video grounding)`;
+- Thumbnail: ${v.thumbnail || 'Tidak tersedia'}`;
+
+      if (v.durationText) b += `\n- Durasi: ${v.durationText}`;
+      if (v.views) b += `\n- Jumlah Tayangan: ${v.views}`;
+      if (v.description) {
+        const dSnippet = v.description.length > 2000 ? v.description.slice(0, 2000) + '...' : v.description;
+        b += `\n- Deskripsi Resmi Video:\n"""\n${dSnippet}\n"""`;
+      }
+      if (v.hasTranscript && v.transcript) {
+        const tSnippet = v.transcript.length > 25000 ? v.transcript.slice(0, 25000) + '... [transkrip dipotong untuk batas konteks]' : v.transcript;
+        b += `\n- TRANSKRIP / PERCAKAPAN LENGKAP VIDEO (TERVERIFIKASI REAL-TIME):\n"""\n${tSnippet}\n"""`;
+      } else {
+        b += `\n- Status Transkrip: Tidak tersedia langsung pada video ini (gunakan deskripsi resmi di atas untuk merangkum).`;
+      }
+
+      return b;
     }).join('\n\n');
 
-    const groundingContext = `### DATA METADATA RESMI VIDEO (VERIFIED GROUNDING):
+    const groundingContext = `### DATA METADATA RESMI & TRANSKRIP VIDEO (VERIFIED GROUNDING):
 ${blocks}
 
-### PANDUAN INTEGRITAS & ANTI-HALUSINASI UNTUK ASISTEN AI:
-1. Informasi di atas adalah metadata resmi terverifikasi real-time via video grounding.
-2. BATASAN DATA: Data di atas HANYA memuat judul, platform, dan kreator/URL, dan TIDAK MEMUAT transkrip/rekaman isi percakapan suara video lengkap kecuali disediakan pengguna.
-3. DILARANG BERHALUSINASI: Dilarang mengarang atau mereka-reka isi dialog atau kesimpulan detail dari video di atas semata-mata berdasarkan judulnya.
-4. JAWABAN JUJUR: Jika pengguna meminta "Rangkum isi video ini" atau "Apa kesimpulan video ini?", jelaskan fakta judul dan platform/tautannya, lalu sampaikan secara transparan kepada pengguna jika transkrip penuh percakapan di dalam video belum disertakan.`;
+### PANDUAN PENGGUNAAN INFORMASI VIDEO UNTUK ASISTEN AI:
+1. Data di atas memuat metadata resmi, deskripsi lengkap, serta transkrip percakapan suara nyata yang diekstrak secara real-time dari tautan video yang dikirim oleh pengguna.
+2. JELASKAN & RANGKUM ISI VIDEO SECARA MENDALAM: Jika pengguna bertanya "Apa ini?", "Rangkum video ini", "Apa isinya?", atau menanyakan hal terkait isi video, manfaatkan transkrip percakapan dan deskripsi resmi di atas untuk menjawab secara detail, komprehensif, dan tepat.
+3. DILARANG MENOLAK MERANGKUM jika transkrip atau deskripsi tersedia di atas. Dilarang meminta pengguna menyalin transkrip secara manual karena data transkrip dan informasinya sudah disediakan lengkap di atas untuk Anda.
+4. Jika transkrip tidak tersedia namun deskripsi ada, jelaskan ringkasan materi video berdasarkan deskripsi resmi dan metadata yang disediakan.`;
 
     return {
       groundingContext,
@@ -24322,17 +24353,49 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           }
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'find_related_videos',
+        description: 'Mencari atau merekomendasikan video lain yang relevan/terkait dari tautan video sebelumnya yang telah dibahas atau berdasarkan topik/kata kunci yang diminta pengguna (mendukung YouTube, XVideos, dan platform video lain). Tool ini mengembalikan daftar video nyata terverifikasi lengkap dengan URL asli yang langsung dapat diputar di percakapan (In-Chat Player). Panggil tool ini KAPAN SAJA pengguna meminta rekomendasi video, video lanjutan, video serupa, atau video terkait.',
+        parameters: {
+          type: 'object',
+          properties: {
+            video_url: {
+              type: 'string',
+              description: 'Tautan URL video sebelumnya yang ingin dicari rekomendasi atau lanjutannya (contoh: "https://youtu.be/c50HtBe632Y" atau tautan video di obrolan sebelumnya). Kosongkan jika mencari video baru berdasarkan topik query.'
+            },
+            query: {
+              type: 'string',
+              description: 'Topik atau kata kunci spesifik video yang ingin dicari atau direkomendasikan (contoh: "lanjutan kuliah boltzmann machines", "tutorial deep learning part 2", atau nama topik yang dibahas).'
+            },
+            limit: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 10,
+              default: 5,
+              description: 'Jumlah video yang ingin direkomendasikan (minimal 1, maksimal 10, default 5).'
+            },
+            platform: {
+              type: 'string',
+              enum: ['auto', 'youtube', 'xvideos'],
+              default: 'auto',
+              description: 'Platform video target. Gunakan "auto" untuk otomatis mengikuti platform dari tautan video sebelumnya.'
+            }
+          }
+        }
+      }
     }
   ];
 
-  // Tool video YouTube selalu aktif — tidak bergantung pada toggle Mode Pencarian Web,
-  // sehingga SEMUA model (native tool calling maupun format teks) tetap bisa memakainya.
-// Tool utility lokal (Memori SQLite, Eksekusi Python & Rangkum WhatsApp dengan Consent): diizinkan SELALU
+  // Tool utility lokal (Memori SQLite, Eksekusi Python, Rangkum WhatsApp Consent & Rekomendasi Video): diizinkan SELALU tanpa perlu menu UI
   const LOCAL_UTILITY_TOOL_NAMES = [
     'save_memory', 'simpan_memori', 'store_memory',
     'search_memory', 'cari_memori', 'query_memory',
     'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python',
-    'summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary'
+    'summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary',
+    'find_related_videos', 'search_related_videos', 'recommend_related_videos', 'recommend_videos', 'cari_video_terkait', 'rekomendasi_video', 'related_videos'
   ];
 
   // Daftar nama tool lokal yang dikenal sistem (native call maupun parse teks)
@@ -24340,7 +24403,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     'save_memory', 'simpan_memori', 'store_memory',
     'search_memory', 'cari_memori', 'query_memory',
     'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python',
-    'summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary'
+    'summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary',
+    'find_related_videos', 'search_related_videos', 'recommend_related_videos', 'recommend_videos', 'cari_video_terkait', 'rekomendasi_video', 'related_videos'
   ];
 
   function normalizeToolName(name) {
@@ -24350,6 +24414,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (['search_memory', 'cari_memori', 'query_memory'].includes(n)) return 'search_memory';
     if (['execute_python_code', 'execute_code', 'run_python', 'run_code', 'python_code', 'python'].includes(n)) return 'execute_python_code';
     if (['summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary'].includes(n)) return 'summarize_whatsapp_chat';
+    if (['find_related_videos', 'search_related_videos', 'recommend_related_videos', 'recommend_videos', 'cari_video_terkait', 'rekomendasi_video', 'related_videos'].includes(n)) return 'find_related_videos';
     return n;
   }
 
@@ -24404,6 +24469,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const target = (raw && typeof raw === 'object') ? (raw.target_number_or_name || raw.target || raw.contact || raw.number || raw.phone || raw.jid || raw.query || '') : String(raw || '');
       const focus = (raw && typeof raw === 'object') ? (raw.focus_topic || raw.focus || raw.topic || '') : '';
       return `wa_sum:${String(target).trim().toLowerCase()}:${String(focus).trim().toLowerCase().slice(0, 40)}`;
+    }
+    if (toolName === 'find_related_videos') {
+      const u = (raw && typeof raw === 'object') ? (raw.video_url || raw.url || raw.link || '') : '';
+      const q = (raw && typeof raw === 'object') ? (raw.query || raw.q || raw.topic || '') : String(raw || '');
+      return `rel_vid:${String(u).trim().toLowerCase()}:${String(q).trim().toLowerCase().slice(0, 40)}`;
     }
     let url = '';
     if (raw && typeof raw === 'object') url = raw.url || raw.target || raw.link || raw.href || raw.targetUrl || raw.tautan || raw.alamat || '';
@@ -24836,6 +24906,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           // If string is raw text (not JSON), use it directly
           if (toolName === 'browse_web_page' || toolName === 'extract_web') {
             args = { url: trimmed };
+          } else if (toolName === 'find_related_videos') {
+            args = /^https?:\/\//i.test(trimmed) ? { video_url: trimmed } : { query: trimmed };
           } else if (toolName === 'execute_python_code') {
             args = { code: trimmed };
           } else if (toolName === 'save_memory') {
@@ -24882,6 +24954,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       } else if (toolName === 'execute_python_code') {
         canonicalTool = 'execute_python_code';
         canonicalArg = String(args.code || args.script || args.python || (typeof args === 'string' ? args : '')).trim();
+      } else if (toolName === 'find_related_videos') {
+        canonicalTool = 'find_related_videos';
+        const u = String(args.video_url || args.url || args.link || '').trim().toLowerCase();
+        const q = String(args.query || args.q || args.topic || '').trim().toLowerCase();
+        const lim = Math.max(1, Math.min(10, parseInt(args.limit || args.max_results || 5, 10) || 5));
+        canonicalArg = `${u}:${q}:${lim}`;
       } else {
         canonicalArg = JSON.stringify(args);
       }
@@ -25351,6 +25429,85 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         };
       }
 
+      if (toolName === 'find_related_videos') {
+        let videoUrl = String(args.video_url || args.url || args.link || args.target || '').trim();
+        let query = String(args.query || args.q || args.search || args.topic || args.keyword || (typeof args === 'string' ? args : '')).trim();
+        const limit = Math.max(1, Math.min(10, parseInt(args.limit || args.max_results || 5, 10) || 5));
+        const platform = String(args.platform || 'auto').trim().toLowerCase();
+
+        // Jika videoUrl tidak diberikan secara eksplisit, cari tautan video terakhir di riwayat percakapan session
+        if (!videoUrl && session && Array.isArray(session.messages)) {
+          for (let i = session.messages.length - 1; i >= 0; i--) {
+            const msg = session.messages[i];
+            const content = msg ? (msg.content || '') : '';
+            const matches = content ? content.match(/https?:\/\/[^\s<>"'`]+/gi) : null;
+            if (matches) {
+              const foundVideo = matches.find(u => isAnyVideoUrlClient(u));
+              if (foundVideo) {
+                videoUrl = foundVideo;
+                break;
+              }
+            }
+          }
+        }
+
+        if (!videoUrl && !query) {
+          query = promptContext || '';
+        }
+
+        let searchRes = null;
+        try {
+          const res = await fetch('/api/tools/related-videos', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ video_url: videoUrl, query, limit, platform }),
+            signal: makeToolSignal(10000)
+          });
+          if (res.ok) {
+            searchRes = await res.json();
+          }
+        } catch (_) {}
+
+        if (searchRes && searchRes.success && Array.isArray(searchRes.videos) && searchRes.videos.length > 0) {
+          const vids = searchRes.videos.slice(0, limit);
+          const lines = vids.map((v, idx) => {
+            const dur = v.duration ? ` (${v.duration})` : '';
+            const ch = v.channel ? ` oleh ${v.channel}` : '';
+            const views = v.views ? ` - ${v.views}` : '';
+            return `[${idx + 1}] "${v.title}"${dur}${ch}${views}\n    Tautan Video: ${v.url}`;
+          });
+
+          const srcRef = searchRes.sourceVideoTitle
+            ? ` berdasarkan video sebelumnya ("${searchRes.sourceVideoTitle}")`
+            : (videoUrl ? ` berdasarkan tautan video (${videoUrl})` : '');
+
+          const formattedText = `[HASIL PENCARIAN & REKOMENDASI VIDEO TERKAIT${srcRef.toUpperCase()}]:\n` + lines.join('\n\n') +
+            `\n\n[INSTRUKSI ASISTEN]: Berikan rekomendasi video di atas kepada pengguna secara informatif dan sertakan tautan URL lengkapnya. Sistem antarmuka chat Zoz Router akan secara otomatis merender kartu pemutar video interaktif dengan tombol "▶ Putar di Chat" untuk setiap tautan video di atas.`;
+
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+            BioEndocrine.registerToolSuccess({
+              toolName: 'find_related_videos',
+              count: vids.length,
+              details: `${vids.length} rekomendasi video terkait ditemukan`
+            });
+          }
+
+          return cacheAndReturn({
+            text: formattedText,
+            videos: vids,
+            sources: vids.map(v => ({ title: v.title, url: v.url, domain: v.platform || 'video' })),
+            success: true
+          });
+        }
+
+        return cacheAndReturn({
+          text: `[HASIL PENCARIAN VIDEO TERKAIT]: Tidak ditemukan rekomendasi video tambahan untuk topik/tautan tersebut saat ini.`,
+          videos: [],
+          sources: [],
+          success: false
+        });
+      }
+
       const unknownMsg = `Error: Tool "${toolName}" tidak dikenal.`;
       if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
         BioEndocrine.registerToolIssue({ toolName, error: unknownMsg, status: 404, args: rawArgs });
@@ -25633,7 +25790,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // 6. Function call with JSON argument: search_web({"query": "..."}) or browse_web_page({"url": "..."})
-    const funcJsonRegex = /(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code|run_python|python|summarize_whatsapp_chat|read_whatsapp_chat|rangkum_whatsapp|baca_whatsapp|whatsapp_summary)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
+    const funcJsonRegex = /(search_web|web_search|search|browse_web_page|browse_web|browse_page|extract_web|read_url|scrape_url|save_memory|simpan_memori|search_memory|cari_memori|execute_python_code|execute_code|run_code|python_code|run_python|python|summarize_whatsapp_chat|read_whatsapp_chat|rangkum_whatsapp|baca_whatsapp|whatsapp_summary|find_related_videos|search_related_videos|recommend_related_videos|recommend_videos|cari_video_terkait|rekomendasi_video)\s*\(\s*(\{[\s\S]*?\})\s*\)/gi;
     let fjm;
     while ((fjm = funcJsonRegex.exec(textWithoutCode)) !== null) {
       const name = fjm[1];
@@ -25687,8 +25844,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // 7b. Single-argument function call syntax: search_web("query") or browse_web_page("url")
-    // Jika teks sangat panjang (> 300 kata), batasi search_web di awal teks (< 220 karakter), namun izinkan tool spesifik lain (browse_web_page, execute_python_code, save_memory, search_memory)
-    const funcRegex = new RegExp(`(${toolPattern})\\s*\\(\\s*(?:(?:query|url|q|link|target|code|topic|content|isi|kata_kunci|topik|script|cari|tautan|konten)\\s*[:=]\\s*)?(["'\`])([\\s\\S]*?)\\2\\s*\\)`, 'gi');
+    // Jika teks sangat panjang (> 300 kata), batasi search_web di awal teks (< 220 karakter), namun izinkan tool spesifik lain (browse_web_page, execute_python_code, save_memory, search_memory, find_related_videos)
+    const funcRegex = new RegExp(`(${toolPattern})\\s*\\(\\s*(?:(?:query|url|video_url|q|link|target|code|topic|content|isi|kata_kunci|topik|script|cari|tautan|konten)\\s*[:=]\\s*)?(["'\`])([\\s\\S]*?)\\2\\s*\\)`, 'gi');
     let fm;
     while ((fm = funcRegex.exec(textWithoutCode)) !== null) {
       const name = fm[1];
@@ -25699,16 +25856,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         const isUrlTool = ['browse_web_page', 'extract_web'].includes(normName);
         const isCodeTool = ['execute_python_code', 'run_python', 'python'].includes(normName);
         const isSaveMem = normName === 'save_memory';
+        const isVideoTool = normName === 'find_related_videos';
         if (isUrlTool) addCall(name, { url: val }, fm[0]);
         else if (isCodeTool) addCall(name, { code: val }, fm[0]);
         else if (isSaveMem) addCall(name, { topic: 'catatan', content: val }, fm[0]);
+        else if (isVideoTool) addCall(name, /^https?:\/\//i.test(val) ? { video_url: val } : { query: val }, fm[0]);
         else addCall(name, { query: val }, fm[0]);
       }
     }
 
     // 8. Conversational triggers: "We will call search_web for <query>"
     // Hanya picu jika berada di awal generasi (bukan teks penutup di akhir pesan panjang)
-    const convRegex = new RegExp(`(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari|menjelajahi|ekstrak)\\s+(${toolPattern})(?:\\s+(?:for|with|tentang|query|url|code|topic|isi|kata_kunci|topik|cari|tautan|:))?\\s*(["'\`])([^\\n]+?)\\2`, 'gi');
+    const convRegex = new RegExp(`(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari|menjelajahi|ekstrak|rekomendasi video)\\s+(${toolPattern})(?:\\s+(?:for|with|tentang|query|url|code|topic|isi|kata_kunci|topik|cari|tautan|:))?\\s*(["'\`])([^\\n]+?)\\2`, 'gi');
     let cvm;
     while ((cvm = convRegex.exec(textWithoutCode)) !== null) {
       const name = cvm[1];
@@ -25719,9 +25878,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         const isUrlTool = ['browse_web_page', 'extract_web'].includes(normName);
         const isCodeTool = normName === 'execute_python_code';
         const isSaveMem = normName === 'save_memory';
+        const isVideoTool = normName === 'find_related_videos';
         if (isUrlTool) addCall(name, { url: val }, cvm[0]);
         else if (isCodeTool) addCall(name, { code: val }, cvm[0]);
         else if (isSaveMem) addCall(name, { topic: 'catatan', content: val }, cvm[0]);
+        else if (isVideoTool) addCall(name, /^https?:\/\//i.test(val) ? { video_url: val } : { query: val }, cvm[0]);
         else addCall(name, { query: val }, cvm[0]);
       }
     }
@@ -25730,7 +25891,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   }
 
   function getAutonomousSystemDirective() {
-    return `\n[TOOL WHATSAPP PRIVACY GATE TERSEDIA]: Jika pengguna meminta untuk membaca, memeriksa, atau merangkum chat/obrolan WhatsApp (WA), panggil tool \`summarize_whatsapp_chat({"target_number_or_name": "<nama/nomor jika disebut>", "focus_topic": "<fokus rangkuman>"})\`. Sistem akan menampilkan Pop-up Persetujuan (Consent Gate) kepada pengguna untuk memilih nomor mana saja yang diizinkan sebelum data chat dibaca.`;
+    return `\n[TOOL WHATSAPP PRIVACY GATE TERSEDIA]: Jika pengguna meminta untuk membaca, memeriksa, atau merangkum chat/obrolan WhatsApp (WA), panggil tool \`summarize_whatsapp_chat({"target_number_or_name": "<nama/nomor jika disebut>", "focus_topic": "<fokus rangkuman>"})\`. Sistem akan menampilkan Pop-up Persetujuan (Consent Gate) kepada pengguna untuk memilih nomor mana saja yang diizinkan sebelum data chat dibaca.
+[TOOL PENCARIAN & REKOMENDASI VIDEO TERSEDIA]: Jika pengguna meminta untuk mencari, merekomendasikan, atau menemukan video lain yang terkait/mirip dengan video yang baru saja dibahas atau berdasarkan topik tertentu, Anda DAPAT dan WAJIB memanggil tool \`find_related_videos({"video_url": "<URL video sebelumnya jika ada>", "query": "<kata kunci/topik video yang dicari>", "limit": 5})\`. Tool ini akan mengembalikan daftar video nyata terverifikasi (YouTube/XVideos/dll.) lengkap dengan tautan asli yang langsung dapat ditonton di percakapan pengguna.`;
   }
   const AUTONOMOUS_SYSTEM_DIRECTIVE = '';
 
@@ -25743,6 +25905,15 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           <span class="typing-cursor"></span>
           <i class="fa-brands fa-whatsapp fa-spin"></i>
           <span>Menunggu persetujuan nomor WhatsApp & menyiapkan rangkuman AI...</span>
+        </div>
+      `;
+    }
+    if (norm === 'find_related_videos') {
+      return `
+        <div class="autonomous-search-status" style="border-color: rgba(0, 240, 255, 0.45); background: rgba(0, 50, 80, 0.25); color: #00f0ff;">
+          <span class="typing-cursor"></span>
+          <i class="fa-solid fa-film fa-spin"></i>
+          <span>Mencari rekomendasi video terkait...</span>
         </div>
       `;
     }
