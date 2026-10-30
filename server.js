@@ -2079,6 +2079,18 @@ function fetchYouTubeSearchResults(query, limit = 5) {
   });
 }
 
+function decodeHtmlEntities(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function fetchXVideosSearchResults(query, limit = 5) {
   return new Promise((resolve) => {
     const cleanQ = String(query || '').trim();
@@ -2086,9 +2098,11 @@ function fetchXVideosSearchResults(query, limit = 5) {
     const targetUrl = 'https://www.xvideos.com/?k=' + encodeURIComponent(cleanQ);
     const req = https.get(targetUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
       },
-      timeout: 3500
+      timeout: 5000
     }, (res) => {
       if (res.statusCode !== 200) {
         res.resume();
@@ -2097,22 +2111,72 @@ function fetchXVideosSearchResults(query, limit = 5) {
       let html = '';
       res.on('data', chunk => {
         html += chunk;
-        if (html.length > 600000) { res.destroy(); }
+        if (html.length > 500000) { res.destroy(); }
       });
       res.on('end', () => {
         const results = [];
-        const re = /<div id="video_([0-9a-zA-Z]+)"[\s\S]*?<a href="([^"]+)" title="([^"]+)"/gi;
+        const videoBlockRegex = /<div id="video_([0-9a-zA-Z]+)"[\s\S]*?<p class="title">\s*<a href="([^"]+)"\s+title="([^"]+)"[\s\S]*?<\/div>/gi;
         let m;
-        while ((m = re.exec(html)) !== null && results.length < limit) {
+        while ((m = videoBlockRegex.exec(html)) !== null && results.length < limit) {
+          const block = m[0];
+          const durMatch = block.match(/<span class="duration">([^<]+)<\/span>/i);
+          const chMatch = block.match(/<span class="name">([^<]+)<\/span>/i);
+          const viewsMatch = block.match(/([0-9.]+[kMGT]?)\s*<span class="sprfluous">\s*Views/i);
           results.push({
             platform: 'XVIDEOS',
             videoId: m[1],
             url: `https://www.xvideos.com${m[2]}`,
-            title: m[3],
-            channel: 'XVIDEOS'
+            title: decodeHtmlEntities(m[3]),
+            channel: chMatch ? decodeHtmlEntities(chMatch[1]) : 'XVIDEOS',
+            duration: durMatch ? durMatch[1].trim() : '',
+            views: viewsMatch ? `${viewsMatch[1]} views` : ''
           });
         }
         resolve(results);
+      });
+      res.on('error', () => resolve([]));
+    });
+    req.on('timeout', () => { req.destroy(); resolve([]); });
+    req.on('error', () => resolve([]));
+  });
+}
+
+function fetchArchiveOrgSearchResults(query, limit = 5) {
+  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 5, 1), 10);
+  const cleanQ = String(query || '').trim();
+  if (!cleanQ) return Promise.resolve([]);
+  return new Promise((resolve) => {
+    const targetUrl = 'https://archive.org/advancedsearch.php?q=' + encodeURIComponent(cleanQ) +
+      '+AND+mediatype:movies&fl[]=identifier,title,description,duration&rows=' + safeLimit + '&output=json';
+    const req = https.get(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+      },
+      timeout: 5000
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        return resolve([]);
+      }
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          const docs = json?.response?.docs || [];
+          const results = docs.map(doc => ({
+            platform: 'Archive.org',
+            videoId: doc.identifier,
+            url: `https://archive.org/details/${doc.identifier}`,
+            title: decodeHtmlEntities(doc.title || doc.identifier),
+            channel: 'Internet Archive',
+            duration: doc.duration || '',
+            views: ''
+          }));
+          resolve(results);
+        } catch (_) {
+          resolve([]);
+        }
       });
       res.on('error', () => resolve([]));
     });
@@ -2152,7 +2216,7 @@ function fetchDailymotionSearchResults(query, limit = 5) {
             return {
               platform: 'Dailymotion',
               url: item.url || `https://www.dailymotion.com/video/${item.id}`,
-              title: item.title || 'Video Dailymotion',
+              title: decodeHtmlEntities(item.title || 'Video Dailymotion'),
               channel: item.channel || 'Dailymotion',
               duration: durationStr,
               views: item.views_total ? `${item.views_total} views` : '',
@@ -2185,6 +2249,8 @@ async function searchRelatedVideos({ videoUrl = '', query = '', platform = 'auto
     detectedPlatform = 'xvideos';
   } else if (/xnxx\.com/i.test(cleanUrl) || platform === 'xnxx') {
     detectedPlatform = 'xvideos';
+  } else if (/archive\.org/i.test(cleanUrl) || platform === 'archive' || platform === 'archive.org') {
+    detectedPlatform = 'archive';
   } else if (/vimeo\.com/i.test(cleanUrl) || platform === 'vimeo') {
     detectedPlatform = 'vimeo';
   } else if (/tiktok\.com/i.test(cleanUrl) || platform === 'tiktok') {
@@ -2223,6 +2289,11 @@ async function searchRelatedVideos({ videoUrl = '', query = '', platform = 'auto
     };
   }
 
+  // Deteksi intensi konten video dewasa agar pencarian video dewasa tepat sasaran ke mesin video dewasa (XVideos)
+  const isAdultIntent = /porn|sex|hentai|creampie|squirt|cunt|pussy|tits|blowjob|anal|milf|jav|boobs|nsfw|xxx|slut/i.test(cleanQuery) ||
+    /xvideos|xnxx|pornhub|redtube|youporn/i.test(cleanUrl) ||
+    detectedPlatform === 'xvideos' || detectedPlatform === 'xnxx';
+
   // Bersihkan dan batasi kueri agar efektif untuk mesin pencari video (maksimal 6 kata kunci penting)
   let searchTerms = cleanTitleForQuery(cleanQuery);
   const words = searchTerms.split(/\s+/).filter(w => w.length > 1);
@@ -2231,12 +2302,21 @@ async function searchRelatedVideos({ videoUrl = '', query = '', platform = 'auto
   }
   if (!searchTerms) searchTerms = cleanQuery || 'video';
 
-  const cacheKey = `${detectedPlatform}:${searchTerms.toLowerCase()}:${safeLimit}`;
+  const cacheKey = `${isAdultIntent ? 'adult' : detectedPlatform}:${searchTerms.toLowerCase()}:${safeLimit}`;
   const hit = RELATED_VIDEOS_CACHE.get(cacheKey);
   if (hit && hit.exp > Date.now()) return hit.data;
 
   let videos = [];
-  if (detectedPlatform === 'youtube') {
+  if (isAdultIntent || detectedPlatform === 'xvideos' || detectedPlatform === 'xnxx') {
+    videos = await fetchXVideosSearchResults(searchTerms, safeLimit);
+    if (videos.length === 0) {
+      // Coba variasi kata kunci yang lebih ringkas jika kueri panjang tidak menemukan video
+      const shortTerms = words.slice(0, 3).join(' ');
+      if (shortTerms && shortTerms !== searchTerms) {
+        videos = await fetchXVideosSearchResults(shortTerms, safeLimit);
+      }
+    }
+  } else if (detectedPlatform === 'youtube') {
     videos = await fetchYouTubeSearchResults(searchTerms, safeLimit);
     if (videos.length < safeLimit) {
       const remaining = safeLimit - videos.length;
@@ -2250,32 +2330,26 @@ async function searchRelatedVideos({ videoUrl = '', query = '', platform = 'auto
       const extra = await fetchYouTubeSearchResults(searchTerms, remaining);
       videos = videos.concat(extra);
     }
-  } else if (detectedPlatform === 'xvideos') {
-    videos = await fetchXVideosSearchResults(searchTerms, safeLimit);
-    if (videos.length === 0) {
-      // Fallback ke Dailymotion dan YouTube jika XVideos diblokir ISP lokal atau kosong
-      const [dmFallback, ytFallback] = await Promise.all([
-        fetchDailymotionSearchResults(searchTerms, safeLimit).catch(() => []),
-        fetchYouTubeSearchResults(searchTerms, safeLimit).catch(() => [])
-      ]);
-      videos = dmFallback.length > 0 ? dmFallback : ytFallback;
-    }
+  } else if (detectedPlatform === 'archive' || detectedPlatform === 'archive.org') {
+    videos = await fetchArchiveOrgSearchResults(searchTerms, safeLimit);
   } else {
-    // Multi-platform global video search across YouTube, Dailymotion, dan web video
-    const [ytRes, dmRes] = await Promise.all([
+    // Multi-platform global video search across YouTube, Dailymotion, Internet Archive (seluruh video di bumi)
+    const [ytRes, dmRes, archRes] = await Promise.all([
       fetchYouTubeSearchResults(searchTerms, safeLimit).catch(() => []),
-      fetchDailymotionSearchResults(searchTerms, safeLimit).catch(() => [])
+      fetchDailymotionSearchResults(searchTerms, safeLimit).catch(() => []),
+      fetchArchiveOrgSearchResults(searchTerms, safeLimit).catch(() => [])
     ]);
     const merged = [];
-    const maxL = Math.max(ytRes.length, dmRes.length);
+    const maxL = Math.max(ytRes.length, dmRes.length, archRes.length);
     for (let i = 0; i < maxL; i++) {
       if (ytRes[i] && merged.length < safeLimit) merged.push(ytRes[i]);
       if (dmRes[i] && merged.length < safeLimit) merged.push(dmRes[i]);
+      if (archRes[i] && merged.length < safeLimit) merged.push(archRes[i]);
     }
     videos = merged;
   }
 
-  if (videos.length === 0 && detectedPlatform !== 'youtube') {
+  if (videos.length === 0 && !isAdultIntent && detectedPlatform !== 'youtube') {
     videos = await fetchYouTubeSearchResults(searchTerms, safeLimit);
   }
 

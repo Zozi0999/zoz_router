@@ -2280,7 +2280,7 @@ export default {
       }
     }
 
-    // Related & Recommended Videos Tool API (Cloudflare Worker)
+    // Related & Recommended Videos Tool API (Cloudflare Worker - All Videos on Earth)
     if ((url.pathname === '/api/tools/related-videos' || url.pathname === '/api/tools/search-videos') && (request.method === 'GET' || request.method === 'POST')) {
       try {
         let videoUrl = '';
@@ -2312,58 +2312,120 @@ export default {
         }
         if (!effectiveQuery) effectiveQuery = 'popular trending videos';
 
+        const safeLimit = Math.min(Math.max(limit, 1), 10);
         let mapped = [];
-        const isDailymotion = /dailymotion\.com|dai\.ly/i.test(videoUrl) || platform === 'dailymotion';
 
-        if (isDailymotion) {
+        const isAdult = /porn|sex|hentai|creampie|squirt|cunt|pussy|tits|blowjob|anal|milf|jav|boobs|nsfw|xxx|slut/i.test(effectiveQuery) ||
+          /xvideos|xnxx|pornhub|redtube|youporn/i.test(videoUrl) ||
+          platform === 'xvideos' || platform === 'xnxx';
+
+        if (isAdult || platform === 'xvideos' || platform === 'xnxx') {
           try {
-            const dmRes = await fetch('https://api.dailymotion.com/videos?search=' + encodeURIComponent(effectiveQuery) + '&fields=id,title,channel,duration,views_total,thumbnail_url,url&limit=' + limit, { signal: AbortSignal.timeout(6000) });
-            if (dmRes.ok) {
-              const dmJson = await dmRes.json();
-              if (Array.isArray(dmJson.list)) {
-                mapped = dmJson.list.map(item => {
-                  const dur = parseInt(item.duration, 10);
-                  const m = Math.floor(dur / 60);
-                  const s = dur % 60;
-                  return {
-                    platform: 'Dailymotion',
-                    url: item.url || `https://www.dailymotion.com/video/${item.id}`,
-                    title: item.title || 'Video Dailymotion',
-                    channel: item.channel || 'Dailymotion',
-                    duration: dur > 0 ? `${m}:${String(s).padStart(2, '0')}` : '',
-                    views: item.views_total ? `${item.views_total} views` : '',
-                    thumbnail: item.thumbnail_url || ''
-                  };
+            const xvRes = await fetch('https://www.xvideos.com/?k=' + encodeURIComponent(effectiveQuery), {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+              },
+              signal: AbortSignal.timeout(5000)
+            });
+            if (xvRes.ok) {
+              const html = await xvRes.text();
+              const videoBlockRegex = /<div id="video_([0-9a-zA-Z]+)"[\s\S]*?<p class="title">\s*<a href="([^"]+)"\s+title="([^"]+)"[\s\S]*?<\/div>/gi;
+              let m;
+              while ((m = videoBlockRegex.exec(html)) !== null && mapped.length < safeLimit) {
+                const block = m[0];
+                const durMatch = block.match(/<span class="duration">([^<]+)<\/span>/i);
+                const chMatch = block.match(/<span class="name">([^<]+)<\/span>/i);
+                const viewsMatch = block.match(/([0-9.]+[kMGT]?)\s*<span class="sprfluous">\s*Views/i);
+                mapped.push({
+                  platform: 'XVIDEOS',
+                  videoId: m[1],
+                  url: `https://www.xvideos.com${m[2]}`,
+                  title: m[3].replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#039;/g, "'").trim(),
+                  channel: chMatch ? chMatch[1].trim() : 'XVIDEOS',
+                  duration: durMatch ? durMatch[1].trim() : '',
+                  views: viewsMatch ? `${viewsMatch[1]} views` : ''
                 });
               }
             }
           } catch (_) {}
-        }
+        } else {
+          // Multi-platform global search across YouTube, Dailymotion & Archive.org
+          const isDailymotion = /dailymotion\.com|dai\.ly/i.test(videoUrl) || platform === 'dailymotion';
+          const isArchive = /archive\.org/i.test(videoUrl) || platform === 'archive';
+          const isYouTube = /youtube\.com|youtu\.be/i.test(videoUrl) || platform === 'youtube';
 
-        if (mapped.length < limit) {
-          try {
-            const data = await ytSearchVideos(effectiveQuery, limit - mapped.length);
-            const ytMapped = (data && Array.isArray(data.results)) ? data.results.map(v => ({
-              platform: 'YouTube',
-              videoId: v.videoId,
-              url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`,
-              title: v.title,
-              channel: v.channel,
-              duration: v.durationText || '',
-              views: v.viewText || '',
-              thumbnail: v.thumbnail || ''
-            })) : [];
-            mapped = mapped.concat(ytMapped);
-          } catch (_) {}
+          if (isDailymotion || platform === 'all' || platform === 'auto') {
+            try {
+              const dmRes = await fetch('https://api.dailymotion.com/videos?search=' + encodeURIComponent(effectiveQuery) + '&fields=id,title,channel,duration,views_total,thumbnail_url,url&limit=' + safeLimit, { signal: AbortSignal.timeout(5000) });
+              if (dmRes.ok) {
+                const dmJson = await dmRes.json();
+                if (Array.isArray(dmJson.list)) {
+                  dmJson.list.forEach(item => {
+                    const dur = parseInt(item.duration, 10);
+                    const m = Math.floor(dur / 60);
+                    const s = dur % 60;
+                    mapped.push({
+                      platform: 'Dailymotion',
+                      url: item.url || `https://www.dailymotion.com/video/${item.id}`,
+                      title: item.title || 'Video Dailymotion',
+                      channel: item.channel || 'Dailymotion',
+                      duration: dur > 0 ? `${m}:${String(s).padStart(2, '0')}` : '',
+                      views: item.views_total ? `${item.views_total} views` : '',
+                      thumbnail: item.thumbnail_url || ''
+                    });
+                  });
+                }
+              }
+            } catch (_) {}
+          }
+
+          if (mapped.length < safeLimit && (isYouTube || platform === 'all' || platform === 'auto')) {
+            try {
+              const data = await ytSearchVideos(effectiveQuery, safeLimit - mapped.length);
+              const ytMapped = (data && Array.isArray(data.results)) ? data.results.map(v => ({
+                platform: 'YouTube',
+                videoId: v.videoId,
+                url: v.url || `https://www.youtube.com/watch?v=${v.videoId}`,
+                title: v.title,
+                channel: v.channel,
+                duration: v.durationText || '',
+                views: v.viewText || '',
+                thumbnail: v.thumbnail || ''
+              })) : [];
+              mapped = mapped.concat(ytMapped);
+            } catch (_) {}
+          }
+
+          if (mapped.length < safeLimit && (isArchive || platform === 'all' || platform === 'auto')) {
+            try {
+              const archRes = await fetch('https://archive.org/advancedsearch.php?q=' + encodeURIComponent(effectiveQuery) + '+AND+mediatype:movies&fl[]=identifier,title,description,duration&rows=' + (safeLimit - mapped.length) + '&output=json', { signal: AbortSignal.timeout(4000) });
+              if (archRes.ok) {
+                const archJson = await archRes.json();
+                const docs = archJson?.response?.docs || [];
+                docs.forEach(doc => {
+                  mapped.push({
+                    platform: 'Archive.org',
+                    videoId: doc.identifier,
+                    url: `https://archive.org/details/${doc.identifier}`,
+                    title: doc.title || doc.identifier,
+                    channel: 'Internet Archive',
+                    duration: doc.duration || '',
+                    views: ''
+                  });
+                });
+              }
+            } catch (_) {}
+          }
         }
 
         return new Response(JSON.stringify({
           success: mapped.length > 0,
-          platform: isDailymotion ? 'Dailymotion' : 'YouTube',
+          platform: isAdult ? 'XVIDEOS' : (mapped[0]?.platform || 'multi-platform'),
           query: effectiveQuery,
           sourceVideoUrl: videoUrl || null,
           count: mapped.length,
-          videos: mapped
+          videos: mapped.slice(0, safeLimit)
         }), {
           status: 200,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }

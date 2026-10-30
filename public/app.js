@@ -5660,6 +5660,55 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
   }
 
   function synthesizeAutonomousWebSummary(rawToolResponsesText, sources) {
+    const rawText = String(rawToolResponsesText || '');
+
+    // Cek apakah data ini adalah respon rekomendasi video dari find_related_videos (seluruh video di bumi)
+    const isVideoRecommendation = rawText.includes('[HASIL PENCARIAN & REKOMENDASI VIDEO TERKAIT') ||
+      rawText.includes('Tautan Video:') ||
+      (Array.isArray(sources) && sources.some(s => s && (s.domain === 'YouTube' || s.domain === 'Dailymotion' || s.domain === 'XVIDEOS' || s.domain === 'Archive.org' || isAnyVideoUrlClient(s.url))));
+
+    if (isVideoRecommendation) {
+      const videoItems = [];
+      const segs = rawText.split(/(?=\[\d+\]\s*")/g);
+      for (const seg of segs) {
+        const tMatch = seg.match(/\[\d+\]\s*"([^"]+)"/);
+        const uMatch = seg.match(/Tautan(?:\s*Video)?:\s*(https?:\/\/[^\s\n]+)/i);
+        const durMatch = seg.match(/\(([^)]+)\)/);
+        const chMatch = seg.match(/oleh\s+([^\n\-]+)/i);
+        if (tMatch && uMatch) {
+          videoItems.push({
+            title: tMatch[1].trim(),
+            url: uMatch[1].trim(),
+            duration: durMatch ? durMatch[1].trim() : '',
+            channel: chMatch ? chMatch[1].trim() : ''
+          });
+        }
+      }
+      if (videoItems.length === 0 && Array.isArray(sources)) {
+        for (const s of sources) {
+          if (s && s.url && (isAnyVideoUrlClient(s.url) || s.domain === 'YouTube' || s.domain === 'Dailymotion' || s.domain === 'XVIDEOS' || s.domain === 'Archive.org')) {
+            videoItems.push({
+              title: s.title || 'Video Rekomendasi',
+              url: s.url,
+              duration: '',
+              channel: s.domain || ''
+            });
+          }
+        }
+      }
+      if (videoItems.length > 0) {
+        let out = 'Berikut daftar rekomendasi video terkait yang berhasil ditemukan:\n\n';
+        videoItems.forEach((v, idx) => {
+          const dur = v.duration ? ` *(${v.duration})*` : '';
+          const ch = v.channel ? ` — ${v.channel}` : '';
+          out += `### ${idx + 1}. [${v.title}](${v.url})${dur}${ch}\n${v.url}\n\n`;
+        });
+        out += 'Anda dapat langsung memutar dan menonton video-video di atas langsung di dalam percakapan menggunakan pemutar interaktif.';
+        return out;
+      }
+      return 'Maaf, belum ditemukan rekomendasi video yang sesuai untuk kata kunci atau tautan tersebut saat ini. Silakan coba kueri atau judul video lainnya.';
+    }
+
     const validSources = Array.isArray(sources) ? sources.filter(s => s && (s.title || s.snippet || s.url || s.content)) : [];
 
     const articles = [];
@@ -20824,7 +20873,10 @@ ${organicBlock}
       embed: (m) => `https://www.xnxx.com/embedframe/${m[1] || m[2]}` },
     { id: 'pornhub', label: 'Pornhub', icon: 'fa-solid fa-play',
       re: /https?:\/\/(?:www\.|m\.)?pornhub\.com\/view_video\.php\?(?:.*&)?viewkey=([a-zA-Z0-9]+)/i,
-      embed: (m) => `https://www.pornhub.com/embed/${m[1]}` }
+      embed: (m) => `https://www.pornhub.com/embed/${m[1]}` },
+    { id: 'archive', label: 'Archive.org', icon: 'fa-solid fa-landmark',
+      re: /https?:\/\/(?:www\.)?archive\.org\/(?:details|embed)\/([a-zA-Z0-9_\-]+)/i,
+      embed: (m, ap) => `https://archive.org/embed/${m[1]}?autoplay=${ap ? 1 : 0}` }
   ];
 
   // Helper pemeriksa universal: Apakah URL merupakan tautan video (YouTube, provider resolver, ekstensi berkas video, atau platform streaming)?
@@ -20838,6 +20890,7 @@ ${organicBlock}
       if (/\.(mp4|webm|m3u8|mov|mkv|avi|flv|wmv|ogv|ts|m4v)(?:[?#]|$)/i.test(pathname + p.search)) return true;
       if (Array.isArray(VIDEO_PROVIDER_RESOLVERS) && VIDEO_PROVIDER_RESOLVERS.some(prov => prov.re.test(u))) return true;
       if (/(?:xvideos|xnxx|pornhub|vimeo|tiktok|dailymotion|twitch|streamable|bilibili|loom|rumble|odysee|redgifs)\.com/i.test(h)) return true;
+      if (/archive\.org/i.test(h) && (pathname.startsWith('/details/') || pathname.startsWith('/embed/'))) return true;
       if (/twitch\.tv|youtu\.be|dai\.ly|fb\.watch/i.test(h)) return true;
     } catch (_) {}
     return false;
@@ -27163,14 +27216,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web'].includes(normalizeToolName(c.function.name)));
         const hasExecutedPython = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'execute_python_code');
         const hasExecutedMemory = detectedAutonomousCalls.some(c => c && c.function && ['save_memory', 'search_memory'].includes(normalizeToolName(c.function.name)));
-        const isLastRound = circuitBreakerTripped || hasBrowsedWeb || (autonomousRound >= maxAutonomousRounds - 1);
+        const hasExecutedVideo = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'find_related_videos');
+        const isLastRound = circuitBreakerTripped || hasBrowsedWeb || hasExecutedVideo || (autonomousRound >= maxAutonomousRounds - 1);
         const currentDateObj = new Date();
         const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-        const roundInstruction = (isLastRound || hasExecutedSearch || hasExecutedPython || hasExecutedMemory)
+        const roundInstruction = (isLastRound || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo)
           ? `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
 WAKTU SISTEM SAAT INI: ${currentFormattedDate} (Tahun ${currentDateObj.getFullYear()}).
 
-${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan hasil eksekusi kode Python sandbox di atas untuk menjawab pertanyaan atau menyelesaikan perhitungan pengguna secara akurat, jelas, dan tuntas dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil operasi memori jangka panjang di atas untuk menjawab pengguna secara langsung, ramah, dan akurat dalam Bahasa Indonesia.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'))}
+${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : (hasExecutedVideo ? 'Gunakan daftar rekomendasi video nyata di atas untuk memberikan ulasan dan rekomendasi video kepada pengguna lengkap dengan tautan URL aslinya. Sajikan dalam format Markdown yang rapi dan informatif sehingga kartu pemutar video interaktif dapat langsung diputar oleh pengguna di dalam obrolan.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan hasil eksekusi kode Python sandbox di atas untuk menjawab pertanyaan atau menyelesaikan perhitungan pengguna secara akurat, jelas, dan tuntas dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil operasi memori jangka panjang di atas untuk menjawab pengguna secara langsung, ramah, dan akurat dalam Bahasa Indonesia.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.')))}
 
 
 PANDUAN NILAI GUNA & INTEGRITAS FAKTA:
@@ -28752,14 +28806,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web'].includes(normalizeToolName(c.function.name)));
         const hasExecutedPython = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'execute_python_code');
         const hasExecutedMemory = detectedAutonomousCalls.some(c => c && c.function && ['save_memory', 'search_memory'].includes(normalizeToolName(c.function.name)));
-        const isLastRound = circuitBreakerTripped || hasBrowsedWeb || (autonomousRound >= maxAutonomousRounds - 1);
+        const hasExecutedVideo = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'find_related_videos');
+        const isLastRound = circuitBreakerTripped || hasBrowsedWeb || hasExecutedVideo || (autonomousRound >= maxAutonomousRounds - 1);
         const currentDateObj = new Date();
         const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-        const roundInstruction = (isLastRound || hasExecutedSearch || hasExecutedPython || hasExecutedMemory)
+        const roundInstruction = (isLastRound || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo)
           ? `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
 WAKTU SISTEM SAAT INI: ${currentFormattedDate} (Tahun ${currentDateObj.getFullYear()}).
 
-${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan hasil eksekusi kode Python sandbox di atas untuk menjawab pertanyaan atau menyelesaikan perhitungan pengguna secara akurat, jelas, dan tuntas dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil operasi memori jangka panjang di atas untuk menjawab pengguna secara langsung, ramah, dan akurat dalam Bahasa Indonesia.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'))}
+${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : (hasExecutedVideo ? 'Gunakan daftar rekomendasi video nyata di atas untuk memberikan ulasan dan rekomendasi video kepada pengguna lengkap dengan tautan URL aslinya. Sajikan dalam format Markdown yang rapi dan informatif sehingga kartu pemutar video interaktif dapat langsung diputar oleh pengguna di dalam obrolan.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan hasil eksekusi kode Python sandbox di atas untuk menjawab pertanyaan atau menyelesaikan perhitungan pengguna secara akurat, jelas, dan tuntas dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil operasi memori jangka panjang di atas untuk menjawab pengguna secara langsung, ramah, dan akurat dalam Bahasa Indonesia.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.')))}
 
 
 PANDUAN NILAI GUNA & INTEGRITAS FAKTA:
