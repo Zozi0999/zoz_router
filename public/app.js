@@ -70,8 +70,7 @@
   function getUniversalApiUrl(path) {
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
     const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
-    const isCloudflarePages = Boolean(location.hostname && (location.hostname.includes('zozdocs.com') || location.hostname.endsWith('pages.dev')));
-    const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin || isCloudflarePages);
+    const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
     if (isLocal) return cleanPath;
     const tunnelBase = getActiveTunnelUrl();
     return (tunnelBase || VERCEL_BACKEND_GATEWAY) + cleanPath;
