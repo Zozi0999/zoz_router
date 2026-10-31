@@ -24004,21 +24004,24 @@ ${blocks}
       if (/\bmark\s+zuckerberg\b/i.test(text)) return 'Mark Zuckerberg';
       if (/\bjeff\s+bezos\b/i.test(text)) return 'Jeff Bezos';
 
-      // 2. Permintaan Foto / Gambar Eksplisit (Contoh: 'berikan contoh fotonya', 'fotonya', 'gambarnya')
-      const explicitPhotoMatch = text.match(/\b(?:berikan|tampilkan|sertakan|mana|lihat)?\s*(?:contoh\s+)?(?:foto|fhoto|gambar|photo|image|visual)(?:nya)?\s*(?:dari|tentang|mengenai)?\s+([a-zA-Z0-9\s\-]{3,40})/i);
+      // 2. Permintaan Foto / Gambar Eksplisit (Indonesian & English)
+      const explicitPhotoMatch = text.match(/\b(?:berikan|tampilkan|sertakan|mana|lihat|show|give|display|find)?\s*(?:contoh\s+)?(?:foto|fhoto|gambar|photo|picture|image|visual)(?:nya|s)?\s*(?:dari|tentang|mengenai|of|about)?\s+([a-zA-Z0-9\s\-]{3,40})/i);
       if (explicitPhotoMatch && explicitPhotoMatch[1]) {
-        const rawSubject = explicitPhotoMatch[1].trim().replace(/\b(?:saat|ketika|waktu|di|pada|nya|dong|ya|ini|itu|tersebut|adalah)\b.*$/i, '').trim();
-        if (rawSubject.length >= 3 && !/^(?:yang|ini|itu|tersebut|adalah)$/i.test(rawSubject)) {
+        let rawSubject = explicitPhotoMatch[1].trim()
+          .replace(/^(?:of|about|dari|tentang|mengenai)\s+/i, '')
+          .replace(/\b(?:saat|ketika|waktu|di|pada|nya|dong|ya|ini|itu|tersebut|adalah|when|in|at|is|the)\b.*$/i, '')
+          .trim();
+        if (rawSubject.length >= 3 && !/^(?:yang|ini|itu|tersebut|adalah|the|this|that)$/i.test(rawSubject)) {
           return rawSubject;
         }
       }
 
-      // 3. Pertanyaan Tokoh / Subjek: "siapa X, berikan fotonya" / "profil X"
-      const personMatch = text.match(/\b(?:siapa|profil|tokoh)\s+([a-zA-Z0-9\s\-]{3,40}?)(?:[,\.\?!]|\s+(?:dan|berikan|kasih|tampilkan|sertakan|contoh|foto|fhoto|gambar)|$)/i);
+      // 3. Pertanyaan Tokoh / Subjek: "siapa X" / "who is X" / "who was X" / "profil X" / "profile of X"
+      const personMatch = text.match(/\b(?:siapa|who\s+is|who\s+was|profil(?:e)?(?:\s+of)?|tokoh)\s+([a-zA-Z0-9\s\-]{3,40}?)(?:[,\.\?!]|\s+(?:dan|berikan|kasih|tampilkan|sertakan|contoh|foto|fhoto|gambar|photo|picture|image)|$)/i);
       if (personMatch && personMatch[1]) {
-        const rawName = personMatch[1].trim();
-        const isRoleOrGeneric = /\b(?:presiden|menteri|gubernur|bupati|walikota|raja|ratu|pangeran|putri|penemu|pencipta|pemimpin|ketua|pendiri|bapak|ibu|juara)\b/i.test(rawName);
-        if (!isRoleOrGeneric && rawName.length >= 3 && !/^(?:dia|mereka|anda|kamu|yang|ini|itu|nama)$/i.test(rawName)) {
+        let rawName = personMatch[1].trim().replace(/^(?:the|a|an|sang|si)\s+/i, '');
+        const isRoleOrGeneric = /\b(?:presiden|menteri|gubernur|bupati|walikota|raja|ratu|pangeran|putri|penemu|pencipta|pemimpin|ketua|pendiri|bapak|ibu|juara|president|minister|governor|king|queen|prince|princess|inventor|founder|leader|champion)\b/i.test(rawName);
+        if (!isRoleOrGeneric && rawName.length >= 3 && !/^(?:dia|mereka|anda|kamu|yang|ini|itu|nama|he|she|they|you|it|name)$/i.test(rawName)) {
           return rawName;
         }
       }
