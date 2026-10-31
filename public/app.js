@@ -26634,6 +26634,19 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       effectiveSystem = effectiveSystem ? `${temporal}\n\n${effectiveSystem}` : temporal;
     }
 
+    // Gerbang Integritas Konteks & Nol-Informasi Shannon:
+    // Jika turn pengguna murni berisi perintah meta tanpa subjek/pertanyaan (misal "Jawab singkat saja") dan tanpa lampiran gambar,
+    // cegah model dari kolaps prior / mengarang pertanyaan atau mengasumsikan foto fiktif.
+    const hasPriorTurns = validList.length > 1;
+    const firstUserMsg = validList.find(m => m.role === 'user');
+    const hasAnyImages = validList.some(m => Array.isArray(m.images) && m.images.length > 0);
+    const tsModule = (typeof textSafety !== 'undefined') ? textSafety : null;
+    const isZeroInfo = !hasPriorTurns && !hasAnyImages && firstUserMsg && tsModule && typeof tsModule.isZeroInformationQuery === 'function' && tsModule.isZeroInformationQuery(firstUserMsg.content, hasAnyImages, hasPriorTurns);
+    if (isZeroInfo) {
+      const zeroInfoNotice = '[INTEGRITAS KONTEKS: Pengguna hanya memberikan instruksi meta tanpa melampirkan pertanyaan, soal, teks masalah, atau gambar. DILARANG KERAS mengarang soal fiktif atau mengasumsikan konteks gambar lama. Tanyakan langsung dengan ramah apa pertanyaan atau materi yang ingin dijawab oleh pengguna.]';
+      effectiveSystem = effectiveSystem ? `${effectiveSystem}\n\n${zeroInfoNotice}` : zeroInfoNotice;
+    }
+
     if (effectiveSystem && effectiveSystem.trim()) {
       if (supportsSystem) {
         messagesPayload.push({ role: 'system', content: effectiveSystem.trim() });

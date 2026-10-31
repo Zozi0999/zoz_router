@@ -2237,7 +2237,27 @@
     };
   }
 
+  // ============================================================================
+  // 17. GERBANG INFORMASI SHANNON & DETEKSI KUERI AMBIGU / META-IMPERATIVE TANPA KONTEKS
+  // Mencegah kolaps prior tanpa syarat saat kueri hanya berisi instruksi meta (misal "Jawab singkat saja")
+  // ============================================================================
+  const META_IMPERATIVE_TOKENS = new Set([
+    'jawab', 'jawablah', 'jawabannya', 'jawaban', 'singkat', 'saja', 'tolong', 'bantu', 'berikan', 'kasih',
+    'apa', 'mana', 'cepat', 'ya', 'dong', 'ini', 'itu', 'deh', 'lah', 'kan', 'nih',
+    'answer', 'respond', 'reply', 'give', 'me', 'the', 'please', 'just', 'briefly', 'shortly', 'quick', 'only'
+  ]);
+
+  function isZeroInformationQuery(prompt, hasImages = false, hasHistory = false) {
+    if (hasImages || hasHistory) return false;
+    if (!prompt || typeof prompt !== 'string') return true;
+    const words = prompt.toLowerCase().replace(/[^a-z0-9_\u00C0-\u024F\s-]/gi, ' ').trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return true;
+    const substantive = words.filter(w => !META_IMPERATIVE_TOKENS.has(w));
+    return substantive.length === 0;
+  }
+
   return {
+    isZeroInformationQuery,
     splitReasoningAndContent,
     stripReasoningText,
     reflowShreddedProse,
