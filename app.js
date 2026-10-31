@@ -10590,7 +10590,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       for (const routeType of routesToTry) {
         if (STATE.abortController?.signal?.aborted) break;
         const isDirect = routeType === 'direct';
-        const endpoint = isDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
+        const endpoint = isDirect ? 'https://openrouter.ai/api/v1/chat/completions' : getUniversalApiUrl('/api/openrouter/chat');
         const headers = { 'Content-Type': 'application/json' };
         if (STATE.settings.openRouterKey) {
           headers['Authorization'] = `Bearer ${STATE.settings.openRouterKey}`;
@@ -11856,7 +11856,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           if (signal.aborted) throw new Error('aborted');
           const direct = route === 'direct';
           if (direct && !key) { errors.push('rute langsung dilewati (belum ada API key)'); continue; }
-          const url = direct ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat';
+          const url = direct ? 'https://openrouter.ai/api/v1/chat/completions' : getUniversalApiUrl('/api/openrouter/chat');
           const headers = { 'Content-Type': 'application/json' };
           if (key) headers['Authorization'] = `Bearer ${key}`;
           if (direct) {
@@ -22682,7 +22682,7 @@ ${blocks}
 
     // 1. Coba endpoint ekstraksi web resmi Zoz Router (/api/extract-web)
     try {
-      const ep = '/api/extract-web?url=' + encodeURIComponent(clean) + '&maxChars=' + maxChars;
+      const ep = getUniversalApiUrl('/api/extract-web?url=' + encodeURIComponent(clean) + '&maxChars=' + maxChars);
       const res = await fetch(ep, {
         headers: { 'Accept': 'application/json' },
         signal: AbortSignal.timeout(10000)
@@ -25325,7 +25325,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
         try {
           const browseSig = makeToolSignal(10000);
-          const res = await fetch('/api/tools/browse-page', {
+          const res = await fetch(getUniversalApiUrl('/api/tools/browse-page'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url: rawUrl, maxChars }),
@@ -26591,6 +26591,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (m.role === 'assistant') {
         textContent = safeAssistantText(textContent);
       }
+      if (m.role === 'user' && textContent.startsWith('[Instruksi Sistem & Konteks:')) {
+        const lastBracketIdx = textContent.lastIndexOf(']\n\n');
+        if (lastBracketIdx !== -1) {
+          textContent = textContent.slice(lastBracketIdx + 3).trim();
+        } else {
+          textContent = textContent.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
+        }
+      }
       if (!textContent && mImgs.length === 0) {
         return; // skip blank message turns
       }
@@ -26621,7 +26629,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const activePersona = (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
 
     let effectiveSystem = (systemContent && systemContent.trim()) ? systemContent.trim() : '';
-    if (!effectiveSystem.includes('### INFORMASI WAKTU SISTEM REAL-TIME')) {
+    if (!effectiveSystem.includes('[KOORDINAT WAKTU REFERENSI SISTEM]') && !effectiveSystem.includes('### INFORMASI WAKTU SISTEM REAL-TIME')) {
       const temporal = getDynamicSystemTemporalContext();
       effectiveSystem = effectiveSystem ? `${temporal}\n\n${effectiveSystem}` : temporal;
     }
@@ -26630,12 +26638,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (supportsSystem) {
         messagesPayload.push({ role: 'system', content: effectiveSystem.trim() });
       } else {
-        // Untuk model yang tidak mendukung role system (misal: Gemma), lebur konteks sistem ke turn user pertama
+        // Untuk model yang tidak mendukung role system (misal: Gemma), lebur konteks sistem ke turn user pertama secara terkompaksi
+        let compactedSystem = effectiveSystem.trim()
+          .replace(/### BIO-ENDOCRINE[\s\S]*?(?=(?:\[SKEMA TOOL|\[KORPUS BUKTI|$))/i, '')
+          .replace(/\[AUTONOMIC NERVOUS LOG[\s\S]*?(?=(?:###|\[SKEMA TOOL|\[KORPUS BUKTI|$))/i, '')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+
         const firstUserMsg = validList.find(m => m.role === 'user');
         if (firstUserMsg) {
-          firstUserMsg.content = `[Instruksi Sistem & Konteks:\n${effectiveSystem.trim()}]\n\n${firstUserMsg.content}`;
+          firstUserMsg.content = `[Instruksi Sistem & Konteks:\n${compactedSystem}]\n\n${firstUserMsg.content}`;
         } else {
-          validList.unshift({ role: 'user', content: `[Instruksi Sistem & Konteks:\n${effectiveSystem.trim()}]`, images: [] });
+          validList.unshift({ role: 'user', content: `[Instruksi Sistem & Konteks:\n${compactedSystem}]`, images: [] });
         }
       }
     }
@@ -29523,7 +29537,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
             bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyintesis bukti terverifikasi...</span></div>`;
             const rescueModel = actualModelUsed || modelName;
             const rescueDirect = activeRouteType === 'direct' || (!activeEndpoint || activeEndpoint.includes('openrouter.ai'));
-            const rescueUrl = activeEndpoint || (rescueDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat');
+            const rescueUrl = activeEndpoint || (rescueDirect ? 'https://openrouter.ai/api/v1/chat/completions' : getUniversalApiUrl('/api/openrouter/chat'));
             const rescueHeaders = (activeHeaders && Object.keys(activeHeaders).length > 0) ? activeHeaders : {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`,
@@ -29563,7 +29577,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
             smartScrollChatToBottom(true);
             const rescueModel = actualModelUsed || modelName;
             const rescueDirect = activeRouteType === 'direct' || (!activeEndpoint || activeEndpoint.includes('openrouter.ai'));
-            const rescueUrl = activeEndpoint || (rescueDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat');
+            const rescueUrl = activeEndpoint || (rescueDirect ? 'https://openrouter.ai/api/v1/chat/completions' : getUniversalApiUrl('/api/openrouter/chat'));
             const rescueHeaders = (activeHeaders && Object.keys(activeHeaders).length > 0) ? activeHeaders : {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`,

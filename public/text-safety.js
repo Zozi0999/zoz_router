@@ -1365,6 +1365,12 @@
     berita: ['news', 'report', 'updates'],
     pembaruan: ['update', 'updates', 'upgrade'],
     kecerdasan: ['artificial', 'intelligence', 'ai'],
+    makalah: ['paper', 'papers', 'article', 'articles', 'preprint', 'study'],
+    jurnal: ['journal', 'paper', 'research'],
+    riset: ['research', 'study', 'findings', 'paper'],
+    ilmiah: ['scientific', 'academic', 'research'],
+    terbaik: ['best', 'top', 'leading', 'benchmark'],
+    model: ['model', 'models', 'llm', 'architecture'],
     penalaran: ['reasoning', 'thinking'],
     terbuka: ['open', 'weights', 'source'],
     harga: ['price', 'pricing', 'cost'],
@@ -1645,19 +1651,18 @@
     const rawTokens = tokenizeForIR(query);
     const expanded = new Map();
     for (const t of rawTokens) {
-      if (IR_STOPWORDS.has(t)) continue;
       if (t === String(curYear)) {
-        // Year is handled by the continuous temporal decay kernel W_time(Δt), not as a mandatory lexical bias
         expanded.set(t, 0.25);
         continue;
       }
-      expanded.set(t, Math.max(expanded.get(t) || 0, 1.0));
       const syns = BILINGUAL_QUERY_BASIS[t];
       if (syns) {
         for (const syn of syns) {
           expanded.set(syn, Math.max(expanded.get(syn) || 0, 0.85));
         }
       }
+      if (IR_STOPWORDS.has(t)) continue;
+      expanded.set(t, Math.max(expanded.get(t) || 0, 1.0));
     }
     // If all tokens were stopwords/temporal (e.g. "berita terbaru hari ini"), retain core topical tokens
     if (expanded.size === 0) {
@@ -1750,7 +1755,13 @@
         }
       }
 
-      if (bm25 <= 0 || matchedDistinct === 0) continue;
+      if (bm25 <= 0 || matchedDistinct === 0) {
+        if (options.keepCandidateFloor || options.isWhitelistedPool) {
+          bm25 = 0.5;
+        } else {
+          continue;
+        }
+      }
       const lexNorm = bm25 / (bm25 + kappa);
 
       // 2. Exponential Radioactive Temporal Decay W_time(Δt) = exp(-λ · Δt)

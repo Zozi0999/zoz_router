@@ -9846,11 +9846,20 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       if (Array.isArray(body.messages) && body.messages.length > 0) {
         const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
         if (lastUser) {
-          userPrompt = typeof lastUser.content === 'string'
+          let rawUserPrompt = typeof lastUser.content === 'string'
             ? lastUser.content
             : (Array.isArray(lastUser.content)
                 ? lastUser.content.map(c => c.text || (c.type === 'text' ? c.text : '')).filter(Boolean).join('\n')
                 : '');
+          if (rawUserPrompt.startsWith('[Instruksi Sistem & Konteks:')) {
+            const lastBracketIdx = rawUserPrompt.lastIndexOf(']\n\n');
+            if (lastBracketIdx !== -1) {
+              rawUserPrompt = rawUserPrompt.slice(lastBracketIdx + 3).trim();
+            } else {
+              rawUserPrompt = rawUserPrompt.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
+            }
+          }
+          userPrompt = rawUserPrompt;
         }
       }
       delete body.sessionId;
@@ -10563,11 +10572,20 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       if (Array.isArray(body.messages) && body.messages.length > 0) {
         const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
         if (lastUser) {
-          userPrompt = typeof lastUser.content === 'string'
+          let rawUserPrompt = typeof lastUser.content === 'string'
             ? lastUser.content
             : (Array.isArray(lastUser.content)
                 ? lastUser.content.map(c => c.text || (c.type === 'text' ? c.text : '')).filter(Boolean).join('\n')
                 : '');
+          if (rawUserPrompt.startsWith('[Instruksi Sistem & Konteks:')) {
+            const lastBracketIdx = rawUserPrompt.lastIndexOf(']\n\n');
+            if (lastBracketIdx !== -1) {
+              rawUserPrompt = rawUserPrompt.slice(lastBracketIdx + 3).trim();
+            } else {
+              rawUserPrompt = rawUserPrompt.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
+            }
+          }
+          userPrompt = rawUserPrompt;
         }
       }
       delete body.sessionId;
