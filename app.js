@@ -21025,57 +21025,57 @@ ${msg.content.slice(0, 3000)}
   ]);
 
   // ==================== AUTONOMOUS AI WEB SEARCH SKILL ENGINE ====================
+  // Anti-Halusinasi & Anti-Peracunan Topik (v618):
+  // Menjamin kueri penelusuran murni sesuai pertanyaan pengguna, tidak meracuni kueri dengan
+  // subjek masa lalu kecuali jika pengguna secara eksplisit hanya mengirim kata ganti deiktis murni.
   function synthesizeAutonomousSearchQuery(session, rawPrompt) {
     if (!rawPrompt) return '';
     const cleanPrompt = rawPrompt.trim();
 
-    // Indonesian & English filler / stop-words
-    const fillerWords = [
+    const fillerWords = new Set([
       'bagaimana', 'apa', 'apakah', 'kenapa', 'mengapa', 'tolong', 'coba', 'carikan', 'cari', 'jelaskan',
-      'sebutkan', 'berikan', 'tampilkan', 'info', 'informasi', 'data', 'terbaru', 'terupdate', 'terkini',
-      'hari ini', 'saat ini', 'sekarang', 'menurutmu', 'menurut anda', 'tentang', 'mengenai', 'bisa', 'dong',
-      'kan', 'sih', 'ya', 'bro', 'min', 'how', 'what', 'why', 'tell', 'me', 'about', 'latest', 'news', 'update'
-    ];
+      'sebutkan', 'berikan', 'tampilkan', 'info', 'informasi', 'data', 'menurutmu', 'menurut anda', 'tentang',
+      'mengenai', 'bisa', 'dong', 'kan', 'sih', 'ya', 'bro', 'min', 'how', 'what', 'why', 'tell', 'me', 'about'
+    ]);
 
-    const words = cleanPrompt.toLowerCase().replace(/[^a-z0-9\s]/gi, ' ').split(/\s+/).filter(Boolean);
-    const nonFillerWords = words.filter(w => !fillerWords.includes(w) && w.length > 1);
+    const words = cleanPrompt.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+    const contentTokens = words.filter(w => !fillerWords.has(w) && w.length >= 2);
 
-    // Scan recent session history to extract subject context
+    // Kriteria Ketat Anafora Sejati:
+    // HANYA dipicu jika kueri pengguna adalah rujukan ganti eksplisit TANPA entitas substantif mandiri
+    // Contoh valid: "siapa dia?", "berapa umurnya?", "apa fungsinya?", "kenapa begitu?"
+    const isPureAnaphoric = /^(?:siapa|berapa|apa|bagaimana|kenapa|mengapa|dimana|kapan)?\s*(?:dia|ia|beliau|mereka|itu|tersebut|it|he|she|they)(?:\s+(?:itu|ini|nya))?[?.!\s]*$/i.test(cleanPrompt);
+
+    if (!isPureAnaphoric || contentTokens.length > 2) {
+      // Pertahankan kueri murni pengguna, cegah peracunan topik dari giliran percakapan sebelumnya!
+      return cleanPrompt.replace(/\s+/g, ' ').trim();
+    }
+
+    // Jika dan hanya jika murni anafora, cari entitas subjek dari riwayat giliran terakhir
     let contextSubject = '';
     if (session && Array.isArray(session.messages) && session.messages.length > 0) {
-      // Look at the last 4 messages in reverse
-      const recentMsgs = session.messages.slice(-4).reverse();
+      const recentMsgs = session.messages.slice(-3).reverse();
       for (const msg of recentMsgs) {
         const text = msg.content || '';
-        // Extract capitalized terms, quotes, code blocks, technology names, product names
-        const matches = text.match(/([A-Z][a-zA-Z0-9_\-\.\+]+(?:\s+[A-Z0-9][a-zA-Z0-9_\-\.\+]+){0,5})/g);
-        if (matches && matches.length > 0) {
-          const filteredMatches = matches.filter(m => !['Anda', 'AI', 'Zoz', 'Router', 'Ollama', 'OpenRouter', 'Google', 'HTTP', 'JSON'].includes(m) && m.length > 2);
-          if (filteredMatches.length > 0) {
-            contextSubject = filteredMatches[0];
-            break;
-          }
+        const entMatch = text.match(/\b([A-Z][a-zA-Z0-9_\-\.\+]+(?:\s+[A-Z0-9][a-zA-Z0-9_\-\.\+]+){0,3})\b/);
+        if (entMatch && !['Anda', 'AI', 'Zoz', 'Router', 'Ollama', 'OpenRouter'].includes(entMatch[1])) {
+          contextSubject = entMatch[1];
+          break;
         }
-        // If no capitalized match, check backticks or bold text
-        const codeMatch = text.match(/`([^`]+)`|\*\*([^*]+)\*\*/);
-        if (codeMatch) {
-          contextSubject = codeMatch[1] || codeMatch[2];
+        const boldMatch = text.match(/\*\*([^*]+)\*\*|`([^`]+)`/);
+        if (boldMatch) {
+          contextSubject = (boldMatch[1] || boldMatch[2]).trim();
           break;
         }
       }
     }
 
-    // Formulate the optimal targeted query without hardcoded year noise or topic poisoning
-    let finalQuery = '';
-    const isAnaphoricFollowUp = nonFillerWords.length <= 2 || /\b(itu|tersebut|dia|ini|nya|it|they|them|this|that)\b/i.test(cleanPrompt);
-    if (isAnaphoricFollowUp && contextSubject && !cleanPrompt.toLowerCase().includes(contextSubject.toLowerCase())) {
-      const intentKeywords = nonFillerWords.length > 0 ? nonFillerWords.join(' ') : 'data spesifikasi update';
-      finalQuery = `${contextSubject} ${intentKeywords}`;
-    } else {
-      finalQuery = `${cleanPrompt}`;
+    if (contextSubject && !cleanPrompt.toLowerCase().includes(contextSubject.toLowerCase())) {
+      const intentWords = contentTokens.filter(w => !['dia', 'ia', 'beliau', 'mereka', 'itu', 'tersebut'].includes(w)).join(' ');
+      return `${contextSubject} ${intentWords}`.trim();
     }
 
-    return finalQuery.replace(/\s+/g, ' ').trim();
+    return cleanPrompt.replace(/\s+/g, ' ').trim();
   }
 
   function cleanWebSnippetText(str) {
@@ -21095,6 +21095,40 @@ ${msg.content.slice(0, 3000)}
       .replace(/&hellip;|&#8230;/g, '...')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  // Metrik Relevansi Leksikal-Semantik Jaccard/Overlap Term Terbobot (Anti-Halusinasi v618)
+  function computeLexicalRelevanceScore(query, doc) {
+    if (!query || !doc) return 0;
+    const cleanQ = String(query).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ');
+    const stopWords = new Set([
+      'dan', 'atau', 'yang', 'untuk', 'dengan', 'pada', 'dari', 'ke', 'di', 'ini', 'itu', 'adalah',
+      'sebagai', 'dalam', 'oleh', 'saat', 'hari', 'tentang', 'apa', 'siapa', 'bagaimana', 'berapa',
+      'the', 'a', 'an', 'and', 'or', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are'
+    ]);
+    const qTokens = cleanQ.split(/\s+/).filter(t => t.length >= 2 && !stopWords.has(t));
+    if (qTokens.length === 0) return 0.5;
+
+    const titleText = String(doc.title || '').toLowerCase();
+    const snippetText = String(doc.snippet || '').toLowerCase();
+    const contentText = String(doc.content || '').toLowerCase();
+    const fullText = `${titleText} ${snippetText} ${contentText.slice(0, 3000)}`;
+
+    let matchCount = 0;
+    let weightedScore = 0;
+
+    for (const token of qTokens) {
+      if (fullText.includes(token)) {
+        matchCount++;
+        const inTitle = titleText.includes(token);
+        const inSnippet = snippetText.includes(token);
+        weightedScore += inTitle ? 2.5 : (inSnippet ? 1.5 : 1.0);
+      }
+    }
+
+    const coverage = matchCount / qTokens.length;
+    const normalizedScore = coverage * Math.min(1.0, weightedScore / (qTokens.length * 1.5));
+    return Number(normalizedScore.toFixed(4));
   }
 
   async function getWebSearchContext(query, session = null, hudElement = null, forceRun = false) {
@@ -21238,53 +21272,66 @@ ${msg.content.slice(0, 3000)}
         });
       }
 
-      cleanOrganicList.sort((a, b) => {
-        const aRep = REPUTABLE_TECH_DOMAINS.has(a.domain) ? 1 : 0;
-        const bRep = REPUTABLE_TECH_DOMAINS.has(b.domain) ? 1 : 0;
-        if (aRep !== bRep) return bRep - aRep;
-        return (b.timestamp || 0) - (a.timestamp || 0);
-      });
+      // 3. Filter Dokumen Berdasarkan Ambang Batas Relevansi Matematis \tau_{rel}
+      // Membuang artikel spam / tidak relevan yang menjadi pemicu utama halusinasi AI
+      const RELEVANCE_THRESHOLD = 0.20;
+      const relevantOrganicList = [];
 
-      let organicBlock = '';
-      if (cleanOrganicList.length > 0) {
-        cleanOrganicList.slice(0, 8).forEach((item, idx) => {
-          const title = item.title;
-          const link = item.url;
-          const snippet = item.snippet || '';
-          const rawDate = item.pubDate || item.date || '';
-          const date = rawDate ? ` [${rawDate}]` : '';
-
-          const bodyText = String(item.content || '').slice(0, idx < 5 ? 2500 : 600);
-          const bodyBlock = bodyText && bodyText.length > snippet.length ? `\n   Isi Artikel: ${bodyText}` : '';
-          organicBlock += `\n${idx + 1}. **[${title}](${link})**${date}\n   Ringkasan: ${snippet}${bodyBlock}\n`;
-          
-          if (link && !sources.some(s => s.url === link)) {
-            sources.push({
-              title,
-              url: link,
-              snippet,
-              date: rawDate || null,
-              pubDate: rawDate || '',
-              content: bodyText || snippet,
-              domain: item.domain
-            });
-          }
-        });
+      for (const item of cleanOrganicList) {
+        const score = computeLexicalRelevanceScore(query, item);
+        item.relevanceScore = score;
+        if (score >= RELEVANCE_THRESHOLD) {
+          relevantOrganicList.push(item);
+        }
       }
+
+      // Urutkan murni berdasarkan skor relevansi terhadap pertanyaan pengguna!
+      relevantOrganicList.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+
+      if (relevantOrganicList.length === 0 && !factsBlock) {
+        console.warn(`[WebSearch] Seluruh hasil penelusuran memiliki relevansi rendah (< ${RELEVANCE_THRESHOLD}) terhadap kueri "${query}". Konteks digugurkan untuk mencegah halusinasi.`);
+        return null;
+      }
+
+      const displayList = relevantOrganicList.slice(0, 6);
+      let organicBlock = '';
+      displayList.forEach((item, idx) => {
+        const title = item.title;
+        const link = item.url;
+        const snippet = item.snippet || '';
+        const rawDate = item.pubDate || item.date || '';
+        const date = rawDate ? ` [${rawDate}]` : '';
+
+        const bodyText = String(item.content || '').slice(0, idx < 3 ? 2000 : 500);
+        const bodyBlock = bodyText && bodyText.length > snippet.length ? `\n   Kutipan Bukti: ${bodyText}` : '';
+        organicBlock += `\n${idx + 1}. **[${title}](${link})**${date} [Kesesuaian: ${(item.relevanceScore * 100).toFixed(0)}%]\n   Ringkasan: ${snippet}${bodyBlock}\n`;
+        
+        if (link && !sources.some(s => s.url === link)) {
+          sources.push({
+            title,
+            url: link,
+            snippet,
+            date: rawDate || null,
+            pubDate: rawDate || '',
+            content: bodyText || snippet,
+            domain: item.domain
+          });
+        }
+      });
 
       if (!factsBlock && !organicBlock) return null;
 
       const currentTime = new Date().toISOString();
-      const systemPromptContext = `[KORPUS BUKTI PENELUSURAN TERVERIFIKASI — UTC ${currentTime}]
-Kueri: "${smartQuery}"
+      const systemPromptContext = `[REFERENSI PENELUSURAN DOKUMEN WEB TERVERIFIKASI — UTC ${currentTime}]
 Pertanyaan Pengguna: "${query}"
 ${factsBlock}
-=== DOKUMEN BUKTI TERPERINGKAT (BM25F × TEMPORAL DECAY) ===
+=== DOKUMEN BUKTI RELEVAN ===
 ${organicBlock}
-[BATASAN DOMAIN FAKTUAL]:
-1. Sintesis jawaban dibatasi secara ketat pada fakta, entitas, versi, angka, dan tanggal rilis yang tertulis eksplisit di dalam dokumen bukti di atas.
-2. Jelaskan isi substansial dari bagian "Isi Artikel" secara langsung dan terstruktur dalam Bahasa Indonesia, disertai tautan referensi [Nama Sumber](URL).
-3. Apabila suatu informasi spesifik tidak termuat dalam dokumen bukti di atas, nyatakan bahwa informasi tersebut tidak tercantum dalam sumber yang ditemukan.`;
+[PRINSIP AKURASI & INTEGRITAS JAWABAN (ANTI-HALUSINASI)]:
+1. PRIORITAS UTAMA: Jawab pertanyaan pengguna "${query}" secara langsung, tepat sasaran, akurat, dan komprehensif dalam Bahasa Indonesia.
+2. PENGGUNAAN BUKTI: Gunakan fakta, angka, dan tanggal dari dokumen bukti di atas HANYA jika secara langsung relevan dan menjawab pertanyaan pengguna. Sertakan sitasi tautan referensi [Nama Sumber](URL).
+3. ANTI-DIVERGENSI (DILARANG MENYIMPANG): DILARANG KERAS merangkum artikel yang tidak berhubungan dengan pertanyaan pengguna. Jika dokumen di atas tidak memuat informasi yang diminta, JANGAN menceritakan isi dokumen tersebut; jawablah pertanyaan pengguna dengan benar berdasarkan pengetahuan terbaik Anda.
+4. INTEGRITAS FAKTA: Dilarang mengarang informasi yang bertentangan dengan realitas. Jika suatu data belum dapat dipastikan, sampaikan secara jujur dan santun.`;
 
       return {
         systemPromptContext,
@@ -27965,7 +28012,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   }
 
   // Universal Message Payload Normalizer & Alternating Role Enforcer
-  function doesModelSupportSystemRole(modelName) {
+  function doesModelSupportSystemRole(modelName, engine = 'openrouter') {
+    if (engine === 'ollama') return true; // Ollama menangani role system secara native untuk seluruh arsitektur
     if (!modelName || typeof modelName !== 'string') return true;
     const lower = modelName.toLowerCase();
     // Model Gemma, Liquid LFM, Inkling, Dots, Ling, dll. menolak role "system" di sebagian besar provider OpenRouter
@@ -28053,7 +28101,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
   function buildSanitizedMessagesPayload(sessionOrMessages, currentImages = [], engine = 'openrouter', systemContent = '', modelName = '') {
     const messagesPayload = [];
-    const supportsSystem = doesModelSupportSystemRole(modelName);
+    const supportsSystem = doesModelSupportSystemRole(modelName, engine);
 
     const rawList = Array.isArray(sessionOrMessages?.messages) ? sessionOrMessages.messages : (Array.isArray(sessionOrMessages) ? sessionOrMessages : []);
     const validList = [];
@@ -28138,16 +28186,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (supportsSystem) {
         messagesPayload.push({ role: 'system', content: effectiveSystem.trim() });
       } else {
-        // Untuk model yang tidak mendukung role system (misal: Gemma), lebur konteks sistem ke turn user pertama secara terkompaksi
+        // Untuk model yang tidak mendukung role system secara langsung:
+        // Tempelkan instruksi sistem ke pesan USER TERAKHIR (turn aktif yang sedang dijawab saat ini),
+        // BUKAN ke pesan user pertama dari riwayat masa lalu!
         let compactedSystem = effectiveSystem.trim()
-          .replace(/### BIO-ENDOCRINE[\s\S]*?(?=(?:\[SKEMA TOOL|\[KORPUS BUKTI|$))/i, '')
-          .replace(/\[AUTONOMIC NERVOUS LOG[\s\S]*?(?=(?:###|\[SKEMA TOOL|\[KORPUS BUKTI|$))/i, '')
+          .replace(/### BIO-ENDOCRINE[\s\S]*?(?=(?:\[SKEMA TOOL|\[KORPUS BUKTI|\[REFERENSI PENELUSURAN|$))/i, '')
+          .replace(/\[AUTONOMIC NERVOUS LOG[\s\S]*?(?=(?:###|\[SKEMA TOOL|\[KORPUS BUKTI|\[REFERENSI PENELUSURAN|$))/i, '')
           .replace(/\n{3,}/g, '\n\n')
           .trim();
 
-        const firstUserMsg = validList.find(m => m.role === 'user');
-        if (firstUserMsg) {
-          firstUserMsg.content = `[Instruksi Sistem & Konteks:\n${compactedSystem}]\n\n${firstUserMsg.content}`;
+        const latestUserMsg = [...validList].reverse().find(m => m.role === 'user');
+        if (latestUserMsg) {
+          latestUserMsg.content = `[Instruksi Sistem & Konteks:\n${compactedSystem}]\n\n${latestUserMsg.content}`;
         } else {
           validList.unshift({ role: 'user', content: `[Instruksi Sistem & Konteks:\n${compactedSystem}]`, images: [] });
         }
