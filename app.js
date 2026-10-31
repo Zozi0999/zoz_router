@@ -37573,6 +37573,8 @@ Aturan:
     };
 
     const syncTerminalOnResume = () => {
+      const isTermOpen = document.getElementById('terminalModal')?.classList.contains('show');
+      if (!isTermOpen) return;
       if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.getActiveTab === 'function') {
         const tTab = TerminalManager.getActiveTab();
         if (tTab) {

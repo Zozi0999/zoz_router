@@ -6960,6 +6960,9 @@ async function requestHandler(req, res) {
       }
       const sessionId = (body.session || 'default').trim();
       const enabled = Boolean(body.enabled);
+      if (globalAutoEnterEnabled === enabled) {
+        return sendJSON(res, 200, { success: true, session: sessionId, autoEnter: enabled });
+      }
       globalAutoEnterEnabled = enabled;
       savePersistedTunnelState();
 
@@ -11562,6 +11565,9 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
             const parsed = JSON.parse(str);
             if (parsed.type === 'auto-enter') {
               const enabled = Boolean(parsed.enabled);
+              if (globalAutoEnterEnabled === enabled && session.autoEnter === enabled) {
+                return;
+              }
               session.autoEnter = enabled;
               globalAutoEnterEnabled = enabled;
               savePersistedTunnelState();
