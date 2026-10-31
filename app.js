@@ -6259,7 +6259,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     });
 
     // Ubah token penempatan gambar terverifikasi [[ZOZ_IMAGE_DISPLAY:disp_...]] menjadi slot DOM bersih
-    result = result.replace(/(?:<p>\s*)?\[\[ZOZ_IMAGE_DISPLAY:(disp_[a-zA-Z0-9_-]{4,64})\]\](?:\s*<\/p>)?/gi, (_m, dispId) => {
+    result = result.replace(/(?:<p\b[^>]*>\s*)?\[\[ZOZ_IMAGE_DISPLAY:(disp_[a-zA-Z0-9_-]{4,64})\]\](?:\s*<\/p>)?/gi, (_m, dispId) => {
       return `<div class="zoz-image-display-slot" data-display-id="${escapeHtml(dispId)}"></div>`;
     });
 
@@ -23959,118 +23959,135 @@ ${blocks}
   }
 
   // Deteksi target entitas visual untuk Grounded Image Search (Tokoh, Foto, Candi, Monumen, Fauna, Karya Seni, Tempat Bersejarah)
-  function detectVisualEntityGroundingTarget(promptText) {
-    if (!promptText || typeof promptText !== 'string') return null;
-    const text = promptText.trim();
-    if (text.length < 3 || text.length > 500) return null;
+  function detectVisualEntityGroundingTarget(promptText, fullText = '') {
+    function extractEntityFromRawText(rawText) {
+      if (!rawText || typeof rawText !== 'string') return null;
+      const text = rawText.trim();
+      if (text.length < 3 || text.length > 500) return null;
 
-    // Abaikan jika kueri pemrograman, coding, regex, JSON, terminal, file, atau matematika murni
-    if (/\b(?:function|def |class |const |let |var |import |SELECT |UPDATE |DELETE |INSERT |SELECT \*|<script|<html>|<\?php|print\(|console\.log|regex|fourier|integral|diferensial|turunan|matriks|eigen)\b/i.test(text)) {
+      // Abaikan jika kueri pemrograman, coding, regex, JSON, terminal, file, atau matematika murni
+      if (/\b(?:function|def |class |const |let |var |import |SELECT |UPDATE |DELETE |INSERT |SELECT \*|<script|<html>|<\?php|print\(|console\.log|regex|fourier|integral|diferensial|turunan|matriks|eigen)\b/i.test(text)) {
+        return null;
+      }
+
+      // Abaikan jika meminta dokumen, website, kode saja, dsb
+      if (/^\/(?:diagram|website|web|dokumen|kodenya-saja|edit|code)\b/i.test(text)) {
+        return null;
+      }
+
+      // 1. Tokoh Terkenal Dunia & Nasional (Kepala Negara, Tokoh Sejarah, Ilmuwan, Pelopor)
+      if (/\b(?:donald\s+)?trump\b/i.test(text)) return 'Donald Trump';
+      if (/\b(?:bung\s+)?(?:s(?:oe|u)karno|karno)\b/i.test(text)) return 'Sukarno';
+      if (/\b(?:mohammad\s+)?hatta\b/i.test(text)) return 'Mohammad Hatta';
+      if (/\b(?:joko\s+widodo|jokowi)\b/i.test(text)) return 'Joko Widodo';
+      if (/\bprabowo(?:\s+subianto)?\b/i.test(text)) return 'Prabowo Subianto';
+      if (/\b(?:b\.?\s*j\.?\s*)?habibie\b/i.test(text)) return 'B. J. Habibie';
+      if (/\b(?:gus\s+dur|abdurrahman\s+wahid)\b/i.test(text)) return 'Abdurrahman Wahid';
+      if (/\bmegawati(?:\s+soekarnoputri)?\b/i.test(text)) return 'Megawati Soekarnoputri';
+      if (/\b(?:susilo\s+bambang\s+yudhoyono|sby)\b/i.test(text)) return 'Susilo Bambang Yudhoyono';
+      if (/\b(?:albert\s+)?einstein\b/i.test(text)) return 'Albert Einstein';
+      if (/\b(?:isaac\s+)?newton\b/i.test(text)) return 'Isaac Newton';
+      if (/\b(?:nikola\s+)?tesla\b/i.test(text)) return 'Nikola Tesla';
+      if (/\b(?:marie\s+)?curie\b/i.test(text)) return 'Marie Curie';
+      if (/\bgalileo(?:\s+galilei)?\b/i.test(text)) return 'Galileo Galilei';
+      if (/\bstephen\s+hawking\b/i.test(text)) return 'Stephen Hawking';
+      if (/\b(?:barack\s+)?obama\b/i.test(text)) return 'Barack Obama';
+      if (/\b(?:joe\s+)?biden\b/i.test(text)) return 'Joe Biden';
+      if (/\b(?:abraham\s+)?lincoln\b/i.test(text)) return 'Abraham Lincoln';
+      if (/\bgeorge\s+washington\b/i.test(text)) return 'George Washington';
+      if (/\bnelson\s+mandela\b/i.test(text)) return 'Nelson Mandela';
+      if (/\bwinston\s+churchill\b/i.test(text)) return 'Winston Churchill';
+      if (/\bsteve\s+jobs\b/i.test(text)) return 'Steve Jobs';
+      if (/\belon\s+musk\b/i.test(text)) return 'Elon Musk';
+      if (/\bbill\s+gates\b/i.test(text)) return 'Bill Gates';
+      if (/\bmark\s+zuckerberg\b/i.test(text)) return 'Mark Zuckerberg';
+      if (/\bjeff\s+bezos\b/i.test(text)) return 'Jeff Bezos';
+
+      // 2. Permintaan Foto / Gambar Eksplisit (Contoh: 'berikan contoh fotonya', 'fotonya', 'gambarnya')
+      const explicitPhotoMatch = text.match(/\b(?:berikan|tampilkan|sertakan|mana|lihat)?\s*(?:contoh\s+)?(?:foto|fhoto|gambar|photo|image|visual)(?:nya)?\s*(?:dari|tentang|mengenai)?\s+([a-zA-Z0-9\s\-]{3,40})/i);
+      if (explicitPhotoMatch && explicitPhotoMatch[1]) {
+        const rawSubject = explicitPhotoMatch[1].trim().replace(/\b(?:saat|ketika|waktu|di|pada|nya|dong|ya|ini|itu|tersebut|adalah)\b.*$/i, '').trim();
+        if (rawSubject.length >= 3 && !/^(?:yang|ini|itu|tersebut|adalah)$/i.test(rawSubject)) {
+          return rawSubject;
+        }
+      }
+
+      // 3. Pertanyaan Tokoh / Subjek: "siapa X, berikan fotonya" / "profil X"
+      const personMatch = text.match(/\b(?:siapa|profil|tokoh)\s+([a-zA-Z0-9\s\-]{3,40}?)(?:[,\.\?!]|\s+(?:dan|berikan|kasih|tampilkan|sertakan|contoh|foto|fhoto|gambar)|$)/i);
+      if (personMatch && personMatch[1]) {
+        const rawName = personMatch[1].trim();
+        const isRoleOrGeneric = /\b(?:presiden|menteri|gubernur|bupati|walikota|raja|ratu|pangeran|putri|penemu|pencipta|pemimpin|ketua|pendiri|bapak|ibu|juara)\b/i.test(rawName);
+        if (!isRoleOrGeneric && rawName.length >= 3 && !/^(?:dia|mereka|anda|kamu|yang|ini|itu|nama)$/i.test(rawName)) {
+          return rawName;
+        }
+      }
+
+      // 4. Candi & Situs Arkeologi
+      const candiMatch = text.match(/\b(?:candi|temple)\s+([a-zA-Z0-9\-]+(?:\s+(?:muara takus|gedong songo|lawang sewu|sewu))?)/i);
+      if (candiMatch && candiMatch[1]) {
+        const singleWord = candiMatch[1].trim().split(/\s+/)[0];
+        if (singleWord.length >= 3 && !/^(?:yang|ini|itu|tersebut|adalah|di|pada)$/i.test(singleWord)) {
+          return `Candi ${singleWord}`;
+        }
+      }
+
+      // 5. Monumen, Tugu, Patung terkenal & Landmark Arsitektur
+      if (/\bborobudur\b/i.test(text)) return 'Borobudur temple';
+      if (/\bprambanan\b/i.test(text)) return 'Prambanan temple';
+      if (/\bmonas\b/i.test(text) || /\bmonumen nasional\b/i.test(text)) return 'Monas Jakarta';
+      if (/\bgaruda wisnu kencana\b/i.test(text) || /\bgwk\b/i.test(text)) return 'Garuda Wisnu Kencana';
+      if (/\btaj mahal\b/i.test(text)) return 'Taj Mahal';
+      if (/\bcolosseum\b/i.test(text)) return 'Colosseum Rome';
+      if (/\beiffel\b/i.test(text)) return 'Eiffel Tower';
+      if (/\b(?:piramida|pyramids?)\s+(?:giza|mesir|egypt)?\b/i.test(text)) return 'Giza Pyramids';
+      if (/\b(?:lawang sewu)\b/i.test(text)) return 'Lawang Sewu';
+      if (/\b(?:masjid istiqlal)\b/i.test(text)) return 'Istiqlal Mosque';
+      if (/\b(?:katedral jakarta)\b/i.test(text)) return 'Jakarta Cathedral';
+      if (/\b(?:hagia sophia)\b/i.test(text)) return 'Hagia Sophia';
+      if (/\b(?:benteng vredeburg)\b/i.test(text)) return 'Fort Vredeburg';
+      if (/\b(?:keraton yogyakarta)\b/i.test(text)) return 'Kraton Ngayogyakarta';
+
+      // 6. Landmark & Wisata Alam terkemuka
+      const landmarkMatch = text.match(/\b(?:danau toba|gunung bromo|kawah ijen|raja ampat|pulau komodo|labuan bajo|gunung rinjani|mount fuji|grand canyon|niagara falls)\b/i);
+      if (landmarkMatch) {
+        return landmarkMatch[0].trim();
+      }
+
+      // 7. Fauna Langka & Hewan Ikonik
+      const faunaMatch = text.match(/\b(?:komodo|badak jawa|harimau sumatera|orangutan|burung cendrawasih|jalak bali|anoa|babirusa|gajah sumatera|paus biru|hiu paus)\b/i);
+      if (faunaMatch) {
+        return faunaMatch[0].trim();
+      }
+
+      // 8. Mahakarya Seni & Lukisan Terkenal
+      if (/\bmona lisa\b/i.test(text)) return 'Mona Lisa Leonardo da Vinci';
+      if (/\b(?:the )?starry night\b/i.test(text)) return 'The Starry Night Van Gogh';
+      if (/\bpenangkapan pangeran diponegoro\b/i.test(text)) return 'Penangkapan Pangeran Diponegoro Raden Saleh';
+      if (/\bguernica\b/i.test(text)) return 'Guernica Picasso';
+      if (/\bthe scream\b/i.test(text)) return 'The Scream Munch';
+
+      // 9. Pola umum Candi / Museum / Istana
+      const generalPlaceMatch = text.match(/\b(?:museum|istana|kastil|pura|kelenteng)\s+([a-zA-Z0-9\s\-]{3,30})/i);
+      if (generalPlaceMatch && generalPlaceMatch[1]) {
+        const cleanPlace = generalPlaceMatch[1].trim().replace(/\b(?:di|in|pada|jawa|indonesia|daerah|wilayah)\b.*$/i, '').trim();
+        if (cleanPlace.length >= 3 && !/^(?:yang|ini|itu|tersebut)$/i.test(cleanPlace)) {
+          return `${generalPlaceMatch[0].split(/\s+/)[0]} ${cleanPlace}`;
+        }
+      }
+
       return null;
     }
 
-    // Abaikan jika meminta dokumen, website, kode saja, dsb
-    if (/^\/(?:diagram|website|web|dokumen|kodenya-saja|edit|code)\b/i.test(text)) {
-      return null;
-    }
+    // 1. Ekstraksi langsung dari prompt pengguna
+    const directTarget = extractEntityFromRawText(promptText);
+    if (directTarget) return directTarget;
 
-    // 1. Tokoh Terkenal Dunia & Nasional (Kepala Negara, Tokoh Sejarah, Ilmuwan, Pelopor)
-    if (/\b(?:donald\s+)?trump\b/i.test(text)) return 'Donald Trump';
-    if (/\b(?:bung\s+)?(?:s(?:oe|u)karno|karno)\b/i.test(text)) return 'Sukarno';
-    if (/\b(?:mohammad\s+)?hatta\b/i.test(text)) return 'Mohammad Hatta';
-    if (/\b(?:joko\s+widodo|jokowi)\b/i.test(text)) return 'Joko Widodo';
-    if (/\bprabowo(?:\s+subianto)?\b/i.test(text)) return 'Prabowo Subianto';
-    if (/\b(?:b\.?\s*j\.?\s*)?habibie\b/i.test(text)) return 'B. J. Habibie';
-    if (/\b(?:gus\s+dur|abdurrahman\s+wahid)\b/i.test(text)) return 'Abdurrahman Wahid';
-    if (/\bmegawati(?:\s+soekarnoputri)?\b/i.test(text)) return 'Megawati Soekarnoputri';
-    if (/\b(?:susilo\s+bambang\s+yudhoyono|sby)\b/i.test(text)) return 'Susilo Bambang Yudhoyono';
-    if (/\b(?:albert\s+)?einstein\b/i.test(text)) return 'Albert Einstein';
-    if (/\b(?:isaac\s+)?newton\b/i.test(text)) return 'Isaac Newton';
-    if (/\b(?:nikola\s+)?tesla\b/i.test(text)) return 'Nikola Tesla';
-    if (/\b(?:marie\s+)?curie\b/i.test(text)) return 'Marie Curie';
-    if (/\bgalileo(?:\s+galilei)?\b/i.test(text)) return 'Galileo Galilei';
-    if (/\bstephen\s+hawking\b/i.test(text)) return 'Stephen Hawking';
-    if (/\b(?:barack\s+)?obama\b/i.test(text)) return 'Barack Obama';
-    if (/\b(?:joe\s+)?biden\b/i.test(text)) return 'Joe Biden';
-    if (/\b(?:abraham\s+)?lincoln\b/i.test(text)) return 'Abraham Lincoln';
-    if (/\bgeorge\s+washington\b/i.test(text)) return 'George Washington';
-    if (/\bnelson\s+mandela\b/i.test(text)) return 'Nelson Mandela';
-    if (/\bwinston\s+churchill\b/i.test(text)) return 'Winston Churchill';
-    if (/\bsteve\s+jobs\b/i.test(text)) return 'Steve Jobs';
-    if (/\belon\s+musk\b/i.test(text)) return 'Elon Musk';
-    if (/\bbill\s+gates\b/i.test(text)) return 'Bill Gates';
-    if (/\bmark\s+zuckerberg\b/i.test(text)) return 'Mark Zuckerberg';
-    if (/\bjeff\s+bezos\b/i.test(text)) return 'Jeff Bezos';
-
-    // 2. Permintaan Foto / Gambar Eksplisit (Contoh: 'berikan contoh fotonya', 'fotonya', 'gambarnya')
-    const explicitPhotoMatch = text.match(/\b(?:berikan|tampilkan|sertakan|mana|lihat)?\s*(?:contoh\s+)?(?:foto|fhoto|gambar|photo|image|visual)(?:nya)?\s*(?:dari|tentang|mengenai)?\s+([a-zA-Z0-9\s\-]{3,40})/i);
-    if (explicitPhotoMatch && explicitPhotoMatch[1]) {
-      const rawSubject = explicitPhotoMatch[1].trim().replace(/\b(?:saat|ketika|waktu|di|pada|nya|dong|ya|ini|itu|tersebut|adalah)\b.*$/i, '').trim();
-      if (rawSubject.length >= 3 && !/^(?:yang|ini|itu|tersebut|adalah)$/i.test(rawSubject)) {
-        return rawSubject;
-      }
-    }
-
-    // 3. Pertanyaan Tokoh / Subjek: "siapa X, berikan fotonya" / "profil X"
-    const personMatch = text.match(/\b(?:siapa|profil|tokoh)\s+([a-zA-Z0-9\s\-]{3,40}?)(?:[,\.\?!]|\s+(?:dan|berikan|kasih|tampilkan|sertakan|contoh|foto|fhoto|gambar)|$)/i);
-    if (personMatch && personMatch[1]) {
-      const rawName = personMatch[1].trim();
-      if (rawName.length >= 3 && !/^(?:dia|mereka|anda|kamu|yang|ini|itu|nama)$/i.test(rawName)) {
-        return rawName;
-      }
-    }
-
-    // 4. Candi & Situs Arkeologi
-    const candiMatch = text.match(/\b(?:candi|temple)\s+([a-zA-Z0-9\-]+(?:\s+(?:muara takus|gedong songo|lawang sewu|sewu))?)/i);
-    if (candiMatch && candiMatch[1]) {
-      const singleWord = candiMatch[1].trim().split(/\s+/)[0];
-      if (singleWord.length >= 3 && !/^(?:yang|ini|itu|tersebut|adalah|di|pada)$/i.test(singleWord)) {
-        return `Candi ${singleWord}`;
-      }
-    }
-
-    // 5. Monumen, Tugu, Patung terkenal & Landmark Arsitektur
-    if (/\bborobudur\b/i.test(text)) return 'Borobudur temple';
-    if (/\bprambanan\b/i.test(text)) return 'Prambanan temple';
-    if (/\bmonas\b/i.test(text) || /\bmonumen nasional\b/i.test(text)) return 'Monas Jakarta';
-    if (/\bgaruda wisnu kencana\b/i.test(text) || /\bgwk\b/i.test(text)) return 'Garuda Wisnu Kencana';
-    if (/\btaj mahal\b/i.test(text)) return 'Taj Mahal';
-    if (/\bcolosseum\b/i.test(text)) return 'Colosseum Rome';
-    if (/\beiffel\b/i.test(text)) return 'Eiffel Tower';
-    if (/\b(?:piramida|pyramids?)\s+(?:giza|mesir|egypt)?\b/i.test(text)) return 'Giza Pyramids';
-    if (/\b(?:lawang sewu)\b/i.test(text)) return 'Lawang Sewu';
-    if (/\b(?:masjid istiqlal)\b/i.test(text)) return 'Istiqlal Mosque';
-    if (/\b(?:katedral jakarta)\b/i.test(text)) return 'Jakarta Cathedral';
-    if (/\b(?:hagia sophia)\b/i.test(text)) return 'Hagia Sophia';
-    if (/\b(?:benteng vredeburg)\b/i.test(text)) return 'Fort Vredeburg';
-    if (/\b(?:keraton yogyakarta)\b/i.test(text)) return 'Kraton Ngayogyakarta';
-
-    // 6. Landmark & Wisata Alam terkemuka
-    const landmarkMatch = text.match(/\b(?:danau toba|gunung bromo|kawah ijen|raja ampat|pulau komodo|labuan bajo|gunung rinjani|mount fuji|grand canyon|niagara falls)\b/i);
-    if (landmarkMatch) {
-      return landmarkMatch[0].trim();
-    }
-
-    // 7. Fauna Langka & Hewan Ikonik
-    const faunaMatch = text.match(/\b(?:komodo|badak jawa|harimau sumatera|orangutan|burung cendrawasih|jalak bali|anoa|babirusa|gajah sumatera|paus biru|hiu paus)\b/i);
-    if (faunaMatch) {
-      return faunaMatch[0].trim();
-    }
-
-    // 8. Mahakarya Seni & Lukisan Terkenal
-    if (/\bmona lisa\b/i.test(text)) return 'Mona Lisa Leonardo da Vinci';
-    if (/\b(?:the )?starry night\b/i.test(text)) return 'The Starry Night Van Gogh';
-    if (/\bpenangkapan pangeran diponegoro\b/i.test(text)) return 'Penangkapan Pangeran Diponegoro Raden Saleh';
-    if (/\bguernica\b/i.test(text)) return 'Guernica Picasso';
-    if (/\bthe scream\b/i.test(text)) return 'The Scream Munch';
-
-    // 9. Pola umum Candi / Museum / Istana
-    const generalPlaceMatch = text.match(/\b(?:museum|istana|kastil|pura|kelenteng)\s+([a-zA-Z0-9\s\-]{3,30})/i);
-    if (generalPlaceMatch && generalPlaceMatch[1]) {
-      const cleanPlace = generalPlaceMatch[1].trim().replace(/\b(?:di|in|pada|jawa|indonesia|daerah|wilayah)\b.*$/i, '').trim();
-      if (cleanPlace.length >= 3 && !/^(?:yang|ini|itu|tersebut)$/i.test(cleanPlace)) {
-        return `${generalPlaceMatch[0].split(/\s+/)[0]} ${cleanPlace}`;
-      }
+    // 2. Proyeksi kontekstual: jika prompt tidak memuat nama entitas spesifik (misal kueri deskriptif: "Siapa presiden AS ke-45?"),
+    // ekstrak entitas dari 400 karakter pembuka jawaban sintetis model.
+    if (fullText && typeof fullText === 'string') {
+      const opening = fullText.slice(0, 400).trim();
+      const contextualTarget = extractEntityFromRawText(opening);
+      if (contextualTarget) return contextualTarget;
     }
 
     return null;

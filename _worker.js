@@ -1254,7 +1254,17 @@ export default {
     // Universal WhatsApp, AI & Daemon Tunnel Proxy (Edge Bridge)
     const TUNNEL_GATEWAY_URL = 'https://roommate-flashers-flags-briefly.trycloudflare.com';
     let reqBodyBytes = null;
-    if (url.pathname.startsWith('/api/')) {
+    const isEdgeNativeRoute = url.pathname === '/api/ping' ||
+      url.pathname === '/api/health' ||
+      url.pathname === '/api/tools/search-images' ||
+      url.pathname === '/api/search-images' ||
+      url.pathname === '/api/tools/inspect-image' ||
+      url.pathname === '/api/inspect-image' ||
+      url.pathname === '/api/tools/prepare-image-display' ||
+      url.pathname === '/api/prepare-image-display' ||
+      url.pathname.startsWith('/api/tools/image-asset/');
+
+    if (url.pathname.startsWith('/api/') && !isEdgeNativeRoute) {
       const targetUrl = TUNNEL_GATEWAY_URL + url.pathname + url.search;
       const fwdHeaders = new Headers(request.headers);
       fwdHeaders.set('Host', 'roommate-flashers-flags-briefly.trycloudflare.com');
