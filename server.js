@@ -2648,6 +2648,10 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     ? sources.map(s => extractWhitelistedDomain(s)).filter(Boolean)
     : ['arxiv.org', 'github.com', 'cna.al', 'cnn.com', 'bloomberg.com', 'reddit.com'];
 
+  const nowMs = Date.now();
+  const recencyProfile = textSafety.computeTemporalRecencyProfile(cleanQ, '', nowMs);
+  const sortRecent = (recencyProfile.recencyAlpha ?? 0) >= 0.5;
+
   const results = [];
   const searchTasks = [];
 
@@ -2655,7 +2659,8 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
   if (targets.some(t => t.includes('arxiv.org'))) {
     searchTasks.push((async () => {
       try {
-        const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(cleanQ)}&start=0&max_results=${Math.min(safeLimit, 5)}`;
+        const arxivSort = sortRecent ? '&sortBy=submittedDate&sortOrder=descending' : '';
+        const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(cleanQ)}&start=0&max_results=${Math.min(safeLimit, 6)}${arxivSort}`;
         const res = await fetch(arxivUrl, { signal: AbortSignal.timeout(3500) });
         if (res.ok) {
           const xml = await res.text();
@@ -2677,6 +2682,7 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
                 url: rawUrl,
                 snippet: rawSnippet,
                 published_date: pubDate,
+                published_at: pubDate,
                 source_name: 'arXiv',
                 relevance_score: Number((0.96 - (idx * 0.04)).toFixed(2))
               });
@@ -2691,7 +2697,8 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
   if (targets.some(t => t.includes('github.com'))) {
     searchTasks.push((async () => {
       try {
-        const ghUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(cleanQ)}&per_page=${Math.min(safeLimit, 5)}`;
+        const ghSort = sortRecent ? '&sort=updated&order=desc' : '';
+        const ghUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(cleanQ)}&per_page=${Math.min(safeLimit, 6)}${ghSort}`;
         const res = await fetch(ghUrl, {
           headers: { 'User-Agent': 'ZOZ-Router-Grounding-Agent' },
           signal: AbortSignal.timeout(3500)
@@ -2700,11 +2707,13 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
           const json = await res.json();
           const items = Array.isArray(json.items) ? json.items : [];
           items.forEach((item, idx) => {
+            const pubDate = item.updated_at ? item.updated_at.slice(0, 10) : '';
             results.push({
               title: `${item.name} (${item.full_name})`,
               url: item.html_url,
               snippet: item.description || `Repositori GitHub open-source: ${item.full_name} (${item.stargazers_count} bintang).`,
-              published_date: item.updated_at ? item.updated_at.slice(0, 10) : '',
+              published_date: pubDate,
+              published_at: pubDate,
               source_name: 'GitHub',
               relevance_score: Number((0.92 - (idx * 0.04)).toFixed(2))
             });
@@ -2726,14 +2735,17 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
         if (res.ok) {
           const text = await res.text();
           const linkMatches = text.match(/\[([^\]]+)\]\((https?:\/\/(?:www\.)?cna\.al\/[^\s\)]+)\)/gi) || [];
-          linkMatches.slice(0, 3).forEach((lm, idx) => {
+          linkMatches.slice(0, 4).forEach((lm, idx) => {
             const m = lm.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/i);
             if (m && !results.some(r => r.url === m[2])) {
+              const parsedTs = textSafety.parseAuthenticTimestamp('', m[2].trim(), m[1].trim(), nowMs);
+              const pubDate = parsedTs !== null ? new Date(parsedTs).toISOString().slice(0, 10) : '';
               results.push({
                 title: m[1].trim(),
                 url: m[2].trim(),
                 snippet: `Berita dan laporan resmi dari CNA Albania mengenai: ${m[1].trim()}`,
-                published_date: 'Terkini',
+                published_date: pubDate,
+                published_at: pubDate,
                 source_name: 'CNA Albania',
                 relevance_score: Number((0.88 - (idx * 0.03)).toFixed(2))
               });
@@ -2758,14 +2770,17 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
         if (res.ok) {
           const text = await res.text();
           const linkMatches = text.match(new RegExp(`\\[([^\\]]+)\\]\\((https?:\\/\\/(?:www\\.|edition\\.)?${selectedDomain.replace('.', '\\.')}\\/[^\\s\\)]+)\\)`, 'gi')) || [];
-          linkMatches.slice(0, 3).forEach((lm, idx) => {
+          linkMatches.slice(0, 4).forEach((lm, idx) => {
             const m = lm.match(new RegExp(`\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s\\)]+)\\)`, 'i'));
             if (m && !results.some(r => r.url === m[2])) {
+              const parsedTs = textSafety.parseAuthenticTimestamp('', m[2].trim(), m[1].trim(), nowMs);
+              const pubDate = parsedTs !== null ? new Date(parsedTs).toISOString().slice(0, 10) : '';
               results.push({
                 title: m[1].trim(),
                 url: m[2].trim(),
                 snippet: `Laporan resmi dari ${getSourceNameFromUrl(m[2])}: ${m[1].trim()}`,
-                published_date: 'Terkini',
+                published_date: pubDate,
+                published_at: pubDate,
                 source_name: getSourceNameFromUrl(m[2]),
                 relevance_score: Number((0.86 - (idx * 0.03)).toFixed(2))
               });
@@ -2781,12 +2796,24 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     await Promise.allSettled(searchTasks);
   }
 
+  const ranked = textSafety.rankDocumentsMathematically(results, cleanQ, { profile: recencyProfile, nowMs });
+  const finalSourceResults = ranked.slice(0, safeLimit).map(item => ({
+    title: item.title,
+    url: item.url,
+    snippet: item.snippet,
+    published_date: item.pubDate || item.published_date || '',
+    source_name: item.source_name || getSourceNameFromUrl(item.url),
+    relevance_score: typeof item.mathDiagnostics?.mathScore === 'number'
+      ? Number(Math.min(0.99, 0.35 + 0.64 * item.mathDiagnostics.mathScore).toFixed(3))
+      : (item.relevance_score || 0.5)
+  }));
+
   return {
-    success: results.length > 0,
+    success: finalSourceResults.length > 0,
     query: cleanQ,
     sources_queried: targets,
-    count: results.length,
-    results: results.slice(0, safeLimit)
+    count: finalSourceResults.length,
+    results: finalSourceResults
   };
 }
 
@@ -4282,14 +4309,10 @@ ${p.content}
 
 function stripDateNoise(q) {
   if (!q || typeof q !== 'string') return '';
-  const months = 'januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|january|february|march|april|may|june|july|august|september|october|november|december';
   const days = 'senin|selasa|rabu|kamis|jumat|sabtu|minggu|monday|tuesday|wednesday|thursday|friday|saturday|sunday';
+  // Pertahankan koordinat waktu eksplisit (tahun 202x & nama bulan) agar intent temporal tidak hilang
   return q
     .replace(new RegExp(`\\b(${days})\\b`, 'gi'), ' ')
-    .replace(new RegExp(`\\b\\d{1,2}\\s+(${months})(?:\\s*,?\\s*\\d{2,4})?\\b`, 'gi'), ' ')
-    .replace(new RegExp(`\\b(${months})\\s+\\d{1,2}(?:\\s*,?\\s*\\d{2,4})?\\b`, 'gi'), ' ')
-    .replace(new RegExp(`\\b(${months})(?:\\s+\\d{2,4})?\\b`, 'gi'), ' ')
-    .replace(/\b(202[0-9])\b/g, ' ')
     .replace(/[,;]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -4402,7 +4425,7 @@ function initZozWebSearchDb() {
       );
     `);
     zozWebDb = db;
-    seedSovereignWebIndex(db);
+    purgeSyntheticAndStaleWebIndex(db);
     return zozWebDb;
   } catch (err) {
     console.warn('[Zoz Sovereign Search Engine] SQLite FTS5 fallback aktif:', err.message);
@@ -4417,13 +4440,16 @@ function indexArticleToZozDb(art) {
   const cleanContent = cleanHtmlText(art.content || cleanSnippet);
   const domain = art.domain || extractDomainSafe(art.url);
   const category = art.category || 'tech';
-  const pubDate = art.published_at || art.pubDate || new Date().toISOString().slice(0, 10);
+  const rawPub = String(art.published_at || art.pubDate || '').trim();
+  const verifiedTs = textSafety.parseAuthenticTimestamp(rawPub, art.url, `${cleanTitle} ${cleanSnippet}`);
+  // Jangan pernah memalsukan tanggal publikasi dengan Date.now() bila sumber tidak memiliki timestamp asli
+  const pubDate = verifiedTs !== null ? (rawPub || new Date(verifiedTs).toISOString()) : '';
   const now = new Date().toISOString();
 
   const db = initZozWebSearchDb();
   if (db) {
     try {
-      const checkStmt = db.prepare('SELECT id FROM zoz_web_pages WHERE url = ? LIMIT 1');
+      const checkStmt = db.prepare('SELECT id, published_at FROM zoz_web_pages WHERE url = ? LIMIT 1');
       const existing = checkStmt.all(art.url);
       if (!existing || existing.length === 0) {
         const insertPage = db.prepare(`
@@ -4437,6 +4463,9 @@ function indexArticleToZozDb(art) {
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `);
         insertFts.run(cleanTitle, cleanSnippet, cleanContent, art.url, domain, category, pubDate);
+      } else if (pubDate && (!existing[0].published_at || existing[0].published_at === 'Terkini')) {
+        db.prepare('UPDATE zoz_web_pages SET published_at = ?, crawled_at = ? WHERE url = ?').run(pubDate, now, art.url);
+        db.prepare('UPDATE zoz_web_fts SET published_at = ? WHERE url = ?').run(pubDate, art.url);
       }
       return;
     } catch (e) {
@@ -4460,130 +4489,48 @@ function indexArticleToZozDb(art) {
   }
 }
 
-// Registry Pengetahuan Faktual Model AI Frontier & Open-Source Berdaulat
-const VERIFIED_SOVEREIGN_AI_REGISTRY = [
-  {
-    url: 'https://ai.google.dev/gemma/gemma-4-release',
-    domain: 'ai.google.dev',
-    title: 'Google DeepMind Merilis Gemma 4: Arsitektur 31B, 12B, dan 2B Terbuka dengan Multimodal Vision',
-    snippet: 'Google DeepMind merilis keluarga model open weights terbaru Gemma 4 (31B, 12B, 2B) dengan native multimodal vision, konteks 128k, dan lisensi komersial Apache 2.0.',
-    content: 'Google DeepMind resmi meluncurkan keluarga model terbuka generasi terbaru Gemma 4 pada Oktober 2026. Lini model ini mencakup Gemma 4 31B (google/gemma-4-31b-it) untuk penalaran mendalam dan rekayasa kode pemrograman tingkat lanjut, Gemma 4 12B untuk workstation enterprise, serta Gemma 4 2B untuk perangkat edge dan smartphone. Gemma 4 membawa arsitektur native multimodal vision untuk analisis gambar dokumen dan antarmuka, jendela konteks 128k token, sliding window attention, serta logit soft-capping. Model ini dioptimalkan penuh untuk inferensi lokal pada Ollama (ollama run gemma4:31b), vLLM, dan llama.cpp dengan lisensi terbuka ramah komersial.',
-    category: 'tech',
-    published_at: '2026-10-18'
-  },
-  {
-    url: 'https://blog.google/technology/ai/google-gemini-2-announcement',
-    domain: 'blog.google',
-    title: 'Google Memperkenalkan Gemini 2.0: Model AI Generasi Baru dengan Streaming Multimodal Real-Time dan Agen Cerdas',
-    snippet: 'Google mengumumkan Gemini 2.0 Flash dan Pro dengan kapabilitas streaming audio-to-audio dan vision real-time serta eksekusi agen otonom.',
-    content: 'Google secara resmi mengumumkan Gemini 2.0, model fondasi generasi berikutnya untuk era agen kecerdasan buatan (agentic AI). Gemini 2.0 hadir dalam varian Gemini 2.0 Flash untuk inferensi kecepatan tinggi dan throughput masif berlatensi sangat rendah, serta Gemini 2.0 Pro untuk penalaran ilmiah mendalam dan rekayasa perangkat lunak multi-file. Model ini mendukung native multimodal I/O secara langsung tanpa konversi transkripsi teks, jendela konteks hingga 2 juta token, kemampuan pemanggilan tool otonom, eksekusi kode Python sandbox, serta integrasi mendalam ke Google Workspace dan Android.',
-    category: 'tech',
-    published_at: '2026-10-15'
-  },
-  {
-    url: 'https://deepmind.google/technologies/gemini/gemini-1-5-pro',
-    domain: 'deepmind.google',
-    title: 'Google Gemini 1.5 Pro dan 1.5 Flash: Arsitektur MoE dengan Jendela Konteks Revolusioner 2 Juta Token',
-    snippet: 'Gemini 1.5 Pro dan 1.5 Flash menggunakan arsitektur Mixture of Experts (MoE) dengan kapasitas pemrosesan hingga 2 juta token konteks.',
-    content: 'Google DeepMind mengembangkan Gemini 1.5 Pro dan Gemini 1.5 Flash menggunakan arsitektur Mixture-of-Experts (MoE) berkapasitas jendela konteks revolusioner 2 juta token. Model ini mencatatkan akurasi 99.7% dalam pencarian informasi pada 2 juta token teks, 1 jam video, atau 11 jam audio. Gemini 1.5 Flash dioptimalkan untuk kecepatan dan efisiensi biaya produksi skala besar.',
-    category: 'tech',
-    published_at: '2026-08-20'
-  },
-  {
-    url: 'https://www.anthropic.com/news/claude-3-7-sonnet',
-    domain: 'anthropic.com',
-    title: 'Anthropic Merilis Claude 3.7 Sonnet: Model AI Hybrid Reasoning Pertama dengan Kontrol Extended Thinking',
-    snippet: 'Anthropic meluncurkan Claude 3.7 Sonnet, model hybrid reasoning pertama yang menggabungkan respons kilat instan dengan extended thinking terencana yang dapat diatur oleh pengembang.',
-    content: 'Anthropic resmi meluncurkan Claude 3.7 Sonnet, model AI hybrid reasoning pertama di industri yang memadukan kecepatan respons standar dengan penalaran mendalam terencana (extended thinking). Pengembang dapat mengontrol durasi dan anggaran berpikir (thinking budget) sesuai kompleksitas masalah. Claude 3.7 Sonnet menduduki peringkat teratas dunia pada benchmark SWE-bench Verified (70.3%) untuk rekayasa perangkat lunak dan debugging nyata. Model ini memiliki jendela konteks 200.000 token, output hingga 8.192 token, serta kemampuan analisis visual multimodal.',
-    category: 'tech',
-    published_at: '2026-10-12'
-  },
-  {
-    url: 'https://www.anthropic.com/news/claude-3-5-sonnet-and-haiku-update',
-    domain: 'anthropic.com',
-    title: 'Anthropic Memperbarui Claude 3.5 Sonnet dan Merilis Claude 3.5 Haiku dengan Fitur Computer Use',
-    snippet: 'Anthropic memperbarui Claude 3.5 Sonnet dengan kemampuan Computer Use untuk mengendalikan desktop, serta meluncurkan model Claude 3.5 Haiku.',
-    content: 'Anthropic memperkenalkan pembaruan besar pada Claude 3.5 Sonnet dengan fitur terobosan Computer Use (API publik beta) yang memungkinkan AI berinteraksi langsung dengan antarmuka komputer seperti manusia: melihat layar, menggerakkan kursor mouse, mengklik tombol, dan mengetik teks secara otonom. Bersamaan dengan itu, Claude 3.5 Haiku dirilis sebagai model ultra-cepat dan hemat biaya yang menyamai performa Claude 3 Opus generasi sebelumnya pada coding dan analisis teks.',
-    category: 'tech',
-    published_at: '2026-10-05'
-  },
-  {
-    url: 'https://www.anthropic.com/news/claude-3-family-overview',
-    domain: 'anthropic.com',
-    title: 'Anthropic Claude 3 Opus: Model Puncak untuk Analisis Riset Mendalam dan Sintesis Pengetahuan',
-    snippet: 'Claude 3 Opus adalah model flagship terkuat Anthropic untuk penalaran abstrak, sintesis dokumen beratus halaman, dan pemodelan skenario ilmiah.',
-    content: 'Claude 3 Opus merupakan model terkuat dalam keluarga Claude 3 dari Anthropic untuk penalaran abstrak tingkat tinggi, analisis kepatuhan hukum, dan pemrosesan dokumen ilmiah ratusan halaman dengan integritas fakta tinggi dan minim halusinasi.',
-    category: 'tech',
-    published_at: '2026-06-15'
-  },
-  {
-    url: 'https://openai.com/index/introducing-openai-o1/',
-    domain: 'openai.com',
-    title: 'OpenAI Meluncurkan Seri o1 dan o3: Model Penalaran Berbasis Reinforcement Learning untuk Sains, Matematika, dan Coding',
-    snippet: 'OpenAI merilis o1 dan o3, model penalaran berbasis RL yang berpikir sebelum menjawab dengan performa setara level Ph.D.',
-    content: 'OpenAI memperkenalkan model penalaran seri o1 dan o3 yang dilatih menggunakan algoritma Reinforcement Learning berskala besar untuk membangun proses berpikir internal (chain of thought) sebelum menghasilkan jawaban. Model ini mencapai skor medali emas pada olimpiade matematika (AIME), melampaui kemampuan manusia ahli pada benchmark sains, serta memecahkan masalah coding kompetitif.',
-    category: 'tech',
-    published_at: '2026-09-20'
-  },
-  {
-    url: 'https://ai.meta.com/blog/llama-4-announcement/',
-    domain: 'ai.meta.com',
-    title: 'Meta Mengumumkan Llama 4: Arsitektur Model Terbuka Multimodal Terbesar untuk Komunitas AI Global',
-    snippet: 'Meta mengumumkan Llama 4 dengan varian Scout, 70B, dan 405B, menghadirkan bobot model terbuka multimodal teks, audio, dan gambar.',
-    content: 'Meta mengumumkan arsitektur Llama 4, generasi terbaru dari keluarga model terbuka terbesar di dunia. Llama 4 menghadirkan kemampuan multimodal terintegrasi penuh yang mendukung pemahaman teks, visual, dan audio secara simultan. Varian mencakup Llama 4 Scout, Llama 4 70B, dan Llama 4 405B untuk riset dan penerapan komersial berskala global.',
-    category: 'tech',
-    published_at: '2026-10-10'
-  },
-  {
-    url: 'https://github.com/deepseek-ai/DeepSeek-V3',
-    domain: 'github.com',
-    title: 'DeepSeek Meluncurkan V3 dan R1: Model MoE 671B dan Penalaran Terbuka dengan Efisiensi Arsitektur Revolusioner',
-    snippet: 'DeepSeek merilis DeepSeek-V3 (671B MoE) dan DeepSeek-R1 (open reasoning RL), memberikan performa frontier dengan efisiensi biaya luar biasa.',
-    content: 'DeepSeek merilis DeepSeek-V3, model Mixture of Experts (MoE) 671 miliar parameter total dengan 37 miliar parameter aktif per token, memanfaatkan inovasi Multi-head Latent Attention (MLA) untuk menekan kebutuhan cache KV memori hingga 93%. DeepSeek-R1 adalah model penalaran berbasis Reinforcement Learning murni yang dirilis dengan bobot terbuka penuh.',
-    category: 'tech',
-    published_at: '2026-10-02'
-  },
-  {
-    url: 'https://qwenlm.github.io/blog/qwen2.5/',
-    domain: 'qwenlm.github.io',
-    title: 'Alibaba Merilis Qwen 2.5 dan Qwen 2.5-Coder: Model Open Weights Terkuat untuk Coding dan 29+ Bahasa Dunia',
-    snippet: 'Alibaba merilis Qwen 2.5 dan Qwen 2.5-Coder 32B dengan kemampuan coding terdepan, konteks 128k, dan pemahaman Bahasa Indonesia yang mendalam.',
-    content: 'Alibaba Cloud meluncurkan seri Qwen 2.5, mencakup model umum dan model khusus pemrograman Qwen 2.5-Coder (32B dan 7B). Qwen 2.5-Coder menjadi model coding open weights peringkat teratas di dunia pada berbagai benchmark coding (HumanEval, MBPP), mendukung lebih dari 92 bahasa pemrograman dan 29 bahasa alami termasuk Bahasa Indonesia.',
-    category: 'tech',
-    published_at: '2026-09-25'
-  }
+// Daftar URL statis sintetis lama yang wajib dibersihkan dari indeks persisten agar tidak meracuni fakta temporal
+const DEPRECATED_SYNTHETIC_SEED_URLS = [
+  'https://ai.google.dev/gemma/gemma-4-release',
+  'https://blog.google/technology/ai/google-gemini-2-announcement',
+  'https://deepmind.google/technologies/gemini/gemini-1-5-pro',
+  'https://www.anthropic.com/news/claude-3-7-sonnet',
+  'https://www.anthropic.com/news/claude-3-5-sonnet-and-haiku-update',
+  'https://www.anthropic.com/news/claude-3-family-overview',
+  'https://openai.com/index/introducing-openai-o1/',
+  'https://ai.meta.com/blog/llama-4-announcement/',
+  'https://github.com/deepseek-ai/DeepSeek-V3',
+  'https://qwenlm.github.io/blog/qwen2.5/'
 ];
 
-function seedSovereignWebIndex(db) {
+function purgeSyntheticAndStaleWebIndex(db) {
   if (!db) return;
   try {
-    const now = new Date().toISOString();
-    const insertPage = db.prepare(`
-      INSERT OR REPLACE INTO zoz_web_pages (url, domain, title, snippet, content, category, published_at, crawled_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const insertFts = db.prepare(`
-      INSERT INTO zoz_web_fts (title, snippet, content, url, domain, category, published_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-    const deleteFtsOld = db.prepare('DELETE FROM zoz_web_fts WHERE url = ?');
-
-    for (const art of VERIFIED_SOVEREIGN_AI_REGISTRY) {
-      deleteFtsOld.run(art.url);
-      insertPage.run(art.url, art.domain, art.title, art.snippet, art.content, art.category, art.published_at, now);
-      insertFts.run(art.title, art.snippet, art.content, art.url, art.domain, art.category, art.published_at);
+    const delPage = db.prepare('DELETE FROM zoz_web_pages WHERE url = ?');
+    const delFts = db.prepare('DELETE FROM zoz_web_fts WHERE url = ?');
+    for (const badUrl of DEPRECATED_SYNTHETIC_SEED_URLS) {
+      delPage.run(badUrl);
+      delFts.run(badUrl);
     }
+    // Bersihkan entri tanpa timestamp asli yang dulu diberi label palsu YYYY-MM-DD dari Date.now()
+    db.prepare("UPDATE zoz_web_pages SET published_at = '' WHERE published_at = 'Terkini'").run();
+    db.prepare("UPDATE zoz_web_fts SET published_at = '' WHERE published_at = 'Terkini'").run();
   } catch (err) {
-    console.warn('[Zoz Sovereign Search Engine] Gagal seed registry model AI:', err.message);
+    console.warn('[Zoz Sovereign Search Engine] Gagal membersihkan residu sintetis:', err.message);
   }
 }
 
-function updateIndexedContent(url, content) {
+function updateIndexedContent(url, content, verifiedPublishedAt = '') {
   const db = initZozWebSearchDb();
   if (!db || !url || !content) return;
   try {
-    db.prepare('UPDATE zoz_web_pages SET content = ?, crawled_at = ? WHERE url = ?').run(content, new Date().toISOString(), url);
-    db.prepare('UPDATE zoz_web_fts SET content = ? WHERE url = ?').run(content, url);
+    if (verifiedPublishedAt) {
+      db.prepare('UPDATE zoz_web_pages SET content = ?, published_at = ?, crawled_at = ? WHERE url = ?').run(content, verifiedPublishedAt, new Date().toISOString(), url);
+      db.prepare('UPDATE zoz_web_fts SET content = ?, published_at = ? WHERE url = ?').run(content, verifiedPublishedAt, url);
+    } else {
+      db.prepare('UPDATE zoz_web_pages SET content = ?, crawled_at = ? WHERE url = ?').run(content, new Date().toISOString(), url);
+      db.prepare('UPDATE zoz_web_fts SET content = ? WHERE url = ?').run(content, url);
+    }
   } catch (_) {}
 }
 
@@ -4740,6 +4687,216 @@ function sanitizeFtsQuery(query) {
   return tokens.map(t => `"${t.replace(/"/g, '')}"*`).join(' OR ');
 }
 
+function extractHtmlPublishedDate(html) {
+  if (!html || typeof html !== 'string') return '';
+  const headSlice = html.slice(0, 65000);
+  const metaPatterns = [
+    /<meta\b[^>]*(?:property|name|itemprop)=["'](?:article:published_time|og:published_time|datePublished|pubdate|publish-date|publishdate|dc\.date(?:\.issued)?|sailthru\.date|parsely-pub-date)["'][^>]*content=["']([^"']{6,64})["']/i,
+    /<meta\b[^>]*content=["']([^"']{6,64})["'][^>]*(?:property|name|itemprop)=["'](?:article:published_time|og:published_time|datePublished|pubdate|publish-date|publishdate|dc\.date(?:\.issued)?|sailthru\.date|parsely-pub-date)["']/i,
+    /"datePublished"\s*:\s*"([^"\\]{6,64})"/i,
+    /<time\b[^>]*datetime=["']([^"']{6,64})["']/i
+  ];
+  for (const re of metaPatterns) {
+    const m = re.exec(headSlice);
+    if (m && m[1]) {
+      const ts = textSafety.parseAuthenticTimestamp(m[1].trim());
+      if (ts !== null) return new Date(ts).toISOString();
+    }
+  }
+  return '';
+}
+
+function buildDisjunctiveLiveQueries(cleanQuery, profile) {
+  const indoMap = [
+    [/\bcari(?:kan)?\s+di\s+(?:web|internet|google)\b/gi, ' '],
+    [/\b(?:tolong|coba|carikan|cari|jelaskan|sebutkan|apakah|apa|bagaimana|siapa|kapan)\b/gi, ' '],
+    [/\bminggu\s+ini\b/gi, 'this week'],
+    [/\bbulan\s+ini\b/gi, 'this month'],
+    [/\bhari\s+ini\b/gi, 'today'],
+    [/\btahun\s+ini\b/gi, String(profile.curYear)],
+    [/\brilis(?:an)?\b/gi, 'release'],
+    [/\bpeluncuran\b/gi, 'launch'],
+    [/\bterbaru\b/gi, 'latest'],
+    [/\bterkini\b/gi, 'latest'],
+    [/\bmutakhir\b/gi, 'frontier'],
+    [/\bberita\b/gi, 'news'],
+    [/\bpembaruan\b/gi, 'update'],
+    [/\bkecerdasan\s+buatan\b/gi, 'AI'],
+    [/\bmodel\s+terbuka\b/gi, 'open model']
+  ];
+  let enQ = cleanQuery;
+  for (const [re, rep] of indoMap) enQ = enQ.replace(re, rep);
+  enQ = enQ.replace(/[^\p{L}\p{N}\s.\-+]/gu, ' ').replace(/\s+/g, ' ').trim();
+  if (!enQ) enQ = cleanQuery;
+
+  // Dekomposisi Aljabar Boole: pisahkan kernel topik K dari himpunan entitas sejajar E = {e_1..e_m}
+  // sehingga kueri multi-lab seperti "AI model release OpenAI Google Anthropic" tidak gagal akibat irisan AND sempit
+  const entityRegex = /\b(openai|google|deepmind|anthropic|claude|meta|llama|mistral|deepseek|qwen|alibaba|xai|grok|microsoft|nvidia|cohere)\b/gi;
+  const entities = [...new Set((enQ.match(entityRegex) || []).map(s => s.toLowerCase()))];
+  const kernel = enQ.replace(entityRegex, ' ').replace(/\b(202\d|this\s+week|this\s+month|today|latest)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+
+  const queries = [];
+  if (entities.length >= 2 && kernel.length >= 3) {
+    queries.push(`${kernel} (${entities.join(' OR ')})`);
+    queries.push(`${kernel} ${profile.recencyAlpha >= 0.65 ? profile.curYear : ''}`.trim());
+  } else {
+    queries.push(enQ);
+  }
+  const isIndo = /\b(indonesia|jakarta|rupiah|prabowo|ihsg|bmkg|komisi|menteri|pemerintah|pilkada|kpk|timnas)\b/i.test(cleanQuery);
+  if (isIndo) {
+    const cleanId = cleanQuery.replace(/\bcari(?:kan)?\s+di\s+(?:web|internet|google)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+    if (cleanId && !queries.includes(cleanId)) queries.unshift(cleanId);
+  }
+  return { queries: queries.slice(0, 2), kernel: kernel || enQ, isIndo };
+}
+
+async function probeLiveQueryFeeds(cleanQuery, profile) {
+  const { queries, kernel, isIndo } = buildDisjunctiveLiveQueries(cleanQuery, profile);
+  const primaryQ = queries[0] || cleanQuery;
+  const broadQ = queries[1] || kernel || primaryQ;
+  const collected = [];
+  const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+  const fetchTextSafe = async (url, timeoutMs = 4200) => {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': ua, 'Accept': 'application/rss+xml, application/xml, text/xml, application/json, */*' },
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    if (!res.ok) return '';
+    return await res.text();
+  };
+
+  const parseBingRss = (xml) => {
+    const out = [];
+    const itemRe = /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
+    let m;
+    while ((m = itemRe.exec(xml)) !== null && out.length < 12) {
+      const raw = m[1];
+      const tM = /<title\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/title>/i.exec(raw);
+      const lM = /<link\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/link>/i.exec(raw);
+      const dM = /<description\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/description>/i.exec(raw);
+      const pM = /<pubDate\b[^>]*>([\s\S]*?)<\/pubDate>/i.exec(raw);
+      const sM = /<News:Source\b[^>]*>([\s\S]*?)<\/News:Source>/i.exec(raw);
+
+      const title = cleanHtmlText(tM ? (tM[1] || tM[2] || '') : '');
+      let link = (lM ? (lM[1] || lM[2] || '') : '').replace(/&amp;/g, '&').trim();
+      try {
+        const uObj = new URL(link);
+        const unwrapped = uObj.searchParams.get('url');
+        if (unwrapped && /^https?:\/\//i.test(unwrapped)) link = unwrapped;
+      } catch (_) {}
+      const snippet = cleanHtmlText(dM ? (dM[1] || dM[2] || '') : '').slice(0, 420);
+      const pubDate = (pM ? pM[1] : '').trim();
+      const sourceLabel = cleanHtmlText(sM ? sM[1] : '');
+      if (title && link && /^https?:\/\//i.test(link)) {
+        const domain = extractDomainSafe(link);
+        out.push({
+          url: link,
+          domain,
+          title,
+          snippet,
+          content: snippet,
+          category: 'live_news',
+          published_at: pubDate,
+          sourceProvider: sourceLabel ? `${sourceLabel} (${domain})` : domain
+        });
+      }
+    }
+    return out;
+  };
+
+  const parseGoogleNewsRss = (xml) => {
+    const out = [];
+    const itemRe = /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
+    let m;
+    while ((m = itemRe.exec(xml)) !== null && out.length < 10) {
+      const raw = m[1];
+      const tM = /<title\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/title>/i.exec(raw);
+      const lM = /<link\b[^>]*>([\s\S]*?)<\/link>/i.exec(raw);
+      const pM = /<pubDate\b[^>]*>([\s\S]*?)<\/pubDate>/i.exec(raw);
+      const srcM = /<source\b[^>]*url=["']([^"']+)["'][^>]*>([\s\S]*?)<\/source>/i.exec(raw);
+
+      const title = cleanHtmlText(tM ? (tM[1] || tM[2] || '') : '');
+      const link = (lM ? lM[1] : '').trim();
+      const pubDate = (pM ? pM[1] : '').trim();
+      const srcUrl = srcM ? srcM[1].trim() : '';
+      const srcName = cleanHtmlText(srcM ? srcM[2] : '');
+      const domain = srcUrl ? extractDomainSafe(srcUrl) : extractDomainSafe(link);
+      if (title && link && pubDate) {
+        out.push({
+          url: link,
+          domain,
+          title,
+          snippet: `${title}${srcName ? ` — Sumber: ${srcName}` : ''}`,
+          content: `${title}${srcName ? ` (${srcName}, ${pubDate})` : ''}`,
+          category: 'live_news',
+          published_at: pubDate,
+          sourceProvider: srcName ? `${srcName} (${domain})` : domain
+        });
+      }
+    }
+    return out;
+  };
+
+  const intervalParam = profile.recencyAlpha >= 0.85 ? '&qft=interval%3d%228%22' : (profile.recencyAlpha >= 0.60 ? '&qft=interval%3d%229%22' : '');
+  const gnewsWhen = profile.recencyAlpha >= 0.85 ? ' when:14d' : (profile.recencyAlpha >= 0.60 ? ' when:30d' : '');
+
+  const tasks = [
+    // 1. Bing News RSS (direct canonical publisher URLs + exact RFC-2822 pubDate)
+    fetchTextSafe(`https://www.bing.com/news/search?q=${encodeURIComponent(primaryQ)}${intervalParam}&format=rss`)
+      .then(xml => { if (xml) collected.push(...parseBingRss(xml)); }).catch(() => {}),
+    // 2. Google News RSS (broad topical / disjunctive coverage with exact pubDate)
+    fetchTextSafe(
+      isIndo
+        ? `https://news.google.com/rss/search?q=${encodeURIComponent(primaryQ + gnewsWhen)}&hl=id&gl=ID&ceid=ID:id`
+        : `https://news.google.com/rss/search?q=${encodeURIComponent(broadQ + gnewsWhen)}&hl=en-US&gl=US&ceid=US:en`
+    ).then(xml => { if (xml) collected.push(...parseGoogleNewsRss(xml)); }).catch(() => {})
+  ];
+
+  // If multi-lab query had distinct broadQ, also fetch broadQ from Bing News so single-lab launches are never missed
+  if (broadQ !== primaryQ) {
+    tasks.push(
+      fetchTextSafe(`https://www.bing.com/news/search?q=${encodeURIComponent(broadQ)}${intervalParam}&format=rss`)
+        .then(xml => { if (xml) collected.push(...parseBingRss(xml)); }).catch(() => {})
+    );
+  }
+
+  // 3. Hacker News Algolia API (exact Unix epoch timestamps for tech/AI/software releases)
+  if (/\b(ai|llm|model|gpt|claude|gemini|gemma|llama|mistral|deepseek|qwen|open\s*source|github|code|release|launch|tech|chip|gpu|tpu)\b/i.test(`${cleanQuery} ${broadQ}`)) {
+    const cutoffSec = profile.recencyAlpha >= 0.65
+      ? Math.floor((Date.now() - 45 * 86400000) / 1000)
+      : Math.floor((Date.now() - 365 * 86400000) / 1000);
+    tasks.push(
+      fetchTextSafe(`https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(broadQ)}&tags=story&numericFilters=created_at_i>${cutoffSec}&hitsPerPage=8`, 3800)
+        .then(raw => {
+          if (!raw) return;
+          const j = JSON.parse(raw);
+          for (const h of (j.hits || [])) {
+            if (!h || !h.title || !h.url) continue;
+            const domain = extractDomainSafe(h.url);
+            collected.push({
+              url: h.url,
+              domain,
+              title: cleanHtmlText(h.title),
+              snippet: `${cleanHtmlText(h.title)} (Diskusi teknis Hacker News · ${h.points || 0} poin)`,
+              content: cleanHtmlText(h.story_text || h.title),
+              category: 'tech',
+              published_at: h.created_at || '',
+              sourceProvider: `Hacker News (${domain})`
+            });
+          }
+        }).catch(() => {})
+    );
+  }
+
+  await Promise.allSettled(tasks);
+
+  for (const item of collected) {
+    indexArticleToZozDb(item);
+  }
+  return collected;
+}
+
 function queryZozFts(db, cleanQuery, limit) {
   const ftsQuery = sanitizeFtsQuery(cleanQuery);
   if (!ftsQuery) return [];
@@ -4751,33 +4908,45 @@ function queryZozFts(db, cleanQuery, limit) {
     ORDER BY rank
     LIMIT ?
   `).all(ftsQuery, limit);
-  return rows.map(r => ({
-    title: r.title,
-    url: r.url,
-    domain: r.domain,
-    snippet: r.snippet,
-    content: String(r.content || '').slice(0, 6000),
-    sourceProvider: `Zoz Neural Index (${r.domain})`,
-    timestamp: Date.parse(r.published_at) || Date.now(),
-    pubDate: r.published_at || 'Terkini'
-  }));
+  return rows.map(r => {
+    const ts = textSafety.parseAuthenticTimestamp(r.published_at, r.url, `${r.title} ${r.snippet}`);
+    return {
+      title: r.title,
+      url: r.url,
+      domain: r.domain,
+      snippet: r.snippet,
+      content: String(r.content || '').slice(0, 6000),
+      sourceProvider: `Zoz Neural Index (${r.domain})`,
+      timestamp: ts || 0,
+      published_at: r.published_at || '',
+      pubDate: ts !== null ? new Date(ts).toISOString().slice(0, 10) : ''
+    };
+  });
 }
 
-// Baca halaman asli hasil teratas agar AI menerima ISI artikel, bukan hanya judul + tautan
-async function enrichResultsWithFullText(results, maxEnrich = 4) {
+// Baca halaman asli hasil teratas & verifikasi metadata tanggal publikasi HTML asli
+async function enrichResultsWithFullText(results, maxEnrich = 5) {
   const targets = results
     .slice(0, maxEnrich)
-    .filter(r => r.url && /^https?:\/\//i.test(r.url) && String(r.content || '').length < 1200);
+    .filter(r => r.url && /^https?:\/\//i.test(r.url) && !/news\.google\.com\/rss\/articles\//i.test(r.url) && String(r.content || '').length < 1200);
   await Promise.allSettled(targets.map(async (r) => {
     try {
       const page = await Promise.race([
         browseWebPageContent(r.url, 5000),
-        new Promise(resolve => setTimeout(() => resolve(null), 7000))
+        new Promise(resolve => setTimeout(() => resolve(null), 6500))
       ]);
       const text = page && typeof page.text === 'string' ? cleanHtmlText(page.text).replace(/&#\d+;/g, ' ').trim() : '';
+      const htmlPub = page && page.published_at ? page.published_at : '';
+      if (htmlPub) {
+        r.published_at = htmlPub;
+        r.pubDate = htmlPub.slice(0, 10);
+        r.timestamp = Date.parse(htmlPub) || r.timestamp;
+      }
       if (text && !page.error && text.length > String(r.content || '').length) {
         r.content = text.slice(0, 6000);
-        updateIndexedContent(r.url, r.content);
+        updateIndexedContent(r.url, r.content, htmlPub);
+      } else if (htmlPub) {
+        updateIndexedContent(r.url, r.content || r.snippet || r.title, htmlPub);
       }
     } catch (_) {}
   }));
@@ -4791,7 +4960,8 @@ async function searchZozWebIndex(query, maxResults = 10, contextText = '') {
 
   const cleanQuery = query.trim();
   const db = initZozWebSearchDb();
-  let results = [];
+  const nowMs = Date.now();
+  const profile = textSafety.computeTemporalRecencyProfile(cleanQuery, contextText, nowMs);
 
   // Input berupa URL langsung: baca halaman secara mendalam dan index
   if (/^https?:\/\//i.test(cleanQuery)) {
@@ -4799,14 +4969,17 @@ async function searchZozWebIndex(query, maxResults = 10, contextText = '') {
       const pageData = await browseWebPageContent(cleanQuery, 6000);
       if (pageData && pageData.text && !pageData.error) {
         const title = pageData.title || cleanQuery;
+        const verifiedPub = pageData.published_at || '';
         indexArticleToZozDb({
           url: cleanQuery,
           domain: extractDomainSafe(cleanQuery),
           title,
           snippet: pageData.text.slice(0, 300),
           content: pageData.text,
+          published_at: verifiedPub,
           category: 'web'
         });
+        const ts = textSafety.parseAuthenticTimestamp(verifiedPub, cleanQuery, pageData.text, nowMs);
         return {
           query: cleanQuery,
           engine: 'zoz_sovereign_search_engine',
@@ -4818,129 +4991,93 @@ async function searchZozWebIndex(query, maxResults = 10, contextText = '') {
             snippet: pageData.text.slice(0, 300),
             content: pageData.text.slice(0, 6000),
             sourceProvider: `Zoz Deep Browser (${extractDomainSafe(cleanQuery)})`,
-            timestamp: Date.now(),
-            pubDate: 'Terkini'
+            timestamp: ts || 0,
+            pubDate: ts !== null ? new Date(ts).toISOString().slice(0, 10) : ''
           }]
         };
       }
     } catch (_) {}
   }
 
-  const detectedEntities = detectAiEntitiesInQuery(cleanQuery);
-  const isMultiEntity = detectedEntities.length > 1;
+  const fetchLimit = Math.min(Math.max(maxResults * 4, 24), 60);
+  const candidatePool = [];
 
-  if (db && isMultiEntity) {
-    // Multi-entity query (contoh: "Google dan Claude"): lakukan targeted search untuk tiap entitas secara berimbang
-    const perEntityLimit = Math.max(2, Math.ceil(maxResults / detectedEntities.length));
-    for (const ent of detectedEntities) {
-      const aliases = KNOWN_AI_ENTITY_MAP[ent] || [ent];
-      const entityFts = `(${aliases.map(a => `"${a}"*`).join(' OR ')}) AND ("model"* OR "ai"* OR "rilis"* OR "terbaru"* OR "release"* OR "update"*)`;
-      try {
-        const rows = db.prepare(`
-          SELECT title, snippet, content, url, domain, published_at,
-                 bm25(zoz_web_fts, 5.0, 2.0, 1.0) AS rank
-          FROM zoz_web_fts
-          WHERE zoz_web_fts MATCH ?
-          ORDER BY rank
-          LIMIT ?
-        `).all(entityFts, perEntityLimit);
-        for (const r of rows) {
-          results.push({
-            title: r.title,
-            url: r.url,
-            domain: r.domain,
-            snippet: r.snippet,
-            content: String(r.content || '').slice(0, 6000),
-            sourceProvider: `Zoz Neural Index (${r.domain})`,
-            timestamp: Date.parse(r.published_at) || Date.now(),
-            pubDate: r.published_at || 'Terkini'
-          });
-        }
-      } catch (_) {}
-    }
-  } else if (db && detectedEntities.length === 1) {
-    // Single entity query (contoh: hanya "Google" atau hanya "Claude"): wajibkan entitas tersebut ada
-    const aliases = KNOWN_AI_ENTITY_MAP[detectedEntities[0]] || [detectedEntities[0]];
-    const entityFts = `(${aliases.map(a => `"${a}"*`).join(' OR ')}) AND ("model"* OR "ai"* OR "rilis"* OR "terbaru"* OR "release"* OR "update"*)`;
+  // 1. Ambil kandidat awal dari indeks FTS5 lokal
+  if (db) {
     try {
-      const rows = db.prepare(`
-        SELECT title, snippet, content, url, domain, published_at,
-               bm25(zoz_web_fts, 5.0, 2.0, 1.0) AS rank
-        FROM zoz_web_fts
-        WHERE zoz_web_fts MATCH ?
-        ORDER BY rank
-        LIMIT ?
-      `).all(entityFts, maxResults * 2);
-      for (const r of rows) {
-        results.push({
-          title: r.title,
-          url: r.url,
-          domain: r.domain,
-          snippet: r.snippet,
-          content: String(r.content || '').slice(0, 6000),
-          sourceProvider: `Zoz Neural Index (${r.domain})`,
-          timestamp: Date.parse(r.published_at) || Date.now(),
-          pubDate: r.published_at || 'Terkini'
-        });
-      }
-    } catch (_) {}
-  }
-
-  // Jika belum ada hasil spesifik entitas, jalankan query FTS umum
-  if (results.length === 0 && db) {
-    const fetchLimit = Math.min(maxResults * 2, 30);
-    try { results = queryZozFts(db, cleanQuery, fetchLimit); } catch (err) {
+      candidatePool.push(...queryZozFts(db, cleanQuery, fetchLimit));
+    } catch (err) {
       console.warn('[Zoz Sovereign Search Engine] Query SQLite FTS error:', err.message);
     }
   }
 
-  // Hasil sedikit atau kueri meminta info terkini: rayapi sumber primer langsung lalu query ulang
-  const combinedContext = (cleanQuery + ' ' + (contextText || '')).toLowerCase();
-  const needsLiveProbe = results.length < 3 || /\b(terbaru|terkini|hari ini|berita|today|latest|update|rilis|release|baru)\b/i.test(combinedContext);
-  if (needsLiveProbe) {
+  // 2. Evaluasi apakah kandidat lokal sudah memiliki cukup dokumen segar terverifikasi (Δt <= 21 hari)
+  const preRankedLocal = textSafety.rankDocumentsMathematically(candidatePool, cleanQuery, { profile, contextText, nowMs });
+  const freshLocalCount = preRankedLocal.filter(r => r.mathDiagnostics && r.mathDiagnostics.ageDays !== null && r.mathDiagnostics.ageDays <= 21 && r.mathDiagnostics.mathScore >= 0.15).length;
+
+  // 3. Jalankan multi-channel live probe paralel jika kueri membutuhkan kesegaran waktu atau hasil lokal minim
+  if (profile.recencyAlpha >= 0.40 || freshLocalCount < Math.min(4, maxResults)) {
     try {
-      await Promise.race([
-        crawlPrimaryFeeds(true),
-        new Promise(resolve => setTimeout(resolve, 6000))
+      const [liveItems] = await Promise.all([
+        Promise.race([
+          probeLiveQueryFeeds(cleanQuery, profile),
+          new Promise(resolve => setTimeout(() => resolve([]), 5200))
+        ]),
+        Promise.race([
+          crawlPrimaryFeeds(true),
+          new Promise(resolve => setTimeout(resolve, 4500))
+        ])
       ]);
-      if (db) results = queryZozFts(db, cleanQuery, fetchLimit);
+      if (Array.isArray(liveItems) && liveItems.length > 0) {
+        candidatePool.push(...liveItems);
+      }
+      if (db) {
+        try {
+          candidatePool.push(...queryZozFts(db, cleanQuery, fetchLimit));
+        } catch (_) {}
+      }
     } catch (_) {}
   }
 
   // Fallback in-memory jika SQLite tidak tersedia
-  if (!results.length && sovereignFallbackStore.length > 0) {
-    const tokens = cleanQuery.toLowerCase().split(/\s+/).filter(t => t && !ZOZ_SEARCH_STOPWORDS.has(t));
-    results = sovereignFallbackStore.filter(item => {
-      const text = (item.title + ' ' + item.snippet + ' ' + item.content).toLowerCase();
-      return tokens.some(t => text.includes(t));
-    }).slice(0, maxResults).map(m => ({
+  if (candidatePool.length === 0 && sovereignFallbackStore.length > 0) {
+    candidatePool.push(...sovereignFallbackStore.map(m => ({
       title: m.title,
       url: m.url,
       domain: m.domain,
       snippet: m.snippet,
       content: String(m.content || '').slice(0, 6000),
       sourceProvider: `Zoz In-Memory Index (${m.domain})`,
-      timestamp: Date.parse(m.published_at) || Date.now(),
-      pubDate: m.published_at || 'Terkini'
-    }));
+      published_at: m.published_at || ''
+    })));
   }
 
+  // 4. Deduplikasi kandidat & pemeringkatan matematis Tahap-1 (BM25F × Peluruhan Eksponensial e^{-λ·Δt})
   const seenUrls = new Set();
-  const deduped = [];
-  for (const item of results) {
-    if (!item.url || seenUrls.has(item.url)) continue;
-    seenUrls.add(item.url);
-    deduped.push(item);
-    if (deduped.length >= maxResults) break;
+  const uniquePool = [];
+  for (const item of candidatePool) {
+    if (!item || !item.url) continue;
+    const normUrl = String(item.url).trim().replace(/\/+$/, '');
+    if (seenUrls.has(normUrl)) continue;
+    seenUrls.add(normUrl);
+    uniquePool.push(item);
   }
 
-  await enrichResultsWithFullText(deduped, 6);
+  let ranked = textSafety.rankDocumentsMathematically(uniquePool, cleanQuery, { profile, contextText, nowMs });
+  const topCandidates = ranked.slice(0, Math.min(maxResults + 4, 14));
+
+  // 5. Perkaya isi artikel lengkap & verifikasi ulang timestamp HTML asli (Tahap-2 Re-ranking)
+  await enrichResultsWithFullText(topCandidates, Math.min(6, topCandidates.length));
+  ranked = textSafety.rankDocumentsMathematically(topCandidates, cleanQuery, { profile, contextText, nowMs });
+
+  const finalResults = ranked.slice(0, maxResults);
 
   return {
     query: cleanQuery,
-    engine: 'zoz_sovereign_search_engine',
-    count: deduped.length,
-    results: deduped
+    engine: 'zoz_sovereign_mathematical_ir_v2',
+    temporalProfile: profile,
+    count: finalResults.length,
+    results: finalResults
   };
 }
 
@@ -5019,6 +5156,7 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
         if (resolved) return;
         resolved = true;
         try {
+          const htmlPublishedAt = extractHtmlPublishedDate(html);
           const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
           const title = titleMatch ? cleanHtmlText(titleMatch[1]) : '';
 
@@ -5051,7 +5189,10 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
           clean = cleanHtmlText(clean);
 
           if (clean.length < 50 && redirectCount === 0) {
-            return fallbackJinaReader(cleanTarget, maxChars).then(resolve);
+            return fallbackJinaReader(cleanTarget, maxChars).then((jinaRes) => {
+              if (htmlPublishedAt && jinaRes && !jinaRes.published_at) jinaRes.published_at = htmlPublishedAt;
+              resolve(jinaRes);
+            });
           }
 
           resolve({
@@ -5059,6 +5200,7 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
             title: title || parsedUrl.hostname,
             text: clean.substring(0, maxChars),
             totalLength: clean.length,
+            published_at: htmlPublishedAt,
             links
           });
         } catch (e) {
@@ -5161,12 +5303,14 @@ function fallbackJinaReader(targetUrl, maxChars = 5000) {
         res.on('end', () => {
           if (res.statusCode === 200 && md.length > 50) {
             const titleMatch = md.match(/^Title:\s*(.+)$/m) || md.match(/^#\s+(.+)$/m);
+            const pubMatch = md.match(/^Published Time:\s*(.+)$/mi);
             const title = titleMatch ? cleanHtmlText(titleMatch[1].trim()) : extractDomainSafe(targetUrl);
             safeResolve({
               url: targetUrl,
               title,
               text: md.substring(0, maxChars),
               totalLength: md.length,
+              published_at: pubMatch ? pubMatch[1].trim() : '',
               links: []
             });
           } else {

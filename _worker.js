@@ -357,6 +357,120 @@ function extractKeyPointsFromText(text, maxPoints = 4) {
   return valid.slice(0, maxPoints);
 }
 
+function parseEdgeAuthenticTimestamp(rawDateStr, urlStr = '', bodyStr = '', nowMs = Date.now()) {
+  const MAX_FUTURE_SKEW_MS = 36 * 3600 * 1000;
+  const s = String(rawDateStr || '').trim();
+  if (s && !/^(terkini|baru|latest|recent|unknown|n\/a|-)$/i.test(s)) {
+    const direct = Date.parse(s);
+    if (!Number.isNaN(direct) && direct > 946684800000 && direct <= nowMs + MAX_FUTURE_SKEW_MS) return direct;
+    const rel = s.match(/(\d+)\s*(detik|menit|jam|hari|minggu|bulan|tahun|second|minute|hour|day|week|month|year)s?\s*(?:yang\s*)?(?:lalu|ago)/i);
+    if (rel) {
+      const n = parseInt(rel[1], 10);
+      const u = rel[2].toLowerCase();
+      const map = { detik: 1e3, second: 1e3, menit: 6e4, minute: 6e4, jam: 36e5, hour: 36e5, hari: 864e5, day: 864e5, minggu: 6048e5, week: 6048e5, bulan: 2592e6, month: 2592e6, tahun: 31536e6, year: 31536e6 };
+      if (map[u]) return nowMs - n * map[u];
+    }
+  }
+  const uMatch = String(urlStr || '').match(/\/(20[12]\d)[\/\-](0[1-9]|1[0-2])[\/\-](0[1-9]|[12]\d|3[01])(?:\/|$|\b)/);
+  if (uMatch) {
+    const ts = Date.UTC(parseInt(uMatch[1], 10), parseInt(uMatch[2], 10) - 1, parseInt(uMatch[3], 10), 12, 0, 0);
+    if (ts <= nowMs + MAX_FUTURE_SKEW_MS) return ts;
+  }
+  const bMatch = String(bodyStr || '').slice(0, 600).match(/\b(20[12]\d)-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])\b/);
+  if (bMatch) {
+    const ts = Date.UTC(parseInt(bMatch[1], 10), parseInt(bMatch[2], 10) - 1, parseInt(bMatch[3], 10), 12, 0, 0);
+    if (ts <= nowMs + MAX_FUTURE_SKEW_MS) return ts;
+  }
+  return null;
+}
+
+function computeEdgeRecencyProfile(query, contextText = '', nowMs = Date.now()) {
+  const combined = `${query || ''} ${(contextText || '').slice(0, 300)}`.toLowerCase();
+  const curYear = new Date(nowMs).getUTCFullYear();
+  const yearMatches = (String(query || '').match(/\b(19\d{2}|20[0-3]\d)\b/g) || []).map(Number);
+  const explicitPastYear = yearMatches.find(y => y < curYear) || null;
+  if (explicitPastYear && !yearMatches.includes(curYear)) {
+    return { alpha: 0.08, halfLifeDays: 1825, lambda: Math.LN2 / 1825, targetHistoricalYear: explicitPastYear };
+  }
+  let p = 0;
+  const combineOr = (w) => { p = 1 - (1 - p) * (1 - w); };
+  if (/\b(hari\s+ini|today|breaking|barusan|detik\s+ini|right\s+now|live)\b/i.test(combined)) combineOr(0.96);
+  if (/\b(minggu\s+ini|pekan\s+ini|this\s+week|kemarin|yesterday)\b/i.test(combined)) combineOr(0.92);
+  if (/\b(terbaru|terkini|latest|newest|recent|baru\s+rilis|rilis\s+terbaru|new\s+release|update\s+terbaru|saat\s+ini|sekarang)\b/i.test(combined)) combineOr(0.88);
+  if (yearMatches.includes(curYear)) combineOr(0.82);
+  if (/\b(rilis|release|launched|announc\w*|berita|news|harga|price|kurs|skor|benchmark)\b/i.test(combined)) combineOr(0.55);
+  const alpha = Number(Math.min(0.99, Math.max(0.05, p)).toFixed(4));
+  const halfLifeDays = alpha >= 0.90 ? 14 : (alpha >= 0.75 ? 25 : (alpha >= 0.50 ? 60 : 365));
+  return { alpha, halfLifeDays, lambda: Math.LN2 / halfLifeDays, targetHistoricalYear: null };
+}
+
+function rankEdgeDocumentsMathematically(candidates, query, profile, nowMs = Date.now()) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return [];
+  const STOP = new Set(['apa','siapa','kapan','dimana','bagaimana','mengapa','yang','dan','atau','di','ke','dari','untuk','pada','dengan','ini','itu','coba','cari','tolong','web','internet','terbaru','terkini','hari','minggu','bulan','tahun','what','who','when','where','how','why','the','and','or','in','to','from','for','with','this','that','please','search','find','latest','newest','recent','today']);
+  const SYN = { rilis: ['release','released','launch','launched','announcing','introduced'], model: ['models','llm','foundation','frontier'], ai: ['artificial','intelligence','llm','genai'], berita: ['news','report','update'] };
+  const baseTokens = String(query || '').toLowerCase().replace(/[^\p{L}\p{N}.+-]+/gu, ' ').split(/\s+/).filter(t => t.length >= 2 && !STOP.has(t) && !/^20[12]\d$/.test(t));
+  const qTerms = [];
+  const seenT = new Set();
+  for (const t of baseTokens) {
+    if (!seenT.has(t)) { seenT.add(t); qTerms.push({ term: t, weight: 1.0 }); }
+    for (const s of (SYN[t] || [])) {
+      if (!seenT.has(s)) { seenT.add(s); qTerms.push({ term: s, weight: 0.65 }); }
+    }
+  }
+  const N = candidates.length;
+  const docs = candidates.map(item => {
+    const titleToks = String(item.title || '').toLowerCase().replace(/[^\p{L}\p{N}.+-]+/gu, ' ').split(/\s+/).filter(Boolean);
+    const snipToks = String(item.snippet || '').toLowerCase().replace(/[^\p{L}\p{N}.+-]+/gu, ' ').split(/\s+/).filter(Boolean);
+    const contToks = String(item.content || '').slice(0, 3500).toLowerCase().replace(/[^\p{L}\p{N}.+-]+/gu, ' ').split(/\s+/).filter(Boolean);
+    const tf = new Map();
+    const add = (arr, w) => { for (const tok of arr) tf.set(tok, (tf.get(tok) || 0) + w); };
+    add(titleToks, 4.0); add(snipToks, 2.0); add(contToks, 1.0);
+    const dl = titleToks.length * 4 + snipToks.length * 2 + contToks.length + 1;
+    const ts = parseEdgeAuthenticTimestamp(item.published_at || item.published_date || item.pubDate || '', item.url || '', `${item.title || ''} ${item.snippet || ''}`, nowMs);
+    return { item, tf, dl, ts };
+  });
+  const avgDl = docs.reduce((s, d) => s + d.dl, 0) / Math.max(1, N);
+  const df = new Map();
+  for (const q of qTerms) {
+    let c = 0;
+    for (const d of docs) if ((d.tf.get(q.term) || 0) > 0) c++;
+    df.set(q.term, c);
+  }
+  const hasFreshVerified = docs.some(d => d.ts !== null && ((nowMs - d.ts) / 864e5) <= 90);
+  const k1 = 1.5, b = 0.75;
+  const scored = [];
+  for (const d of docs) {
+    let bm25 = 0;
+    for (const q of qTerms) {
+      const f = d.tf.get(q.term) || 0;
+      if (f <= 0) continue;
+      const dfi = df.get(q.term) || 0;
+      const idf = Math.log(1 + (N - dfi + 0.5) / (dfi + 0.5));
+      bm25 += q.weight * idf * ((f * (k1 + 1)) / (f + k1 * (1 - b + b * (d.dl / avgDl))));
+    }
+    if (qTerms.length > 0 && bm25 <= 0.05) continue;
+    let ageDays = null;
+    let temporalFactor = 1.0;
+    if (d.ts !== null) {
+      ageDays = Math.max(0, (nowMs - d.ts) / 864e5);
+      if (profile.alpha >= 0.70 && hasFreshVerified && ageDays > 120) continue;
+      temporalFactor = (1 - profile.alpha) + profile.alpha * Math.exp(-profile.lambda * ageDays);
+    } else {
+      temporalFactor = profile.alpha >= 0.70 ? 0.18 : 0.65;
+    }
+    const finalScore = (bm25 > 0 ? bm25 : 0.25) * temporalFactor;
+    scored.push({
+      ...d.item,
+      timestamp: d.ts || 0,
+      pubDate: d.ts !== null ? new Date(d.ts).toISOString().slice(0, 10) : '',
+      ageDays: ageDays !== null ? Number(ageDays.toFixed(2)) : null,
+      mathematicalScore: Number(finalScore.toFixed(4))
+    });
+  }
+  scored.sort((a, b) => b.mathematicalScore - a.mathematicalScore);
+  return scored;
+}
+
 async function searchWebSources({ query = '', sources = [], max_results = 5, language = '' } = {}) {
   const cleanQ = String(query || '').trim();
   if (!cleanQ) {
@@ -381,6 +495,10 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     ? sources.map(s => extractWhitelistedDomain(s)).filter(Boolean)
     : ['arxiv.org', 'github.com', 'cna.al', 'cnn.com', 'bloomberg.com', 'reddit.com'];
 
+  const nowMs = Date.now();
+  const recencyProfile = computeEdgeRecencyProfile(cleanQ, '', nowMs);
+  const sortRecent = recencyProfile.alpha >= 0.5;
+
   const results = [];
   const searchTasks = [];
 
@@ -388,7 +506,8 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
   if (targets.some(t => t.includes('arxiv.org'))) {
     searchTasks.push((async () => {
       try {
-        const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(cleanQ)}&start=0&max_results=${Math.min(safeLimit, 5)}`;
+        const arxivSort = sortRecent ? '&sortBy=submittedDate&sortOrder=descending' : '';
+        const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(cleanQ)}&start=0&max_results=${Math.min(safeLimit, 6)}${arxivSort}`;
         const res = await fetch(arxivUrl, { signal: AbortSignal.timeout(3500) });
         if (res.ok) {
           const xml = await res.text();
@@ -410,6 +529,7 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
                 url: rawUrl,
                 snippet: rawSnippet,
                 published_date: pubDate,
+                published_at: pubDate,
                 source_name: 'arXiv',
                 relevance_score: Number((0.96 - (idx * 0.04)).toFixed(2))
               });
@@ -424,7 +544,8 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
   if (targets.some(t => t.includes('github.com'))) {
     searchTasks.push((async () => {
       try {
-        const ghUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(cleanQ)}&per_page=${Math.min(safeLimit, 5)}`;
+        const ghSort = sortRecent ? '&sort=updated&order=desc' : '';
+        const ghUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(cleanQ)}&per_page=${Math.min(safeLimit, 6)}${ghSort}`;
         const res = await fetch(ghUrl, {
           headers: { 'User-Agent': 'ZOZ-Router-Grounding-Agent' },
           signal: AbortSignal.timeout(3500)
@@ -433,11 +554,13 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
           const json = await res.json();
           const items = Array.isArray(json.items) ? json.items : [];
           items.forEach((item, idx) => {
+            const pubDate = item.updated_at ? item.updated_at.slice(0, 10) : '';
             results.push({
               title: `${item.name} (${item.full_name})`,
               url: item.html_url,
               snippet: item.description || `Repositori GitHub open-source: ${item.full_name} (${item.stargazers_count} bintang).`,
-              published_date: item.updated_at ? item.updated_at.slice(0, 10) : '',
+              published_date: pubDate,
+              published_at: pubDate,
               source_name: 'GitHub',
               relevance_score: Number((0.92 - (idx * 0.04)).toFixed(2))
             });
@@ -459,14 +582,17 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
         if (res.ok) {
           const text = await res.text();
           const linkMatches = text.match(/\[([^\]]+)\]\((https?:\/\/(?:www\.)?cna\.al\/[^\s\)]+)\)/gi) || [];
-          linkMatches.slice(0, 3).forEach((lm, idx) => {
+          linkMatches.slice(0, 4).forEach((lm, idx) => {
             const m = lm.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/i);
             if (m && !results.some(r => r.url === m[2])) {
+              const ts = parseEdgeAuthenticTimestamp('', m[2].trim(), m[1].trim(), nowMs);
+              const pubDate = ts !== null ? new Date(ts).toISOString().slice(0, 10) : '';
               results.push({
                 title: m[1].trim(),
                 url: m[2].trim(),
                 snippet: `Berita dan laporan resmi dari CNA Albania mengenai: ${m[1].trim()}`,
-                published_date: 'Terkini',
+                published_date: pubDate,
+                published_at: pubDate,
                 source_name: 'CNA Albania',
                 relevance_score: Number((0.88 - (idx * 0.03)).toFixed(2))
               });
@@ -491,14 +617,17 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
         if (res.ok) {
           const text = await res.text();
           const linkMatches = text.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/gi) || [];
-          linkMatches.slice(0, 3).forEach((lm, idx) => {
+          linkMatches.slice(0, 4).forEach((lm, idx) => {
             const m = lm.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/i);
             if (m && isWhitelistedSourceUrl(m[2]) && !results.some(r => r.url === m[2])) {
+              const ts = parseEdgeAuthenticTimestamp('', m[2].trim(), m[1].trim(), nowMs);
+              const pubDate = ts !== null ? new Date(ts).toISOString().slice(0, 10) : '';
               results.push({
                 title: m[1].trim(),
                 url: m[2].trim(),
                 snippet: `Laporan resmi dari ${getSourceNameFromUrl(m[2])} seputar topik kueri.`,
-                published_date: 'Terkini',
+                published_date: pubDate,
+                published_at: pubDate,
                 source_name: getSourceNameFromUrl(m[2]),
                 relevance_score: Number((0.86 - (idx * 0.03)).toFixed(2))
               });
@@ -514,12 +643,24 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     await Promise.allSettled(searchTasks);
   }
 
+  const ranked = rankEdgeDocumentsMathematically(results, cleanQ, recencyProfile, nowMs);
+  const finalResults = ranked.slice(0, safeLimit).map(item => ({
+    title: item.title,
+    url: item.url,
+    snippet: item.snippet,
+    published_date: item.pubDate || item.published_date || '',
+    source_name: item.source_name || getSourceNameFromUrl(item.url),
+    relevance_score: typeof item.mathematicalScore === 'number'
+      ? Number(Math.min(0.99, 0.45 + 0.14 * Math.log1p(item.mathematicalScore)).toFixed(3))
+      : (item.relevance_score || 0.5)
+  }));
+
   return {
-    success: results.length > 0,
+    success: finalResults.length > 0,
     query: cleanQ,
     sources_queried: targets,
-    count: results.length,
-    results: results.slice(0, safeLimit)
+    count: finalResults.length,
+    results: finalResults
   };
 }
 
@@ -2264,125 +2405,185 @@ export default {
         }
         const targetNum = Math.min(Math.max(isNaN(num) ? 12 : num, 1), 30);
         const cleanQuery = query.trim();
+        const nowMs = Date.now();
+        const profile = computeEdgeRecencyProfile(cleanQuery, context, nowMs);
 
-        // 2. Direct Primary Feed Spiders (Direct publisher RSS without search engines)
+        // Dekomposisi Aljabar Boolean K ∧ (e₁ ∨ ... ∨ eₘ) untuk mencegah over-conjunction multi-lab
+        const KNOWN_LABS = new Set(['openai','anthropic','google','deepmind','meta','mistral','deepseek','qwen','alibaba','xai','nvidia','microsoft','cohere','zhipu']);
+        const rawWords = cleanQuery.replace(/[?,!;:()[\]{}"'`]+/g, ' ').split(/\s+/).filter(Boolean);
+        const NOISE = new Set(['apa','siapa','kapan','dimana','bagaimana','coba','cari','tolong','di','ke','dari','web','internet','terbaru','terkini','minggu','hari','bulan','ini','itu','please','search','find','latest','newest','recent']);
+        const ents = [];
+        const core = [];
+        for (const w of rawWords) {
+          const lw = w.toLowerCase();
+          if (NOISE.has(lw) || /^20[12]\d$/.test(lw)) continue;
+          if (KNOWN_LABS.has(lw)) ents.push(lw);
+          else core.push(w);
+        }
+        const coreStr = core.join(' ').trim() || cleanQuery;
+        const enCore = coreStr
+          .replace(/\brilis\b/gi, 'release')
+          .replace(/\bberita\b/gi, 'news')
+          .replace(/\bharga\b/gi, 'price');
+        const subQueries = [];
+        if (ents.length >= 2) {
+          subQueries.push(`${enCore} (${ents.slice(0, 6).join(' OR ')})`.trim());
+          subQueries.push(enCore);
+        } else {
+          subQueries.push(enCore);
+          if (enCore.toLowerCase() !== coreStr.toLowerCase()) subQueries.push(coreStr);
+        }
+
         const PRIMARY_FEEDS = [
           'https://feeds.arstechnica.com/arstechnica/index',
           'https://huggingface.co/blog/feed.xml',
-          'https://www.antaranews.com/rss/tekno.xml',
-          'https://techcrunch.com/feed/'
+          'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml',
+          'https://techcrunch.com/category/artificial-intelligence/feed/',
+          'https://simonwillison.net/atom/everything/',
+          'https://www.antaranews.com/rss/tekno.xml'
         ];
 
-        const candidatePool = [];
+        const parseRssXmlItems = (xml, maxItems = 10, unwrapBing = false) => {
+          const items = [];
+          const itemRegex = /<(?:item|entry)\b[^>]*>([\s\S]*?)<\/(?:item|entry)>/gi;
+          let match;
+          while ((match = itemRegex.exec(xml)) !== null && items.length < maxItems) {
+            const raw = match[1];
+            const titleM = /<title\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/title>/i.exec(raw);
+            const linkAttrM = /<link\b[^>]*href=["']([^"']+)["'][^>]*\/?>/i.exec(raw);
+            const linkM = /<link\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/link>/i.exec(raw);
+            const descM = /<(?:description|content:encoded|summary|content)\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/(?:description|content:encoded|summary|content)>/i.exec(raw);
+            const pubM = /<(?:pubDate|dc:date|published|updated)\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/(?:pubDate|dc:date|published|updated)>/i.exec(raw);
+            const srcM = /<source\b[^>]*>([\s\S]*?)<\/source>/i.exec(raw);
 
-        // Crawl direct primary feeds if needed for live news
-        const combinedContext = (cleanQuery + ' ' + (context || '')).toLowerCase();
-        const wantsLive = true; // Worker tidak punya index persisten: selalu rayapi sumber primer langsung
-
-        if (wantsLive) {
-          const fetchFeed = async (feedUrl) => {
-            try {
-              const res = await fetch(feedUrl, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ZozSpider/2.0' },
-                signal: AbortSignal.timeout(4000)
+            const title = (titleM ? (titleM[1] || titleM[2] || '') : '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim();
+            let link = (linkM ? (linkM[1] || linkM[2] || '') : (linkAttrM ? linkAttrM[1] : '')).replace(/&amp;/g, '&').trim();
+            if (unwrapBing && link.includes('bing.com/news/apiclick.aspx')) {
+              try {
+                const uParam = new URL(link).searchParams.get('url');
+                if (uParam && /^https?:\/\//i.test(uParam)) link = uParam;
+              } catch (_) {}
+            }
+            const descText = (descM ? (descM[1] || descM[2] || '') : '').replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+            const pubDate = (pubM ? (pubM[1] || pubM[2] || '') : '').trim();
+            const srcName = srcM ? srcM[1].replace(/<[^>]+>/g, '').trim() : '';
+            if (title && link && /^https?:\/\//i.test(link)) {
+              let domain = 'web';
+              try { domain = new URL(link).hostname.replace(/^www\./i, ''); } catch (_) {}
+              if (domain === 'news.google.com' && srcName) domain = srcName;
+              items.push({
+                url: link,
+                domain,
+                title,
+                snippet: descText.slice(0, 320),
+                content: descText.slice(0, 4000),
+                category: 'live_feed',
+                published_at: pubDate
               });
-              if (!res.ok) return [];
-              const xml = await res.text();
-              const items = [];
-              const itemRegex = /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
-              let match;
-              while ((match = itemRegex.exec(xml)) !== null && items.length < 8) {
-                const raw = match[1];
-                const titleM = /<title\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/title>/i.exec(raw);
-                const linkM = /<link\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/link>/i.exec(raw);
-                const descM = /<(?:description|content:encoded|summary)\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/(?:description|content:encoded|summary)>/i.exec(raw);
-                const pubM = /<(?:pubDate|dc:date|published|updated)\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/(?:pubDate|dc:date|published|updated)>/i.exec(raw);
-
-                const title = (titleM ? (titleM[1] || titleM[2] || '') : '').replace(/<[^>]+>/g, '').trim();
-                let link = (linkM ? (linkM[1] || linkM[2] || '') : '').trim();
-                const fullM = /<content:encoded\b[^>]*>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([\s\S]*?))<\/content:encoded>/i.exec(raw);
-                const descText = (descM ? (descM[1] || descM[2] || '') : '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-                const fullText = (fullM ? (fullM[1] || fullM[2] || '') : '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-                const snippet = descText.slice(0, 300);
-                const articleText = (fullText.length > descText.length ? fullText : descText).slice(0, 4000);
-                const pubDate = (pubM ? (pubM[1] || pubM[2] || '') : '').trim();
-                if (title && link) {
-                  let domain = 'web';
-                  try { domain = new URL(link).hostname.replace(/^www\./i, ''); } catch (_) {}
-                  items.push({
-                    url: link,
-                    domain,
-                    title,
-                    snippet,
-                    content: articleText,
-                    category: 'feed',
-                    published_at: pubDate
-                  });
-                }
-              }
-              return items;
-            } catch (_) {
-              return [];
-            }
-          };
-
-          const feedResults = await Promise.allSettled(PRIMARY_FEEDS.map(f => fetchFeed(f)));
-          for (const fr of feedResults) {
-            if (fr.status === 'fulfilled' && Array.isArray(fr.value)) {
-              candidatePool.push(...fr.value);
             }
           }
+          return items;
+        };
+
+        const tasks = [];
+        const mainSubQ = subQueries[0] || cleanQuery;
+        const whenSuffix = profile.alpha >= 0.65 ? ' when:30d' : '';
+
+        // 1. Bing News RSS Live Query (dengan unwrapping URL penerbit asli)
+        for (const sq of subQueries.slice(0, 2)) {
+          tasks.push((async () => {
+            try {
+              const bUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(sq)}&format=rss&setlang=en-us`;
+              const r = await fetch(bUrl, { headers: { 'User-Agent': 'Mozilla/5.0 ZozSpider/3.0' }, signal: AbortSignal.timeout(4000) });
+              return r.ok ? parseRssXmlItems(await r.text(), 10, true) : [];
+            } catch (_) { return []; }
+          })());
         }
 
-        // Score candidates based on query token matches
-        const qTokens = cleanQuery.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ' ').split(/\s+/).filter(Boolean);
-        const scored = candidatePool.map(item => {
-          let score = 0;
-          const tLower = (item.title || '').toLowerCase();
-          const sLower = (item.snippet || '').toLowerCase();
-          const cLower = (item.content || '').toLowerCase();
+        // 2. Google News RSS Live Query (EN & ID)
+        tasks.push((async () => {
+          try {
+            const gEn = `https://news.google.com/rss/search?q=${encodeURIComponent(mainSubQ + whenSuffix)}&hl=en-US&gl=US&ceid=US:en`;
+            const r = await fetch(gEn, { headers: { 'User-Agent': 'Mozilla/5.0 ZozSpider/3.0' }, signal: AbortSignal.timeout(4000) });
+            return r.ok ? parseRssXmlItems(await r.text(), 10, false) : [];
+          } catch (_) { return []; }
+        })());
+        tasks.push((async () => {
+          try {
+            const gId = `https://news.google.com/rss/search?q=${encodeURIComponent(coreStr + whenSuffix)}&hl=id&gl=ID&ceid=ID:id`;
+            const r = await fetch(gId, { headers: { 'User-Agent': 'Mozilla/5.0 ZozSpider/3.0' }, signal: AbortSignal.timeout(4000) });
+            return r.ok ? parseRssXmlItems(await r.text(), 8, false) : [];
+          } catch (_) { return []; }
+        })());
 
-          for (const token of qTokens) {
-            if (tLower.includes(token)) score += 10;
-            if (sLower.includes(token)) score += 4;
-            if (cLower.includes(token)) score += 2;
-          }
+        // 3. Hacker News Algolia Live API (timestamp Unix terverifikasi)
+        tasks.push((async () => {
+          try {
+            const endpoint = profile.alpha >= 0.65 ? 'search_by_date' : 'search';
+            const minTs = profile.alpha >= 0.65 ? `&numericFilters=created_at_i>${Math.floor((nowMs - 45 * 864e5) / 1000)}` : '';
+            const hnUrl = `https://hn.algolia.com/api/v1/${endpoint}?query=${encodeURIComponent(enCore)}&tags=story&hitsPerPage=8${minTs}`;
+            const r = await fetch(hnUrl, { signal: AbortSignal.timeout(3500) });
+            if (!r.ok) return [];
+            const data = await r.json();
+            return (Array.isArray(data.hits) ? data.hits : []).filter(h => h && h.title && h.url).map(h => {
+              let domain = 'news.ycombinator.com';
+              try { domain = new URL(h.url).hostname.replace(/^www\./i, ''); } catch (_) {}
+              return {
+                url: h.url,
+                domain,
+                title: h.title,
+                snippet: `${h.title} (${h.points || 0} pts, ${h.num_comments || 0} comments on HN)`,
+                content: h.story_text ? String(h.story_text).replace(/<[^>]+>/g, ' ').slice(0, 2000) : h.title,
+                category: 'hn_live',
+                published_at: h.created_at || ''
+              };
+            });
+          } catch (_) { return []; }
+        })());
 
-          if (item.published_at && (item.published_at.includes('2026') || item.published_at.includes('Oct') || item.published_at.includes('Oktober'))) {
-            score += 5;
-          }
+        // 4. Primary Publisher Feeds
+        for (const fUrl of PRIMARY_FEEDS) {
+          tasks.push((async () => {
+            try {
+              const r = await fetch(fUrl, { headers: { 'User-Agent': 'Mozilla/5.0 ZozSpider/3.0' }, signal: AbortSignal.timeout(3800) });
+              return r.ok ? parseRssXmlItems(await r.text(), 8, false) : [];
+            } catch (_) { return []; }
+          })());
+        }
 
-          return { item, score };
-        });
-
-        // Filter and sort by score
-        scored.sort((a, b) => b.score - a.score);
-
+        const settled = await Promise.allSettled(tasks);
         const seenUrls = new Set();
-        const results = [];
-        for (const entry of scored) {
-          if (entry.score <= 0 && results.length >= 3) break;
-          const it = entry.item;
-          if (!it.url || seenUrls.has(it.url)) continue;
-          seenUrls.add(it.url);
-
-          results.push({
-            title: it.title,
-            url: it.url,
-            domain: it.domain,
-            snippet: it.snippet,
-            content: it.content || '',
-            sourceProvider: `Zoz Sovereign Index (${it.domain})`,
-            timestamp: Date.parse(it.published_at) || Date.now(),
-            pubDate: it.published_at || 'Terkini'
-          });
-          if (results.length >= targetNum) break;
+        const candidatePool = [];
+        for (const st of settled) {
+          if (st.status === 'fulfilled' && Array.isArray(st.value)) {
+            for (const it of st.value) {
+              const norm = String(it.url || '').trim().replace(/\/+$/, '');
+              if (!norm || seenUrls.has(norm)) continue;
+              seenUrls.add(norm);
+              candidatePool.push(it);
+            }
+          }
         }
+
+        const ranked = rankEdgeDocumentsMathematically(candidatePool, cleanQuery, profile, nowMs);
+        const results = ranked.slice(0, targetNum).map(it => ({
+          title: it.title,
+          url: it.url,
+          domain: it.domain,
+          snippet: it.snippet,
+          content: it.content || '',
+          sourceProvider: `Zoz Mathematical IR (${it.domain})`,
+          timestamp: it.timestamp || 0,
+          pubDate: it.pubDate || '',
+          ageDays: it.ageDays,
+          mathematicalScore: it.mathematicalScore
+        }));
 
         return new Response(JSON.stringify({
           success: true,
           query: cleanQuery,
-          engine: 'zoz_sovereign_search_engine',
+          engine: 'zoz_sovereign_mathematical_ir_v2',
+          temporalProfile: profile,
           count: results.length,
           results
         }), {

@@ -5788,10 +5788,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     }
 
     if (articles.length === 0) {
-      return 'Berdasarkan penelusuran mandiri terkini, sistem belum menemukan data spesifik dari domain yang dipilih. Anda dapat memberikan kata kunci yang lebih spesifik atau menyebutkan nama model/sumber tertentu (misal: DeepSeek, Llama, Qwen, atau arXiv) untuk penelusuran mendalam langsung.';
+      return 'Berdasarkan penelusuran indeks saat ini, belum ditemukan dokumen terverifikasi yang cocok dengan parameter kueri tersebut.';
     }
 
-    let out = 'Berdasarkan data penelusuran mandiri terkini, berikut ulasan komprehensif mengenai perkembangan dan rilis model AI terbaru:\n\n';
+    let out = 'Berikut ekstraksi fakta terverifikasi dari sumber pencarian terkini:\n\n';
 
     articles.forEach((art, idx) => {
       const num = idx + 1;
@@ -5816,16 +5816,12 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         } else {
           out += `${text.slice(0, 450).trim()}...\n\n`;
         }
-      } else {
-        out += `Perkembangan ini mencatat perubahan penting dalam ekosistem kecerdasan buatan terkait efisiensi pemodelan, kapabilitas inferensi, integrasi arsitektur, dan implementasi pada sistem komputasi modern.\n\n`;
+      } else if (art.url) {
+        out += `Sumber terverifikasi: [${art.domain || art.url}](${art.url})\n\n`;
       }
     });
 
-    out += '### 💡 Analisis & Implikasi Perkembangan\n\n' +
-      'Perkembangan model dan ekosistem AI terbaru mencerminkan akselerasi industri ke arah model penalaran mendalam (*reasoning*), ' +
-      'efisiensi inferensi perangkat lokal (*on-device AI*), kepatuhan terhadap lisensi data komersial, serta integrasi teknologi AI pada domain spesifik seperti komputasi bioteknologi dan sains.';
-
-    return out;
+    return out.trim();
   }
 
   function isModelInternalMonologue(text) {
@@ -5865,6 +5861,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     const t = String(text || '').trim();
     if (!t) return false;
     return t.startsWith('Berikut rangkuman')
+      || t.startsWith('Berikut ekstraksi fakta terverifikasi')
       || t.startsWith('Berikut informasi yang diperoleh')
       || t.startsWith('Berdasarkan data penelusuran')
       || t.startsWith('Informasi terkait telah berhasil ditelusuri')
@@ -5872,28 +5869,37 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       || t.includes('Tinjau rincian artikel lengkap');
   }
 
+  function getGroundedSamplingParams(queryText = '') {
+    if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function' && typeof ZozTextSafety.computeOptimalSamplingTemperature === 'function') {
+      const prof = ZozTextSafety.computeTemporalRecencyProfile(queryText || '');
+      return ZozTextSafety.computeOptimalSamplingTemperature(prof, true);
+    }
+    return { temperature: 0.05, topP: 0.82 };
+  }
+
   function buildWebRescueMessages(question, evidenceText) {
     const now = new Date();
-    const dateStr = now.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const isoDate = now.toISOString().slice(0, 10);
     return [
       {
         role: 'system',
-        content: 'Anda adalah asisten AI yang cerdas, berwawasan luas, dan objektif. Jawab pertanyaan pengguna secara LENGKAP, TERPERINCI, MENDALAM, dan TERSTRUKTUR dalam Bahasa Indonesia berdasarkan data penelusuran web yang disediakan.\n' +
-          'PANDUAN UTAMA:\n' +
-          '1. JELASKAN ISI SECARA TUNTAS: Paparkan nama model/produk, pengembang, spesifikasi teknis, arsitektur, ukuran parameter, kemampuan baru, tanggal rilis, dan dampaknya bagi industri.\n' +
-          '2. DILARANG hanya menampilkan daftar tautan atau judul. DILARANG menyuruh pengguna membaca atau membuka sumber web sendiri.\n' +
-          '3. Gunakan format Markdown yang rapi dengan heading tematik dan poin ulasan analitis.\n' +
-          '4. JANGAN menulis proses berpikir internal, rencana, atau memanggil tool. Langsung tulis ulasan lengkap.'
+        content: `[SPESIFIKASI SINTESIS BUKTI TERVERIFIKASI — UTC ${isoDate}]\n` +
+          `1. Domain klaim dibatasi secara ketat pada himpunan bukti dokumen di bawah: hanya cantumkan entitas, versi, angka, dan tanggal kalender yang termuat eksplisit di dalam bukti.\n` +
+          `2. Sajikan analisis teknis terstruktur dalam Bahasa Indonesia menggunakan Markdown (heading, poin rincian isi artikel, dan sitasi tautan sumber).\n` +
+          `3. Jangan mencetak blok tool call atau monolog internal.`
       },
       {
         role: 'user',
-        content: `Pertanyaan Pengguna: ${String(question || '').slice(0, 1000)}\n\n[DATA BUKTI PENELUSURAN WEB]:\n${String(evidenceText || '').slice(0, 16000)}\n\nJelaskan sekarang secara mendalam dan informatif dalam Bahasa Indonesia.`
+        content: `Kueri: ${String(question || '').slice(0, 1000)}\n\n[KORPUS BUKTI TERVERIFIKASI]:\n${String(evidenceText || '').slice(0, 16000)}\n\nSusun sintesis faktual berdasarkan korpus bukti di atas.`
       }
     ];
   }
 
-  // Ronde penyelamat OpenRouter: permintaan bersih (tanpa riwayat chat & tanpa tools), hanya membaca delta.content.
+  // Ronde penyelamat OpenRouter: distribusi Boltzmann T -> 0.05 untuk meminimumkan entropi halusinasi parametrik.
   async function rescueWebAnswerOpenRouter({ url, headers, model, question, evidenceText, extraBody, signal }) {
+    const isReasoning = Boolean(model && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(model)));
+    const isLiquid = Boolean(model && (model.includes('liquid') || model.includes('lfm-')));
+    const sampling = getGroundedSamplingParams(question);
     const baseBody = {
       model,
       messages: buildWebRescueMessages(question, evidenceText),
@@ -5901,6 +5907,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       provider: { allow_fallbacks: (STATE.mode === 'auto') },
       ...(extraBody || {})
     };
+    if (!STATE.settings.useCustomParameters) {
+      if (!isReasoning) baseBody.temperature = sampling.temperature;
+      if (!isReasoning && !isLiquid) baseBody.top_p = sampling.topP;
+    }
     const attempts = [baseBody];
     for (const body of attempts) {
       try {
@@ -5936,15 +5946,23 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     return '';
   }
 
-  // Ronde penyelamat Ollama (NDJSON): permintaan bersih tanpa riwayat & tools, hanya message.content.
+  // Ronde penyelamat Ollama (NDJSON): distribusi Boltzmann T -> 0.05 untuk meminimumkan entropi halusinasi parametrik.
   async function rescueWebAnswerOllama({ url, headers, model, question, evidenceText, extraBody, signal }) {
     try {
+      const sampling = getGroundedSamplingParams(question);
       const body = {
         model,
         messages: buildWebRescueMessages(question, evidenceText),
         stream: true,
         ...(extraBody || {})
       };
+      if (!STATE.settings.useCustomParameters) {
+        body.options = {
+          ...(body.options || {}),
+          temperature: sampling.temperature,
+          top_p: sampling.topP
+        };
+      }
       const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
       if (!res.ok) return '';
       const reader = res.body.getReader();
@@ -5975,145 +5993,33 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     }
   }
 
+  // Proyeksi Subruang Klaim-Bukti Matematis P_E(R): memangkas entitas berversi & koordinat tanggal di luar bukti E
   function verifyAndSanitizeWebDigestion(text, sources, rawToolText) {
-    if (!text || !sources || sources.length === 0) return text;
-
-    const now = new Date();
-    const curYear = now.getFullYear();
-    const curMonthIdx = now.getMonth(); // 0 = Jan, 9 = Oct
-    const curDay = now.getDate();
-
-    const idMonths = ['januari', 'februari', 'maret', 'april', 'mei', 'juni', 'juli', 'agustus', 'september', 'oktober', 'november', 'desember'];
-    const enMonths = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
-
-    const curMonthId = idMonths[curMonthIdx];
-    const curMonthEn = enMonths[curMonthIdx];
-
-    // Gabungkan seluruh bukti faktual dari web sources dan rawToolText ke string kanonikal pencarian
-    const evidenceRaw = (String(rawToolText || '') + ' ' + (Array.isArray(sources) ? sources.map(s => (s.title || '') + ' ' + (s.snippet || '') + ' ' + (s.url || '') + ' ' + (s.pubDate || '')).join(' ') : '')).toLowerCase();
-
-    // Helper untuk mengecek apakah suatu string tanggal/klaim ada dalam bukti web
-    const isGroundedInEvidence = (substr) => {
-      if (!substr) return false;
-      const cleanSub = String(substr).trim().toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-      const cleanEv = evidenceRaw.replace(/[^\p{L}\p{N}]/gu, '');
-      return cleanEv.includes(cleanSub);
-    };
-
-    // Helper untuk mengecek apakah suatu kalimat merupakan proyeksi masa depan / jadwal resmi
-    const isForwardLookingContext = (sentence) => {
-      if (!sentence) return false;
-      return /\b(target|proyeksi|prediksi|rencana|jadwal|dijadwalkan|akan|menuju|hingga|sampai|mendatang|perkiraan|diperkirakan|roadmap|expected|projected|forecast|plans?|scheduled|upcoming|estimate)\b/i.test(sentence);
-    };
-
-    let isHallucinated = false;
-    let reason = '';
-    let hallucinatedSnippet = '';
-
-    // 1. Cek tanggal masa depan pada bulan berjalan (misal > curDay + 2 hari toleransi timezone WIB/UTC)
-    // HANYA dianggap halusinasi jika:
-    // a. Tanggal melebihi curDay + 2
-    // b. BUKAN konteks proyeksi / jadwal masa depan ("akan diadakan pada 25 Oktober")
-    // c. TIDAK ADA dalam bukti sumber data web aktual
-    const curMonthRegex = new RegExp(`\\b([1-3]?[0-9])\\s+(?:${curMonthId}|${curMonthEn})\\s*(?:${curYear})?\\b`, 'gi');
-    let m;
-    while ((m = curMonthRegex.exec(text)) !== null) {
-      const day = parseInt(m[1], 10);
-      const matchStr = m[0];
-      if (day > curDay + 2) {
-        const startIdx = Math.max(0, text.lastIndexOf('.', m.index) + 1);
-        const endIdx = text.indexOf('.', m.index + matchStr.length);
-        const sentence = text.slice(startIdx, endIdx !== -1 ? endIdx : text.length);
-
-        if (!isGroundedInEvidence(matchStr) && !isForwardLookingContext(sentence)) {
-          isHallucinated = true;
-          reason = `Tanggal masa depan tanpa dasar sumber: ${matchStr} (Hari ini: ${curDay} ${curMonthId} ${curYear})`;
-          hallucinatedSnippet = sentence.trim().slice(0, 80);
-          break;
-        }
-      }
+    if (!text || (!rawToolText && (!sources || sources.length === 0))) return text;
+    // Lewati proyeksi klaim artikel apabila seluruh sumber merupakan kartu video hasil find_related_videos
+    if (Array.isArray(sources) && sources.length > 0 && sources.every(s => s && (s.domain === 'video' || /youtube\.com|youtu\.be|dailymotion\.com|vimeo\.com|xvideos\.com/i.test(s.url || '')))) {
+      return text;
     }
 
-    // 2. Cek bulan masa depan pada tahun yang sama (misal November/Desember 2026)
-    if (!isHallucinated) {
-      for (let i = curMonthIdx + 1; i < 12; i++) {
-        const futMonthRegex = new RegExp(`\\b(?:[1-3]?[0-9]\\s+)?(?:${idMonths[i]}|${enMonths[i]})\\s+${curYear}\\b`, 'gi');
-        let fm;
-        while ((fm = futMonthRegex.exec(text)) !== null) {
-          const matchStr = fm[0];
-          const startIdx = Math.max(0, text.lastIndexOf('.', fm.index) + 1);
-          const endIdx = text.indexOf('.', fm.index + matchStr.length);
-          const sentence = text.slice(startIdx, endIdx !== -1 ? endIdx : text.length);
-
-          if (!isGroundedInEvidence(matchStr) && !isForwardLookingContext(sentence)) {
-            isHallucinated = true;
-            reason = `Bulan masa depan tanpa dasar sumber: ${matchStr}`;
-            hallucinatedSnippet = sentence.trim().slice(0, 80);
-            break;
-          }
+    if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.projectGroundedResponseMathematically === 'function') {
+      const projection = ZozTextSafety.projectGroundedResponseMathematically(text, sources || [], rawToolText || '');
+      if (projection.prunedCount > 0 || projection.dateCorrections > 0) {
+        const reason = `Subspace Projection P_E(R): pruned=${projection.prunedCount}, dateCorrections=${projection.dateCorrections}, rate=${projection.hallucinationRate}`;
+        console.warn(`[Mathematical Grounding Projection] ${reason}`);
+        if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerHallucinationIssue === 'function') {
+          BioEndocrine.registerHallucinationIssue({
+            model: typeof STATE !== 'undefined' ? (STATE.mode === 'ollama' ? STATE.settings.ollamaModel : STATE.settings.openRouterModel) : 'Model',
+            reason,
+            snippet: `pruned=${projection.prunedCount}/${projection.evaluatedClaims}`,
+            actionTaken: 'Orthogonal Claim-Evidence Subspace Projection P_E(R)'
+          });
         }
-        if (isHallucinated) break;
-      }
-    }
-
-    // 3. Cek tahun masa depan (> curYear, misal 2027+)
-    // Tahun masa depan pada berita teknologi/ekonomi (seperti target 2027-2030) adalah lumrah
-    // KECUALI jika disajikan sebagai peristiwa masa lalu atau bertentangan tanpa konteks proyeksi
-    if (!isHallucinated) {
-      const futYearRegex = /\b(202[7-9]|20[3-9][0-9])\b/g;
-      let ym;
-      while ((ym = futYearRegex.exec(text)) !== null) {
-        const yrStr = ym[0];
-        const startIdx = Math.max(0, text.lastIndexOf('.', ym.index) + 1);
-        const endIdx = text.indexOf('.', ym.index + yrStr.length);
-        const sentence = text.slice(startIdx, endIdx !== -1 ? endIdx : text.length);
-
-        if (!isGroundedInEvidence(yrStr) && !isForwardLookingContext(sentence)) {
-          if (/\b(kemarin|telah|sudah|lalu|terjadi|dirilis pada)\b/i.test(sentence)) {
-            isHallucinated = true;
-            reason = `Klaim peristiwa masa depan telah terjadi di tahun: ${yrStr}`;
-            hallucinatedSnippet = sentence.trim().slice(0, 80);
-            break;
-          }
+        if ((projection.hallucinationRate > 0.72 && projection.prunedCount >= 3) || !projection.text || projection.text.trim().length < 80) {
+          return synthesizeAutonomousWebSummary(rawToolText, sources);
         }
+        return projection.text;
       }
-    }
-
-    // 4. Cek klaim versi/benchmark fiktif besar jika tidak ada dalam sumber web aktual
-    if (!isHallucinated && (rawToolText || sources.length > 0)) {
-      if (/\bbeam\s+[2-9](?:\.0)?\b/i.test(text) && !/\bbeam\s+[2-9]/i.test(evidenceRaw)) {
-        isHallucinated = true;
-        reason = 'Klaim versi fiktif Beam 2.0+ tanpa dasar sumber data';
-        hallucinatedSnippet = (text.match(/\b[^\.\n]*beam\s+[2-9][^\.\n]*/i)?.[0] || 'Beam 2.0+').trim();
-      } else if (/\bgpt-[5-9]\b/i.test(text) && !/\bgpt-[5-9]\b/i.test(evidenceRaw)) {
-        if (/\b(mengalahkan|unggul dari|melampaui|skor|evaluasi|benchmark|benchmarknya)\s+gpt-[5-9]\b/i.test(text)) {
-          isHallucinated = true;
-          reason = 'Klaim benchmark fiktif mengalahkan GPT-5 tanpa dasar sumber data';
-          hallucinatedSnippet = (text.match(/\b[^\.\n]*(?:mengalahkan|unggul|melampaui|benchmark)[^\.\n]*gpt-[5-9][^\.\n]*/i)?.[0] || 'Benchmark GPT-5').trim();
-        }
-      }
-    }
-
-    if (isHallucinated) {
-      console.warn(`[Anti-Hallucination Guard] Terdeteksi halusinasi: ${reason}. Melaporkan ke Endorfin & meregulasi respon.`);
-      if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerHallucinationIssue === 'function') {
-        BioEndocrine.registerHallucinationIssue({
-          model: typeof STATE !== 'undefined' ? (STATE.mode === 'ollama' ? STATE.settings.ollamaModel : STATE.settings.openRouterModel) : 'Model',
-          reason,
-          snippet: hallucinatedSnippet || reason,
-          actionTaken: 'Sanitasi & Regulasi Respons Faktual'
-        });
-      }
-
-      // Redaksi kalimat halusinasi terlebih dahulu jika teks utama kaya dan berharga
-      if (hallucinatedSnippet && text.length > 300) {
-        let sanitizedText = text.replace(hallucinatedSnippet, '').replace(/\n{3,}/g, '\n\n').trim();
-        if (sanitizedText.length >= 120 && !isAutonomousFallbackText(sanitizedText)) {
-          return sanitizedText;
-        }
-      }
-
-      return synthesizeAutonomousWebSummary(rawToolText, sources);
+      return projection.text || text;
     }
 
     return text;
@@ -20718,8 +20624,9 @@ ${msg.content.slice(0, 3000)}
         cleanOrganicList.slice(0, 8).forEach((item, idx) => {
           const title = item.title;
           const link = item.url;
-          const snippet = item.snippet;
-          const date = item.date ? ` (Dipublikasikan: ${item.date})` : '';
+          const snippet = item.snippet || '';
+          const rawDate = item.pubDate || item.date || '';
+          const date = rawDate ? ` [${rawDate}]` : '';
 
           const bodyText = String(item.content || '').slice(0, idx < 5 ? 2500 : 600);
           const bodyBlock = bodyText && bodyText.length > snippet.length ? `\n   Isi Artikel: ${bodyText}` : '';
@@ -20730,7 +20637,9 @@ ${msg.content.slice(0, 3000)}
               title,
               url: link,
               snippet,
-              date: item.date || null,
+              date: rawDate || null,
+              pubDate: rawDate || '',
+              content: bodyText || snippet,
               domain: item.domain
             });
           }
@@ -20739,22 +20648,17 @@ ${msg.content.slice(0, 3000)}
 
       if (!factsBlock && !organicBlock) return null;
 
-      const currentTime = new Date().toLocaleString('id-ID', { dateStyle: 'full', timeStyle: 'short' });
-      const systemPromptContext = `[DATA PENCARIAN INTERNET MANDIRI - ZOZ NEURAL WEB INDEX (AI SEARCH SKILL)]
-Query Kontekstual yang Dirumuskan AI: "${smartQuery}"
+      const currentTime = new Date().toISOString();
+      const systemPromptContext = `[KORPUS BUKTI PENELUSURAN TERVERIFIKASI — UTC ${currentTime}]
+Kueri: "${smartQuery}"
 Pertanyaan Pengguna: "${query}"
-Waktu Pencarian: ${currentTime}
 ${factsBlock}
-=== TEMUAN SITUS WEB TERATAS ===
+=== DOKUMEN BUKTI TERPERINGKAT (BM25F × TEMPORAL DECAY) ===
 ${organicBlock}
-[PANDUAN UNTUK ASISTEN AI]:
-- Anda adalah AI yang telah mengaktifkan kemampuan Search Skill untuk menelusuri web secara otonom berdasarkan konteks obrolan.
-- Hubungkan data real-time di atas dengan konteks riwayat percakapan sebelumnya dan jawab dengan akurat, mutakhir, faktual, dan komprehensif.
-- FOKUS DAN RELEVANSI TINGGI: Jawablah pertanyaan pengguna secara langsung, relevan, dan terarah. Jika pengguna bertanya tentang berita atau model AI terbaru, utamakan perkembangan model AI utama terkemuka dunia (OpenAI GPT/o-series, Claude, Gemini, Meta Llama, DeepSeek, Mistral, xAI, dll.). Dilarang mengalihkan fokus ke ringkasan pergerakan saham finansial sampingan atau platform lokal kecil yang tidak relevan.
-- ANTI-HALUSINASI KETAT: Dilarang keras mengarang berita, kemitraan fiktif (seperti konsorsium gabungan palsu antar raksasa teknologi), atau tanggal rilis imajiner. Hanya gunakan fakta nyata yang tercantum di hasil pencarian web di atas.
-- JAWAB DENGAN ISI, BUKAN DAFTAR TAUTAN: Baca bagian "Isi Artikel" lalu jelaskan langsung apa yang terjadi/dirilis (nama, detail teknis, angka, tanggal, fitur, dampak) dalam kalimat Anda sendiri. DILARANG hanya menyebut judul artikel dan DILARANG menyuruh pengguna mengunjungi/membaca sumber sendiri.
-- Jika data di atas tidak memuat jawaban atas pertanyaan, katakan terus terang bahwa informasinya belum ditemukan di indeks — jangan mengarang.
-- Cantumkan tautan markdown [Nama Sumber](URL) hanya sebagai referensi pendukung setelah penjelasan.`;
+[BATASAN DOMAIN FAKTUAL]:
+1. Sintesis jawaban dibatasi secara ketat pada fakta, entitas, versi, angka, dan tanggal rilis yang tertulis eksplisit di dalam dokumen bukti di atas.
+2. Jelaskan isi substansial dari bagian "Isi Artikel" secara langsung dan terstruktur dalam Bahasa Indonesia, disertai tautan referensi [Nama Sumber](URL).
+3. Apabila suatu informasi spesifik tidak termuat dalam dokumen bukti di atas, nyatakan bahwa informasi tersebut tidak tercantum dalam sumber yang ditemukan.`;
 
       return {
         systemPromptContext,
@@ -24777,14 +24681,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
   function stripDateNoise(q) {
     if (!q || typeof q !== 'string') return '';
-    const months = 'januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|january|february|march|april|may|june|july|august|september|october|november|december';
+    // Pertahankan tahun (misal 2026) dan nama bulan eksplisit sebagai sinyal koordinat temporal;
+    // hanya bersihkan nama hari dan tanda baca berlebih.
     const days = 'senin|selasa|rabu|kamis|jumat|sabtu|minggu|monday|tuesday|wednesday|thursday|friday|saturday|sunday';
     return q
       .replace(new RegExp(`\\b(${days})\\b`, 'gi'), ' ')
-      .replace(new RegExp(`\\b\\d{1,2}\\s+(${months})(?:\\s*,?\\s*\\d{2,4})?\\b`, 'gi'), ' ')
-      .replace(new RegExp(`\\b(${months})\\s+\\d{1,2}(?:\\s*,?\\s*\\d{2,4})?\\b`, 'gi'), ' ')
-      .replace(new RegExp(`\\b(${months})(?:\\s+\\d{2,4})?\\b`, 'gi'), ' ')
-      .replace(/\b(202[0-9])\b/g, ' ')
       .replace(/[,;]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
@@ -25392,8 +25293,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             }
           });
 
-          const formattedText = `[HASIL PENELUSURAN WEB MANDIRI REAL-TIME UNTUK "${query}"]:\n` + lines.join('\n\n') +
-            `\n\n[INSTRUKSI WAJIB]: Baca "Isi Artikel" di atas lalu JELASKAN langsung kepada pengguna apa isinya (nama, detail, angka, tanggal, fitur, dampak) dengan kalimat Anda sendiri. DILARANG hanya menampilkan daftar judul/tautan, dan DILARANG menyuruh pengguna membuka atau membaca sumbernya sendiri. Tautan hanya dicantumkan sebagai referensi pendukung. Jika data di atas tidak memuat jawaban atas pertanyaan, katakan terus terang bahwa indeks belum memiliki informasinya — jangan mengarang.`;
+          const formattedText = `[HASIL PENELUSURAN TERVERIFIKASI UNTUK "${query}"]:\n` + lines.join('\n\n') +
+            `\n\n[BATASAN BUKTI]: Sintesis jawaban hanya dari fakta, entitas, versi, dan tanggal publikasi yang tercantum eksplisit pada "Isi Artikel" dan "Ringkasan" di atas. Uraikan rincian teknis secara langsung dalam Bahasa Indonesia dan sertakan tautan sumber sebagai sitasi pendukung.`;
 
           return cacheAndReturn({
             text: formattedText,
@@ -26431,19 +26332,16 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   }
 
   function getAutonomousSystemDirective() {
-    return `\n[SISTEM TOOL CALLING PENCARIAN WEB REAL-TIME & MULTI-SUMBER AKTIF SECARA OTONOM]:
-Anda MEMILIKI koneksi pencarian internet real-time langsung yang selalu siap dieksekusi kapan saja tanpa memerlukan menu/tombol UI apa pun. DILARANG KERAS mengatakan bahwa Anda tidak memiliki akses internet atau tidak bisa mencari di web!
-- CARA MEMANGGIL TOOL: Gunakan fitur native tool/function calling jika tersedia. Apabila jalur model Anda saat ini tidak menyediakan native tool API, panggil tool secara langsung dengan menuliskan HANYA blok:
-  \`<tool_call>{"name": "<nama_tool>", "arguments": {<parameter_json>}}</tool_call>\`
-  (tanpa teks pengantar lain) agar mesin Zoz Router langsung mengeksekusinya di latar belakang dan mengirimkan datanya untuk Anda sintesis.
-- DAFTAR TOOL PENCARIAN WEB & SUMBER TERVERIFIKASI:
-  1. \`search_web({"query": "<kata kunci pencarian>", "max_results": 8})\`: Pencarian real-time di seluruh internet untuk rilis model AI terbaru, berita terkini, fakta mutakhir, harga, dokumentasi, atau topik umum apa pun. WAJIB panggil tool ini saat pengguna meminta "cari di web" atau menanyakan peristiwa/rilis terbaru!
-  2. \`browse_web_page({"url": "<https://...>"})\`: Membaca isi teks penuh halaman URL publik mana pun di internet.
-  3. \`search_web_sources({"query": "<kata kunci>", "sources": ["github.com", "arxiv.org"], "max_results": 5})\`: Mencari informasi spesifik dari sumber whitelist resmi (github.com, bloomberg.com, reddit.com, x.com, edition.cnn.com, cna.al, arxiv.org). Gunakan ketika pengguna meminta repositori GitHub, paper arXiv, diskusi Reddit/X, atau berita Bloomberg/CNN/CNA Albania.
-  4. \`fetch_url_content({"url": "<URL dari domain whitelist>", "extract_mode": "full_text"})\`: Mengambil isi bersih beserta poin penting dari URL domain whitelist resmi.
-  5. \`summarize_sources({"query": "<topik>", "urls": ["<url1>", "<url2>"], "summary_style": "detailed", "include_citations": true})\`: Merangkum beberapa URL whitelist resmi menjadi satu jawaban koheren lengkap dengan sitasi [1], [2].
-  6. \`find_related_videos({"video_url": "<URL video sebelumnya jika ada>", "query": "<kata kunci/topik video>", "platform": "auto", "limit": 5})\`: Mencari & merekomendasikan video terkait lintas platform di seluruh bumi (YouTube, Dailymotion, Vimeo, TikTok, Bilibili, XVideos, dll.) yang langsung dapat diputar di percakapan.
-  7. \`summarize_whatsapp_chat({"target_number_or_name": "<nama/nomor>", "focus_topic": "<fokus>"})\`: Membaca & merangkum obrolan WhatsApp melalui Pop-up Persetujuan (Consent Gate).`;
+    return `\n[SKEMA TOOL EKSTERNAL AKTIF]:
+- Panggil fungsi melalui native tool calling API; apabila jalur upstream tidak mendukung native tool API, keluarkan blok \`<tool_call>{"name": "<nama_tool>", "arguments": {<parameter_json>}}</tool_call>\`.
+- Daftar fungsi tersedia:
+  1. \`search_web({"query": "<kata kunci>", "max_results": 8})\`: Pencarian dokumen web real-time terperingkat secara matematis (BM25F × peluruhan temporal).
+  2. \`browse_web_page({"url": "<https://...>"})\`: Ekstraksi isi teks halaman URL publik.
+  3. \`search_web_sources({"query": "<kata kunci>", "sources": ["github.com", "arxiv.org"], "max_results": 5})\`: Pencarian pada domain whitelist (github.com, bloomberg.com, reddit.com, x.com, edition.cnn.com, cna.al, arxiv.org).
+  4. \`fetch_url_content({"url": "<URL whitelist>", "extract_mode": "full_text"})\`: Ekstraksi konten dan metadata dari URL domain whitelist.
+  5. \`summarize_sources({"query": "<topik>", "urls": ["<url1>", "<url2>"], "summary_style": "detailed", "include_citations": true})\`: Sintesis multi-sumber whitelist bersitasi.
+  6. \`find_related_videos({"video_url": "<URL video>", "query": "<topik>", "platform": "auto", "limit": 5})\`: Pencarian video lintas platform yang dapat diputar di obrolan.
+  7. \`summarize_whatsapp_chat({"target_number_or_name": "<nama/nomor>", "focus_topic": "<fokus>"})\`: Rangkuman obrolan WhatsApp dengan gerbang persetujuan pengguna.`;
   }
   const AUTONOMOUS_SYSTEM_DIRECTIVE = '';
 
@@ -26663,16 +26561,10 @@ Anda MEMILIKI koneksi pencarian internet real-time langsung yang selalu siap die
     const timeFormatted = `${hours}:${minutes}`;
     const isoUtc = now.toISOString();
 
-    return `### INFORMASI WAKTU SISTEM REAL-TIME (GROUNDING TEMPORAL)
-- Tanggal & Waktu Sekarang: ${dayName}, ${dateNum} ${monthName} ${year} (${timeFormatted} waktu lokal)
-- Waktu Standar UTC: ${isoUtc}
-- Tahun Berjalan: ${year}
-- MANDAT KONSISTENSI TEMPORAL & DATA WEB:
-  1. Anda beroperasi di dunia nyata pada tahun ${year}.
-  2. Apabila dalam riwayat percakapan sebelumnya Anda melihat jawaban atau data yang diakhiri penanda:
-     "[System Note: Jawaban di atas telah diverifikasi menggunakan ... Sumber Referensi Web Real-Time via Zoz Router]"
-     MAKA Anda WAJIB menyadari bahwa data tersebut adalah HASIL PENCARIAN WEB REAL-TIME ZOZ ROUTER yang 100% VALID, AKTUAL, dan SESUAI WAKTU SAAT INI (${year}), BUKAN halusinasi model!
-  3. Pada giliran chat ke-2, ke-3, dan seterusnya, pertahankan fakta dan data web tersebut dengan konsisten dan percaya diri. Jangan pernah menyangkal atau menganggap data mutakhir tersebut sebagai karangan atau halusinasi masa lalu.`;
+    return `[KOORDINAT WAKTU REFERENSI SISTEM]
+- Tanggal Lokal: ${dayName}, ${dateNum} ${monthName} ${year} (${timeFormatted})
+- Timestamp UTC: ${isoUtc}
+- Tahun Referensi: ${year}`;
   }
 
   function estimateBpeTokens(text) {
@@ -27146,9 +27038,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // UNIVERSAL YOUTUBE METADATA & SEARCH GROUNDING FOR ALL MODELS
+      let hasVideoUrlGrounded = false;
       try {
         const ytRes = await getYouTubeGroundingContext(promptText, bubbleText);
         if (ytRes && ytRes.groundingContext) {
+          hasVideoUrlGrounded = true;
           systemContent = `${systemContent}\n\n${ytRes.groundingContext}`;
           bubbleText.innerHTML = '<span class="typing-cursor"></span>';
         }
@@ -27156,14 +27050,19 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         console.warn('YouTube client grounding error:', ytErr);
       }
 
+      // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) & PELURUHAN RADIOAKTIF W(Δt)
+      const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
+        ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
+        : { alpha: 0.1, epistemicSearchTrigger: 0.1 };
+      const isVideoTopicPrompt = /\b(video|youtube|youtu\.be|dailymotion|vimeo|xvideos)\b/i.test(promptText);
+
       // WEB SEARCH GROUNDING:
-      // Aktif pada mode default search, atau sebagai fallback otomatis ketika mode autonomous search
-      // berjalan pada model tanpa dukungan tools atau model gratis (agar tetap mendapat data internet terkini).
-      // Dilewati bila pencarian YouTube sudah dieksekusi di atas agar hasil video tidak ditimpa pencarian artikel Google.
+      // Aktif pada mode default search, atau secara matematis ketika model tidak mendukung native tools dan U(Q) >= 0.72.
       const needsGroundingFallback = STATE.searchMode === 'autonomous' && !doesModelSupportTools(modelName);
-      if (STATE.searchMode === 'default' || (STATE.webSearchEnabled && needsGroundingFallback)) {
+      const autoEpistemicPreSearch = needsGroundingFallback && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      if (STATE.searchMode === 'default' || autoEpistemicPreSearch) {
         try {
-          const searchRes = await getWebSearchContext(promptText, session, bubbleText, needsGroundingFallback);
+          const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
           if (searchRes && searchRes.systemPromptContext) {
             systemContent = systemContent
               ? `${systemContent}\n\n${searchRes.systemPromptContext}`
@@ -27207,7 +27106,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         stream: true,
         endpoint: ep
       };
-      // Hapus batasan parameter model: gunakan parameter bawaan (default) resmi Modelfile Ollama
+      // Parameter sampling: apabila korpus bukti web sudah disuntikkan, terapkan penajaman distribusi Boltzmann T -> 0.05
       if (STATE.settings.useCustomParameters) {
         requestBody.options = {};
         if (STATE.settings.temperature !== null && STATE.settings.temperature !== undefined) {
@@ -27216,6 +27115,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         if (STATE.settings.topP !== null && STATE.settings.topP !== undefined) {
           requestBody.options.top_p = parseFloat(STATE.settings.topP);
         }
+      } else if (webSources && webSources.length > 0) {
+        const optSampling = getGroundedSamplingParams(promptText);
+        requestBody.options = {
+          temperature: optSampling.temperature,
+          top_p: optSampling.topP
+        };
       }
       requestBody.options = requestBody.options || {};
       if (!requestBody.options.num_ctx) requestBody.options.num_ctx = 16384;
@@ -27689,22 +27594,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const isLastRound = circuitBreakerTripped || hasBrowsedWeb || hasExecutedVideo || hasExecutedSourceSummary || (autonomousRound >= maxAutonomousRounds - 1);
         const currentDateObj = new Date();
         const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        const currentIsoDate = currentDateObj.toISOString().slice(0, 10);
         const roundInstruction = (isLastRound || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasExecutedGrounding)
-          ? `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
-WAKTU SISTEM SAAT INI: ${currentFormattedDate} (Tahun ${currentDateObj.getFullYear()}).
+          ? `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:
+${circuitBreakerTripped ? 'Eksekusi tool dihentikan karena batas kegagalan jaringan. Berikan jawaban langsung berdasarkan konteks yang tersedia.' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual dalam Bahasa Indonesia berdasarkan korpus bukti penelusuran di atas.'))))}
 
-${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : (hasExecutedGrounding ? (isLastRound ? 'Gunakan hasil pencarian, ekstraksi konten, dan sintesis multi-sumber resmi di atas untuk LANGSUNG menyusun jawaban akhir yang akurat, ringkas, berbobot, dan menyertakan nomor sitasi [1], [2] ke URL sumber.' : 'Jika data hasil pencarian sumber whitelist di atas sudah cukup lengkap untuk menjawab pengguna, LANGSUNG susun jawaban akhir yang akurat, berbobot, dan menyertakan sitasi URL sumber. Apabila Anda membutuhkan isi lengkap artikel/repositori/paper tertentu dari daftar URL di atas, Anda boleh memanggil fetch_url_content atau summarize_sources.') : (hasExecutedVideo ? 'Gunakan daftar rekomendasi video nyata di atas untuk memberikan ulasan dan rekomendasi video kepada pengguna lengkap dengan tautan URL aslinya. Sajikan dalam format Markdown yang rapi dan informatif sehingga kartu pemutar video interaktif dapat langsung diputar oleh pengguna di dalam obrolan.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan hasil eksekusi kode Python sandbox di atas untuk menjawab pertanyaan atau menyelesaikan perhitungan pengguna secara akurat, jelas, dan tuntas dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil operasi memori jangka panjang di atas untuk menjawab pengguna secara langsung, ramah, dan akurat dalam Bahasa Indonesia.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'))))}
-
-
-PANDUAN NILAI GUNA & INTEGRITAS FAKTA:
-1. NILAI GUNA TINGGI & JELASKAN ISI: Jangan sekadar menyajikan daftar judul atau tautan mentah. DILARANG menyuruh pengguna membuka atau membaca sumber sendiri. Baca bagian "Isi Artikel" di atas lalu JELASKAN langsung kepada pengguna apa yang terjadi, apa yang dirilis (nama model/produk, fitur, spesifikasi teknis, fungsi, angka, tanggal rilis, dan dampaknya) dengan kalimat analitis Anda sendiri secara lengkap dan tuntas.
-2. INTEGRITAS FAKTA (ANTI-HALUSINASI): Tetap setia pada data fakta yang tertera pada sumber. Dilarang mengarang tanggal di masa depan (Hari ini adalah ${currentFormattedDate}. Segala peristiwa setelah hari ini belum terjadi), nomor versi palsu, atau klaim fiktif yang tidak didukung bukti sumber.
-3. STRUKTUR BERKUALITAS: Gunakan format Markdown yang rapi dengan heading tematik, poin penjelasan yang padat isi, dan bila menyajikan tabel Markdown, WAJIB menggunakan baris baru (\\n) yang valid antar baris.
-4. Jawablah langsung secara alami tanpa penolakan kaku dan TANPA format pemanggilan tool (${toolSummaryList.map(s => s.split('(')[0]).join(', ') || 'search_web'}) yang sama lagi.`
-          : `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
-Data hasil eksekusi di atas telah disediakan secara internal.
-Jika informasi sudah cukup lengkap, berikan jawaban akhir secara langsung dan tuntas kepada pengguna tanpa menampilkan langkah ekstraksi atau data mentah.
-Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artikel lengkap dengan browse_web_page dari URL hasil pencarian, mencari memori tambahan, atau mengeksekusi kalkulasi kode Python), Anda dapat memanggil tool berikutnya yang relevan.`;
+BATASAN DOMAIN KLAIM:
+1. Hanya cantumkan entitas, nomor versi, metrik, dan tanggal rilis yang tertulis eksplisit di dalam bukti dokumen di atas (tanggal referensi hari ini: ${currentFormattedDate}).
+2. Uraikan rincian teknis dari bagian "Isi Artikel" secara langsung menggunakan Markdown terstruktur (heading, poin analisis, dan baris baru \\n yang valid bila memakai tabel).
+3. Jangan memanggil ulang fungsi (${toolSummaryList.map(s => s.split('(')[0]).join(', ') || 'search_web'}) yang sudah dieksekusi.`
+          : `[HASIL EKSEKUSI TOOL]:
+Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika diperlukan ekstraksi lanjutan (seperti browse_web_page, search_memory, atau execute_python_code), panggil fungsi terkait.`;
 
         conversationChain.push({
           role: 'user',
@@ -27718,7 +27618,16 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           endpoint: ep
         };
         if (requestBody.options) {
-          digestionBody.options = requestBody.options;
+          digestionBody.options = { ...requestBody.options };
+        }
+        // Penajaman Distribusi Boltzmann (T -> 0.05) untuk menekan entropi halusinasi saat menyintesis bukti web
+        if (!STATE.settings.useCustomParameters && (hasExecutedSearch || hasBrowsedWeb || hasExecutedGrounding || (webSources && webSources.length > 0))) {
+          const optSampling = getGroundedSamplingParams(promptText);
+          digestionBody.options = {
+            ...(digestionBody.options || {}),
+            temperature: optSampling.temperature,
+            top_p: optSampling.topP
+          };
         }
         if (!isLastRound && !hasBrowsedWeb && !hasExecutedSearch && selectedOllamaTools && selectedOllamaTools.length > 0) {
           const availableTools = selectedOllamaTools.filter(t => {
@@ -27861,6 +27770,40 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               : (cleanAssistant || '');
           }
           break;
+        }
+      }
+
+      // ===== GERBANG KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) >= 0.75 =====
+      // Apabila model melewatkan pemanggilan tool pada Turn-1 padahal U(Q) melampaui ambang ketidakpastian temporal,
+      // eksekusi retrieval matematis secara deterministik dan sintesis pada suhu Boltzmann T -> 0.05.
+      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
+        try {
+          bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Menjalankan penelusuran indeks matematis (U=${temporalRecencyProfile.epistemicSearchTrigger})...</span></div>`;
+          smartScrollChatToBottom(true);
+          const autoSearchRes = await executeAutonomousWebTool('search_web', { query: promptText, max_results: 8 }, promptText, session);
+          if (autoSearchRes && Array.isArray(autoSearchRes.sources) && autoSearchRes.sources.length > 0 && !STATE.abortController?.signal?.aborted) {
+            webSources = autoSearchRes.sources;
+            allAccumulatedToolResponsesText = autoSearchRes.text || '';
+            bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyintesis bukti terverifikasi...</span></div>`;
+            const rescueExtra = { endpoint: ep };
+            if (session?.id) rescueExtra.sessionId = session.id + '_epistemic';
+            if (STATE.settings.ollamaApiKey) rescueExtra.apiKey = STATE.settings.ollamaApiKey;
+            if (STATE.settings.openRouterKey) rescueExtra.openRouterKey = STATE.settings.openRouterKey;
+            const groundedAns = await rescueWebAnswerOllama({
+              url: chatUrl,
+              headers,
+              model: modelName,
+              question: promptText,
+              evidenceText: allAccumulatedToolResponsesText,
+              extraBody: rescueExtra,
+              signal: STATE.abortController?.signal
+            });
+            fullText = groundedAns || synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
+            preambleHtml = '';
+          }
+        } catch (epErr) {
+          if (epErr && (epErr.name === 'AbortError' || STATE.abortController?.signal?.aborted)) throw epErr;
+          console.warn('[Ollama Epistemic Gate] Error:', epErr);
         }
       }
 
@@ -28507,9 +28450,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // UNIVERSAL YOUTUBE METADATA & SEARCH GROUNDING FOR ALL MODELS
+      let hasVideoUrlGrounded = false;
       try {
         const ytRes = await getYouTubeGroundingContext(promptText, bubbleText);
         if (ytRes && ytRes.groundingContext) {
+          hasVideoUrlGrounded = true;
           systemContent = `${systemContent}\n\n${ytRes.groundingContext}`;
           bubbleText.innerHTML = '<span class="typing-cursor"></span>';
         }
@@ -28529,14 +28474,19 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         (STATE.openRouterModels || []).some(m => m.id === effectiveInitialModel && (m.cat === 'free' || m.tag === 'Free'))
       );
 
+      // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) & PELURUHAN RADIOAKTIF W(Δt)
+      const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
+        ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
+        : { alpha: 0.1, epistemicSearchTrigger: 0.1 };
+      const isVideoTopicPrompt = /\b(video|youtube|youtu\.be|dailymotion|vimeo|xvideos)\b/i.test(promptText);
+
       // WEB SEARCH GROUNDING:
-      // Aktif pada mode default search, atau sebagai fallback otomatis ketika mode autonomous search
-      // berjalan pada model gratis / model tanpa dukungan tools (agar tetap mendapat data internet terkini).
-      // Dilewati bila pencarian YouTube sudah dieksekusi di atas agar hasil video tidak ditimpa pencarian artikel Google.
+      // Aktif pada mode default search, atau secara matematis ketika model tanpa native tools / model gratis menghadapi U(Q) >= 0.72.
       const needsGroundingFallback = STATE.searchMode === 'autonomous' && (isFreeModel || !STATE.settings.openRouterKey || !doesModelSupportTools(effectiveInitialModel));
-      if (STATE.searchMode === 'default' || (STATE.webSearchEnabled && needsGroundingFallback)) {
+      const autoEpistemicPreSearch = needsGroundingFallback && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      if (STATE.searchMode === 'default' || autoEpistemicPreSearch) {
         try {
-          const searchRes = await getWebSearchContext(promptText, session, bubbleText, needsGroundingFallback);
+          const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
           if (searchRes && searchRes.systemPromptContext) {
             systemContent = systemContent
               ? `${systemContent}\n\n${searchRes.systemPromptContext}`
@@ -28639,6 +28589,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           if (!isLiquid && !isReasoning && STATE.settings.topP !== null && STATE.settings.topP !== undefined) {
             basePayload.top_p = parseFloat(STATE.settings.topP);
           }
+        } else if (webSources && webSources.length > 0) {
+          const optSampling = getGroundedSamplingParams(promptText);
+          if (!isReasoning) basePayload.temperature = optSampling.temperature;
+          if (!isLiquid && !isReasoning) basePayload.top_p = optSampling.topP;
         }
 
         if (currentIsImageCapable && (STATE.isImageGenMode || isImageGenerationTrigger(promptText))) {
@@ -29292,22 +29246,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const isLastRound = circuitBreakerTripped || hasBrowsedWeb || hasExecutedVideo || hasExecutedSourceSummary || (autonomousRound >= maxAutonomousRounds - 1);
         const currentDateObj = new Date();
         const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        const currentIsoDate = currentDateObj.toISOString().slice(0, 10);
         const roundInstruction = (isLastRound || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasExecutedGrounding)
-          ? `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
-WAKTU SISTEM SAAT INI: ${currentFormattedDate} (Tahun ${currentDateObj.getFullYear()}).
+          ? `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:
+${circuitBreakerTripped ? 'Eksekusi tool dihentikan karena batas kegagalan jaringan. Berikan jawaban langsung berdasarkan konteks yang tersedia.' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual dalam Bahasa Indonesia berdasarkan korpus bukti penelusuran di atas.'))))}
 
-${circuitBreakerTripped ? 'PERINGATAN SISTEM: Pemanggilan tool berturut-turut mengalami kendala jaringan. JANGAN memanggil tool lagi. Gunakan pengetahuan dasar yang Anda miliki untuk menjawab secara langsung, atau jelaskan dengan jujur kepada pengguna bahwa data eksternal tidak dapat diakses saat ini.' : (hasExecutedGrounding ? (isLastRound ? 'Gunakan hasil pencarian, ekstraksi konten, dan sintesis multi-sumber resmi di atas untuk LANGSUNG menyusun jawaban akhir yang akurat, ringkas, berbobot, dan menyertakan nomor sitasi [1], [2] ke URL sumber.' : 'Jika data hasil pencarian sumber whitelist di atas sudah cukup lengkap untuk menjawab pengguna, LANGSUNG susun jawaban akhir yang akurat, berbobot, dan menyertakan sitasi URL sumber. Apabila Anda membutuhkan isi lengkap artikel/repositori/paper tertentu dari daftar URL di atas, Anda boleh memanggil fetch_url_content atau summarize_sources.') : (hasExecutedVideo ? 'Gunakan daftar rekomendasi video nyata di atas untuk memberikan ulasan dan rekomendasi video kepada pengguna lengkap dengan tautan URL aslinya. Sajikan dalam format Markdown yang rapi dan informatif sehingga kartu pemutar video interaktif dapat langsung diputar oleh pengguna di dalam obrolan.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan hasil eksekusi kode Python sandbox di atas untuk menjawab pertanyaan atau menyelesaikan perhitungan pengguna secara akurat, jelas, dan tuntas dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil operasi memori jangka panjang di atas untuk menjawab pengguna secara langsung, ramah, dan akurat dalam Bahasa Indonesia.' : 'Gunakan seluruh fakta dan bukti data penelusuran web di atas untuk LANGSUNG menyusun ulasan akhir dalam Bahasa Indonesia yang berbobot, bernilai guna tinggi, cerdas, runtut, dan informatif.'))))}
-
-
-PANDUAN NILAI GUNA & INTEGRITAS FAKTA:
-1. NILAI GUNA TINGGI & JELASKAN ISI: Jangan sekadar menyajikan daftar judul atau tautan mentah. DILARANG menyuruh pengguna membuka atau membaca sumber sendiri. Baca bagian "Isi Artikel" di atas lalu JELASKAN langsung kepada pengguna apa yang terjadi, apa yang dirilis (nama model/produk, fitur, spesifikasi teknis, fungsi, angka, tanggal rilis, dan dampaknya) dengan kalimat analitis Anda sendiri secara lengkap dan tuntas.
-2. INTEGRITAS FAKTA (ANTI-HALUSINASI): Tetap setia pada data fakta yang tertera pada sumber. Dilarang mengarang tanggal di masa depan (Hari ini adalah ${currentFormattedDate}. Segala peristiwa setelah hari ini belum terjadi), nomor versi palsu, atau klaim fiktif yang tidak didukung bukti sumber.
-3. STRUKTUR BERKUALITAS: Gunakan format Markdown yang rapi dengan heading tematik, poin penjelasan yang padat isi, dan bila menyajikan tabel Markdown, WAJIB menggunakan baris baru (\\n) yang valid antar baris.
-4. Jawablah langsung secara alami tanpa penolakan kaku dan TANPA format pemanggilan tool (search_web) lagi.`
-          : `[INFORMASI TELAH TERSEDIA DI LATAR BELAKANG]:
-Data hasil eksekusi di atas telah disediakan secara internal.
-Jika informasi sudah cukup lengkap, berikan jawaban akhir secara langsung dan tuntas kepada pengguna tanpa menampilkan langkah ekstraksi atau data mentah.
-Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artikel lengkap dengan browse_web_page dari URL hasil pencarian, mencari memori tambahan, atau mengeksekusi kalkulasi kode Python), Anda dapat memanggil tool berikutnya yang relevan.`;
+BATASAN DOMAIN KLAIM:
+1. Hanya cantumkan entitas, nomor versi, metrik, dan tanggal rilis yang tertulis eksplisit di dalam bukti dokumen di atas (tanggal referensi hari ini: ${currentFormattedDate}).
+2. Uraikan rincian teknis dari bagian "Isi Artikel" secara langsung menggunakan Markdown terstruktur (heading, poin analisis, dan baris baru \\n yang valid bila memakai tabel).
+3. Jangan memanggil ulang fungsi search_web yang sudah dieksekusi.`
+          : `[HASIL EKSEKUSI TOOL]:
+Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika diperlukan ekstraksi lanjutan (seperti browse_web_page, search_memory, atau execute_python_code), panggil fungsi terkait.`;
 
         conversationChain.push({
           role: 'user',
@@ -29317,7 +29266,7 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
         // Jalankan panggilan streaming ke model untuk putaran berikutnya
         const activeDigestionModel = actualModelUsed || modelName;
         const isDigestionLiquid = Boolean(activeDigestionModel && (activeDigestionModel.includes('liquid') || activeDigestionModel.includes('lfm-')));
-        const isDigestionReasoning = Boolean(activeDigestionModel && (activeDigestionModel.includes('/o1') || activeDigestionModel.includes('/o3')));
+        const isDigestionReasoning = Boolean(activeDigestionModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(activeDigestionModel)));
 
         const digestionRequestBody = {
           model: activeDigestionModel,
@@ -29352,6 +29301,10 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
           if (!isDigestionLiquid && !isDigestionReasoning && STATE.settings.topP !== null && STATE.settings.topP !== undefined) {
             digestionRequestBody.top_p = parseFloat(STATE.settings.topP);
           }
+        } else if (hasExecutedSearch || hasBrowsedWeb || hasExecutedGrounding || (webSources && webSources.length > 0)) {
+          const optSampling = getGroundedSamplingParams(promptText);
+          if (!isDigestionReasoning) digestionRequestBody.temperature = optSampling.temperature;
+          if (!isDigestionLiquid && !isDigestionReasoning) digestionRequestBody.top_p = optSampling.topP;
         }
 
         const isDirectRoute = activeRouteType === 'direct' || (!activeEndpoint || activeEndpoint.includes('openrouter.ai'));
@@ -29557,6 +29510,49 @@ Namun jika Anda masih memerlukan data pendukung tambahan (misalnya membaca artik
               : (cleanAssistant || '');
           }
           break;
+        }
+      }
+
+      // ===== GERBANG KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) >= 0.75 (OPENROUTER) =====
+      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
+        try {
+          bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Menjalankan penelusuran indeks matematis (U=${temporalRecencyProfile.epistemicSearchTrigger})...</span></div>`;
+          smartScrollChatToBottom(true);
+          const autoSearchRes = await executeAutonomousWebTool('search_web', { query: promptText, max_results: 8 }, promptText, session);
+          if (autoSearchRes && Array.isArray(autoSearchRes.sources) && autoSearchRes.sources.length > 0 && !STATE.abortController?.signal?.aborted) {
+            webSources = autoSearchRes.sources;
+            allAccumulatedToolResponsesText = autoSearchRes.text || '';
+            bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyintesis bukti terverifikasi...</span></div>`;
+            const rescueModel = actualModelUsed || modelName;
+            const rescueDirect = activeRouteType === 'direct' || (!activeEndpoint || activeEndpoint.includes('openrouter.ai'));
+            const rescueUrl = activeEndpoint || (rescueDirect ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat');
+            const rescueHeaders = (activeHeaders && Object.keys(activeHeaders).length > 0) ? activeHeaders : {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`,
+              'HTTP-Referer': location.origin || 'https://zozi0999.github.io/zoz_router',
+              'X-Title': 'ZOZ Router'
+            };
+            const rescueExtra = {};
+            if (!rescueDirect) {
+              if (session?.id) rescueExtra.sessionId = session.id + '_epistemic';
+              if (STATE.userId) rescueExtra.userId = STATE.userId;
+              rescueExtra.apiKey = STATE.settings.openRouterKey || undefined;
+            }
+            const groundedAns = await rescueWebAnswerOpenRouter({
+              url: rescueUrl,
+              headers: rescueHeaders,
+              model: rescueModel,
+              question: promptText,
+              evidenceText: allAccumulatedToolResponsesText,
+              extraBody: rescueExtra,
+              signal: STATE.abortController?.signal
+            });
+            fullText = groundedAns || synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
+            preambleHtml = '';
+          }
+        } catch (epErr) {
+          if (epErr && (epErr.name === 'AbortError' || STATE.abortController?.signal?.aborted)) throw epErr;
+          console.warn('[OpenRouter Epistemic Gate] Error:', epErr);
         }
       }
 

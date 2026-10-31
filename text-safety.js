@@ -1311,6 +1311,921 @@
     };
   }
 
+  // ============================================================================
+  // 6. PURE MATHEMATICAL INFORMATION RETRIEVAL, RADIOACTIVE TEMPORAL DECAY,
+  //    BOLTZMANN ENTROPY CONTROL & HILBERT-SPACE GROUNDING PROJECTION
+  //    Menghapus halusinasi & pengambilan informasi usang murni dengan aljabar
+  //    linear, peluruhan eksponensial radioaktif W(Δt) = exp(-λ·Δt), skor BM25F,
+  //    dan proyeksi ortogonal subruang bukti P_E(u) tanpa instruksi persona AI.
+  // ============================================================================
+
+  const MONTH_INDEX_MAP = {
+    januari: 1, jan: 1, january: 1,
+    februari: 2, feb: 2, february: 2,
+    maret: 3, mar: 3, march: 3,
+    april: 4, apr: 4,
+    mei: 5, may: 5,
+    juni: 6, jun: 6, june: 6,
+    juli: 7, jul: 7, july: 7,
+    agustus: 8, agu: 8, agt: 8, aug: 8, august: 8,
+    september: 9, sep: 9, sept: 9,
+    oktober: 10, okt: 10, oct: 10, october: 10,
+    november: 11, nov: 11,
+    desember: 12, des: 12, dec: 12, december: 12
+  };
+
+  const ID_MONTH_NAMES = [
+    '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  ];
+
+  const GENERIC_NON_ENTITY_WORDS = new Set([
+    'januari', 'februari', 'maret', 'april', 'mei', 'juni', 'juli', 'agustus', 'september', 'oktober', 'november', 'desember',
+    'january', 'february', 'march', 'may', 'june', 'july', 'august', 'october', 'december',
+    'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'agu', 'agt', 'sep', 'sept', 'okt', 'oct', 'nov', 'dec', 'des',
+    'senin', 'selasa', 'rabu', 'kamis', 'jumat', 'sabtu', 'minggu',
+    'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+    'tahun', 'bulan', 'pekan', 'hari', 'jam', 'menit', 'detik', 'year', 'years', 'month', 'months', 'week', 'weeks', 'day', 'days', 'hour', 'hours',
+    'tanggal', 'date', 'abad', 'kuartal', 'quarter', 'semester', 'tahap', 'fase', 'phase', 'stage', 'step', 'langkah',
+    'bab', 'chapter', 'pasal', 'ayat', 'bagian', 'part', 'section', 'poin', 'nomor', 'no', 'item', 'baris', 'kolom', 'tabel', 'sumber', 'source',
+    'versi', 'version', 'seri', 'series', 'generasi', 'gen', 'tier', 'level', 'kelas', ' peringkat', 'rank', 'top', 'skor', 'score',
+    'juta', 'miliar', 'triliun', 'ribu', 'persen', 'percent', 'million', 'billion', 'trillion', 'ribuan',
+    'usd', 'idr', 'eur', 'rupiah', 'dolar', 'dollar', 'gb', 'tb', 'mb', 'kb', 'kw', 'mw', 'gw', 'hz', 'ghz', 'mhz', 'nm', 'mm', 'cm', 'km', 'kg', 'fps', 'tps',
+    'dari', 'pada', 'untuk', 'dengan', 'dalam', 'hingga', 'sampai', 'antara', 'sekitar', 'lebih', 'kurang', 'hampir', 'mencapai', 'sebesar', 'senilai',
+    'over', 'under', 'from', 'into', 'with', 'than', 'more', 'less', 'about', 'around', 'nearly', 'up', 'to', 'in', 'on', 'at', 'by', 'of', 'for', 'the', 'and',
+    'rilis', 'dirilis', 'release', 'released', 'update', 'updated', 'model', 'models', 'fitur', 'agen', 'agent', 'agents', 'data', 'kode', 'code', 'api', 'web'
+  ]);
+
+  const BILINGUAL_QUERY_BASIS = {
+    rilis: ['release', 'releases', 'released', 'launch', 'launches', 'unveils', 'announces'],
+    peluncuran: ['launch', 'release', 'unveils'],
+    terbaru: ['latest', 'new', 'newest', 'recent'],
+    terkini: ['latest', 'breaking', 'current', 'recent'],
+    mutakhir: ['frontier', 'latest', 'advanced'],
+    berita: ['news', 'report', 'updates'],
+    pembaruan: ['update', 'updates', 'upgrade'],
+    kecerdasan: ['artificial', 'intelligence', 'ai'],
+    penalaran: ['reasoning', 'thinking'],
+    terbuka: ['open', 'weights', 'source'],
+    harga: ['price', 'pricing', 'cost'],
+    saham: ['stock', 'stocks', 'market'],
+    gempa: ['earthquake', 'seismic'],
+    perang: ['war', 'conflict']
+  };
+
+  const IR_STOPWORDS = new Set([
+    ...STOPWORDS_AND_VERBS,
+    'cari', 'carikan', 'coba', 'tolong', 'web', 'internet', 'google', 'search', 'find', 'look',
+    'terbaru', 'terkini', 'hari', 'minggu', 'bulan', 'tahun', 'sekarang', 'saat', 'latest', 'recent',
+    'today', 'week', 'month', 'year', 'now', 'current', 'new', 'baru'
+  ]);
+
+  function parseAuthenticTimestamp(rawDateStr, urlStr = '', bodyStr = '', nowMs = Date.now()) {
+    const maxFutureMs = nowMs + 36 * 3600 * 1000;
+    const minValidMs = Date.UTC(1995, 0, 1);
+
+    const tryEpoch = (ms) => {
+      if (!Number.isFinite(ms)) return null;
+      if (ms < minValidMs || ms > maxFutureMs) return null;
+      return ms;
+    };
+
+    const raw = String(rawDateStr || '').trim();
+    if (raw && !/^(?:terkini|baru|latest|recent|today|now|n\/a|unknown|-)$/i.test(raw)) {
+      // Relative time expressions: "3 hours ago", "2 days ago", "5 jam lalu"
+      const relMatch = raw.match(/(\d+)\s*(detik|menit|jam|hari|minggu|bulan|second|minute|hour|day|week|month)s?\s*(?:yang\s+)?(?:lalu|ago)/i);
+      if (relMatch) {
+        const val = parseInt(relMatch[1], 10);
+        const unit = relMatch[2].toLowerCase();
+        const mult = unit.startsWith('det') || unit.startsWith('sec') ? 1000
+          : unit.startsWith('men') || unit.startsWith('min') ? 60000
+          : unit.startsWith('jam') || unit.startsWith('hour') ? 3600000
+          : unit.startsWith('har') || unit.startsWith('day') ? 86400000
+          : unit.startsWith('ming') || unit.startsWith('week') ? 7 * 86400000
+          : 30 * 86400000;
+        const t = tryEpoch(nowMs - val * mult);
+        if (t !== null) return t;
+      }
+
+      // Pure ISO / RFC-2822 parse (reject bare 4-digit year string alone as ambiguous)
+      if (!/^\d{4}$/.test(raw)) {
+        const parsed = Date.parse(raw);
+        const valid = tryEpoch(parsed);
+        if (valid !== null) return valid;
+      }
+
+      // Indonesian / textual date in rawDateStr (e.g., "30 Oktober 2026")
+      const coords = extractCalendarDateCoordinates(raw);
+      if (coords.length > 0 && coords[0].year) {
+        const c = coords[0];
+        const valid = tryEpoch(Date.UTC(c.year, c.month - 1, c.day || 15, 12, 0, 0));
+        if (valid !== null) return valid;
+      }
+    }
+
+    // Extract from URL path: /2026/10/30/ or -20261029- or /2026-10-30
+    const u = String(urlStr || '');
+    if (u) {
+      const urlYmd = u.match(/(?:\/|[-_])(20[0-2]\d)[\/\-_](0[1-9]|1[0-2])[\/\-_](0[1-9]|[12]\d|3[01])(?:\/|[-_.]|$)/);
+      if (urlYmd) {
+        const valid = tryEpoch(Date.UTC(parseInt(urlYmd[1], 10), parseInt(urlYmd[2], 10) - 1, parseInt(urlYmd[3], 10), 12, 0, 0));
+        if (valid !== null) return valid;
+      }
+      const urlCompact = u.match(/(?:\/|[-_])(20[0-2]\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?:[-_/.]|$)/);
+      if (urlCompact) {
+        const valid = tryEpoch(Date.UTC(parseInt(urlCompact[1], 10), parseInt(urlCompact[2], 10) - 1, parseInt(urlCompact[3], 10), 12, 0, 0));
+        if (valid !== null) return valid;
+      }
+      const urlYm = u.match(/\/(20[0-2]\d)\/(0[1-9]|1[0-2])\//);
+      if (urlYm) {
+        const valid = tryEpoch(Date.UTC(parseInt(urlYm[1], 10), parseInt(urlYm[2], 10) - 1, 15, 12, 0, 0));
+        if (valid !== null) return valid;
+      }
+    }
+
+    // Extract from leading article body header (first 400 chars often contain byline date)
+    const head = String(bodyStr || '').slice(0, 450);
+    if (head) {
+      const coords = extractCalendarDateCoordinates(head);
+      const withYear = coords.find(c => c.year && c.hasDay);
+      if (withYear) {
+        const valid = tryEpoch(Date.UTC(withYear.year, withYear.month - 1, withYear.day, 12, 0, 0));
+        if (valid !== null) return valid;
+      }
+    }
+
+    return null;
+  }
+
+  function extractCalendarDateCoordinates(text, fallbackYear = null) {
+    const s = String(text || '');
+    if (!s) return [];
+    const results = [];
+    const seen = new Set();
+
+    const pushCoord = (year, month, day, hasDay, raw) => {
+      const y = year ? parseInt(year, 10) : fallbackYear;
+      const m = parseInt(month, 10);
+      const d = hasDay ? parseInt(day, 10) : 15;
+      if (!m || m < 1 || m > 12 || d < 1 || d > 31) return;
+      if (y && (y < 1990 || y > 2099)) return;
+      const epochDays = y ? Math.floor(Date.UTC(y, m - 1, d) / 86400000) : null;
+      const key = `${y || '?'}-${m}-${hasDay ? d : 'M'}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        results.push({ year: y || null, month: m, day: hasDay ? d : null, hasDay, epochDays, raw: raw.trim() });
+      }
+    };
+
+    const monthPat = Object.keys(MONTH_INDEX_MAP).join('|');
+
+    // 1. ISO YYYY-MM-DD or YYYY/MM/DD
+    const isoRe = /\b(20[0-3]\d)[-\/](0[1-9]|1[0-2])[-\/](0[1-9]|[12]\d|3[01])\b/g;
+    let m;
+    while ((m = isoRe.exec(s)) !== null) {
+      pushCoord(m[1], m[2], m[3], true, m[0]);
+    }
+
+    // 2. DD Month [YYYY] (Indonesian & RFC: "12 Oktober 2026", "5 Okt", "30 Oct 2026")
+    const dmyRe = new RegExp(`\\b([0-3]?\\d)\\s+(${monthPat})(?:[.,]?\\s*(20[0-3]\\d))?\\b`, 'gi');
+    while ((m = dmyRe.exec(s)) !== null) {
+      const dayNum = parseInt(m[1], 10);
+      if (dayNum >= 1 && dayNum <= 31) {
+        const monIdx = MONTH_INDEX_MAP[m[2].toLowerCase()];
+        if (monIdx) pushCoord(m[3] || fallbackYear, monIdx, dayNum, true, m[0]);
+      }
+    }
+
+    // 3. Month DD[, YYYY] (English: "October 30, 2026", "Oct 27")
+    const mdyRe = new RegExp(`\\b(${monthPat})\\.?\\s+([0-3]?\\d)(?:st|nd|rd|th)?(?:\\s*,?\\s*(20[0-3]\\d))?\\b`, 'gi');
+    while ((m = mdyRe.exec(s)) !== null) {
+      const dayNum = parseInt(m[2], 10);
+      if (dayNum >= 1 && dayNum <= 31) {
+        const monIdx = MONTH_INDEX_MAP[m[1].toLowerCase()];
+        if (monIdx) pushCoord(m[3] || fallbackYear, monIdx, dayNum, true, m[0]);
+      }
+    }
+
+    // 4. Month YYYY without day ("Sep 2026", "September 2026", "Oktober 2026")
+    const myRe = new RegExp(`\\b(${monthPat})\\.?\\s+(20[0-3]\\d)\\b`, 'gi');
+    while ((m = myRe.exec(s)) !== null) {
+      const monIdx = MONTH_INDEX_MAP[m[1].toLowerCase()];
+      if (monIdx) pushCoord(m[2], monIdx, 15, false, m[0]);
+    }
+
+    return results;
+  }
+
+  function extractVersionedEntityAnchors(text) {
+    const s = String(text || '');
+    if (!s) return [];
+    const anchors = new Set();
+
+    // 1. Formal morphological <Entity>[ -]<Version> extractor:
+    //    Matches e.g. "Claude 3.7", "Claude 3.5", "Claude 3 Opus", "Gemma 4", "Genie 4",
+    //    "Llama 4", "Large 4", "GPT-6.1", "GPT-5", "GPT-4o", "Qwen 2.5", "DeepSeek-V3", "DeepSeek R1", "Gemini 2.0"
+    const entityVerRe = /\b([A-Za-z][A-Za-z0-9]{1,18})(?:[\s\-]+)(v?\d+(?:\.\d+)*[a-z]?|r[12]\b|v[1-9](?:\.\d+)?)\b/gi;
+    let m;
+    while ((m = entityVerRe.exec(s)) !== null) {
+      const ent = m[1].toLowerCase();
+      let ver = m[2].toLowerCase();
+      if (GENERIC_NON_ENTITY_WORDS.has(ent)) continue;
+      if (STOPWORDS_AND_VERBS.has(ent) || LOW_ENTROPY_FILLERS.has(ent)) continue;
+      // Ignore 4-digit calendar years (1990-2039) and parameter/context sizes (70b, 31b, 128k, 100m)
+      if (/^(?:19\d\d|20[0-3]\d)$/.test(ver)) continue;
+      if (/^\d+(?:\.\d+)?[bkmgt]$/i.test(ver) && !/^v\d/i.test(ver)) continue;
+      // Ignore pure counts >= 25 unless decimal or prefixed with v/r (versions are typically 1..24 or x.y)
+      if (/^\d+$/.test(ver) && parseInt(ver, 10) > 24) continue;
+      ver = ver.replace(/^v(?=\d)/, '');
+      // Normalize trailing .0 (e.g. "2.0" -> "2" so "Gemini 2.0" == "Gemini 2")
+      ver = ver.replace(/^(\d+)\.0$/, '$1');
+      anchors.add(`${ent}:${ver}`);
+    }
+
+    // 2. Standalone reasoning / frontier shorthand model codes: o1, o3, o4-mini, r1
+    const codeRe = /\b(o1(?:-mini|-pro|-preview)?|o3(?:-mini|-pro)?|o4(?:-mini)?)\b/gi;
+    while ((m = codeRe.exec(s)) !== null) {
+      const baseCode = m[1].toLowerCase().split('-')[0];
+      anchors.add(`code:${baseCode}`);
+    }
+
+    return [...anchors];
+  }
+
+  function computeTemporalRecencyProfile(query, contextText = '', nowMs = Date.now()) {
+    const q = String(query || '').trim();
+    const combined = `${q} ${String(contextText || '')}`.trim();
+    const curYear = new Date(nowMs).getUTCFullYear();
+
+    const isCodeOrCreative = /\b(?:html|css|javascript|typescript|python|java|rust|golang|sql|regex|website|landing\s*page|komponen|buatkan\s+(?:kode|script|fungsi|program|puisi|cerpen|cerita|lagu|musik|surat|makalah|dokumen))\b/i.test(q)
+      || /<<<ZOZ_FILE|<<<<<<< SEARCH|```/.test(q);
+
+    // Noisy-OR fusion over temporal & epistemic retrieval operators
+    const probs = [];
+    let halfLifeDays = 365;
+
+    const explicitWebOp = /\b(?:cari(?:kan)?\s+di\s+(?:web|internet|google)|search\s+(?:the\s+)?(?:web|internet|online)|telusuri(?:\s+web|\s+internet)?|cek\s+di\s+(?:web|internet)|browsing)\b/i.test(q);
+    if (explicitWebOp) {
+      probs.push(0.96);
+      halfLifeDays = Math.min(halfLifeDays, 21);
+    }
+
+    const immediateRecency = /\b(?:hari\s+ini|kemarin|barusan|sekarang|minggu\s+ini|pekan\s+ini|today|yesterday|right\s+now|this\s+week|breaking\s+news)\b/i.test(q);
+    if (immediateRecency) {
+      probs.push(0.95);
+      halfLifeDays = Math.min(halfLifeDays, 10);
+    }
+
+    const generalRecency = /\b(?:terbaru|terkini|mutakhir|bulan\s+ini|tahun\s+ini|latest|newest|most\s+recent|this\s+month|current\s+release|rilis\s+.*\bbaru|new\s+release)\b/i.test(q);
+    if (generalRecency) {
+      probs.push(0.90);
+      halfLifeDays = Math.min(halfLifeDays, 18);
+    }
+
+    const releaseOrNewsTopic = /\b(?:rilis|peluncuran|berita|kabar|pengumuman|update|pembaruan|harga|kurs|skor|klasemen|jadwal|cuaca|gempa|release|launch|announcement|news|price)\b/i.test(q);
+    if (releaseOrNewsTopic) {
+      probs.push(0.55);
+      halfLifeDays = Math.min(halfLifeDays, 30);
+    }
+
+    // Explicit year detection
+    const yearMatches = (q.match(/\b(199\d|20[0-3]\d)\b/g) || []).map(Number);
+    const hasCurrentYear = yearMatches.includes(curYear);
+    const historicalYears = yearMatches.filter(y => y < curYear);
+
+    if (hasCurrentYear) {
+      probs.push(0.88);
+      halfLifeDays = Math.min(halfLifeDays, 21);
+    }
+
+    let targetHistoricalYear = null;
+    if (historicalYears.length > 0 && !hasCurrentYear && !immediateRecency && !generalRecency) {
+      targetHistoricalYear = historicalYears[0];
+    }
+
+    let recencyAlpha = 0.15;
+    if (targetHistoricalYear !== null) {
+      recencyAlpha = 0.0;
+    } else if (probs.length > 0) {
+      let complement = 1.0;
+      for (const p of probs) complement *= (1.0 - p);
+      recencyAlpha = 1.0 - complement;
+    }
+
+    // Check contextual continuity (e.g. follow-up turn about recent news)
+    if (recencyAlpha < 0.5 && !targetHistoricalYear && /\b(?:terbaru|terkini|latest|2026|oktober|october)\b/i.test(combined)) {
+      recencyAlpha = Math.max(recencyAlpha, 0.55);
+      halfLifeDays = Math.min(halfLifeDays, 30);
+    }
+
+    const lambda = Math.LN2 / Math.max(1, halfLifeDays);
+    const epistemicSearchTrigger = isCodeOrCreative ? 0.0 : (explicitWebOp ? 0.98 : recencyAlpha);
+
+    return {
+      recencyAlpha: Number(recencyAlpha.toFixed(4)),
+      halfLifeDays,
+      lambda: Number(lambda.toFixed(6)),
+      targetHistoricalYear,
+      curYear,
+      explicitWebOp,
+      epistemicSearchTrigger: Number(epistemicSearchTrigger.toFixed(4))
+    };
+  }
+
+  function tokenizeForIR(text) {
+    return String(text || '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}._-]/gu, ' ')
+      .split(/\s+/)
+      .map(t => t.replace(/^[._-]+|[._-]+$/g, ''))
+      .filter(t => t.length >= 2);
+  }
+
+  function expandQueryTokensMathematically(query, curYear) {
+    const rawTokens = tokenizeForIR(query);
+    const expanded = new Map();
+    for (const t of rawTokens) {
+      if (IR_STOPWORDS.has(t)) continue;
+      if (t === String(curYear)) {
+        // Year is handled by the continuous temporal decay kernel W_time(Δt), not as a mandatory lexical bias
+        expanded.set(t, 0.25);
+        continue;
+      }
+      expanded.set(t, Math.max(expanded.get(t) || 0, 1.0));
+      const syns = BILINGUAL_QUERY_BASIS[t];
+      if (syns) {
+        for (const syn of syns) {
+          expanded.set(syn, Math.max(expanded.get(syn) || 0, 0.85));
+        }
+      }
+    }
+    // If all tokens were stopwords/temporal (e.g. "berita terbaru hari ini"), retain core topical tokens
+    if (expanded.size === 0) {
+      for (const t of rawTokens) {
+        if (t.length >= 2) expanded.set(t, 0.7);
+      }
+    }
+    return expanded;
+  }
+
+  function rankDocumentsMathematically(candidates, query, options = {}) {
+    if (!Array.isArray(candidates) || candidates.length === 0) return [];
+    const nowMs = options.nowMs || Date.now();
+    const profile = options.profile || computeTemporalRecencyProfile(query, options.contextText || '', nowMs);
+    const queryWeights = expandQueryTokensMathematically(query, profile.curYear);
+    const qTerms = [...queryWeights.keys()];
+
+    // Pre-tokenize documents & extract authentic timestamps
+    const docs = candidates.map((item) => {
+      const title = String(item.title || '');
+      const snippet = String(item.snippet || '');
+      const content = String(item.content || '');
+      const url = String(item.url || item.link || '');
+      const rawDate = item.published_at || item.pubDate || item.published_date || item.date || '';
+
+      const titleTokens = tokenizeForIR(title);
+      const snippetTokens = tokenizeForIR(snippet);
+      const contentTokens = tokenizeForIR(content.slice(0, 4000));
+
+      const tfTitle = new Map();
+      const tfSnippet = new Map();
+      const tfContent = new Map();
+      for (const t of titleTokens) tfTitle.set(t, (tfTitle.get(t) || 0) + 1);
+      for (const t of snippetTokens) tfSnippet.set(t, (tfSnippet.get(t) || 0) + 1);
+      for (const t of contentTokens) tfContent.set(t, (tfContent.get(t) || 0) + 1);
+
+      const docLen = titleTokens.length * 2 + snippetTokens.length + contentTokens.length;
+      const verifiedTs = parseAuthenticTimestamp(rawDate, url, `${title} ${snippet} ${content.slice(0, 400)}`, nowMs);
+      const ageDays = verifiedTs !== null ? ((nowMs - verifiedTs) / 86400000) : null;
+
+      return {
+        item,
+        url,
+        titleTokens,
+        tfTitle,
+        tfSnippet,
+        tfContent,
+        docLen: Math.max(1, docLen),
+        verifiedTs,
+        ageDays
+      };
+    });
+
+    const N = docs.length;
+    const avgdl = docs.reduce((acc, d) => acc + d.docLen, 0) / Math.max(1, N);
+
+    // Compute IDF(q) across candidate corpus
+    const idfMap = new Map();
+    for (const qt of qTerms) {
+      let df = 0;
+      for (const d of docs) {
+        if (d.tfTitle.has(qt) || d.tfSnippet.has(qt) || d.tfContent.has(qt)) df++;
+      }
+      // Smooth Robertson-Sparck Jones IDF with floor so shared topical terms in pre-filtered pools stay positive
+      const idf = Math.log(1 + (N - df + 0.5) / (df + 0.5)) + 0.35;
+      idfMap.set(qt, idf);
+    }
+
+    const freshVerifiedCount = docs.filter(d => d.ageDays !== null && d.ageDays >= -1.5 && d.ageDays <= 60).length;
+
+    const k1 = 1.5;
+    const b = 0.75;
+    const kappa = 3.2;
+
+    const scored = [];
+    for (const d of docs) {
+      // 1. Field-weighted Okapi BM25F
+      let bm25 = 0;
+      let matchedDistinct = 0;
+      for (const [qt, qWeight] of queryWeights.entries()) {
+        const fT = d.tfTitle.get(qt) || 0;
+        const fS = d.tfSnippet.get(qt) || 0;
+        const fC = d.tfContent.get(qt) || 0;
+        const pseudoFreq = 4.0 * fT + 2.0 * fS + 1.0 * fC;
+        if (pseudoFreq > 0) {
+          matchedDistinct++;
+          const idf = idfMap.get(qt) || 0.5;
+          const denom = pseudoFreq + k1 * (1 - b + b * (d.docLen / Math.max(1, avgdl)));
+          bm25 += qWeight * idf * ((pseudoFreq * (k1 + 1)) / denom);
+        }
+      }
+
+      if (bm25 <= 0 || matchedDistinct === 0) continue;
+      const lexNorm = bm25 / (bm25 + kappa);
+
+      // 2. Exponential Radioactive Temporal Decay W_time(Δt) = exp(-λ · Δt)
+      let temporalWeight = 1.0;
+      if (profile.targetHistoricalYear !== null) {
+        if (d.verifiedTs !== null) {
+          const docYear = new Date(d.verifiedTs).getUTCFullYear();
+          const yearDiff = docYear - profile.targetHistoricalYear;
+          temporalWeight = Math.exp(-(yearDiff * yearDiff) / 2.0);
+        } else {
+          temporalWeight = 0.4;
+        }
+      } else if (d.ageDays !== null) {
+        if (d.ageDays < -1.5) {
+          // Causal cone violation (impossible future publication timestamp)
+          continue;
+        }
+        // Hard horizon cutoff when query demands fresh info and fresh documents exist
+        if (profile.recencyAlpha >= 0.72 && freshVerifiedCount >= 2 && d.ageDays > 120) {
+          continue;
+        }
+        temporalWeight = Math.exp(-profile.lambda * Math.max(0, d.ageDays));
+      } else {
+        // Unverified / missing publication timestamp penalty under maximum entropy prior
+        const combinedLower = `${d.item.title || ''} ${d.item.snippet || ''}`.toLowerCase();
+        const mentionsPastYear = /\b(201\d|202[0-5])\b/.test(combinedLower) && !combinedLower.includes(String(profile.curYear));
+        if (profile.recencyAlpha >= 0.72) {
+          if (mentionsPastYear || freshVerifiedCount >= 3) {
+            temporalWeight = mentionsPastYear ? 0.0 : 0.06;
+          } else {
+            temporalWeight = 0.18;
+          }
+        } else {
+          temporalWeight = 0.65;
+        }
+      }
+
+      if (temporalWeight <= 1e-6) continue;
+
+      // 3. Joint Multiplicative-Harmonic Retrieval Score
+      const alpha = profile.recencyAlpha;
+      const blend = (1 - alpha) + alpha * temporalWeight;
+      const mathScore = lexNorm * blend * Math.pow(temporalWeight, alpha);
+
+      if (mathScore <= 1e-5) continue;
+
+      const isoDate = d.verifiedTs !== null ? new Date(d.verifiedTs).toISOString().slice(0, 10) : '';
+
+      scored.push({
+        ...d.item,
+        timestamp: d.verifiedTs || 0,
+        pubDate: isoDate || (d.verifiedTs !== null ? d.item.pubDate : ''),
+        published_at: d.verifiedTs !== null ? (d.item.published_at || isoDate) : '',
+        mathDiagnostics: {
+          mathScore: Number(mathScore.toFixed(5)),
+          bm25Score: Number(bm25.toFixed(4)),
+          lexNorm: Number(lexNorm.toFixed(4)),
+          temporalWeight: Number(temporalWeight.toFixed(5)),
+          ageDays: d.ageDays !== null ? Number(d.ageDays.toFixed(2)) : null,
+          recencyAlpha: alpha
+        }
+      });
+    }
+
+    scored.sort((a, b) => b.mathDiagnostics.mathScore - a.mathDiagnostics.mathScore);
+    return scored;
+  }
+
+  function computeOptimalSamplingTemperature(recencyProfile, hasGroundedEvidence = false) {
+    if (hasGroundedEvidence) {
+      // Sharpen Boltzmann distribution P_T(w) ∝ exp(z_w / T) toward MAP context mode
+      return { temperature: 0.05, top_p: 0.82, topP: 0.82 };
+    }
+    const alpha = recencyProfile && typeof recencyProfile.recencyAlpha === 'number'
+      ? recencyProfile.recencyAlpha
+      : 0.15;
+    const temp = Math.max(0.10, Number((0.70 * (1 - 0.80 * alpha)).toFixed(2)));
+    const pVal = alpha >= 0.7 ? 0.85 : 0.92;
+    return { temperature: temp, top_p: pVal, topP: pVal };
+  }
+
+  function buildCharNgramSet(text, n = 4) {
+    const clean = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    const set = new Set();
+    for (let i = 0; i <= clean.length - n; i++) {
+      set.add(clean.slice(i, i + n));
+    }
+    return set;
+  }
+
+  function projectGroundedResponseMathematically(responseText, sources, rawToolText = '', options = {}) {
+    const raw = String(responseText || '');
+    if (!raw.trim() || !Array.isArray(sources) || sources.length === 0) {
+      return { text: raw, prunedCount: 0, dateCorrections: 0, hallucinationRate: 0 };
+    }
+
+    const nowMs = options.nowMs || Date.now();
+    const nowDate = new Date(nowMs);
+    const curYear = nowDate.getUTCFullYear();
+    const todayEpochDays = Math.floor(nowMs / 86400000);
+
+    // 1. Construct Verified Evidence Anchor Sets A_ver(E), A_date(E), and Invariant Token Space I(E)
+    const evidenceDocs = sources.map((s) => {
+      const docText = [
+        s.title || '',
+        s.snippet || '',
+        s.content || '',
+        s.pubDate || '',
+        s.published_at || '',
+        s.published_date || '',
+        s.date || '',
+        s.url || ''
+      ].join(' ');
+      const ts = parseAuthenticTimestamp(
+        s.published_at || s.pubDate || s.published_date || s.date || '',
+        s.url || '',
+        docText,
+        nowMs
+      );
+      const docDates = extractCalendarDateCoordinates(docText, curYear);
+      if (ts !== null) {
+        const dt = new Date(ts);
+        docDates.unshift({
+          year: dt.getUTCFullYear(),
+          month: dt.getUTCMonth() + 1,
+          day: dt.getUTCDate(),
+          hasDay: true,
+          epochDays: Math.floor(ts / 86400000),
+          raw: dt.toISOString().slice(0, 10)
+        });
+      }
+      return {
+        source: s,
+        docText,
+        tokens: new Set(tokenizeForIR(docText)),
+        ngrams: buildCharNgramSet(docText, 4),
+        verAnchors: new Set(extractVersionedEntityAnchors(docText)),
+        dates: docDates,
+        ts
+      };
+    });
+
+    const fullEvidenceCorpus = `${String(rawToolText || '')}\n${evidenceDocs.map(d => d.docText).join('\n')}`;
+    const verifiedVerAnchors = new Set(extractVersionedEntityAnchors(fullEvidenceCorpus));
+    const verifiedTokens = new Set(tokenizeForIR(fullEvidenceCorpus));
+
+    // Also index entity stems that have verified versions so we recognize version mismatches cleanly
+    const verifiedDayEpochSet = [];
+    const verifiedMonthSet = new Set();
+    // Allow today's system date as a valid meta-reference ("per 31 Oktober 2026")
+    verifiedDayEpochSet.push(todayEpochDays);
+    verifiedMonthSet.add(`${curYear}-${nowDate.getUTCMonth() + 1}`);
+
+    for (const d of evidenceDocs) {
+      for (const dc of d.dates) {
+        if (dc.epochDays !== null && dc.hasDay) verifiedDayEpochSet.push(dc.epochDays);
+        if (dc.year && dc.month) verifiedMonthSet.add(`${dc.year}-${dc.month}`);
+      }
+    }
+    for (const dc of extractCalendarDateCoordinates(rawToolText, curYear)) {
+      if (dc.epochDays !== null && dc.hasDay) verifiedDayEpochSet.push(dc.epochDays);
+      if (dc.year && dc.month) verifiedMonthSet.add(`${dc.year}-${dc.month}`);
+    }
+
+    const hasVerifiedDates = verifiedDayEpochSet.length > 1;
+
+    const isDateSupported = (coord, sentenceContext = '') => {
+      const isForward = /\b(target|proyeksi|prediksi|rencana|jadwal|dijadwalkan|akan|menuju|hingga|sampai|mendatang|perkiraan|roadmap|expected|projected|forecast|scheduled|upcoming)\b/i.test(sentenceContext);
+      if (coord.epochDays !== null && coord.epochDays > todayEpochDays + 1 && !isForward) {
+        // Future date claimed as past/present fact: must exist verbatim in evidence
+        return verifiedDayEpochSet.some(ed => Math.abs(ed - coord.epochDays) <= 1);
+      }
+      if (isForward) return true;
+      if (!hasVerifiedDates) return true;
+      if (coord.hasDay && coord.epochDays !== null) {
+        // Tolerance ±1 day for UTC <-> local timezone (WIB/PDT) boundary shifts
+        return verifiedDayEpochSet.some(ed => Math.abs(ed - coord.epochDays) <= 1);
+      }
+      if (!coord.hasDay && coord.year && coord.month) {
+        return verifiedMonthSet.has(`${coord.year}-${coord.month}`);
+      }
+      return true;
+    };
+
+    const computeMaxDocSimilarity = (unitText) => {
+      const uNgrams = buildCharNgramSet(unitText, 4);
+      if (uNgrams.size === 0) return 0;
+      let bestSim = 0;
+      let bestDoc = null;
+      for (const d of evidenceDocs) {
+        let inter = 0;
+        for (const ng of uNgrams) {
+          if (d.ngrams.has(ng)) inter++;
+        }
+        const sim = inter / Math.max(1, uNgrams.size);
+        if (sim > bestSim) {
+          bestSim = sim;
+          bestDoc = d;
+        }
+      }
+      return { bestSim, bestDoc };
+    };
+
+    const computeInvariantSupport = (unitText) => {
+      // Extract capitalized proper nouns / tech identifiers / numbers not in Indonesian stopwords
+      const rawWords = String(unitText || '').match(/\b[A-Z][A-Za-z0-9._-]{1,20}\b|\b[a-z]+[0-9][a-z0-9._-]*\b/g) || [];
+      const invariants = [];
+      for (const w of rawWords) {
+        const lw = w.toLowerCase();
+        if (GENERIC_NON_ENTITY_WORDS.has(lw) || STOPWORDS_AND_VERBS.has(lw) || LOW_ENTROPY_FILLERS.has(lw)) continue;
+        if (/^(?:tabel|ringkasan|analisis|catatan|kesimpulan|poin|tren|pola|rekap|model|rilis|kategori|pengembang|sorotan|utama|indonesia|dunia|global)$/i.test(lw)) continue;
+        invariants.push(lw);
+      }
+      if (invariants.length === 0) return { count: 0, ratio: 1 };
+      let hits = 0;
+      for (const inv of invariants) {
+        if (verifiedTokens.has(inv) || [...verifiedTokens].some(vt => vt.length >= 4 && inv.length >= 4 && (vt.includes(inv) || inv.includes(vt)))) {
+          hits++;
+        }
+      }
+      return { count: invariants.length, ratio: hits / invariants.length };
+    };
+
+    // 2. Line-by-line & Structural Block Projection (preserving code fences)
+    const lines = raw.split(/\r?\n/);
+    const projectedLines = [];
+    let inCodeFence = false;
+    let prunedCount = 0;
+    let dateCorrections = 0;
+    let evaluatedClaims = 0;
+
+    // Track section headings so if a heading introduces an ungrounded entity (or loses all body lines), we prune it cleanly
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i];
+      const trimmed = line.trim();
+
+      if (/^```/.test(trimmed)) {
+        inCodeFence = !inCodeFence;
+        projectedLines.push(line);
+        continue;
+      }
+      if (inCodeFence || !trimmed) {
+        projectedLines.push(line);
+        continue;
+      }
+
+      // A. Markdown Table Row Projection: | col1 | col2 | ... |
+      const isTableRow = /^\|.*\|$/.test(trimmed);
+      const isTableSeparator = /^\|[\s:|-]+\|$/.test(trimmed);
+      if (isTableRow && !isTableSeparator) {
+        // Detect if header row (next line is |---|---|)
+        const nextTrimmed = (lines[i + 1] || '').trim();
+        const isTableHeader = /^\|[\s:|-]+\|$/.test(nextTrimmed);
+        if (isTableHeader) {
+          projectedLines.push(line);
+          continue;
+        }
+
+        evaluatedClaims++;
+        const rowVers = extractVersionedEntityAnchors(trimmed);
+        const rowDates = extractCalendarDateCoordinates(trimmed, curYear);
+        const inv = computeInvariantSupport(trimmed);
+
+        // Rule T1: Disjoint versioned entity in table row -> project out
+        if (rowVers.length > 0) {
+          const hasAnySupportedVer = rowVers.some(v => verifiedVerAnchors.has(v));
+          if (!hasAnySupportedVer) {
+            prunedCount++;
+            continue;
+          }
+        }
+
+        // Rule T2: Unsupported calendar date coordinate in table row
+        if (rowDates.length > 0) {
+          const allDatesValid = rowDates.every(dc => isDateSupported(dc, trimmed));
+          if (!allDatesValid) {
+            // If entity IS supported in a specific dated evidence doc, project the date cell to the verified date!
+            const { bestSim, bestDoc } = computeMaxDocSimilarity(trimmed);
+            const hasSupportedVer = rowVers.length > 0 && rowVers.some(v => verifiedVerAnchors.has(v));
+            if ((hasSupportedVer || bestSim >= 0.28) && bestDoc && bestDoc.ts !== null) {
+              const dt = new Date(bestDoc.ts);
+              const trueDateStr = `${dt.getUTCDate()} ${ID_MONTH_NAMES[dt.getUTCMonth() + 1]} ${dt.getUTCFullYear()}`;
+              for (const badDc of rowDates) {
+                if (!isDateSupported(badDc, trimmed) && badDc.raw) {
+                  line = line.replace(badDc.raw, trueDateStr);
+                  dateCorrections++;
+                }
+              }
+              projectedLines.push(line);
+              continue;
+            }
+            prunedCount++;
+            continue;
+          }
+        }
+
+        // Rule T3: Zero invariant support across multi-entity table row
+        if (inv.count >= 2 && inv.ratio === 0) {
+          prunedCount++;
+          continue;
+        }
+
+        projectedLines.push(line);
+        continue;
+      }
+
+      if (isTableSeparator) {
+        projectedLines.push(line);
+        continue;
+      }
+
+      // B. Heading Projection (## ... or **1. Title (Date)**)
+      const isMarkdownHeading = /^#{1,6}\s+/.test(trimmed);
+      const isBoldSubheading = /^\*\*(?:\d+\.\s*)?[^*\n]{4,90}\*\*\s*$/.test(trimmed);
+      if (isMarkdownHeading || isBoldSubheading) {
+        const hVers = extractVersionedEntityAnchors(trimmed);
+        if (hVers.length > 0 && !hVers.some(v => verifiedVerAnchors.has(v))) {
+          // Entire sub-section header is about a non-existent / stale parametric model!
+          // Skip this heading AND skip immediately following bullets/lines belonging to this ungrounded entity until next heading/blank section
+          prunedCount++;
+          evaluatedClaims++;
+          let j = i + 1;
+          while (j < lines.length) {
+            const nt = lines[j].trim();
+            if (/^#{1,6}\s+/.test(nt) || /^\*\*(?:\d+\.\s*)?[^*\n]{4,90}\*\*\s*$/.test(nt) || /^\|.*\|$/.test(nt) || /^---+$/.test(nt)) {
+              break;
+            }
+            if (nt) {
+              const nextVers = extractVersionedEntityAnchors(nt);
+              // Stop skipping if a new paragraph introduces a verified entity from E
+              if (nextVers.length > 0 && nextVers.some(v => verifiedVerAnchors.has(v))) {
+                break;
+              }
+            }
+            j++;
+          }
+          i = j - 1;
+          continue;
+        }
+
+        // Correct or strip unverified date inside a valid heading
+        const hDates = extractCalendarDateCoordinates(trimmed, curYear);
+        for (const dc of hDates) {
+          if (!isDateSupported(dc, trimmed) && dc.raw) {
+            const { bestDoc } = computeMaxDocSimilarity(trimmed);
+            if (bestDoc && bestDoc.ts !== null) {
+              const dt = new Date(bestDoc.ts);
+              const trueDateStr = `${dt.getUTCDate()} ${ID_MONTH_NAMES[dt.getUTCMonth() + 1]} ${dt.getUTCFullYear()}`;
+              line = line.replace(dc.raw, trueDateStr);
+              dateCorrections++;
+            }
+          }
+        }
+        projectedLines.push(line);
+        continue;
+      }
+
+      // C. Prose Paragraph / Bullet Item Projection
+      const pVers = extractVersionedEntityAnchors(trimmed);
+      const pDates = extractCalendarDateCoordinates(trimmed, curYear);
+
+      if (pVers.length > 0 || pDates.length > 0) {
+        evaluatedClaims++;
+
+        // C1. Disjoint versioned entity assertion -> prune node & its unanchored child bullets in Markdown AST
+        if (pVers.length > 0 && !pVers.some(v => verifiedVerAnchors.has(v))) {
+          prunedCount++;
+          const isTopBullet = /^\s*(?:[-*•]|\d+\.)\s+/.test(line);
+          const curIndent = (line.match(/^\s*/) || [''])[0].length;
+          let j = i + 1;
+          while (j < lines.length) {
+            const rawNext = lines[j];
+            const nt = rawNext.trim();
+            if (!nt) {
+              // Peek past single blank line only if followed by child bullets of a non-bullet intro paragraph
+              const afterBlank = (lines[j + 1] || '').trim();
+              if (!isTopBullet && /^(?:[-*•])\s+/.test(afterBlank)) {
+                j++;
+                continue;
+              }
+              break;
+            }
+            if (/^#{1,6}\s+/.test(nt) || /^\|.*\|$/.test(nt) || /^---+$/.test(nt) || /^```/.test(nt)) break;
+            const nextVers = extractVersionedEntityAnchors(nt);
+            if (nextVers.length > 0 && nextVers.some(v => verifiedVerAnchors.has(v))) break;
+            const nextIsBullet = /^\s*(?:[-*•]|\d+\.)\s+/.test(rawNext);
+            const nextIndent = (rawNext.match(/^\s*/) || [''])[0].length;
+            if (isTopBullet) {
+              // Only skip deeper-indented sub-bullets belonging to this bullet
+              if (nextIndent > curIndent) { j++; continue; }
+              break;
+            } else {
+              // Parent prose paragraph was ungrounded: skip its child bullets
+              if (nextIsBullet) { j++; continue; }
+              break;
+            }
+          }
+          i = j - 1;
+          continue;
+        }
+
+        // C2. Unverified calendar date assertion
+        if (pDates.length > 0) {
+          const unsupportedDates = pDates.filter(dc => !isDateSupported(dc, trimmed));
+          if (unsupportedDates.length > 0) {
+            const hasSupportedVer = pVers.length > 0 && pVers.some(v => verifiedVerAnchors.has(v));
+            const inv = computeInvariantSupport(trimmed);
+            const { bestSim, bestDoc } = computeMaxDocSimilarity(trimmed);
+
+            if ((hasSupportedVer || inv.ratio >= 0.5 || bestSim >= 0.25) && bestDoc && bestDoc.ts !== null) {
+              // Entity/event IS grounded in bestDoc, project fabricated date onto verified timestamp
+              const dt = new Date(bestDoc.ts);
+              const trueDateStr = `${dt.getUTCDate()} ${ID_MONTH_NAMES[dt.getUTCMonth() + 1]} ${dt.getUTCFullYear()}`;
+              for (const badDc of unsupportedDates) {
+                if (badDc.raw) {
+                  line = line.replace(badDc.raw, trueDateStr);
+                  dateCorrections++;
+                }
+              }
+            } else {
+              // Neither date nor entity/invariant is grounded in E -> prune fabricated claim!
+              prunedCount++;
+              continue;
+            }
+          }
+        }
+      }
+
+      projectedLines.push(line);
+    }
+
+    // 3. Clean up empty Markdown tables (header + separator with 0 remaining data rows) & orphaned headings
+    const cleanedLines = [];
+    for (let i = 0; i < projectedLines.length; i++) {
+      const cur = projectedLines[i].trim();
+      const nxt = (projectedLines[i + 1] || '').trim();
+      const nxt2 = (projectedLines[i + 2] || '').trim();
+      if (/^\|.*\|$/.test(cur) && /^\|[\s:|-]+\|$/.test(nxt) && !/^\|.*\|$/.test(nxt2)) {
+        // Table lost all its ungrounded rows -> skip header & separator
+        i += 1;
+        continue;
+      }
+      cleanedLines.push(projectedLines[i]);
+    }
+
+    // Remove headings that became completely empty (followed immediately by another heading of same/higher level or EOF)
+    const finalLines = [];
+    for (let i = 0; i < cleanedLines.length; i++) {
+      const cur = cleanedLines[i].trim();
+      if (/^#{1,4}\s+/.test(cur)) {
+        const curLevel = (cur.match(/^#+/) || [''])[0].length;
+        let k = i + 1;
+        while (k < cleanedLines.length && (!cleanedLines[k].trim() || /^---+$/.test(cleanedLines[k].trim()))) k++;
+        if (k >= cleanedLines.length) continue;
+        const nextNonEmpty = cleanedLines[k].trim();
+        if (/^#{1,4}\s+/.test(nextNonEmpty)) {
+          const nextLevel = (nextNonEmpty.match(/^#+/) || [''])[0].length;
+          if (nextLevel <= curLevel) continue;
+        }
+      }
+      finalLines.push(cleanedLines[i]);
+    }
+
+    const finalText = finalLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    const hallucinationRate = evaluatedClaims > 0 ? (prunedCount / evaluatedClaims) : 0;
+
+    return {
+      text: finalText,
+      prunedCount,
+      dateCorrections,
+      evaluatedClaims,
+      hallucinationRate: Number(hallucinationRate.toFixed(4))
+    };
+  }
+
   return {
     splitReasoningAndContent,
     stripReasoningText,
@@ -1327,6 +2242,13 @@
     stitchContinuationOverlap,
     graftPartialHtmlFragment,
     createHyperbolicManifold,
-    createEntropyStreamGate
+    createEntropyStreamGate,
+    parseAuthenticTimestamp,
+    extractCalendarDateCoordinates,
+    extractVersionedEntityAnchors,
+    computeTemporalRecencyProfile,
+    rankDocumentsMathematically,
+    computeOptimalSamplingTemperature,
+    projectGroundedResponseMathematically
   };
 });
