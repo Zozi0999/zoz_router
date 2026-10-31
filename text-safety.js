@@ -2253,6 +2253,7 @@
 
   const META_IMPERATIVE_TOKENS = new Set([
     'jawab', 'jawablah', 'jawabannya', 'jawaban', 'singkat', 'saja', 'tolong', 'bantu', 'berikan', 'kasih',
+    'coba', 'cobalah', 'silakan', 'mohon',
     'apa', 'mana', 'cepat', 'ya', 'dong', 'ini', 'itu', 'deh', 'lah', 'kan', 'nih',
     'analisis', 'analisa', 'jelaskan', 'sebutkan', 'uraikan', 'baca', 'bacakan', 'cek', 'periksa',
     'simpulkan', 'terjemahkan', 'artikan', 'tuliskan', 'tulis',

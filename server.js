@@ -17,6 +17,7 @@ const net = require('net');
 const os = require('os');
 const { spawn, execSync, execFile } = require('child_process');
 const textSafety = require('./text-safety');
+const { createImageGroundingService } = require('./image-grounding');
 
 // Persistent HTTPS Agent dengan TCP Keep-Alive untuk kestabilan koneksi streaming OpenRouter tanpa putus
 const openRouterHttpsAgent = new https.Agent({
@@ -900,6 +901,12 @@ async function assertResolvesPublic(rawUrl) {
     return { ok: true };
   }
 }
+
+// Instance tunggal layanan pencarian, verifikasi biner, & proxy aset gambar terverifikasi
+const imageGroundingService = createImageGroundingService({
+  env: process.env,
+  assertResolvesPublic
+});
 
 // Endpoint Ollama yang BOLEH menerima secret milik server (OLLAMA_API_KEY dari
 // environment). Endpoint khusus yang dikirim klien bisa menunjuk ke server
@@ -3457,17 +3464,86 @@ function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus') {
 // Rantai promise memaksa read-modify-write berjalan satu per satu per sesi.
 const sessionAppendQueues = new Map(); // cleanSid -> Promise tail antrean
 
+// Resolusi ID sesi induk untuk subtugas internal (digest, rescue, epistemic)
+// agar jawaban dari penelusuran otonom tersimpan ke sesi utama pengguna dan tidak mencemari disk dengan berkas phantom
+function resolveParentSessionId(sid) {
+  if (!sid || typeof sid !== 'string') return sid;
+  const clean = sid.trim();
+  const m = clean.match(/^(ses_[a-zA-Z0-9]+)_(?:digest_\d+|rescue|epistemic|temp)$/i);
+  return m ? m[1] : clean;
+}
+
+// Defense-in-depth: Gerbang Nol-Informasi Shannon di sisi server (mencegah unconditioned prior collapse & halusinasi gambar)
+function applyContextIntegrityGuard(messages, userPrompt) {
+  if (!Array.isArray(messages) || messages.length === 0) return;
+  const lastUser = [...messages].reverse().find(m => m && m.role === 'user');
+  if (!lastUser) return;
+
+  let uPrompt = userPrompt;
+  if (!uPrompt) {
+    uPrompt = typeof lastUser.content === 'string'
+      ? lastUser.content
+      : (Array.isArray(lastUser.content)
+          ? lastUser.content.map(c => c.text || (c.type === 'text' ? c.text : '')).filter(Boolean).join('\n')
+          : '');
+    if (uPrompt.startsWith('[Instruksi Sistem & Konteks:')) {
+      const lastBracketIdx = uPrompt.lastIndexOf(']\n\n');
+      if (lastBracketIdx !== -1) {
+        uPrompt = uPrompt.slice(lastBracketIdx + 3).trim();
+      } else {
+        uPrompt = uPrompt.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
+      }
+    }
+  }
+
+  const hasAnyImages = messages.some(m =>
+    (Array.isArray(m.images) && m.images.length > 0) ||
+    (Array.isArray(m.files) && m.files.length > 0) ||
+    (Array.isArray(m.content) && m.content.some(c => c && c.type === 'image_url'))
+  );
+  const isTurnZero = messages.filter(m => m && m.role === 'user').length <= 1;
+  const isZero = isTurnZero && !hasAnyImages && (
+    (typeof textSafety.isZeroInformationQuery === 'function' && textSafety.isZeroInformationQuery(uPrompt)) ||
+    /^(?:coba|cobalah|silakan|mohon|tolong|jawab|berikan|jelaskan|tuliskan|sebutkan|analisis|analisa|baca|cek|periksa|singkat|saja|jawabannya|gambar|gambarnya|foto|fotonya|terlampir|dilampirkan|dokumen|file|pdf|ini|itu|\s|[.,!?])+$/i.test(String(uPrompt).trim())
+  );
+
+  if (isZero) {
+    const isMediaRef = /(?:gambar|foto|image|photo|lampiran|terlampir|dokumen|file|pdf)/i.test(String(uPrompt));
+    const zeroNotice = isMediaRef
+      ? '[INTEGRITAS KONTEKS: Pengguna merujuk pada gambar/foto/dokumen terlampir, namun TIDAK ADA gambar atau berkas yang diunggah dalam percakapan. DILARANG KERAS mengarang isi gambar atau berhalusinasi adanya materi lampiran. Sampaikan secara santun dan ringkas bahwa gambar atau berkas belum terlampir, dan persilakan pengguna untuk mengunggahnya.]'
+      : '[INTEGRITAS KONTEKS: Pengguna hanya memberikan instruksi meta tanpa melampirkan pertanyaan, soal, teks masalah, atau gambar. DILARANG KERAS mengarang soal fiktif atau mengasumsikan konteks gambar lama. Tanyakan langsung dengan ramah apa pertanyaan atau materi yang ingin dijawab oleh pengguna.]';
+    const sysMsg = messages.find(m => m && m.role === 'system');
+    if (sysMsg) {
+      if (!sysMsg.content.includes('[INTEGRITAS KONTEKS:')) {
+        sysMsg.content = `${sysMsg.content}\n\n${zeroNotice}`;
+      }
+    } else {
+      const firstUser = messages.find(m => m && m.role === 'user');
+      if (firstUser && typeof firstUser.content === 'string' && !firstUser.content.includes('[INTEGRITAS KONTEKS:')) {
+        firstUser.content = `[Instruksi Sistem & Konteks:\n${zeroNotice}]\n\n${firstUser.content}`;
+      }
+    }
+  }
+}
+
 function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extraMeta = {}, explicitUserId = null) {
   if (!sessionId || !content || !content.trim()) return Promise.resolve(false);
   // Fail closed for legacy/provider-tagged thought text, regardless of the caller.
   content = textSafety.stripReasoningText(content);
   if (!content.trim()) return Promise.resolve(false);
   try {
-    const cleanSid = String(sessionId).trim();
-    if (!/^[a-zA-Z0-9_-]+$/.test(cleanSid)) return Promise.resolve(false);
+    const rawSid = String(sessionId).trim();
+    if (!/^[a-zA-Z0-9_-]+$/.test(rawSid)) return Promise.resolve(false);
 
-    // Tentukan userId pemilik sesi
+    // Resolusi parent session jika ini adalah tugas subtask internal (digest, rescue, epistemic)
+    // agar jawaban tersimpan ke sesi utama pengguna dan tidak mencemari disk dengan berkas phantom
+    const cleanSid = resolveParentSessionId(rawSid);
+
+    // Tentukan userId pemilik sesi (cek task key rawSid dan cleanSid)
     let effectiveUid = explicitUserId;
+    if (!effectiveUid && dbActiveChatTasks[rawSid]?.userId) {
+      effectiveUid = dbActiveChatTasks[rawSid].userId;
+    }
     if (!effectiveUid && dbActiveChatTasks[cleanSid]?.userId) {
       effectiveUid = dbActiveChatTasks[cleanSid].userId;
     }
@@ -3482,7 +3558,10 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
     // Tangkap konteks task SEBELUM await pertama — beberapa pemanggil (stop,
     // prune, interrupt) menghapus dbActiveChatTasks tepat setelah memanggil
     // fungsi ini, jadi userPrompt harus dibaca sebelum I/O asinkron pertama.
-    let userPrompt = (sessionId && dbActiveChatTasks[sessionId]?.userPrompt) ? dbActiveChatTasks[sessionId].userPrompt : null;
+    let userPrompt = (rawSid && dbActiveChatTasks[rawSid]?.userPrompt) ? dbActiveChatTasks[rawSid].userPrompt : null;
+    if (!userPrompt && cleanSid && dbActiveChatTasks[cleanSid]?.userPrompt) {
+      userPrompt = dbActiveChatTasks[cleanSid].userPrompt;
+    }
     if (!userPrompt && extraMeta && typeof extraMeta === 'object' && extraMeta.prompt) {
       userPrompt = extraMeta.prompt;
     }
@@ -3570,9 +3649,24 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
     const msgs = sessData.messages;
     const trimmedContent = content.trim();
 
-    // Cek apakah pesan asisten ini sudah tersimpan sebelumnya (hindari duplikasi)
+    // Temukan pesan user terakhir dalam percakapan untuk validasi integritas giliran (turn integrity)
+    const lastUserMsg = [...msgs].reverse().find(m => m && m.role === 'user');
+    const normUserPrompt = userPrompt ? String(userPrompt).trim().toLowerCase() : '';
+    const normLastUser = lastUserMsg ? String(lastUserMsg.content || lastUserMsg.displayContent || '').trim().toLowerCase() : '';
+
+    // Cek apakah prompt yang memicu respons ini adalah giliran obrolan yang berbeda dari giliran user terakhir di disk
+    const isDifferentTurn = Boolean(
+      normUserPrompt &&
+      normLastUser &&
+      normUserPrompt !== normLastUser &&
+      !normUserPrompt.includes(normLastUser.slice(0, 30)) &&
+      !normLastUser.includes(normUserPrompt.slice(0, 30))
+    );
+
+    // Cek apakah pesan asisten terakhir ini sudah tersimpan sebelumnya (hindari duplikasi)
     const lastMsg = msgs[msgs.length - 1];
-    if (lastMsg && lastMsg.role === 'assistant') {
+
+    if (!isDifferentTurn && lastMsg && lastMsg.role === 'assistant') {
       const isRefusalOrError = /^(?:maaf|mohon\s+maaf|sorry|error|i\s+cannot|i\s+am\s+unable|i\s+apologize)/i.test(trimmedContent);
       if (isRefusalOrError && lastMsg.content && lastMsg.content.length > 10) {
         // Jangan timpa respons yang sudah berhasil di browser dengan pesan penolakan/error dari background task
@@ -3581,11 +3675,18 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
 
       const msgAgeMs = lastMsg.timestamp ? (Date.now() - new Date(lastMsg.timestamp).getTime()) : 0;
       const isRecent = msgAgeMs < 10 * 60 * 1000;
-      const isSamePrefix = lastMsg.content && trimmedContent.startsWith(lastMsg.content) && (isRecent || lastMsg.backgroundCompleted);
+      const isSamePrefix = Boolean(lastMsg.content && trimmedContent.startsWith(lastMsg.content) && (isRecent || lastMsg.backgroundCompleted));
+      const isExactMatch = lastMsg.content === trimmedContent;
+      const isExplicitTarget = Boolean(extraMeta && extraMeta.msgId && lastMsg.id === extraMeta.msgId);
+      const isPlaceholder = !lastMsg.content || lastMsg.content === '...' || lastMsg.content === 'Thinking...' || lastMsg.isInterrupted;
 
-      // Selalu perbarui lastMsg daripada menambahkan asisten ganda berturut-turut dalam satu giliran chat
-      if (lastMsg.content === trimmedContent || isSamePrefix || trimmedContent.length >= (lastMsg.content || '').length || !lastMsg.content) {
-        if (trimmedContent.length >= (lastMsg.content || '').length || !lastMsg.content) {
+      // Update in-place HANYA jika:
+      // 1. Teks identik
+      // 2. Prefix streaming yang sah (trimmedContent adalah sambungan kelanjutan dari lastMsg.content)
+      // 3. Ditargetkan secara eksplisit via msgId
+      // 4. lastMsg masih berupa placeholder kosong/terputus
+      if (isExactMatch || isSamePrefix || isExplicitTarget || isPlaceholder) {
+        if (!isExactMatch && (isSamePrefix || isExplicitTarget || isPlaceholder)) {
           lastMsg.content = trimmedContent;
           lastMsg.model = modelName || lastMsg.model;
         }
@@ -3593,6 +3694,7 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
         if (extraMeta && typeof extraMeta === 'object') {
           if (extraMeta.chatSummary) lastMsg.chatSummary = extraMeta.chatSummary;
           if (Array.isArray(extraMeta.sources) && extraMeta.sources.length) lastMsg.sources = extraMeta.sources;
+          if (Array.isArray(extraMeta.imageDisplays) && extraMeta.imageDisplays.length) lastMsg.imageDisplays = extraMeta.imageDisplays;
           if (extraMeta.latency) lastMsg.latency = extraMeta.latency;
           if (extraMeta.isImageGen) lastMsg.isImageGen = true;
           if (extraMeta.type) lastMsg.type = extraMeta.type;
@@ -3604,6 +3706,9 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
           if (extraMeta.seed) lastMsg.seed = extraMeta.seed;
         }
         sessData.updatedAt = new Date().toISOString();
+        if (Array.isArray(sessData.messages)) {
+          sessData.messageCount = sessData.messages.length;
+        }
         const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
         try {
           await fsp.writeFile(tempFile, JSON.stringify(sessData, null, 2), 'utf8');
@@ -3615,17 +3720,33 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
         return true;
       }
 
-      // Jika lastMsg sudah lebih panjang dan valid, cukup tandai selesai tanpa menimpa atau menduplikasi
-      lastMsg.backgroundCompleted = true;
-      sessData.updatedAt = new Date().toISOString();
-      const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-      try {
-        await fsp.writeFile(tempFile, JSON.stringify(sessData, null, 2), 'utf8');
-        safeAtomicRenameSync(tempFile, sessFile);
-      } catch (err) {
-        try { fs.unlinkSync(tempFile); } catch {}
+      // Jika lastMsg sudah terisi konten substansial dan trimmedContent sama sekali bukan sambungan (prefix) dari lastMsg:
+      // JANGAN timpa lastMsg! Ini mencegah kerusakan data lintas-sesi / kontaminasi balasan berbeda.
+      if (lastMsg.content && lastMsg.content.length > 20) {
+        lastMsg.backgroundCompleted = true;
+        sessData.updatedAt = new Date().toISOString();
+        if (Array.isArray(sessData.messages)) {
+          sessData.messageCount = sessData.messages.length;
+        }
+        const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        try {
+          await fsp.writeFile(tempFile, JSON.stringify(sessData, null, 2), 'utf8');
+          safeAtomicRenameSync(tempFile, sessFile);
+        } catch (err) {
+          try { fs.unlinkSync(tempFile); } catch {}
+        }
+        return true;
       }
-      return true;
+    }
+
+    // Jika ini giliran baru yang belum dicatat di disk, tambahkan pesan user terlebih dahulu
+    if (isDifferentTurn && userPrompt) {
+      msgs.push({
+        id: 'msg_usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        role: 'user',
+        content: userPrompt,
+        timestamp: new Date(Date.now() - 2000).toISOString()
+      });
     }
 
     const newMsg = {
@@ -3640,6 +3761,7 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
     if (extraMeta && typeof extraMeta === 'object') {
       if (extraMeta.chatSummary) newMsg.chatSummary = extraMeta.chatSummary;
       if (Array.isArray(extraMeta.sources) && extraMeta.sources.length) newMsg.sources = extraMeta.sources;
+      if (Array.isArray(extraMeta.imageDisplays) && extraMeta.imageDisplays.length) newMsg.imageDisplays = extraMeta.imageDisplays;
       if (extraMeta.latency) newMsg.latency = extraMeta.latency;
       if (extraMeta.isImageGen) newMsg.isImageGen = true;
       if (extraMeta.type) newMsg.type = extraMeta.type;
@@ -3653,6 +3775,9 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
 
     msgs.push(newMsg);
     sessData.updatedAt = new Date().toISOString();
+    if (Array.isArray(sessData.messages)) {
+      sessData.messageCount = sessData.messages.length;
+    }
     const tempFile = sessFile + `.tmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     try {
       await fsp.writeFile(tempFile, JSON.stringify(sessData, null, 2), 'utf8');
@@ -5861,6 +5986,10 @@ async function requestHandler(req, res) {
       pathname === '/api/tools/search-web-sources' ||
       pathname === '/api/tools/fetch-url-content' ||
       pathname === '/api/tools/summarize-sources' ||
+      pathname === '/api/tools/search-images' ||
+      pathname === '/api/tools/inspect-image' ||
+      pathname === '/api/tools/prepare-image-display' ||
+      pathname.startsWith('/api/tools/image-asset/') ||
       pathname === '/api/extract-web' ||
       pathname === '/api/read-url' ||
       pathname === '/api/scrape-url' ||
@@ -6001,7 +6130,11 @@ async function requestHandler(req, res) {
       if (!fs.existsSync(userDir)) {
         return sendJSON(res, 200, { sessions: [] });
       }
-      const files = (await fsp.readdir(userDir)).filter(f => f.endsWith('.json'));
+      const files = (await fsp.readdir(userDir)).filter(f =>
+        f.endsWith('.json') &&
+        !/_(?:digest_\d+|rescue|epistemic|temp)\.json$/i.test(f) &&
+        !/__studio_/i.test(f)
+      );
       const sessions = [];
       for (const file of files) {
         try {
@@ -6085,6 +6218,9 @@ async function requestHandler(req, res) {
       body.updatedAt = new Date().toISOString();
       body.id = id;
       body.userId = effectiveUid;
+      if (Array.isArray(body.messages)) {
+        body.messageCount = body.messages.length;
+      }
       if (!fs.existsSync(userDir)) {
         fs.mkdirSync(userDir, { recursive: true });
       }
@@ -6121,6 +6257,9 @@ async function requestHandler(req, res) {
         userId: reqUserId,
         updatedAt: new Date().toISOString()
       };
+      if (Array.isArray(updated.messages)) {
+        updated.messageCount = updated.messages.length;
+      }
       if (!fs.existsSync(userDir)) {
         fs.mkdirSync(userDir, { recursive: true });
       }
@@ -6555,6 +6694,109 @@ async function requestHandler(req, res) {
     } catch (e) {
       return sendJSON(res, 500, { success: false, error: 'Gagal merangkum sumber: ' + e.message });
     }
+  }
+
+  // ==================== GROUNDED IMAGE DISCOVERY, INSPECTION & DISPLAY TOOLS ====================
+  // 1. search_images — Pencarian kandidat gambar dari 6 sumber resmi terizinkan
+  if (pathname === '/api/tools/search-images' && (method === 'GET' || method === 'POST')) {
+    try {
+      let query = reqUrl.searchParams.get('query') || reqUrl.searchParams.get('q') || '';
+      let sources = reqUrl.searchParams.get('sources')
+        ? reqUrl.searchParams.get('sources').split(',').map((s) => s.trim()).filter(Boolean)
+        : undefined;
+      let limit = reqUrl.searchParams.get('limit') ? parseInt(reqUrl.searchParams.get('limit'), 10) : 6;
+      let orientation = reqUrl.searchParams.get('orientation') || 'any';
+      let image_type = reqUrl.searchParams.get('image_type') || 'any';
+      let safe_search = reqUrl.searchParams.get('safe_search') !== 'false';
+
+      if (method === 'POST') {
+        const body = await safeParseBody(req);
+        if (!body) return;
+        if (body.query !== undefined || body.q !== undefined) query = String(body.query ?? body.q ?? '');
+        if (body.sources !== undefined) {
+          sources = Array.isArray(body.sources)
+            ? body.sources
+            : (body.sources ? String(body.sources).split(',').map((s) => s.trim()).filter(Boolean) : undefined);
+        }
+        if (body.limit !== undefined) limit = parseInt(body.limit, 10);
+        if (body.orientation !== undefined) orientation = String(body.orientation);
+        if (body.image_type !== undefined) image_type = String(body.image_type);
+        if (typeof body.safe_search === 'boolean') safe_search = body.safe_search;
+      }
+
+      const result = await imageGroundingService.searchImages({
+        query,
+        sources,
+        limit,
+        orientation,
+        image_type,
+        safe_search
+      });
+      return sendJSON(res, 200, result);
+    } catch (e) {
+      return sendJSON(res, 500, {
+        status: 'error',
+        images: [],
+        source_errors: [{ source: 'backend', code: 'internal_error', message: e.message }]
+      });
+    }
+  }
+
+  // 2. inspect_image — Verifikasi aksesibilitas HTTP, magic-bytes MIME, dimensi, kecocokan subjek, & lisensi
+  if (pathname === '/api/tools/inspect-image' && (method === 'GET' || method === 'POST')) {
+    try {
+      let image_id = reqUrl.searchParams.get('image_id') || '';
+      if (method === 'POST') {
+        const body = await safeParseBody(req);
+        if (!body) return;
+        if (body.image_id !== undefined) image_id = String(body.image_id || '');
+      }
+      const result = await imageGroundingService.inspectImage({ image_id });
+      return sendJSON(res, 200, result);
+    } catch (e) {
+      return sendJSON(res, 500, {
+        image_id: '',
+        accessible: false,
+        mime_type: null,
+        dimensions: null,
+        subject_match: 'uncertain',
+        match_basis: 'Kesalahan internal backend saat memeriksa kandidat.',
+        usage_status: 'unknown',
+        attribution_text: null,
+        warnings: ['invalid_image: ' + e.message]
+      });
+    }
+  }
+
+  // 3. prepare_image_display — Persiapan payload aset terverifikasi maksimal 3 gambar untuk UI renderer
+  if (pathname === '/api/tools/prepare-image-display' && method === 'POST') {
+    try {
+      const body = await safeParseBody(req);
+      if (!body) return;
+      const result = await imageGroundingService.prepareImageDisplay({
+        image_ids: body.image_ids,
+        layout: body.layout,
+        placement: body.placement,
+        alt_texts: body.alt_texts
+      });
+      return sendJSON(res, 200, result);
+    } catch (e) {
+      return sendJSON(res, 500, {
+        status: 'error',
+        error_code: 'internal_error',
+        message: e.message,
+        display_items: [],
+        layout: 'single',
+        placement: 'after_intro',
+        rendering_requirements: { requires_client_renderer: true, payload_is_not_render_confirmation: true }
+      });
+    }
+  }
+
+  // 4. Streaming Proxy Aset Gambar Terverifikasi (HMAC-signed token + CSP + nosniff)
+  if (pathname.startsWith('/api/tools/image-asset/') && method === 'GET') {
+    const rawToken = decodeURIComponent(pathname.slice('/api/tools/image-asset/'.length));
+    return await imageGroundingService.serveVerifiedImageAsset(rawToken, res);
   }
 
   // Autonomous Web Search Tool Endpoint (Sovereign Zoz Neural Search Engine, Zero-API)
@@ -9668,47 +9910,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       const isCustomRemoteEndpoint = customEndpoint && !isLoopbackTarget && !customEndpoint.includes('ollama.com');
 
       // Defense-in-depth: Gerbang Nol-Informasi Shannon di sisi server (mencegah unconditioned prior collapse)
-      if (Array.isArray(body.messages) && body.messages.length > 0) {
-        const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
-        if (lastUser) {
-          let uPrompt = typeof lastUser.content === 'string'
-            ? lastUser.content
-            : (Array.isArray(lastUser.content)
-                ? lastUser.content.map(c => c.text || (c.type === 'text' ? c.text : '')).filter(Boolean).join('\n')
-                : '');
-          if (uPrompt.startsWith('[Instruksi Sistem & Konteks:')) {
-            const lastBracketIdx = uPrompt.lastIndexOf(']\n\n');
-            if (lastBracketIdx !== -1) {
-              uPrompt = uPrompt.slice(lastBracketIdx + 3).trim();
-            } else {
-              uPrompt = uPrompt.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
-            }
-          }
-          const hasAnyImages = body.messages.some(m => (Array.isArray(m.images) && m.images.length > 0) || (Array.isArray(m.files) && m.files.length > 0) || (Array.isArray(m.content) && m.content.some(c => c && c.type === 'image_url')));
-          const isTurnZero = body.messages.filter(m => m.role === 'user').length <= 1;
-          const isZero = isTurnZero && !hasAnyImages && (
-            (typeof textSafety.isZeroInformationQuery === 'function' && textSafety.isZeroInformationQuery(uPrompt)) ||
-            /^(?:jawab|berikan|jelaskan|tuliskan|sebutkan|analisis|analisa|baca|cek|periksa|singkat|saja|jawabannya|gambar|gambarnya|foto|fotonya|terlampir|dilampirkan|dokumen|file|pdf|ini|itu|\s|[.,!?])+$/i.test(uPrompt.trim())
-          );
-          if (isZero) {
-            const isMediaRef = /(?:gambar|foto|image|photo|lampiran|terlampir|dokumen|file|pdf)/i.test(uPrompt);
-            const zeroNotice = isMediaRef
-              ? '[INTEGRITAS KONTEKS: Pengguna merujuk pada gambar/foto/dokumen terlampir, namun TIDAK ADA gambar atau berkas yang diunggah dalam percakapan. DILARANG KERAS mengarang isi gambar atau berhalusinasi adanya materi lampiran. Sampaikan secara santun dan ringkas bahwa gambar atau berkas belum terlampir, dan persilakan pengguna untuk mengunggahnya.]'
-              : '[INTEGRITAS KONTEKS: Pengguna hanya memberikan instruksi meta tanpa melampirkan pertanyaan, soal, teks masalah, atau gambar. DILARANG KERAS mengarang soal fiktif atau mengasumsikan konteks gambar lama. Tanyakan langsung dengan ramah apa pertanyaan atau materi yang ingin dijawab oleh pengguna.]';
-            const sysMsg = body.messages.find(m => m.role === 'system');
-            if (sysMsg) {
-              if (!sysMsg.content.includes('[INTEGRITAS KONTEKS:')) {
-                sysMsg.content = `${sysMsg.content}\n\n${zeroNotice}`;
-              }
-            } else {
-              const firstUser = body.messages.find(m => m.role === 'user');
-              if (firstUser && typeof firstUser.content === 'string' && !firstUser.content.includes('[INTEGRITAS KONTEKS:')) {
-                firstUser.content = `[Instruksi Sistem & Konteks:\n${zeroNotice}]\n\n${firstUser.content}`;
-              }
-            }
-          }
-        }
-      }
+      applyContextIntegrityGuard(body.messages);
 
       const shouldUseCloudBridge = Boolean((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (isOpenRouterKeySupplied && !isCustomRemoteEndpoint));
 
@@ -9925,6 +10127,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           userPrompt = rawUserPrompt;
         }
       }
+      // Defense-in-depth: Gerbang Nol-Informasi Shannon di sisi OpenRouter
+      applyContextIntegrityGuard(body.messages, userPrompt);
       delete body.sessionId;
       delete body.endpoint; // Don't send custom field to Ollama
       delete body.apiKey;
@@ -10071,7 +10275,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
               // Multi-Tier Fallback: Jika https://ollama.com mengembalikan HTTP >= 400 (misal 401/403/404/429/500),
               // otomatis alihkan ke daemon Cloud Relay lokal (http://127.0.0.1:11434) tanpa menggagalkan permintaan pengguna!
-              if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
+              if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
                 const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
                 console.warn(`[Ollama Cloud Failover] Upstream ${targetEndpoint} (${targetModel}) returned HTTP ${statusCode}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
                 return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
@@ -10089,7 +10293,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               } catch (e) {}
             });
             proxyRes.on('error', async (err) => {
-              if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
+              if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
                 const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
                 return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
               }
@@ -10276,7 +10480,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         proxyReq.on('timeout', async () => {
           if (hasSplicedRefusal || horocycleHalted) return;
           if (!proxyReq.destroyed) proxyReq.destroy();
-          if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
+          if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
             const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
             return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
           }
@@ -10298,7 +10502,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
         proxyReq.on('error', async (err) => {
           if (hasSplicedRefusal || horocycleHalted) return;
-          if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && !clientDisconnected) {
+          if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
             const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
             console.warn(`[Ollama Cloud Failover] Network error on ${targetEndpoint}: ${err.message}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
             return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
@@ -10651,6 +10855,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           userPrompt = rawUserPrompt;
         }
       }
+      // Defense-in-depth: Gerbang Nol-Informasi Shannon di sisi OpenRouter
+      applyContextIntegrityGuard(body.messages, userPrompt);
       delete body.sessionId;
       delete body.userId; // Cegah error Pydantic / upstream validation di OpenRouter
 
@@ -11211,6 +11417,21 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
   const relative = path.relative(PUBLIC_DIR, filePath);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     return sendJSON(res, 403, { error: 'Forbidden: Path traversal detected' });
+  }
+
+  // Security barrier: block access to sensitive files, backend source files, hidden files, and environment files
+  const baseName = path.basename(filePath).toLowerCase();
+  if (
+    baseName === 'server.js' ||
+    baseName === 'image-grounding.js' ||
+    baseName === '_worker.js' ||
+    baseName.startsWith('.env') ||
+    baseName.startsWith('.git') ||
+    baseName.endsWith('.log') ||
+    baseName.endsWith('.tmp') ||
+    baseName.endsWith('.bak')
+  ) {
+    return sendJSON(res, 403, { error: 'Forbidden: Akses ke berkas sistem internal diblokir.' });
   }
 
   fs.stat(filePath, (err, stats) => {

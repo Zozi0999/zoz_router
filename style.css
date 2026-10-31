@@ -17155,3 +17155,205 @@ body.mermaid-has-fullscreen {
     padding: 8px 12px;
 }
 
+/* =========================================================================
+   GROUNDED CONVERSATIONAL IMAGE DISPLAY (single | gallery | collage)
+   ========================================================================= */
+.zoz-grounded-image-display {
+    margin: 14px 0 16px;
+    padding: 12px;
+    border-radius: 14px;
+    background: rgba(13, 18, 30, 0.72);
+    border: 1px solid rgba(56, 189, 248, 0.18);
+    box-shadow: 0 8px 26px -8px rgba(0, 0, 0, 0.55);
+}
+
+.zoz-grounded-grid {
+    display: grid;
+    gap: 12px;
+}
+
+.zoz-grounded-image-display.zoz-layout-single .zoz-grounded-grid {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 640px;
+}
+
+.zoz-grounded-image-display.zoz-layout-gallery .zoz-grounded-grid {
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.zoz-grounded-image-display.zoz-layout-collage[data-count="2"] .zoz-grounded-grid {
+    grid-template-columns: 1.35fr 1fr;
+}
+
+.zoz-grounded-image-display.zoz-layout-collage[data-count="3"] .zoz-grounded-grid {
+    grid-template-columns: 1.35fr 1fr;
+    grid-auto-rows: minmax(150px, auto);
+}
+
+.zoz-grounded-image-display.zoz-layout-collage[data-count="3"] .zoz-grounded-figure:first-child {
+    grid-row: span 2;
+}
+
+@media (max-width: 640px) {
+    .zoz-grounded-image-display.zoz-layout-collage[data-count="2"] .zoz-grounded-grid,
+    .zoz-grounded-image-display.zoz-layout-collage[data-count="3"] .zoz-grounded-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .zoz-grounded-image-display.zoz-layout-collage[data-count="3"] .zoz-grounded-figure:first-child {
+        grid-row: auto;
+    }
+}
+
+.zoz-grounded-figure {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(8, 11, 19, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.zoz-grounded-img-frame {
+    position: relative;
+    width: 100%;
+    min-height: 150px;
+    max-height: 440px;
+    background: linear-gradient(110deg, rgba(30, 41, 59, 0.55) 25%, rgba(51, 65, 85, 0.45) 37%, rgba(30, 41, 59, 0.55) 63%);
+    background-size: 200% 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.zoz-grounded-figure[data-render-state="rendered"] .zoz-grounded-img-frame {
+    background: rgba(7, 10, 18, 0.92);
+}
+
+.zoz-grounded-img {
+    width: 100%;
+    height: 100%;
+    max-height: 420px;
+    object-fit: cover;
+    display: block;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    cursor: zoom-in;
+    transition: transform 0.22s ease, opacity 0.2s ease;
+}
+
+.zoz-grounded-image-display.zoz-layout-single .zoz-grounded-img {
+    object-fit: contain;
+    background: rgba(5, 8, 15, 0.95);
+}
+
+.zoz-grounded-img:hover {
+    transform: scale(1.015);
+}
+
+.zoz-grounded-figcaption {
+    padding: 9px 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 0.76rem;
+    line-height: 1.4;
+    color: #cbd5e1;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.zoz-grounded-caption-title {
+    font-weight: 600;
+    color: #f1f5f9;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.zoz-grounded-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 0.71rem;
+    color: #94a3b8;
+}
+
+.zoz-grounded-badges {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+}
+
+.zoz-grounded-source-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 0.67rem;
+    font-weight: 600;
+    background: rgba(56, 189, 248, 0.14);
+    border: 1px solid rgba(56, 189, 248, 0.32);
+    color: #7dd3fc;
+}
+
+.zoz-grounded-category-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 0.66rem;
+    font-weight: 600;
+    background: rgba(148, 163, 184, 0.14);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    color: #cbd5e1;
+}
+
+.zoz-grounded-category-pill.cat-ai {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.38);
+    color: #fcd34d;
+}
+
+.zoz-grounded-links {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.zoz-grounded-links a,
+.zoz-grounded-credit-text a {
+    color: #38bdf8;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.zoz-grounded-links a:hover,
+.zoz-grounded-credit-text a:hover {
+    text-decoration: underline;
+}
+
+.zoz-grounded-fallback-card {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: rgba(30, 41, 59, 0.5);
+    color: #cbd5e1;
+    font-size: 0.78rem;
+}
+
+.zoz-grounded-fallback-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #fbbf24;
+    font-weight: 600;
+}
+
+
