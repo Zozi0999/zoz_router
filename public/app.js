@@ -28821,7 +28821,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
       // ===== GERBANG VISUAL GROUNDING OTONOM (OLLAMA - FINAL TURN) =====
       // Dijalankan tepat setelah jawaban teks tuntas disintesis agar token penempatan tidak terhapus oleh rescue round/epistemic gate.
       const visualEntityTargetOllama = detectVisualEntityGroundingTarget(promptText, fullText);
-      if (groundedImageDisplays.length === 0 && visualEntityTargetOllama && !wantsFile && !isDocRequest && !isStudioIsolated && (!images || images.length === 0) && !STATE.abortController?.signal?.aborted) {
+      if (groundedImageDisplays.length === 0 && visualEntityTargetOllama && !wantsFile && !isDocRequest && !isStudioIsolated && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
           bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari visual resmi & memverifikasi lisensi untuk "${visualEntityTargetOllama}"...</span></div>`;
           smartScrollChatToBottom(true);
@@ -30668,7 +30668,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
       // ===== GERBANG VISUAL GROUNDING OTONOM (OPENROUTER - FINAL TURN) =====
       // Dijalankan tepat setelah jawaban teks tuntas disintesis agar token penempatan tidak terhapus oleh rescue round/epistemic gate.
       const visualEntityTargetOpenRouter = detectVisualEntityGroundingTarget(promptText, fullText);
-      if (groundedImageDisplays.length === 0 && visualEntityTargetOpenRouter && !wantsFile && !isDocRequest && !isStudioIsolated && (!images || images.length === 0) && !STATE.abortController?.signal?.aborted) {
+      if (groundedImageDisplays.length === 0 && visualEntityTargetOpenRouter && !wantsFile && !isDocRequest && !isStudioIsolated && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
           bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari visual resmi & memverifikasi lisensi untuk "${visualEntityTargetOpenRouter}"...</span></div>`;
           smartScrollChatToBottom(true);
