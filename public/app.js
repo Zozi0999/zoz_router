@@ -6014,7 +6014,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             actionTaken: 'Orthogonal Claim-Evidence Subspace Projection P_E(R)'
           });
         }
-        if ((projection.hallucinationRate > 0.72 && projection.prunedCount >= 3) || !projection.text || projection.text.trim().length < 80) {
+        if ((projection.hallucinationRate >= 0.50 && projection.prunedCount >= 2) || !projection.text || projection.text.trim().length < 80) {
           return synthesizeAutonomousWebSummary(rawToolText, sources);
         }
         return projection.text;
@@ -20504,7 +20504,7 @@ ${msg.content.slice(0, 3000)}
 
       // 1. Panggil endpoint pencarian web mandiri Zoz Neural Search Index
       try {
-        const autoRes = await fetch('/api/tools/search-web', {
+        const autoRes = await fetch(getUniversalApiUrl('/api/tools/search-web'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: searchQuery, originalQuery: smartQuery, maxResults: 10 }),
@@ -20530,7 +20530,7 @@ ${msg.content.slice(0, 3000)}
 
       // 2. Fallback ke /api/web-search jika perlu
       if (!data) {
-        const proxyRes = await fetch('/api/web-search', {
+        const proxyRes = await fetch(getUniversalApiUrl('/api/web-search'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: searchQuery, num: 10 }),
@@ -22698,7 +22698,7 @@ ${blocks}
 
     // 2. Fallback: coba endpoint /api/tools/browse-page
     try {
-      const res = await fetch('/api/tools/browse-page', {
+      const res = await fetch(getUniversalApiUrl('/api/tools/browse-page'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: clean, maxChars }),
@@ -25223,7 +25223,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         // Panggil endpoint pencarian web mandiri internal
         try {
           const searchSig = makeToolSignal(9500);
-          const res = await fetch('/api/tools/search-web', {
+          const res = await fetch(getUniversalApiUrl('/api/tools/search-web'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query, maxResults }),
@@ -25243,7 +25243,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         if (!results.length) {
           try {
             const searchSig = makeToolSignal(8000);
-            const res = await fetch('/api/web-search', {
+            const res = await fetch(getUniversalApiUrl('/api/web-search'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ query, limit: maxResults }),
@@ -25344,7 +25344,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         if (!pageContent) {
           try {
             const extractSig = makeToolSignal(9000);
-            const res = await fetch('/api/extract-web', {
+            const res = await fetch(getUniversalApiUrl('/api/extract-web'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ url: rawUrl, maxChars }),
@@ -25400,7 +25400,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
         if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
           try {
-            const res = await fetch('/api/memory/save', {
+            const res = await fetch(getUniversalApiUrl('/api/memory/save'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'X-User-ID': STATE.userId || 'default' },
               body: JSON.stringify({ topic, content, userId: STATE.userId || 'default' }),
@@ -25449,7 +25449,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         let serverMatches = [];
         if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
           try {
-            const res = await fetch(`/api/memory/search?q=${encodeURIComponent(query)}&userId=${encodeURIComponent(STATE.userId || 'default')}&limit=${limit}`, {
+            const res = await fetch(getUniversalApiUrl(`/api/memory/search?q=${encodeURIComponent(query)}&userId=${encodeURIComponent(STATE.userId || 'default')}&limit=${limit}`), {
               headers: { 'Accept': 'application/json', 'X-User-ID': STATE.userId || 'default' },
               signal: makeToolSignal(6000)
             });
@@ -25513,7 +25513,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             const execSignal = (typeof AbortSignal.any === 'function' && STATE.abortController?.signal)
               ? AbortSignal.any([AbortSignal.timeout(12000), STATE.abortController.signal])
               : (STATE.abortController?.signal || AbortSignal.timeout(12000));
-            const res = await fetch('/api/execute-code', {
+            const res = await fetch(getUniversalApiUrl('/api/execute-code'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ code }),
@@ -27057,10 +27057,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const isVideoTopicPrompt = /\b(video|youtube|youtu\.be|dailymotion|vimeo|xvideos)\b/i.test(promptText);
 
       // WEB SEARCH GROUNDING:
-      // Aktif pada mode default search, atau secara matematis ketika model tidak mendukung native tools dan U(Q) >= 0.72.
-      const needsGroundingFallback = STATE.searchMode === 'autonomous' && !doesModelSupportTools(modelName);
-      const autoEpistemicPreSearch = needsGroundingFallback && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
-      if (STATE.searchMode === 'default' || autoEpistemicPreSearch) {
+      // Aktif secara deterministik ketika U(Q) >= 0.72 (Epistemic Recency Trigger) atau mode pencarian aktif.
+      const autoEpistemicPreSearch = !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && (STATE.webSearchEnabled || STATE.searchMode === 'default' || STATE.searchMode === 'autonomous' || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
           if (searchRes && searchRes.systemPromptContext) {
@@ -28481,10 +28480,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const isVideoTopicPrompt = /\b(video|youtube|youtu\.be|dailymotion|vimeo|xvideos)\b/i.test(promptText);
 
       // WEB SEARCH GROUNDING:
-      // Aktif pada mode default search, atau secara matematis ketika model tanpa native tools / model gratis menghadapi U(Q) >= 0.72.
-      const needsGroundingFallback = STATE.searchMode === 'autonomous' && (isFreeModel || !STATE.settings.openRouterKey || !doesModelSupportTools(effectiveInitialModel));
-      const autoEpistemicPreSearch = needsGroundingFallback && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
-      if (STATE.searchMode === 'default' || autoEpistemicPreSearch) {
+      // Aktif secara deterministik ketika U(Q) >= 0.72 (Epistemic Recency Trigger) atau mode pencarian aktif.
+      const autoEpistemicPreSearch = !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && (STATE.webSearchEnabled || STATE.searchMode === 'default' || STATE.searchMode === 'autonomous' || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
           if (searchRes && searchRes.systemPromptContext) {
@@ -28601,7 +28599,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         // Pasang tools jika bukan model gratis dan model mendukung tools (berlaku baik menggunakan key client maupun key proxy server)
         const canUseTools = doesModelSupportTools(currentModel);
-        if (!currentIsFree && canUseTools) {
+        if (canUseTools) {
           const validFunctionTools = (selectedAutonomousTools || []).filter(t => t && t.type === 'function' && t.function && t.function.name);
           if (validFunctionTools.length > 0) {
             basePayload.tools = validFunctionTools;
@@ -28634,7 +28632,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             };
             targetBody = { ...basePayload };
           } else {
-            targetUrl = '/api/openrouter/chat';
+            targetUrl = getUniversalApiUrl('/api/openrouter/chat');
             targetHeaders = {
               'Content-Type': 'application/json'
             };
@@ -29318,7 +29316,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
           digestionRequestBody.apiKey = STATE.settings.openRouterKey || undefined;
         }
 
-        const digestionUrl = activeEndpoint || (isDirectRoute ? 'https://openrouter.ai/api/v1/chat/completions' : '/api/openrouter/chat');
+        const digestionUrl = activeEndpoint || (isDirectRoute ? 'https://openrouter.ai/api/v1/chat/completions' : getUniversalApiUrl('/api/openrouter/chat'));
         const digestionHeaders = (activeHeaders && Object.keys(activeHeaders).length > 0) ? activeHeaders : {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`,
