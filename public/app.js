@@ -70,7 +70,8 @@
   function getUniversalApiUrl(path) {
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
     const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
-    const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
+    const isCloudflarePages = Boolean(location.hostname && (location.hostname.includes('zozdocs.com') || location.hostname.endsWith('pages.dev')));
+    const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin || isCloudflarePages);
     if (isLocal) return cleanPath;
     const tunnelBase = getActiveTunnelUrl();
     return (tunnelBase || VERCEL_BACKEND_GATEWAY) + cleanPath;
@@ -29198,7 +29199,8 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
       const visualEntityTargetOllama = detectVisualEntityGroundingTarget(promptText, fullText);
       if (groundedImageDisplays.length === 0 && visualEntityTargetOllama && !wantsFile && !isDocRequest && !isStudioIsolated && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
-          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari visual resmi & memverifikasi lisensi untuk "${visualEntityTargetOllama}"...</span></div>`;
+          const existingGeneratedHtml = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
+          bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari visual resmi & memverifikasi lisensi untuk "${visualEntityTargetOllama}"...</span></div>`;
           smartScrollChatToBottom(true);
           const autoImgSearch = await executeAutonomousWebTool('search_images', {
             query: visualEntityTargetOllama,
@@ -31049,7 +31051,8 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
       const visualEntityTargetOpenRouter = detectVisualEntityGroundingTarget(promptText, fullText);
       if (groundedImageDisplays.length === 0 && visualEntityTargetOpenRouter && !wantsFile && !isDocRequest && !isStudioIsolated && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
-          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari visual resmi & memverifikasi lisensi untuk "${visualEntityTargetOpenRouter}"...</span></div>`;
+          const existingGeneratedHtml = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
+          bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari visual resmi & memverifikasi lisensi untuk "${visualEntityTargetOpenRouter}"...</span></div>`;
           smartScrollChatToBottom(true);
           const autoImgSearch = await executeAutonomousWebTool('search_images', {
             query: visualEntityTargetOpenRouter,
