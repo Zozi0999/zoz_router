@@ -6794,9 +6794,9 @@ async function requestHandler(req, res) {
   }
 
   // 4. Streaming Proxy Aset Gambar Terverifikasi (HMAC-signed token + CSP + nosniff)
-  if (pathname.startsWith('/api/tools/image-asset/') && method === 'GET') {
+  if (pathname.startsWith('/api/tools/image-asset/') && (method === 'GET' || method === 'HEAD')) {
     const rawToken = decodeURIComponent(pathname.slice('/api/tools/image-asset/'.length));
-    return await imageGroundingService.serveVerifiedImageAsset(rawToken, res);
+    return await imageGroundingService.serveVerifiedImageAsset(rawToken, res, method);
   }
 
   // Autonomous Web Search Tool Endpoint (Sovereign Zoz Neural Search Engine, Zero-API)

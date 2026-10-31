@@ -1879,7 +1879,7 @@ function createImageGroundingService(options = {}) {
   /**
    * Streaming Proxy Aset Gambar Aman (GET /api/tools/image-asset/:token)
    */
-  async function serveVerifiedImageAsset(token, res) {
+  async function serveVerifiedImageAsset(token, res, method = 'GET') {
     if (!token || typeof token !== 'string' || !token.includes('.')) {
       res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ error: 'Token aset gambar tidak valid.', code: 'invalid_image' }));
@@ -1970,6 +1970,10 @@ function createImageGroundingService(options = {}) {
       'Cross-Origin-Resource-Policy': 'cross-origin',
       'Cache-Control': cacheHeader
     });
+    if (String(method).toUpperCase() === 'HEAD') {
+      res.end();
+      return;
+    }
     res.end(upstream.buffer);
   }
 
