@@ -517,18 +517,44 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
   const results = [];
   const searchTasks = [];
 
+  function translateQueryToEnglishAcademic(query) {
+    const indoMap = [
+      [/\bcari(?:kan)?\s+di\s+(?:web|internet|google)\b/gi, ' '],
+      [/\b(?:tolong|coba|carikan|cari|jelaskan|sebutkan|apakah|apa|bagaimana|siapa|kapan|saya|tentang|soal|terkait|bagi|untuk|pada|di|ke|dari)\b/gi, ' '],
+      [/\bmakalah\b/gi, 'paper'],
+      [/\bjurnal\b/gi, 'journal'],
+      [/\briset\b/gi, 'research'],
+      [/\bpenelitian\b/gi, 'research'],
+      [/\bilmiah\b/gi, 'scientific'],
+      [/\bterbaik\b/gi, 'best'],
+      [/\bterbaru|terkini|teranyar|baru\b/gi, 'recent'],
+      [/\bteknologi\b/gi, 'technology'],
+      [/\bkecerdasan\s+buatan\b/gi, 'artificial intelligence'],
+      [/\bmodel\s+bahasa\b/gi, 'language model'],
+      [/\bpembelajaran\s+mesin\b/gi, 'machine learning']
+    ];
+    let en = String(query || '');
+    for (const [re, rep] of indoMap) en = en.replace(re, rep);
+    en = en.replace(/[^\p{L}\p{N}\s.\-+]/gu, ' ').replace(/\s+/g, ' ').trim();
+    return en || query;
+  }
+
+  function isNavigationalOrBoilerplateUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') return true;
+    const u = rawUrl.trim();
+    if (/#/.test(u)) return true;
+    if (/^https?:\/\/[^\/]+\/?$/i.test(u)) return true;
+    if (/\/(account|settings|newsletters|follow|search|privacy|terms|login|signup|signin|signout|subscribe|about|contact|cookies|profile|feedback|help|faq)\b/i.test(u)) return true;
+    return false;
+  }
+
   // 1. Search arXiv (Paralel)
   if (targets.some(t => t.includes('arxiv.org'))) {
     searchTasks.push((async () => {
       try {
         const arxivSort = sortRecent ? '&sortBy=submittedDate&sortOrder=descending' : '';
-        const arxivExpandedQ = cleanQ
-          .replace(/\b(makalah|jurnal|artikel|tulisan)\b/gi, 'paper')
-          .replace(/\b(terbaru|terkini|teranyar|baru)\b/gi, 'recent')
-          .replace(/\b(kecerdasan buatan)\b/gi, 'artificial intelligence')
-          .replace(/\b(terbaik)\b/gi, 'best')
-          .trim();
-        const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(arxivExpandedQ || cleanQ)}&start=0&max_results=${Math.min(safeLimit, 6)}${arxivSort}`;
+        const arxivExpandedQ = translateQueryToEnglishAcademic(cleanQ);
+        const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(arxivExpandedQ)}&start=0&max_results=${Math.min(safeLimit, 6)}${arxivSort}`;
         const res = await fetch(arxivUrl, { signal: AbortSignal.timeout(4000) });
         if (res.ok) {
           const xml = await res.text();
@@ -545,15 +571,17 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
               const rawSnippet = sMatch ? sMatch[1].replace(/\s+/g, ' ').trim().slice(0, 300) + '...' : '';
               const pubDate = pubMatch ? pubMatch[1].slice(0, 10) : '';
 
-              results.push({
-                title: rawTitle,
-                url: rawUrl,
-                snippet: rawSnippet,
-                published_date: pubDate,
-                published_at: pubDate,
-                source_name: 'arXiv',
-                relevance_score: Number((0.96 - (idx * 0.04)).toFixed(2))
-              });
+              if (isWhitelistedSourceUrl(rawUrl) && !isNavigationalOrBoilerplateUrl(rawUrl) && !results.some(r => r.url === rawUrl)) {
+                results.push({
+                  title: rawTitle,
+                  url: rawUrl,
+                  snippet: rawSnippet,
+                  published_date: pubDate,
+                  published_at: pubDate,
+                  source_name: 'arXiv',
+                  relevance_score: Number((0.96 - (idx * 0.04)).toFixed(2))
+                });
+              }
             }
           });
         }
@@ -566,7 +594,8 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     searchTasks.push((async () => {
       try {
         const ghSort = sortRecent ? '&sort=updated&order=desc' : '';
-        const ghUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(cleanQ)}&per_page=${Math.min(safeLimit, 6)}${ghSort}`;
+        const ghQ = translateQueryToEnglishAcademic(cleanQ);
+        const ghUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(ghQ)}&per_page=${Math.min(safeLimit, 6)}${ghSort}`;
         const res = await fetch(ghUrl, {
           headers: { 'User-Agent': 'ZOZ-Router-Grounding-Agent' },
           signal: AbortSignal.timeout(3500)
@@ -576,22 +605,63 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
           const items = Array.isArray(json.items) ? json.items : [];
           items.forEach((item, idx) => {
             const pubDate = item.updated_at ? item.updated_at.slice(0, 10) : '';
-            results.push({
-              title: `${item.name} (${item.full_name})`,
-              url: item.html_url,
-              snippet: item.description || `Repositori GitHub open-source: ${item.full_name} (${item.stargazers_count} bintang).`,
-              published_date: pubDate,
-              published_at: pubDate,
-              source_name: 'GitHub',
-              relevance_score: Number((0.92 - (idx * 0.04)).toFixed(2))
-            });
+            if (isWhitelistedSourceUrl(item.html_url) && !isNavigationalOrBoilerplateUrl(item.html_url) && !results.some(r => r.url === item.html_url)) {
+              results.push({
+                title: `${item.name} (${item.full_name})`,
+                url: item.html_url,
+                snippet: item.description || `Repositori GitHub open-source: ${item.full_name} (${item.stargazers_count} bintang).`,
+                published_date: pubDate,
+                published_at: pubDate,
+                source_name: 'GitHub',
+                relevance_score: Number((0.92 - (idx * 0.04)).toFixed(2))
+              });
+            }
           });
         }
       } catch (_) {}
     })());
   }
 
-  // 3. Search CNA Albania (Paralel)
+  // 3. Search CNN via Official RSS
+  if (targets.some(t => t.includes('cnn.com') || t.includes('edition.cnn.com'))) {
+    searchTasks.push((async () => {
+      try {
+        const rssFeeds = ['http://rss.cnn.com/rss/edition_technology.rss', 'http://rss.cnn.com/rss/edition.rss'];
+        for (const feed of rssFeeds) {
+          const res = await fetch(feed, { signal: AbortSignal.timeout(3500) });
+          if (res.ok) {
+            const xml = await res.text();
+            const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+            for (const item of items.slice(0, 4)) {
+              const tMatch = item.match(/<title>([\s\S]*?)<\/title>/i);
+              const lMatch = item.match(/<link>([\s\S]*?)<\/link>/i);
+              const dMatch = item.match(/<description>([\s\S]*?)<\/description>/i);
+              const pMatch = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/i);
+              if (tMatch && lMatch) {
+                const title = tMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').replace(/\s+/g, ' ').trim();
+                const rawUrl = lMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim();
+                const snippet = dMatch ? dMatch[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 280) : '';
+                const pubDate = pMatch ? new Date(pMatch[1]).toISOString().slice(0, 10) : '';
+                if (isWhitelistedSourceUrl(rawUrl) && !isNavigationalOrBoilerplateUrl(rawUrl) && !results.some(r => r.url === rawUrl)) {
+                  results.push({
+                    title,
+                    url: rawUrl,
+                    snippet: snippet || `Laporan resmi CNN: ${title}`,
+                    published_date: pubDate,
+                    published_at: pubDate,
+                    source_name: 'CNN',
+                    relevance_score: 0.88
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    })());
+  }
+
+  // 4. Search CNA Albania (Paralel)
   if (targets.some(t => t.includes('cna.al'))) {
     searchTasks.push((async () => {
       try {
@@ -605,7 +675,7 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
           const linkMatches = text.match(/\[([^\]]+)\]\((https?:\/\/(?:www\.)?cna\.al\/[^\s\)]+)\)/gi) || [];
           linkMatches.slice(0, 4).forEach((lm, idx) => {
             const m = lm.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/i);
-            if (m && !results.some(r => r.url === m[2])) {
+            if (m && isWhitelistedSourceUrl(m[2]) && !isNavigationalOrBoilerplateUrl(m[2]) && !results.some(r => r.url === m[2])) {
               const ts = parseEdgeAuthenticTimestamp('', m[2].trim(), m[1].trim(), nowMs);
               const pubDate = ts !== null ? new Date(ts).toISOString().slice(0, 10) : '';
               results.push({
@@ -616,83 +686,6 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
                 published_at: pubDate,
                 source_name: 'CNA Albania',
                 relevance_score: Number((0.88 - (idx * 0.03)).toFixed(2))
-              });
-            }
-          });
-        }
-      } catch (_) {}
-    })());
-  }
-
-  // 4. Whitelist Multi-Domain RSS Probe (Google News RSS restricted to Whitelist Targets)
-  const allowedWhitelistSites = targets.filter(t => !t.includes('localhost') && ['arxiv.org', 'github.com', 'bloomberg.com', 'reddit.com', 'x.com', 'edition.cnn.com', 'cnn.com', 'cna.al'].some(d => t.includes(d)));
-  if (allowedWhitelistSites.length > 0) {
-    searchTasks.push((async () => {
-      try {
-        const siteFilter = allowedWhitelistSites.map(d => `site:${d}`).join(' OR ');
-        const rssFeedUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ + ' (' + siteFilter + ')')}&hl=en-US&gl=US&ceid=US:en`;
-        const res = await fetch(rssFeedUrl, { signal: AbortSignal.timeout(3500) });
-        if (res.ok) {
-          const xml = await res.text();
-          const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
-          for (const item of items.slice(0, 6)) {
-            const tMatch = item.match(/<title>([\s\S]*?)<\/title>/i);
-            const lMatch = item.match(/<link>([\s\S]*?)<\/link>/i) || item.match(/<guid[^>]*>([\s\S]*?)<\/guid>/i);
-            const pMatch = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/i);
-            const sMatch = item.match(/<description>([\s\S]*?)<\/description>/i);
-            if (tMatch && lMatch) {
-              const rawTitle = tMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').replace(/\s+/g, ' ').trim();
-              const rawUrl = lMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim();
-              const rawDesc = sMatch ? sMatch[1].replace(/<[^>]+>/g, '').replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
-              const pubStr = pMatch ? pMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
-              const ts = parseEdgeAuthenticTimestamp(pubStr, rawUrl, rawTitle, nowMs);
-              const pubDate = ts !== null ? new Date(ts).toISOString().slice(0, 10) : '';
-
-              if (!results.some(r => r.url === rawUrl || r.title === rawTitle)) {
-                results.push({
-                  title: rawTitle,
-                  url: rawUrl,
-                  snippet: rawDesc || `Publikasi terverifikasi dari sumber resmi: ${rawTitle}`,
-                  published_date: pubDate,
-                  published_at: pubDate,
-                  source_name: getSourceNameFromUrl(rawUrl),
-                  relevance_score: 0.90
-                });
-              }
-            }
-          }
-        }
-      } catch (_) {}
-    })());
-  }
-
-  // 5. Search CNN / Bloomberg / Reddit via Jina Search (Paralel)
-  const otherDomains = targets.filter(t => ['edition.cnn.com', 'cnn.com', 'bloomberg.com', 'reddit.com'].some(d => t.includes(d)));
-  if (otherDomains.length > 0) {
-    const selectedDomain = otherDomains[0].includes('cnn') ? 'edition.cnn.com' : (otherDomains[0].includes('bloomberg') ? 'bloomberg.com' : 'reddit.com');
-    searchTasks.push((async () => {
-      try {
-        const jinaSearchUrl = `https://r.jina.ai/https://${selectedDomain}/search?q=${encodeURIComponent(cleanQ)}`;
-        const res = await fetch(jinaSearchUrl, {
-          headers: { 'Accept': 'text/plain' },
-          signal: AbortSignal.timeout(4000)
-        });
-        if (res.ok) {
-          const text = await res.text();
-          const linkMatches = text.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/gi) || [];
-          linkMatches.slice(0, 4).forEach((lm, idx) => {
-            const m = lm.match(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/i);
-            if (m && isWhitelistedSourceUrl(m[2]) && !results.some(r => r.url === m[2])) {
-              const ts = parseEdgeAuthenticTimestamp('', m[2].trim(), m[1].trim(), nowMs);
-              const pubDate = ts !== null ? new Date(ts).toISOString().slice(0, 10) : '';
-              results.push({
-                title: m[1].trim(),
-                url: m[2].trim(),
-                snippet: `Laporan resmi dari ${getSourceNameFromUrl(m[2])} seputar topik kueri.`,
-                published_date: pubDate,
-                published_at: pubDate,
-                source_name: getSourceNameFromUrl(m[2]),
-                relevance_score: Number((0.86 - (idx * 0.03)).toFixed(2))
               });
             }
           });
