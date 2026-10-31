@@ -6063,6 +6063,25 @@ async function requestHandler(req, res) {
       const validation = validateSessionId(rawId, effectiveUid);
       if (!validation.valid) return sendJSON(res, 400, { error: validation.error });
       const { id, sessFile, userDir } = validation;
+
+      // Defense against Stale Cache Re-Poisoning:
+      // Jika file sesi sudah ada di disk dengan timestamp updatedAt yang lebih baru dari body.updatedAt klien,
+      // dan body.messages yang dikirim klien tidak menambah pesan baru, jangan biarkan cache basi klien menimpa disk!
+      if (fs.existsSync(sessFile)) {
+        try {
+          const existing = JSON.parse(fs.readFileSync(sessFile, 'utf8'));
+          if (existing && existing.updatedAt && body.updatedAt) {
+            const diskTime = new Date(existing.updatedAt).getTime();
+            const clientTime = new Date(body.updatedAt).getTime();
+            const diskMsgsLen = Array.isArray(existing.messages) ? existing.messages.length : 0;
+            const clientMsgsLen = Array.isArray(body.messages) ? body.messages.length : 0;
+            if (diskTime > clientTime && diskMsgsLen >= clientMsgsLen) {
+              return sendJSON(res, 200, { success: true, session: existing, rehydratedFromDisk: true });
+            }
+          }
+        } catch (_) {}
+      }
+
       body.updatedAt = new Date().toISOString();
       body.id = id;
       body.userId = effectiveUid;
@@ -9647,6 +9666,47 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       }
 
       const isCustomRemoteEndpoint = customEndpoint && !isLoopbackTarget && !customEndpoint.includes('ollama.com');
+
+      // Defense-in-depth: Gerbang Nol-Informasi Shannon di sisi server (mencegah unconditioned prior collapse)
+      if (Array.isArray(body.messages) && body.messages.length > 0) {
+        const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
+        if (lastUser) {
+          let uPrompt = typeof lastUser.content === 'string'
+            ? lastUser.content
+            : (Array.isArray(lastUser.content)
+                ? lastUser.content.map(c => c.text || (c.type === 'text' ? c.text : '')).filter(Boolean).join('\n')
+                : '');
+          if (uPrompt.startsWith('[Instruksi Sistem & Konteks:')) {
+            const lastBracketIdx = uPrompt.lastIndexOf(']\n\n');
+            if (lastBracketIdx !== -1) {
+              uPrompt = uPrompt.slice(lastBracketIdx + 3).trim();
+            } else {
+              uPrompt = uPrompt.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
+            }
+          }
+          const hasAnyImages = body.messages.some(m => (Array.isArray(m.images) && m.images.length > 0) || (Array.isArray(m.content) && m.content.some(c => c && c.type === 'image_url')));
+          const isTurnZero = body.messages.filter(m => m.role === 'user').length <= 1;
+          const isZero = isTurnZero && !hasAnyImages && (
+            (typeof textSafety.isZeroInformationQuery === 'function' && textSafety.isZeroInformationQuery(uPrompt)) ||
+            /^(?:jawab|berikan|jelaskan|tuliskan|singkat|saja|jawabannya|\s|[.,!?])+$/i.test(uPrompt.trim())
+          );
+          if (isZero) {
+            const zeroNotice = '[INTEGRITAS KONTEKS: Pengguna hanya memberikan instruksi meta tanpa melampirkan pertanyaan, soal, teks masalah, atau gambar. DILARANG KERAS mengarang soal fiktif atau mengasumsikan konteks gambar lama. Tanyakan langsung dengan ramah apa pertanyaan atau materi yang ingin dijawab oleh pengguna.]';
+            const sysMsg = body.messages.find(m => m.role === 'system');
+            if (sysMsg) {
+              if (!sysMsg.content.includes('[INTEGRITAS KONTEKS:')) {
+                sysMsg.content = `${sysMsg.content}\n\n${zeroNotice}`;
+              }
+            } else {
+              const firstUser = body.messages.find(m => m.role === 'user');
+              if (firstUser && typeof firstUser.content === 'string' && !firstUser.content.includes('[INTEGRITAS KONTEKS:')) {
+                firstUser.content = `[Instruksi Sistem & Konteks:\n${zeroNotice}]\n\n${firstUser.content}`;
+              }
+            }
+          }
+        }
+      }
+
       const shouldUseCloudBridge = Boolean((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (isOpenRouterKeySupplied && !isCustomRemoteEndpoint));
 
       if (shouldUseCloudBridge) {

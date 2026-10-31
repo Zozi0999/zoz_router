@@ -1,7 +1,10 @@
 (function (root, factory) {
   const api = factory();
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  if (root) root.ZozTextSafety = api;
+  if (root) {
+    root.ZozTextSafety = api;
+    root.textSafety = api;
+  }
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 

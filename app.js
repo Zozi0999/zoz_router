@@ -12672,8 +12672,13 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         const diskLast = fullSess.messages[diskLen - 1];
         const memLast = targetSession.messages ? targetSession.messages[memLen - 1] : null;
 
-        if (targetSession._isLazyDisk || diskLen > memLen || (diskLast && memLast && diskLast.content !== memLast.content && ((diskLast.content || '').length > (memLast.content || '').length || diskLast.backgroundCompleted))) {
+        const diskTime = fullSess.updatedAt ? new Date(fullSess.updatedAt).getTime() : 0;
+        const memTime = targetSession.updatedAt ? new Date(targetSession.updatedAt).getTime() : 0;
+        const isDiskContentChanged = diskLast && memLast && diskLast.content !== memLast.content;
+
+        if (targetSession._isLazyDisk || diskLen !== memLen || diskTime > memTime || isDiskContentChanged || (diskLast && diskLast.backgroundCompleted)) {
           targetSession.messages = fullSess.messages;
+          if (fullSess.updatedAt) targetSession.updatedAt = fullSess.updatedAt;
           delete targetSession._isLazyDisk;
           await ChatDB.saveSession(targetSession);
         }
@@ -26640,8 +26645,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const hasPriorTurns = validList.length > 1;
     const firstUserMsg = validList.find(m => m.role === 'user');
     const hasAnyImages = validList.some(m => Array.isArray(m.images) && m.images.length > 0);
-    const tsModule = (typeof textSafety !== 'undefined') ? textSafety : null;
-    const isZeroInfo = !hasPriorTurns && !hasAnyImages && firstUserMsg && tsModule && typeof tsModule.isZeroInformationQuery === 'function' && tsModule.isZeroInformationQuery(firstUserMsg.content, hasAnyImages, hasPriorTurns);
+    const tsModule = (typeof ZozTextSafety !== 'undefined') ? ZozTextSafety : ((typeof textSafety !== 'undefined') ? textSafety : (typeof TEXT_SAFETY !== 'undefined' ? TEXT_SAFETY : null));
+    let isZeroInfo = !hasPriorTurns && !hasAnyImages && firstUserMsg && tsModule && typeof tsModule.isZeroInformationQuery === 'function' && tsModule.isZeroInformationQuery(firstUserMsg.content, hasAnyImages, hasPriorTurns);
+    if (!isZeroInfo && !hasPriorTurns && !hasAnyImages && firstUserMsg && typeof firstUserMsg.content === 'string') {
+      const trimmedQ = firstUserMsg.content.trim().toLowerCase();
+      if (/^(?:jawab|berikan|jelaskan|tuliskan|singkat|saja|jawabannya|\s|[.,!?])+$/i.test(trimmedQ)) {
+        isZeroInfo = true;
+      }
+    }
     if (isZeroInfo) {
       const zeroInfoNotice = '[INTEGRITAS KONTEKS: Pengguna hanya memberikan instruksi meta tanpa melampirkan pertanyaan, soal, teks masalah, atau gambar. DILARANG KERAS mengarang soal fiktif atau mengasumsikan konteks gambar lama. Tanyakan langsung dengan ramah apa pertanyaan atau materi yang ingin dijawab oleh pengguna.]';
       effectiveSystem = effectiveSystem ? `${effectiveSystem}\n\n${zeroInfoNotice}` : zeroInfoNotice;
