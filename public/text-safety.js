@@ -2243,11 +2243,21 @@
   // ============================================================================
   // 17. GERBANG INFORMASI SHANNON & DETEKSI KUERI AMBIGU / META-IMPERATIVE TANPA KONTEKS
   // Mencegah kolaps prior tanpa syarat saat kueri hanya berisi instruksi meta (misal "Jawab singkat saja")
+  // atau merujuk ke media terlampir padahal tidak ada lampiran gambar/berkas (Dangling Media Deictic Query).
   // ============================================================================
+  const DEICTIC_MEDIA_TOKENS = new Set([
+    'gambar', 'gambarnya', 'foto', 'fotonya', 'image', 'images', 'photo', 'photos',
+    'picture', 'pictures', 'screenshot', 'lampiran', 'terlampir', 'dilampirkan',
+    'dokumen', 'file', 'pdf', 'diagram', 'grafik', 'skrinsut', 'isi', 'konten'
+  ]);
+
   const META_IMPERATIVE_TOKENS = new Set([
     'jawab', 'jawablah', 'jawabannya', 'jawaban', 'singkat', 'saja', 'tolong', 'bantu', 'berikan', 'kasih',
     'apa', 'mana', 'cepat', 'ya', 'dong', 'ini', 'itu', 'deh', 'lah', 'kan', 'nih',
-    'answer', 'respond', 'reply', 'give', 'me', 'the', 'please', 'just', 'briefly', 'shortly', 'quick', 'only'
+    'analisis', 'analisa', 'jelaskan', 'sebutkan', 'uraikan', 'baca', 'bacakan', 'cek', 'periksa',
+    'simpulkan', 'terjemahkan', 'artikan', 'tuliskan', 'tulis',
+    'answer', 'respond', 'reply', 'give', 'me', 'the', 'please', 'just', 'briefly', 'shortly', 'quick', 'only',
+    'analyze', 'analysis', 'explain', 'read', 'check', 'summarize'
   ]);
 
   function isZeroInformationQuery(prompt, hasImages = false, hasHistory = false) {
@@ -2255,7 +2265,7 @@
     if (!prompt || typeof prompt !== 'string') return true;
     const words = prompt.toLowerCase().replace(/[^a-z0-9_\u00C0-\u024F\s-]/gi, ' ').trim().split(/\s+/).filter(Boolean);
     if (words.length === 0) return true;
-    const substantive = words.filter(w => !META_IMPERATIVE_TOKENS.has(w));
+    const substantive = words.filter(w => !META_IMPERATIVE_TOKENS.has(w) && !DEICTIC_MEDIA_TOKENS.has(w));
     return substantive.length === 0;
   }
 

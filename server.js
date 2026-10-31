@@ -9684,14 +9684,17 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               uPrompt = uPrompt.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
             }
           }
-          const hasAnyImages = body.messages.some(m => (Array.isArray(m.images) && m.images.length > 0) || (Array.isArray(m.content) && m.content.some(c => c && c.type === 'image_url')));
+          const hasAnyImages = body.messages.some(m => (Array.isArray(m.images) && m.images.length > 0) || (Array.isArray(m.files) && m.files.length > 0) || (Array.isArray(m.content) && m.content.some(c => c && c.type === 'image_url')));
           const isTurnZero = body.messages.filter(m => m.role === 'user').length <= 1;
           const isZero = isTurnZero && !hasAnyImages && (
             (typeof textSafety.isZeroInformationQuery === 'function' && textSafety.isZeroInformationQuery(uPrompt)) ||
-            /^(?:jawab|berikan|jelaskan|tuliskan|singkat|saja|jawabannya|\s|[.,!?])+$/i.test(uPrompt.trim())
+            /^(?:jawab|berikan|jelaskan|tuliskan|sebutkan|analisis|analisa|baca|cek|periksa|singkat|saja|jawabannya|gambar|gambarnya|foto|fotonya|terlampir|dilampirkan|dokumen|file|pdf|ini|itu|\s|[.,!?])+$/i.test(uPrompt.trim())
           );
           if (isZero) {
-            const zeroNotice = '[INTEGRITAS KONTEKS: Pengguna hanya memberikan instruksi meta tanpa melampirkan pertanyaan, soal, teks masalah, atau gambar. DILARANG KERAS mengarang soal fiktif atau mengasumsikan konteks gambar lama. Tanyakan langsung dengan ramah apa pertanyaan atau materi yang ingin dijawab oleh pengguna.]';
+            const isMediaRef = /(?:gambar|foto|image|photo|lampiran|terlampir|dokumen|file|pdf)/i.test(uPrompt);
+            const zeroNotice = isMediaRef
+              ? '[INTEGRITAS KONTEKS: Pengguna merujuk pada gambar/foto/dokumen terlampir, namun TIDAK ADA gambar atau berkas yang diunggah dalam percakapan. DILARANG KERAS mengarang isi gambar atau berhalusinasi adanya materi lampiran. Sampaikan secara santun dan ringkas bahwa gambar atau berkas belum terlampir, dan persilakan pengguna untuk mengunggahnya.]'
+              : '[INTEGRITAS KONTEKS: Pengguna hanya memberikan instruksi meta tanpa melampirkan pertanyaan, soal, teks masalah, atau gambar. DILARANG KERAS mengarang soal fiktif atau mengasumsikan konteks gambar lama. Tanyakan langsung dengan ramah apa pertanyaan atau materi yang ingin dijawab oleh pengguna.]';
             const sysMsg = body.messages.find(m => m.role === 'system');
             if (sysMsg) {
               if (!sysMsg.content.includes('[INTEGRITAS KONTEKS:')) {

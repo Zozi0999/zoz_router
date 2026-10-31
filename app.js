@@ -26640,21 +26640,25 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // Gerbang Integritas Konteks & Nol-Informasi Shannon:
-    // Jika turn pengguna murni berisi perintah meta tanpa subjek/pertanyaan (misal "Jawab singkat saja") dan tanpa lampiran gambar,
+    // Jika turn pengguna murni berisi perintah meta tanpa subjek/pertanyaan (misal "Jawab singkat saja")
+    // atau merujuk ke gambar/lampiran padahal tidak ada lampiran gambar/berkas (Dangling Media Deictic Query),
     // cegah model dari kolaps prior / mengarang pertanyaan atau mengasumsikan foto fiktif.
     const hasPriorTurns = validList.length > 1;
     const firstUserMsg = validList.find(m => m.role === 'user');
-    const hasAnyImages = validList.some(m => Array.isArray(m.images) && m.images.length > 0);
+    const hasAnyImages = validList.some(m => (Array.isArray(m.images) && m.images.length > 0) || (Array.isArray(m.files) && m.files.length > 0));
     const tsModule = (typeof ZozTextSafety !== 'undefined') ? ZozTextSafety : ((typeof textSafety !== 'undefined') ? textSafety : (typeof TEXT_SAFETY !== 'undefined' ? TEXT_SAFETY : null));
     let isZeroInfo = !hasPriorTurns && !hasAnyImages && firstUserMsg && tsModule && typeof tsModule.isZeroInformationQuery === 'function' && tsModule.isZeroInformationQuery(firstUserMsg.content, hasAnyImages, hasPriorTurns);
     if (!isZeroInfo && !hasPriorTurns && !hasAnyImages && firstUserMsg && typeof firstUserMsg.content === 'string') {
       const trimmedQ = firstUserMsg.content.trim().toLowerCase();
-      if (/^(?:jawab|berikan|jelaskan|tuliskan|singkat|saja|jawabannya|\s|[.,!?])+$/i.test(trimmedQ)) {
+      if (/^(?:jawab|berikan|jelaskan|tuliskan|sebutkan|analisis|analisa|baca|cek|periksa|singkat|saja|jawabannya|gambar|gambarnya|foto|fotonya|terlampir|dilampirkan|dokumen|file|pdf|ini|itu|\s|[.,!?])+$/i.test(trimmedQ)) {
         isZeroInfo = true;
       }
     }
     if (isZeroInfo) {
-      const zeroInfoNotice = '[INTEGRITAS KONTEKS: Pengguna hanya memberikan instruksi meta tanpa melampirkan pertanyaan, soal, teks masalah, atau gambar. DILARANG KERAS mengarang soal fiktif atau mengasumsikan konteks gambar lama. Tanyakan langsung dengan ramah apa pertanyaan atau materi yang ingin dijawab oleh pengguna.]';
+      const isMediaRef = firstUserMsg && typeof firstUserMsg.content === 'string' && /(?:gambar|foto|image|photo|lampiran|terlampir|dokumen|file|pdf)/i.test(firstUserMsg.content);
+      const zeroInfoNotice = isMediaRef
+        ? '[INTEGRITAS KONTEKS: Pengguna merujuk pada gambar/foto/dokumen terlampir, namun TIDAK ADA gambar atau berkas yang diunggah dalam percakapan. DILARANG KERAS mengarang isi gambar atau berhalusinasi adanya materi lampiran. Sampaikan secara santun dan ringkas bahwa gambar atau berkas belum terlampir, dan persilakan pengguna untuk mengunggahnya.]'
+        : '[INTEGRITAS KONTEKS: Pengguna hanya memberikan instruksi meta tanpa melampirkan pertanyaan, soal, teks masalah, atau gambar. DILARANG KERAS mengarang soal fiktif atau mengasumsikan konteks gambar lama. Tanyakan langsung dengan ramah apa pertanyaan atau materi yang ingin dijawab oleh pengguna.]';
       effectiveSystem = effectiveSystem ? `${effectiveSystem}\n\n${zeroInfoNotice}` : zeroInfoNotice;
     }
 
