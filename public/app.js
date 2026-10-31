@@ -4969,7 +4969,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       // host yang ditelan catch luar, sehingga SELURUH sisa load preferensi + mirror
       // sesi dilewatkan. `STATE.settings.mode` juga tidak pernah ada — mode hidup di
       // STATE.mode. Kini memakai savedSettings (ada = pernah disimpan) & STATE.mode.
-      if (IS_CLOUD_HOSTED && !savedSettings && STATE.mode === 'ollama') {
+      // v617: Jangan pernah menimpa ke 'auto' jika pengguna telah menyetel Auto-Start model!
+      const hasAutoStartCfg = Boolean(STATE.autoStartModel || getAutoStartModelConfig());
+      if (IS_CLOUD_HOSTED && !savedSettings && !hasAutoStartCfg && STATE.mode === 'ollama') {
         STATE.mode = 'auto';
       }
 
@@ -23466,16 +23468,19 @@ ${blocks}
         if (els.ollamaStatusVal) els.ollamaStatusVal.innerText = statusText;
         if (els.ollamaIndicator) els.ollamaIndicator.className = isRunning ? 'status-indicator online' : 'status-indicator';
 
-        // Auto-select model nyata yang terpasang jika model saat ini tidak valid atau bekas gemma4:31b
-        const modelNames = rawModels.map(m => m.name || m.model || m.id);
-        const modelNamesLower = new Set(modelNames.map(n => String(n || '').toLowerCase()));
-        if (!STATE.settings.ollamaModel || !modelNamesLower.has(String(STATE.settings.ollamaModel).toLowerCase()) || STATE.settings.ollamaModel.startsWith('gemma4') || STATE.settings.ollamaModel === 'beam' || STATE.settings.ollamaModel === 'muse-spark-open') {
+        // v617: Invarian Matematis Integritas Model:
+        // Jangan pernah menimpa model yang telah dipilih pengguna (misal gemma4:31b atau model cloud).
+        // Hanya inisialisasi default jika STATE.settings.ollamaModel belum pernah diatur atau string kosong.
+        const modelNames = rawModels.map(m => m.name || m.model || m.id).filter(Boolean);
+        if (!STATE.settings.ollamaModel || typeof STATE.settings.ollamaModel !== 'string' || !STATE.settings.ollamaModel.trim()) {
           const preferredModel = modelNames.find(n => n.includes('llama3.2') || n.includes('qwen') || n.includes('granite'))
             || modelNames[0]
             || '';
-          STATE.settings.ollamaModel = preferredModel;
-          safeLocalStorage.setItem('zoz_ollama_model', preferredModel);
-          savePersistedState();
+          if (preferredModel) {
+            STATE.settings.ollamaModel = preferredModel;
+            safeLocalStorage.setItem('zoz_ollama_model', preferredModel);
+            savePersistedState();
+          }
         }
 
         if (els.badgeOllamaCount) {
@@ -23946,14 +23951,11 @@ ${blocks}
           return;
         }
         const isOllamaTab = STATE.dropdownModelTab === 'ollama';
-        if (STATE.mode !== 'auto') {
-          if (isOllamaTab && STATE.mode !== 'ollama') {
-            setEngineMode('ollama');
-          } else if (!isOllamaTab && STATE.mode !== 'openrouter') {
-            setEngineMode('openrouter');
-          }
+        const targetEngine = isOllamaTab ? 'ollama' : 'openrouter';
+        if (STATE.mode !== targetEngine) {
+          setEngineMode(targetEngine, true, false);
         }
-        selectModel(modelId, isOllamaTab ? 'ollama' : 'openrouter');
+        selectModel(modelId, targetEngine, true);
         els.modelDropdownMenu.classList.remove('show');
         AudioEngine.click();
       });
@@ -24120,17 +24122,20 @@ ${blocks}
   function selectModel(modelId, forcedProvider = null, forceSwitch = false) {
     if (!modelId) return;
     const isOR = forcedProvider ? (forcedProvider === 'openrouter') : (modelId.includes('/') || STATE.mode === 'openrouter');
+    const targetProvider = isOR ? 'openrouter' : 'ollama';
     if (isOR) {
       const cleanORModel = modelId.includes('/') ? modelId : (mapOllamaModelToOpenRouter(modelId) || 'openrouter/free');
       STATE.settings.openRouterModel = cleanORModel;
-      if (STATE.mode !== 'openrouter' && STATE.mode !== 'auto') {
-        setEngineMode('openrouter', forceSwitch, forceSwitch);
-      }
     } else {
       STATE.settings.ollamaModel = modelId;
-      if (STATE.mode !== 'ollama' && STATE.mode !== 'auto') {
-        setEngineMode('ollama', forceSwitch, forceSwitch);
+    }
+
+    if (forceSwitch || forcedProvider || STATE.mode === 'auto') {
+      if (STATE.mode !== targetProvider) {
+        setEngineMode(targetProvider, true, true);
       }
+    } else if (STATE.mode !== targetProvider) {
+      setEngineMode(targetProvider, false, false);
     }
 
     updateModelUI();
@@ -31750,50 +31755,133 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
     }
   }
 
+  // ==================== PURE MATHEMATICAL AUTO ROUTER AUTOMATON ====================
+  // Matriks Utilitas Multi-Atribut \Psi(m \mid P, I, \pi, \vec{v})
+  function extractPromptFeatureTensor(promptText, images) {
+    const text = String(promptText || '');
+    const rawImgs = Array.isArray(images) ? images : (images ? [images] : []);
+    const hasVision = rawImgs.length > 0;
+
+    // 1. Sinyal Pemrograman \phi_{code} \in [0, 1]
+    const codeBlockCount = (text.match(/```/g) || []).length / 2;
+    const codeKeywords = /\b(function|class|const|let|var|def|import|from|export|return|async|await|select|from|where|insert|update|delete|table|database|query|sql|algorithm|bug|fix|refactor|error|exception|stack|trace|compiler|syntax|regex|regexp|docker|kubernetes|k8s|git|commit|pull|branch|merge|endpoint|route|api|controller|schema|json|yaml|xml|html|css|component|react|vue|angular|node|npm|cargo|pip|golang|rust|python|typescript|javascript|c\+\+|java)\b/gi;
+    const codeMatches = (text.match(codeKeywords) || []).length;
+    const codeSyntaxSymbols = (text.match(/[{}\[\]()<>=;:$#\\/]/g) || []).length;
+    const rawCodeSignal = (codeBlockCount * 3.0) + (codeMatches * 0.45) + (codeSyntaxSymbols * 0.04);
+    const codeScore = Math.min(1.0, rawCodeSignal / 5.0);
+
+    // 2. Sinyal Matematika & Penalaran Logis \phi_{math} \in [0, 1]
+    const mathKeywords = /\b(matematika|rumus|formula|teorema|persamaan|hitung|kalkulasi|derivatif|integral|matriks|vektor|probabilitas|statistika|analisis|logika|pembuktian|aljabar|geometri|kalkulus|discrete|prime|modulo|theorem|equation|proof|calculate|probability|matrix|vector|optimization|entropy|lagrange|eigen|derivative)\b/gi;
+    const mathMatches = (text.match(mathKeywords) || []).length;
+    const mathSymbols = (text.match(/[∑∫∏√±×÷≠≈≤≥∞∂∇∈∉⊂⊆∪∩∧∨¬⇒⇔∀∃]/g) || []).length;
+    const rawMathSignal = (mathMatches * 0.6) + (mathSymbols * 0.9);
+    const mathScore = Math.min(1.0, rawMathSignal / 4.0);
+
+    // 3. Sinyal Panjang Token / Bobot Teks \phi_{length} \in [0, 1]
+    const lengthScore = Math.min(1.0, text.length / 1600);
+
+    // 4. Tensor Kompleksitas Terintegrasi
+    const complexityScore = Math.max(codeScore, mathScore, lengthScore * 0.85);
+
+    return {
+      hasVision,
+      codeScore,
+      mathScore,
+      lengthScore,
+      complexityScore
+    };
+  }
+
+  function scoreModelUtility(candidate, features, policy, isOllamaRunnable, canRunOpenRouter) {
+    const { modelId, provider } = candidate;
+    const lowerId = String(modelId || '').toLowerCase().trim();
+
+    // Invarian Kelayakan Mutlak (Fisibilitas Provider)
+    if (provider === 'ollama' && !isOllamaRunnable) return -Infinity;
+    if (provider === 'openrouter' && !canRunOpenRouter) return -Infinity;
+
+    // Invarian Visual Mutlak
+    if (features.hasVision) {
+      const isVisionCapable = lowerId.includes('vision') || lowerId.includes('gemini') || 
+                              lowerId.includes('4o') || lowerId.includes('pixtral') || 
+                              lowerId.includes('qwen-vl') || lowerId.includes('gemma4') ||
+                              lowerId.includes('claude-3') || lowerId.includes('vl');
+      if (!isVisionCapable) return -Infinity;
+    }
+
+    // Skor utilitas dasar
+    let score = 10.0;
+
+    // Bobot Kebijakan Prioritas (Policy Priors)
+    if (policy === 'local_first') {
+      if (provider === 'ollama') score += 10.0;
+    } else if (policy === 'cloud_first') {
+      if (provider === 'openrouter') score += 10.0;
+    } else if (policy === 'cloud_heavy') {
+      if (features.complexityScore > 0.4) {
+        if (provider === 'openrouter') score += 10.0 * features.complexityScore;
+        else score += 2.0;
+      } else {
+        if (provider === 'ollama') score += 8.0;
+        else score += 3.0;
+      }
+    }
+
+    // Penyelarasan Spesialisasi Tugas (Task Specialization)
+    if (features.codeScore > 0.25) {
+      const isCodeSpecialist = lowerId.includes('code') || lowerId.includes('coder') || 
+                               lowerId.includes('deepseek') || lowerId.includes('qwen') || 
+                               lowerId.includes('claude') || lowerId.includes('dev');
+      if (isCodeSpecialist) score += 7.0 * features.codeScore;
+    }
+
+    if (features.mathScore > 0.25) {
+      const isMathReasoning = lowerId.includes('r1') || lowerId.includes('reason') || 
+                              lowerId.includes('deepseek-r1') || lowerId.includes('qwen') || 
+                              lowerId.includes('gemma4') || lowerId.includes('gemini');
+      if (isMathReasoning) score += 7.0 * features.mathScore;
+    }
+
+    // Penyelarasan Kapasitas Parameter (Model Scale Capacity)
+    const isLargeModel = lowerId.includes('31b') || lowerId.includes('70b') || 
+                         lowerId.includes('pro') || lowerId.includes('plus') || 
+                         lowerId.includes('large') || lowerId.includes('sonnet');
+    const isFastSmallModel = lowerId.includes('1.5b') || lowerId.includes('3b') || 
+                             lowerId.includes('flash') || lowerId.includes('mini') || 
+                             lowerId.includes('nano');
+    if (isLargeModel) {
+      score += 4.0 * features.complexityScore;
+    }
+    if (isFastSmallModel) {
+      score += 3.5 * (1.0 - features.complexityScore);
+    }
+
+    // Afinitas & Kontinuitas Pilihan Pengguna (User Sovereignty Priors)
+    if (isModelAutoStart(modelId)) score += 6.0;
+    if (isModelPinned(modelId)) score += 4.0;
+    if (isModelFavorite(modelId)) score += 2.5;
+
+    // Afinitas model aktif saat ini
+    if (provider === 'ollama' && STATE.settings.ollamaModel === modelId) score += 5.0;
+    if (provider === 'openrouter' && STATE.settings.openRouterModel === modelId) score += 5.0;
+
+    return score;
+  }
+
   // --- AUTO ROUTER (SMART ROUTING) ---
   async function runAutoRouterStreaming(session, promptText, image, runOptions = {}) {
     try {
       setGeneratingState(true);
-      // Check if Ollama is online & runnable on current deployment
+      // Validasi Kelayakan Provider (Sadar Proxy Backend & SSRF)
       const isOllamaOnline = await checkOllamaHealth();
       const hasOllamaCloudKey = Boolean(STATE.settings.ollamaApiKey);
       const isLoopbackEndpoint = /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(STATE.settings.ollamaEndpoint);
       const isCloudHosted = Boolean(IS_CLOUD_HOSTED || location.protocol === 'https:');
-      const isOllamaRunnable = isOllamaOnline && (!isCloudHosted || !isLoopbackEndpoint || hasOllamaCloudKey);
-      
-      // Policy check
-      const policy = STATE.settings.autoPolicy || 'cloud_first';
-      const isLongOrHeavy = (promptText.length > 800) || (promptText.toLowerCase().includes('buatkan sistem') || promptText.toLowerCase().includes('arsitektur kompleks'));
+      const isBackendAvailable = Boolean(DeviceStorage.isDeviceBackendAvailable || !IS_GITHUB_PAGES);
+      const isOllamaRunnable = Boolean(isOllamaOnline && (isBackendAvailable || !isCloudHosted || !isLoopbackEndpoint || hasOllamaCloudKey));
       const canRunOpenRouter = Boolean(STATE.settings.openRouterKey || DeviceStorage.isDeviceBackendAvailable || !IS_GITHUB_PAGES);
 
-      if (policy === 'cloud_heavy' && isLongOrHeavy && canRunOpenRouter) {
-        showToast('🔀 Auto-Router: Mengarahkan tugas kompleks ke OpenRouter Cloud...', 'info');
-        const orOk = await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free', { ...runOptions, autoFallback: Boolean(isOllamaRunnable) });
-        if (!orOk && isOllamaRunnable) {
-          console.warn('Auto-Router: OpenRouter gagal / tidak merespons, beralih ke Ollama Engine...');
-          showToast('🔀 Auto-Router: OpenRouter tidak tersedia, beralih ke Ollama...', 'info');
-          await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel, runOptions);
-        }
-      } else if (policy === 'cloud_first' && canRunOpenRouter) {
-        showToast('🔀 Auto-Router: Menggunakan OpenRouter Cloud...', 'info');
-        const orOk = await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free', { ...runOptions, autoFallback: Boolean(isOllamaRunnable) });
-        if (!orOk && isOllamaRunnable) {
-          console.warn('Auto-Router: OpenRouter gagal / tidak merespons, beralih ke Ollama Engine...');
-          showToast('🔀 Auto-Router: OpenRouter tidak tersedia, beralih ke Ollama...', 'info');
-          await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel, runOptions);
-        }
-      } else if (isOllamaRunnable) {
-        showToast('🔀 Auto-Router: Menghubungi Ollama Engine...', 'info');
-        const ollamaOk = await runOllamaStreaming(session, promptText, image, STATE.settings.ollamaModel, { ...runOptions, autoFallback: Boolean(canRunOpenRouter) });
-        if (!ollamaOk && canRunOpenRouter) {
-          console.warn('Auto-Router: Ollama gagal / tidak merespons, otomatis beralih ke OpenRouter Cloud...');
-          showToast('🔀 Auto-Router: Ollama tidak tersedia, beralih ke OpenRouter Cloud...', 'info');
-          await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free', runOptions);
-        }
-      } else if (canRunOpenRouter) {
-        showToast('🔀 Auto-Router: Menggunakan OpenRouter Cloud...', 'info');
-        await runOpenRouterStreaming(session, promptText, image, STATE.settings.openRouterModel || 'openrouter/free', runOptions);
-      } else {
+      if (!isOllamaRunnable && !canRunOpenRouter) {
         // Kedua engine tidak siap: tampilkan kartu bantuan interaktif dan pulihkan composer
         const assistantRow = appendMessageElement('assistant', '', null, 'Auto-Router Engine');
         const bubbleText = assistantRow.querySelector('.msg-text-content');
@@ -31842,6 +31930,85 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
         AudioEngine.error();
         showToast('Ollama offline dan OpenRouter Key belum disetting.', 'error');
         smartScrollChatToBottom(true);
+        return;
+      }
+
+      const policy = STATE.settings.autoPolicy || 'cloud_first';
+      const features = extractPromptFeatureTensor(promptText, image);
+
+      // Kumpulkan kandidat model universal dari kedua provider
+      const candidateMap = new Map();
+      const addCandidate = (mId, prov) => {
+        if (!mId || typeof mId !== 'string') return;
+        const clean = mId.trim();
+        if (!clean) return;
+        const key = `${prov}::${clean}`;
+        if (!candidateMap.has(key)) {
+          candidateMap.set(key, { modelId: clean, provider: prov });
+        }
+      };
+
+      // 1. Model aktif pengaturan
+      if (STATE.settings.ollamaModel) addCandidate(STATE.settings.ollamaModel, 'ollama');
+      if (STATE.settings.openRouterModel) addCandidate(STATE.settings.openRouterModel, 'openrouter');
+      // 2. Model Auto-Start
+      const autoCfg = STATE.autoStartModel || getAutoStartModelConfig();
+      if (autoCfg && autoCfg.modelId) {
+        addCandidate(autoCfg.modelId, autoCfg.provider || (autoCfg.modelId.includes('/') ? 'openrouter' : 'ollama'));
+      }
+      // 3. Model tersemat (Pinned)
+      (STATE.pinnedModels || []).forEach(pId => {
+        addCandidate(pId, pId.includes('/') ? 'openrouter' : 'ollama');
+      });
+      // 4. Model lokal/cloud dari catalog aktif
+      (STATE.ollamaModels || []).forEach(m => {
+        const id = m.name || m.model || m.id;
+        if (id) addCandidate(id, 'ollama');
+      });
+      (STATE.openRouterModels || []).forEach(m => {
+        if (m && m.id) addCandidate(m.id, 'openrouter');
+      });
+      // Fallback universal
+      addCandidate('openrouter/free', 'openrouter');
+      addCandidate('llama3.2:3b', 'ollama');
+
+      // Evaluasi skor utilitas \Psi(m)
+      const scoredCandidates = Array.from(candidateMap.values())
+        .map(cand => ({
+          ...cand,
+          score: scoreModelUtility(cand, features, policy, isOllamaRunnable, canRunOpenRouter)
+        }))
+        .filter(cand => Number.isFinite(cand.score));
+
+      scoredCandidates.sort((a, b) => b.score - a.score);
+
+      const topCandidate = scoredCandidates[0] || (isOllamaRunnable ? { modelId: STATE.settings.ollamaModel || 'llama3.2:3b', provider: 'ollama', score: 10 } : { modelId: STATE.settings.openRouterModel || 'openrouter/free', provider: 'openrouter', score: 10 });
+      const fallbackCandidate = scoredCandidates.find(c => c.provider !== topCandidate.provider && Number.isFinite(c.score)) || null;
+
+      showToast(`🔀 Auto-Router: Memilih model "${topCandidate.modelId}" (${topCandidate.provider.toUpperCase()}) [Skor: ${topCandidate.score.toFixed(1)}]`, 'info');
+
+      if (topCandidate.provider === 'ollama') {
+        const ollamaOk = await runOllamaStreaming(session, promptText, image, topCandidate.modelId, { ...runOptions, autoFallback: Boolean(fallbackCandidate) });
+        if (!ollamaOk && fallbackCandidate) {
+          console.warn(`Auto-Router: Ollama "${topCandidate.modelId}" gagal, beralih ke "${fallbackCandidate.modelId}" (${fallbackCandidate.provider})...`);
+          showToast(`🔀 Auto-Router: Beralih ke model cadangan "${fallbackCandidate.modelId}"...`, 'info');
+          if (fallbackCandidate.provider === 'openrouter') {
+            await runOpenRouterStreaming(session, promptText, image, fallbackCandidate.modelId, runOptions);
+          } else {
+            await runOllamaStreaming(session, promptText, image, fallbackCandidate.modelId, runOptions);
+          }
+        }
+      } else {
+        const orOk = await runOpenRouterStreaming(session, promptText, image, topCandidate.modelId, { ...runOptions, autoFallback: Boolean(fallbackCandidate) });
+        if (!orOk && fallbackCandidate) {
+          console.warn(`Auto-Router: OpenRouter "${topCandidate.modelId}" gagal, beralih ke "${fallbackCandidate.modelId}" (${fallbackCandidate.provider})...`);
+          showToast(`🔀 Auto-Router: Beralih ke model cadangan "${fallbackCandidate.modelId}"...`, 'info');
+          if (fallbackCandidate.provider === 'ollama') {
+            await runOllamaStreaming(session, promptText, image, fallbackCandidate.modelId, runOptions);
+          } else {
+            await runOpenRouterStreaming(session, promptText, image, fallbackCandidate.modelId, runOptions);
+          }
+        }
       }
     } finally {
       setGeneratingState(false);
@@ -36619,17 +36786,15 @@ Aturan:
     }
 
     // Model Obrolan Utama
+    const targetEngine = provider === 'ollama' ? 'ollama' : 'openrouter';
     if (provider === 'ollama') {
       STATE.settings.ollamaModel = modelId;
-      if (STATE.mode !== 'auto') {
-        setEngineMode('ollama');
-      }
     } else {
       const cleanORModel = modelId.includes('/') ? modelId : (mapOllamaModelToOpenRouter(modelId) || 'openrouter/free');
       STATE.settings.openRouterModel = cleanORModel;
-      if (STATE.mode !== 'auto') {
-        setEngineMode('openrouter');
-      }
+    }
+    if (STATE.mode !== targetEngine) {
+      setEngineMode(targetEngine, true, false);
     }
     savePersistedState();
     updateModelUI();
@@ -47600,8 +47765,8 @@ Aturan:
           ? STATE.ollamaModels.map(m => m.name || m.model || m.id).filter(Boolean)
           : [];
 
-        // Singkirkan model palsu/fiktif
-        const ollamaList = rawOllamaList.filter(id => !id.startsWith('gemma4') && id !== 'beam' && id !== 'muse-spark-open');
+        // Model nyata yang terverifikasi
+        const ollamaList = rawOllamaList.filter(Boolean);
 
         if (ollamaList.length === 0) {
           const opt = document.createElement('option');
@@ -48348,13 +48513,13 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     const autoCfg = STATE.autoStartModel || getAutoStartModelConfig();
     if (autoCfg && autoCfg.enabled && autoCfg.modelId) {
       const isOR = autoCfg.provider === 'openrouter' || autoCfg.modelId.includes('/');
+      const targetProvider = isOR ? 'openrouter' : 'ollama';
       if (isOR) {
         STATE.settings.openRouterModel = autoCfg.modelId;
-        if (STATE.mode !== 'auto') STATE.mode = 'openrouter';
       } else {
         STATE.settings.ollamaModel = autoCfg.modelId;
-        if (STATE.mode !== 'auto') STATE.mode = 'ollama';
       }
+      STATE.mode = targetProvider;
       if (!isTabReload) {
         setTimeout(() => {
           showToast(`🚀 Auto-Start: Model "${autoCfg.modelId}" (${(autoCfg.provider || 'AI').toUpperCase()}) siap digunakan.`, 'success');
