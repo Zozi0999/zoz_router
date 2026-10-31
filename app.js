@@ -270,6 +270,191 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     } catch (_) {}
   }
 
+  function getPinnedModels() {
+    try {
+      const raw = localStorage.getItem('zoz_pinned_models_v1') || localStorage.getItem('zoz_pinned_models');
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) return arr;
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  function savePinnedModels() {
+    try {
+      localStorage.setItem('zoz_pinned_models_v1', JSON.stringify(STATE.pinnedModels || []));
+    } catch (_) {}
+  }
+
+  function isModelPinned(modelId) {
+    if (!modelId) return false;
+    if (!Array.isArray(STATE.pinnedModels)) {
+      STATE.pinnedModels = getPinnedModels();
+    }
+    return STATE.pinnedModels.includes(modelId);
+  }
+
+  function toggleModelPinned(modelId, e) {
+    if (e) {
+      try {
+        e.preventDefault();
+        e.stopPropagation();
+      } catch (_) {}
+    }
+    if (!modelId) return;
+    if (!Array.isArray(STATE.pinnedModels)) {
+      STATE.pinnedModels = getPinnedModels();
+    }
+    const idx = STATE.pinnedModels.indexOf(modelId);
+    const wasPinned = idx !== -1;
+    if (wasPinned) {
+      STATE.pinnedModels.splice(idx, 1);
+      showToast(`📌 Sematan model "${modelId}" dilepas.`, 'info');
+    } else {
+      STATE.pinnedModels.unshift(modelId);
+      showToast(`📌 Model "${modelId}" disematkan ke prioritas teratas!`, 'success');
+    }
+    savePinnedModels();
+    updateModelOptionsMenuUI();
+    updateModelUI();
+
+    try {
+      if (typeof els !== 'undefined' && els.modelDropdownMenu && els.modelDropdownMenu.classList.contains('show')) {
+        const searchVal = els.modelSearchInput ? els.modelSearchInput.value : '';
+        populateModelDropdown(searchVal);
+      }
+    } catch (_) {}
+  }
+
+  function getAutoStartModelConfig() {
+    try {
+      const raw = localStorage.getItem('zoz_auto_start_model_v1') || localStorage.getItem('zoz_auto_start_model');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && parsed.modelId && parsed.enabled !== false) {
+        return parsed;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function isModelAutoStart(modelId) {
+    if (!modelId) return false;
+    const cfg = STATE.autoStartModel || getAutoStartModelConfig();
+    return Boolean(cfg && cfg.enabled && cfg.modelId === modelId);
+  }
+
+  function toggleAutoStartModel(modelId, provider = null, e) {
+    if (e) {
+      try {
+        e.preventDefault();
+        e.stopPropagation();
+      } catch (_) {}
+    }
+    if (!modelId) return;
+    const cleanProvider = provider || (modelId.includes('/') ? 'openrouter' : 'ollama');
+    const isCurrentlyAuto = isModelAutoStart(modelId);
+
+    if (isCurrentlyAuto) {
+      localStorage.removeItem('zoz_auto_start_model_v1');
+      localStorage.removeItem('zoz_auto_start_model');
+      STATE.autoStartModel = null;
+      showToast(`⚡ Auto-Start dinonaktifkan.`, 'info');
+    } else {
+      const cfg = {
+        modelId,
+        provider: cleanProvider,
+        enabled: true,
+        updatedAt: new Date().toISOString()
+      };
+      localStorage.setItem('zoz_auto_start_model_v1', JSON.stringify(cfg));
+      localStorage.setItem('zoz_auto_start_model', JSON.stringify(cfg));
+      STATE.autoStartModel = cfg;
+      showToast(`🚀 Auto-Start diaktifkan! Model "${modelId}" (${cleanProvider.toUpperCase()}) akan otomatis aktif setiap kali aplikasi dibuka.`, 'success');
+    }
+
+    updateModelOptionsMenuUI();
+    updateModelUI();
+
+    try {
+      if (typeof els !== 'undefined' && els.modelDropdownMenu && els.modelDropdownMenu.classList.contains('show')) {
+        const searchVal = els.modelSearchInput ? els.modelSearchInput.value : '';
+        populateModelDropdown(searchVal);
+      }
+    } catch (_) {}
+  }
+
+  function updateModelOptionsMenuUI() {
+    if (!els.modelOptionsMenuPopup) return;
+    const isOR = STATE.mode === 'openrouter';
+    const activeRaw = isOR ? STATE.settings.openRouterModel : STATE.settings.ollamaModel;
+    const activeEngine = isOR ? 'OpenRouter' : 'Ollama';
+    const activeDisplay = activeRaw || 'Auto Router';
+
+    if (els.modelOptionsActiveName) {
+      els.modelOptionsActiveName.textContent = activeDisplay;
+      els.modelOptionsActiveName.title = activeDisplay;
+    }
+    if (els.modelOptionsActiveEngine) {
+      els.modelOptionsActiveEngine.textContent = activeEngine;
+      els.modelOptionsActiveEngine.style.background = isOR ? 'rgba(255, 82, 0, 0.15)' : 'rgba(0, 240, 255, 0.15)';
+      els.modelOptionsActiveEngine.style.color = isOR ? 'var(--neon-amber, #ff5200)' : 'var(--neon-cyan, #00f0ff)';
+      els.modelOptionsActiveEngine.style.borderColor = isOR ? 'rgba(255, 82, 0, 0.3)' : 'rgba(0, 240, 255, 0.3)';
+    }
+
+    const isPinned = isModelPinned(activeRaw);
+    const isAutoStart = isModelAutoStart(activeRaw);
+
+    // Update status badge header
+    if (els.modelOptionsActiveStatusBadge) {
+      let badges = [];
+      if (isPinned) badges.push('📌 Tersemat');
+      if (isAutoStart) badges.push('⚡ Auto-Start');
+      els.modelOptionsActiveStatusBadge.textContent = badges.join(' • ');
+    }
+
+    // Update Tombol Pin
+    if (els.btnTogglePinCurrentModel) {
+      els.btnTogglePinCurrentModel.classList.toggle('active-pin', isPinned);
+      if (els.textPinModelTitle) {
+        els.textPinModelTitle.textContent = isPinned ? 'Lepas Sematan Model' : 'Sematkan Model Ini';
+      }
+      if (els.badgePinModel) {
+        els.badgePinModel.style.display = isPinned ? 'inline-block' : 'none';
+      }
+      if (els.iconPinCurrentModel) {
+        els.iconPinCurrentModel.className = isPinned ? 'fa-solid fa-thumbtack text-teal-400' : 'fa-solid fa-thumbtack';
+      }
+    }
+
+    // Update Tombol Auto-Start
+    if (els.btnToggleAutoStartCurrentModel) {
+      els.btnToggleAutoStartCurrentModel.classList.toggle('active-autostart', isAutoStart);
+      if (els.textAutoStartModelTitle) {
+        els.textAutoStartModelTitle.textContent = isAutoStart ? 'Nonaktifkan Auto-Start' : 'Jadikan Auto-Start saat Masuk';
+      }
+      if (els.badgeAutoStartModel) {
+        els.badgeAutoStartModel.style.display = isAutoStart ? 'inline-block' : 'none';
+      }
+      if (els.iconAutoStartCurrentModel) {
+        els.iconAutoStartCurrentModel.className = isAutoStart ? 'fa-solid fa-bolt text-amber-400' : 'fa-solid fa-rocket';
+      }
+    }
+
+    // Update Footer Info
+    if (els.modelOptionsAutoStartTarget) {
+      const curCfg = STATE.autoStartModel || getAutoStartModelConfig();
+      if (curCfg && curCfg.enabled && curCfg.modelId) {
+        els.modelOptionsAutoStartTarget.textContent = `${curCfg.modelId} (${curCfg.provider.toUpperCase()})`;
+        els.modelOptionsAutoStartTarget.style.color = '#38bdf8';
+      } else {
+        els.modelOptionsAutoStartTarget.textContent = 'Belum Diatur';
+        els.modelOptionsAutoStartTarget.style.color = '#94a3b8';
+      }
+    }
+  }
+
   function isModelFavorite(modelId) {
     if (!modelId || !STATE.favoriteModels) return false;
     return STATE.favoriteModels.includes(modelId);
@@ -526,6 +711,23 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     customModelInput: $('#customModelInput'),
     useCustomModelBtn: $('#useCustomModelBtn'),
     singleModelPickerWrap: $('#singleModelPickerWrap'),
+    btnModelOptionsMenu: $('#btnModelOptionsMenu'),
+    modelOptionsMenuPopup: $('#modelOptionsMenuPopup'),
+    modelOptionsActiveName: $('#modelOptionsActiveName'),
+    modelOptionsActiveEngine: $('#modelOptionsActiveEngine'),
+    modelOptionsActiveStatusBadge: $('#modelOptionsActiveStatusBadge'),
+    btnTogglePinCurrentModel: $('#btnTogglePinCurrentModel'),
+    textPinModelTitle: $('#textPinModelTitle'),
+    badgePinModel: $('#badgePinModel'),
+    iconPinCurrentModel: $('#iconPinCurrentModel'),
+    iconBoxPinModel: $('#iconBoxPinModel'),
+    btnToggleAutoStartCurrentModel: $('#btnToggleAutoStartCurrentModel'),
+    textAutoStartModelTitle: $('#textAutoStartModelTitle'),
+    badgeAutoStartModel: $('#badgeAutoStartModel'),
+    iconAutoStartCurrentModel: $('#iconAutoStartCurrentModel'),
+    iconBoxAutoStartModel: $('#iconBoxAutoStartModel'),
+    modelOptionsAutoStartTarget: $('#modelOptionsAutoStartTarget'),
+    modelChipStatusBadges: $('#modelChipStatusBadges'),
     
     // Status
     ollamaStatusVal: $('#ollamaStatusVal'),
@@ -4722,8 +4924,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         STATE.settings.ollamaEndpoint = 'https://ollama.com';
       }
 
-      // Pastikan model Ollama valid dan bukan model palsu/gimmick
-      if (!STATE.settings.ollamaModel || STATE.settings.ollamaModel.startsWith('gemma4') || STATE.settings.ollamaModel === 'beam' || STATE.settings.ollamaModel === 'muse-spark-open') {
+      // Pastikan model Ollama default terdefinisi jika kosong
+      if (!STATE.settings.ollamaModel || typeof STATE.settings.ollamaModel !== 'string' || !STATE.settings.ollamaModel.trim()) {
         STATE.settings.ollamaModel = 'llama3.2:3b';
         safeLocalStorage.setItem('zoz_ollama_model', 'llama3.2:3b');
       }
@@ -4732,6 +4934,34 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (!STATE.settings.openRouterModel) {
         STATE.settings.openRouterModel = 'openrouter/free';
       }
+
+      // Muat daftar model tersemat (pinned models)
+      try {
+        const rawPinned = localStorage.getItem('zoz_pinned_models_v1') || localStorage.getItem('zoz_pinned_models');
+        if (rawPinned) {
+          const parsedPinned = JSON.parse(rawPinned);
+          if (Array.isArray(parsedPinned)) STATE.pinnedModels = parsedPinned;
+        }
+      } catch (_) {}
+
+      // Muat konfigurasi Auto-Start Model
+      try {
+        const rawAutoStart = localStorage.getItem('zoz_auto_start_model_v1') || localStorage.getItem('zoz_auto_start_model');
+        if (rawAutoStart) {
+          const parsedAutoStart = JSON.parse(rawAutoStart);
+          if (parsedAutoStart && parsedAutoStart.modelId && parsedAutoStart.enabled !== false) {
+            STATE.autoStartModel = parsedAutoStart;
+            // Terapkan model auto-start saat startup
+            if (parsedAutoStart.provider === 'openrouter' || parsedAutoStart.modelId.includes('/')) {
+              STATE.settings.openRouterModel = parsedAutoStart.modelId;
+              STATE.mode = 'openrouter';
+            } else {
+              STATE.settings.ollamaModel = parsedAutoStart.modelId;
+              if (STATE.mode !== 'auto') STATE.mode = 'ollama';
+            }
+          }
+        }
+      } catch (_) {}
 
       // Jika baru pertama kali dibuka di cloud (Vercel) dan mode masih default 'ollama',
       // jadikan mode auto secara default.
@@ -23706,6 +23936,15 @@ ${blocks}
           toggleModelFavorite(modelId, e); // di dalamnya sudah preventDefault + stopPropagation
           return;
         }
+        if (e.target.closest && e.target.closest('.model-item-pin-btn')) {
+          toggleModelPinned(modelId, e);
+          return;
+        }
+        if (e.target.closest && e.target.closest('.model-item-autostart-btn')) {
+          const isOllamaTab = STATE.dropdownModelTab === 'ollama';
+          toggleAutoStartModel(modelId, isOllamaTab ? 'ollama' : 'openrouter', e);
+          return;
+        }
         const isOllamaTab = STATE.dropdownModelTab === 'ollama';
         if (STATE.mode !== 'auto') {
           if (isOllamaTab && STATE.mode !== 'ollama') {
@@ -23763,10 +24002,21 @@ ${blocks}
     // Filter pencarian
     let filtered = models.filter(m => !q || (m.id && m.id.toLowerCase().includes(q)) || (m.name && m.name.toLowerCase().includes(q)));
 
-    // Urutkan model dengan rapi: Model aktif di paling atas, disusul model favorit pengguna, lalu model gratis (:free), dan sisanya alfabetis
+    // Urutkan model dengan rapi: Model aktif di paling atas, disusul model auto-start & disematkan (pinned), lalu favorit, gratis (:free), dan sisanya alfabetis
     filtered.sort((a, b) => {
       if (a.id === activeModelForTab) return -1;
       if (b.id === activeModelForTab) return 1;
+
+      const aAuto = isModelAutoStart(a.id);
+      const bAuto = isModelAutoStart(b.id);
+      if (aAuto && !bAuto) return -1;
+      if (!aAuto && bAuto) return 1;
+
+      const aPin = isModelPinned(a.id);
+      const bPin = isModelPinned(b.id);
+      if (aPin && !bPin) return -1;
+      if (!aPin && bPin) return 1;
+
       const aFav = isModelFavorite(a.id);
       const bFav = isModelFavorite(b.id);
       if (aFav && !bFav) return -1;
@@ -23789,17 +24039,16 @@ ${blocks}
       return;
     }
 
-    // Batasi rendering: bila hasil filter > 80, render 80 pertama + SEMUA favorit yang
-    // lolos (sort di atas sudah menaruh favorit di depan, tapi tetap dilengkapi kalau
-    // jumlah favorit melebihi 80) + baris info jumlah. Hanya aktif saat > 80 —
-    // daftar kecil tetap dirender penuh.
+    // Batasi rendering: bila hasil filter > 80, render 80 pertama + SEMUA favorit, disematkan, dan auto-start yang
+    // lolos (sort di atas sudah menaruhnya di depan, tapi tetap dilengkapi kalau
+    // jumlahnya melebihi 80) + baris info jumlah.
     const totalFiltered = filtered.length;
     let displayList = filtered;
     if (totalFiltered > 80) {
       displayList = filtered.slice(0, 80);
       const keptIds = new Set(displayList.map(m => m.id));
       filtered.forEach(m => {
-        if (isModelFavorite(m.id) && !keptIds.has(m.id)) {
+        if ((isModelFavorite(m.id) || isModelPinned(m.id) || isModelAutoStart(m.id)) && !keptIds.has(m.id)) {
           displayList.push(m);
           keptIds.add(m.id);
         }
@@ -23811,7 +24060,9 @@ ${blocks}
     displayList.forEach(m => {
       const item = document.createElement('div');
       const isFav = isModelFavorite(m.id);
-      item.className = `model-option-item ${m.id === activeModelForTab ? 'selected' : ''} ${isFav ? 'is-fav' : ''}`;
+      const isPinned = isModelPinned(m.id);
+      const isAutoStart = isModelAutoStart(m.id);
+      item.className = `model-option-item ${m.id === activeModelForTab ? 'selected' : ''} ${isFav ? 'is-fav' : ''} ${isPinned ? 'is-pinned' : ''}`;
       const tagLower = (m.tag || '').toLowerCase();
       const isFree = tagLower.includes('free');
       const isCloud = tagLower.includes('cloud');
@@ -23820,17 +24071,27 @@ ${blocks}
         : (isCloud ? 'background:rgba(0,240,255,0.12); color:var(--neon-cyan); border:1px solid rgba(0,240,255,0.3);' : 'background:rgba(255,183,3,0.15); color:var(--neon-amber); border:1px solid rgba(255,183,3,0.3);');
 
       item.innerHTML = `
-        <button type="button" class="model-fav-btn ${isFav ? 'active' : ''}" title="${isFav ? 'Hapus dari Model Favorit' : 'Jadikan Model Favorit'}" style="margin-right:8px;">
+        <button type="button" class="model-fav-btn ${isFav ? 'active' : ''}" title="${isFav ? 'Hapus dari Model Favorit' : 'Jadikan Model Favorit'}" style="margin-right:6px;">
           <i class="fa-solid fa-laptop-code"></i>
         </button>
-        <div style="display:flex; flex-direction:column; overflow:hidden; flex:1; padding-right:8px;">
-          <div style="display:flex; align-items:center; gap:6px;">
+        <div style="display:flex; flex-direction:column; overflow:hidden; flex:1; padding-right:6px;">
+          <div style="display:flex; align-items:center; gap:5px;">
             <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; font-size:0.82rem;">${escapeHtml(m.name || m.id)}</span>
+            ${isPinned ? `<span class="model-pinned-tag" title="Model Disematkan"><i class="fa-solid fa-thumbtack text-teal-400"></i></span>` : ''}
+            ${isAutoStart ? `<span class="model-autostart-tag" title="Model Auto-Start"><i class="fa-solid fa-bolt text-amber-400"></i></span>` : ''}
             ${isFav ? `<span class="model-fav-tag" title="Model Favorit"><i class="fa-solid fa-laptop-code"></i></span>` : ''}
           </div>
           <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.68rem; color:var(--text-dim); font-family:var(--font-code);">${escapeHtml(m.id)}</span>
         </div>
-        <span style="font-size:0.65rem; padding:2px 6px; border-radius:3px; font-weight:600; flex-shrink:0; ${badgeStyle}">${escapeHtml(m.tag || 'AI')}</span>
+        <div class="model-item-actions">
+          <button type="button" class="model-item-action-btn model-item-pin-btn ${isPinned ? 'active-pin' : ''}" title="${isPinned ? 'Lepas Sematan' : 'Sematkan Model (Prioritas Atas)'}">
+            <i class="fa-solid fa-thumbtack"></i>
+          </button>
+          <button type="button" class="model-item-action-btn model-item-autostart-btn ${isAutoStart ? 'active-autostart' : ''}" title="${isAutoStart ? 'Nonaktifkan Auto-Start' : 'Jadikan Auto-Start saat Masuk'}">
+            <i class="fa-solid ${isAutoStart ? 'fa-bolt text-amber-400' : 'fa-rocket'}"></i>
+          </button>
+          <span style="font-size:0.65rem; padding:2px 6px; border-radius:3px; font-weight:600; flex-shrink:0; ${badgeStyle}">${escapeHtml(m.tag || 'AI')}</span>
+        </div>
       `;
 
       // Kunci identitas baris untuk delegated listener di atas (tanpa listener per-baris)
@@ -23888,6 +24149,24 @@ ${blocks}
         els.currentModelLabel.title = current;
       }
     }
+
+    // Status Badges di Model Picker Chip (Pin & Auto-Start)
+    if (els.modelChipStatusBadges) {
+      const isOR = STATE.mode === 'openrouter';
+      const activeRaw = isOR ? STATE.settings.openRouterModel : STATE.settings.ollamaModel;
+      const isPinned = isModelPinned(activeRaw);
+      const isAutoStart = isModelAutoStart(activeRaw);
+      let badgesHtml = '';
+      if (isPinned) {
+        badgesHtml += `<span class="chip-status-icon-pin" title="Model ini Disematkan (Pinned)"><i class="fa-solid fa-thumbtack"></i></span>`;
+      }
+      if (isAutoStart) {
+        badgesHtml += `<span class="chip-status-icon-bolt" title="Model ini Auto-Start saat Masuk (Default Startup)"><i class="fa-solid fa-bolt"></i></span>`;
+      }
+      els.modelChipStatusBadges.innerHTML = badgesHtml;
+    }
+
+    updateModelOptionsMenuUI();
   }
 
   function updateAutoRouterIndicatorUI() {
@@ -36721,6 +37000,12 @@ Aturan:
       closeImageModelDropdown();
       closeMusicModelDropdown();
 
+      // Tutup popup menu titik tiga model jika sedang terbuka
+      if (els.modelOptionsMenuPopup) {
+        els.modelOptionsMenuPopup.style.display = 'none';
+        els.modelOptionsMenuPopup.classList.remove('show');
+      }
+
       const menu = els.modelDropdownMenu;
       if (!menu) return;
 
@@ -36730,6 +37015,49 @@ Aturan:
         populateModelDropdown(els.modelSearchInput?.value || '');
         setTimeout(() => els.modelSearchInput?.focus(), 80);
       }
+      AudioEngine.click();
+    });
+
+    // Model Options Menu: Tombol Titik Tiga (Kebab) untuk Pin & Auto-Start
+    els.btnModelOptionsMenu?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideSlashCommandsMenu();
+      closeAttachmentDropdown();
+      closeSearchDropdown();
+      closeImageModelDropdown();
+      closeMusicModelDropdown();
+      if (els.modelDropdownMenu) els.modelDropdownMenu.classList.remove('show');
+
+      const popup = els.modelOptionsMenuPopup;
+      if (!popup) return;
+      const isVisible = popup.style.display !== 'none' && popup.classList.contains('show');
+      if (isVisible) {
+        popup.style.display = 'none';
+        popup.classList.remove('show');
+      } else {
+        updateModelOptionsMenuUI();
+        popup.style.display = 'block';
+        popup.classList.add('show');
+      }
+      AudioEngine.click();
+    });
+
+    els.btnTogglePinCurrentModel?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const isOR = STATE.mode === 'openrouter';
+      const activeRaw = isOR ? STATE.settings.openRouterModel : STATE.settings.ollamaModel;
+      toggleModelPinned(activeRaw, e);
+      AudioEngine.click();
+    });
+
+    els.btnToggleAutoStartCurrentModel?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const isOR = STATE.mode === 'openrouter';
+      const activeRaw = isOR ? STATE.settings.openRouterModel : STATE.settings.ollamaModel;
+      const provider = isOR ? 'openrouter' : (activeRaw && activeRaw.includes('/') ? 'openrouter' : 'ollama');
+      toggleAutoStartModel(activeRaw, provider, e);
       AudioEngine.click();
     });
 
@@ -36781,6 +37109,13 @@ Aturan:
     document.addEventListener('click', (e) => {
       if (els.modelPickerChip && els.modelDropdownMenu && !els.modelPickerChip.contains(e.target) && !els.modelDropdownMenu.contains(e.target)) {
         els.modelDropdownMenu.classList.remove('show');
+      }
+
+      if (els.modelOptionsMenuPopup && els.modelOptionsMenuPopup.classList.contains('show')) {
+        if (!els.modelOptionsMenuPopup.contains(e.target) && !els.btnModelOptionsMenu?.contains(e.target)) {
+          els.modelOptionsMenuPopup.style.display = 'none';
+          els.modelOptionsMenuPopup.classList.remove('show');
+        }
       }
 
       // Global delegation untuk tombol Cari Model
@@ -48007,6 +48342,24 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       STATE.currentSessionId = null;
       renderChatHistory();
       renderCurrentSession();
+    }
+
+    // Inisialisasi & Terapkan Auto-Start Model saat Masuk ke Aplikasi
+    const autoCfg = STATE.autoStartModel || getAutoStartModelConfig();
+    if (autoCfg && autoCfg.enabled && autoCfg.modelId) {
+      const isOR = autoCfg.provider === 'openrouter' || autoCfg.modelId.includes('/');
+      if (isOR) {
+        STATE.settings.openRouterModel = autoCfg.modelId;
+        if (STATE.mode !== 'auto') STATE.mode = 'openrouter';
+      } else {
+        STATE.settings.ollamaModel = autoCfg.modelId;
+        if (STATE.mode !== 'auto') STATE.mode = 'ollama';
+      }
+      if (!isTabReload) {
+        setTimeout(() => {
+          showToast(`🚀 Auto-Start: Model "${autoCfg.modelId}" (${(autoCfg.provider || 'AI').toUpperCase()}) siap digunakan.`, 'success');
+        }, 600);
+      }
     }
 
     // 3. RENDER ALL UI CONTROLS INSTANTLY (Synchronous, 0ms, Zero Lag)

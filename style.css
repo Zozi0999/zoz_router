@@ -1319,6 +1319,313 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   position: relative;
 }
 
+.model-picker-combo-btn-group {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md, 8px);
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.model-picker-combo-btn-group:hover {
+  border-color: rgba(45, 212, 191, 0.35);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.model-picker-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+}
+
+.model-kebab-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  padding: 5px 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.model-kebab-btn:hover {
+  color: #38bdf8 !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.model-chip-status-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 2px;
+}
+
+.chip-status-icon-bolt {
+  color: #fbbf24;
+  font-size: 10px;
+  animation: pulse 2s infinite ease-in-out;
+}
+
+.chip-status-icon-pin {
+  color: #2dd4bf;
+  font-size: 10px;
+}
+
+/* Model Options Popup Menu */
+.model-options-popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 290px;
+  background: rgba(13, 18, 30, 0.96);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 12px;
+  box-shadow: 0 14px 38px -6px rgba(0, 0, 0, 0.75), 0 0 20px rgba(56, 189, 248, 0.12);
+  z-index: 1050;
+  padding: 8px;
+  animation: fadeInDown 0.15s ease-out;
+}
+
+.model-options-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 10px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  margin-bottom: 6px;
+}
+
+.model-options-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(45, 212, 191, 0.12);
+  border: 1px solid rgba(45, 212, 191, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.model-options-header-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+
+.model-options-name {
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: #f8fafc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-options-subrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.model-options-engine-badge {
+  font-size: 0.62rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: rgba(0, 240, 255, 0.15);
+  color: var(--neon-cyan, #00f0ff);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+}
+
+.model-options-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.model-options-action-item {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.model-options-action-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.model-options-action-item.active-pin {
+  background: rgba(45, 212, 191, 0.08);
+  border-color: rgba(45, 212, 191, 0.3);
+}
+
+.model-options-action-item.active-autostart {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.action-item-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.action-item-icon.pin-icon-box {
+  color: #2dd4bf;
+  background: rgba(45, 212, 191, 0.1);
+}
+
+.action-item-icon.rocket-icon-box {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.action-item-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.action-item-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.action-item-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.action-item-desc {
+  font-size: 0.68rem;
+  color: #94a3b8;
+  margin-top: 2px;
+  line-height: 1.3;
+}
+
+.action-item-badge {
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+
+.action-item-badge.pinned-badge {
+  background: rgba(45, 212, 191, 0.2);
+  color: #2dd4bf;
+  border: 1px solid rgba(45, 212, 191, 0.4);
+}
+
+.action-item-badge.autostart-badge {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.model-options-footer {
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-options-footer-text {
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+.model-options-footer-text strong {
+  color: #38bdf8;
+  font-family: var(--font-code);
+}
+
+/* Badges for dropdown rows */
+.model-pinned-tag {
+  color: #2dd4bf;
+  font-size: 0.72rem;
+  margin-left: 4px;
+}
+
+.model-autostart-tag {
+  color: #fbbf24;
+  font-size: 0.72rem;
+  margin-left: 4px;
+}
+
+.model-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding-left: 6px;
+}
+
+.model-item-action-btn {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.model-item-action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f8fafc;
+}
+
+.model-item-action-btn.active-pin {
+  color: #2dd4bf;
+}
+
+.model-item-action-btn.active-autostart {
+  color: #fbbf24;
+}
+
 .model-picker-chip {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
