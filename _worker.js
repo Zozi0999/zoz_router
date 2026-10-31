@@ -3599,6 +3599,144 @@ export default {
     }
 
     // ==================== IMAGE GROUNDING ENDPOINTS (CLOUDFLARE EDGE) ====================
+    const edgeCandidateCache = globalThis.__ZOZ_EDGE_CANDIDATES__ || (globalThis.__ZOZ_EDGE_CANDIDATES__ = new Map());
+    const EDGE_SPOOF_REGEX = /\b(impersonators?|look-?alikes?|parod(?:y|ies)|caricatures?|wax(?:work|\s+figures?)?|madame\s+tussauds|cosplay(?:ers?)?|memes?|cartoons?|satires?|puppets?|effig(?:y|ies))\b/i;
+
+    const putEdgeCandidate = (id, cand) => {
+      if (!id || !cand) return;
+      if (edgeCandidateCache.has(id)) edgeCandidateCache.delete(id);
+      while (edgeCandidateCache.size >= 300) {
+        const oldestKey = edgeCandidateCache.keys().next().value;
+        if (oldestKey === undefined) break;
+        edgeCandidateCache.delete(oldestKey);
+      }
+      edgeCandidateCache.set(id, cand);
+    };
+
+    const evaluateEdgeLicenseStatus = (licenseName) => {
+      if (!licenseName || typeof licenseName !== 'string' || !licenseName.trim()) {
+        return { usage_status: 'unknown', warning: 'license_unknown: Metadata lisensi sumber bernilai null/tidak diketahui.' };
+      }
+      const licLower = licenseName.toLowerCase();
+      if (/\b(all rights reserved|copyrighted|fair use|non-?commercial|by-nc|cc-by-nc|no derivatives|by-nd|cc-by-nd)\b/i.test(licLower)) {
+        return { usage_status: 'restricted', warning: `access_denied: Lisensi "${licenseName}" membatasi penayangan ulang.` };
+      }
+      if (
+        licLower.includes('public domain') ||
+        /\bpd(?:-[a-z0-9-]+|\b)/i.test(licLower) ||
+        licLower.includes('cc0') ||
+        licLower.includes('cc-zero') ||
+        licLower.includes('no restrictions') ||
+        licLower.includes('cc by') ||
+        licLower.includes('cc-by') ||
+        licLower.includes('attribution') ||
+        licLower.includes('free art license') ||
+        licLower.includes('gfdl')
+      ) {
+        return { usage_status: 'allowed', warning: null };
+      }
+      return { usage_status: 'unknown', warning: `license_unknown: Ketentuan lisensi "${licenseName}" memerlukan verifikasi manual.` };
+    };
+
+    const parseWikimediaPageForEdge = (page, queryStr = '') => {
+      if (!page || !Array.isArray(page.imageinfo) || page.imageinfo.length === 0) return null;
+      const info = page.imageinfo[0];
+      const ext = info.extmetadata || {};
+      const mime = String(info.mime || '').toLowerCase();
+      if (!mime.startsWith('image/') || mime.includes('svg')) return null;
+
+      const rawTitle = String(page.title || '').replace(/^File:/i, '').replace(/\.[a-z0-9]+$/i, '').replace(/_/g, ' ').trim();
+      const pageUrl = info.descriptionurl || `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(String(page.title || '').replace(/^File:/i, '').replace(/\s+/g, '_'))}`;
+      const creator = (ext.Artist && typeof ext.Artist.value === 'string')
+        ? (ext.Artist.value.replace(/<[^>]+>/g, '').trim() || null)
+        : null;
+      const rawLicShort = (ext.LicenseShortName && typeof ext.LicenseShortName.value === 'string')
+        ? ext.LicenseShortName.value.replace(/<[^>]+>/g, '').trim()
+        : '';
+      const rawUsageTerms = (ext.UsageTerms && typeof ext.UsageTerms.value === 'string')
+        ? ext.UsageTerms.value.replace(/<[^>]+>/g, '').trim()
+        : '';
+      const rawLicCode = (ext.License && typeof ext.License.value === 'string')
+        ? ext.License.value.replace(/<[^>]+>/g, '').trim()
+        : '';
+      const license = rawLicShort || rawUsageTerms || rawLicCode || null;
+      const licenseUrl = (ext.LicenseUrl && typeof ext.LicenseUrl.value === 'string')
+        ? (ext.LicenseUrl.value.trim() || null)
+        : null;
+      const desc = (ext.ImageDescription && typeof ext.ImageDescription.value === 'string')
+        ? (ext.ImageDescription.value.replace(/<[^>]+>/g, '').trim() || null)
+        : null;
+      const categories = Array.isArray(page.categories)
+        ? page.categories.map((c) => String(c.title || '').replace(/^Category:/i, ''))
+        : [];
+
+      const creditParts = [];
+      if (creator) creditParts.push(`Foto/Karya: ${creator}`);
+      creditParts.push('Wikimedia Commons');
+      if (license) creditParts.push(`(${license})`);
+
+      const image_id = page.pageid ? `img_wmc_${page.pageid}` : `img_wmc_${Math.random().toString(36).slice(2, 10)}`;
+      return {
+        image_id,
+        title: rawTitle || null,
+        description: desc,
+        source_name: 'wikimedia_commons',
+        source_page_url: pageUrl,
+        preview_url: info.thumburl || info.url || null,
+        image_url: info.url || null,
+        creator,
+        creator_url: null,
+        license_name: license,
+        license_url: licenseUrl,
+        attribution_text: creditParts.join(' — '),
+        width: Number.isInteger(info.width) && info.width > 0 ? info.width : null,
+        height: Number.isInteger(info.height) && info.height > 0 ? info.height : null,
+        _mime: mime,
+        _categories: categories,
+        _query: queryStr || ''
+      };
+    };
+
+    const resolveEdgeCandidateById = async (imageId) => {
+      if (!imageId || typeof imageId !== 'string') return null;
+      const cached = edgeCandidateCache.get(imageId);
+      if (cached) return cached;
+      const m = imageId.match(/^img_wmc_(\d+)$/);
+      if (!m) return null;
+      const pageId = m[1];
+      const params = new URLSearchParams({
+        action: 'query',
+        pageids: pageId,
+        prop: 'imageinfo|categories',
+        cllimit: '15',
+        iiprop: 'url|size|mime|mediatype|extmetadata',
+        iiurlwidth: '960',
+        format: 'json'
+      });
+      const wmcRes = await fetch(`https://commons.wikimedia.org/w/api.php?${params.toString()}`, {
+        headers: {
+          'User-Agent': 'ZozRouter/1.0 (Cloudflare Edge Visual Grounding; https://z21.zozdocs.com)',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(7000)
+      }).catch(() => null);
+      if (!wmcRes || !wmcRes.ok) return null;
+      const data = await wmcRes.json().catch(() => null);
+      const page = data?.query?.pages?.[pageId];
+      const parsed = parseWikimediaPageForEdge(page, '');
+      if (parsed) {
+        parsed.image_id = imageId;
+        putEdgeCandidate(imageId, parsed);
+      }
+      return parsed;
+    };
+
+    const isAllowedEdgeCdnHost = (hostname) => {
+      const h = String(hostname || '').toLowerCase();
+      const ALLOWED_CDN = ['upload.wikimedia.org', 'thumb.wikimedia.org', 'images.unsplash.com', 'images.pexels.com', 'pixabay.com'];
+      return ALLOWED_CDN.some((d) => h === d || h.endsWith(`.${d}`));
+    };
+
     // 1. Search Images
     if ((url.pathname === '/api/tools/search-images' || url.pathname === '/api/search-images') && (request.method === 'GET' || request.method === 'POST')) {
       try {
@@ -3620,6 +3758,7 @@ export default {
           if (body.image_type) image_type = body.image_type;
           if (typeof body.safe_search === 'boolean') safe_search = body.safe_search;
         }
+        limit = Number.isFinite(limit) ? Math.max(1, Math.min(20, limit)) : 6;
 
         const cleanQ = String(query || '').trim();
         if (!cleanQ) {
@@ -3659,45 +3798,34 @@ export default {
         });
 
         const data = await wmcRes.json().catch(() => null);
-        const pages = data && data.query && data.query.pages ? Object.values(data.query.pages) : [];
-        const candidates = [];
+        const pages = data && data.query && data.query.pages
+          ? Object.values(data.query.pages).sort((a, b) => (a.index ?? 999999) - (b.index ?? 999999))
+          : [];
+        const qTokens = cleanQ.toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
+        const queryAllowsSpoof = EDGE_SPOOF_REGEX.test(cleanQ);
+        const scored = [];
 
         for (const page of pages) {
-          if (!page || !Array.isArray(page.imageinfo) || page.imageinfo.length === 0) continue;
-          const info = page.imageinfo[0];
-          const ext = info.extmetadata || {};
-          const mime = String(info.mime || '').toLowerCase();
-          if (!mime.startsWith('image/') || mime.includes('svg')) continue;
+          const parsed = parseWikimediaPageForEdge(page, cleanQ);
+          if (!parsed) continue;
+          const combinedMeta = `${parsed.title || ''} ${parsed.description || ''} ${(parsed._categories || []).join(' ')}`;
+          if (!queryAllowsSpoof && EDGE_SPOOF_REGEX.test(combinedMeta)) continue;
 
-          const rawTitle = String(page.title || '').replace(/^File:/i, '').replace(/\.[a-z0-9]+$/i, '').replace(/_/g, ' ').trim();
-          const pageUrl = info.descriptionurl || `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(String(page.title || '').replace(/^File:/i, '').replace(/\s+/g, '_'))}`;
-          const creator = ext.Artist ? ext.Artist.value.replace(/<[^>]+>/g, '').trim() : null;
-          const license = ext.LicenseShortName ? ext.LicenseShortName.value.replace(/<[^>]+>/g, '').trim() : (ext.License ? ext.License.value : 'Public domain');
-          const licenseUrl = ext.LicenseUrl ? ext.LicenseUrl.value.trim() : null;
-          const desc = ext.ImageDescription ? ext.ImageDescription.value.replace(/<[^>]+>/g, '').trim() : rawTitle;
-
-          const image_id = `img_wmc_${page.pageid || Math.random().toString(36).slice(2, 10)}`;
-          const credit = creator ? `Foto/Karya: ${creator} — Wikimedia Commons — (${license})` : `Wikimedia Commons — (${license})`;
-
-          candidates.push({
-            image_id,
-            title: rawTitle,
-            description: desc,
-            source_name: 'wikimedia_commons',
-            source_page_url: pageUrl,
-            preview_url: info.thumburl || info.url,
-            image_url: info.url,
-            creator,
-            creator_url: null,
-            license_name: license,
-            license_url: licenseUrl,
-            attribution_text: credit,
-            width: info.width || 960,
-            height: info.height || 640
-          });
-
-          if (candidates.length >= limit) break;
+          const titleLower = String(parsed.title || '').toLowerCase();
+          let hitCount = 0;
+          for (const qt of qTokens) {
+            if (titleLower.includes(qt)) hitCount++;
+          }
+          const score = (qTokens.length > 0 ? (hitCount / qTokens.length) * 100 : 0) - ((page.index ?? 999) * 0.5);
+          scored.push({ score, parsed });
         }
+
+        scored.sort((a, b) => b.score - a.score);
+        const candidates = scored.slice(0, limit).map(({ parsed }) => {
+          putEdgeCandidate(parsed.image_id, parsed);
+          const { _mime, _categories, _query, ...pub } = parsed;
+          return pub;
+        });
 
         return new Response(JSON.stringify({
           status: candidates.length > 0 ? 'success' : 'no_results',
@@ -3729,17 +3857,56 @@ export default {
           const body = await request.json().catch(() => ({}));
           image_id = body.image_id || body.id || '';
         }
+        image_id = String(image_id || '').trim();
+        const cand = await resolveEdgeCandidateById(image_id);
+        if (!cand) {
+          return new Response(JSON.stringify({
+            image_id: image_id || '',
+            accessible: false,
+            mime_type: null,
+            dimensions: null,
+            subject_match: 'uncertain',
+            match_basis: 'Kandidat image_id tidak ditemukan atau tidak valid; pemeriksaan visual piksel tidak dilakukan.',
+            usage_status: 'unknown',
+            attribution_text: null,
+            warnings: ['invalid_image: image_id tidak terdaftar.']
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        const licEval = evaluateEdgeLicenseStatus(cand.license_name);
+        const combinedMeta = `${cand.title || ''} ${cand.description || ''} ${(cand._categories || []).join(' ')}`;
+        const isSpoof = EDGE_SPOOF_REGEX.test(combinedMeta) && !EDGE_SPOOF_REGEX.test(cand._query || '');
+        const qTokens = String(cand._query || '').toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
+        let hitCount = 0;
+        for (const qt of qTokens) {
+          if (combinedMeta.toLowerCase().includes(qt)) hitCount++;
+        }
+        let subject_match = 'likely';
+        if (isSpoof) {
+          subject_match = 'mismatch';
+        } else if (qTokens.length > 0) {
+          const cov = hitCount / qTokens.length;
+          subject_match = cov >= 0.85 ? 'confirmed' : (cov >= 0.5 ? 'likely' : (cov > 0 ? 'uncertain' : 'mismatch'));
+        }
+
+        const warnings = [];
+        if (licEval.warning) warnings.push(licEval.warning);
 
         return new Response(JSON.stringify({
-          image_id: image_id || 'img_verified',
-          accessible: true,
-          mime_type: 'image/jpeg',
-          dimensions: { width: 960, height: 640 },
-          subject_match: 'confirmed',
-          match_basis: 'Metadata Wikimedia Commons terverifikasi publik dan bebas royalti.',
-          usage_status: 'allowed',
-          attribution_text: 'Wikimedia Commons — (Bebas Royalti)',
-          warnings: []
+          image_id: cand.image_id,
+          accessible: Boolean(cand.preview_url || cand.image_url),
+          mime_type: cand._mime || 'image/jpeg',
+          dimensions: (cand.width && cand.height) ? { width: cand.width, height: cand.height } : null,
+          subject_match,
+          match_basis: isSpoof
+            ? 'Metadata mengindikasikan peniru/parodi/karikatur, bukan subjek asli.'
+            : 'Evaluasi metadata judul, deskripsi, dan kategori sumber resmi Wikimedia Commons; pemeriksaan visual piksel tidak dilakukan.',
+          usage_status: (cand.preview_url || cand.image_url) ? licEval.usage_status : 'restricted',
+          attribution_text: cand.attribution_text || null,
+          warnings
         }), {
           status: 200,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
@@ -3748,7 +3915,12 @@ export default {
         return new Response(JSON.stringify({
           image_id: 'unknown',
           accessible: false,
+          mime_type: null,
+          dimensions: null,
+          subject_match: 'uncertain',
+          match_basis: 'Gagal menginspeksi kandidat gambar.',
           usage_status: 'unknown',
+          attribution_text: null,
           warnings: [err.message]
         }), {
           status: 200,
@@ -3761,42 +3933,83 @@ export default {
     if (url.pathname === '/api/tools/prepare-image-display' && request.method === 'POST') {
       try {
         const body = await request.json().catch(() => ({}));
-        const image_ids = Array.isArray(body.image_ids) ? body.image_ids.slice(0, 3) : [];
-        const layout = body.layout || (image_ids.length === 1 ? 'single' : 'gallery');
-        const placement = body.placement || 'after_intro';
+        const image_ids = Array.isArray(body.image_ids) ? body.image_ids.map((id) => String(id || '').trim()).filter(Boolean).slice(0, 3) : [];
+        const layout = ['single', 'gallery', 'collage'].includes(body.layout) ? body.layout : (image_ids.length === 1 ? 'single' : 'gallery');
+        const placement = ['after_intro', 'within_section'].includes(body.placement) ? body.placement : 'after_intro';
         const alt_texts = Array.isArray(body.alt_texts) ? body.alt_texts : [];
+
+        const display_items = [];
+        const item_errors = [];
+
+        for (let idx = 0; idx < image_ids.length; idx++) {
+          const id = image_ids[idx];
+          const cand = await resolveEdgeCandidateById(id);
+          if (!cand) {
+            item_errors.push({ image_id: id, code: 'invalid_image', message: `image_id "${id}" tidak ditemukan.` });
+            continue;
+          }
+          const licEval = evaluateEdgeLicenseStatus(cand.license_name);
+          if (licEval.usage_status !== 'allowed') {
+            item_errors.push({ image_id: id, code: licEval.usage_status === 'restricted' ? 'access_denied' : 'license_unknown', message: licEval.warning || 'Lisensi tidak terverifikasi.' });
+            continue;
+          }
+          const verifiedMediaUrl = cand.preview_url || cand.image_url;
+          if (!verifiedMediaUrl) {
+            item_errors.push({ image_id: id, code: 'invalid_image', message: 'URL media kandidat kosong.' });
+            continue;
+          }
+          const alt = String(alt_texts[idx] || cand.title || `Visual terverifikasi ${idx + 1}`).trim();
+          const tokenPayload = JSON.stringify({ id: cand.image_id, u: verifiedMediaUrl, ts: Date.now() });
+          const token = btoa(unescape(encodeURIComponent(tokenPayload))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+          const asset_ref = `/api/tools/image-asset/${token}`;
+          display_items.push({
+            image_id: cand.image_id,
+            asset_ref,
+            fallback_asset_ref: verifiedMediaUrl,
+            direct_media_url: verifiedMediaUrl,
+            alt_text: alt,
+            title: cand.title,
+            source_name: cand.source_name || 'wikimedia_commons',
+            source_page_url: cand.source_page_url,
+            creator: cand.creator,
+            creator_url: cand.creator_url,
+            license_name: cand.license_name,
+            license_url: cand.license_url,
+            attribution_text: cand.attribution_text,
+            width: cand.width,
+            height: cand.height,
+            media_category: 'documentary_photo'
+          });
+        }
+
+        if (display_items.length === 0) {
+          return new Response(JSON.stringify({
+            status: 'error',
+            error_code: item_errors[0]?.code || 'invalid_image',
+            display_items: [],
+            item_errors,
+            layout,
+            placement,
+            rendering_requirements: {
+              requires_client_renderer: true,
+              payload_is_not_render_confirmation: true
+            }
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
 
         const display_id = `disp_${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 6)}`;
         const placement_token = `[[ZOZ_IMAGE_DISPLAY:${display_id}]]`;
 
-        const display_items = image_ids.map((id, idx) => {
-          const alt = alt_texts[idx] || `Visual terverifikasi ${idx + 1}`;
-          const tokenPayload = JSON.stringify({ id, alt, ts: Date.now() });
-          const token = btoa(unescape(encodeURIComponent(tokenPayload))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-          const asset_ref = `/api/tools/image-asset/${token}`;
-          return {
-            image_id: id,
-            asset_ref,
-            fallback_asset_ref: asset_ref,
-            alt_text: alt,
-            title: alt,
-            source_name: 'wikimedia_commons',
-            source_page_url: 'https://commons.wikimedia.org/',
-            creator: null,
-            license_name: 'Public domain / CC',
-            attribution_text: `Foto/Visual Terverifikasi — Wikimedia Commons`,
-            width: 960,
-            height: 640,
-            media_category: 'documentary_photo'
-          };
-        });
-
         return new Response(JSON.stringify({
-          status: 'ready',
+          status: item_errors.length > 0 ? 'partial' : 'ready',
           display_id,
           placement_token,
           display_items,
-          layout,
+          item_errors,
+          layout: display_items.length === 1 ? 'single' : layout,
           placement,
           rendering_requirements: {
             requires_client_renderer: true,
@@ -3825,15 +4038,15 @@ export default {
     // 4. Image Asset Proxy Streamer
     if (url.pathname.startsWith('/api/tools/image-asset/') && request.method === 'GET') {
       try {
-        const rawToken = url.pathname.replace(/^\/api\/tools\/image-asset\//, '');
+        const rawToken = decodeURIComponent(url.pathname.replace(/^\/api\/tools\/image-asset\//, ''));
         // A. Token dari laptop server (membawa signature tanda titik '.')
         if (rawToken.includes('.')) {
           const tunnelBase = 'https://roommate-flashers-flags-briefly.trycloudflare.com';
           const laptopRes = await fetch(`${tunnelBase}${url.pathname}`, {
             headers: { 'Accept': 'image/*' },
             signal: AbortSignal.timeout(6000)
-          });
-          if (laptopRes.ok) {
+          }).catch(() => null);
+          if (laptopRes && laptopRes.ok) {
             return new Response(laptopRes.body, {
               status: 200,
               headers: {
@@ -3843,6 +4056,32 @@ export default {
               }
             });
           }
+          // Jika tunnel sedang offline tetapi payload JSON token membawa URL CDN terizinkan, alirkan dari CDN terverifikasi
+          try {
+            const payloadB64 = rawToken.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
+            const padded = payloadB64 + '='.repeat((4 - (payloadB64.length % 4)) % 4);
+            const parsedOriginToken = JSON.parse(decodeURIComponent(escape(atob(padded))));
+            const originTargetUrl = parsedOriginToken?.u || parsedOriginToken?.url;
+            if (originTargetUrl && (!parsedOriginToken.exp || Date.now() <= parsedOriginToken.exp)) {
+              const u = new URL(originTargetUrl);
+              if (u.protocol === 'https:' && isAllowedEdgeCdnHost(u.hostname)) {
+                const upRes = await fetch(originTargetUrl, {
+                  headers: { 'User-Agent': 'ZozRouter/1.0 (Cloudflare Edge Visual Proxy; https://z21.zozdocs.com)' },
+                  signal: AbortSignal.timeout(7000)
+                }).catch(() => null);
+                if (upRes && upRes.ok) {
+                  return new Response(upRes.body, {
+                    status: 200,
+                    headers: {
+                      'Content-Type': upRes.headers.get('content-type') || 'image/jpeg',
+                      'Cache-Control': 'public, max-age=86400, stale-while-revalidate=172800',
+                      'Access-Control-Allow-Origin': '*'
+                    }
+                  });
+                }
+              }
+            }
+          } catch (_) {}
         }
 
         // B. Token Cloudflare Edge
@@ -3853,11 +4092,16 @@ export default {
           decoded = JSON.parse(decodeURIComponent(escape(atob(b64))));
         } catch (_) {}
 
-        if (decoded && decoded.url) {
-          const u = new URL(decoded.url);
-          const ALLOWED_CDN = ['upload.wikimedia.org', 'thumb.wikimedia.org', 'images.unsplash.com', 'images.pexels.com', 'pixabay.com'];
-          if (u.protocol === 'https:' && ALLOWED_CDN.some(d => u.hostname.endsWith(d))) {
-            const upRes = await fetch(decoded.url, {
+        let targetAssetUrl = decoded && (decoded.u || decoded.url);
+        if (!targetAssetUrl && decoded && decoded.id) {
+          const hydrated = await resolveEdgeCandidateById(decoded.id);
+          targetAssetUrl = hydrated ? (hydrated.preview_url || hydrated.image_url) : null;
+        }
+
+        if (targetAssetUrl) {
+          const u = new URL(targetAssetUrl);
+          if (u.protocol === 'https:' && isAllowedEdgeCdnHost(u.hostname)) {
+            const upRes = await fetch(targetAssetUrl, {
               headers: { 'User-Agent': 'ZozRouter/1.0 (Cloudflare Edge Visual Proxy; https://z21.zozdocs.com)' },
               signal: AbortSignal.timeout(7000)
             });

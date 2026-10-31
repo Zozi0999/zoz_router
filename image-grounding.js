@@ -98,7 +98,8 @@ const MAX_REDIRECTS = 3;
 const MAX_PROBE_BYTES = 64 * 1024;          // 64 KB untuk verifikasi header & dimensi
 const MAX_ASSET_STREAM_BYTES = 8 * 1024 * 1024; // 8 MB batas unduhan proxy gambar
 const MAX_API_JSON_BYTES = 2 * 1024 * 1024; // 2 MB batas respons JSON API penyedia
-const CANDIDATE_TTL_MS = 2 * 60 * 60 * 1000; // 2 jam TTL kandidat
+const CANDIDATE_TTL_MS = 2 * 60 * 60 * 1000; // 2 jam TTL cache kandidat di RAM
+const STATELESS_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 hari masa berlaku token HMAC stateless untuk riwayat sesi
 const MAX_CANDIDATE_CACHE = 600;
 const MAX_DISPLAY_CACHE = 250;
 
@@ -390,12 +391,22 @@ function extractQueryTokens(query) {
     .filter((t) => t.length >= 2 && !STOPWORDS.has(t));
 }
 
+const NEGATIVE_SUBJECT_SPOOF_REGEX = /\b(impersonators?|look-?alikes?|parod(?:y|ies)|caricatures?|wax(?:work|\s+figures?)?|madame\s+tussauds|cosplay(?:ers?)?|memes?|cartoons?|satires?|puppets?|effig(?:y|ies))\b/i;
+
 function evaluateSubjectMatch(candidate, query) {
-  const tokens = extractQueryTokens(query || candidate.search_query || '');
+  const rawQueryStr = String(query || candidate.search_query || '');
+  const tokens = extractQueryTokens(rawQueryStr);
   const titleText = (candidate.title || '').toLowerCase();
   const descText = (candidate.description || '').toLowerCase();
   const catText = Array.isArray(candidate._categories) ? candidate._categories.join(' ').toLowerCase() : '';
   const combined = `${titleText} ${descText} ${catText}`.trim();
+
+  if (combined && NEGATIVE_SUBJECT_SPOOF_REGEX.test(combined) && !NEGATIVE_SUBJECT_SPOOF_REGEX.test(rawQueryStr)) {
+    return {
+      subject_match: 'mismatch',
+      match_basis: 'Metadata sumber mengindikasikan peniru (impersonator), parodi, karikatur, atau replika lilin, bukan subjek asli; ditolak demi keaslian identitas.'
+    };
+  }
 
   if (!combined || tokens.length === 0) {
     return {
@@ -850,7 +861,7 @@ function createImageGroundingService(options = {}) {
       pinterest: 'pin',
       kaboompics: 'kab'
     };
-    const image_id = `img_${prefixMap[rawCandidate.source_name] || 'src'}_${shortHash}`;
+    const image_id = rawCandidate._customImageId || `img_${prefixMap[rawCandidate.source_name] || 'src'}_${shortHash}`;
 
     const candidate = {
       image_id,
@@ -939,11 +950,11 @@ function createImageGroundingService(options = {}) {
       return { images: [], error: null };
     }
 
-    const pages = Object.values(pagesObj).sort((a, b) => (a.index || 999) - (b.index || 999));
-    const candidates = [];
+    const pages = Object.values(pagesObj).sort((a, b) => (a.index ?? 999999) - (b.index ?? 999999));
+    const queryAllowsSpoof = NEGATIVE_SUBJECT_SPOOF_REGEX.test(query);
+    const rawCandidates = [];
 
     for (const page of pages) {
-      if (candidates.length >= limit) break;
       const ii = Array.isArray(page.imageinfo) && page.imageinfo[0] ? page.imageinfo[0] : null;
       if (!ii) continue;
 
@@ -984,7 +995,12 @@ function createImageGroundingService(options = {}) {
       const categories = Array.isArray(page.categories)
         ? page.categories.map((c) => String(c.title || '').replace(/^Category:/i, ''))
         : [];
-      const joinedCats = `${categories.join(' ')} ${description || ''}`.toLowerCase();
+      const joinedMeta = `${cleanTitle || ''} ${categories.join(' ')} ${description || ''}`;
+      if (!queryAllowsSpoof && NEGATIVE_SUBJECT_SPOOF_REGEX.test(joinedMeta)) {
+        continue;
+      }
+
+      const joinedCats = joinedMeta.toLowerCase();
       let mediaCategory = 'documentary_photo';
       if (/\b(ai-generated|artificial intelligence|midjourney|stable diffusion|dall-e)\b/i.test(joinedCats)) {
         mediaCategory = 'ai_generated';
@@ -1000,27 +1016,39 @@ function createImageGroundingService(options = {}) {
       if (licenseName) creditParts.push(`(${licenseName})`);
       const attributionText = creditParts.join(' — ');
 
-      const registered = registerCandidate({
-        title: cleanTitle,
-        description,
-        source_name: 'wikimedia_commons',
-        source_page_url: sourcePageUrl,
-        preview_url: previewUrl,
-        image_url: fullRasterUrl,
-        creator,
-        creator_url: null,
-        license_name: licenseName,
-        license_url: licenseUrl,
-        attribution_text: attributionText,
-        width,
-        height,
-        _categories: categories,
-        _mediaCategory: mediaCategory,
-        _requiresProxy: true
-      }, query);
+      const qTokens = extractQueryTokens(query);
+      const titleLower = String(cleanTitle || '').toLowerCase();
+      let titleHitScore = 0;
+      for (const qt of qTokens) {
+        if (titleLower.includes(qt)) titleHitScore += 1;
+      }
+      const rankScore = (qTokens.length > 0 ? (titleHitScore / qTokens.length) * 100 : 0) - ((page.index ?? 999) * 0.5);
 
-      candidates.push(registered);
+      rawCandidates.push({
+        rankScore,
+        payload: {
+          title: cleanTitle,
+          description,
+          source_name: 'wikimedia_commons',
+          source_page_url: sourcePageUrl,
+          preview_url: previewUrl,
+          image_url: fullRasterUrl,
+          creator,
+          creator_url: null,
+          license_name: licenseName,
+          license_url: licenseUrl,
+          attribution_text: attributionText,
+          width,
+          height,
+          _categories: categories,
+          _mediaCategory: mediaCategory,
+          _requiresProxy: true
+        }
+      });
     }
+
+    rawCandidates.sort((a, b) => b.rankScore - a.rankScore);
+    const candidates = rawCandidates.slice(0, limit).map((item) => registerCandidate(item.payload, query));
 
     return { images: candidates, error: null };
   }
@@ -1449,6 +1477,76 @@ function createImageGroundingService(options = {}) {
     };
   }
 
+  async function hydrateWikimediaCandidateByPageId(imageId) {
+    const match = typeof imageId === 'string' ? imageId.match(/^img_wmc_(\d+)$/) : null;
+    if (!match) return null;
+    const pageId = match[1];
+    const params = new URLSearchParams({
+      action: 'query',
+      pageids: pageId,
+      prop: 'imageinfo|categories',
+      cllimit: '15',
+      iiprop: 'url|size|mime|mediatype|extmetadata',
+      iiurlwidth: '960',
+      format: 'json'
+    });
+    const apiUrl = `https://commons.wikimedia.org/w/api.php?${params.toString()}`;
+    const res = await secureFetchProviderJson(apiUrl, 'wikimedia_commons').catch(() => null);
+    if (!res || !res.ok || !res.data?.query?.pages) return null;
+    const page = res.data.query.pages[pageId];
+    const ii = page && Array.isArray(page.imageinfo) && page.imageinfo[0] ? page.imageinfo[0] : null;
+    if (!ii) return null;
+
+    const rawMime = String(ii.mime || '').toLowerCase();
+    const isSvg = rawMime === 'image/svg+xml';
+    if (!ALLOWED_IMAGE_MIME_TYPES.has(rawMime) && !isSvg) return null;
+
+    const sourcePageUrl = sanitizeSourcePageUrl(ii.descriptionurl, 'wikimedia_commons');
+    const previewUrl = sanitizeMediaUrl(ii.thumburl || (!isSvg ? ii.url : null), 'wikimedia_commons');
+    const fullRasterUrl = isSvg ? previewUrl : sanitizeMediaUrl(ii.url || ii.thumburl, 'wikimedia_commons');
+    if (!sourcePageUrl || (!fullRasterUrl && !previewUrl)) return null;
+
+    const ext = ii.extmetadata || {};
+    const cleanTitle = sanitizeUntrustedText(
+      (ext.ObjectName && ext.ObjectName.value) || String(page.title || '').replace(/^File:/i, '').replace(/\.[a-z0-9]{2,5}$/i, '').replace(/_/g, ' '),
+      220
+    );
+    const description = sanitizeUntrustedText(ext.ImageDescription && ext.ImageDescription.value, 500);
+    const creator = sanitizeUntrustedText(ext.Artist && ext.Artist.value, 140);
+    const licenseName = sanitizeUntrustedText(
+      (ext.LicenseShortName && ext.LicenseShortName.value) || (ext.UsageTerms && ext.UsageTerms.value),
+      120
+    );
+    const licenseUrl = sanitizeAuxiliaryUrl(ext.LicenseUrl && ext.LicenseUrl.value);
+    const categories = Array.isArray(page.categories)
+      ? page.categories.map((c) => String(c.title || '').replace(/^Category:/i, ''))
+      : [];
+    const creditParts = [];
+    if (creator) creditParts.push(`Foto/Karya: ${creator}`);
+    creditParts.push('Wikimedia Commons');
+    if (licenseName) creditParts.push(`(${licenseName})`);
+
+    return registerCandidate({
+      _customImageId: imageId,
+      title: cleanTitle,
+      description,
+      source_name: 'wikimedia_commons',
+      source_page_url: sourcePageUrl,
+      preview_url: previewUrl,
+      image_url: fullRasterUrl,
+      creator,
+      creator_url: null,
+      license_name: licenseName,
+      license_url: licenseUrl,
+      attribution_text: creditParts.join(' — '),
+      width: Number.isInteger(ii.width) ? ii.width : null,
+      height: Number.isInteger(ii.height) ? ii.height : null,
+      _categories: categories,
+      _mediaCategory: 'documentary_photo',
+      _requiresProxy: true
+    }, cleanTitle || '');
+  }
+
   /**
    * TOOL 2: inspect_image
    */
@@ -1468,7 +1566,10 @@ function createImageGroundingService(options = {}) {
       };
     }
 
-    const candidate = candidateStore.get(image_id);
+    let candidate = candidateStore.get(image_id);
+    if (!candidate && /^img_wmc_\d+$/.test(image_id)) {
+      candidate = await hydrateWikimediaCandidateByPageId(image_id);
+    }
     if (!candidate) {
       return {
         image_id,
@@ -1529,27 +1630,33 @@ function createImageGroundingService(options = {}) {
 
     const matchEval = evaluateSubjectMatch(candidate, candidate._searchQuery);
 
-    // Evaluasi status lisensi & ketentuan penggunaan
+    // Evaluasi status lisensi & ketentuan penggunaan (Partisi Disjoin Lattice Kleene: cek predikat pembatas terlebih dahulu agar P_open ∩ P_rest = ∅)
     let usage_status = 'unknown';
     const licLower = (candidate.license_name || '').toLowerCase();
-    if (!candidate.license_name) {
-      usage_status = candidate.source_name === 'pinterest' ? 'restricted' : 'unknown';
-      warnings.push('license_unknown: Lisensi sumber tidak tercantum secara eksplisit pada metadata.');
-    } else if (
+    const isRestrictedLicense = /\b(all rights reserved|copyrighted|fair use|non-?commercial|by-nc|cc-by-nc|no derivatives|by-nd|cc-by-nd)\b/i.test(licLower);
+    const isOpenLicense = !isRestrictedLicense && (
       licLower.includes('public domain') ||
+      /\bpd(?:-[a-z0-9-]+|\b)/i.test(licLower) ||
       licLower.includes('cc0') ||
+      licLower.includes('cc-zero') ||
+      licLower.includes('no restrictions') ||
       licLower.includes('cc by') ||
       licLower.includes('cc-by') ||
+      licLower.includes('attribution') ||
       licLower.includes('unsplash license') ||
       licLower.includes('pexels license') ||
       licLower.includes('pixabay') ||
       licLower.includes('free art license') ||
       licLower.includes('gfdl')
-    ) {
-      usage_status = accessible ? 'allowed' : 'restricted';
-    } else if (licLower.includes('all rights reserved') || licLower.includes('copyrighted') || licLower.includes('fair use')) {
+    );
+    if (!candidate.license_name) {
+      usage_status = candidate.source_name === 'pinterest' ? 'restricted' : 'unknown';
+      warnings.push('license_unknown: Lisensi sumber tidak tercantum secara eksplisit pada metadata.');
+    } else if (isRestrictedLicense) {
       usage_status = 'restricted';
       warnings.push(`access_denied: Lisensi "${candidate.license_name}" membatasi penayangan ulang.`);
+    } else if (isOpenLicense) {
+      usage_status = accessible ? 'allowed' : 'restricted';
     } else {
       usage_status = 'unknown';
       warnings.push(`license_unknown: Ketentuan lisensi "${candidate.license_name}" memerlukan verifikasi manual.`);
@@ -1586,7 +1693,7 @@ function createImageGroundingService(options = {}) {
       : (candidate.image_url || candidate.preview_url);
 
     const nonce = crypto.randomBytes(8).toString('hex');
-    const exp = Date.now() + CANDIDATE_TTL_MS;
+    const exp = Date.now() + STATELESS_TOKEN_TTL_MS;
     const tokenObj = {
       id: candidate.image_id,
       u: targetUrl,
@@ -1666,7 +1773,10 @@ function createImageGroundingService(options = {}) {
 
     for (let i = 0; i < rawIds.length; i++) {
       const id = rawIds[i];
-      const candidate = candidateStore.get(id);
+      let candidate = candidateStore.get(id);
+      if (!candidate && /^img_wmc_\d+$/.test(id)) {
+        candidate = await hydrateWikimediaCandidateByPageId(id);
+      }
       if (!candidate) {
         item_errors.push({ image_id: id, code: 'invalid_image', message: `image_id "${id}" tidak ditemukan.` });
         continue;
@@ -1884,5 +1994,6 @@ module.exports = {
   SOURCE_PAGE_ALLOWLIST,
   MEDIA_CDN_ALLOWLIST,
   sanitizeUntrustedText,
-  sniffImageHeader
+  sniffImageHeader,
+  evaluateSubjectMatch
 };

@@ -4904,10 +4904,17 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
                 const diskTime = full.updatedAt ? new Date(full.updatedAt).getTime() : 0;
                 const memTime = activeSess.updatedAt ? new Date(activeSess.updatedAt).getTime() : 0;
-                const isDiskContentChanged = diskLast && memLast && diskLast.content !== memLast.content;
+                const isDiskImageDisplaysChanged = Boolean(
+                  diskLast && memLast &&
+                  JSON.stringify(diskLast.imageDisplays || null) !== JSON.stringify(memLast.imageDisplays || null)
+                );
+                const isDiskContentChanged = Boolean(
+                  diskLast && memLast && (diskLast.content !== memLast.content || isDiskImageDisplaysChanged)
+                );
 
                 if (activeSess._isLazyDisk || diskLen > memLen || diskTime > memTime || isDiskContentChanged || (diskLast && diskLast.backgroundCompleted)) {
                   activeSess.messages = full.messages;
+                  if (full.updatedAt) activeSess.updatedAt = full.updatedAt;
                   delete activeSess._isLazyDisk;
                   activeSess.userId = STATE.userId;
                   await ChatDB.saveSession(activeSess);
@@ -8744,6 +8751,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         if (h) img.height = h;
 
         let triedFallback = false;
+        let triedDirect = false;
         img.addEventListener('load', () => {
           figure.dataset.renderState = 'rendered';
         });
@@ -8754,7 +8762,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             return;
           }
           const directUrl = resolveSafeAssetUrl(item.direct_media_url || item.preview_url || item.image_url);
-          if (directUrl && directUrl !== img.src) {
+          if (!triedDirect && directUrl && directUrl !== img.src) {
+            triedDirect = true;
             img.src = directUrl;
             return;
           }
@@ -10724,7 +10733,48 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         renderTaskTrackerUI();
       }
 
-      // Render dan persisten: Pertahankan teks hasil komputasi model AI secara utuh tanpa pemotongan destruktif
+      // Temukan pesan target & pertahankan serat visual (imageDisplays) agar operator sambungan komutatif dengan grounding
+      let targetMsg = null;
+      const stripDisplaySlots = (txt) => String(txt || '').replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '');
+      const cleanBasePrefix = stripDisplaySlots(rawBaseText).substring(0, 50);
+      if (Array.isArray(session.messages)) {
+        for (let i = session.messages.length - 1; i >= 0; i--) {
+          const msg = session.messages[i];
+          const msgContent = (msg && typeof msg.content === 'string') ? msg.content : '';
+          const cleanMsgContent = stripDisplaySlots(msgContent);
+          if (msg && msg.role === 'assistant' && (msgContent === rawBaseText || msgContent === options.previousText || (cleanBasePrefix && cleanMsgContent.startsWith(cleanBasePrefix)))) {
+            targetMsg = msg;
+            break;
+          }
+        }
+      }
+      const fallbackLastMsg = (!targetMsg && session.messages && session.messages.length > 0 && session.messages[session.messages.length - 1]?.role === 'assistant')
+        ? session.messages[session.messages.length - 1]
+        : null;
+      const activeImageDisplays = (Array.isArray(options.imageDisplays) && options.imageDisplays.length > 0)
+        ? options.imageDisplays
+        : (Array.isArray(targetMsg?.imageDisplays) && targetMsg.imageDisplays.length > 0
+          ? targetMsg.imageDisplays
+          : (Array.isArray(fallbackLastMsg?.imageDisplays) ? fallbackLastMsg.imageDisplays : []));
+
+      if (activeImageDisplays.length > 0 && finalExtracted.files.length === 0) {
+        for (const disp of activeImageDisplays) {
+          if (disp && disp.display_id) {
+            const displayToken = `[[ZOZ_IMAGE_DISPLAY:${disp.display_id}]]`;
+            if (currentAccumulated && !currentAccumulated.includes(displayToken)) {
+              const paras = currentAccumulated.split(/\n\s*\n/);
+              if (paras.length > 1) {
+                paras.splice(1, 0, displayToken);
+                currentAccumulated = paras.join('\n\n');
+              } else {
+                currentAccumulated = `${currentAccumulated}\n\n${displayToken}\n`;
+              }
+            }
+          }
+        }
+      }
+
+      // Render dan persisten: Pertahankan teks hasil komputasi model AI beserta komponen visual terverifikasi
       if (bubbleText) {
         if (finalExtracted.files.length > 0) {
           bubbleText.innerHTML = renderMarkdown(hideFileBlocksForDisplay(currentAccumulated, contRunOptions));
@@ -10732,7 +10782,11 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         } else {
           bubbleText.innerHTML = renderMarkdown(currentAccumulated);
         }
+        if (row && activeImageDisplays.length > 0) {
+          renderGroundedImageDisplaysForRow(row, activeImageDisplays);
+        }
         enhanceCodeBlocks(bubbleText);
+        enhanceChatImages(bubbleText);
       }
 
       if (options.targetCard && finalExtracted.files.length > 0) {
@@ -10765,26 +10819,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       }
 
       // Persist hasil akhir ke sesi secara utuh tanpa penggantian placeholder
-      let targetMsg = null;
-      if (Array.isArray(session.messages)) {
-        for (let i = session.messages.length - 1; i >= 0; i--) {
-          const msg = session.messages[i];
-          const msgContent = (msg && typeof msg.content === 'string') ? msg.content : '';
-          if (msg && msg.role === 'assistant' && (msgContent === rawBaseText || msgContent === options.previousText || msgContent.startsWith(rawBaseText.substring(0, 50)))) {
-            targetMsg = msg;
-            break;
-          }
-        }
-      }
       if (targetMsg) {
         targetMsg.content = safeAssistantText(currentAccumulated);
+        if (activeImageDisplays.length > 0) targetMsg.imageDisplays = activeImageDisplays;
         if (finalExtracted.files.length > 0) targetMsg.files = finalExtracted.files;
-      } else {
-        const lastMsg = (session.messages && session.messages.length > 0) ? session.messages[session.messages.length - 1] : null;
-        if (lastMsg && lastMsg.role === 'assistant') {
-          lastMsg.content = safeAssistantText(currentAccumulated);
-          if (finalExtracted.files.length > 0) lastMsg.files = finalExtracted.files;
-        }
+      } else if (fallbackLastMsg) {
+        fallbackLastMsg.content = safeAssistantText(currentAccumulated);
+        if (activeImageDisplays.length > 0) fallbackLastMsg.imageDisplays = activeImageDisplays;
+        if (finalExtracted.files.length > 0) fallbackLastMsg.files = finalExtracted.files;
       }
       if (row) row.dataset.fullContent = safeAssistantText(currentAccumulated);
       session.updatedAt = new Date().toISOString();
@@ -10884,12 +10926,13 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         hasAssistantTail = true;
       }
 
-      // Konteks Lengkap Autoregresif: pertahankan seluruh riwayat dan tail tanpa pemotongan kerdil 40 baris
-      let effectiveTail = currentFullText || '';
+      // Konteks Lengkap Autoregresif: pertahankan seluruh riwayat dan tail tanpa membocorkan token slot UI internal
+      const stripUiSlotTokens = (s) => String(s || '').replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '');
+      let effectiveTail = stripUiSlotTokens(currentFullText || '');
 
       historyMessages.forEach((m, idx) => {
         const isTail = (idx === historyMessages.length - 1);
-        let content = m.role === 'assistant' ? safeAssistantText(m.content || '') : (m.content || '');
+        let content = m.role === 'assistant' ? stripUiSlotTokens(safeAssistantText(m.content || '')) : (m.content || '');
         if (isTail && m.role === 'assistant' && effectiveTail) {
           content = effectiveTail;
         }
@@ -11166,12 +11209,13 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       hasAssistantTail = true;
     }
 
-    // Konteks Lengkap Autoregresif untuk Ollama: pertahankan seluruh token konteks agar tidak merusak AST & logika
-    let effectiveTail = currentFullText || '';
+    // Konteks Lengkap Autoregresif untuk Ollama: pertahankan seluruh token konteks tanpa membocorkan token slot UI internal
+    const stripOllamaUiSlotTokens = (s) => String(s || '').replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '');
+    let effectiveTail = stripOllamaUiSlotTokens(currentFullText || '');
 
     historyMessages.forEach((m, idx) => {
       const isTail = (idx === historyMessages.length - 1);
-      let content = m.role === 'assistant' ? safeAssistantText(m.content || '') : (m.content || '');
+      let content = m.role === 'assistant' ? stripOllamaUiSlotTokens(safeAssistantText(m.content || '')) : (m.content || '');
       if (isTail && m.role === 'assistant' && effectiveTail) {
         content = effectiveTail;
       }
@@ -13008,7 +13052,13 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
 
         const diskTime = fullSess.updatedAt ? new Date(fullSess.updatedAt).getTime() : 0;
         const memTime = targetSession.updatedAt ? new Date(targetSession.updatedAt).getTime() : 0;
-        const isDiskContentChanged = diskLast && memLast && diskLast.content !== memLast.content;
+        const isDiskImageDisplaysChanged = Boolean(
+          diskLast && memLast &&
+          JSON.stringify(diskLast.imageDisplays || null) !== JSON.stringify(memLast.imageDisplays || null)
+        );
+        const isDiskContentChanged = Boolean(
+          diskLast && memLast && (diskLast.content !== memLast.content || isDiskImageDisplaysChanged)
+        );
 
         if (targetSession._isLazyDisk || diskLen !== memLen || diskTime > memTime || isDiskContentChanged || (diskLast && diskLast.backgroundCompleted)) {
           targetSession.messages = fullSess.messages;
@@ -14407,7 +14457,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         rawText = docs.map(d => `[Dokumen: ${d.name || 'lampiran'}]`).join('\n');
       }
       const textToCopy = (role === 'assistant' ? safeAssistantText(rawText) : rawText)
-        .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-f0-9]{8,24}\]\]\s*/gi, '')
+        .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
         .trim();
       copyTextToClipboard(textToCopy, () => {
         const origHtml = copyBtn.innerHTML;
@@ -25671,14 +25721,57 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     return null;
   }
 
-  // Cache memori kandidat gambar klien untuk redundansi ketahanan tinggi (Direct Client Visual Grounding)
+  // Cache memori kandidat gambar klien terikat kapasitas FIFO (|M_n| <= 300) untuk Direct Client Visual Grounding
   const WINDOW_GROUNDED_CANDIDATES = new Map();
+  const CLIENT_SPOOF_REGEX = /\b(impersonators?|look-?alikes?|parod(?:y|ies)|caricatures?|wax(?:work|\s+figures?)?|madame\s+tussauds|cosplay(?:ers?)?|memes?|cartoons?|satires?|puppets?|effig(?:y|ies))\b/i;
+
+  function cacheGroundedCandidateClient(id, cand) {
+    if (!id || !cand) return;
+    if (WINDOW_GROUNDED_CANDIDATES.has(id)) {
+      WINDOW_GROUNDED_CANDIDATES.delete(id);
+    }
+    while (WINDOW_GROUNDED_CANDIDATES.size >= 300) {
+      const oldestKey = WINDOW_GROUNDED_CANDIDATES.keys().next().value;
+      if (oldestKey === undefined) break;
+      WINDOW_GROUNDED_CANDIDATES.delete(oldestKey);
+    }
+    WINDOW_GROUNDED_CANDIDATES.set(id, cand);
+  }
+
+  function evaluateClientLicenseStatus(licenseName) {
+    if (!licenseName || typeof licenseName !== 'string' || !licenseName.trim()) {
+      return { usage_status: 'unknown', warning: 'license_unknown: Metadata lisensi bernilai null/tidak diketahui.' };
+    }
+    const licLower = licenseName.toLowerCase();
+    if (/\b(all rights reserved|copyrighted|fair use|non-?commercial|by-nc|cc-by-nc|no derivatives|by-nd|cc-by-nd)\b/i.test(licLower)) {
+      return { usage_status: 'restricted', warning: `access_denied: Lisensi "${licenseName}" membatasi penayangan ulang.` };
+    }
+    if (
+      licLower.includes('public domain') ||
+      /\bpd(?:-[a-z0-9-]+|\b)/i.test(licLower) ||
+      licLower.includes('cc0') ||
+      licLower.includes('cc-zero') ||
+      licLower.includes('no restrictions') ||
+      licLower.includes('cc by') ||
+      licLower.includes('cc-by') ||
+      licLower.includes('attribution') ||
+      licLower.includes('unsplash license') ||
+      licLower.includes('pexels license') ||
+      licLower.includes('pixabay') ||
+      licLower.includes('free art license') ||
+      licLower.includes('gfdl')
+    ) {
+      return { usage_status: 'allowed', warning: null };
+    }
+    return { usage_status: 'unknown', warning: `license_unknown: Ketentuan lisensi "${licenseName}" memerlukan verifikasi manual.` };
+  }
 
   async function searchWikimediaCommonsDirect(query, limit = 6) {
     try {
       const cleanQ = String(query || '').trim();
       if (!cleanQ) return [];
-      const fetchCount = Math.min(30, Math.max(10, limit * 2));
+      const clampedLimit = Math.max(1, Math.min(20, parseInt(limit, 10) || 6));
+      const fetchCount = Math.min(30, Math.max(10, clampedLimit * 2));
       const params = new URLSearchParams({
         action: 'query',
         generator: 'search',
@@ -25698,8 +25791,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       });
       if (!res.ok) return [];
       const data = await res.json().catch(() => null);
-      const pages = data?.query?.pages ? Object.values(data.query.pages) : [];
-      const candidates = [];
+      // Urutkan berdasarkan bijeksi relevansi page.index (bukan urutan integer pageid dari Object.values)
+      const pages = data?.query?.pages
+        ? Object.values(data.query.pages).sort((a, b) => (a.index ?? 999999) - (b.index ?? 999999))
+        : [];
+      const qTokens = cleanQ.toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
+      const queryAllowsSpoof = CLIENT_SPOOF_REGEX.test(cleanQ);
+      const scored = [];
       for (const page of pages) {
         if (!page || !Array.isArray(page.imageinfo) || page.imageinfo.length === 0) continue;
         const info = page.imageinfo[0];
@@ -25708,34 +25806,74 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         const ext = info.extmetadata || {};
         const rawTitle = String(page.title || '').replace(/^File:/i, '').replace(/\.[a-z0-9]+$/i, '').replace(/_/g, ' ').trim();
         const pageUrl = info.descriptionurl || `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(String(page.title || '').replace(/^File:/i, '').replace(/\s+/g, '_'))}`;
-        const creator = ext.Artist ? ext.Artist.value.replace(/<[^>]+>/g, '').trim() : null;
-        const license = ext.LicenseShortName ? ext.LicenseShortName.value.replace(/<[^>]+>/g, '').trim() : (ext.License ? ext.License.value : 'Public domain');
-        const licenseUrl = ext.LicenseUrl ? ext.LicenseUrl.value.trim() : null;
-        const desc = ext.ImageDescription ? ext.ImageDescription.value.replace(/<[^>]+>/g, '').trim() : rawTitle;
-        const image_id = `img_wmc_${page.pageid || Math.random().toString(36).slice(2, 10)}`;
-        const credit = creator ? `Foto/Karya: ${creator} — Wikimedia Commons — (${license})` : `Wikimedia Commons — (${license})`;
-        const directUrl = info.thumburl || info.url;
+        const creator = (ext.Artist && typeof ext.Artist.value === 'string')
+          ? (ext.Artist.value.replace(/<[^>]+>/g, '').trim() || null)
+          : null;
+        const rawLicShort = (ext.LicenseShortName && typeof ext.LicenseShortName.value === 'string')
+          ? ext.LicenseShortName.value.replace(/<[^>]+>/g, '').trim()
+          : '';
+        const rawUsageTerms = (ext.UsageTerms && typeof ext.UsageTerms.value === 'string')
+          ? ext.UsageTerms.value.replace(/<[^>]+>/g, '').trim()
+          : '';
+        const rawLicCode = (ext.License && typeof ext.License.value === 'string')
+          ? ext.License.value.replace(/<[^>]+>/g, '').trim()
+          : '';
+        // Jangan mengarang 'Public domain' bila metadata lisensi kosong; pertahankan null sesuai invarians epistemik
+        const license = rawLicShort || rawUsageTerms || rawLicCode || null;
+        const licenseUrl = (ext.LicenseUrl && typeof ext.LicenseUrl.value === 'string')
+          ? (ext.LicenseUrl.value.trim() || null)
+          : null;
+        const desc = (ext.ImageDescription && typeof ext.ImageDescription.value === 'string')
+          ? (ext.ImageDescription.value.replace(/<[^>]+>/g, '').trim() || null)
+          : null;
+        const categories = Array.isArray(page.categories)
+          ? page.categories.map((c) => String(c.title || '').replace(/^Category:/i, ''))
+          : [];
+        const combinedMeta = `${rawTitle} ${desc || ''} ${categories.join(' ')}`;
+        if (!queryAllowsSpoof && CLIENT_SPOOF_REGEX.test(combinedMeta)) continue;
 
-        candidates.push({
-          image_id,
-          title: rawTitle,
-          description: desc,
-          source_name: 'wikimedia_commons',
-          source_page_url: pageUrl,
-          preview_url: directUrl,
-          image_url: info.url,
-          direct_media_url: directUrl,
-          creator,
-          creator_url: null,
-          license_name: license,
-          license_url: licenseUrl,
-          attribution_text: credit,
-          width: info.width || 960,
-          height: info.height || 640
+        const image_id = `img_wmc_${page.pageid || Math.random().toString(36).slice(2, 10)}`;
+        const creditParts = [];
+        if (creator) creditParts.push(`Foto/Karya: ${creator}`);
+        creditParts.push('Wikimedia Commons');
+        if (license) creditParts.push(`(${license})`);
+        const credit = creditParts.join(' — ');
+        const directUrl = info.thumburl || info.url || null;
+        if (!directUrl) continue;
+
+        const titleLower = rawTitle.toLowerCase();
+        let hitCount = 0;
+        for (const qt of qTokens) {
+          if (titleLower.includes(qt)) hitCount++;
+        }
+        const rankScore = (qTokens.length > 0 ? (hitCount / qTokens.length) * 100 : 0) - ((page.index ?? 999) * 0.5);
+
+        scored.push({
+          rankScore,
+          candidate: {
+            image_id,
+            title: rawTitle || null,
+            description: desc,
+            source_name: 'wikimedia_commons',
+            source_page_url: pageUrl,
+            preview_url: directUrl,
+            image_url: info.url || null,
+            direct_media_url: directUrl,
+            creator,
+            creator_url: null,
+            license_name: license,
+            license_url: licenseUrl,
+            attribution_text: credit,
+            width: Number.isInteger(info.width) && info.width > 0 ? info.width : null,
+            height: Number.isInteger(info.height) && info.height > 0 ? info.height : null,
+            _mime: mime,
+            _categories: categories,
+            _searchQuery: cleanQ
+          }
         });
-        if (candidates.length >= limit) break;
       }
-      return candidates;
+      scored.sort((a, b) => b.rankScore - a.rankScore);
+      return scored.slice(0, clampedLimit).map((item) => item.candidate);
     } catch (e) {
       console.warn('[Wikimedia Commons Direct Client Fallback] Error:', e);
       return [];
@@ -26538,7 +26676,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           searchRes = { status: 'error', images: [], source_errors: [{ source: 'network', code: 'access_denied', message: e.message }] };
         }
 
-        const imgs = Array.isArray(searchRes?.images) ? searchRes.images : [];
+        let imgs = Array.isArray(searchRes?.images) ? searchRes.images : [];
         if (imgs.length === 0 && query) {
           try {
             const fb = await searchWikimediaCommonsDirect(query, limit);
@@ -26546,13 +26684,15 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
               imgs = fb;
               searchRes = { status: 'success', images: imgs, source_errors: [] };
             }
-          } catch (_) {}
+          } catch (fbErr) {
+            console.warn('[search_images Client Fallback] Error:', fbErr);
+          }
         }
 
         if (imgs.length > 0) {
           imgs.forEach((im) => {
             if (im && im.image_id) {
-              WINDOW_GROUNDED_CANDIDATES.set(im.image_id, im);
+              cacheGroundedCandidateClient(im.image_id, { ...im, _searchQuery: im._searchQuery || query });
             }
           });
         }
@@ -26617,16 +26757,37 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         if (!inspectRes || !inspectRes.accessible) {
           const cached = WINDOW_GROUNDED_CANDIDATES.get(image_id);
           if (cached) {
+            const licEval = evaluateClientLicenseStatus(cached.license_name);
+            const combinedMeta = `${cached.title || ''} ${cached.description || ''} ${(cached._categories || []).join(' ')}`;
+            const qStr = String(cached._searchQuery || promptContext || '');
+            const isSpoof = CLIENT_SPOOF_REGEX.test(combinedMeta) && !CLIENT_SPOOF_REGEX.test(qStr);
+            const qTokens = qStr.toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
+            let hitCount = 0;
+            for (const qt of qTokens) {
+              if (combinedMeta.toLowerCase().includes(qt)) hitCount++;
+            }
+            let subject_match = 'likely';
+            if (isSpoof) {
+              subject_match = 'mismatch';
+            } else if (qTokens.length > 0) {
+              const cov = hitCount / qTokens.length;
+              subject_match = cov >= 0.85 ? 'confirmed' : (cov >= 0.5 ? 'likely' : (cov > 0 ? 'uncertain' : 'mismatch'));
+            }
+            const hasMediaUrl = Boolean(cached.direct_media_url || cached.preview_url || cached.image_url);
+            const warnings = [];
+            if (licEval.warning) warnings.push(licEval.warning);
             inspectRes = {
               image_id,
-              accessible: true,
-              mime_type: 'image/jpeg',
-              dimensions: { width: cached.width || 960, height: cached.height || 640 },
-              subject_match: 'confirmed',
-              match_basis: `Metadata ${cached.source_name || 'wikimedia_commons'} terverifikasi resmi dan bebas royalti.`,
-              usage_status: 'allowed',
-              attribution_text: cached.attribution_text || 'Wikimedia Commons — (Bebas Royalti)',
-              warnings: []
+              accessible: hasMediaUrl,
+              mime_type: cached._mime || 'image/jpeg',
+              dimensions: (cached.width && cached.height) ? { width: cached.width, height: cached.height } : null,
+              subject_match,
+              match_basis: isSpoof
+                ? 'Metadata sumber mengindikasikan peniru/parodi/karikatur, bukan subjek asli.'
+                : `Evaluasi metadata ${cached.source_name || 'wikimedia_commons'} tanpa klaim pemeriksaan visual piksel.`,
+              usage_status: hasMediaUrl ? licEval.usage_status : 'restricted',
+              attribution_text: cached.attribution_text || null,
+              warnings
             };
           } else if (!inspectRes) {
             inspectRes = {
@@ -26699,14 +26860,34 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           prepRes = null;
         }
 
-        if (!prepRes || (prepRes.status !== 'ready' && prepRes.status !== 'partial') || !Array.isArray(prepRes.display_items) || prepRes.display_items.length === 0) {
+        if (prepRes && (prepRes.status === 'ready' || prepRes.status === 'partial') && Array.isArray(prepRes.display_items) && prepRes.display_items.length > 0) {
+          prepRes.display_items = prepRes.display_items.map((item) => {
+            const cached = item && item.image_id ? WINDOW_GROUNDED_CANDIDATES.get(item.image_id) : null;
+            if (!cached) return item;
+            const directRef = cached.direct_media_url || cached.preview_url || cached.image_url || null;
+            return {
+              ...item,
+              direct_media_url: item.direct_media_url || directRef,
+              fallback_asset_ref: (item.fallback_asset_ref && item.fallback_asset_ref !== item.asset_ref) ? item.fallback_asset_ref : (directRef || item.fallback_asset_ref),
+              source_page_url: (item.source_page_url && item.source_page_url !== 'https://commons.wikimedia.org/') ? item.source_page_url : (cached.source_page_url || item.source_page_url),
+              creator: item.creator ?? cached.creator ?? null,
+              license_name: item.license_name ?? cached.license_name ?? null,
+              license_url: item.license_url ?? cached.license_url ?? null,
+              attribution_text: item.attribution_text || cached.attribution_text || null,
+              width: item.width || cached.width || null,
+              height: item.height || cached.height || null
+            };
+          });
+        } else {
           const fallbackDisplayItems = [];
           for (let i = 0; i < image_ids.length; i++) {
             const id = image_ids[i];
             const cached = WINDOW_GROUNDED_CANDIDATES.get(id);
             if (cached) {
-              const alt = alt_texts[i] || cached.title || 'Visual referensi';
+              const licEval = evaluateClientLicenseStatus(cached.license_name);
               const directRef = cached.direct_media_url || cached.preview_url || cached.image_url;
+              if (licEval.usage_status !== 'allowed' || !directRef) continue;
+              const alt = alt_texts[i] || cached.title || 'Visual referensi';
               fallbackDisplayItems.push({
                 image_id: id,
                 asset_ref: directRef,
@@ -26721,8 +26902,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
                 license_name: cached.license_name,
                 license_url: cached.license_url,
                 attribution_text: cached.attribution_text,
-                width: cached.width || 960,
-                height: cached.height || 640,
+                width: cached.width || null,
+                height: cached.height || null,
                 media_category: 'documentary_photo'
               });
             }
@@ -29025,7 +29206,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
                 image_id: cand.image_id
               }, promptText, session);
               const inspectData = inspectRes?.data || inspectRes || {};
-              if (inspectData.accessible && inspectData.usage_status === 'allowed') {
+              if (inspectData.accessible && inspectData.usage_status === 'allowed' && (inspectData.subject_match === 'confirmed' || inspectData.subject_match === 'likely')) {
                 verifiedCandidate = cand;
                 verifiedInspectData = inspectData;
                 break;
@@ -29129,10 +29310,14 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
             modelName,
             engine: 'ollama',
             previousText: rawFullTextBeforeStripping,
+            imageDisplays: groundedImageDisplays,
             isWebsite: isWebTask,
             forceTakeover: true,
             isAutoContinue: true
           });
+          if (groundedImageDisplays.length > 0) {
+            renderGroundedImageDisplaysForRow(assistantRow, groundedImageDisplays);
+          }
           if (assistantRow.dataset.fullContent) {
             fullText = assistantRow.dataset.fullContent;
             rawFullTextBeforeStripping = fullText;
@@ -30872,7 +31057,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
                 image_id: cand.image_id
               }, promptText, session);
               const inspectData = inspectRes?.data || inspectRes || {};
-              if (inspectData.accessible && inspectData.usage_status === 'allowed') {
+              if (inspectData.accessible && inspectData.usage_status === 'allowed' && (inspectData.subject_match === 'confirmed' || inspectData.subject_match === 'likely')) {
                 verifiedCandidate = cand;
                 verifiedInspectData = inspectData;
                 break;
@@ -31025,10 +31210,14 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
             modelName: actualModelUsed || displayModel,
             engine: engineMode,
             previousText: rawFullTextBeforeStripping,
+            imageDisplays: groundedImageDisplays,
             isWebsite: isWebTask,
             forceTakeover: true,
             isAutoContinue: true
           });
+          if (groundedImageDisplays.length > 0) {
+            renderGroundedImageDisplaysForRow(assistantRow, groundedImageDisplays);
+          }
           if (assistantRow.dataset.fullContent) {
             fullText = assistantRow.dataset.fullContent;
             rawFullTextBeforeStripping = fullText;
