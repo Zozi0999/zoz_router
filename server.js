@@ -1249,7 +1249,15 @@ async function resolveLocalDaemonCloudManifest(modelId) {
   // 4. Base name match (prefix before colon)
   const baseMatch = models.find(m => m.name.split(':')[0] === clean || m.model.split(':')[0] === clean);
   if (baseMatch) return baseMatch.name;
-  return clean;
+  // 5. Family / prefix match (e.g. minimax -> minimax-m2.7:cloud)
+  const cleanFamily = clean.split(/[-:.]/)[0].toLowerCase();
+  if (cleanFamily.length >= 3) {
+    const familyMatch = models.find(m => m.name.toLowerCase().startsWith(cleanFamily));
+    if (familyMatch) return familyMatch.name;
+  }
+  // 6. Fallback to resilient local model if requested model is missing
+  const defaultFallback = models.find(m => m.name.includes('glm-5.3-flash') || m.name.includes('llama3.2') || m.name.includes('qwen'));
+  return defaultFallback ? defaultFallback.name : clean;
 }
 fetchLocalOllamaTags().catch(() => {});
 
@@ -2660,8 +2668,14 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     searchTasks.push((async () => {
       try {
         const arxivSort = sortRecent ? '&sortBy=submittedDate&sortOrder=descending' : '';
-        const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(cleanQ)}&start=0&max_results=${Math.min(safeLimit, 6)}${arxivSort}`;
-        const res = await fetch(arxivUrl, { signal: AbortSignal.timeout(3500) });
+        const arxivExpandedQ = cleanQ
+          .replace(/\b(makalah|jurnal|artikel|tulisan)\b/gi, 'paper')
+          .replace(/\b(terbaru|terkini|teranyar|baru)\b/gi, 'recent')
+          .replace(/\b(kecerdasan buatan)\b/gi, 'artificial intelligence')
+          .replace(/\b(terbaik)\b/gi, 'best')
+          .trim();
+        const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(arxivExpandedQ || cleanQ)}&start=0&max_results=${Math.min(safeLimit, 6)}${arxivSort}`;
+        const res = await fetch(arxivUrl, { signal: AbortSignal.timeout(4000) });
         if (res.ok) {
           const xml = await res.text();
           const entries = xml.split(/<entry>/gi).slice(1);
@@ -2756,7 +2770,49 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     })());
   }
 
-  // 4. Search CNN / Bloomberg / Reddit via Jina Search (Paralel)
+  // 4. Whitelist Multi-Domain RSS Probe (Google News RSS restricted to Whitelist Targets)
+  const allowedWhitelistSites = targets.filter(t => !t.includes('localhost') && ['arxiv.org', 'github.com', 'bloomberg.com', 'reddit.com', 'x.com', 'edition.cnn.com', 'cnn.com', 'cna.al'].some(d => t.includes(d)));
+  if (allowedWhitelistSites.length > 0) {
+    searchTasks.push((async () => {
+      try {
+        const siteFilter = allowedWhitelistSites.map(d => `site:${d}`).join(' OR ');
+        const rssFeedUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ + ' (' + siteFilter + ')')}&hl=en-US&gl=US&ceid=US:en`;
+        const res = await fetch(rssFeedUrl, { signal: AbortSignal.timeout(3500) });
+        if (res.ok) {
+          const xml = await res.text();
+          const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+          for (const item of items.slice(0, 6)) {
+            const tMatch = item.match(/<title>([\s\S]*?)<\/title>/i);
+            const lMatch = item.match(/<link>([\s\S]*?)<\/link>/i) || item.match(/<guid[^>]*>([\s\S]*?)<\/guid>/i);
+            const pMatch = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/i);
+            const sMatch = item.match(/<description>([\s\S]*?)<\/description>/i);
+            if (tMatch && lMatch) {
+              const rawTitle = tMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').replace(/\s+/g, ' ').trim();
+              const rawUrl = lMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim();
+              const rawDesc = sMatch ? sMatch[1].replace(/<[^>]+>/g, '').replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+              const pubStr = pMatch ? pMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+              const parsedTs = textSafety.parseAuthenticTimestamp(pubStr, rawUrl, rawTitle, nowMs);
+              const pubDate = parsedTs !== null ? new Date(parsedTs).toISOString().slice(0, 10) : '';
+
+              if (!results.some(r => r.url === rawUrl || r.title === rawTitle)) {
+                results.push({
+                  title: rawTitle,
+                  url: rawUrl,
+                  snippet: rawDesc || `Publikasi terverifikasi dari sumber resmi: ${rawTitle}`,
+                  published_date: pubDate,
+                  published_at: pubDate,
+                  source_name: getSourceNameFromUrl(rawUrl),
+                  relevance_score: 0.90
+                });
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    })());
+  }
+
+  // 5. Search CNN / Bloomberg / Reddit via Jina Search (Fallback Paralel)
   const otherDomains = targets.filter(t => ['edition.cnn.com', 'cnn.com', 'bloomberg.com', 'reddit.com'].some(d => t.includes(d)));
   if (otherDomains.length > 0) {
     const selectedDomain = otherDomains[0].includes('cnn') ? 'edition.cnn.com' : (otherDomains[0].includes('bloomberg') ? 'bloomberg.com' : 'reddit.com');
@@ -2796,7 +2852,7 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     await Promise.allSettled(searchTasks);
   }
 
-  const ranked = textSafety.rankDocumentsMathematically(results, cleanQ, { profile: recencyProfile, nowMs });
+  const ranked = textSafety.rankDocumentsMathematically(results, cleanQ, { profile: recencyProfile, nowMs, isWhitelistedPool: true });
   const finalSourceResults = ranked.slice(0, safeLimit).map(item => ({
     title: item.title,
     url: item.url,

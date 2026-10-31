@@ -407,7 +407,16 @@ function computeEdgeRecencyProfile(query, contextText = '', nowMs = Date.now()) 
 function rankEdgeDocumentsMathematically(candidates, query, profile, nowMs = Date.now()) {
   if (!Array.isArray(candidates) || candidates.length === 0) return [];
   const STOP = new Set(['apa','siapa','kapan','dimana','bagaimana','mengapa','yang','dan','atau','di','ke','dari','untuk','pada','dengan','ini','itu','coba','cari','tolong','web','internet','terbaru','terkini','hari','minggu','bulan','tahun','what','who','when','where','how','why','the','and','or','in','to','from','for','with','this','that','please','search','find','latest','newest','recent','today']);
-  const SYN = { rilis: ['release','released','launch','launched','announcing','introduced'], model: ['models','llm','foundation','frontier'], ai: ['artificial','intelligence','llm','genai'], berita: ['news','report','update'] };
+  const SYN = {
+    rilis: ['release','released','launch','launched','announcing','introduced'],
+    model: ['models','llm','foundation','frontier','architecture'],
+    ai: ['artificial','intelligence','llm','genai'],
+    berita: ['news','report','update'],
+    makalah: ['paper','papers','article','preprint','study'],
+    jurnal: ['journal','paper','research'],
+    riset: ['research','study','paper'],
+    terbaik: ['best','top','benchmark']
+  };
   const baseTokens = String(query || '').toLowerCase().replace(/[^\p{L}\p{N}.+-]+/gu, ' ').split(/\s+/).filter(t => t.length >= 2 && !STOP.has(t) && !/^20[12]\d$/.test(t));
   const qTerms = [];
   const seenT = new Set();
@@ -448,7 +457,13 @@ function rankEdgeDocumentsMathematically(candidates, query, profile, nowMs = Dat
       const idf = Math.log(1 + (N - dfi + 0.5) / (dfi + 0.5));
       bm25 += q.weight * idf * ((f * (k1 + 1)) / (f + k1 * (1 - b + b * (d.dl / avgDl))));
     }
-    if (qTerms.length > 0 && bm25 <= 0.05) continue;
+    if (qTerms.length > 0 && bm25 <= 0.05) {
+      if (d.item.source_name || d.item.url) {
+        bm25 = 0.25;
+      } else {
+        continue;
+      }
+    }
     let ageDays = null;
     let temporalFactor = 1.0;
     if (d.ts !== null) {
@@ -507,8 +522,14 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     searchTasks.push((async () => {
       try {
         const arxivSort = sortRecent ? '&sortBy=submittedDate&sortOrder=descending' : '';
-        const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(cleanQ)}&start=0&max_results=${Math.min(safeLimit, 6)}${arxivSort}`;
-        const res = await fetch(arxivUrl, { signal: AbortSignal.timeout(3500) });
+        const arxivExpandedQ = cleanQ
+          .replace(/\b(makalah|jurnal|artikel|tulisan)\b/gi, 'paper')
+          .replace(/\b(terbaru|terkini|teranyar|baru)\b/gi, 'recent')
+          .replace(/\b(kecerdasan buatan)\b/gi, 'artificial intelligence')
+          .replace(/\b(terbaik)\b/gi, 'best')
+          .trim();
+        const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(arxivExpandedQ || cleanQ)}&start=0&max_results=${Math.min(safeLimit, 6)}${arxivSort}`;
+        const res = await fetch(arxivUrl, { signal: AbortSignal.timeout(4000) });
         if (res.ok) {
           const xml = await res.text();
           const entries = xml.split(/<entry>/gi).slice(1);
@@ -603,7 +624,49 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     })());
   }
 
-  // 4. Search CNN / Bloomberg / Reddit via Jina Search (Paralel)
+  // 4. Whitelist Multi-Domain RSS Probe (Google News RSS restricted to Whitelist Targets)
+  const allowedWhitelistSites = targets.filter(t => !t.includes('localhost') && ['arxiv.org', 'github.com', 'bloomberg.com', 'reddit.com', 'x.com', 'edition.cnn.com', 'cnn.com', 'cna.al'].some(d => t.includes(d)));
+  if (allowedWhitelistSites.length > 0) {
+    searchTasks.push((async () => {
+      try {
+        const siteFilter = allowedWhitelistSites.map(d => `site:${d}`).join(' OR ');
+        const rssFeedUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQ + ' (' + siteFilter + ')')}&hl=en-US&gl=US&ceid=US:en`;
+        const res = await fetch(rssFeedUrl, { signal: AbortSignal.timeout(3500) });
+        if (res.ok) {
+          const xml = await res.text();
+          const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+          for (const item of items.slice(0, 6)) {
+            const tMatch = item.match(/<title>([\s\S]*?)<\/title>/i);
+            const lMatch = item.match(/<link>([\s\S]*?)<\/link>/i) || item.match(/<guid[^>]*>([\s\S]*?)<\/guid>/i);
+            const pMatch = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/i);
+            const sMatch = item.match(/<description>([\s\S]*?)<\/description>/i);
+            if (tMatch && lMatch) {
+              const rawTitle = tMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').replace(/\s+/g, ' ').trim();
+              const rawUrl = lMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim();
+              const rawDesc = sMatch ? sMatch[1].replace(/<[^>]+>/g, '').replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+              const pubStr = pMatch ? pMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+              const ts = parseEdgeAuthenticTimestamp(pubStr, rawUrl, rawTitle, nowMs);
+              const pubDate = ts !== null ? new Date(ts).toISOString().slice(0, 10) : '';
+
+              if (!results.some(r => r.url === rawUrl || r.title === rawTitle)) {
+                results.push({
+                  title: rawTitle,
+                  url: rawUrl,
+                  snippet: rawDesc || `Publikasi terverifikasi dari sumber resmi: ${rawTitle}`,
+                  published_date: pubDate,
+                  published_at: pubDate,
+                  source_name: getSourceNameFromUrl(rawUrl),
+                  relevance_score: 0.90
+                });
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    })());
+  }
+
+  // 5. Search CNN / Bloomberg / Reddit via Jina Search (Paralel)
   const otherDomains = targets.filter(t => ['edition.cnn.com', 'cnn.com', 'bloomberg.com', 'reddit.com'].some(d => t.includes(d)));
   if (otherDomains.length > 0) {
     const selectedDomain = otherDomains[0].includes('cnn') ? 'edition.cnn.com' : (otherDomains[0].includes('bloomberg') ? 'bloomberg.com' : 'reddit.com');

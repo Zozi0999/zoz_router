@@ -25651,7 +25651,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
         let searchRes = null;
         try {
-          const res = await fetch('/api/tools/related-videos', {
+          const res = await fetch(getUniversalApiUrl('/api/tools/related-videos'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ video_url: videoUrl, query, limit, platform }),
@@ -25710,7 +25710,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
         let searchRes = null;
         try {
-          const res = await fetch('/api/tools/search-web-sources', {
+          const res = await fetch(getUniversalApiUrl('/api/tools/search-web-sources'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query, sources, max_results, language }),
@@ -25759,7 +25759,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
         let fetchRes = null;
         try {
-          const res = await fetch('/api/tools/fetch-url-content', {
+          const res = await fetch(getUniversalApiUrl('/api/tools/fetch-url-content'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, extract_mode }),
@@ -25807,7 +25807,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
         let sumRes = null;
         try {
-          const res = await fetch('/api/tools/summarize-sources', {
+          const res = await fetch(getUniversalApiUrl('/api/tools/summarize-sources'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query, urls, summary_style, include_citations }),
