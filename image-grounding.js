@@ -20,6 +20,8 @@ const https = require('node:https');
 const crypto = require('node:crypto');
 const dns = require('node:dns');
 const net = require('node:net');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const ALLOWED_SOURCES = Object.freeze([
   'pinterest',
@@ -448,7 +450,22 @@ function createImageGroundingService(options = {}) {
   const externalAssertResolvesPublic = typeof options.assertResolvesPublic === 'function'
     ? options.assertResolvesPublic
     : null;
-  const hmacSecret = options.secret || env.ZOZ_IMAGE_PROXY_SECRET || crypto.randomBytes(32).toString('hex');
+  let persistentSecret = options.secret || env.ZOZ_IMAGE_PROXY_SECRET || '';
+  if (!persistentSecret) {
+    const secretPath = path.join(__dirname, 'data', 'image_proxy.secret');
+    try {
+      if (fs.existsSync(secretPath)) {
+        persistentSecret = fs.readFileSync(secretPath, 'utf8').trim();
+      } else {
+        persistentSecret = crypto.randomBytes(32).toString('hex');
+        fs.mkdirSync(path.dirname(secretPath), { recursive: true });
+        fs.writeFileSync(secretPath, persistentSecret, 'utf8');
+      }
+    } catch (_) {
+      persistentSecret = crypto.randomBytes(32).toString('hex');
+    }
+  }
+  const hmacSecret = persistentSecret;
 
   // Konfigurasi tambahan host media tepercaya opsional (hanya dari konfigurasi backend eksplisit)
   const extraMediaHosts = options.extraTrustedMediaHostsBySource || {};
@@ -1570,9 +1587,17 @@ function createImageGroundingService(options = {}) {
 
     const nonce = crypto.randomBytes(8).toString('hex');
     const exp = Date.now() + CANDIDATE_TTL_MS;
-    const payload = `${candidate.image_id}|${exp}|${nonce}`;
-    const sig = crypto.createHmac('sha256', hmacSecret).update(payload).digest('hex').slice(0, 24);
-    const token = `${Buffer.from(payload, 'utf8').toString('base64url')}.${sig}`;
+    const tokenObj = {
+      id: candidate.image_id,
+      u: targetUrl,
+      s: candidate.source_name,
+      m: mimeType || 'image/jpeg',
+      exp,
+      n: nonce
+    };
+    const rawJson = JSON.stringify(tokenObj);
+    const sig = crypto.createHmac('sha256', hmacSecret).update(rawJson).digest('hex').slice(0, 24);
+    const token = `${Buffer.from(rawJson, 'utf8').toString('base64url')}.${sig}`;
 
     assetTokenStore.set(token, {
       image_id: candidate.image_id,
@@ -1680,7 +1705,8 @@ function createImageGroundingService(options = {}) {
       display_items.push({
         image_id: candidate.image_id,
         asset_ref: primaryAssetRef,
-        fallback_asset_ref: proxyRef,
+        fallback_asset_ref: candidate.preview_url || candidate.image_url || proxyRef,
+        direct_media_url: candidate.preview_url || candidate.image_url || null,
         alt_text: cleanAlt,
         title: candidate.title,
         source_name: candidate.source_name,
@@ -1769,7 +1795,22 @@ function createImageGroundingService(options = {}) {
       return;
     }
 
-    const entry = assetTokenStore.get(token);
+    let entry = assetTokenStore.get(token);
+    if (!entry) {
+      try {
+        const parsed = JSON.parse(decodedPayload);
+        if (parsed && parsed.u && parsed.s && parsed.exp) {
+          entry = {
+            image_id: parsed.id,
+            url: parsed.u,
+            source_name: parsed.s,
+            mime_type: parsed.m || 'image/jpeg',
+            exp: parsed.exp
+          };
+        }
+      } catch (_) {}
+    }
+
     if (!entry || Date.now() > entry.exp) {
       assetTokenStore.delete(token);
       res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
