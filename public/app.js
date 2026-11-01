@@ -42661,6 +42661,10 @@ Aturan:
         clearTimeout(paneState._reconnectTimer);
         paneState._reconnectTimer = null;
       }
+      if (paneState._stabilityTimer) {
+        clearTimeout(paneState._stabilityTimer);
+        paneState._stabilityTimer = null;
+      }
       if (paneState.eventSource) {
         try { paneState.eventSource.close(); } catch (_) {}
         paneState.eventSource = null;
@@ -42720,7 +42724,6 @@ Aturan:
 
         ws.onopen = () => {
           wsConnected = true;
-          paneState._wsFailCount = 0;
           paneState.isFallbackMode = false;
           if (statusDot) statusDot.className = 'pane-status-dot online';
           if (this.isRemoteConnected) {
@@ -42734,6 +42737,14 @@ Aturan:
           if (paneState.term) {
             this.sendPtyResize(sessionId, paneState.term.cols, paneState.term.rows);
           }
+          // Invarian Stabilitas Jaringan:
+          // Counter kegagalan HANYA direset jika koneksi terbukti stabil minimal 15 detik
+          // Mencegah siklus tak berhingga 0 -> 1 -> 0 saat koneksi berkedip (fluttering)
+          if (paneState._stabilityTimer) clearTimeout(paneState._stabilityTimer);
+          paneState._stabilityTimer = setTimeout(() => {
+            paneState._wsFailCount = 0;
+            paneState._stabilityTimer = null;
+          }, 15000);
         };
 
         ws.onmessage = (evt) => {
@@ -42744,6 +42755,10 @@ Aturan:
         };
 
         ws.onerror = () => {
+          if (paneState._stabilityTimer) {
+            clearTimeout(paneState._stabilityTimer);
+            paneState._stabilityTimer = null;
+          }
           if (!wsConnected && !ws._manualClose) {
             paneState._wsFailCount = (paneState._wsFailCount || 0) + 1;
             if ((this.isRemoteConnected || this.isWindowsSynced) && paneState._wsFailCount < 3) {
@@ -42763,6 +42778,10 @@ Aturan:
         };
 
         ws.onclose = () => {
+          if (paneState._stabilityTimer) {
+            clearTimeout(paneState._stabilityTimer);
+            paneState._stabilityTimer = null;
+          }
           if (paneState.ws === ws) paneState.ws = null;
           if (ws._manualClose) return;
           paneState._wsFailCount = (paneState._wsFailCount || 0) + 1;

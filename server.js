@@ -11680,6 +11680,8 @@ function processWsStream(socket, chunk, onMessage) {
     } else if (opcode === 0x09) {
       const pong = Buffer.from([0x8a, 0x00]);
       onMessage({ type: 'ping', pong });
+    } else if (opcode === 0x0a) {
+      onMessage({ type: 'pong' });
     } else if (opcode === 0x01 || opcode === 0x02) {
       onMessage({ type: 'data', payload: payload.toString('utf8') });
     }
@@ -11984,10 +11986,20 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
     });
   });
 
+  // RFC 6455 Ping frame (0x89, 0x00) setiap 20 detik untuk mencegah idle timeout Cloudflare Edge & Mobile CGNAT
+  const wsHeartbeat = setInterval(() => {
+    if (socket.writable) {
+      try {
+        socket.write(Buffer.from([0x89, 0x00]));
+      } catch (_) {}
+    }
+  }, 20000);
+
   let isCleanedUp = false;
   const cleanup = () => {
     if (isCleanedUp) return;
     isCleanedUp = true;
+    clearInterval(wsHeartbeat);
     socket._wsBuffer = null;
     if (session && session.wsClients) {
       const removed = session.wsClients.delete(socket);
