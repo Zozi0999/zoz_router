@@ -44122,10 +44122,13 @@ Aturan:
       if (!keybar) return;
 
       keybar.querySelectorAll('.term-touch-key').forEach(btn => {
-        // Prevent button tap from stealing focus from xterm's hidden textarea
+        // Prevent button tap from stealing focus from xterm's hidden textarea on desktop and mobile
         btn.addEventListener('mousedown', (e) => {
           e.preventDefault();
         });
+        btn.addEventListener('touchstart', (e) => {
+          if (e.cancelable) e.preventDefault();
+        }, { passive: false });
 
         let lastTouchTap = 0;
         const handleTouchKey = async (e) => {

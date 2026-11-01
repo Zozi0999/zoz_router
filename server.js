@@ -450,9 +450,6 @@ function handleServerAutoEnter(session, data) {
       if (session && session.pty && session.autoEnter) {
         try {
           session.pty.write('\r');
-          setTimeout(() => {
-            try { if (session && session.pty) session.pty.write('\n'); } catch (_) {}
-          }, 35);
           console.log(`[AutoEnter] Session ${session.id}: Auto-approved CLI menu via Enter`);
         } catch (_) {}
       }
@@ -464,9 +461,6 @@ function handleServerAutoEnter(session, data) {
       if (session && session.pty && session.autoEnter) {
         try {
           session.pty.write('y\r');
-          setTimeout(() => {
-            try { if (session && session.pty) session.pty.write('\n'); } catch (_) {}
-          }, 35);
           console.log(`[AutoEnter] Session ${session.id}: Auto-approved Y/N prompt via 'y\\r'`);
         } catch (_) {}
       }
@@ -478,9 +472,6 @@ function handleServerAutoEnter(session, data) {
       if (session && session.pty && session.autoEnter) {
         try {
           session.pty.write('\r');
-          setTimeout(() => {
-            try { if (session && session.pty) session.pty.write('\n'); } catch (_) {}
-          }, 35);
           console.log(`[AutoEnter] Session ${session.id}: Auto-continued Enter prompt via '\\r'`);
         } catch (_) {}
       }
@@ -11960,86 +11951,94 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
     }
   } catch (_) {}
 
-  socket.on('data', (chunk) => {
-    session.lastActivity = Date.now();
-    processWsStream(socket, chunk, (msg) => {
-      if (msg.type === 'close') {
-        try { socket.destroy(); } catch (_) {}
-        return;
-      }
-      if (msg.type === 'ping' && msg.pong) {
-        try { socket.write(msg.pong); } catch (_) {}
-      } else if (msg.type === 'data') {
-        let str = msg.payload;
-        try {
-          if (str.startsWith('{') && str.endsWith('}')) {
-            const parsed = JSON.parse(str);
-            if (parsed.type === 'auto-enter') {
-              const enabled = Boolean(parsed.enabled);
-              if (globalAutoEnterEnabled === enabled && session.autoEnter === enabled) {
+  const onWsMessage = (msg) => {
+    if (msg.type === 'close') {
+      try { socket.destroy(); } catch (_) {}
+      return;
+    }
+    if (msg.type === 'ping' && msg.pong) {
+      try { socket.write(msg.pong); } catch (_) {}
+    } else if (msg.type === 'data') {
+      let str = msg.payload;
+      try {
+        if (str.startsWith('{') && str.endsWith('}')) {
+          const parsed = JSON.parse(str);
+          if (parsed.type === 'auto-enter') {
+            const enabled = Boolean(parsed.enabled);
+            if (globalAutoEnterEnabled === enabled && session.autoEnter === enabled) {
+              return;
+            }
+            session.autoEnter = enabled;
+            globalAutoEnterEnabled = enabled;
+            savePersistedTunnelState();
+            // Sinkronisasi status Auto Enter ke seluruh sesi laptop aktif
+            for (const [id, s] of activeTerminalSessions.entries()) {
+              s.autoEnter = enabled;
+              const autoPayload = JSON.stringify({ type: 'auto-enter-status', autoEnter: enabled, session: id });
+              for (const client of s.clients) {
+                try { if (!client.writableEnded) client.write(`data: ${autoPayload}\n\n`); } catch (_) {}
+              }
+              if (s.wsClients && s.wsClients.size > 0) {
+                const wsFrame = encodeWsFrame(autoPayload);
+                for (const ws of s.wsClients) {
+                  try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+                }
+              }
+            }
+            console.log(`[AutoEnter] Synchronized autoEnter=${enabled} across all laptop terminal sessions via WS.`);
+            return;
+          } else if (parsed.type === 'resize' && session.pty) {
+            const c = Math.max(45, Math.min(300, parseInt(parsed.cols, 10) || cols));
+            const r = Math.max(15, Math.min(100, parseInt(parsed.rows, 10) || rows));
+            if (session.cols !== c || session.rows !== r) {
+              const now = Date.now();
+              if (session._lastResizeTime && (now - session._lastResizeTime) < 200) {
                 return;
               }
-              session.autoEnter = enabled;
-              globalAutoEnterEnabled = enabled;
-              savePersistedTunnelState();
-              // Sinkronisasi status Auto Enter ke seluruh sesi laptop aktif
-              for (const [id, s] of activeTerminalSessions.entries()) {
-                s.autoEnter = enabled;
-                const autoPayload = JSON.stringify({ type: 'auto-enter-status', autoEnter: enabled, session: id });
-                for (const client of s.clients) {
-                  try { if (!client.writableEnded) client.write(`data: ${autoPayload}\n\n`); } catch (_) {}
-                }
-                if (s.wsClients && s.wsClients.size > 0) {
-                  const wsFrame = encodeWsFrame(autoPayload);
-                  for (const ws of s.wsClients) {
+              session._lastResizeTime = now;
+              session.pty.resize(c, r);
+              session.cols = c;
+              session.rows = r;
+              const resizePayload = JSON.stringify({ type: 'pty-resize', cols: c, rows: r });
+              for (const client of session.clients) {
+                try { if (!client.writableEnded) client.write(`data: ${resizePayload}\n\n`); } catch (_) {}
+              }
+              if (session.wsClients && session.wsClients.size > 0) {
+                const wsFrame = encodeWsFrame(resizePayload);
+                for (const ws of session.wsClients) {
+                  if (ws !== socket) {
                     try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
                   }
                 }
               }
-              console.log(`[AutoEnter] Synchronized autoEnter=${enabled} across all laptop terminal sessions via WS.`);
-              return;
-            } else if (parsed.type === 'resize' && session.pty) {
-              const c = Math.max(45, Math.min(300, parseInt(parsed.cols, 10) || cols));
-              const r = Math.max(15, Math.min(100, parseInt(parsed.rows, 10) || rows));
-              if (session.cols !== c || session.rows !== r) {
-                const now = Date.now();
-                if (session._lastResizeTime && (now - session._lastResizeTime) < 200) {
-                  return;
-                }
-                session._lastResizeTime = now;
-                session.pty.resize(c, r);
-                session.cols = c;
-                session.rows = r;
-                const resizePayload = JSON.stringify({ type: 'pty-resize', cols: c, rows: r });
-                for (const client of session.clients) {
-                  try { if (!client.writableEnded) client.write(`data: ${resizePayload}\n\n`); } catch (_) {}
-                }
-                if (session.wsClients && session.wsClients.size > 0) {
-                  const wsFrame = encodeWsFrame(resizePayload);
-                  for (const ws of session.wsClients) {
-                    if (ws !== socket) {
-                      try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
-                    }
-                  }
-                }
-              }
-              return;
-            } else if (parsed.type === 'input' && typeof parsed.data === 'string' && session.pty) {
-              session.lastInputAt = Date.now();
-              const safeData = parsed.data.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f');
-              session.pty.write(safeData);
-              return;
             }
+            return;
+          } else if (parsed.type === 'input' && typeof parsed.data === 'string' && session.pty) {
+            session.lastInputAt = Date.now();
+            const safeData = parsed.data.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f');
+            session.pty.write(safeData);
+            return;
           }
-        } catch (_) {}
-        if (session.pty) {
-          session.lastInputAt = Date.now();
-          const safeStr = typeof str === 'string' ? str.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f') : str;
-          session.pty.write(safeStr);
         }
+      } catch (_) {}
+      if (session.pty) {
+        session.lastInputAt = Date.now();
+        const safeStr = typeof str === 'string' ? str.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f') : str;
+        session.pty.write(safeStr);
       }
-    });
+    }
+  };
+
+  socket.on('data', (chunk) => {
+    session.lastActivity = Date.now();
+    processWsStream(socket, chunk, onWsMessage);
   });
+
+  // Salurkan chunk 'head' jika buffer awal paket TCP upgrade telah memuat frame WebSocket ter-pipelined
+  if (head && Buffer.isBuffer(head) && head.length > 0) {
+    session.lastActivity = Date.now();
+    processWsStream(socket, head, onWsMessage);
+  }
 
   // RFC 6455 Ping frame (0x89, 0x00) setiap 20 detik untuk mencegah idle timeout Cloudflare Edge & Mobile CGNAT
   const wsHeartbeat = setInterval(() => {

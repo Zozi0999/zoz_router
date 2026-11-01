@@ -646,15 +646,26 @@
     const maxLineCheck = Math.min(12, aLines.length, bLines.length);
     for (let k = maxLineCheck; k >= 1; k--) {
       let match = true;
+      let nonBlankCount = 0;
       for (let j = 0; j < k; j++) {
         const lineA = aLines[aLines.length - k + j].trim();
         const lineB = bLines[j].trim();
-        if (!lineA || lineA !== lineB) {
+        if (lineA !== lineB) {
           match = false;
           break;
         }
+        if (lineA.length > 0) {
+          nonBlankCount++;
+        }
       }
-      if (match) {
+      // Overlap sah jika:
+      // - k >= 2: semua k baris cocok dan terdapat minimal 1 baris non-kosong bermakna
+      // - k === 1: baris tunggal cocok dan memiliki panjang signifikan (>= 8 karakter) untuk mencegah kolisi kurung tunggal '}' atau ';'
+      const isValidOverlap = match && (
+        (k >= 2 && nonBlankCount >= 1) ||
+        (k === 1 && nonBlankCount >= 1 && aLines[aLines.length - 1].trim().length >= 8)
+      );
+      if (isValidOverlap) {
         return aLines.concat(bLines.slice(k)).join('\n');
       }
     }
@@ -674,18 +685,22 @@
     const tagRe = new RegExp('<(\\/?)' + tagName + '(?=[\\s>/])[^>]*>', 'gi');
     tagRe.lastIndex = startIndex;
     let depth = 0;
+    let hasOpened = false;
     let m;
     while ((m = tagRe.exec(html)) !== null) {
       const fullTag = m[0];
       const isClose = m[1] === '/';
       const isSelfClose = /\/\s*>$/.test(fullTag);
       if (isClose) {
-        depth--;
-        if (depth <= 0) {
-          return { start: startIndex, end: m.index + fullTag.length };
+        if (hasOpened) {
+          depth--;
+          if (depth <= 0) {
+            return { start: startIndex, end: m.index + fullTag.length };
+          }
         }
       } else if (!isSelfClose) {
         depth++;
+        hasOpened = true;
       }
     }
     return null;
