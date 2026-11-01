@@ -41965,6 +41965,9 @@ Aturan:
       this.updatePaneHeaders();
       this.focusActiveInput();
       [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
+      if (typeof TerminalEndorphin !== 'undefined' && typeof TerminalEndorphin.startAutoWatch === 'function') {
+        TerminalEndorphin.startAutoWatch();
+      }
     },
 
     toggle() {
@@ -42533,6 +42536,12 @@ Aturan:
                 term.scrollToBottom();
               } catch (_) {}
               if (paneState.updateScrollUI) paneState.updateScrollUI();
+            } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
+              this.resetImeLine(paneState);
+              if (window.TerminalEndorphin) {
+                window.TerminalEndorphin.heal(paneNum);
+              }
+              return false;
             }
             paneState._userScrolledUp = false;
             term.scrollToBottom();
@@ -43030,6 +43039,12 @@ Aturan:
               term.scrollToBottom();
             } catch (_) {}
             if (paneState.updateScrollUI) paneState.updateScrollUI();
+          } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
+            this.resetImeLine(paneState);
+            if (window.TerminalEndorphin) {
+              window.TerminalEndorphin.heal(paneNum);
+            }
+            return;
           }
           this.resetImeLine(paneState);
           paneState._userScrolledUp = false;
@@ -45180,15 +45195,18 @@ Aturan:
   const MultiPaneTerminal = TerminalManager;
 
   // =========================================================================
-  // CODE ENDORFIN: TERMINAL SELF-HEALING & NEURAL DIAGNOSTIC ENGINE
+  // CODE ENDORFIN v4.0: TERMINAL AUTONOMOUS IMMUNOLOGY & NEURAL SELF-HEAL ENGINE
   // =========================================================================
   const TerminalEndorphin = {
+    _autoWatchTimer: null,
+
     diagnose(paneNum = (TerminalManager.activePane || 1)) {
       const tab = TerminalManager.getActiveTab();
       const pane = TerminalManager.getPaneState(paneNum);
       const term = pane?.term;
       const issues = [];
       const fixes = [];
+      const isMobile = TerminalManager.isMobileDevice();
       const metrics = {
         paneNum,
         tabId: tab?.id || 'none',
@@ -45197,10 +45215,13 @@ Aturan:
         rows: term?.rows || 0,
         ptyCols: pane?.ptyCols || term?.cols || 0,
         ptyRows: pane?.ptyRows || term?.rows || 0,
-        isMobile: TerminalManager.isMobileDevice(),
+        stableMobileRows: pane?._stableMobileRows || 0,
+        isMobile,
         userScrolledUp: Boolean(pane?._userScrolledUp),
         isTouchActive: Boolean(pane?._isTouchActive),
         hasTouchInertia: Boolean(pane?._touchInertiaRaf),
+        imeBufferLen: (pane?._imeBuffer || '').length,
+        textareaLen: (term?.textarea?.value || '').length,
         isMouseActive: Boolean(
           term && (
             (term._core && term._core._coreMouseService && term._core._coreMouseService.areMouseEventsActive) ||
@@ -45220,14 +45241,20 @@ Aturan:
         };
       }
 
-      // 1. Audit Dimensi PTY & ConPTY wrap trap (cols < 45)
-      const minSafeCols = metrics.isMobile ? 48 : 80;
+      // 1. Audit Dimensi Kolom PTY & ConPTY wrap trap (cols < 45)
+      const minSafeCols = isMobile ? 48 : 80;
       if (metrics.cols < 45 || metrics.ptyCols < 45) {
-        issues.push(`Dimensi PTY Terjebak Terlalu Sempit (${metrics.cols}x${metrics.rows}, server: ${metrics.ptyCols}x${metrics.ptyRows})! Menyebabkan baris wrapping tangga (staircase indent).`);
+        issues.push(`Dimensi PTY Terjebak Terlalu Sempit (${metrics.cols}x${metrics.rows}, server: ${metrics.ptyCols}x${metrics.ptyRows})! Menyebabkan baris wrapping tangga.`);
         fixes.push(`Normalkan lebar kolom ke minimum aman >= ${minSafeCols} cols.`);
       }
 
-      // 2. Audit Scroll Lock / Stuck Trap
+      // 2. Audit Mobile Row Drift & Stranded Prompt Invariant
+      if (isMobile && pane._stableMobileRows && Math.abs(metrics.rows - pane._stableMobileRows) >= 3) {
+        issues.push(`Drift Baris Layar Mobile Terdeteksi (${metrics.rows} vs stabil ${pane._stableMobileRows}): Berpotensi memindahkan prompt ke tengah layar.`);
+        fixes.push(`Sinkronkan baris terminal kembali ke jangkar stabil mobile (${pane._stableMobileRows} baris).`);
+      }
+
+      // 3. Audit Scroll Lock / Stuck Trap
       if (metrics.userScrolledUp && !metrics.isMouseActive) {
         if (term.buffer && term.buffer.active) {
           const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
@@ -45238,24 +45265,43 @@ Aturan:
         }
       }
 
-      // 3. Audit Alternate Screen / SGR Mouse Protocol (Claude Code / Htop / Nano)
+      // 4. Audit Layar Hitam Blank / Missing Prompt Trap (Screenshot 6 & 7)
+      let isBlankScreen = false;
+      if (term.buffer && term.buffer.active && term.buffer.active.length > 0) {
+        const checkLines = Math.min(term.rows || 20, term.buffer.active.length);
+        let hasVisibleChar = false;
+        for (let i = 0; i < checkLines; i++) {
+          const line = term.buffer.active.getLine(i);
+          if (line && line.translateToString(true).trim().length > 0) {
+            hasVisibleChar = true;
+            break;
+          }
+        }
+        if (!hasVisibleChar && pane.sessionId && (pane.ws?.readyState === WebSocket.OPEN || pane.eventSource)) {
+          isBlankScreen = true;
+          issues.push('Layar Kosong Pekat Terdeteksi: Sesi PTY terhubung namun prompt host belum ter-render.');
+          fixes.push('Pancarkan sinyal refresh prompt (\\r) ke shell host.');
+        }
+      }
+
+      // 5. Audit Mode SGR Mouse Tracking (Claude Code / Htop / Nano / agy TUI)
       if (metrics.isMouseActive) {
-        fixes.push('Mode SGR Mouse Tracking aktif: Touch drag dan PgUp/PgDn diarahkan via SGR wheel sequence.');
+        fixes.push('Mode TUI / SGR Mouse Tracking aktif: Touch scroll diarahkan via ANSI SGR sequences.');
       }
 
-      // 4. Audit IME Textarea Buffer (Virtual Keyboard Ghosting)
-      if (term.textarea && term.textarea.value && term.textarea.value.length > 4) {
-        issues.push(`IME Textarea Buffer Menumpuk (${term.textarea.value.length} karakter): Berpotensi menduplikasi ketikan.`);
-        fixes.push('Bersihkan textarea dan flush komposisi teks virtual.');
+      // 6. Audit IME Textarea Buffer & Ghosting (Virtual Keyboard Desync)
+      if (metrics.textareaLen > 4 || metrics.imeBufferLen > 40) {
+        issues.push(`Buffer IME Transduser Menumpuk (textarea: ${metrics.textareaLen}, transduser: ${metrics.imeBufferLen}): Berpotensi menduplikasi ketikan.`);
+        fixes.push('Bersihkan textarea dan reset buffer transduser IME ke kondisi bersih.');
       }
 
-      // 5. Audit Runaway Animation Frame
+      // 7. Audit Runaway Animation Frame
       if (metrics.hasTouchInertia) {
         issues.push('Runaway touch inertia RAF terdeteksi.');
         fixes.push('Batalkan loop RAF inersia touch.');
       }
 
-      // 6. Audit WAN Tunnel Latency & Packet Queue
+      // 8. Audit WAN Tunnel Latency
       if (TerminalManager.isRemoteConnected) {
         const ping = TerminalManager.remotePingMs;
         if (ping !== null) {
@@ -45266,10 +45312,10 @@ Aturan:
         }
       }
 
-      const score = Math.max(0, 100 - (issues.length * 20));
-      const status = score >= 90 ? 'healthy' : (score >= 60 ? 'warning' : 'critical');
+      const score = Math.max(0, 100 - (issues.length * 15));
+      const status = score >= 85 ? 'healthy' : (score >= 60 ? 'warning' : 'critical');
 
-      return { score, status, metrics, issues, fixes };
+      return { score, status, metrics, issues, fixes, isBlankScreen };
     },
 
     heal(paneNum = (TerminalManager.activePane || 1), options = {}) {
@@ -45286,12 +45332,17 @@ Aturan:
       const diag = this.diagnose(paneNum);
       const isMobile = TerminalManager.isMobileDevice();
       const dims = (pane.fitAddon && pane.fitAddon.proposeDimensions()) || null;
-      const minSafeCols = isMobile ? 45 : 80;
-      const minSafeRows = isMobile ? 15 : 20;
+      const minSafeCols = isMobile ? 48 : 80;
+      const minSafeRows = isMobile ? 20 : 22;
       const safeCols = dims ? Math.max(minSafeCols, dims.cols) : Math.max(minSafeCols, term.cols || minSafeCols);
-      const safeRows = dims ? Math.max(minSafeRows, dims.rows) : Math.max(minSafeRows, pane._stableRows || term.rows || 25);
+      let safeRows = dims ? Math.max(minSafeRows, dims.rows) : Math.max(minSafeRows, term.rows || 25);
 
-      // A. Normalisasi Dimensi PTY Host & DOM xterm (Termux Mobile Architecture)
+      // A. Normalisasi Dimensi PTY Host & DOM xterm (Sticky Mobile Rows Architecture)
+      if (isMobile) {
+        const stableRows = pane._stableMobileRows || safeRows;
+        safeRows = Math.max(20, stableRows);
+        pane._stableMobileRows = safeRows;
+      }
       try {
         pane.ptyCols = safeCols;
         pane.ptyRows = safeRows;
@@ -45306,7 +45357,7 @@ Aturan:
         }
       } catch (_) {}
 
-      // B. Lepaskan Scroll Trap & Batalkan Inersia Touch
+      // B. Lepaskan Scroll Trap, Batalkan Inersia Touch & Jangkar Viewport
       pane._userScrolledUp = false;
       pane._isTouchActive = false;
       if (pane._touchInertiaRaf) {
@@ -45319,15 +45370,17 @@ Aturan:
         if (pane.updateScrollUI) pane.updateScrollUI();
       } catch (_) {}
 
-      // C. Balas Sinkronisasi untuk Claude Code / TUI Mouse Mode
+      // C. Sinkronisasi TUI Mouse Mode (Claude Code / Htop / Nano / agy)
       if (diag.metrics.isMouseActive && pane.sessionId) {
         const col = Math.max(1, Math.floor(safeCols / 2));
         const row = Math.max(1, Math.floor(safeRows / 2));
-        // Kirim wheel-down halus untuk mengunci bottom prompt
         TerminalManager.sendPtyInput(pane.sessionId, `\x1b[<65;${col};${row}M`.repeat(3));
       }
 
-      // D. Bersihkan IME Textarea Virtual Keyboard
+      // D. Pemurnian IME Textarea & Reset Transduser Virtual Keyboard
+      TerminalManager.resetImeLine(pane);
+      pane._lastEmittedChar = '';
+      pane._lastEmitTime = 0;
       if (term.textarea) {
         try {
           term.textarea.value = '';
@@ -45341,34 +45394,40 @@ Aturan:
         } catch (_) {}
       }
 
-      // E. Redraw prompt dengan Ctrl+L bila bukan TUI interaktif
-      if (pane.sessionId && !diag.metrics.isMouseActive && !options.noRedraw) {
+      // E. Pemulihan Layar Blank Pekat (Missing Host Prompt)
+      if (diag.isBlankScreen && pane.sessionId) {
+        setTimeout(() => {
+          if (pane.sessionId) {
+            TerminalManager.sendPtyInput(pane.sessionId, '\r');
+          }
+        }, 80);
+      } else if (pane.sessionId && !diag.metrics.isMouseActive && !options.noRedraw) {
         TerminalManager.sendPtyInput(pane.sessionId, '\x0c');
       }
 
-      // F. Sinyal Endorfin ke BioEndocrine (CodeEndocrine v3)
+      // F. Sinyal Endorfin Biologis ke BioEndocrine (CodeEndocrine v4.0)
       const endoTarget = (typeof BioEndocrine !== 'undefined' && BioEndocrine) || (typeof window !== 'undefined' && window.BioEndocrine);
       if (endoTarget && typeof endoTarget.log === 'function') {
-        endoTarget.log('endorphin', 30, `Suntikan Endorfin Terminal [${paneName}]: Dimensi PTY dinormalkan ke ${safeCols}x${safeRows}, scroll & IME dipulihkan.`);
+        endoTarget.log('endorphin', 35, `🌿 Suntikan Endorfin Terminal [${paneName}]: Dimensi dinormalkan ke ${safeCols}x${safeRows}, scroll & transduser IME dipulihkan penuh.`);
         if (endoTarget.hormones) {
-          endoTarget.hormones.cortisol = Math.max(0, endoTarget.hormones.cortisol - 25);
-          endoTarget.hormones.dopamine = Math.min(100, endoTarget.hormones.dopamine + 30);
-          endoTarget.hormones.endorphin = Math.min(100, (endoTarget.hormones.endorphin ?? 100) + 20);
+          endoTarget.hormones.cortisol = Math.max(0, endoTarget.hormones.cortisol - 30);
+          endoTarget.hormones.dopamine = Math.min(100, endoTarget.hormones.dopamine + 35);
+          endoTarget.hormones.endorphin = Math.min(100, (endoTarget.hormones.endorphin ?? 100) + 30);
           endoTarget.updateUI();
         }
       }
 
-      // G. Audio Feedback & Toast (Muted bell/chime on background terminal healing to protect mobile devices)
+      // G. Audio / Haptic Feedback & Notifikasi Elegan
       try {
         if (!options.silent && navigator.vibrate) {
-          navigator.vibrate(25);
+          navigator.vibrate(35);
         }
       } catch (_) {}
 
       if (!options.silent) {
         const fixedCount = diag.issues.length;
         const note = fixedCount > 0 ? ` (${fixedCount} anomali dinormalkan)` : '';
-        showToast(`🌿 Endorfin Disuntikkan: ${paneName} pulih penuh (${safeCols}x${safeRows})${note}!`, 'success');
+        showToast(`🌿 Endorfin Disuntikkan: ${paneName} pulih optimal (${safeCols}x${safeRows})${note}!`, 'success');
       }
 
       return { success: true, diag, safeCols, safeRows };
@@ -45381,6 +45440,18 @@ Aturan:
       if (tab.isSplit) {
         this.heal(2, options);
       }
+    },
+
+    startAutoWatch() {
+      if (this._autoWatchTimer) return;
+      this._autoWatchTimer = setInterval(() => {
+        const modal = document.getElementById('terminalModal');
+        if (!modal || !modal.classList.contains('show')) return;
+        const diag = this.diagnose(TerminalManager.activePane || 1);
+        if (diag.score < 70 || diag.isBlankScreen) {
+          this.healAll({ silent: true, noRedraw: true });
+        }
+      }, 25000);
     }
   };
 
