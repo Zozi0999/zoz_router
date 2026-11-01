@@ -3323,6 +3323,46 @@ function pruneActiveChatTasks() {
 
 setInterval(pruneActiveChatTasks, 10 * 60 * 1000).unref();
 
+function reapOrphanedTerminalSessions() {
+  if (!activeTerminalSessions || activeTerminalSessions.size === 0) return;
+  const now = Date.now();
+  const MAX_IDLE_TTL = 24 * 60 * 60 * 1000; // 24 jam tanpa klien & tanpa aktivitas
+  const MAX_SESSIONS = 15;
+
+  // 1. Bersihkan sesi yang tidak memiliki klien aktif dan telah idle > 24 jam
+  for (const [id, session] of activeTerminalSessions.entries()) {
+    const activeClients = (session.clients ? session.clients.size : 0) + (session.wsClients ? session.wsClients.size : 0);
+    if (activeClients === 0) {
+      const idleTime = now - (session.lastActivity || session.createdAt || now);
+      if (idleTime > MAX_IDLE_TTL) {
+        try { if (session.pty && typeof session.pty.kill === 'function') session.pty.kill(); } catch (_) {}
+        activeTerminalSessions.delete(id);
+        console.log(`[PTY Reaper] Reaped orphaned terminal session ${id} (idle ${Math.round(idleTime / 3600000)}h, 0 clients).`);
+      }
+    }
+  }
+
+  // 2. Batas atas kapasitas: jika total sesi masih > MAX_SESSIONS, reap sesi tertua yang tidak memiliki klien aktif
+  if (activeTerminalSessions.size > MAX_SESSIONS) {
+    const unattached = [];
+    for (const [id, session] of activeTerminalSessions.entries()) {
+      const activeClients = (session.clients ? session.clients.size : 0) + (session.wsClients ? session.wsClients.size : 0);
+      if (activeClients === 0) {
+        unattached.push({ id, session, lastActivity: session.lastActivity || session.createdAt || 0 });
+      }
+    }
+    unattached.sort((a, b) => a.lastActivity - b.lastActivity);
+    while (activeTerminalSessions.size > MAX_SESSIONS && unattached.length > 0) {
+      const target = unattached.shift();
+      try { if (target.session.pty && typeof target.session.pty.kill === 'function') target.session.pty.kill(); } catch (_) {}
+      activeTerminalSessions.delete(target.id);
+      console.log(`[PTY Reaper] Capacity limit exceeded (> ${MAX_SESSIONS}). Reaped oldest unattached session ${target.id}.`);
+    }
+  }
+}
+
+setInterval(reapOrphanedTerminalSessions, 30 * 60 * 1000).unref();
+
 const MAX_FULLTEXT_BYTES = 10 * 1024 * 1024; // 10MB limit for accumulated response text
 
 function accumulateChatChunk(sessionId, chunk, provider) {
@@ -4576,6 +4616,7 @@ function initZozWebSearchDb() {
     }
     const webDbPath = path.join(DATA_DIR, 'zoz_web_search.db');
     const db = new DatabaseSync(webDbPath);
+    try { db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;'); } catch (_) {}
     db.exec(`
       CREATE TABLE IF NOT EXISTS zoz_web_pages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -5512,6 +5553,7 @@ function initZozMemoryDb() {
     }
     const memoryDbPath = path.join(DATA_DIR, 'zoz_memory.db');
     const db = new DatabaseSync(memoryDbPath);
+    try { db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;'); } catch (_) {}
     // Inisialisasi tabel FTS5 virtual table dengan user_id unindexed untuk isolasi privasi
     db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS memories USING fts5(
