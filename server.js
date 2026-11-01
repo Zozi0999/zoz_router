@@ -11981,6 +11981,16 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
     })));
     if (session.buffer && session.buffer.length > 0) {
       socket.write(encodeWsFrame(JSON.stringify({ type: 'init', data: session.buffer.join('') })));
+      // Jika buffer hanya berisi sekuens clear/wipe tanpa teks alfanumerik yang tampak,
+      // refresh shell dengan carriage return lembut (\r) agar prompt host tidak kosong di layar klien
+      const visibleText = session.buffer.join('').replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').trim();
+      if (!visibleText && session.pty) {
+        setTimeout(() => {
+          if (session && session.pty) {
+            try { session.pty.write('\r'); } catch (_) {}
+          }
+        }, 120);
+      }
     } else {
       // Hanya kirim carriage return bila sesi baru dan buffer masih kosong
       setTimeout(() => {

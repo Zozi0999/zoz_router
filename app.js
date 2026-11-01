@@ -42378,11 +42378,26 @@ Aturan:
           const val = rawVal;
           if (val === oldText) return;
 
+          const now = Date.now();
+
           // 2. Fast-Path A: Penambahan murni di akhir kursor (Append Delta)
           if (val.startsWith(oldText)) {
             const insertText = val.slice(oldText.length);
             paneState._imeBuffer = val;
+
+            // Temporal Anti-Stutter & IME Duplicate Filter:
+            // Mencegah emisi ganda dari Gboard (mis. insertCompositionText + insertText atau translasi ganda)
+            // di mana karakter yang persis sama dikirim dalam rentang waktu < 50ms
+            if (insertText.length === 1 &&
+                paneState._lastEmittedChar === insertText &&
+                paneState._lastEmitTime &&
+                (now - paneState._lastEmitTime) < 50) {
+              return;
+            }
+
             if (insertText.length > 0) {
+              paneState._lastEmittedChar = insertText;
+              paneState._lastEmitTime = now;
               if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
                 this.sendPtyInput(paneState.sessionId || sessionId, insertText);
               } else if (paneState && paneState.isFallbackMode) {
@@ -42397,9 +42412,10 @@ Aturan:
           if (oldText.startsWith(val)) {
             const delCount = oldText.length - val.length;
             paneState._imeBuffer = val;
-            const now = Date.now();
             paneState._lastBackspaceHandled = now;
             paneState._lastBackspaceTime = now;
+            paneState._lastEmittedChar = '\x7f';
+            paneState._lastEmitTime = now;
             if (delCount > 0) {
               const delSeq = '\x7f'.repeat(delCount);
               if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
@@ -42424,20 +42440,31 @@ Aturan:
           }
 
           let delCount = oldText.length - lcp;
-          // Guard Invarian: Jangan biarkan Gboard menghapus melewati batas kata aktif terakhir (spasi terakhir).
-          // Jika perbedaan terjadi sebelum spasi terakhir (mis. Gboard mengkapitalisasi kata lampau di awal baris),
-          // jangan kirim Backspace mundur ke shell host karena di terminal TUI (agy) itu akan merusak garis prompt!
+          // Guard Invarian Batas Kata Aktif (Active Word Boundary Invariant):
+          // Hanya batasi jika penghapusan melintasi batas sebelum spasi terakhir (kata lampau/prompt).
+          // Di dalam kata aktif yang sedang diketik (lcp >= lastSpaceOld + 1), izinkan penggantian kata tanpa duplikasi!
           const lastSpaceOld = oldText.lastIndexOf(' ');
-          if (lastSpaceOld !== -1 && lcp <= lastSpaceOld) {
-            delCount = 0;
-            lcp = Math.min(oldText.length, val.length);
-          } else if (delCount > 15) {
+          if (lastSpaceOld !== -1 && lcp < lastSpaceOld + 1) {
+            delCount = Math.max(0, oldText.length - (lastSpaceOld + 1));
+            lcp = lastSpaceOld + 1;
+          } else if (delCount > 25) {
             delCount = 0;
             lcp = Math.min(oldText.length, val.length);
           }
 
+          const insertText = val.slice(lcp);
+
+          // Temporal Anti-Stutter Guard pada Path C
+          if (delCount === 0 &&
+              insertText.length === 1 &&
+              paneState._lastEmittedChar === insertText &&
+              paneState._lastEmitTime &&
+              (now - paneState._lastEmitTime) < 50) {
+            paneState._imeBuffer = val;
+            return;
+          }
+
           if (delCount > 0) {
-            const now = Date.now();
             paneState._lastBackspaceHandled = now;
             paneState._lastBackspaceTime = now;
             const delSeq = '\x7f'.repeat(delCount);
@@ -42453,8 +42480,9 @@ Aturan:
             }
           }
 
-          const insertText = val.slice(lcp);
           if (insertText.length > 0) {
+            paneState._lastEmittedChar = insertText;
+            paneState._lastEmitTime = now;
             if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
               this.sendPtyInput(paneState.sessionId || sessionId, insertText);
             } else if (paneState && paneState.isFallbackMode) {
@@ -42472,6 +42500,7 @@ Aturan:
 
         term.textarea.addEventListener('compositionend', () => {
           paneState._isComposing = false;
+          paneState._lastCompositionEndAt = Date.now();
         }, true);
 
         term.textarea.addEventListener('blur', () => {
@@ -43683,7 +43712,22 @@ Aturan:
           const dims = paneState.fitAddon.proposeDimensions();
           if (dims && dims.cols > 10 && dims.rows > 5) {
             targetCols = Math.max(isMobile ? 45 : 60, dims.cols);
-            targetRows = Math.max(isMobile ? 8 : 20, dims.rows);
+            if (isMobile) {
+              // Invarian Baris Mobile Stabil (Sticky Mobile Rows Invariant):
+              // Saat keyboard ponsel terbuka (visualViewport menyusut < 75%), JANGAN menciutkan baris PTY
+              // menjadi 8-10 baris! Menciutkan PTY menyebabkan ConPTY me-reflow teks, dan saat keyboard ditutup,
+              // prompt terdampar di baris 10 di tengah layar. Pertahankan baris stabil baseline!
+              const vv = window.visualViewport;
+              const isKeyboardOpen = vv && (vv.height < window.innerHeight * 0.75);
+              if (isKeyboardOpen && paneState._stableMobileRows) {
+                targetRows = paneState._stableMobileRows;
+              } else {
+                targetRows = Math.max(20, dims.rows);
+                paneState._stableMobileRows = targetRows;
+              }
+            } else {
+              targetRows = Math.max(20, dims.rows);
+            }
           }
         } catch (_) {}
       }
@@ -43695,7 +43739,18 @@ Aturan:
         const charW = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.width) || 8.5;
         const charH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
         targetCols = Math.max(isMobile ? 45 : 60, Math.floor(containerW / charW));
-        targetRows = Math.max(isMobile ? 8 : 20, Math.floor(containerH / charH));
+        if (isMobile) {
+          const vv = window.visualViewport;
+          const isKeyboardOpen = vv && (vv.height < window.innerHeight * 0.75);
+          if (isKeyboardOpen && paneState._stableMobileRows) {
+            targetRows = paneState._stableMobileRows;
+          } else {
+            targetRows = Math.max(20, Math.floor(containerH / charH));
+            paneState._stableMobileRows = targetRows;
+          }
+        } else {
+          targetRows = Math.max(20, Math.floor(containerH / charH));
+        }
       }
 
       paneState._stableRows = targetRows;
@@ -43718,7 +43773,8 @@ Aturan:
       }
       if (forcePtyResize && paneState.sessionId && !paneState.isFallbackMode) {
         const isActivelyTyping = isMobile && paneState._lastDataEmitAt && (Date.now() - paneState._lastDataEmitAt) < 800;
-        if (!isActivelyTyping && (prevCols !== targetCols || prevRows !== targetRows || paneState._lastSentPtyCols !== targetCols || paneState._lastSentPtyRows !== targetRows)) {
+        const isKeyboardOpen = isMobile && window.visualViewport && (window.visualViewport.height < window.innerHeight * 0.75);
+        if (!isActivelyTyping && !isKeyboardOpen && (prevCols !== targetCols || prevRows !== targetRows || paneState._lastSentPtyCols !== targetCols || paneState._lastSentPtyRows !== targetRows)) {
           paneState._lastSentPtyCols = targetCols;
           paneState._lastSentPtyRows = targetRows;
           this.sendPtyResize(paneState.sessionId, targetCols, targetRows);
