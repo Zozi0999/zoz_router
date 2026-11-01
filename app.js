@@ -40243,8 +40243,12 @@ Aturan:
       }
       if (this._mobileVvTimer) clearTimeout(this._mobileVvTimer);
       this._mobileVvTimer = setTimeout(() => {
-        this.fitAllPanes();
-      }, 60);
+        const activePane = this.getPaneState();
+        const isTyping = activePane?._lastDataEmitAt && (Date.now() - activePane._lastDataEmitAt < 800);
+        if (!isTyping) {
+          this.fitAllPanes();
+        }
+      }, 150);
     },
 
     syncMobileScreenPosition(paneState) {
@@ -42003,6 +42007,10 @@ Aturan:
             paneState.term.focus();
             if (paneState.term.textarea) {
               paneState.term.textarea.focus({ preventScroll: true });
+              if (this.isMobileDevice()) {
+                paneState.term.textarea.value = '\u200B';
+                paneState.term.textarea.setSelectionRange(1, 1);
+              }
             }
           } catch (_) {}
         }
@@ -42158,7 +42166,7 @@ Aturan:
       if (term.textarea) {
         term.textarea.setAttribute('autocomplete', 'off');
         term.textarea.setAttribute('autocorrect', 'off');
-        term.textarea.setAttribute('autocapitalize', 'off');
+        term.textarea.setAttribute('autocapitalize', 'none');
         term.textarea.setAttribute('spellcheck', 'false');
         term.textarea.setAttribute('enterkeyhint', 'go');
         term.textarea.setAttribute('inputmode', 'text');
@@ -42167,140 +42175,152 @@ Aturan:
         term.textarea.setAttribute('aria-autocomplete', 'none');
       }
 
-      // Real-time Mobile IME Composition Bridge (Gboard / Android virtual keyboards)
-      // Eliminasi tuntas bug "teks hanya muncul setelah spasi/enter":
-      // Setiap karakter yang sedang diketik di IME ponsel langsung di-stream karakter-per-karakter ke PTY tanpa menunggu compositionend
+      // =========================================================================
+      // ZERO-STATE SENTINEL TRANSDUCER UNTUK KEYBOARD PONSEL (ANDROID / GBOARD)
+      // Murni Matematika: Menjaga buffer textarea selalu pada kondisi kanonikal
+      // B(textarea) = \u200B (Zero-Width Space Sentinel) sehingga Gboard tidak mengakumulasi
+      // riwayat teks, tidak mengaktifkan translate bar paksa, dan karakter mengalir lancar
+      // tanpa stuttering, tanpa duplikasi, dan backspace responsif 100%.
+      // =========================================================================
+      const isMobile = this.isMobileDevice();
+      const SENTINEL = '\u200B';
+
       const helper = term._core && term._core._compositionHelper;
       if (helper) {
-        const origStart = helper.compositionstart ? helper.compositionstart.bind(helper) : null;
+        if (helper._compositionView) {
+          helper._compositionView.classList.remove('active');
+          helper._compositionView.style.display = 'none';
+        }
         helper.compositionstart = function() {
-          this._compGen = (this._compGen || 0) + 1;
-          if (origStart) origStart();
-          this._lastComposed = '';
-          this._dataAlreadySent = '';
-          if (this._compositionView) {
-            this._compositionView.classList.remove('active');
+          if (this._compositionView) this._compositionView.classList.remove('active');
+        };
+        helper.compositionupdate = function(e) {
+          if (this._compositionView) this._compositionView.classList.remove('active');
+        };
+        helper.compositionend = function() {
+          if (this._compositionView) this._compositionView.classList.remove('active');
+        };
+      }
+
+      if (isMobile && term.textarea) {
+        const resetSentinel = () => {
+          try {
+            term.textarea.value = SENTINEL;
+            term.textarea.setSelectionRange(1, 1);
+          } catch (_) {}
+        };
+
+        resetSentinel();
+
+        const emitToTerminal = (chars) => {
+          if (!chars) return;
+          paneState._lastDataEmitAt = Date.now();
+          if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+            this.sendPtyInput(paneState.sessionId || sessionId, chars);
+          } else if (paneState && paneState.isFallbackMode) {
+            if (chars === '\r' || chars === '\n') {
+              term.write('\r\n');
+              const cmdToRun = paneState._inputLine || '';
+              paneState._inputLine = '';
+              if (cmdToRun.trim()) {
+                this.executeCommand(cmdToRun.trim());
+              }
+            } else if (chars === '\x7f' || chars === '\b') {
+              if (paneState._inputLine && paneState._inputLine.length > 0) {
+                paneState._inputLine = paneState._inputLine.slice(0, -1);
+                term.write('\b \b');
+              }
+            } else {
+              paneState._inputLine = (paneState._inputLine || '') + chars;
+              term.write(chars);
+            }
           }
         };
 
-        helper.compositionupdate = function(e) {
-          if (this._compositionView) {
-            this._compositionView.classList.remove('active');
-          }
-          const text = (e && e.data) || '';
-          if (typeof this._lastComposed !== 'string') {
-            this._lastComposed = '';
-          }
+        // Capture-phase beforeinput: Saluran transmisi instan ke PTY tanpa akumulasi memori lokal
+        term.textarea.addEventListener('beforeinput', (e) => {
+          const now = Date.now();
 
-          if (text.startsWith(this._lastComposed)) {
-            // Huruf baru diketik
-            const delta = text.slice(this._lastComposed.length);
-            if (delta) {
-              this._coreService.triggerDataEvent(delta, true);
-              this._dataAlreadySent = (this._dataAlreadySent || '') + delta;
+          // 1. Penghapusan Karakter (Backspace)
+          if (e.inputType === 'deleteContentBackward' || e.inputType === 'deleteWordBackward') {
+            if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 15) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              resetSentinel();
+              return;
             }
-          } else if (this._lastComposed.startsWith(text)) {
-            // Tombol backspace ditekan saat komposisi
-            const diff = this._lastComposed.length - text.length;
-            for (let i = 0; i < diff; i++) {
-              this._coreService.triggerDataEvent('\x7f', true);
-            }
-            this._dataAlreadySent = (this._dataAlreadySent || '').slice(0, -diff);
-            const now = Date.now();
             paneState._lastBackspaceHandled = now;
             paneState._lastBackspaceTime = now;
-          } else {
-            // Penggantian kata atau koreksi teks Gboard
-            let common = 0;
-            while (common < this._lastComposed.length && common < text.length && this._lastComposed[common] === text[common]) {
-              common++;
-            }
-            const toDelete = this._lastComposed.length - common;
-            for (let i = 0; i < toDelete; i++) {
-              this._coreService.triggerDataEvent('\x7f', true);
-            }
-            if (toDelete > 0) {
-              const now = Date.now();
-              paneState._lastBackspaceHandled = now;
-              paneState._lastBackspaceTime = now;
-            }
-            const toAdd = text.slice(common);
-            if (toAdd) {
-              this._coreService.triggerDataEvent(toAdd, true);
-            }
-            this._dataAlreadySent = text;
-          }
-          this._lastComposed = text;
-          setTimeout(() => {
-            if (this._textarea && this._compositionPosition) {
-              this._compositionPosition.end = this._textarea.value.length;
-            }
-          }, 0);
-        };
-
-        helper._finalizeComposition = function(waitForChanges) {
-          if (this._compositionView) {
-            this._compositionView.classList.remove('active');
-          }
-          this._isComposing = false;
-          this._lastComposed = '';
-          const gen = this._compGen || 0;
-          const startPos = this._compositionPosition ? this._compositionPosition.start : 0;
-          const alreadySent = this._dataAlreadySent || '';
-
-          if (!waitForChanges) {
-            this._isSendingComposition = false;
-            this._dataAlreadySent = '';
-            if (this._textarea && this._compositionPosition) {
-              const input = this._textarea.value.substring(this._compositionPosition.start, this._compositionPosition.end);
-              const remaining = input.slice(alreadySent.length);
-              if (remaining.length > 0) {
-                this._coreService.triggerDataEvent(remaining, true);
-              }
-            }
+            emitToTerminal(e.inputType === 'deleteWordBackward' ? '\x17' : '\x7f');
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            resetSentinel();
             return;
           }
 
-          this._isSendingComposition = true;
-          setTimeout(() => {
-            // Jika komposisi baru sudah dimulai sebelum timer ini jalan, batalkan agar tidak menggandakan huruf!
-            if ((this._compGen || 0) !== gen) {
+          // 2. Baris Baru (Enter)
+          if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
+            if (paneState._lastEnterSentAt && (now - paneState._lastEnterSentAt) < 120) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              resetSentinel();
               return;
             }
-            if (this._isSendingComposition) {
-              this._isSendingComposition = false;
-              this._dataAlreadySent = '';
-              if (this._textarea) {
-                const textVal = this._textarea.value || '';
-                const effectiveStart = startPos + alreadySent.length;
-                const effectiveEnd = (this._isComposing && this._compositionPosition)
-                  ? this._compositionPosition.start
-                  : textVal.length;
-                if (effectiveEnd > effectiveStart) {
-                  const remaining = textVal.substring(effectiveStart, effectiveEnd);
-                  if (remaining.length > 0) {
-                    this._coreService.triggerDataEvent(remaining, true);
-                  }
-                }
-              }
+            paneState._lastEnterSentAt = now;
+            paneState._userScrolledUp = false;
+            term.scrollToBottom();
+            if (paneState.updateScrollUI) paneState.updateScrollUI();
+            emitToTerminal('\r');
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            resetSentinel();
+            return;
+          }
+
+          // 3. Karakter Baru, Autocomplete Suggestion, atau Paste
+          let incoming = e.data;
+          if (!incoming && e.dataTransfer) {
+            incoming = e.dataTransfer.getData('text/plain');
+          }
+          if (typeof incoming === 'string' && incoming.length > 0) {
+            incoming = incoming.replace(/\u200B/g, '');
+            if (incoming.length > 0) {
+              emitToTerminal(incoming);
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              resetSentinel();
             }
-          }, 0);
-        };
+          }
+        }, true);
 
-        helper.compositionend = function() {
-          this._finalizeComposition(true);
-        };
-
-        if (typeof helper._handleAnyTextareaChanges === 'function') {
-          const origHandleAny = helper._handleAnyTextareaChanges.bind(helper);
-          helper._handleAnyTextareaChanges = function() {
+        // Fallback input event untuk virtual keyboard yang tidak mengisi beforeinput.data
+        term.textarea.addEventListener('input', (e) => {
+          const val = term.textarea.value || '';
+          if (val === '') {
             const now = Date.now();
-            if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 120) {
-              return;
+            if (!paneState._lastBackspaceHandled || (now - paneState._lastBackspaceHandled) >= 15) {
+              paneState._lastBackspaceHandled = now;
+              paneState._lastBackspaceTime = now;
+              emitToTerminal('\x7f');
             }
-            return origHandleAny();
-          };
-        }
+            e.stopImmediatePropagation();
+            resetSentinel();
+            return;
+          }
+
+          if (val !== SENTINEL) {
+            const clean = val.replace(/\u200B/g, '');
+            if (clean.length > 0) {
+              emitToTerminal(clean);
+            }
+            e.stopImmediatePropagation();
+            resetSentinel();
+          }
+        }, true);
+
+        term.textarea.addEventListener('focus', () => {
+          resetSentinel();
+        }, true);
       }
 
       // Cegah xterm menghasilkan \x1b\x7f atau \x1b\x08 (yang memicu echo ^H pada PowerShell/ConPTY)
@@ -42309,6 +42329,9 @@ Aturan:
         if (ev.key === 'Backspace' || ev.keyCode === 8) {
           if (ev.type === 'keydown') {
             const now = Date.now();
+            if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 15) {
+              return false;
+            }
             paneState._lastBackspaceTime = now;
             paneState._lastBackspaceHandled = now;
             if (this.isMobileDevice() || ev.altKey) {
@@ -42488,25 +42511,18 @@ Aturan:
       // Mobile IME / Gboard deleteContentBackward fallback (saat keyCode adalah 229 / IME composition)
       container.addEventListener('beforeinput', (ev) => {
         if (ev.inputType === 'deleteContentBackward' || ev.inputType === 'deleteWordBackward') {
-          // PENTING: Jika sedang dalam mode komposisi IME (_isComposing = true),
-          // biarkan helper.compositionupdate yang menangani penghapusan karakter agar tidak terjadi Double/Triple Backspace!
-          if (helper && helper._isComposing) {
-            return;
-          }
           const now = Date.now();
-          if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 160) {
+          if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 15) {
             return;
           }
-          if (!paneState._lastBackspaceTime || (now - paneState._lastBackspaceTime) > 120) {
-            paneState._lastBackspaceTime = now;
-            paneState._lastBackspaceHandled = now;
-            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-              this.sendPtyInput(paneState.sessionId || sessionId, ev.inputType === 'deleteWordBackward' ? '\x17' : '\x7f');
-            } else if (paneState && paneState.isFallbackMode) {
-              if (paneState._inputLine && paneState._inputLine.length > 0) {
-                paneState._inputLine = paneState._inputLine.slice(0, -1);
-                term.write('\b \b');
-              }
+          paneState._lastBackspaceTime = now;
+          paneState._lastBackspaceHandled = now;
+          if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+            this.sendPtyInput(paneState.sessionId || sessionId, ev.inputType === 'deleteWordBackward' ? '\x17' : '\x7f');
+          } else if (paneState && paneState.isFallbackMode) {
+            if (paneState._inputLine && paneState._inputLine.length > 0) {
+              paneState._inputLine = paneState._inputLine.slice(0, -1);
+              term.write('\b \b');
             }
           }
         }
@@ -43414,19 +43430,19 @@ Aturan:
           const dims = paneState.fitAddon.proposeDimensions();
           if (dims && dims.cols > 10 && dims.rows > 5) {
             targetCols = Math.max(isMobile ? 45 : 60, dims.cols);
-            targetRows = Math.max(isMobile ? 15 : 20, dims.rows);
+            targetRows = Math.max(isMobile ? 8 : 20, dims.rows);
           }
         } catch (_) {}
       }
 
       // Fallback penghitungan dimensi jika proposeDimensions belum siap
-      if (!targetCols || !targetRows || targetCols < 20 || targetRows < 10) {
+      if (!targetCols || !targetRows || targetCols < 20 || targetRows < 8) {
         const containerW = container.clientWidth || window.innerWidth;
         const containerH = container.clientHeight || (window.innerHeight - 130);
         const charW = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.width) || 8.5;
         const charH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
         targetCols = Math.max(isMobile ? 45 : 60, Math.floor(containerW / charW));
-        targetRows = Math.max(isMobile ? 15 : 20, Math.floor(containerH / charH));
+        targetRows = Math.max(isMobile ? 8 : 20, Math.floor(containerH / charH));
       }
 
       paneState._stableRows = targetRows;
@@ -43443,7 +43459,8 @@ Aturan:
         } finally {
           setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
         }
-        if (forcePtyResize && paneState.sessionId && !paneState.isFallbackMode) {
+        const isTypingRecently = isMobile && paneState._lastDataEmitAt && (Date.now() - paneState._lastDataEmitAt < 800);
+        if (forcePtyResize && paneState.sessionId && !paneState.isFallbackMode && !isTypingRecently) {
           this.sendPtyResize(paneState.sessionId, targetCols, targetRows);
         }
       }
