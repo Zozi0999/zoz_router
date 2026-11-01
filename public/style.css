@@ -14517,9 +14517,9 @@ body.mermaid-has-fullscreen {
   height: 0 !important;
 }
 
-/* Kunci posisi helper textarea xterm di (0,0) agar browser mobile tidak mencoba scroll-into-view saat kursor berpindah */
+/* Kunci posisi helper textarea xterm di (0,0) secara statis fixed agar browser mobile tidak mencoba scroll-into-view saat kursor berpindah */
 .xterm .xterm-helper-textarea {
-  position: absolute !important;
+  position: fixed !important;
   opacity: 0 !important;
   left: 0 !important;
   top: 0 !important;
@@ -14531,10 +14531,10 @@ body.mermaid-has-fullscreen {
   outline: none !important;
   background: transparent !important;
   color: transparent !important;
-  pointer-events: auto !important;
+  pointer-events: none !important;
   resize: none !important;
   overflow: hidden !important;
-  z-index: 0 !important;
+  z-index: -10 !important;
 }
 
 .terminal-screen::-webkit-scrollbar {
@@ -15035,7 +15035,7 @@ body.mermaid-has-fullscreen {
     height: 0 !important;
   }
   .xterm .xterm-helper-textarea {
-    position: absolute !important;
+    position: fixed !important;
     opacity: 0 !important;
     left: 0 !important;
     top: 0 !important;
@@ -15047,10 +15047,10 @@ body.mermaid-has-fullscreen {
     outline: none !important;
     background: transparent !important;
     color: transparent !important;
-    pointer-events: auto !important;
+    pointer-events: none !important;
     resize: none !important;
     overflow: hidden !important;
-    z-index: 0 !important;
+    z-index: -10 !important;
   }
   /* Mobile Keybar Termux 8-Kolom 2-Baris Presisi */
   .terminal-mobile-keybar {

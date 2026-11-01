@@ -40243,8 +40243,15 @@ Aturan:
       }
       if (this._mobileVvTimer) clearTimeout(this._mobileVvTimer);
       this._mobileVvTimer = setTimeout(() => {
+        // Redam resize saat pengguna sedang aktif mengetik di keyboard ponsel (< 1000ms yang lalu)
+        const activePane = this.getPaneState(this.activePane || 1);
+        if (activePane && activePane._lastDataEmitAt && (Date.now() - activePane._lastDataEmitAt) < 1000) {
+          if (this._mobileVvTimer) clearTimeout(this._mobileVvTimer);
+          this._mobileVvTimer = setTimeout(() => this.fitAllPanes(), 600);
+          return;
+        }
         this.fitAllPanes();
-      }, 120);
+      }, 350);
     },
 
     syncMobileScreenPosition(paneState) {
@@ -42013,7 +42020,7 @@ Aturan:
             if (paneState.term.textarea) {
               paneState.term.textarea.focus({ preventScroll: true });
               if (this.isMobileDevice()) {
-                this.resetImeLine(paneState);
+                paneState._imeBuffer = (paneState.term.textarea.value || '').replace(/[\u200B\uFEFF\u00A0]/g, ' ');
               }
             }
           } catch (_) {}
@@ -42192,9 +42199,24 @@ Aturan:
 
       if (term._core) {
         if (isMobile) {
-          // Nonaktifkan _inputEvent internal xterm di mobile karena Capture-Phase beforeinput
+          // Nonaktifkan _inputEvent internal xterm di mobile karena transduser LCP
           // adalah emitor tunggal deterministik kita!
           term._core._inputEvent = function() { return false; };
+
+          // Kunci posisi textarea di (0, 0) secara statis tanpa pergeseran dinamis mengikuti kursor!
+          // Mengeliminasi total relayout jitter Android InputMethodManager saat agy atau ConPTY me-redraw layar.
+          term._core._syncTextArea = function() {
+            if (!this.textarea) return;
+            this.textarea.style.position = 'fixed';
+            this.textarea.style.left = '0px';
+            this.textarea.style.top = '0px';
+            this.textarea.style.width = '1px';
+            this.textarea.style.height = '1px';
+            this.textarea.style.opacity = '0';
+            this.textarea.style.zIndex = '-10';
+            this.textarea.style.pointerEvents = 'none';
+          };
+          term._core._syncTextArea();
         }
         if (term._core._compositionHelper) {
           const helper = term._core._compositionHelper;
@@ -42402,9 +42424,14 @@ Aturan:
           }
 
           let delCount = oldText.length - lcp;
-          // Guard Invarian: Jangan biarkan Gboard menghapus lebih dari 15 karakter kata aktif
-          // jika terjadi perubahan kapitalisasi otomatis di awal kalimat lampau.
-          if (delCount > 15) {
+          // Guard Invarian: Jangan biarkan Gboard menghapus melewati batas kata aktif terakhir (spasi terakhir).
+          // Jika perbedaan terjadi sebelum spasi terakhir (mis. Gboard mengkapitalisasi kata lampau di awal baris),
+          // jangan kirim Backspace mundur ke shell host karena di terminal TUI (agy) itu akan merusak garis prompt!
+          const lastSpaceOld = oldText.lastIndexOf(' ');
+          if (lastSpaceOld !== -1 && lcp <= lastSpaceOld) {
+            delCount = 0;
+            lcp = Math.min(oldText.length, val.length);
+          } else if (delCount > 15) {
             delCount = 0;
             lcp = Math.min(oldText.length, val.length);
           }
@@ -42439,12 +42466,22 @@ Aturan:
           paneState._imeBuffer = val;
         }, true);
 
+        term.textarea.addEventListener('compositionstart', () => {
+          paneState._isComposing = true;
+        }, true);
+
+        term.textarea.addEventListener('compositionend', () => {
+          paneState._isComposing = false;
+        }, true);
+
         term.textarea.addEventListener('blur', () => {
-          this.resetImeLine(paneState);
+          if (!paneState._isComposing) {
+            this.resetImeLine(paneState);
+          }
         }, true);
 
         term.textarea.addEventListener('focus', () => {
-          this.resetImeLine(paneState);
+          paneState._imeBuffer = (term.textarea.value || '').replace(/[\u200B\uFEFF\u00A0]/g, ' ');
         }, true);
       }
 
@@ -43614,12 +43651,16 @@ Aturan:
         paneState._isRemoteResizing = true;
         try {
           term.resize(targetCols, targetRows);
+          if (isMobile) {
+            try { term.scrollToBottom(); } catch (_) {}
+          }
         } finally {
           setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
         }
       }
       if (forcePtyResize && paneState.sessionId && !paneState.isFallbackMode) {
-        if (prevCols !== targetCols || prevRows !== targetRows || paneState._lastSentPtyCols !== targetCols || paneState._lastSentPtyRows !== targetRows) {
+        const isActivelyTyping = isMobile && paneState._lastDataEmitAt && (Date.now() - paneState._lastDataEmitAt) < 800;
+        if (!isActivelyTyping && (prevCols !== targetCols || prevRows !== targetRows || paneState._lastSentPtyCols !== targetCols || paneState._lastSentPtyRows !== targetRows)) {
           paneState._lastSentPtyCols = targetCols;
           paneState._lastSentPtyRows = targetRows;
           this.sendPtyResize(paneState.sessionId, targetCols, targetRows);
