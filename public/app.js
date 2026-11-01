@@ -21025,54 +21025,148 @@ ${msg.content.slice(0, 3000)}
   ]);
 
   // ==================== AUTONOMOUS AI WEB SEARCH SKILL ENGINE ====================
-  // Anti-Halusinasi & Anti-Peracunan Topik (v618):
-  // Menjamin kueri penelusuran murni sesuai pertanyaan pengguna, tidak meracuni kueri dengan
-  // subjek masa lalu kecuali jika pengguna secara eksplisit hanya mengirim kata ganti deiktis murni.
-  function synthesizeAutonomousSearchQuery(session, rawPrompt) {
-    if (!rawPrompt) return '';
-    const cleanPrompt = rawPrompt.trim();
+  // Anti-Halusinasi & Anti-Peracunan Topik (v620):
+  // 1. Ekstraksi Entitas Salien Terbobot dari Riwayat Giliran Dialog (User Prioritized)
+  // 2. Klasifikasi Anafora Leksikal Formal (Pronouns + Enclitic '-nya' tanpa Named Entity)
+  // 3. Metrik Relevansi Kata Batas Eksak + Pemetaan Sinonim Semantik (Zero Subword False-Positives)
 
-    const fillerWords = new Set([
-      'bagaimana', 'apa', 'apakah', 'kenapa', 'mengapa', 'tolong', 'coba', 'carikan', 'cari', 'jelaskan',
-      'sebutkan', 'berikan', 'tampilkan', 'info', 'informasi', 'data', 'menurutmu', 'menurut anda', 'tentang',
-      'mengenai', 'bisa', 'dong', 'kan', 'sih', 'ya', 'bro', 'min', 'how', 'what', 'why', 'tell', 'me', 'about'
-    ]);
+  const ANAPHORA_SENTENCE_STARTERS = new Set([
+    'halo', 'hai', 'berikut', 'tentu', 'berdasarkan', 'baik', 'ya', 'tidak', 'menurut', 'dalam', 'untuk',
+    'dengan', 'pada', 'dari', 'jika', 'ketika', 'saat', 'setelah', 'sebelum', 'namun', 'tetapi', 'meskipun',
+    'selain', 'sebagai', 'adapun', 'hello', 'hi', 'sure', 'certainly', 'according', 'based', 'here', 'yes', 'no',
+    'well', 'apa', 'siapa', 'kapan', 'dimana', 'bagaimana', 'kenapa', 'mengapa', 'berapa'
+  ]);
 
-    const words = cleanPrompt.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
-    const contentTokens = words.filter(w => !fillerWords.has(w) && w.length >= 2);
+  const ANAPHORA_GENERIC_ENTITIES = new Set([
+    'anda', 'ai', 'zoz', 'router', 'ollama', 'openrouter', 'model', 'mode', 'bot', 'assistant', 'user', 'system'
+  ]);
 
-    // Kriteria Ketat Anafora Sejati:
-    // HANYA dipicu jika kueri pengguna adalah rujukan ganti eksplisit TANPA entitas substantif mandiri
-    // Contoh valid: "siapa dia?", "berapa umurnya?", "apa fungsinya?", "kenapa begitu?"
-    const isPureAnaphoric = /^(?:siapa|berapa|apa|bagaimana|kenapa|mengapa|dimana|kapan)?\s*(?:dia|ia|beliau|mereka|itu|tersebut|it|he|she|they)(?:\s+(?:itu|ini|nya))?[?.!\s]*$/i.test(cleanPrompt);
+  const ANAPHORA_PRONOUNS_3RD = new Set(['dia', 'ia', 'beliau', 'mereka', 'itu', 'tersebut', 'he', 'she', 'they', 'it']);
+  const ANAPHORA_ADVERB_NYA = new Set(['sebenarnya', 'biasanya', 'rupanya', 'tampaknya', 'akhirnya', 'umumnya', 'seharusnya', 'sebaiknya', 'khususnya', 'pokoknya']);
+  const ANAPHORA_FILLER_WORDS = new Set([
+    'bagaimana', 'apa', 'apakah', 'kenapa', 'mengapa', 'berapa', 'siapa', 'kapan', 'dimana',
+    'tolong', 'coba', 'carikan', 'cari', 'jelaskan', 'sebutkan', 'berikan', 'tampilkan', 'info',
+    'informasi', 'data', 'menurutmu', 'menurut anda', 'tentang', 'mengenai', 'bisa', 'dong', 'kan',
+    'sih', 'ya', 'bro', 'min', 'how', 'what', 'why', 'tell', 'me', 'about'
+  ]);
 
-    if (!isPureAnaphoric || contentTokens.length > 2) {
-      // Pertahankan kueri murni pengguna, cegah peracunan topik dari giliran percakapan sebelumnya!
-      return cleanPrompt.replace(/\s+/g, ' ').trim();
+  const SEARCH_SYNONYM_MAP = new Map([
+    ['usia', ['umur', 'berumur', 'berusia']],
+    ['umur', ['usia', 'berusia', 'berumur']],
+    ['lahir', ['kelahiran', 'dilahirkan']],
+    ['kelahiran', ['lahir', 'dilahirkan']],
+    ['meninggal', ['wafat', 'tewas', 'gugur']],
+    ['wafat', ['meninggal', 'tewas', 'gugur']],
+    ['istri', ['pasangan', 'nyonya']],
+    ['suami', ['pasangan', 'tuan']]
+  ]);
+
+  function extractSalientEntityFromSession(session) {
+    if (!session || !Array.isArray(session.messages) || session.messages.length === 0) return '';
+    const recentMsgs = session.messages.slice(-4).reverse();
+
+    // Prioritas 1: Ekstraksi entitas dari pesan pengguna sebelumnya (topik definitif yang ditanyakan manusia)
+    for (const msg of recentMsgs) {
+      if (msg.role !== 'user') continue;
+      const text = msg.content || '';
+      const allMatches = [...text.matchAll(/\b([A-Z][a-zA-Z0-9_\-\.\+]+(?:\s+[A-Z0-9][a-zA-Z0-9_\-\.\+]+)*)\b/g)];
+      const candidates = allMatches
+        .map(m => m[1].trim())
+        .filter(ent => {
+          const words = ent.split(/\s+/);
+          if (words.length === 1 && ANAPHORA_SENTENCE_STARTERS.has(words[0].toLowerCase())) return false;
+          if (ANAPHORA_GENERIC_ENTITIES.has(ent.toLowerCase())) return false;
+          return ent.length >= 3;
+        });
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => b.split(/\s+/).length - a.split(/\s+/).length);
+        return candidates[0];
+      }
     }
 
-    // Jika dan hanya jika murni anafora, cari entitas subjek dari riwayat giliran terakhir
-    let contextSubject = '';
-    if (session && Array.isArray(session.messages) && session.messages.length > 0) {
-      const recentMsgs = session.messages.slice(-3).reverse();
-      for (const msg of recentMsgs) {
-        const text = msg.content || '';
-        const entMatch = text.match(/\b([A-Z][a-zA-Z0-9_\-\.\+]+(?:\s+[A-Z0-9][a-zA-Z0-9_\-\.\+]+){0,3})\b/);
-        if (entMatch && !['Anda', 'AI', 'Zoz', 'Router', 'Ollama', 'OpenRouter'].includes(entMatch[1])) {
-          contextSubject = entMatch[1];
-          break;
+    // Prioritas 2: Markdown Bold atau Heading pada respons asisten terakhir
+    for (const msg of recentMsgs) {
+      if (msg.role !== 'assistant') continue;
+      const text = msg.content || '';
+      const headingMatch = text.match(/^(?:#{1,3})\s+([A-Z][^\n\r]+)/m);
+      if (headingMatch) {
+        const candidate = headingMatch[1].replace(/[*_`]/g, '').trim();
+        if (candidate.length >= 3 && candidate.length <= 40 && !ANAPHORA_GENERIC_ENTITIES.has(candidate.toLowerCase())) {
+          return candidate;
         }
-        const boldMatch = text.match(/\*\*([^*]+)\*\*|`([^`]+)`/);
-        if (boldMatch) {
-          contextSubject = (boldMatch[1] || boldMatch[2]).trim();
-          break;
+      }
+      const boldMatch = text.match(/\*\*([A-Z][a-zA-Z0-9_\-\.\s]{2,40})\*\*/);
+      if (boldMatch) {
+        const candidate = boldMatch[1].trim();
+        if (!ANAPHORA_SENTENCE_STARTERS.has(candidate.toLowerCase()) && !ANAPHORA_GENERIC_ENTITIES.has(candidate.toLowerCase())) {
+          return candidate;
         }
       }
     }
 
+    // Prioritas 3: Entitas bernama kapital pada respons asisten
+    for (const msg of recentMsgs) {
+      const text = msg.content || '';
+      const allMatches = [...text.matchAll(/\b([A-Z][a-zA-Z0-9_\-\.\+]+(?:\s+[A-Z0-9][a-zA-Z0-9_\-\.\+]+)*)\b/g)];
+      const candidates = allMatches
+        .map(m => m[1].trim())
+        .filter(ent => {
+          const words = ent.split(/\s+/);
+          if (words.length === 1 && ANAPHORA_SENTENCE_STARTERS.has(words[0].toLowerCase())) return false;
+          if (ANAPHORA_GENERIC_ENTITIES.has(ent.toLowerCase())) return false;
+          return ent.length >= 3;
+        });
+
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => b.split(/\s+/).length - a.split(/\s+/).length);
+        return candidates[0];
+      }
+    }
+
+    return '';
+  }
+
+  function synthesizeAutonomousSearchQuery(session, rawPrompt) {
+    if (!rawPrompt) return '';
+    const cleanPrompt = rawPrompt.trim();
+
+    const words = cleanPrompt.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+    const contentTokens = words.filter(w => !ANAPHORA_FILLER_WORDS.has(w) && w.length >= 2);
+
+    // 1. Cek Kata Ganti Orang Ketiga atau Deiktis
+    const hasPronoun = words.some(w => ANAPHORA_PRONOUNS_3RD.has(w));
+
+    // 2. Cek Klitika Anaphora -nya (misal "umurnya", "usianya", "lahirnya", "rumahnya", "dilantiknya")
+    const hasEnclitic = words.some(w => w.endsWith('nya') && w.length >= 4 && !ANAPHORA_ADVERB_NYA.has(w));
+
+    if (!hasPronoun && !hasEnclitic) {
+      return cleanPrompt.replace(/\s+/g, ' ').trim();
+    }
+
+    // 3. Cek apakah kueri memiliki entitas substantif kapital independen
+    const rawWords = cleanPrompt.split(/\s+/).filter(Boolean);
+    const properEntities = [];
+    rawWords.forEach((rw, idx) => {
+      const cleanWord = rw.replace(/[^\p{L}\p{N}]/gu, '');
+      if (!cleanWord) return;
+      const isCapitalized = /^[A-Z][a-zA-Z0-9_\-\.\+]*$/.test(cleanWord);
+      if (isCapitalized) {
+        if (idx === 0 && ANAPHORA_SENTENCE_STARTERS.has(cleanWord.toLowerCase())) return;
+        properEntities.push(cleanWord);
+      }
+    });
+
+    if (properEntities.length > 0 || contentTokens.length > 4) {
+      return cleanPrompt.replace(/\s+/g, ' ').trim();
+    }
+
+    // Resolusi Entitas Subjek Terkemuka (Salient Entity)
+    const contextSubject = extractSalientEntityFromSession(session);
     if (contextSubject && !cleanPrompt.toLowerCase().includes(contextSubject.toLowerCase())) {
-      const intentWords = contentTokens.filter(w => !['dia', 'ia', 'beliau', 'mereka', 'itu', 'tersebut'].includes(w)).join(' ');
-      return `${contextSubject} ${intentWords}`.trim();
+      const intentWords = words
+        .filter(w => !ANAPHORA_PRONOUNS_3RD.has(w) && !ANAPHORA_FILLER_WORDS.has(w))
+        .map(w => (w.endsWith('nya') && w.length >= 5 && !ANAPHORA_ADVERB_NYA.has(w)) ? w.slice(0, -3) : w);
+      return `${contextSubject} ${intentWords.join(' ')}`.trim();
     }
 
     return cleanPrompt.replace(/\s+/g, ' ').trim();
@@ -21097,7 +21191,7 @@ ${msg.content.slice(0, 3000)}
       .trim();
   }
 
-  // Metrik Relevansi Leksikal-Semantik Jaccard/Overlap Term Terbobot (Anti-Halusinasi v618)
+  // Metrik Relevansi Leksikal-Semantik Kata Batas Eksak & Sinonim (Anti-Halusinasi v620)
   function computeLexicalRelevanceScore(query, doc) {
     if (!query || !doc) return 0;
     const cleanQ = String(query).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ');
@@ -21109,19 +21203,32 @@ ${msg.content.slice(0, 3000)}
     const qTokens = cleanQ.split(/\s+/).filter(t => t.length >= 2 && !stopWords.has(t));
     if (qTokens.length === 0) return 0.5;
 
-    const titleText = String(doc.title || '').toLowerCase();
-    const snippetText = String(doc.snippet || '').toLowerCase();
-    const contentText = String(doc.content || '').toLowerCase();
-    const fullText = `${titleText} ${snippetText} ${contentText.slice(0, 3000)}`;
+    const titleWords = new Set(String(doc.title || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+    const snippetWords = new Set(String(doc.snippet || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+    const contentWords = new Set(String(doc.content || '').slice(0, 3000).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
 
     let matchCount = 0;
     let weightedScore = 0;
 
     for (const token of qTokens) {
-      if (fullText.includes(token)) {
+      const rootToken = (token.endsWith('nya') && token.length >= 5) ? token.slice(0, -3) : null;
+      const synonyms = SEARCH_SYNONYM_MAP.get(token) || (rootToken ? SEARCH_SYNONYM_MAP.get(rootToken) : null) || [];
+
+      const checkWordSet = (wordSet) => {
+        if (wordSet.has(token)) return true;
+        if (rootToken && wordSet.has(rootToken)) return true;
+        for (const syn of synonyms) {
+          if (wordSet.has(syn)) return true;
+        }
+        return false;
+      };
+
+      const inTitle = checkWordSet(titleWords);
+      const inSnippet = checkWordSet(snippetWords);
+      const inContent = checkWordSet(contentWords);
+
+      if (inTitle || inSnippet || inContent) {
         matchCount++;
-        const inTitle = titleText.includes(token);
-        const inSnippet = snippetText.includes(token);
         weightedScore += inTitle ? 2.5 : (inSnippet ? 1.5 : 1.0);
       }
     }
@@ -21278,7 +21385,9 @@ ${msg.content.slice(0, 3000)}
       const relevantOrganicList = [];
 
       for (const item of cleanOrganicList) {
-        const score = computeLexicalRelevanceScore(query, item);
+        const scoreUser = computeLexicalRelevanceScore(query, item);
+        const scoreSearch = (searchQuery && searchQuery !== query) ? computeLexicalRelevanceScore(searchQuery, item) : 0;
+        const score = Math.max(scoreUser, scoreSearch);
         item.relevanceScore = score;
         if (score >= RELEVANCE_THRESHOLD) {
           relevantOrganicList.push(item);

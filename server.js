@@ -7175,11 +7175,21 @@ async function requestHandler(req, res) {
       }
     }, 20000);
 
-    req.on('close', () => {
+    let isSseCleanedUp = false;
+    const sseCleanup = () => {
+      if (isSseCleanedUp) return;
+      isSseCleanedUp = true;
       clearInterval(heartbeat);
-      session.clients.delete(res);
-      console.log(`[PTY] Client SSE disconnected from session ${sessionId}. Process persists in background on host laptop.`);
-    });
+      if (session && session.clients) {
+        const removed = session.clients.delete(res);
+        if (removed) {
+          console.log(`[PTY] Client SSE disconnected from session ${sessionId}. Process persists in background on host laptop.`);
+        }
+      }
+    };
+    req.on('close', sseCleanup);
+    req.on('end', sseCleanup);
+    req.on('error', sseCleanup);
 
     return;
   }
