@@ -389,18 +389,33 @@ function resolveHostShell(shellType) {
 }
 
 /**
+ * Helper deteksi ada atau tidaknya teks prompt terminal yang tampak (visible prompt).
+ * Memeriksa apakah buffer berisi teks alfanumerik nyata setelah membersihkan seluruh kode ANSI CSI, OSC, dan control sequences.
+ */
+function hasVisibleTerminalPrompt(bufferStr) {
+  if (!bufferStr) return false;
+  const stripped = bufferStr
+    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+    .replace(/\x1b[()][A-Za-z0-9]/g, '')
+    .replace(/[\x00-\x1f\x7f]/g, ' ')
+    .trim();
+  return stripped.length >= 2;
+}
+
+/**
  * Helper normalisasi stream ConPTY Windows di level global untuk memurnikan sekuens hapus layar (cls / Clear-Host)
  * Diakses oleh jalur SSE (/api/terminal/stream) maupun jalur WebSocket (handleTerminalWebSocketUpgrade).
  */
 function cleanConptyData(str) {
   if (typeof str !== 'string' || !str) return str;
   // 1. Ganti simulasi loop hapus layar ConPTY yang berulang dengan ANSI Clear Viewport + Scrollback \x1b[2J\x1b[3J\x1b[H
-  const wipeRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;]*m){3,}\x1b\[(?:H|1;1H)/g;
+  const wipeRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;?]*[a-zA-Z]){3,}\x1b\[(?:H|1;1H)/g;
   str = str.replace(wipeRe, '\x1b[2J\x1b[3J\x1b[H');
   // 2. Hilangkan padding newline berulang yang diakhiri pemindahan kursor \x1b[row;colH
-  const padRe = /(?:(?:\r\n|\n)\x1b\[K)+(?:(?:\r\n|\n))?\x1b\[(\d+);(\d+)H/g;
+  const padRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;?]*[a-zA-Z])+(?:(?:\r\n|\n))?\x1b\[(\d+);(\d+)H/g;
   str = str.replace(padRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
-  const padHomeRe = /(?:(?:\r\n|\n)\x1b\[K)+(?:(?:\r\n|\n))?\x1b\[H/g;
+  const padHomeRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;?]*[a-zA-Z])+(?:(?:\r\n|\n))?\x1b\[H/g;
   str = str.replace(padHomeRe, '\x1b[H');
   return str;
 }
@@ -7236,6 +7251,13 @@ async function requestHandler(req, res) {
     if (session.buffer && session.buffer.length > 0) {
       const replay = session.buffer.join('');
       res.write(`data: ${JSON.stringify({ type: 'init', data: replay })}\n\n`);
+      if (!hasVisibleTerminalPrompt(replay) && session.pty) {
+        setTimeout(() => {
+          if (session && session.pty) {
+            try { session.pty.write('\r'); } catch (_) {}
+          }
+        }, 120);
+      }
     } else {
       setTimeout(() => {
         if (session && session.pty && (!session.buffer || session.buffer.length === 0)) {
@@ -11980,11 +12002,11 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       autoEnter: Boolean(session.autoEnter)
     })));
     if (session.buffer && session.buffer.length > 0) {
-      socket.write(encodeWsFrame(JSON.stringify({ type: 'init', data: session.buffer.join('') })));
+      const replay = session.buffer.join('');
+      socket.write(encodeWsFrame(JSON.stringify({ type: 'init', data: replay })));
       // Jika buffer hanya berisi sekuens clear/wipe tanpa teks alfanumerik yang tampak,
       // refresh shell dengan carriage return lembut (\r) agar prompt host tidak kosong di layar klien
-      const visibleText = session.buffer.join('').replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').trim();
-      if (!visibleText && session.pty) {
+      if (!hasVisibleTerminalPrompt(replay) && session.pty) {
         setTimeout(() => {
           if (session && session.pty) {
             try { session.pty.write('\r'); } catch (_) {}

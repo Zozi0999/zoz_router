@@ -40251,7 +40251,15 @@ Aturan:
           return;
         }
         this.fitAllPanes();
-      }, 350);
+        // Ketika keyboard virtual ditutup, pastikan viewport xterm kembali terkunci ke dasar dan tombol scroll disinkronkan
+        const vv = window.visualViewport;
+        const isKeyboardClosed = !vv || (vv.height >= window.innerHeight * 0.75);
+        if (isKeyboardClosed && activePane && activePane.term) {
+          activePane._userScrolledUp = false;
+          try { activePane.term.scrollToBottom(); } catch (_) {}
+          if (activePane.updateScrollUI) activePane.updateScrollUI();
+        }
+      }, 250);
     },
 
     syncMobileScreenPosition(paneState) {
@@ -40261,11 +40269,14 @@ Aturan:
       if (xtermScreen && xtermScreen.style.transform) {
         xtermScreen.style.transform = '';
       }
-      if (!paneState._userScrolledUp && term.buffer && term.buffer.active) {
-        if (term.buffer.active.viewportY !== term.buffer.active.baseY) {
+      if (term.buffer && term.buffer.active) {
+        const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
+        if (linesFromBottom <= 2 || !paneState._userScrolledUp) {
+          paneState._userScrolledUp = false;
           try { term.scrollToBottom(); } catch (_) {}
         }
       }
+      if (paneState.updateScrollUI) paneState.updateScrollUI();
     },
 
     syncTerminalFrameDisplay(paneState) {
@@ -41945,26 +41956,24 @@ Aturan:
         openModal('terminalModal');
       }
       this.syncMobileViewport();
-      if (this.remoteHost && this.remotePin && (!this.isRemoteConnected || forceRemote)) {
-        this.connectRemoteTerminal(this.remoteHost, this.remotePin, false).finally(() => {
-          this.initActiveTabPanes();
-          this.updatePaneHeaders();
-          this.focusActiveInput();
-          [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
-        });
-      } else {
+      const afterOpenSetup = () => {
         this.initActiveTabPanes();
         this.updatePaneHeaders();
         this.focusActiveInput();
-        [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
+        [80, 250].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
+      };
+
+      if (this.remoteHost && this.remotePin && (!this.isRemoteConnected || forceRemote)) {
+        this.connectRemoteTerminal(this.remoteHost, this.remotePin, false).finally(() => {
+          afterOpenSetup();
+        });
+      } else {
+        afterOpenSetup();
       }
       this.checkAndPromptRemoteIfMobileOrUnreachable();
       this.detectWindowsBridge(false).then(() => {
         this.syncServerCwd();
       });
-      this.updatePaneHeaders();
-      this.focusActiveInput();
-      [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
       if (typeof TerminalEndorphin !== 'undefined' && typeof TerminalEndorphin.startAutoWatch === 'function') {
         TerminalEndorphin.startAutoWatch();
       }
@@ -42383,19 +42392,28 @@ Aturan:
 
           const now = Date.now();
 
+          // Selalu jangkar terminal ke dasar dan pulihkan status scroll setiap kali pengguna mengetik
+          paneState._userScrolledUp = false;
+          try { term.scrollToBottom(); } catch (_) {}
+          if (paneState.updateScrollUI) paneState.updateScrollUI();
+
+          const isImeComposing = Boolean(paneState._isComposing || (now - (paneState._lastCompositionEndAt || 0)) < 300);
+
           // 2. Fast-Path A: Penambahan murni di akhir kursor (Append Delta)
           if (val.startsWith(oldText)) {
             const insertText = val.slice(oldText.length);
             paneState._imeBuffer = val;
 
             // Temporal Anti-Stutter & IME Duplicate Filter:
-            // Mencegah emisi ganda dari Gboard (mis. insertCompositionText + insertText atau translasi ganda)
-            // di mana karakter yang persis sama dikirim dalam rentang waktu < 50ms
+            // Mencegah emisi ganda dari Gboard (mis. insertCompositionText + insertText atau Google Translate)
+            // di mana karakter yang persis sama dikirim dalam rentang waktu < 180ms, atau selama siklus komposisi IME aktif (< 350ms)
             if (insertText.length === 1 &&
                 paneState._lastEmittedChar === insertText &&
-                paneState._lastEmitTime &&
-                (now - paneState._lastEmitTime) < 50) {
-              return;
+                paneState._lastEmitTime) {
+              const emitDelta = now - paneState._lastEmitTime;
+              if (emitDelta < 180 || (isImeComposing && emitDelta < 350)) {
+                return;
+              }
             }
 
             if (insertText.length > 0) {
@@ -42461,10 +42479,12 @@ Aturan:
           if (delCount === 0 &&
               insertText.length === 1 &&
               paneState._lastEmittedChar === insertText &&
-              paneState._lastEmitTime &&
-              (now - paneState._lastEmitTime) < 50) {
-            paneState._imeBuffer = val;
-            return;
+              paneState._lastEmitTime) {
+            const emitDelta = now - paneState._lastEmitTime;
+            if (emitDelta < 180 || (isImeComposing && emitDelta < 350)) {
+              paneState._imeBuffer = val;
+              return;
+            }
           }
 
           if (delCount > 0) {
@@ -43391,12 +43411,12 @@ Aturan:
     cleanConptyData(str) {
       if (typeof str !== 'string' || !str) return str;
       // 1. Ganti simulasi loop hapus layar ConPTY yang berulang dengan ANSI Clear Viewport + Scrollback \x1b[2J\x1b[3J\x1b[H
-      const wipeRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;]*m){3,}\x1b\[(?:H|1;1H)/g;
+      const wipeRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;?]*[a-zA-Z]){3,}\x1b\[(?:H|1;1H)/g;
       str = str.replace(wipeRe, '\x1b[2J\x1b[3J\x1b[H');
       // 2. Hilangkan padding newline berulang yang diakhiri pemindahan kursor \x1b[row;colH
-      const padRe = /(?:(?:\r\n|\n)\x1b\[K)+(?:(?:\r\n|\n))?\x1b\[(\d+);(\d+)H/g;
+      const padRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;?]*[a-zA-Z])+(?:(?:\r\n|\n))?\x1b\[(\d+);(\d+)H/g;
       str = str.replace(padRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
-      const padHomeRe = /(?:(?:\r\n|\n)\x1b\[K)+(?:(?:\r\n|\n))?\x1b\[H/g;
+      const padHomeRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;?]*[a-zA-Z])+(?:(?:\r\n|\n))?\x1b\[H/g;
       str = str.replace(padHomeRe, '\x1b[H');
       return str;
     },
@@ -43428,12 +43448,36 @@ Aturan:
               paneState._userScrolledUp = false;
               try { currentTerm.scrollToBottom(); } catch (_) {}
               if (paneState.updateScrollUI) paneState.updateScrollUI();
+            } else if (!paneState._userScrolledUp) {
+              try { currentTerm.scrollToBottom(); } catch (_) {}
             }
           });
           if (msg.type === 'init' || isScreenClear) {
             paneState._userScrolledUp = false;
             try { currentTerm.scrollToBottom(); } catch (_) {}
             if (paneState.updateScrollUI) paneState.updateScrollUI();
+          } else if (!paneState._userScrolledUp) {
+            try { currentTerm.scrollToBottom(); } catch (_) {}
+          }
+
+          // Pemulihan Layar Blank Pekat (Screenshot 5): Jika setelah init buffer tidak menampilkan teks prompt, minta shell mencetak ulang prompt
+          if (msg.type === 'init') {
+            setTimeout(() => {
+              if (currentTerm && currentTerm.buffer && currentTerm.buffer.active) {
+                let hasVisibleText = false;
+                const checkLen = Math.min(currentTerm.rows || 20, currentTerm.buffer.active.length);
+                for (let i = 0; i < checkLen; i++) {
+                  const line = currentTerm.buffer.active.getLine(i);
+                  if (line && line.translateToString(true).trim().length > 0) {
+                    hasVisibleText = true;
+                    break;
+                  }
+                }
+                if (!hasVisibleText && paneState.sessionId && !paneState.isFallbackMode) {
+                  this.sendPtyInput(paneState.sessionId, '\r');
+                }
+              }
+            }, 300);
           }
           this.handleAutoRespond(tab, paneState, paneNum, msg.data);
         } else if (typeof msg.data === 'string') {
@@ -45254,14 +45298,15 @@ Aturan:
         fixes.push(`Sinkronkan baris terminal kembali ke jangkar stabil mobile (${pane._stableMobileRows} baris).`);
       }
 
-      // 3. Audit Scroll Lock / Stuck Trap
-      if (metrics.userScrolledUp && !metrics.isMouseActive) {
-        if (term.buffer && term.buffer.active) {
-          const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
-          if (linesFromBottom <= 1) {
-            issues.push('Scroll Trap: Flag _userScrolledUp terkunci padahal posisi kursor di dasar layar.');
-            fixes.push('Reset flag _userScrolledUp dan posisikan viewport ke dasar.');
-          }
+      // 3. Audit Scroll Lock / Stuck Trap / Stranded Prompt in Center (Screenshot 1 & 4)
+      if (term.buffer && term.buffer.active) {
+        const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
+        if (linesFromBottom > 2 && !pane._isTouchActive && !metrics.isMouseActive) {
+          issues.push(`Viewport Terangkat (${linesFromBottom} baris dari dasar): Prompt berisiko melayang di tengah layar.`);
+          fixes.push('Kunci kembali viewport ke posisi dasar (term.scrollToBottom()).');
+        } else if (metrics.userScrolledUp && !metrics.isMouseActive && linesFromBottom <= 1) {
+          issues.push('Scroll Trap: Flag _userScrolledUp terkunci padahal posisi kursor di dasar layar.');
+          fixes.push('Reset flag _userScrolledUp dan posisikan viewport ke dasar.');
         }
       }
 
