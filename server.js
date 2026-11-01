@@ -1038,6 +1038,9 @@ function getUserSessionsDir(userId) {
   const cleanUid = sanitizeUserId(userId);
   const userDir = path.join(SESSIONS_DIR, cleanUid);
   if (ensuredUserSessionDirs.has(cleanUid)) return userDir; // cache hit → langsung
+  if (ensuredUserSessionDirs.size >= 1000) {
+    ensuredUserSessionDirs.clear();
+  }
   if (!fs.existsSync(userDir)) {
     try {
       fs.mkdirSync(userDir, { recursive: true });
@@ -5588,6 +5591,15 @@ function saveMemoryRecord(userId, topic, content) {
       const checkStmt = db.prepare('SELECT rowid FROM memories WHERE user_id = ? AND topic = ? AND content = ? LIMIT 1');
       const existing = checkStmt.all(cleanUid, cleanTopic, cleanContent);
       if (!existing || existing.length === 0) {
+        // Enforce per-user quota to prevent unbounded table growth
+        try {
+          const countStmt = db.prepare('SELECT count(*) as c FROM memories WHERE user_id = ?');
+          const countRow = countStmt.get(cleanUid);
+          if (countRow && countRow.c >= 1000) {
+            const pruneStmt = db.prepare('DELETE FROM memories WHERE rowid IN (SELECT rowid FROM memories WHERE user_id = ? ORDER BY rowid ASC LIMIT 50)');
+            pruneStmt.run(cleanUid);
+          }
+        } catch (_) {}
         const stmt = db.prepare('INSERT INTO memories (user_id, topic, content) VALUES (?, ?, ?)');
         stmt.run(cleanUid, cleanTopic, cleanContent);
       }
@@ -11523,6 +11535,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           }
         });
         if (res.writableEnded || res.destroyed) { idxStream.destroy(); return; }
+        res.on('close', () => {
+          try { idxStream.destroy(); } catch (_) {}
+        });
         idxStream.pipe(res);
       });
       return;
@@ -11583,6 +11598,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       }
     });
     if (res.writableEnded || res.destroyed) { fileStream.destroy(); return; }
+    // Klien pergi di tengah jalan → buang stream agar fd tidak bocor (baik gzip maupun non-gzip)
+    res.on('close', () => {
+      try { fileStream.destroy(); } catch (_) {}
+    });
     if (useGzip) {
       const gzipStream = zlib.createGzip({ level: 6 });
       gzipStream.on('error', (err) => {
@@ -11591,9 +11610,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         if (!res.destroyed) { try { res.destroy(); } catch (_) {}
         }
       });
-      // Klien pergi di tengah jalan → buang kedua stream agar fd tidak bocor
       res.on('close', () => {
-        try { fileStream.destroy(); } catch (_) {}
         try { gzipStream.destroy(); } catch (_) {}
       });
       fileStream.pipe(gzipStream).pipe(res);

@@ -28501,14 +28501,27 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
       }
 
-      budgetedList = [anchorUser];
       if (keptIntermediate.length < intermediateMessages.length) {
-        budgetedList.push({
-          role: supportsSystem ? 'system' : 'user',
-          content: '[Catatan Sistem: Sebagian riwayat percakapan lama di antara turn awal dan turn terkini telah diringkas untuk mengoptimalkan jendela konteks token.]'
-        });
+        anchorUser.content = `${anchorUser.content}\n\n[Catatan Konteks: Sebagian riwayat percakapan lama di antara turn awal dan turn terkini telah diringkas untuk mengoptimalkan jendela konteks token.]`.trim();
       }
-      budgetedList.push(...keptIntermediate, ...tailMessages);
+      const rawBudgeted = [anchorUser, ...keptIntermediate, ...tailMessages];
+
+      // Terapkan Operator Alternasi Deterministik \Pi_{alt} untuk menjamin kepatuhan skema API AI 100%
+      const strictlyAlternatedList = [];
+      for (const msg of rawBudgeted) {
+        if (strictlyAlternatedList.length > 0 && strictlyAlternatedList[strictlyAlternatedList.length - 1].role === msg.role) {
+          const prev = strictlyAlternatedList[strictlyAlternatedList.length - 1];
+          prev.content = `${prev.content}\n\n${msg.content}`.trim();
+          if (msg.images && msg.images.length > 0) {
+            prev.images = [...(prev.images || []), ...msg.images];
+          }
+          if (msg.model && !prev.model) prev.model = msg.model;
+          if (msg.engine && !prev.engine) prev.engine = msg.engine;
+        } else {
+          strictlyAlternatedList.push({ ...msg });
+        }
+      }
+      budgetedList = strictlyAlternatedList;
     }
 
     const sanitizeParticipantName = (name) => {
