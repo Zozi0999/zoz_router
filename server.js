@@ -7081,7 +7081,7 @@ async function requestHandler(req, res) {
     }
     const targetCwd = (reqCwd && fs.existsSync(reqCwd) && path.resolve(reqCwd).toLowerCase() !== WORKSPACE_ROOT.toLowerCase()) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
     const cols = Math.max(45, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
-    const rows = Math.max(15, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
+    const rows = Math.max(8, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -7194,10 +7194,10 @@ async function requestHandler(req, res) {
       if (reqUrl.searchParams.has('autoEnter')) {
         session.autoEnter = (reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true');
       }
-      if (session && session.pty && typeof session.pty.resize === 'function') {
+      if (session && session.pty && typeof session.pty.resize === 'function' && reqUrl.searchParams.has('cols') && reqUrl.searchParams.has('rows')) {
         const isRemote = isRemoteTunnelRequest(req);
         const hasActiveClients = (session.clients && session.clients.size > 0) || (session.wsClients && session.wsClients.size > 0);
-        if (!isRemote || !hasActiveClients) {
+        if (sessionId.startsWith('mob-') || !isRemote || !hasActiveClients) {
           try {
             session.pty.resize(cols, rows);
             session.cols = cols;
@@ -7352,20 +7352,17 @@ async function requestHandler(req, res) {
       }
       const sessionId = (body.session || 'default').trim();
       const cols = Math.max(45, Math.min(400, parseInt(body.cols || '100', 10)));
-      const rows = Math.max(15, Math.min(200, parseInt(body.rows || '28', 10)));
+      const rows = Math.max(8, Math.min(200, parseInt(body.rows || '28', 10)));
       const session = activeTerminalSessions.get(sessionId);
       if (session && session.pty && typeof session.pty.resize === 'function') {
         try {
-          if (session.cols !== cols || session.rows !== rows) {
-            const now = Date.now();
-            if (session._lastResizeTime && (now - session._lastResizeTime) < 200) {
-              return sendJSON(res, 200, { success: true, debounced: true, cols: session.cols, rows: session.rows });
-            }
-            session._lastResizeTime = now;
-            session.pty.resize(cols, rows);
-            session.cols = cols;
-            session.rows = rows;
-            const resizePayload = JSON.stringify({ type: 'pty-resize', cols, rows });
+          const applyPtyResize = (targetC, targetR) => {
+            if (!session.pty || (session.cols === targetC && session.rows === targetR)) return;
+            session._lastResizeTime = Date.now();
+            try { session.pty.resize(targetC, targetR); } catch (_) {}
+            session.cols = targetC;
+            session.rows = targetR;
+            const resizePayload = JSON.stringify({ type: 'pty-resize', cols: targetC, rows: targetR });
             for (const client of session.clients) {
               try { if (!client.writableEnded) client.write(`data: ${resizePayload}\n\n`); } catch (_) {}
             }
@@ -7375,6 +7372,22 @@ async function requestHandler(req, res) {
                 try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
               }
             }
+          };
+          if (session.cols !== cols || session.rows !== rows) {
+            const now = Date.now();
+            const elapsed = session._lastResizeTime ? (now - session._lastResizeTime) : 9999;
+            if (session._resizeTimer) {
+              clearTimeout(session._resizeTimer);
+              session._resizeTimer = null;
+            }
+            if (elapsed < 120) {
+              session._resizeTimer = setTimeout(() => {
+                session._resizeTimer = null;
+                applyPtyResize(cols, rows);
+              }, 120 - elapsed);
+              return sendJSON(res, 200, { success: true, scheduled: true, cols, rows });
+            }
+            applyPtyResize(cols, rows);
           }
           return sendJSON(res, 200, { success: true, cols, rows });
         } catch (resizeErr) {
@@ -11989,17 +12002,14 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
             return;
           } else if (parsed.type === 'resize' && session.pty) {
             const c = Math.max(45, Math.min(300, parseInt(parsed.cols, 10) || cols));
-            const r = Math.max(15, Math.min(100, parseInt(parsed.rows, 10) || rows));
-            if (session.cols !== c || session.rows !== r) {
-              const now = Date.now();
-              if (session._lastResizeTime && (now - session._lastResizeTime) < 200) {
-                return;
-              }
-              session._lastResizeTime = now;
-              session.pty.resize(c, r);
-              session.cols = c;
-              session.rows = r;
-              const resizePayload = JSON.stringify({ type: 'pty-resize', cols: c, rows: r });
+            const r = Math.max(8, Math.min(100, parseInt(parsed.rows, 10) || rows));
+            const applyWsPtyResize = (targetC, targetR) => {
+              if (!session.pty || (session.cols === targetC && session.rows === targetR)) return;
+              session._lastResizeTime = Date.now();
+              try { session.pty.resize(targetC, targetR); } catch (_) {}
+              session.cols = targetC;
+              session.rows = targetR;
+              const resizePayload = JSON.stringify({ type: 'pty-resize', cols: targetC, rows: targetR });
               for (const client of session.clients) {
                 try { if (!client.writableEnded) client.write(`data: ${resizePayload}\n\n`); } catch (_) {}
               }
@@ -12011,6 +12021,22 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
                   }
                 }
               }
+            };
+            if (session.cols !== c || session.rows !== r) {
+              const now = Date.now();
+              const elapsed = session._lastResizeTime ? (now - session._lastResizeTime) : 9999;
+              if (session._resizeTimer) {
+                clearTimeout(session._resizeTimer);
+                session._resizeTimer = null;
+              }
+              if (elapsed < 120) {
+                session._resizeTimer = setTimeout(() => {
+                  session._resizeTimer = null;
+                  applyWsPtyResize(c, r);
+                }, 120 - elapsed);
+                return;
+              }
+              applyWsPtyResize(c, r);
             }
             return;
           } else if (parsed.type === 'input' && typeof parsed.data === 'string' && session.pty) {

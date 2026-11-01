@@ -40243,12 +40243,8 @@ Aturan:
       }
       if (this._mobileVvTimer) clearTimeout(this._mobileVvTimer);
       this._mobileVvTimer = setTimeout(() => {
-        const activePane = this.getPaneState();
-        const isTyping = activePane?._lastDataEmitAt && (Date.now() - activePane._lastDataEmitAt < 800);
-        if (!isTyping) {
-          this.fitAllPanes();
-        }
-      }, 150);
+        this.fitAllPanes();
+      }, 120);
     },
 
     syncMobileScreenPosition(paneState) {
@@ -42303,10 +42299,56 @@ Aturan:
           }
         }, true);
 
-        // Transduser LCP Presisi (M_diff): Emitor Tunggal Mutlak N(c) = 1 untuk seluruh teks keyboard virtual (Gboard)
+        // Transduser LCP Baris Kontinu (M_diff): Emitor Tunggal Mutlak N(c) = 1 untuk seluruh teks keyboard virtual (Gboard).
+        // Invarian Utama: JANGAN PERNAH mereset textarea.value di tengah pengetikan kata/spasi atau saat compositionend,
+        // karena mutasi DOM textarea.value = '' memicu InputMethodManager.restartInput() pada Android Gboard yang
+        // menyebabkan Gboard mengirim ulang (re-commit) kata komposisi dan menduplikasi huruf awal (mis. 'a' -> 'aaj').
         term.textarea.addEventListener('input', (e) => {
-          const val = (term.textarea.value || '').replace(/[\u200B\uFEFF]/g, '');
+          const rawVal = (term.textarea.value || '').replace(/[\u200B\uFEFF]/g, '');
           const oldText = paneState._imeBuffer || '';
+
+          // Jika Gboard menyisipkan karakter baris baru (\n atau \r) melalui event input:
+          if (rawVal.includes('\n') || rawVal.includes('\r')) {
+            const cleanVal = rawVal.replace(/[\r\n]+/g, '');
+            if (cleanVal !== oldText) {
+              let lcp = 0;
+              const minLen = Math.min(oldText.length, cleanVal.length);
+              while (lcp < minLen && oldText.charCodeAt(lcp) === cleanVal.charCodeAt(lcp)) {
+                lcp++;
+              }
+              const delCount = oldText.length - lcp;
+              if (delCount > 0) {
+                paneState._lastBackspaceHandled = Date.now();
+                paneState._lastBackspaceTime = Date.now();
+                if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                  this.sendPtyInput(paneState.sessionId || sessionId, '\x7f'.repeat(delCount));
+                }
+              }
+              const insertText = cleanVal.slice(lcp);
+              if (insertText.length > 0 && paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                this.sendPtyInput(paneState.sessionId || sessionId, insertText);
+              }
+            }
+            this.resetImeLine(paneState);
+            const now = Date.now();
+            if (!paneState._lastEnterSentAt || (now - paneState._lastEnterSentAt) >= 120) {
+              paneState._lastEnterSentAt = now;
+              paneState._userScrolledUp = false;
+              term.scrollToBottom();
+              if (paneState.updateScrollUI) paneState.updateScrollUI();
+              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                this.sendPtyInput(paneState.sessionId || sessionId, '\r');
+              } else if (paneState && paneState.isFallbackMode) {
+                term.write('\r\n');
+                const cmdToRun = paneState._inputLine || '';
+                paneState._inputLine = '';
+                if (cmdToRun.trim()) this.executeCommand(cmdToRun.trim());
+              }
+            }
+            return;
+          }
+
+          const val = rawVal;
           if (val === oldText) return;
 
           let lcp = 0;
@@ -42317,6 +42359,9 @@ Aturan:
 
           const delCount = oldText.length - lcp;
           if (delCount > 0) {
+            const now = Date.now();
+            paneState._lastBackspaceHandled = now;
+            paneState._lastBackspaceTime = now;
             const delSeq = '\x7f'.repeat(delCount);
             if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
               this.sendPtyInput(paneState.sessionId || sessionId, delSeq);
@@ -42341,16 +42386,6 @@ Aturan:
           }
 
           paneState._imeBuffer = val;
-
-          // Batasi akumulasi buffer kata: jika pengguna mengetik spasi atau buffer melebihi 60 huruf,
-          // bersihkan textarea agar siap menerima kata baru tanpa risiko overflow.
-          if (val.length > 60 || val.endsWith(' ')) {
-            this.resetImeLine(paneState);
-          }
-        }, true);
-
-        term.textarea.addEventListener('compositionend', () => {
-          this.resetImeLine(paneState);
         }, true);
 
         term.textarea.addEventListener('blur', () => {
@@ -42394,10 +42429,30 @@ Aturan:
         if (ev.key === 'Backspace' || ev.keyCode === 8) {
           if (ev.type === 'keydown') {
             if (this.isMobileDevice()) {
-              // Di ponsel: biarkan browser melakukan mutasi DOM pada textarea (return true)
-              // agar event 'input' memancarkan \x7f yang presisi melalui transduser LCP.
-              // Jika textarea kosong, Capture-Phase beforeinput yang akan mengirimkan \x7f.
-              return true;
+              const currentVal = (term.textarea?.value || '').replace(/[\u200B\uFEFF]/g, '');
+              if (currentVal.length > 0) {
+                // Jika masih ada teks di textarea, biarkan browser menghapus karakter di textarea (return true)
+                // agar transduser input LCP mendeteksi penyusutan dan memancarkan \x7f.
+                return true;
+              }
+              // Jika textarea sudah kosong (kursor di posisi 0), Gboard sering mengirim keydown keyCode 8
+              // tanpa memicu beforeinput/input. Pancarkan \x7f secara langsung dengan guard anti-duplikasi!
+              const now = Date.now();
+              if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 40) {
+                return false;
+              }
+              paneState._lastBackspaceHandled = now;
+              paneState._lastBackspaceTime = now;
+              this.resetImeLine(paneState);
+              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                this.sendPtyInput(paneState.sessionId || sessionId, '\x7f');
+              } else if (paneState && paneState.isFallbackMode) {
+                if (paneState._inputLine && paneState._inputLine.length > 0) {
+                  paneState._inputLine = paneState._inputLine.slice(0, -1);
+                  term.write('\b \b');
+                }
+              }
+              return false;
             }
             const now = Date.now();
             if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 15) {
@@ -42990,11 +43045,12 @@ Aturan:
       if (!paneState.term) {
         this.initXtermPane(paneNum);
       }
+      this.fitPane(paneState, false);
 
       const activeTerm = paneState.term;
       const dims = (paneState.fitAddon && paneState.fitAddon.proposeDimensions()) || null;
       const cols = (dims && dims.cols >= 45) ? dims.cols : ((activeTerm && activeTerm.cols) ? activeTerm.cols : (this.isMobileDevice() ? 48 : 100));
-      const rows = (dims && dims.rows >= 15) ? dims.rows : ((activeTerm && activeTerm.rows) ? activeTerm.rows : (this.isMobileDevice() ? 25 : 28));
+      const rows = (dims && dims.rows >= 8) ? dims.rows : ((activeTerm && activeTerm.rows) ? activeTerm.rows : (this.isMobileDevice() ? 25 : 28));
       let queryParams = `session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}&autoEnter=${paneState.autoEnter ? '1' : '0'}`;
       const effectivePin = this.remotePin || localStorage.getItem('zoz_last_tunnel_pin') || '';
       if (effectivePin) {
@@ -43180,9 +43236,14 @@ Aturan:
             paneState._userScrolledUp = false;
           }
           const cleanData = msg.data.includes('\x07') ? msg.data.replace(/\x07/g, '') : msg.data;
+          const isScreenClear = cleanData.includes('\x1b[2J') || cleanData.includes('\x1b[3J') || cleanData.includes('\x1bc') || cleanData.includes('\x1b[H\r\n');
+          if (isScreenClear) {
+            paneState._userScrolledUp = false;
+          }
           currentTerm.write(cleanData);
-          if (msg.type === 'init') {
+          if (msg.type === 'init' || isScreenClear) {
             try { currentTerm.scrollToBottom(); } catch (_) {}
+            if (paneState.updateScrollUI) paneState.updateScrollUI();
           }
           this.handleAutoRespond(tab, paneState, paneNum, msg.data);
         } else if (typeof msg.data === 'string') {
@@ -43207,18 +43268,24 @@ Aturan:
       } else if (msg.type === 'connected' || msg.type === 'session') {
         const cCols = parseInt(msg.cols, 10);
         const cRows = parseInt(msg.rows, 10);
-        if (cCols) paneState.ptyCols = cCols;
-        if (cRows) paneState.ptyRows = cRows;
-        if (currentTerm && cCols && cRows) {
-          if (currentTerm.cols !== cCols || currentTerm.rows !== cRows) {
-            paneState._isRemoteResizing = true;
-            try {
-              currentTerm.resize(cCols, cRows);
-            } finally {
-              setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
+        if (this.isMobileDevice()) {
+          // Di ponsel, ukuran layar fisik ponsel (fitPane) adalah sumber kebenaran mutlak.
+          // Jangan biarkan dimensi lama dari sesi server menimpa jumlah baris (rows) xterm ponsel.
+          this.fitPane(paneState, true);
+        } else {
+          if (cCols) paneState.ptyCols = cCols;
+          if (cRows) paneState.ptyRows = cRows;
+          if (currentTerm && cCols && cRows) {
+            if (currentTerm.cols !== cCols || currentTerm.rows !== cRows) {
+              paneState._isRemoteResizing = true;
+              try {
+                currentTerm.resize(cCols, cRows);
+              } finally {
+                setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
+              }
             }
+            this.syncTerminalFrameDisplay(paneState);
           }
-          this.syncTerminalFrameDisplay(paneState);
         }
         if (this.isRemoteConnected) {
           const lat = this.remotePingMs !== null ? ` • ${this.remotePingMs}ms` : '';
@@ -43499,8 +43566,11 @@ Aturan:
         } finally {
           setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
         }
-        const isTypingRecently = isMobile && paneState._lastDataEmitAt && (Date.now() - paneState._lastDataEmitAt < 800);
-        if (forcePtyResize && paneState.sessionId && !paneState.isFallbackMode && !isTypingRecently) {
+      }
+      if (forcePtyResize && paneState.sessionId && !paneState.isFallbackMode) {
+        if (prevCols !== targetCols || prevRows !== targetRows || paneState._lastSentPtyCols !== targetCols || paneState._lastSentPtyRows !== targetRows) {
+          paneState._lastSentPtyCols = targetCols;
+          paneState._lastSentPtyRows = targetRows;
           this.sendPtyResize(paneState.sessionId, targetCols, targetRows);
         }
       }
