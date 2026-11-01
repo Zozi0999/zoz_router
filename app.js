@@ -42196,34 +42196,35 @@ Aturan:
       const isMobile = this.isMobileDevice();
       paneState._imeBuffer = '';
 
-      const helper = term._core && term._core._compositionHelper;
-      if (helper) {
-        if (helper._compositionView) {
-          helper._compositionView.classList.remove('active');
-          helper._compositionView.style.display = 'none';
-        }
-        helper.compositionstart = function() {
-          if (this._compositionView) this._compositionView.classList.remove('active');
-        };
-        helper.compositionupdate = function(e) {
-          if (this._compositionView) this._compositionView.classList.remove('active');
-        };
-        helper.compositionend = function() {
-          if (this._compositionView) this._compositionView.classList.remove('active');
-        };
-
-        // Pengamatan Z21 (v630): PSReadLine menerima setiap huruf DUA kali ("aagguu", "bbhhddnn").
-        // Emitor kedua = xterm CompositionHelper.keydown(keyCode 229) -> _handleAnyTextareaChanges(),
-        // yang mengirim diff textarea via setTimeout(0) karena _isComposing tidak pernah true.
-        // Invarian: tepat SATU emitor per ketukan (n(k) = 1) -> transduser LCP adalah emitor tunggal di ponsel.
+      if (term._core) {
         if (isMobile) {
-          const origKeydown = typeof helper.keydown === 'function' ? helper.keydown.bind(helper) : null;
-          helper.keydown = function(ev) {
-            if (ev && ev.keyCode === 229) return false;
-            return origKeydown ? origKeydown(ev) : true;
-          };
-          helper._handleAnyTextareaChanges = function() {};
+          // Invarian Emitor Tunggal (v634): Nonaktifkan _inputEvent dan _keyPress internal xterm di ponsel
+          // agar xterm tidak memicu triggerDataEvent yang menduplikasi Transduser LCP Kontinu!
+          term._core._inputEvent = function() { return false; };
+          term._core._keyPress = function() { return false; };
         }
+        if (term._core._compositionHelper) {
+          const helper = term._core._compositionHelper;
+          if (helper._compositionView) {
+            helper._compositionView.classList.remove('active');
+            helper._compositionView.style.display = 'none';
+          }
+          helper.compositionstart = function() {};
+          helper.compositionupdate = function() {};
+          helper.compositionend = function() {};
+          helper._finalizeComposition = function() {};
+          helper._handleAnyTextareaChanges = function() {};
+          if (isMobile) {
+            helper.keydown = function() { return false; };
+          }
+        }
+      }
+
+      // Sinkronisasi pergantian layar / alternate buffer (AI CLI mode agy/claude): reset IME buffer
+      if (term.buffer && typeof term.buffer.onBufferChange === 'function') {
+        term.buffer.onBufferChange(() => {
+          this.resetImeLine(paneState);
+        });
       }
 
       if (isMobile && term.textarea) {
@@ -42631,6 +42632,41 @@ Aturan:
           }
         }
 
+        if (this.isMobileDevice()) {
+          // DI PERANGKAT MOBILE (v634):
+          // Seluruh ketikan teks virtual keyboard (huruf a-z, A-Z, angka, tanda baca, simbol, spasi)
+          // dialirkan secara eksklusif melalui term.textarea -> Transduser LCP (applyContinuousDelta).
+          // Mengembalikan false memberi tahu xterm._keyDown untuk TIDAK memproses tombol teks ini
+          // dan TIDAK memicu triggerDataEvent, sehingga duplikasi n(c)=2 tereliminasi mutlak!
+          if (ev.type === 'keydown') {
+            if (ev.key === 'ArrowUp') {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x1b[A');
+              return false;
+            }
+            if (ev.key === 'ArrowDown') {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x1b[B');
+              return false;
+            }
+            if (ev.key === 'ArrowRight') {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x1b[C');
+              return false;
+            }
+            if (ev.key === 'ArrowLeft') {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x1b[D');
+              return false;
+            }
+            if (ev.key === 'Tab') {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\t');
+              return false;
+            }
+            if (ev.key === 'Escape') {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x1b');
+              return false;
+            }
+          }
+          return false;
+        }
+
         return true;
       });
 
@@ -42866,6 +42902,20 @@ Aturan:
 
       term.onData((data) => {
         paneState._lastDataEmitAt = Date.now();
+
+        // INVARIAN EMITOR TUNGGAL PADA PERANGKAT MOBILE (v634):
+        // Di ponsel, seluruh karakter teks cetak (data tanpa escape code \x1b, ASCII >= 32)
+        // telah dikirim oleh Transduser LCP Kontinu (applyContinuousDelta).
+        // Blokir emisi duplikat yang berasal dari engine internal xterm!
+        if (this.isMobileDevice()) {
+          if (typeof data === 'string' && data.length > 0) {
+            const code0 = data.charCodeAt(0);
+            if (!data.startsWith('\x1b') && data !== '\r' && data !== '\n' && data !== '\x7f' && data !== '\b' && data !== '\t' && code0 >= 32) {
+              return;
+            }
+          }
+        }
+
         if (data === '\r' || data === '\n') {
           const now = Date.now();
           if (paneState._lastEnterSentAt && (now - paneState._lastEnterSentAt) < 120) {
