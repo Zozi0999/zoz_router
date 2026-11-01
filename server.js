@@ -5517,7 +5517,15 @@ function fallbackJinaReader(targetUrl, maxChars = 5000) {
     try {
       const req = https.get(`https://r.jina.ai/${targetUrl}`, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 8000 }, (res) => {
         let md = '';
-        res.on('data', c => md += c);
+        let totalBytes = 0;
+        res.on('data', c => {
+          totalBytes += c.length;
+          if (totalBytes > 1000000) {
+            req.destroy();
+          } else {
+            md += c;
+          }
+        });
         res.on('end', () => {
           if (res.statusCode === 200 && md.length > 50) {
             const titleMatch = md.match(/^Title:\s*(.+)$/m) || md.match(/^#\s+(.+)$/m);
@@ -10076,7 +10084,11 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               try {
                 const parsed = JSON.parse(rawResp);
                 const txt = parsed.choices?.[0]?.message?.content || '';
+                const reasoning = parsed.choices?.[0]?.message?.reasoning || parsed.choices?.[0]?.message?.reasoning_content || '';
                 const msgPayload = { role: 'assistant', content: txt };
+                if (reasoning) {
+                  msgPayload.reasoning = reasoning;
+                }
                 if (parsed.choices?.[0]?.message?.tool_calls) {
                   msgPayload.tool_calls = parsed.choices[0].message.tool_calls;
                 }
@@ -10116,9 +10128,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 const delta = parsed.choices?.[0]?.delta?.content || '';
                 const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
                 const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
-                if (delta || deltaToolCalls) {
+                if (delta || deltaToolCalls || deltaReasoning) {
                   const msgPayload = { role: 'assistant', content: delta };
                   if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
+                  if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
                   res.write(JSON.stringify({
                     model: body.model || 'qwen2.5:1.5b',
                     created_at: new Date().toISOString(),
@@ -10132,6 +10145,31 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           });
 
           bridgeRes.on('end', () => {
+            if (sseBuffer && sseBuffer.trim()) {
+              const trimmed = sseBuffer.trim();
+              if (trimmed.startsWith('data:')) {
+                const dataStr = trimmed.slice(5).trim();
+                if (dataStr !== '[DONE]') {
+                  try {
+                    const parsed = JSON.parse(dataStr);
+                    const delta = parsed.choices?.[0]?.delta?.content || '';
+                    const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
+                    const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
+                    if (delta || deltaToolCalls || deltaReasoning) {
+                      const msgPayload = { role: 'assistant', content: delta };
+                      if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
+                      if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
+                      res.write(JSON.stringify({
+                        model: body.model || 'qwen2.5:1.5b',
+                        created_at: new Date().toISOString(),
+                        message: msgPayload,
+                        done: false
+                      }) + '\n');
+                    }
+                  } catch (_) {}
+                }
+              }
+            }
             if (!res.writableEnded) {
               res.write(JSON.stringify({
                 model: body.model || 'qwen2.5:1.5b',

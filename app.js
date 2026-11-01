@@ -6433,12 +6433,70 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
 
   function fixSingleLineMarkdownTables(text) {
     if (!text || typeof text !== 'string') return text;
-    // 1. Pastikan ada baris baru jika tabel menempel langsung setelah teks kalimat (titik dua)
-    let t = text.replace(/:\s*(\|)/g, ':\n\n|');
-    // 2. Deteksi baris tabel yang digabung dalam satu baris (| col | col | | --- | --- | | data | data |)
-    // dan ubah | | menjadi baris baru |\n| agar marked dapat mem-parse tabel HTML dengan sempurna
-    t = t.replace(/\|[ \t]*\|[ \t]*(?=[-:\|\w\p{L}])/gu, '|\n| ');
-    return t;
+    if (!text.includes('|')) return text;
+
+    // Lindungi blok kode ```...``` agar kode di dalamnya tidak terpengaruh
+    const parts = text.split(/(```[\s\S]*?```)/g);
+    for (let i = 0; i < parts.length; i += 2) {
+      let t = parts[i];
+      // 1. Pastikan ada baris baru jika tabel menempel langsung setelah kalimat (titik dua)
+      t = t.replace(/:\s*(\|(?=[^|\n]+\|))/g, ':\n\n|');
+
+      // 2. Pisahkan jika header dan separator markdown digabung dalam satu baris
+      t = t.replace(/(\|[^|\n]+\|)\s*(\|(?:\s*:?-+:?\s*\|)+)/g, '$1\n$2');
+
+      // 3. Pisahkan jika separator dan data baris pertama digabung dalam satu baris
+      t = t.replace(/(\|(?:\s*:?-+:?\s*\|)+)\s*(\|[^|\n]+\|)/g, '$1\n$2');
+
+      // 4. Periksa baris per baris dengan Teori Konservasi Kolom-Pipe
+      const lines = t.split('\n');
+      const fixedLines = [];
+      let expectedCols = null;
+
+      for (let line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) {
+          fixedLines.push(line);
+          expectedCols = null;
+          continue;
+        }
+
+        const pipes = (trimmed.match(/\|/g) || []).length;
+        const isSeparator = /^\|(?:\s*:?-+:?\s*\|)+$/.test(trimmed);
+
+        if (isSeparator) {
+          expectedCols = pipes - 1;
+          fixedLines.push(line);
+          continue;
+        }
+
+        if (expectedCols === null) {
+          expectedCols = pipes - 1;
+          fixedLines.push(line);
+          continue;
+        }
+
+        if (expectedCols >= 2 && pipes >= (expectedCols * 2)) {
+          const cellPattern = new RegExp(`^((?:\\|[^|]*){${expectedCols}}\\|)\\s*(\\|.*)$`);
+          let currentPart = trimmed;
+          while (currentPart) {
+            const m = currentPart.match(cellPattern);
+            if (m) {
+              fixedLines.push(m[1]);
+              currentPart = m[2].trim();
+            } else {
+              fixedLines.push(currentPart);
+              break;
+            }
+          }
+        } else {
+          // Baris tabel normal (termasuk yang memiliki sel kosong | |) — PERTAHANKAN UTUH!
+          fixedLines.push(line);
+        }
+      }
+      parts[i] = fixedLines.join('\n');
+    }
+    return parts.join('');
   }
 
   function renderMarkdown(rawText, isStreaming = false) {
@@ -30845,6 +30903,54 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                       }
                       if (parsed.usage) {
                         openRouterUsage = parsed.usage;
+                      }
+                      const rawImgs = parsed.choices?.[0]?.delta?.images 
+                        || parsed.choices?.[0]?.message?.images 
+                        || parsed.choices?.[0]?.images
+                        || (parsed.data && Array.isArray(parsed.data) ? parsed.data : null);
+                      if (Array.isArray(rawImgs) && rawImgs.length > 0) {
+                        rawImgs.forEach(img => {
+                          const url = img?.image_url?.url || img?.url || (img?.b64_json ? `data:${img.media_type || 'image/png'};base64,${img.b64_json}` : (typeof img === 'string' ? img : null));
+                          if (url && !collectedImages.includes(url)) {
+                            collectedImages.push(url);
+                          }
+                        });
+                      }
+                      const deltaTc = parsed.choices?.[0]?.delta?.tool_calls;
+                      if (Array.isArray(deltaTc)) {
+                        deltaTc.forEach(tc => {
+                          const idx = tc.index ?? 0;
+                          if (!accumulatedToolCalls[idx]) {
+                            accumulatedToolCalls[idx] = {
+                              id: tc.id || `call_${Date.now()}_${idx}`,
+                              type: tc.type || 'function',
+                              function: {
+                                name: tc.function?.name || '',
+                                arguments: tc.function?.arguments || ''
+                              }
+                            };
+                          } else {
+                            if (tc.id) accumulatedToolCalls[idx].id = tc.id;
+                            if (tc.function?.name) {
+                              if (!accumulatedToolCalls[idx].function.name) {
+                                accumulatedToolCalls[idx].function.name = tc.function.name;
+                              } else if (accumulatedToolCalls[idx].function.name !== tc.function.name && !accumulatedToolCalls[idx].function.name.endsWith(tc.function.name)) {
+                                accumulatedToolCalls[idx].function.name += tc.function.name;
+                              }
+                            }
+                            if (tc.function?.arguments) accumulatedToolCalls[idx].function.arguments += tc.function.arguments;
+                          }
+                        });
+                      }
+                      const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning 
+                        || parsed.choices?.[0]?.delta?.reasoning_content 
+                        || parsed.choices?.[0]?.delta?.thought 
+                        || '';
+                      if (reasoningDelta) {
+                        if (!firstTokenTime) firstTokenTime = performance.now();
+                        clearTimeout(ttftTimer);
+                        tokenCount++;
+                        streamRenderer.appendReasoning(reasoningDelta);
                       }
                       const delta = parsed.choices?.[0]?.delta?.content;
                       if (delta) {
