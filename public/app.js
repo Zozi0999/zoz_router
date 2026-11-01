@@ -21191,30 +21191,75 @@ ${msg.content.slice(0, 3000)}
       .trim();
   }
 
-  // Metrik Relevansi Leksikal-Semantik Kata Batas Eksak & Sinonim (Anti-Halusinasi v620)
+  // Taksonomi Token & Metrik Relevansi Leksikal-Semantik Murni (Anti-Halusinasi v624)
+  const IR_QUERY_STOPWORDS = new Set([
+    'dan', 'atau', 'yang', 'untuk', 'dengan', 'pada', 'dari', 'ke', 'di', 'ini', 'itu', 'adalah',
+    'sebagai', 'dalam', 'oleh', 'saat', 'hari', 'tentang', 'apa', 'siapa', 'bagaimana', 'berapa',
+    'kapan', 'kenapa', 'mengapa', 'mana', 'dimana', 'apakah', 'ada', 'bisa', 'dapat', 'akan',
+    'sudah', 'telah', 'sedang', 'masih', 'juga', 'hanya', 'saja', 'tersebut', 'cari', 'carikan',
+    'coba', 'tolong', 'web', 'internet', 'google', 'search', 'find', 'the', 'a', 'an', 'and',
+    'or', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'it', 'its'
+  ]);
+
+  const GENERIC_QUERY_MODIFIERS = new Set([
+    'harga', 'terbaru', 'terkini', 'berita', 'update', 'jadwal', 'rilis', 'daftar', 'informasi',
+    'spesifikasi', 'fitur', 'cara', 'panduan', 'tutorial', 'review', 'ulasan', 'kelebihan',
+    'kekurangan', 'biografi', 'profil', 'asal', 'sejarah', 'penyebab', 'dampak', 'solusi',
+    'arti', 'makna', 'definisi', 'pengertian', 'contoh', 'hasil', 'skor', 'klasemen', 'stat',
+    'statistik', 'populer', 'viral', 'resmi', 'official', 'news', 'price', 'specs', 'release',
+    'date', 'schedule', 'guide', 'history', 'meaning', 'result', 'hari', 'bulan', 'tahun', 'minggu'
+  ]);
+
+  function extractQueryTokenTaxonomy(query) {
+    const clean = String(query || '').toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, ' ');
+    const rawTokens = clean.split(/\s+/).filter(t => t.length >= 2);
+    const contentTokens = rawTokens.filter(t => !IR_QUERY_STOPWORDS.has(t));
+
+    if (contentTokens.length === 0) {
+      return { essentialTokens: [], modifierTokens: [], allContentTokens: [] };
+    }
+
+    const essential = [];
+    const modifiers = [];
+
+    for (const t of contentTokens) {
+      if (GENERIC_QUERY_MODIFIERS.has(t)) {
+        modifiers.push(t);
+      } else {
+        essential.push(t);
+      }
+    }
+
+    if (essential.length === 0) {
+      const longer = contentTokens.filter(t => t.length >= 4);
+      if (longer.length > 0) {
+        essential.push(...longer);
+      } else {
+        essential.push(...contentTokens);
+      }
+    }
+
+    return {
+      essentialTokens: [...new Set(essential)],
+      modifierTokens: [...new Set(modifiers.filter(m => !essential.includes(m)))],
+      allContentTokens: [...new Set(contentTokens)]
+    };
+  }
+
   function computeLexicalRelevanceScore(query, doc) {
     if (!query || !doc) return 0;
-    const cleanQ = String(query).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ');
-    const stopWords = new Set([
-      'dan', 'atau', 'yang', 'untuk', 'dengan', 'pada', 'dari', 'ke', 'di', 'ini', 'itu', 'adalah',
-      'sebagai', 'dalam', 'oleh', 'saat', 'hari', 'tentang', 'apa', 'siapa', 'bagaimana', 'berapa',
-      'the', 'a', 'an', 'and', 'or', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are'
-    ]);
-    const qTokens = cleanQ.split(/\s+/).filter(t => t.length >= 2 && !stopWords.has(t));
-    if (qTokens.length === 0) return 0.5;
+    const { essentialTokens, modifierTokens, allContentTokens } = extractQueryTokenTaxonomy(query);
+    if (allContentTokens.length === 0) return 0.5;
 
     const titleWords = new Set(String(doc.title || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
     const snippetWords = new Set(String(doc.snippet || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
     const contentWords = new Set(String(doc.content || '').slice(0, 3000).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
 
-    let matchCount = 0;
-    let weightedScore = 0;
-
-    for (const token of qTokens) {
+    const checkWordSet = (token) => {
       const rootToken = (token.endsWith('nya') && token.length >= 5) ? token.slice(0, -3) : null;
       const synonyms = SEARCH_SYNONYM_MAP.get(token) || (rootToken ? SEARCH_SYNONYM_MAP.get(rootToken) : null) || [];
 
-      const checkWordSet = (wordSet) => {
+      const inWordSet = (wordSet) => {
         if (wordSet.has(token)) return true;
         if (rootToken && wordSet.has(rootToken)) return true;
         for (const syn of synonyms) {
@@ -21223,19 +21268,57 @@ ${msg.content.slice(0, 3000)}
         return false;
       };
 
-      const inTitle = checkWordSet(titleWords);
-      const inSnippet = checkWordSet(snippetWords);
-      const inContent = checkWordSet(contentWords);
+      const inT = inWordSet(titleWords);
+      const inS = inWordSet(snippetWords);
+      const inC = inWordSet(contentWords);
 
-      if (inTitle || inSnippet || inContent) {
-        matchCount++;
-        weightedScore += inTitle ? 2.5 : (inSnippet ? 1.5 : 1.0);
+      return { inT, inS, inC, matched: inT || inS || inC };
+    };
+
+    // 1. Evaluasi Hard Essential Entity Gate \mathcal{G}_{essential}(Q, D)
+    let essentialMatches = 0;
+    let essentialWeightedSum = 0;
+    for (const et of essentialTokens) {
+      const { inT, inS, inC, matched } = checkWordSet(et);
+      if (matched) {
+        essentialMatches++;
+        essentialWeightedSum += inT ? 3.0 : (inS ? 1.8 : 0.8);
       }
     }
 
-    const coverage = matchCount / qTokens.length;
-    const normalizedScore = coverage * Math.min(1.0, weightedScore / (qTokens.length * 1.5));
-    return Number(normalizedScore.toFixed(4));
+    if (essentialTokens.length > 0) {
+      const minReq = essentialTokens.length === 1 ? 1 : Math.ceil(essentialTokens.length * 0.5);
+      if (essentialMatches < minReq) {
+        // Diskualifikasi dokumen jika tidak memuat entitas esensial kueri
+        return 0.0;
+      }
+    }
+
+    // 2. Evaluasi Modifier Tokens
+    let modifierMatches = 0;
+    let modifierWeightedSum = 0;
+    for (const mt of modifierTokens) {
+      const { inT, inS, inC, matched } = checkWordSet(mt);
+      if (matched) {
+        modifierMatches++;
+        modifierWeightedSum += inT ? 2.0 : (inS ? 1.2 : 0.6);
+      }
+    }
+
+    // 3. Formula Skor Relevansi Matematis
+    const covE = essentialTokens.length > 0 ? (essentialMatches / essentialTokens.length) : 1.0;
+    const covM = modifierTokens.length > 0 ? (modifierMatches / modifierTokens.length) : 1.0;
+
+    const jointCoverage = essentialTokens.length > 0
+      ? (0.75 * covE + 0.25 * covM)
+      : covM;
+
+    const totalWeighted = essentialWeightedSum + modifierWeightedSum;
+    const maxPossibleWeight = Math.max(1, (essentialTokens.length * 3.0 + modifierTokens.length * 2.0));
+    const fieldRatio = Math.min(1.0, totalWeighted / maxPossibleWeight);
+
+    const finalScore = jointCoverage * (0.60 + 0.40 * fieldRatio);
+    return Number(finalScore.toFixed(4));
   }
 
   async function getWebSearchContext(query, session = null, hudElement = null, forceRun = false) {
@@ -21313,34 +21396,50 @@ ${msg.content.slice(0, 3000)}
       const sources = [];
       let factsBlock = '';
 
-      // Knowledge graph
+      // Knowledge graph: Verifikasi kelayakan relevansi token matematis sebelum disuntikkan
       if (data.knowledgeGraph) {
         const kg = data.knowledgeGraph;
-        const kgText = `${cleanWebSnippetText(kg.title || '')} (${cleanWebSnippetText(kg.type || 'Fakta Ringkas')}): ${cleanWebSnippetText(kg.description || '')}`;
-        factsBlock += `\n[KNOWLEDGE GRAPH]: ${kgText}\n`;
-        const kgUrl = kg.website || kg.descriptionUrl;
-        if (kgUrl) {
-          sources.push({
-            title: cleanWebSnippetText(kg.title || 'Knowledge Graph Fact'),
-            url: kgUrl,
-            snippet: cleanWebSnippetText(kg.description || ''),
-            domain: kgUrl.replace(/^https?:\/\//i, '').split('/')[0]
-          });
+        const kgDoc = {
+          title: cleanWebSnippetText(kg.title || ''),
+          snippet: cleanWebSnippetText(kg.description || ''),
+          content: `${cleanWebSnippetText(kg.title || '')} ${cleanWebSnippetText(kg.type || '')} ${cleanWebSnippetText(kg.description || '')}`
+        };
+        const kgScore = computeLexicalRelevanceScore(query, kgDoc);
+        if (kgScore >= 0.35) {
+          const kgText = `${kgDoc.title} (${cleanWebSnippetText(kg.type || 'Fakta Ringkas')}): ${kgDoc.snippet}`;
+          factsBlock += `\n[KNOWLEDGE GRAPH]: ${kgText}\n`;
+          const kgUrl = kg.website || kg.descriptionUrl;
+          if (kgUrl) {
+            sources.push({
+              title: kgDoc.title || 'Knowledge Graph Fact',
+              url: kgUrl,
+              snippet: kgDoc.snippet,
+              domain: kgUrl.replace(/^https?:\/\//i, '').split('/')[0]
+            });
+          }
         }
       }
 
-      // Answer Box
+      // Answer Box: Verifikasi kelayakan relevansi token matematis sebelum disuntikkan
       if (data.answerBox) {
         const ab = data.answerBox;
         const abText = cleanWebSnippetText(ab.answer || ab.snippet || ab.title || '');
-        factsBlock += `\n[JAWABAN UTAMA GOOGLE]: ${abText}\n`;
-        if (ab.link) {
-          sources.push({
-            title: cleanWebSnippetText(ab.title || 'Jawaban Teratas'),
-            url: ab.link,
-            snippet: abText,
-            domain: ab.link.replace(/^https?:\/\//i, '').split('/')[0]
-          });
+        const abDoc = {
+          title: cleanWebSnippetText(ab.title || ''),
+          snippet: abText,
+          content: abText
+        };
+        const abScore = computeLexicalRelevanceScore(query, abDoc);
+        if (abScore >= 0.35) {
+          factsBlock += `\n[JAWABAN UTAMA TERVERIFIKASI]: ${abText}\n`;
+          if (ab.link) {
+            sources.push({
+              title: cleanWebSnippetText(ab.title || 'Jawaban Teratas'),
+              url: ab.link,
+              snippet: abText,
+              domain: ab.link.replace(/^https?:\/\//i, '').split('/')[0]
+            });
+          }
         }
       }
 
@@ -21381,7 +21480,7 @@ ${msg.content.slice(0, 3000)}
 
       // 3. Filter Dokumen Berdasarkan Ambang Batas Relevansi Matematis \tau_{rel}
       // Membuang artikel spam / tidak relevan yang menjadi pemicu utama halusinasi AI
-      const RELEVANCE_THRESHOLD = 0.20;
+      const RELEVANCE_THRESHOLD = 0.35;
       const relevantOrganicList = [];
 
       for (const item of cleanOrganicList) {
@@ -21397,12 +21496,21 @@ ${msg.content.slice(0, 3000)}
       // Urutkan murni berdasarkan skor relevansi terhadap pertanyaan pengguna!
       relevantOrganicList.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
 
-      if (relevantOrganicList.length === 0 && !factsBlock) {
-        console.warn(`[WebSearch] Seluruh hasil penelusuran memiliki relevansi rendah (< ${RELEVANCE_THRESHOLD}) terhadap kueri "${query}". Konteks digugurkan untuk mencegah halusinasi.`);
+      // 4. Mathematical Pareto / Dynamic Knee Pruning
+      // Mencegah pengambilan seluruh sumber jika terdapat jurang relevansi terhadap sumber utama
+      let displayList = [];
+      if (relevantOrganicList.length > 0) {
+        const maxScore = relevantOrganicList[0].relevanceScore || 1.0;
+        displayList = relevantOrganicList
+          .filter(item => item.relevanceScore >= maxScore * 0.45)
+          .slice(0, 4);
+      }
+
+      if (displayList.length === 0 && !factsBlock) {
+        console.warn(`[WebSearch] Seluruh hasil penelusuran tidak memenuhi kendala token esensial atau ambang batas relevansi (< ${RELEVANCE_THRESHOLD}) terhadap kueri "${query}". Konteks digugurkan untuk mencegah halusinasi.`);
         return null;
       }
 
-      const displayList = relevantOrganicList.slice(0, 6);
       let organicBlock = '';
       displayList.forEach((item, idx) => {
         const title = item.title;
@@ -21411,9 +21519,9 @@ ${msg.content.slice(0, 3000)}
         const rawDate = item.pubDate || item.date || '';
         const date = rawDate ? ` [${rawDate}]` : '';
 
-        const bodyText = String(item.content || '').slice(0, idx < 3 ? 2000 : 500);
+        const bodyText = String(item.content || '').slice(0, idx < 2 ? 1800 : 500);
         const bodyBlock = bodyText && bodyText.length > snippet.length ? `\n   Kutipan Bukti: ${bodyText}` : '';
-        organicBlock += `\n${idx + 1}. **[${title}](${link})**${date} [Kesesuaian: ${(item.relevanceScore * 100).toFixed(0)}%]\n   Ringkasan: ${snippet}${bodyBlock}\n`;
+        organicBlock += `\n${idx + 1}. **[${title}](${link})**${date} [Kesesuaian Token: ${(item.relevanceScore * 100).toFixed(0)}%]\n   Ringkasan: ${snippet}${bodyBlock}\n`;
         
         if (link && !sources.some(s => s.url === link)) {
           sources.push({
@@ -26534,19 +26642,42 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
 
         if (results.length > 0) {
+          // Filter Token Relevansi Matematis Murni & Pareto Knee Pruning (Anti-Halusinasi v624)
+          const filteredResults = [];
+          for (const item of results) {
+            const score = computeLexicalRelevanceScore(query, item);
+            item.relevanceScore = score;
+            if (score >= 0.30) {
+              filteredResults.push(item);
+            }
+          }
+          filteredResults.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+          const maxScore = filteredResults[0]?.relevanceScore || 0;
+          const displayCandidates = maxScore > 0
+            ? filteredResults.filter(r => r.relevanceScore >= maxScore * 0.45).slice(0, Math.min(maxResults, 4))
+            : [];
+
+          if (displayCandidates.length === 0) {
+            return cacheAndReturn({
+              text: `[HASIL PENELUSURAN WEB UNTUK "${query}"]:\nTidak ditemukan hasil spesifik yang memuat token/entitas esensial kueri. Seluruh sumber yang ditemukan tidak relevan dan disaring secara matematis untuk mencegah halusinasi. Silakan formulasikan kueri yang lebih spesifik atau gunakan pengetahuan dasar Anda.`,
+              sources: [],
+              success: false
+            });
+          }
+
           const formattedSources = [];
           const lines = [];
-          results.slice(0, maxResults).forEach((item, idx) => {
+          displayCandidates.forEach((item, idx) => {
             const title = cleanWebSnippetText(item.title || 'Informasi Web');
             const link = item.url || item.link || '';
             const snippet = cleanWebSnippetText(item.snippet || '');
             const domain = item.domain || (link ? link.replace(/^https?:\/\//i, '').split('/')[0] : 'web');
             const provider = item.sourceProvider || domain;
             const dateStr = item.pubDate ? ` [${item.pubDate}]` : '';
-            const bodyText = cleanWebSnippetText(String(item.content || '')).slice(0, idx < 5 ? 2500 : 600);
+            const bodyText = cleanWebSnippetText(String(item.content || '')).slice(0, idx < 2 ? 1800 : 500);
             const bodyBlock = bodyText && bodyText.length > snippet.length ? `\n    Isi Artikel: ${bodyText}` : '';
 
-            lines.push(`[${idx + 1}] "${title}"${dateStr} (${provider})\n    Tautan: ${link}\n    Ringkasan: ${snippet}${bodyBlock}`);
+            lines.push(`[${idx + 1}] "${title}"${dateStr} (${provider}) [Kesesuaian Token: ${(item.relevanceScore * 100).toFixed(0)}%]\n    Tautan: ${link}\n    Ringkasan: ${snippet}${bodyBlock}`);
             if (link) {
               formattedSources.push({
                 title,

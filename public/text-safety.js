@@ -1676,12 +1676,33 @@
     return expanded;
   }
 
+  const GENERIC_IR_MODIFIERS = new Set([
+    'harga', 'terbaru', 'terkini', 'berita', 'update', 'jadwal', 'rilis', 'daftar', 'informasi',
+    'spesifikasi', 'fitur', 'cara', 'panduan', 'tutorial', 'review', 'ulasan', 'kelebihan',
+    'kekurangan', 'biografi', 'profil', 'asal', 'sejarah', 'penyebab', 'dampak', 'solusi',
+    'arti', 'makna', 'definisi', 'pengertian', 'contoh', 'hasil', 'skor', 'klasemen', 'stat',
+    'statistik', 'populer', 'viral', 'resmi', 'official', 'news', 'price', 'specs', 'release',
+    'date', 'schedule', 'guide', 'history', 'meaning', 'result', 'hari', 'bulan', 'tahun', 'minggu'
+  ]);
+
+  function extractEssentialTokensIR(query) {
+    const rawTokens = tokenizeForIR(query);
+    const content = rawTokens.filter(t => !IR_STOPWORDS.has(t));
+    if (content.length === 0) return [];
+    const essential = content.filter(t => !GENERIC_IR_MODIFIERS.has(t));
+    if (essential.length > 0) return [...new Set(essential)];
+    const longer = content.filter(t => t.length >= 4);
+    if (longer.length > 0) return [...new Set(longer)];
+    return [...new Set(content)];
+  }
+
   function rankDocumentsMathematically(candidates, query, options = {}) {
     if (!Array.isArray(candidates) || candidates.length === 0) return [];
     const nowMs = options.nowMs || Date.now();
     const profile = options.profile || computeTemporalRecencyProfile(query, options.contextText || '', nowMs);
     const queryWeights = expandQueryTokensMathematically(query, profile.curYear);
     const qTerms = [...queryWeights.keys()];
+    const essentialTokens = extractEssentialTokensIR(query);
 
     // Pre-tokenize documents & extract authentic timestamps
     const docs = candidates.map((item) => {
@@ -1765,6 +1786,20 @@
           continue;
         }
       }
+
+      // Hard Essential Entity Gate \mathcal{G}_{essential}(Q, D)
+      if (essentialTokens.length > 0 && !options.keepCandidateFloor && !options.isWhitelistedPool) {
+        let matchedEssential = 0;
+        for (const eq of essentialTokens) {
+          if (d.tfTitle.has(eq) || d.tfSnippet.has(eq) || d.tfContent.has(eq)) {
+            matchedEssential++;
+          }
+        }
+        const minReq = essentialTokens.length === 1 ? 1 : Math.ceil(essentialTokens.length * 0.5);
+        if (matchedEssential < minReq) {
+          continue; // Gugurkan kandidat yang tidak memuat entitas esensial kueri
+        }
+      }
       const lexNorm = bm25 / (bm25 + kappa);
 
       // 2. Exponential Radioactive Temporal Decay W_time(Δt) = exp(-λ · Δt)
@@ -1830,6 +1865,12 @@
     }
 
     scored.sort((a, b) => b.mathDiagnostics.mathScore - a.mathDiagnostics.mathScore);
+    if (scored.length > 0 && !options.keepCandidateFloor && !options.isWhitelistedPool) {
+      const topScore = scored[0].mathDiagnostics.mathScore;
+      if (topScore > 0) {
+        return scored.filter(s => s.mathDiagnostics.mathScore >= topScore * 0.40);
+      }
+    }
     return scored;
   }
 
@@ -2253,6 +2294,7 @@
 
   const META_IMPERATIVE_TOKENS = new Set([
     'jawab', 'jawablah', 'jawabannya', 'jawaban', 'singkat', 'saja', 'tolong', 'bantu', 'berikan', 'kasih',
+    'coba', 'cobalah', 'silakan', 'mohon',
     'apa', 'mana', 'cepat', 'ya', 'dong', 'ini', 'itu', 'deh', 'lah', 'kan', 'nih',
     'analisis', 'analisa', 'jelaskan', 'sebutkan', 'uraikan', 'baca', 'bacakan', 'cek', 'periksa',
     'simpulkan', 'terjemahkan', 'artikan', 'tuliskan', 'tulis',
