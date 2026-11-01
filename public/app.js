@@ -42343,8 +42343,20 @@ Aturan:
             return;
           }
 
-          // 4. Karakter Langsung, Autocomplete Suggestion, atau Tempelan Paste
-          if (e.inputType === 'insertText' || e.inputType === 'insertFromPaste' || e.inputType === 'insertReplacementText') {
+          // 4. Penggantian Kata Saran / Autocomplete (insertReplacementText)
+          if (e.inputType === 'insertReplacementText') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const text = (typeof e.data === 'string' ? e.data : '').replace(/\u200B/g, '');
+            if (text) {
+              applyImeDelta(text);
+              commitIme();
+            }
+            return;
+          }
+
+          // 5. Tempelan Clipboard / Paste (insertFromPaste)
+          if (e.inputType === 'insertFromPaste') {
             e.preventDefault();
             e.stopImmediatePropagation();
             let text = typeof e.data === 'string' ? e.data : '';
@@ -42353,9 +42365,23 @@ Aturan:
             }
             text = (text || '').replace(/\u200B/g, '');
             if (text) {
-              applyImeDelta((paneState._imeBuffer || '') + text);
-              if (text.includes(' ') || text.includes('\n')) {
+              emitToTerminal(text);
+              commitIme();
+            }
+            return;
+          }
+
+          // 6. Karakter Langsung (insertText: spasi, simbol, atau huruf tunggal)
+          if (e.inputType === 'insertText') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const text = (typeof e.data === 'string' ? e.data : '').replace(/\u200B/g, '');
+            if (text) {
+              if (text === ' ' || text.includes(' ') || text.includes('\n')) {
                 commitIme();
+                emitToTerminal(text);
+              } else {
+                applyImeDelta((paneState._imeBuffer || '') + text);
               }
             }
             return;
@@ -43458,9 +43484,9 @@ Aturan:
 
     async sendPtyResize(sessionId, cols, rows) {
       const minSafeCols = this.isMobileDevice() ? 45 : 60;
-      const minSafeRows = this.isMobileDevice() ? 15 : 20;
+      const minSafeRows = this.isMobileDevice() ? 8 : 20;
       const safeCols = Math.max(minSafeCols, parseInt(cols, 10) || minSafeCols);
-      const safeRows = Math.max(minSafeRows, parseInt(rows, 10) || (this.isMobileDevice() ? 25 : 28));
+      const safeRows = Math.max(minSafeRows, parseInt(rows, 10) || (this.isMobileDevice() ? 12 : 28));
       const tab = this.getActiveTab();
       const panes = [tab?.pane1, tab?.pane2].filter(p => p && p.sessionId === sessionId);
       const wsPane = panes.find(p => p.ws && p.ws.readyState === WebSocket.OPEN);
@@ -44793,7 +44819,6 @@ Aturan:
         const tag = (activeEl?.tagName || '').toLowerCase();
         if (activeEl === paneState.term.textarea) {
           this.ensureActivePtySize(paneState);
-          if (paneState) paneState._imeBuffer = '';
           return;
         }
         if (tag === 'input' || tag === 'textarea' || tag === 'select' || activeEl?.isContentEditable) {
