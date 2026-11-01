@@ -42495,6 +42495,16 @@ Aturan:
               return false;
             }
             paneState._lastEnterSentAt = now;
+            const enteredCmd = (paneState._imeBuffer || '').trim().toLowerCase();
+            if (enteredCmd === 'cls' || enteredCmd === 'clear') {
+              paneState._lastScreenClearAt = now;
+              paneState._userScrolledUp = false;
+              try {
+                term.clear();
+                term.scrollToBottom();
+              } catch (_) {}
+              if (paneState.updateScrollUI) paneState.updateScrollUI();
+            }
             paneState._userScrolledUp = false;
             term.scrollToBottom();
             if (paneState.updateScrollUI) paneState.updateScrollUI();
@@ -42772,6 +42782,10 @@ Aturan:
       const updateScrollUI = () => {
         const bottomBtn = document.getElementById('btnTermScrollBottom');
         if (!bottomBtn) return;
+        if (paneState._lastScreenClearAt && (Date.now() - paneState._lastScreenClearAt) < 1500) {
+          bottomBtn.style.display = 'none';
+          return;
+        }
         if (term && term.buffer && term.buffer.active) {
           const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
           bottomBtn.style.display = linesFromBottom > 1 ? 'inline-flex' : 'none';
@@ -42781,6 +42795,11 @@ Aturan:
 
       if (term.onScroll) {
         term.onScroll(() => {
+          if (paneState._lastScreenClearAt && (Date.now() - paneState._lastScreenClearAt) < 1500) {
+            paneState._userScrolledUp = false;
+            updateScrollUI();
+            return;
+          }
           if (term && term.buffer && term.buffer.active) {
             const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
             if (linesFromBottom <= 1) {
@@ -42973,6 +42992,16 @@ Aturan:
             return;
           }
           paneState._lastEnterSentAt = now;
+          const enteredCmd = (paneState._imeBuffer || '').trim().toLowerCase();
+          if (enteredCmd === 'cls' || enteredCmd === 'clear') {
+            paneState._lastScreenClearAt = now;
+            paneState._userScrolledUp = false;
+            try {
+              term.clear();
+              term.scrollToBottom();
+            } catch (_) {}
+            if (paneState.updateScrollUI) paneState.updateScrollUI();
+          }
           this.resetImeLine(paneState);
           paneState._userScrolledUp = false;
           if (paneState._touchInertiaRaf) {
@@ -43314,6 +43343,20 @@ Aturan:
       };
     },
 
+    // Helper normalisasi stream ConPTY Windows untuk memurnikan sekuens hapus layar (cls / Clear-Host)
+    cleanConptyData(str) {
+      if (typeof str !== 'string' || !str) return str;
+      // 1. Ganti simulasi loop hapus layar ConPTY yang berulang dengan ANSI Clear Viewport \x1b[2J\x1b[H
+      const wipeRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;]*m){3,}\x1b\[(?:H|1;1H)/g;
+      str = str.replace(wipeRe, '\x1b[2J\x1b[H');
+      // 2. Hilangkan padding newline berulang yang diakhiri pemindahan kursor \x1b[row;colH
+      const padRe = /(?:(?:\r\n|\n)\x1b\[K)+(?:(?:\r\n|\n))?\x1b\[(\d+);(\d+)H/g;
+      str = str.replace(padRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
+      const padHomeRe = /(?:(?:\r\n|\n)\x1b\[K)+(?:(?:\r\n|\n))?\x1b\[H/g;
+      str = str.replace(padHomeRe, '\x1b[H');
+      return str;
+    },
+
     _handleStreamMessage(tab, paneState, paneNum, msg, statusLabel, statusDot, sessionId) {
       const currentTerm = paneState.term;
       if (msg.type === 'data' || msg.type === 'init') {
@@ -43323,13 +43366,25 @@ Aturan:
             try { currentTerm.reset(); } catch (_) {}
             paneState._userScrolledUp = false;
           }
-          const cleanData = msg.data.includes('\x07') ? msg.data.replace(/\x07/g, '') : msg.data;
-          const isScreenClear = cleanData.includes('\x1b[2J') || cleanData.includes('\x1b[3J') || cleanData.includes('\x1bc') || cleanData.includes('\x1b[H\r\n');
+          let cleanData = msg.data.includes('\x07') ? msg.data.replace(/\x07/g, '') : msg.data;
+          cleanData = this.cleanConptyData(cleanData);
+
+          const isScreenClear = cleanData.includes('\x1b[2J') ||
+                                cleanData.includes('\x1b[3J') ||
+                                cleanData.includes('\x1bc') ||
+                                cleanData.includes('\x1b[H\r\n') ||
+                                cleanData.includes('\x0c');
+
           if (isScreenClear) {
+            paneState._lastScreenClearAt = Date.now();
             paneState._userScrolledUp = false;
+            try {
+              currentTerm.clear();
+            } catch (_) {}
           }
           currentTerm.write(cleanData);
           if (msg.type === 'init' || isScreenClear) {
+            paneState._userScrolledUp = false;
             try { currentTerm.scrollToBottom(); } catch (_) {}
             if (paneState.updateScrollUI) paneState.updateScrollUI();
           }
@@ -44010,7 +44065,15 @@ Aturan:
     clearActiveScreen() {
       const pane = this.getPaneState(this.activePane);
       if (pane && pane.term) {
+        pane._lastScreenClearAt = Date.now();
+        pane._userScrolledUp = false;
         pane.term.clear();
+        this.resetImeLine(pane);
+        pane.term.scrollToBottom();
+        if (pane.updateScrollUI) pane.updateScrollUI();
+        if (pane.sessionId && !pane.isFallbackMode) {
+          this.sendPtyInput(pane.sessionId, '\x0c');
+        }
         return;
       }
       const screen = document.getElementById(`termScreen${this.activePane}`);
@@ -44496,7 +44559,18 @@ Aturan:
           }
           else if (keyType === 'ctrl_d') ptySeq = '\x04';
           else if (keyType === 'ctrl_z') ptySeq = '\x1a';
-          else if (keyType === 'ctrl_l') ptySeq = '\x0c';
+          else if (keyType === 'ctrl_l') {
+            ptySeq = '\x0c';
+            paneState._lastScreenClearAt = Date.now();
+            paneState._userScrolledUp = false;
+            if (paneState?.term) {
+              try {
+                paneState.term.clear();
+                paneState.term.scrollToBottom();
+              } catch (_) {}
+            }
+            if (paneState?.updateScrollUI) paneState.updateScrollUI();
+          }
           else if (keyType === 'ctrl_a') ptySeq = '\x01';
           else if (keyType === 'ctrl_e') ptySeq = '\x05';
           else if (keyType === 'Home') ptySeq = '\x1b[H';
