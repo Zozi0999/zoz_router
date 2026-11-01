@@ -41896,13 +41896,11 @@ Aturan:
         return;
       }
 
-      // In desktop/mobile xterm mode with active live PTY, send carriage return (\r) and newline (\n) directly to the pane's PTY
+      // In desktop/mobile xterm mode with active live PTY, send clean carriage return (\r) directly to the pane's PTY
       if (paneState && paneState.term && !paneState.isFallbackMode) {
+        paneState._imeBuffer = '';
         const sessionId = paneState.sessionId || `${tab.id}-p${paneNum}`;
         this.sendPtyInput(sessionId, '\r');
-        setTimeout(() => {
-          this.sendPtyInput(sessionId, '\n');
-        }, 30);
         paneState.term.scrollToBottom();
         this.focusActiveInput();
       } else {
@@ -42176,14 +42174,16 @@ Aturan:
       }
 
       // =========================================================================
-      // ZERO-STATE SENTINEL TRANSDUCER UNTUK KEYBOARD PONSEL (ANDROID / GBOARD)
-      // Murni Matematika: Menjaga buffer textarea selalu pada kondisi kanonikal
-      // B(textarea) = \u200B (Zero-Width Space Sentinel) sehingga Gboard tidak mengakumulasi
-      // riwayat teks, tidak mengaktifkan translate bar paksa, dan karakter mengalir lancar
-      // tanpa stuttering, tanpa duplikasi, dan backspace responsif 100%.
+      // PREFIX-DIFFERENCING TRANSDUCER (M_diff) UNTUK KEYBOARD PONSEL (ANDROID / GBOARD)
+      // Murni Matematika: Pelestarian Invarian Linear O(N) Transmisi Karakter.
+      // Menghitung delta via Longest Common Prefix (LCP):
+      // Delta = (Backspace)^(len(old) - LCP) + new[LCP:]
+      // Mengeliminasi total ledakan akumulasi segitiga O(N^2) dari IME Android / Gboard,
+      // menghasilkan ketikan instan karakter-per-karakter tanpa jeda, tanpa stuttering,
+      // tanpa duplikasi 'AAA...', dan backspace presisi 100%.
       // =========================================================================
       const isMobile = this.isMobileDevice();
-      const SENTINEL = '\u200B';
+      paneState._imeBuffer = '';
 
       const helper = term._core && term._core._compositionHelper;
       if (helper) {
@@ -42203,15 +42203,6 @@ Aturan:
       }
 
       if (isMobile && term.textarea) {
-        const resetSentinel = () => {
-          try {
-            term.textarea.value = SENTINEL;
-            term.textarea.setSelectionRange(1, 1);
-          } catch (_) {}
-        };
-
-        resetSentinel();
-
         const emitToTerminal = (chars) => {
           if (!chars) return;
           paneState._lastDataEmitAt = Date.now();
@@ -42237,33 +42228,87 @@ Aturan:
           }
         };
 
-        // Capture-phase beforeinput: Saluran transmisi instan ke PTY tanpa akumulasi memori lokal
+        const commitIme = () => {
+          paneState._imeBuffer = '';
+          try {
+            term.textarea.value = '';
+          } catch (_) {}
+        };
+
+        const applyImeDelta = (newText) => {
+          if (typeof newText !== 'string') return;
+          const oldText = paneState._imeBuffer || '';
+
+          // Hitung LCP (Longest Common Prefix)
+          let lcp = 0;
+          const minLen = Math.min(oldText.length, newText.length);
+          while (lcp < minLen && oldText[lcp] === newText[lcp]) {
+            lcp++;
+          }
+
+          // 1. Contraction (Backspace untuk karakter lama yang diganti)
+          const delCount = oldText.length - lcp;
+          for (let i = 0; i < delCount; i++) {
+            emitToTerminal('\x7f');
+          }
+
+          // 2. Expansion (Karakter baru setelah LCP)
+          const insertText = newText.slice(lcp);
+          if (insertText.length > 0) {
+            emitToTerminal(insertText);
+          }
+
+          paneState._imeBuffer = newText;
+        };
+
+        // Lifecycle hooks IME untuk Android Gboard
+        term.textarea.addEventListener('compositionstart', (e) => {
+          paneState._imeBuffer = '';
+        }, true);
+
+        term.textarea.addEventListener('compositionupdate', (e) => {
+          const data = typeof e.data === 'string' ? e.data.replace(/\u200B/g, '') : '';
+          applyImeDelta(data);
+        }, true);
+
+        term.textarea.addEventListener('compositionend', (e) => {
+          const data = typeof e.data === 'string' ? e.data.replace(/\u200B/g, '') : '';
+          if (data && data !== paneState._imeBuffer) {
+            applyImeDelta(data);
+          }
+          commitIme();
+        }, true);
+
+        // Capture-phase beforeinput: Penghubung instan untuk seluruh varian input Android IME
         term.textarea.addEventListener('beforeinput', (e) => {
           const now = Date.now();
+          paneState._lastDataEmitAt = now;
 
           // 1. Penghapusan Karakter (Backspace)
           if (e.inputType === 'deleteContentBackward' || e.inputType === 'deleteWordBackward') {
-            if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 15) {
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              resetSentinel();
-              return;
-            }
-            paneState._lastBackspaceHandled = now;
-            paneState._lastBackspaceTime = now;
-            emitToTerminal(e.inputType === 'deleteWordBackward' ? '\x17' : '\x7f');
             e.preventDefault();
             e.stopImmediatePropagation();
-            resetSentinel();
+
+            if (paneState._imeBuffer && paneState._imeBuffer.length > 0) {
+              const target = e.inputType === 'deleteWordBackward' ? '' : paneState._imeBuffer.slice(0, -1);
+              applyImeDelta(target);
+            } else {
+              if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 15) {
+                return;
+              }
+              paneState._lastBackspaceHandled = now;
+              paneState._lastBackspaceTime = now;
+              emitToTerminal(e.inputType === 'deleteWordBackward' ? '\x17' : '\x7f');
+            }
             return;
           }
 
           // 2. Baris Baru (Enter)
           if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            commitIme();
             if (paneState._lastEnterSentAt && (now - paneState._lastEnterSentAt) < 120) {
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              resetSentinel();
               return;
             }
             paneState._lastEnterSentAt = now;
@@ -42271,55 +42316,52 @@ Aturan:
             term.scrollToBottom();
             if (paneState.updateScrollUI) paneState.updateScrollUI();
             emitToTerminal('\r');
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            resetSentinel();
             return;
           }
 
-          // 3. Karakter Baru, Autocomplete Suggestion, atau Paste
-          let incoming = e.data;
-          if (!incoming && e.dataTransfer) {
-            incoming = e.dataTransfer.getData('text/plain');
+          // 3. Teks Komposisi Virtual Keyboard (insertCompositionText)
+          if (e.inputType === 'insertCompositionText') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            const data = typeof e.data === 'string' ? e.data.replace(/\u200B/g, '') : '';
+            applyImeDelta(data);
+            return;
           }
-          if (typeof incoming === 'string' && incoming.length > 0) {
-            incoming = incoming.replace(/\u200B/g, '');
-            if (incoming.length > 0) {
-              emitToTerminal(incoming);
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              resetSentinel();
+
+          // 4. Karakter Langsung, Autocomplete Suggestion, atau Tempelan Paste
+          if (e.inputType === 'insertText' || e.inputType === 'insertFromPaste' || e.inputType === 'insertReplacementText') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            let text = typeof e.data === 'string' ? e.data : '';
+            if (!text && e.dataTransfer) {
+              text = e.dataTransfer.getData('text/plain');
             }
+            text = (text || '').replace(/\u200B/g, '');
+            if (text) {
+              applyImeDelta((paneState._imeBuffer || '') + text);
+              if (text.includes(' ') || text.includes('\n')) {
+                commitIme();
+              }
+            }
+            return;
           }
         }, true);
 
-        // Fallback input event untuk virtual keyboard yang tidak mengisi beforeinput.data
+        // Fallback input event untuk virtual keyboard non-standar
         term.textarea.addEventListener('input', (e) => {
-          const val = term.textarea.value || '';
-          if (val === '') {
-            const now = Date.now();
-            if (!paneState._lastBackspaceHandled || (now - paneState._lastBackspaceHandled) >= 15) {
-              paneState._lastBackspaceHandled = now;
-              paneState._lastBackspaceTime = now;
-              emitToTerminal('\x7f');
-            }
-            e.stopImmediatePropagation();
-            resetSentinel();
-            return;
+          e.stopImmediatePropagation();
+          const val = (term.textarea.value || '').replace(/\u200B/g, '');
+          if (val && val !== paneState._imeBuffer) {
+            applyImeDelta(val);
           }
+        }, true);
 
-          if (val !== SENTINEL) {
-            const clean = val.replace(/\u200B/g, '');
-            if (clean.length > 0) {
-              emitToTerminal(clean);
-            }
-            e.stopImmediatePropagation();
-            resetSentinel();
-          }
+        term.textarea.addEventListener('blur', () => {
+          commitIme();
         }, true);
 
         term.textarea.addEventListener('focus', () => {
-          resetSentinel();
+          commitIme();
         }, true);
       }
 
@@ -42337,6 +42379,9 @@ Aturan:
             if (this.isMobileDevice() || ev.altKey) {
               ev.preventDefault();
               ev.stopPropagation();
+              if (this.isMobileDevice() && paneState._imeBuffer && paneState._imeBuffer.length > 0) {
+                return false;
+              }
               if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
                 this.sendPtyInput(paneState.sessionId || sessionId, '\x7f');
               } else if (paneState && paneState.isFallbackMode) {
@@ -44151,6 +44196,7 @@ Aturan:
           const sId = paneState?.sessionId || `${tab?.id}-p${paneNum}`;
 
           this.ensureActivePtySize(paneState);
+          if (paneState) paneState._imeBuffer = '';
 
           const keepFocus = () => {
             if (paneState?.term) {
@@ -44725,6 +44771,7 @@ Aturan:
         const tag = (activeEl?.tagName || '').toLowerCase();
         if (activeEl === paneState.term.textarea) {
           this.ensureActivePtySize(paneState);
+          if (paneState) paneState._imeBuffer = '';
           return;
         }
         if (tag === 'input' || tag === 'textarea' || tag === 'select' || activeEl?.isContentEditable) {
