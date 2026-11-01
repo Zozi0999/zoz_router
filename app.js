@@ -43346,9 +43346,9 @@ Aturan:
     // Helper normalisasi stream ConPTY Windows untuk memurnikan sekuens hapus layar (cls / Clear-Host)
     cleanConptyData(str) {
       if (typeof str !== 'string' || !str) return str;
-      // 1. Ganti simulasi loop hapus layar ConPTY yang berulang dengan ANSI Clear Viewport \x1b[2J\x1b[H
+      // 1. Ganti simulasi loop hapus layar ConPTY yang berulang dengan ANSI Clear Viewport + Scrollback \x1b[2J\x1b[3J\x1b[H
       const wipeRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;]*m){3,}\x1b\[(?:H|1;1H)/g;
-      str = str.replace(wipeRe, '\x1b[2J\x1b[H');
+      str = str.replace(wipeRe, '\x1b[2J\x1b[3J\x1b[H');
       // 2. Hilangkan padding newline berulang yang diakhiri pemindahan kursor \x1b[row;colH
       const padRe = /(?:(?:\r\n|\n)\x1b\[K)+(?:(?:\r\n|\n))?\x1b\[(\d+);(\d+)H/g;
       str = str.replace(padRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
@@ -43378,11 +43378,14 @@ Aturan:
           if (isScreenClear) {
             paneState._lastScreenClearAt = Date.now();
             paneState._userScrolledUp = false;
-            try {
-              currentTerm.clear();
-            } catch (_) {}
           }
-          currentTerm.write(cleanData);
+          currentTerm.write(cleanData, () => {
+            if (msg.type === 'init' || isScreenClear) {
+              paneState._userScrolledUp = false;
+              try { currentTerm.scrollToBottom(); } catch (_) {}
+              if (paneState.updateScrollUI) paneState.updateScrollUI();
+            }
+          });
           if (msg.type === 'init' || isScreenClear) {
             paneState._userScrolledUp = false;
             try { currentTerm.scrollToBottom(); } catch (_) {}

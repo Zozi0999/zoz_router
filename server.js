@@ -389,6 +389,23 @@ function resolveHostShell(shellType) {
 }
 
 /**
+ * Helper normalisasi stream ConPTY Windows di level global untuk memurnikan sekuens hapus layar (cls / Clear-Host)
+ * Diakses oleh jalur SSE (/api/terminal/stream) maupun jalur WebSocket (handleTerminalWebSocketUpgrade).
+ */
+function cleanConptyData(str) {
+  if (typeof str !== 'string' || !str) return str;
+  // 1. Ganti simulasi loop hapus layar ConPTY yang berulang dengan ANSI Clear Viewport + Scrollback \x1b[2J\x1b[3J\x1b[H
+  const wipeRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;]*m){3,}\x1b\[(?:H|1;1H)/g;
+  str = str.replace(wipeRe, '\x1b[2J\x1b[3J\x1b[H');
+  // 2. Hilangkan padding newline berulang yang diakhiri pemindahan kursor \x1b[row;colH
+  const padRe = /(?:(?:\r\n|\n)\x1b\[K)+(?:(?:\r\n|\n))?\x1b\[(\d+);(\d+)H/g;
+  str = str.replace(padRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
+  const padHomeRe = /(?:(?:\r\n|\n)\x1b\[K)+(?:(?:\r\n|\n))?\x1b\[H/g;
+  str = str.replace(padHomeRe, '\x1b[H');
+  return str;
+}
+
+/**
  * Autonomous Server-Side Auto Y / Auto Enter Engine
  * Memantau output PTY secara real-time di background Windows host.
  * Ketika mendeteksi prompt perizinan (Claude Code, Antigravity CLI, Gemini CLI, PowerShell, npm),
@@ -7063,20 +7080,6 @@ async function requestHandler(req, res) {
   // NEURAL TERMINAL REAL-TIME STREAMING & CONPTY / PSEUDOCONSOLE API
   // Mengizinkan sesi terminal interaktif nyata (node-pty + SSE duplex streaming)
   // =========================================================================
-  // Helper normalisasi stream ConPTY Windows untuk memurnikan sekuens hapus layar (cls / Clear-Host)
-  function cleanConptyData(str) {
-    if (typeof str !== 'string' || !str) return str;
-    // 1. Ganti simulasi loop hapus layar ConPTY yang berulang dengan ANSI Clear Viewport \x1b[2J\x1b[H
-    const wipeRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;]*m){3,}\x1b\[(?:H|1;1H)/g;
-    str = str.replace(wipeRe, '\x1b[2J\x1b[H');
-    // 2. Hilangkan padding newline berulang yang diakhiri pemindahan kursor \x1b[row;colH
-    const padRe = /(?:(?:\r\n|\n)\x1b\[K)+(?:(?:\r\n|\n))?\x1b\[(\d+);(\d+)H/g;
-    str = str.replace(padRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
-    const padHomeRe = /(?:(?:\r\n|\n)\x1b\[K)+(?:(?:\r\n|\n))?\x1b\[H/g;
-    str = str.replace(padHomeRe, '\x1b[H');
-    return str;
-  }
-
   if (pathname === '/api/terminal/stream' && method === 'GET') {
     const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
     if (!pinCheck.valid) {
@@ -7171,7 +7174,7 @@ async function requestHandler(req, res) {
           }
           if (!data) return;
           data = cleanConptyData(data);
-          if (data.includes('\x1b[3J') || data.includes('\x1b[2J')) {
+          if (data.includes('\x1b[3J')) {
             session.buffer = [data];
           } else {
             if (session.buffer.length > 500) session.buffer.shift();
@@ -11874,7 +11877,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       const flushWsBatch = () => {
         wsFlushScheduled = false;
         if (!pendingWsData) return;
-        const out = pendingWsData;
+        const out = cleanConptyData(pendingWsData);
         pendingWsData = '';
         if (session.wsClients && session.wsClients.size > 0) {
           const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data: out }));
