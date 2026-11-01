@@ -11932,11 +11932,16 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
     });
   });
 
+  let isCleanedUp = false;
   const cleanup = () => {
+    if (isCleanedUp) return;
+    isCleanedUp = true;
     socket._wsBuffer = null;
     if (session && session.wsClients) {
-      session.wsClients.delete(socket);
-      console.log(`[PTY] Client disconnected from session ${sessionId}. Process persists in background on host laptop.`);
+      const removed = session.wsClients.delete(socket);
+      if (removed) {
+        console.log(`[PTY] Client disconnected from session ${sessionId}. Process persists in background on host laptop.`);
+      }
     }
   };
   socket.on('close', cleanup);

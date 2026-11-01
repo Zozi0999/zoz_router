@@ -42611,6 +42611,7 @@ Aturan:
 
         ws.onopen = () => {
           wsConnected = true;
+          paneState._wsFailCount = 0;
           paneState.isFallbackMode = false;
           if (statusDot) statusDot.className = 'pane-status-dot online';
           if (this.isRemoteConnected) {
@@ -42635,14 +42636,16 @@ Aturan:
 
         ws.onerror = () => {
           if (!wsConnected && !ws._manualClose) {
-            if (this.isRemoteConnected || this.isWindowsSynced) {
+            paneState._wsFailCount = (paneState._wsFailCount || 0) + 1;
+            if ((this.isRemoteConnected || this.isWindowsSynced) && paneState._wsFailCount < 3) {
               if (statusLabel) statusLabel.textContent = '☁️ Menyambung ulang…';
               if (statusDot) statusDot.className = 'pane-status-dot connecting';
               if (!paneState._reconnectTimer) {
+                const backoffMs = Math.min(15000, 2000 * Math.pow(1.5, paneState._wsFailCount - 1));
                 paneState._reconnectTimer = setTimeout(() => {
                   paneState._reconnectTimer = null;
                   this.connectStream(tab, paneState, paneNum);
-                }, 2000);
+                }, backoffMs);
               }
             } else {
               this.connectSseStream(tab, paneState, paneNum, queryParams, statusLabel, statusDot, sessionId);
@@ -42653,13 +42656,20 @@ Aturan:
         ws.onclose = () => {
           if (paneState.ws === ws) paneState.ws = null;
           if (ws._manualClose) return;
+          paneState._wsFailCount = (paneState._wsFailCount || 0) + 1;
+          if ((this.isRemoteConnected || this.isWindowsSynced) && paneState._wsFailCount >= 3) {
+            // Fallback deterministik ke SSE setelah 3x WebSocket gagal
+            this.connectSseStream(tab, paneState, paneNum, queryParams, statusLabel, statusDot, sessionId);
+            return;
+          }
           if (statusLabel) statusLabel.textContent = this.isRemoteConnected ? '☁️ Menyambung ulang…' : 'Menyambung ulang…';
           if (statusDot) statusDot.className = 'pane-status-dot connecting';
           if (!paneState._reconnectTimer) {
+            const backoffMs = Math.min(15000, 2000 * Math.pow(1.5, Math.min(paneState._wsFailCount, 5)));
             paneState._reconnectTimer = setTimeout(() => {
               paneState._reconnectTimer = null;
               this.connectStream(tab, paneState, paneNum);
-            }, 2000);
+            }, backoffMs);
           }
         };
       } catch (_) {
