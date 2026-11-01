@@ -42200,6 +42200,19 @@ Aturan:
         helper.compositionend = function() {
           if (this._compositionView) this._compositionView.classList.remove('active');
         };
+
+        // Pengamatan Z21 (v630): PSReadLine menerima setiap huruf DUA kali ("aagguu", "bbhhddnn").
+        // Emitor kedua = xterm CompositionHelper.keydown(keyCode 229) -> _handleAnyTextareaChanges(),
+        // yang mengirim diff textarea via setTimeout(0) karena _isComposing tidak pernah true.
+        // Invarian: tepat SATU emitor per ketukan (n(k) = 1) -> transduser LCP adalah emitor tunggal di ponsel.
+        if (isMobile) {
+          const origKeydown = typeof helper.keydown === 'function' ? helper.keydown.bind(helper) : null;
+          helper.keydown = function(ev) {
+            if (ev && ev.keyCode === 229) return false;
+            return origKeydown ? origKeydown(ev) : true;
+          };
+          helper._handleAnyTextareaChanges = function() {};
+        }
       }
 
       if (isMobile && term.textarea) {
@@ -42289,15 +42302,17 @@ Aturan:
             e.preventDefault();
             e.stopImmediatePropagation();
 
+            // Dedupe lintas-emitor: keydown(keyCode 8) yang sudah mengirim \x7f < 15ms lalu
+            if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 15) {
+              return;
+            }
+            paneState._lastBackspaceHandled = now;
+            paneState._lastBackspaceTime = now;
+
             if (paneState._imeBuffer && paneState._imeBuffer.length > 0) {
               const target = e.inputType === 'deleteWordBackward' ? '' : paneState._imeBuffer.slice(0, -1);
               applyImeDelta(target);
             } else {
-              if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 15) {
-                return;
-              }
-              paneState._lastBackspaceHandled = now;
-              paneState._lastBackspaceTime = now;
               emitToTerminal(e.inputType === 'deleteWordBackward' ? '\x17' : '\x7f');
             }
             return;
@@ -42370,6 +42385,11 @@ Aturan:
       term.attachCustomKeyEventHandler((ev) => {
         if (ev.key === 'Backspace' || ev.keyCode === 8) {
           if (ev.type === 'keydown') {
+            // Ponsel + keyCode 229 (Gboard IME): biarkan beforeinput(deleteContentBackward) menjadi emitor tunggal.
+            // Tanpa stempel waktu agar beforeinput tidak salah dianggap duplikat.
+            if (this.isMobileDevice() && ev.keyCode === 229) {
+              return false;
+            }
             const now = Date.now();
             if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 15) {
               return false;
@@ -42379,10 +42399,11 @@ Aturan:
             if (this.isMobileDevice() || ev.altKey) {
               ev.preventDefault();
               ev.stopPropagation();
-              if (this.isMobileDevice() && paneState._imeBuffer && paneState._imeBuffer.length > 0) {
-                return false;
-              }
               if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                if (this.isMobileDevice() && paneState._imeBuffer && paneState._imeBuffer.length > 0) {
+                  // Hapus juga 1 karakter dari memori komposisi agar LCP tetap sinkron (S_t = S_{t-1}[0:-1])
+                  paneState._imeBuffer = paneState._imeBuffer.slice(0, -1);
+                }
                 this.sendPtyInput(paneState.sessionId || sessionId, '\x7f');
               } else if (paneState && paneState.isFallbackMode) {
                 if (paneState._inputLine && paneState._inputLine.length > 0) {
@@ -42832,6 +42853,7 @@ Aturan:
       term.onData((data) => {
         paneState._lastDataEmitAt = Date.now();
         if (data === '\r' || data === '\n') {
+          paneState._imeBuffer = '';
           paneState._lastEnterSentAt = Date.now();
           paneState._userScrolledUp = false;
           if (paneState._touchInertiaRaf) {
