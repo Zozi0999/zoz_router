@@ -42225,35 +42225,12 @@ Aturan:
       }
 
       if (isMobile && term.textarea) {
-        // Capture-phase beforeinput: Penanganan atomik langsung (<1ms latensi) pada keyboard ponsel
+        // Capture-phase beforeinput: Penanganan presisi Enter, Backspace (saat kosong), dan Paste di ponsel
         term.textarea.addEventListener('beforeinput', (e) => {
           const now = Date.now();
           paneState._lastDataEmitAt = now;
 
-          // 1. Karakter Teks Normal (insertText): Fast-path deterministik langsung ke WebSocket
-          if (e.inputType === 'insertText') {
-            let text = typeof e.data === 'string' ? e.data : '';
-            text = text.replace(/[\u200B\uFEFF]/g, '');
-            if (text) {
-              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-                this.sendPtyInput(paneState.sessionId || sessionId, text);
-              } else if (paneState && paneState.isFallbackMode) {
-                paneState._inputLine = (paneState._inputLine || '') + text;
-                term.write(text);
-              }
-            }
-            if (e.cancelable) {
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              try {
-                term.textarea.value = '';
-                term.textarea.setSelectionRange(0, 0);
-              } catch (_) {}
-            }
-            return;
-          }
-
-          // 2. Baris Baru (Enter) pada virtual keyboard ponsel
+          // 1. Baris Baru (Enter) pada virtual keyboard ponsel
           if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -42276,35 +42253,35 @@ Aturan:
             return;
           }
 
-          // 3. Backspace pada virtual keyboard ponsel (deleteContentBackward / deleteWordBackward)
+          // 2. Backspace saat textarea kosong (menghapus karakter pada shell host)
           if (e.inputType === 'deleteContentBackward' || e.inputType === 'deleteWordBackward') {
-            if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 40) {
-              if (e.cancelable) {
-                e.preventDefault();
-                e.stopImmediatePropagation();
+            const currentVal = (term.textarea.value || '').replace(/[\u200B\uFEFF]/g, '');
+            if (!currentVal || currentVal.length === 0) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 40) {
+                return;
+              }
+              paneState._lastBackspaceHandled = now;
+              paneState._lastBackspaceTime = now;
+              this.resetImeLine(paneState);
+              const delChar = e.inputType === 'deleteWordBackward' ? '\x17' : '\x7f';
+              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                this.sendPtyInput(paneState.sessionId || sessionId, delChar);
+              } else if (paneState && paneState.isFallbackMode) {
+                if (paneState._inputLine && paneState._inputLine.length > 0) {
+                  paneState._inputLine = paneState._inputLine.slice(0, -1);
+                  term.write('\b \b');
+                }
               }
               return;
             }
-            paneState._lastBackspaceHandled = now;
-            paneState._lastBackspaceTime = now;
-            if (e.cancelable) {
-              e.preventDefault();
-              e.stopImmediatePropagation();
-              this.resetImeLine(paneState);
-            }
-            const delChar = e.inputType === 'deleteWordBackward' ? '\x17' : '\x7f';
-            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-              this.sendPtyInput(paneState.sessionId || sessionId, delChar);
-            } else if (paneState && paneState.isFallbackMode) {
-              if (paneState._inputLine && paneState._inputLine.length > 0) {
-                paneState._inputLine = paneState._inputLine.slice(0, -1);
-                term.write('\b \b');
-              }
-            }
+            // Jika ada teks di textarea: biarkan browser menghapus karakter di textarea,
+            // transduser input LCP di bawah yang akan mendeteksi penyusutan karakter dan memancarkan \x7f!
             return;
           }
 
-          // 4. Tempelan Clipboard / Paste (insertFromPaste)
+          // 3. Tempelan Clipboard / Paste (insertFromPaste)
           if (e.inputType === 'insertFromPaste') {
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -42326,11 +42303,9 @@ Aturan:
           }
         }, true);
 
-        // Fallback IME Transducer LCP: Menangani inputType tak-cancelable (insertCompositionText dari autocorrect)
+        // Transduser LCP Presisi (M_diff): Emitor Tunggal Mutlak N(c) = 1 untuk seluruh teks keyboard virtual (Gboard)
         term.textarea.addEventListener('input', (e) => {
           const val = (term.textarea.value || '').replace(/[\u200B\uFEFF]/g, '');
-          if (!val) return;
-
           const oldText = paneState._imeBuffer || '';
           if (val === oldText) return;
 
@@ -42366,6 +42341,12 @@ Aturan:
           }
 
           paneState._imeBuffer = val;
+
+          // Batasi akumulasi buffer kata: jika pengguna mengetik spasi atau buffer melebihi 60 huruf,
+          // bersihkan textarea agar siap menerima kata baru tanpa risiko overflow.
+          if (val.length > 60 || val.endsWith(' ')) {
+            this.resetImeLine(paneState);
+          }
         }, true);
 
         term.textarea.addEventListener('compositionend', () => {
@@ -42413,8 +42394,10 @@ Aturan:
         if (ev.key === 'Backspace' || ev.keyCode === 8) {
           if (ev.type === 'keydown') {
             if (this.isMobileDevice()) {
-              // Di ponsel, Backspace ditangani 100% secara atomik oleh Capture-Phase beforeinput event!
-              return false;
+              // Di ponsel: biarkan browser melakukan mutasi DOM pada textarea (return true)
+              // agar event 'input' memancarkan \x7f yang presisi melalui transduser LCP.
+              // Jika textarea kosong, Capture-Phase beforeinput yang akan mengirimkan \x7f.
+              return true;
             }
             const now = Date.now();
             if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 15) {
@@ -42830,13 +42813,12 @@ Aturan:
         paneState._lastDataEmitAt = Date.now();
 
         // INVARIAN EMITOR TUNGGAL PADA PERANGKAT MOBILE:
-        // Di ponsel, seluruh karakter teks cetak (ASCII >= 32 tanpa escape code \x1b)
-        // telah dikirim secara instan oleh beforeinput/input transducer.
+        // Di ponsel, seluruh karakter teks cetak, spasi, simbol, tab, dan backspace
+        // telah dikirim secara eksklusif oleh transduser LCP (N(c) = 1).
         // Abaikan emisi duplikat dari engine internal xterm!
         if (this.isMobileDevice()) {
           if (typeof data === 'string' && data.length > 0) {
-            const code0 = data.charCodeAt(0);
-            if (!data.startsWith('\x1b') && data !== '\r' && data !== '\n' && data !== '\x7f' && data !== '\b' && data !== '\t' && code0 >= 32) {
+            if (!data.startsWith('\x1b') && data !== '\r' && data !== '\n') {
               return;
             }
           }
