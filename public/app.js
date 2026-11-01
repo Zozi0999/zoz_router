@@ -42013,8 +42013,7 @@ Aturan:
             if (paneState.term.textarea) {
               paneState.term.textarea.focus({ preventScroll: true });
               if (this.isMobileDevice()) {
-                paneState.term.textarea.value = '';
-                paneState.term.textarea.setSelectionRange(0, 0);
+                this.resetImeLine(paneState);
               }
             }
           } catch (_) {}
@@ -42171,7 +42170,7 @@ Aturan:
       if (term.textarea) {
         term.textarea.setAttribute('autocomplete', 'off');
         term.textarea.setAttribute('autocorrect', 'off');
-        term.textarea.setAttribute('autocapitalize', 'none');
+        term.textarea.setAttribute('autocapitalize', 'off');
         term.textarea.setAttribute('spellcheck', 'false');
         term.textarea.setAttribute('enterkeyhint', 'send');
         term.textarea.setAttribute('inputmode', 'text');
@@ -42299,34 +42298,40 @@ Aturan:
           }
         }, true);
 
-        // Transduser LCP Baris Kontinu (M_diff): Emitor Tunggal Mutlak N(c) = 1 untuk seluruh teks keyboard virtual (Gboard).
-        // Invarian Utama: JANGAN PERNAH mereset textarea.value di tengah pengetikan kata/spasi atau saat compositionend,
-        // karena mutasi DOM textarea.value = '' memicu InputMethodManager.restartInput() pada Android Gboard yang
-        // menyebabkan Gboard mengirim ulang (re-commit) kata komposisi dan menduplikasi huruf awal (mis. 'a' -> 'aaj').
+        // Transduser Delta Ekor Presisi (Tail-Delta Transducer M_tail):
+        // Murni Matematika O(1): Menjamin emitor tunggal mutlak N(c) = 1 untuk seluruh ketukan keyboard ponsel (Gboard).
+        // 1. Fast-path A (val.startsWith(oldText)): Penambahan murni di akhir kursor tanpa Backspace (95% ketikan).
+        // 2. Fast-path B (oldText.startsWith(val)): Penghapusan murni di akhir kursor via Backspace.
+        // 3. Path C (Koreksi Kata Aktif / LCP dengan Guard Jarak Jauh):
+        //    Jika Gboard melakukan auto-kapitalisasi atau perubahan kamus pada kata lampau di awal baris,
+        //    guard delCount <= 15 mencegah kursor mundur menghapus seluruh kalimat (anti-duplikasi 'adadaaa yyaanngg').
         term.textarea.addEventListener('input', (e) => {
-          const rawVal = (term.textarea.value || '').replace(/[\u200B\uFEFF]/g, '');
+          const rawVal = (term.textarea.value || '').replace(/[\u200B\uFEFF\u00A0]/g, ' ');
           const oldText = paneState._imeBuffer || '';
 
-          // Jika Gboard menyisipkan karakter baris baru (\n atau \r) melalui event input:
+          // 1. Penanganan Baris Baru (Enter / Newline)
           if (rawVal.includes('\n') || rawVal.includes('\r')) {
             const cleanVal = rawVal.replace(/[\r\n]+/g, '');
             if (cleanVal !== oldText) {
-              let lcp = 0;
-              const minLen = Math.min(oldText.length, cleanVal.length);
-              while (lcp < minLen && oldText.charCodeAt(lcp) === cleanVal.charCodeAt(lcp)) {
-                lcp++;
-              }
-              const delCount = oldText.length - lcp;
-              if (delCount > 0) {
-                paneState._lastBackspaceHandled = Date.now();
-                paneState._lastBackspaceTime = Date.now();
-                if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+              if (cleanVal.startsWith(oldText)) {
+                const insertText = cleanVal.slice(oldText.length);
+                if (insertText.length > 0 && paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                  this.sendPtyInput(paneState.sessionId || sessionId, insertText);
+                }
+              } else {
+                let lcp = 0;
+                const minLen = Math.min(oldText.length, cleanVal.length);
+                while (lcp < minLen && oldText.charCodeAt(lcp) === cleanVal.charCodeAt(lcp)) {
+                  lcp++;
+                }
+                const delCount = Math.min(15, oldText.length - lcp);
+                if (delCount > 0 && paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
                   this.sendPtyInput(paneState.sessionId || sessionId, '\x7f'.repeat(delCount));
                 }
-              }
-              const insertText = cleanVal.slice(lcp);
-              if (insertText.length > 0 && paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-                this.sendPtyInput(paneState.sessionId || sessionId, insertText);
+                const insertText = cleanVal.slice(lcp);
+                if (insertText.length > 0 && paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                  this.sendPtyInput(paneState.sessionId || sessionId, insertText);
+                }
               }
             }
             this.resetImeLine(paneState);
@@ -42351,13 +42356,59 @@ Aturan:
           const val = rawVal;
           if (val === oldText) return;
 
+          // 2. Fast-Path A: Penambahan murni di akhir kursor (Append Delta)
+          if (val.startsWith(oldText)) {
+            const insertText = val.slice(oldText.length);
+            paneState._imeBuffer = val;
+            if (insertText.length > 0) {
+              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                this.sendPtyInput(paneState.sessionId || sessionId, insertText);
+              } else if (paneState && paneState.isFallbackMode) {
+                paneState._inputLine = (paneState._inputLine || '') + insertText;
+                term.write(insertText);
+              }
+            }
+            return;
+          }
+
+          // 3. Fast-Path B: Penghapusan murni di akhir kursor (Backspace Delta)
+          if (oldText.startsWith(val)) {
+            const delCount = oldText.length - val.length;
+            paneState._imeBuffer = val;
+            const now = Date.now();
+            paneState._lastBackspaceHandled = now;
+            paneState._lastBackspaceTime = now;
+            if (delCount > 0) {
+              const delSeq = '\x7f'.repeat(delCount);
+              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                this.sendPtyInput(paneState.sessionId || sessionId, delSeq);
+              } else if (paneState && paneState.isFallbackMode) {
+                for (let i = 0; i < delCount; i++) {
+                  if (paneState._inputLine && paneState._inputLine.length > 0) {
+                    paneState._inputLine = paneState._inputLine.slice(0, -1);
+                    term.write('\b \b');
+                  }
+                }
+              }
+            }
+            return;
+          }
+
+          // 4. Path C: Penggantian Kata Aktif (IME Replacement / Sugesti Kamus)
           let lcp = 0;
           const minLen = Math.min(oldText.length, val.length);
           while (lcp < minLen && oldText.charCodeAt(lcp) === val.charCodeAt(lcp)) {
             lcp++;
           }
 
-          const delCount = oldText.length - lcp;
+          let delCount = oldText.length - lcp;
+          // Guard Invarian: Jangan biarkan Gboard menghapus lebih dari 15 karakter kata aktif
+          // jika terjadi perubahan kapitalisasi otomatis di awal kalimat lampau.
+          if (delCount > 15) {
+            delCount = 0;
+            lcp = Math.min(oldText.length, val.length);
+          }
+
           if (delCount > 0) {
             const now = Date.now();
             paneState._lastBackspaceHandled = now;

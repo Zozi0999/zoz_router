@@ -11925,10 +11925,10 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
     if (reqUrl.searchParams.has('autoEnter')) {
       session.autoEnter = (reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true');
     }
-    if (session && session.pty && typeof session.pty.resize === 'function') {
+    if (session && session.pty && typeof session.pty.resize === 'function' && reqUrl.searchParams.has('cols') && reqUrl.searchParams.has('rows')) {
       const isRemote = isRemoteTunnelRequest(req);
       const hasActiveClients = (session.clients && session.clients.size > 0) || (session.wsClients && session.wsClients.size > 0);
-      if (!isRemote || !hasActiveClients) {
+      if (sessionId.startsWith('mob-') || !isRemote || !hasActiveClients) {
         try {
           session.pty.resize(cols, rows);
           session.cols = cols;
