@@ -41860,6 +41860,16 @@ Aturan:
       }).catch(() => {});
     },
 
+    resetImeLine(paneState) {
+      if (!paneState) return;
+      paneState._imeBuffer = '';
+      try {
+        if (paneState.term && paneState.term.textarea) {
+          paneState.term.textarea.value = '';
+        }
+      } catch (_) {}
+    },
+
     sendEnterToPane(paneNum = (this.activePane || 1)) {
       const tab = this.getActiveTab();
       if (!tab) return;
@@ -41898,7 +41908,7 @@ Aturan:
 
       // In desktop/mobile xterm mode with active live PTY, send clean carriage return (\r) directly to the pane's PTY
       if (paneState && paneState.term && !paneState.isFallbackMode) {
-        paneState._imeBuffer = '';
+        this.resetImeLine(paneState);
         const sessionId = paneState.sessionId || `${tab.id}-p${paneNum}`;
         this.sendPtyInput(sessionId, '\r');
         paneState.term.scrollToBottom();
@@ -42241,25 +42251,23 @@ Aturan:
           }
         };
 
-        const commitIme = () => {
-          paneState._imeBuffer = '';
-          try {
-            term.textarea.value = '';
-          } catch (_) {}
+        const resetLine = () => {
+          this.resetImeLine(paneState);
         };
 
-        const applyImeDelta = (newText) => {
+        const applyContinuousDelta = (newText) => {
           if (typeof newText !== 'string') return;
           const oldText = paneState._imeBuffer || '';
+          if (newText === oldText) return;
 
           // Hitung LCP (Longest Common Prefix)
           let lcp = 0;
           const minLen = Math.min(oldText.length, newText.length);
-          while (lcp < minLen && oldText[lcp] === newText[lcp]) {
+          while (lcp < minLen && oldText.charCodeAt(lcp) === newText.charCodeAt(lcp)) {
             lcp++;
           }
 
-          // 1. Contraction (Backspace untuk karakter lama yang diganti)
+          // 1. Contraction (Backspace untuk karakter lama yang diganti/dihapus)
           const delCount = oldText.length - lcp;
           for (let i = 0; i < delCount; i++) {
             emitToTerminal('\x7f');
@@ -42276,53 +42284,28 @@ Aturan:
 
         // Lifecycle hooks IME untuk Android Gboard
         term.textarea.addEventListener('compositionstart', (e) => {
-          paneState._imeBuffer = '';
+          // Biarkan komposisi berjalan di dalam buffer baris kontinu
         }, true);
 
         term.textarea.addEventListener('compositionupdate', (e) => {
-          const data = typeof e.data === 'string' ? e.data.replace(/\u200B/g, '') : '';
-          applyImeDelta(data);
+          // Event input menangani pembaruan teks secara instan dan sinkron
         }, true);
 
         term.textarea.addEventListener('compositionend', (e) => {
-          const data = typeof e.data === 'string' ? e.data.replace(/\u200B/g, '') : '';
-          if (data && data !== paneState._imeBuffer) {
-            applyImeDelta(data);
-          }
-          commitIme();
+          const val = (term.textarea.value || '').replace(/[\u200B\uFEFF]/g, '');
+          applyContinuousDelta(val);
         }, true);
 
-        // Capture-phase beforeinput: Penghubung instan untuk seluruh varian input Android IME
+        // Capture-phase beforeinput: Penanganan instan Enter, Paste, dan Backspace saat buffer kosong
         term.textarea.addEventListener('beforeinput', (e) => {
           const now = Date.now();
           paneState._lastDataEmitAt = now;
 
-          // 1. Penghapusan Karakter (Backspace)
-          if (e.inputType === 'deleteContentBackward' || e.inputType === 'deleteWordBackward') {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-
-            // Dedupe lintas-emitor: keydown(keyCode 8) yang sudah mengirim \x7f < 15ms lalu
-            if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 15) {
-              return;
-            }
-            paneState._lastBackspaceHandled = now;
-            paneState._lastBackspaceTime = now;
-
-            if (paneState._imeBuffer && paneState._imeBuffer.length > 0) {
-              const target = e.inputType === 'deleteWordBackward' ? '' : paneState._imeBuffer.slice(0, -1);
-              applyImeDelta(target);
-            } else {
-              emitToTerminal(e.inputType === 'deleteWordBackward' ? '\x17' : '\x7f');
-            }
-            return;
-          }
-
-          // 2. Baris Baru (Enter)
+          // 1. Baris Baru (Enter) -> Eksekusi perintah dan reset baris kontinu untuk perintah berikutnya
           if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
             e.preventDefault();
             e.stopImmediatePropagation();
-            commitIme();
+            this.resetImeLine(paneState);
             if (paneState._lastEnterSentAt && (now - paneState._lastEnterSentAt) < 120) {
               return;
             }
@@ -42334,28 +42317,27 @@ Aturan:
             return;
           }
 
-          // 3. Teks Komposisi Virtual Keyboard (insertCompositionText)
-          if (e.inputType === 'insertCompositionText') {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            const data = typeof e.data === 'string' ? e.data.replace(/\u200B/g, '') : '';
-            applyImeDelta(data);
-            return;
-          }
-
-          // 4. Penggantian Kata Saran / Autocomplete (insertReplacementText)
-          if (e.inputType === 'insertReplacementText') {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            const text = (typeof e.data === 'string' ? e.data : '').replace(/\u200B/g, '');
-            if (text) {
-              applyImeDelta(text);
-              commitIme();
+          // 2. Penghapusan Karakter saat kotak teks kosong (menghapus karakter pada shell host)
+          if (e.inputType === 'deleteContentBackward' || e.inputType === 'deleteWordBackward') {
+            const currentVal = term.textarea.value || '';
+            if (!currentVal || currentVal.length === 0) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 30) {
+                return;
+              }
+              paneState._lastBackspaceHandled = now;
+              paneState._lastBackspaceTime = now;
+              this.resetImeLine(paneState);
+              emitToTerminal(e.inputType === 'deleteWordBackward' ? '\x17' : '\x7f');
+              return;
             }
+            // Jika ada teks di textarea, biarkan browser menghapusnya secara alami;
+            // event input akan memicu applyContinuousDelta untuk mengirim \x7f yang presisi!
             return;
           }
 
-          // 5. Tempelan Clipboard / Paste (insertFromPaste)
+          // 3. Tempelan Clipboard / Paste (insertFromPaste)
           if (e.inputType === 'insertFromPaste') {
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -42363,46 +42345,30 @@ Aturan:
             if (!text && e.dataTransfer) {
               text = e.dataTransfer.getData('text/plain');
             }
-            text = (text || '').replace(/\u200B/g, '');
+            text = (text || '').replace(/[\u200B\uFEFF]/g, '');
             if (text) {
               emitToTerminal(text);
-              commitIme();
-            }
-            return;
-          }
-
-          // 6. Karakter Langsung (insertText: spasi, simbol, atau huruf tunggal)
-          if (e.inputType === 'insertText') {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            const text = (typeof e.data === 'string' ? e.data : '').replace(/\u200B/g, '');
-            if (text) {
-              if (text === ' ' || text.includes(' ') || text.includes('\n')) {
-                commitIme();
-                emitToTerminal(text);
-              } else {
-                applyImeDelta((paneState._imeBuffer || '') + text);
-              }
+              paneState._imeBuffer = (paneState._imeBuffer || '') + text;
+              try { term.textarea.value = paneState._imeBuffer; } catch (_) {}
             }
             return;
           }
         }, true);
 
-        // Fallback input event untuk virtual keyboard non-standar
+        // Input event: Jantung Transduser Kontinu LCP (berjalan pada setiap ketukan huruf, spasi, dan backspace)
+        // Tanpa pembersihan textarea.value di tengah kata, mengeliminasi freeze/stutter restartInput() 100%!
         term.textarea.addEventListener('input', (e) => {
           e.stopImmediatePropagation();
-          const val = (term.textarea.value || '').replace(/\u200B/g, '');
-          if (val && val !== paneState._imeBuffer) {
-            applyImeDelta(val);
-          }
+          const val = (term.textarea.value || '').replace(/[\u200B\uFEFF]/g, '');
+          applyContinuousDelta(val);
         }, true);
 
         term.textarea.addEventListener('blur', () => {
-          commitIme();
+          // Pertahankan buffer saat blur/focus agar tidak memicu freeze
         }, true);
 
         term.textarea.addEventListener('focus', () => {
-          commitIme();
+          // Pertahankan buffer
         }, true);
       }
 
@@ -42411,9 +42377,28 @@ Aturan:
       term.attachCustomKeyEventHandler((ev) => {
         if (ev.key === 'Backspace' || ev.keyCode === 8) {
           if (ev.type === 'keydown') {
-            // Ponsel + keyCode 229 (Gboard IME): biarkan beforeinput(deleteContentBackward) menjadi emitor tunggal.
-            // Tanpa stempel waktu agar beforeinput tidak salah dianggap duplikat.
-            if (this.isMobileDevice() && ev.keyCode === 229) {
+            if (this.isMobileDevice()) {
+              if (ev.keyCode === 229) return false;
+              const currentVal = term.textarea?.value || '';
+              if (currentVal.length > 0) {
+                // Ada teks di textarea: biarkan browser menghapus dan input event memancarkan \x7f secara presisi!
+                return false;
+              }
+              const now = Date.now();
+              if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 30) {
+                return false;
+              }
+              paneState._lastBackspaceHandled = now;
+              paneState._lastBackspaceTime = now;
+              this.resetImeLine(paneState);
+              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                this.sendPtyInput(paneState.sessionId || sessionId, '\x7f');
+              } else if (paneState && paneState.isFallbackMode) {
+                if (paneState._inputLine && paneState._inputLine.length > 0) {
+                  paneState._inputLine = paneState._inputLine.slice(0, -1);
+                  term.write('\b \b');
+                }
+              }
               return false;
             }
             const now = Date.now();
@@ -42422,14 +42407,10 @@ Aturan:
             }
             paneState._lastBackspaceTime = now;
             paneState._lastBackspaceHandled = now;
-            if (this.isMobileDevice() || ev.altKey) {
+            if (ev.altKey) {
               ev.preventDefault();
               ev.stopPropagation();
               if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-                if (this.isMobileDevice() && paneState._imeBuffer && paneState._imeBuffer.length > 0) {
-                  // Hapus juga 1 karakter dari memori komposisi agar LCP tetap sinkron (S_t = S_{t-1}[0:-1])
-                  paneState._imeBuffer = paneState._imeBuffer.slice(0, -1);
-                }
                 this.sendPtyInput(paneState.sessionId || sessionId, '\x7f');
               } else if (paneState && paneState.isFallbackMode) {
                 if (paneState._inputLine && paneState._inputLine.length > 0) {
@@ -42879,8 +42860,12 @@ Aturan:
       term.onData((data) => {
         paneState._lastDataEmitAt = Date.now();
         if (data === '\r' || data === '\n') {
-          paneState._imeBuffer = '';
-          paneState._lastEnterSentAt = Date.now();
+          const now = Date.now();
+          if (paneState._lastEnterSentAt && (now - paneState._lastEnterSentAt) < 120) {
+            return;
+          }
+          paneState._lastEnterSentAt = now;
+          this.resetImeLine(paneState);
           paneState._userScrolledUp = false;
           if (paneState._touchInertiaRaf) {
             cancelAnimationFrame(paneState._touchInertiaRaf);
@@ -42888,9 +42873,6 @@ Aturan:
           }
           term.scrollToBottom();
           if (paneState.updateScrollUI) paneState.updateScrollUI();
-          if (term.textarea) {
-            try { term.textarea.value = ''; } catch (_) {}
-          }
         }
 
         // Sticky CTRL Modifier from Mobile Touch Keybar
@@ -44244,7 +44226,7 @@ Aturan:
           const sId = paneState?.sessionId || `${tab?.id}-p${paneNum}`;
 
           this.ensureActivePtySize(paneState);
-          if (paneState) paneState._imeBuffer = '';
+          this.resetImeLine(paneState);
 
           const keepFocus = () => {
             if (paneState?.term) {
@@ -44398,6 +44380,7 @@ Aturan:
           else if (keyType === 'ArrowRight') ptySeq = '\x1b[C';
 
           if (ptySeq) {
+            this.resetImeLine(paneState);
             if (paneState?.term && !paneState.isFallbackMode) {
               this.sendPtyInput(sId, ptySeq);
             } else {
@@ -44833,6 +44816,10 @@ Aturan:
             paneState.term.textarea.focus({ preventScroll: true });
           }
         } catch (_) {}
+
+        if (this.isMobileDevice()) {
+          return; // DI PONSEL: Semua input WAJIB melalui term.textarea untuk IME transducer, jangan kirim duplikat dari window keydown!
+        }
 
         if (paneState.isFallbackMode || !paneState.sessionId) return;
 
