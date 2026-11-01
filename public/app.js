@@ -6486,7 +6486,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     });
 
     // Render penanda verifikasi web Zoz Router menjadi badge UI elegan dan terverifikasi
-    result = result.replace(/(?:<p>\s*)?\[System Note:\s*(Jawaban di atas telah diverifikasi menggunakan \d+ Sumber Referensi Web Real-Time via Zoz Router)\](?:\s*<\/p>)?/gi, (match, noteBody) => {
+    result = result.replace(/(?:<p\b[^>]*>\s*)?\[System Note:\s*(Jawaban di atas telah diverifikasi menggunakan \d+ Sumber Referensi Web Real-Time via Zoz Router)\](?:\s*<\/p>)?/gi, (match, noteBody) => {
       return `<div class="system-note-tag"><i class="fa-solid fa-circle-check" style="color:var(--neon-teal, #10b981); margin-right:4px;"></i><span class="system-note-badge">System Note</span> <span>${escapeHtml(noteBody)}</span></div>`;
     });
 
@@ -37579,9 +37579,13 @@ Aturan:
     els.promptInput?.addEventListener('paste', async (e) => {
       const items = (e.clipboardData || window.clipboardData)?.items;
       if (items) {
+        let hasImage = false;
         for (const item of items) {
           if (item.type && item.type.startsWith('image/')) {
-            e.preventDefault();
+            if (!hasImage) {
+              e.preventDefault();
+              hasImage = true;
+            }
             const file = item.getAsFile();
             if (file) {
               const ok = await processSingleImageFile(file);
@@ -37590,9 +37594,9 @@ Aturan:
                 AudioEngine.click();
               }
             }
-            return;
           }
         }
+        if (hasImage) return;
       }
 
       // Claude & Grok AI Style: Otomatis konversi teks panjang / kodingan / laporan menjadi file markdown
