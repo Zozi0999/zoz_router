@@ -382,9 +382,13 @@ function resolveHostShell(shellType) {
     return { exe: isWin ? 'python.exe' : 'python3', args: ['-i'] };
   }
   // Default: PowerShell dengan $PROFILE termuat utuh (tanpa -NoProfile)
+  // Nonaktifkan PSReadLine Inline/History Prediction agar tidak membungkus (wrap) teks prediksi
+  // abu-abu panjang yang mengacaukan koordinat baris/kolom pada layar sempit ponsel.
   return {
     exe: isWin ? 'powershell.exe' : 'pwsh',
-    args: ['-ExecutionPolicy', 'Bypass']
+    args: isWin
+      ? ['-ExecutionPolicy', 'Bypass', '-NoExit', '-Command', 'try { Set-PSReadLineOption -PredictionSource None -ErrorAction SilentlyContinue } catch {}']
+      : ['-ExecutionPolicy', 'Bypass']
   };
 }
 
@@ -396,7 +400,7 @@ function hasVisibleTerminalPrompt(bufferStr) {
   if (!bufferStr) return false;
   const stripped = bufferStr
     .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
-    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+    .replace(/\x1b\[[0-9;? -/]*[@-~]/g, '')
     .replace(/\x1b[()][A-Za-z0-9]/g, '')
     .replace(/[\x00-\x1f\x7f]/g, ' ')
     .trim();
@@ -409,24 +413,20 @@ function hasVisibleTerminalPrompt(bufferStr) {
  */
 function cleanConptyData(str) {
   if (typeof str !== 'string' || !str) return str;
+  const csi = '(?:\\x1b\\[(?![23]J)[0-9;? -/]*[@-~])';
   // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) berulang yang diakhiri cursor home (\x1b[H)
   // Ubah menjadi ANSI clear screen murni: clear viewport \x1b[2J + clear scrollback \x1b[3J + cursor home \x1b[H
-  const wipeRe = /(?:\x1b\[\??[0-9;]*[a-zA-Z])*(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[2?K){3,}(?:\r\n|\n)*(?:\x1b\[\??[0-9;]*[a-zA-Z])*\x1b\[(?:H|1;1H)(?:\x1b\[\?25[hl])*/g;
+  const wipeRe = new RegExp(`${csi}*(?:(?:\\r\\n|\\n)${csi}*\\x1b\\[2?K${csi}*|\\x1b\\[2?K${csi}*(?:\\r\\n|\\n)|\\x1b\\[2?K){3,}(?:\\r\\n|\\n|${csi})*\\x1b\\[(?:H|1;1H)(?:\\x1b\\[\\?25[hl])*`, 'g');
   str = str.replace(wipeRe, '\x1b[2J\x1b[3J\x1b[H');
 
-  // 2. Padding newline ConPTY yang berulang diakhiri pemindahan kursor baris/kolom spesifik \x1b[row;colH
-  // Wajib membutuhkan minimal satu newline (\r\n|\n) dan TIDAK BOLEH memakan sekuens ANSI viewport \x1b[2J\x1b[3J!
-  const padPosRe = /(?:(?:\r\n|\n)+(?:\x1b\[(?![23]J)[0-9;?]*[a-zA-Z])*)+\x1b\[(\d+);(\d+)H/g;
-  str = str.replace(padPosRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
+  // 2. Normalisasi pembersihan sisa layar pasca-clear di baris pertama (\x1b[1;colH) menjadi Erase in Display (\x1b[K\x1b[J)
+  // Tanpa pernah menghapus \r\n pada baris gulir (scroll) atau pembungkusan baris (line-wrap) di tengah/bawah layar!
+  const eraseBelowHomeRe = new RegExp(`(?:(?:\\r\\n|\\n)${csi}*\\x1b\\[2?K${csi}*|\\x1b\\[2?K${csi}*(?:\\r\\n|\\n)){5,}(?:\\x1b\\[2?K)?${csi}*\\x1b\\[1;(\\d+)H`, 'g');
+  str = str.replace(eraseBelowHomeRe, (m, c) => '\x1b[K\x1b[J\x1b[1;' + c + 'H');
 
-  // 3. Padding newline ConPTY yang berulang diakhiri cursor home \x1b[H
-  // TIDAK BOLEH memakan sekuens ANSI viewport \x1b[2J\x1b[3J!
-  const padHomeRe = /(?:(?:\r\n|\n)+(?:\x1b\[(?![23]J)[0-9;?]*[a-zA-Z])*)+\x1b\[(?:H|1;1H)/g;
-  str = str.replace(padHomeRe, '\x1b[H');
-
-  // 4. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>")
+  // 3. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>")
   // Tahan terhadap derau kode ANSI interleave (mis. cursor position \x1b[1;19H, clear-line \x1b[K, hide/show cursor)
-  const dedupRe = /(PS [^\r\n>]+>)(?:[\s\x00-\x1f]|\x1b\[[0-9;?]*[a-zA-Z])*(?:\x1b\[(?:H|1;1H|\d+;\d+H))?\1\s*/g;
+  const dedupRe = /(PS [^\r\n>]+>)(?:[\s\x00-\x1f]|\x1b\[[0-9;? -/]*[@-~])*(?:\x1b\[(?:H|1;1H|\d+;\d+H))?\1\s*/g;
   str = str.replace(dedupRe, '$1 ');
 
   return str;

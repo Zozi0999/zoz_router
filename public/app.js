@@ -40287,19 +40287,25 @@ Aturan:
           }
         }
       } else {
-        // Keyboard terbuka: Gunakan DOM scrollTop murni pada container tanpa merusak CSS transform canvas!
-        // Menjaga teks di atas tetap terbaca alami, tanpa clipping aneh di bawah toolbar/tabs
+        // Keyboard terbuka: Gunakan DOM scrollTop terklamp jendela (scrollIntoViewIfNeeded) pada container
+        // tanpa menyentak scrollTop ke 0 setiap kali kursor bergerak di dalam area pandang!
+        if (!paneState._userScrolledUp) {
+          try { term.scrollToBottom(); } catch (_) {}
+        }
         if (container) {
           const cellH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
           const cursorY = (term.buffer && term.buffer.active) ? term.buffer.active.cursorY : 0;
-          const cursorPx = (cursorY + 1) * cellH;
+          const cursorTop = cursorY * cellH;
+          const cursorBottom = (cursorY + 1) * cellH;
           const containerH = container.clientHeight;
+          const curScroll = container.scrollTop;
+          const padBottom = cellH * 1.2;
+          const padTop = cellH * 0.5;
 
-          if (cursorPx > containerH - (cellH * 1.5)) {
-            const targetScroll = Math.max(0, cursorPx - containerH + (cellH * 1.5));
-            container.scrollTop = targetScroll;
-          } else {
-            container.scrollTop = 0;
+          if (cursorBottom + padBottom > curScroll + containerH) {
+            container.scrollTop = Math.max(0, cursorBottom + padBottom - containerH);
+          } else if (cursorTop - padTop < curScroll) {
+            container.scrollTop = Math.max(0, cursorTop - padTop);
           }
         }
       }
@@ -42194,7 +42200,7 @@ Aturan:
         lineHeight: 1.2,
         scrollback: 5000,
         allowTransparency: true,
-        convertEol: true,
+        convertEol: false,
         bellStyle: 'none'
       });
 
@@ -42228,10 +42234,9 @@ Aturan:
       // =========================================================================
       // INVARIAN EMITOR TUNGGAL DETERMINISTIK UNTUK KEYBOARD PONSEL (ANDROID / GBOARD)
       // Murni Matematika: Tepat 1 emisi N(c) = 1 per ketukan tombol virtual.
-      // - Fast-path langsung via Capture-Phase beforeinput: mengirim c ke PTY secara atomik
-      //   dan mencegah default (e.preventDefault()), menjaga textarea.value SELALU kosong (len = 0).
-      // - Mengeliminasi total ledakan akumulasi segitiga O(N^2) ('AAA...') dari buffer textarea.
       // - Mengisolasi dan membungkam helper internal xterm agar tidak memicu duplikasi atau delay.
+      // - Seluruh ketikan karakter, huruf kembar ('maaf', 'saat', '--'), koreksi kamus Gboard,
+      //   dan Backspace diproses secara deterministik oleh Transduser Delta Ekor di event input.
       // =========================================================================
       const isMobile = this.isMobileDevice();
       paneState._imeBuffer = '';
@@ -42281,6 +42286,32 @@ Aturan:
       }
 
       if (isMobile && term.textarea) {
+        const emitMobileText = (textToEmit) => {
+          if (!textToEmit) return;
+          let out = textToEmit;
+          // Dukung penuh Sticky CTRL & ALT dari bilah tombol sentuh ponsel
+          if (this.isCtrlActive && out.length === 1) {
+            this.isCtrlActive = false;
+            document.getElementById('btnTouchCtrl')?.classList.remove('active');
+            const code = out.charCodeAt(0);
+            if (code >= 65 && code <= 90) out = String.fromCharCode(code - 64);
+            else if (code >= 97 && code <= 122) out = String.fromCharCode(code - 96);
+            else if (out === ' ' || out === '@') out = '\x00';
+            this.resetImeLine(paneState);
+          } else if (this.isAltActive && out.length === 1) {
+            this.isAltActive = false;
+            document.getElementById('btnTouchAlt')?.classList.remove('active');
+            out = '\x1b' + out;
+            this.resetImeLine(paneState);
+          }
+          if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+            this.sendPtyInput(paneState.sessionId || sessionId, out);
+          } else if (paneState && paneState.isFallbackMode) {
+            paneState._inputLine = (paneState._inputLine || '') + out;
+            term.write(out);
+          }
+        };
+
         // Capture-phase beforeinput: Penanganan presisi Enter, Backspace (saat kosong), dan Paste di ponsel
         term.textarea.addEventListener('beforeinput', (e) => {
           const now = Date.now();
@@ -42299,11 +42330,13 @@ Aturan:
             if (enteredCmd === 'cls' || enteredCmd === 'clear') {
               paneState._lastScreenClearAt = now;
               paneState._userScrolledUp = false;
-              try {
-                term.write('\x1b[2J\x1b[3J\x1b[H');
-                term.clear();
-                term.scrollToBottom();
-              } catch (_) {}
+              if (paneState.isFallbackMode) {
+                try {
+                  term.write('\x1b[2J\x1b[3J\x1b[H');
+                  term.clear();
+                  term.scrollToBottom();
+                } catch (_) {}
+              }
               if (paneState.updateScrollUI) paneState.updateScrollUI();
             } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
               if (window.TerminalEndorphin) window.TerminalEndorphin.heal(paneNum);
@@ -42329,9 +42362,10 @@ Aturan:
             if (!currentVal || currentVal.length === 0) {
               e.preventDefault();
               e.stopImmediatePropagation();
-              if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 40) {
+              if (paneState._lastEmptyBsAt && (now - paneState._lastEmptyBsAt) < 35) {
                 return;
               }
+              paneState._lastEmptyBsAt = now;
               paneState._lastBackspaceHandled = now;
               paneState._lastBackspaceTime = now;
               this.resetImeLine(paneState);
@@ -42346,8 +42380,13 @@ Aturan:
               }
               return;
             }
-            // Jika ada teks di textarea: biarkan browser menghapus karakter di textarea,
-            // transduser input LCP di bawah yang akan mendeteksi penyusutan karakter dan memancarkan \x7f!
+            // Pastikan kursor seleksi selalu berada di ujung akhir textarea agar penghapusan tepat di ekor
+            try {
+              const tLen = term.textarea.value.length;
+              if (term.textarea.selectionStart !== tLen || term.textarea.selectionEnd !== tLen) {
+                term.textarea.setSelectionRange(tLen, tLen);
+              }
+            } catch (_) {}
             return;
           }
 
@@ -42361,12 +42400,7 @@ Aturan:
             }
             text = (text || '').replace(/[\u200B\uFEFF]/g, '');
             if (text) {
-              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-                this.sendPtyInput(paneState.sessionId || sessionId, text);
-              } else if (paneState && paneState.isFallbackMode) {
-                paneState._inputLine = (paneState._inputLine || '') + text;
-                term.write(text);
-              }
+              emitMobileText(text);
             }
             this.resetImeLine(paneState);
             return;
@@ -42375,14 +42409,21 @@ Aturan:
 
         // Transduser Delta Ekor Presisi (Tail-Delta Transducer M_tail):
         // Murni Matematika O(1): Menjamin emitor tunggal mutlak N(c) = 1 untuk seluruh ketukan keyboard ponsel (Gboard).
-        // 1. Fast-path A (val.startsWith(oldText)): Penambahan murni di akhir kursor tanpa Backspace (95% ketikan).
+        // 1. Fast-path A (val.startsWith(oldText)): Penambahan murni di akhir kursor tanpa memblokir huruf kembar ('maaf', 'saat', '--').
         // 2. Fast-path B (oldText.startsWith(val)): Penghapusan murni di akhir kursor via Backspace.
-        // 3. Path C (Koreksi Kata Aktif / LCP dengan Guard Jarak Jauh):
-        //    Jika Gboard melakukan auto-kapitalisasi atau perubahan kamus pada kata lampau di awal baris,
-        //    guard delCount <= 15 mencegah kursor mundur menghapus seluruh kalimat (anti-duplikasi 'adadaaa yyaanngg').
-        term.textarea.addEventListener('input', (e) => {
+        // 3. Path C (Koreksi Kata Aktif / LCP dengan Invarian Batas Kata Ekor):
+        //    Menghitung batas kata aktif dengan mengabaikan spasi ekor (oldText.replace(/\s+$/, '')),
+        //    sehingga koreksi Gboard seperti 'bai ' -> 'baik ' atau 'tidak ' -> 'tidak?' terkirim 100% utuh!
+        term.textarea.addEventListener('input', () => {
           const rawVal = (term.textarea.value || '').replace(/[\u200B\uFEFF\u00A0]/g, ' ');
           const oldText = paneState._imeBuffer || '';
+
+          try {
+            const tLen = term.textarea.value.length;
+            if (term.textarea.selectionStart !== tLen || term.textarea.selectionEnd !== tLen) {
+              term.textarea.setSelectionRange(tLen, tLen);
+            }
+          } catch (_) {}
 
           // 1. Penanganan Baris Baru (Enter / Newline)
           if (rawVal.includes('\n') || rawVal.includes('\r')) {
@@ -42390,23 +42431,22 @@ Aturan:
             if (cleanVal !== oldText) {
               if (cleanVal.startsWith(oldText)) {
                 const insertText = cleanVal.slice(oldText.length);
-                if (insertText.length > 0 && paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-                  this.sendPtyInput(paneState.sessionId || sessionId, insertText);
-                }
+                if (insertText.length > 0) emitMobileText(insertText);
               } else {
+                const oldTrimRight = oldText.replace(/\s+$/, '');
+                const activeWordStart = oldTrimRight.lastIndexOf(' ') + 1;
                 let lcp = 0;
                 const minLen = Math.min(oldText.length, cleanVal.length);
                 while (lcp < minLen && oldText.charCodeAt(lcp) === cleanVal.charCodeAt(lcp)) {
                   lcp++;
                 }
-                const delCount = Math.min(15, oldText.length - lcp);
+                const effStart = Math.max(lcp, activeWordStart);
+                const delCount = Math.max(0, oldText.length - effStart);
                 if (delCount > 0 && paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
                   this.sendPtyInput(paneState.sessionId || sessionId, '\x7f'.repeat(delCount));
                 }
-                const insertText = cleanVal.slice(lcp);
-                if (insertText.length > 0 && paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-                  this.sendPtyInput(paneState.sessionId || sessionId, insertText);
-                }
+                const insertText = cleanVal.slice(effStart);
+                if (insertText.length > 0) emitMobileText(insertText);
               }
             }
             const enteredCmd = (paneState._imeBuffer || cleanVal || '').trim().toLowerCase();
@@ -42417,11 +42457,13 @@ Aturan:
               if (enteredCmd === 'cls' || enteredCmd === 'clear') {
                 paneState._lastScreenClearAt = now;
                 paneState._userScrolledUp = false;
-                try {
-                  term.write('\x1b[2J\x1b[3J\x1b[H');
-                  term.clear();
-                  term.scrollToBottom();
-                } catch (_) {}
+                if (paneState.isFallbackMode) {
+                  try {
+                    term.write('\x1b[2J\x1b[3J\x1b[H');
+                    term.clear();
+                    term.scrollToBottom();
+                  } catch (_) {}
+                }
                 if (paneState.updateScrollUI) paneState.updateScrollUI();
               } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
                 if (window.TerminalEndorphin) window.TerminalEndorphin.heal(paneNum);
@@ -42446,6 +42488,7 @@ Aturan:
           if (val === oldText) return;
 
           const now = Date.now();
+          paneState._lastDataEmitAt = now;
 
           // Selalu jangkar terminal ke dasar dan pulihkan status scroll setiap kali pengguna mengetik
           paneState._userScrolledUp = false;
@@ -42456,34 +42499,14 @@ Aturan:
           }
           if (paneState.updateScrollUI) paneState.updateScrollUI();
 
-          const isImeComposing = Boolean(paneState._isComposing || (now - (paneState._lastCompositionEndAt || 0)) < 300);
-
           // 2. Fast-Path A: Penambahan murni di akhir kursor (Append Delta)
           if (val.startsWith(oldText)) {
             const insertText = val.slice(oldText.length);
             paneState._imeBuffer = val;
-
-            // Temporal Anti-Stutter & IME Duplicate Filter:
-            // Mencegah emisi ganda dari Gboard (mis. insertCompositionText + insertText atau Google Translate)
-            // di mana karakter yang persis sama dikirim dalam rentang waktu < 180ms, atau selama siklus komposisi IME aktif (< 350ms)
-            if (insertText.length === 1 &&
-                paneState._lastEmittedChar === insertText &&
-                paneState._lastEmitTime) {
-              const emitDelta = now - paneState._lastEmitTime;
-              if (emitDelta < 180 || (isImeComposing && emitDelta < 350)) {
-                return;
-              }
-            }
-
             if (insertText.length > 0) {
               paneState._lastEmittedChar = insertText;
               paneState._lastEmitTime = now;
-              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-                this.sendPtyInput(paneState.sessionId || sessionId, insertText);
-              } else if (paneState && paneState.isFallbackMode) {
-                paneState._inputLine = (paneState._inputLine || '') + insertText;
-                term.write(insertText);
-              }
+              emitMobileText(insertText);
             }
             return;
           }
@@ -42512,39 +42535,49 @@ Aturan:
             return;
           }
 
-          // 4. Path C: Penggantian Kata Aktif (IME Replacement / Sugesti Kamus)
+          // 4. Path C: Penggantian Kata Aktif (IME Replacement / Sugesti Kamus / Auto-Capitalize)
           let lcp = 0;
           const minLen = Math.min(oldText.length, val.length);
           while (lcp < minLen && oldText.charCodeAt(lcp) === val.charCodeAt(lcp)) {
             lcp++;
           }
 
-          let delCount = oldText.length - lcp;
-          // Guard Invarian Batas Kata Aktif (Active Word Boundary Invariant):
-          // Hanya batasi jika penghapusan melintasi batas sebelum spasi terakhir (kata lampau/prompt).
-          // Di dalam kata aktif yang sedang diketik (lcp >= lastSpaceOld + 1), izinkan penggantian kata tanpa duplikasi!
-          const lastSpaceOld = oldText.lastIndexOf(' ');
-          if (lastSpaceOld !== -1 && lcp < lastSpaceOld + 1) {
-            delCount = Math.max(0, oldText.length - (lastSpaceOld + 1));
-            lcp = lastSpaceOld + 1;
-          } else if (delCount > 25) {
+          // Cari indeks awal kata aktif dengan mengabaikan spasi di ujung kanan (trailing spaces)
+          const oldTrimRight = oldText.replace(/\s+$/, '');
+          const activeWordStart = oldTrimRight.lastIndexOf(' ') + 1;
+
+          let delCount = 0;
+          let insertText = '';
+
+          if (lcp >= activeWordStart) {
+            // Subkasus C1: Perubahan berada di dalam kata aktif terakhir (mis. 'bai ' -> 'baik ' atau 'tidak ' -> 'tidak?')
+            delCount = oldText.length - lcp;
+            insertText = val.slice(lcp);
+          } else if (val.toLowerCase().startsWith(oldText.toLowerCase())) {
+            // Subkasus C2a: Gboard hanya mengubah kapitalisasi huruf di awal kalimat sambil menambah huruf di ujung
             delCount = 0;
-            lcp = Math.min(oldText.length, val.length);
-          }
-
-          const insertText = val.slice(lcp);
-
-          // Temporal Anti-Stutter Guard pada Path C
-          if (delCount === 0 &&
-              insertText.length === 1 &&
-              paneState._lastEmittedChar === insertText &&
-              paneState._lastEmitTime) {
-            const emitDelta = now - paneState._lastEmitTime;
-            if (emitDelta < 180 || (isImeComposing && emitDelta < 350)) {
-              paneState._imeBuffer = val;
-              return;
+            insertText = val.slice(oldText.length);
+          } else if (oldText.toLowerCase().startsWith(val.toLowerCase())) {
+            // Subkasus C2b: Gboard mengubah kapitalisasi awal sambil menghapus huruf di ujung
+            delCount = oldText.length - val.length;
+            insertText = '';
+          } else {
+            // Subkasus C2c: Gboard memodifikasi kata lampau di awal kalimat.
+            // Bandingkan hanya kata aktif terakhir (oldTail vs valTail) agar perubahan panjang kata awal tidak menggeser indeks!
+            const oldTail = oldText.slice(activeWordStart);
+            const valTrimRight = val.replace(/\s+$/, '');
+            const valWordStart = valTrimRight.lastIndexOf(' ') + 1;
+            const valTail = val.slice(valWordStart);
+            let tailLcp = 0;
+            const minTail = Math.min(oldTail.length, valTail.length);
+            while (tailLcp < minTail && oldTail.charCodeAt(tailLcp) === valTail.charCodeAt(tailLcp)) {
+              tailLcp++;
             }
+            delCount = oldTail.length - tailLcp;
+            insertText = valTail.slice(tailLcp);
           }
+
+          paneState._imeBuffer = val;
 
           if (delCount > 0) {
             paneState._lastBackspaceHandled = now;
@@ -42565,15 +42598,8 @@ Aturan:
           if (insertText.length > 0) {
             paneState._lastEmittedChar = insertText;
             paneState._lastEmitTime = now;
-            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-              this.sendPtyInput(paneState.sessionId || sessionId, insertText);
-            } else if (paneState && paneState.isFallbackMode) {
-              paneState._inputLine = (paneState._inputLine || '') + insertText;
-              term.write(insertText);
-            }
+            emitMobileText(insertText);
           }
-
-          paneState._imeBuffer = val;
         }, true);
 
         term.textarea.addEventListener('compositionstart', () => {
@@ -42585,14 +42611,12 @@ Aturan:
           paneState._lastCompositionEndAt = Date.now();
         }, true);
 
-        term.textarea.addEventListener('blur', () => {
-          if (!paneState._isComposing) {
-            this.resetImeLine(paneState);
-          }
-        }, true);
-
         term.textarea.addEventListener('focus', () => {
           paneState._imeBuffer = (term.textarea.value || '').replace(/[\u200B\uFEFF\u00A0]/g, ' ');
+          try {
+            const tLen = term.textarea.value.length;
+            term.textarea.setSelectionRange(tLen, tLen);
+          } catch (_) {}
         }, true);
       }
 
@@ -42610,11 +42634,13 @@ Aturan:
             if (enteredCmd === 'cls' || enteredCmd === 'clear') {
               paneState._lastScreenClearAt = now;
               paneState._userScrolledUp = false;
-              try {
-                term.write('\x1b[2J\x1b[3J\x1b[H');
-                term.clear();
-                term.scrollToBottom();
-              } catch (_) {}
+              if (paneState.isFallbackMode) {
+                try {
+                  term.write('\x1b[2J\x1b[3J\x1b[H');
+                  term.clear();
+                  term.scrollToBottom();
+                } catch (_) {}
+              }
               if (paneState.updateScrollUI) paneState.updateScrollUI();
             } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
               this.resetImeLine(paneState);
@@ -42641,22 +42667,42 @@ Aturan:
           }
         }
 
-        // 2. Cegah xterm menghasilkan \x1b\x7f atau \x1b\x08 saat tombol Backspace ditekan
+        // 2. Penanganan Backspace Presisi (Mobile & Desktop)
         if (ev.key === 'Backspace' || ev.keyCode === 8) {
           if (ev.type === 'keydown') {
             if (this.isMobileDevice()) {
-              const currentVal = (term.textarea?.value || '').replace(/[\u200B\uFEFF]/g, '');
+              const currentVal = (term.textarea?.value || '').replace(/[\u200B\uFEFF\u00A0]/g, ' ');
               if (currentVal.length > 0) {
-                // Jika masih ada teks di textarea, biarkan browser menghapus karakter di textarea (return true)
-                // agar transduser input LCP mendeteksi penyusutan dan memancarkan \x7f.
-                return true;
-              }
-              // Jika textarea sudah kosong (kursor di posisi 0), Gboard sering mengirim keydown keyCode 8
-              // tanpa memicu beforeinput/input. Pancarkan \x7f secara langsung dengan guard anti-duplikasi!
-              const now = Date.now();
-              if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 40) {
+                // PENTING: Kembalikan false (tanpa ev.preventDefault()) agar xterm TIDAK membatalkan
+                // penghapusan karakter asli browser di textarea, sehingga event input Fast-Path B terpancar!
+                // Tambahkan fallback mikro 25ms jika keyboard Android mengirim keydown 8 sintetis tanpa memutasi textarea.
+                const valBeforeKey = currentVal;
+                const imeBeforeKey = paneState._imeBuffer || '';
+                setTimeout(() => {
+                  const valAfterKey = (term.textarea?.value || '').replace(/[\u200B\uFEFF\u00A0]/g, ' ');
+                  if (valAfterKey === valBeforeKey && (paneState._imeBuffer || '') === imeBeforeKey && valAfterKey.length > 0) {
+                    const nextVal = valAfterKey.slice(0, -1);
+                    if (term.textarea) term.textarea.value = nextVal;
+                    paneState._imeBuffer = nextVal;
+                    const ts = Date.now();
+                    paneState._lastBackspaceHandled = ts;
+                    paneState._lastBackspaceTime = ts;
+                    if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                      this.sendPtyInput(paneState.sessionId || sessionId, '\x7f');
+                    } else if (paneState && paneState.isFallbackMode && paneState._inputLine?.length > 0) {
+                      paneState._inputLine = paneState._inputLine.slice(0, -1);
+                      term.write('\b \b');
+                    }
+                  }
+                }, 25);
                 return false;
               }
+              // Jika textarea sudah kosong (kursor di posisi 0), pancarkan \x7f secara langsung!
+              const now = Date.now();
+              if (paneState._lastEmptyBsAt && (now - paneState._lastEmptyBsAt) < 35) {
+                return false;
+              }
+              paneState._lastEmptyBsAt = now;
               paneState._lastBackspaceHandled = now;
               paneState._lastBackspaceTime = now;
               this.resetImeLine(paneState);
@@ -42711,6 +42757,7 @@ Aturan:
             } else {
               ev.preventDefault();
               ev.stopPropagation();
+              this.resetImeLine(paneState);
               if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
                 this.sendPtyInput(paneState.sessionId || sessionId, '\x03');
               } else if (paneState && paneState.isFallbackMode) {
@@ -42744,6 +42791,7 @@ Aturan:
           if (keyLower === 'l') {
             ev.preventDefault();
             ev.stopPropagation();
+            this.resetImeLine(paneState);
             if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
               this.sendPtyInput(paneState.sessionId || sessionId, '\x0c');
             } else if (paneState && paneState.isFallbackMode) {
@@ -42796,6 +42844,7 @@ Aturan:
           if (keyLower === 'u') {
             ev.preventDefault();
             ev.stopPropagation();
+            this.resetImeLine(paneState);
             if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
               this.sendPtyInput(paneState.sessionId || sessionId, '\x15');
             }
@@ -42816,6 +42865,7 @@ Aturan:
           if (keyLower === 'w') {
             ev.preventDefault();
             ev.stopPropagation();
+            this.resetImeLine(paneState);
             if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
               this.sendPtyInput(paneState.sessionId || sessionId, '\x17');
             }
@@ -42850,11 +42900,13 @@ Aturan:
         return true;
       });
 
-      // Sinkronisasi atomik blur xterm dengan buffer IME kontinu
+      // Sinkronisasi atomik blur xterm (Di ponsel, pertahankan _imeBuffer saat keyboard ditutup sementara!)
       if (term._core && typeof term._core._handleTextAreaBlur === 'function') {
         const origBlur = term._core._handleTextAreaBlur.bind(term._core);
         term._core._handleTextAreaBlur = () => {
-          this.resetImeLine(paneState);
+          if (!this.isMobileDevice()) {
+            this.resetImeLine(paneState);
+          }
           origBlur();
         };
       }
@@ -43120,11 +43172,13 @@ Aturan:
           if (enteredCmd === 'cls' || enteredCmd === 'clear') {
             paneState._lastScreenClearAt = now;
             paneState._userScrolledUp = false;
-            try {
-              term.write('\x1b[2J\x1b[3J\x1b[H');
-              term.clear();
-              term.scrollToBottom();
-            } catch (_) {}
+            if (paneState.isFallbackMode) {
+              try {
+                term.write('\x1b[2J\x1b[3J\x1b[H');
+                term.clear();
+                term.scrollToBottom();
+              } catch (_) {}
+            }
             if (paneState.updateScrollUI) paneState.updateScrollUI();
           } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
             this.resetImeLine(paneState);
@@ -43477,24 +43531,20 @@ Aturan:
     // Helper normalisasi stream ConPTY Windows untuk memurnikan sekuens hapus layar (cls / Clear-Host)
     cleanConptyData(str) {
       if (typeof str !== 'string' || !str) return str;
+      const csi = '(?:\\x1b\\[(?![23]J)[0-9;? -/]*[@-~])';
       // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) berulang yang diakhiri cursor home (\x1b[H)
       // Ubah menjadi ANSI clear screen murni: clear viewport \x1b[2J + clear scrollback \x1b[3J + cursor home \x1b[H
-      const wipeRe = /(?:\x1b\[\??[0-9;]*[a-zA-Z])*(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[2?K){3,}(?:\r\n|\n)*(?:\x1b\[\??[0-9;]*[a-zA-Z])*\x1b\[(?:H|1;1H)(?:\x1b\[\?25[hl])*/g;
+      const wipeRe = new RegExp(`${csi}*(?:(?:\\r\\n|\\n)${csi}*\\x1b\\[2?K${csi}*|\\x1b\\[2?K${csi}*(?:\\r\\n|\\n)|\\x1b\\[2?K){3,}(?:\\r\\n|\\n|${csi})*\\x1b\\[(?:H|1;1H)(?:\\x1b\\[\\?25[hl])*`, 'g');
       str = str.replace(wipeRe, '\x1b[2J\x1b[3J\x1b[H');
 
-      // 2. Padding newline ConPTY yang berulang diakhiri pemindahan kursor baris/kolom spesifik \x1b[row;colH
-      // Wajib membutuhkan minimal satu newline (\r\n|\n) dan TIDAK BOLEH memakan sekuens ANSI viewport \x1b[2J\x1b[3J!
-      const padPosRe = /(?:(?:\r\n|\n)+(?:\x1b\[(?![23]J)[0-9;?]*[a-zA-Z])*)+\x1b\[(\d+);(\d+)H/g;
-      str = str.replace(padPosRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
+      // 2. Normalisasi pembersihan sisa layar pasca-clear di baris pertama (\x1b[1;colH) menjadi Erase in Display (\x1b[K\x1b[J)
+      // Tanpa pernah menghapus \r\n pada baris gulir (scroll) atau pembungkusan baris (line-wrap) di tengah/bawah layar!
+      const eraseBelowHomeRe = new RegExp(`(?:(?:\\r\\n|\\n)${csi}*\\x1b\\[2?K${csi}*|\\x1b\\[2?K${csi}*(?:\\r\\n|\\n)){5,}(?:\\x1b\\[2?K)?${csi}*\\x1b\\[1;(\\d+)H`, 'g');
+      str = str.replace(eraseBelowHomeRe, (m, c) => '\x1b[K\x1b[J\x1b[1;' + c + 'H');
 
-      // 3. Padding newline ConPTY yang berulang diakhiri cursor home \x1b[H
-      // TIDAK BOLEH memakan sekuens ANSI viewport \x1b[2J\x1b[3J!
-      const padHomeRe = /(?:(?:\r\n|\n)+(?:\x1b\[(?![23]J)[0-9;?]*[a-zA-Z])*)+\x1b\[(?:H|1;1H)/g;
-      str = str.replace(padHomeRe, '\x1b[H');
-
-      // 4. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>")
+      // 3. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>")
       // Tahan terhadap derau kode ANSI interleave (mis. cursor position \x1b[1;19H, clear-line \x1b[K, hide/show cursor)
-      const dedupRe = /(PS [^\r\n>]+>)(?:[\s\x00-\x1f]|\x1b\[[0-9;?]*[a-zA-Z])*(?:\x1b\[(?:H|1;1H|\d+;\d+H))?\1\s*/g;
+      const dedupRe = /(PS [^\r\n>]+>)(?:[\s\x00-\x1f]|\x1b\[[0-9;? -/]*[@-~])*(?:\x1b\[(?:H|1;1H|\d+;\d+H))?\1\s*/g;
       str = str.replace(dedupRe, '$1 ');
 
       return str;
@@ -43822,19 +43872,29 @@ Aturan:
       let targetCols = term.cols || 80;
       let targetRows = term.rows || 24;
 
+      const charW = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.width) || 8.5;
+      const charH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
+      const vv = window.visualViewport;
+      const isKeyboardOpen = isMobile && vv && (vv.height < window.innerHeight * 0.75);
+
       if (paneState.fitAddon) {
         try {
           const dims = paneState.fitAddon.proposeDimensions();
           if (dims && dims.cols > 10 && dims.rows > 5) {
             targetCols = Math.max(isMobile ? 45 : 60, dims.cols);
             if (isMobile) {
-              const vv = window.visualViewport;
-              const isKeyboardOpen = vv && (vv.height < window.innerHeight * 0.75);
               if (isKeyboardOpen) {
-                // Saat keyboard terbuka di ponsel: Kunci dimensi baris dan kolom agar identik baseline,
+                // Saat keyboard terbuka di ponsel: Kunci dimensi baris dan kolom agar identik baseline layar penuh,
                 // cegah reflow ConPTY yang merusak prompt & tata letak pengetikan
                 if (paneState._stableMobileCols) targetCols = paneState._stableMobileCols;
-                if (paneState._stableMobileRows) targetRows = paneState._stableMobileRows;
+                if (paneState._stableMobileRows) {
+                  targetRows = paneState._stableMobileRows;
+                } else {
+                  const fullH = Math.max(container.clientHeight, window.innerHeight - 130);
+                  targetRows = Math.max(20, Math.floor(fullH / charH));
+                  paneState._stableMobileCols = targetCols;
+                  paneState._stableMobileRows = targetRows;
+                }
               } else {
                 targetCols = Math.max(45, dims.cols);
                 targetRows = Math.max(20, dims.rows);
@@ -43852,15 +43912,18 @@ Aturan:
       if (!targetCols || !targetRows || targetCols < 20 || targetRows < 8) {
         const containerW = container.clientWidth || window.innerWidth;
         const containerH = container.clientHeight || (window.innerHeight - 130);
-        const charW = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.width) || 8.5;
-        const charH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
         targetCols = Math.max(isMobile ? 45 : 60, Math.floor(containerW / charW));
         if (isMobile) {
-          const vv = window.visualViewport;
-          const isKeyboardOpen = vv && (vv.height < window.innerHeight * 0.75);
           if (isKeyboardOpen) {
             if (paneState._stableMobileCols) targetCols = paneState._stableMobileCols;
-            if (paneState._stableMobileRows) targetRows = paneState._stableMobileRows;
+            if (paneState._stableMobileRows) {
+              targetRows = paneState._stableMobileRows;
+            } else {
+              const fullH = Math.max(containerH, window.innerHeight - 130);
+              targetRows = Math.max(20, Math.floor(fullH / charH));
+              paneState._stableMobileCols = targetCols;
+              paneState._stableMobileRows = targetRows;
+            }
           } else {
             targetCols = Math.max(45, targetCols);
             targetRows = Math.max(20, Math.floor(containerH / charH));
@@ -43878,22 +43941,23 @@ Aturan:
 
       const prevCols = term.cols;
       const prevRows = term.rows;
+      const sizeChanged = (prevCols !== targetCols || prevRows !== targetRows);
 
-      if (prevCols !== targetCols || prevRows !== targetRows) {
+      if (sizeChanged) {
         paneState._isRemoteResizing = true;
         try {
           term.resize(targetCols, targetRows);
-          if (isMobile) {
+          if (isMobile && !paneState._userScrolledUp) {
             try { term.scrollToBottom(); } catch (_) {}
           }
         } finally {
           setTimeout(() => { paneState._isRemoteResizing = false; }, 120);
         }
       }
-      if (forcePtyResize && paneState.sessionId && !paneState.isFallbackMode) {
-        const isActivelyTyping = isMobile && paneState._lastDataEmitAt && (Date.now() - paneState._lastDataEmitAt) < 800;
-        const isKeyboardOpen = isMobile && window.visualViewport && (window.visualViewport.height < window.innerHeight * 0.75);
-        if (!isActivelyTyping && !isKeyboardOpen && (prevCols !== targetCols || prevRows !== targetRows || paneState._lastSentPtyCols !== targetCols || paneState._lastSentPtyRows !== targetRows)) {
+      // Invarian Geometri Mutlak: Setiap kali ukuran xterm berubah atau belum dikirim ke PTY,
+      // WAJIB sinkronkan ke server PTY agar term.cols === pty.cols dan term.rows === pty.rows!
+      if ((forcePtyResize || sizeChanged) && paneState.sessionId && !paneState.isFallbackMode) {
+        if (sizeChanged || paneState._lastSentPtyCols !== targetCols || paneState._lastSentPtyRows !== targetRows) {
           paneState._lastSentPtyCols = targetCols;
           paneState._lastSentPtyRows = targetRows;
           this.sendPtyResize(paneState.sessionId, targetCols, targetRows);
@@ -44597,7 +44661,6 @@ Aturan:
           const sId = paneState?.sessionId || `${tab?.id}-p${paneNum}`;
 
           this.ensureActivePtySize(paneState);
-          this.resetImeLine(paneState);
 
           const keepFocus = () => {
             if (paneState?.term) {
@@ -44612,6 +44675,7 @@ Aturan:
 
           if (cmdType) {
             if (cmdType === 'endorfin' || cmdType === 'heal') {
+              this.resetImeLine(paneState);
               if (window.TerminalEndorphin) window.TerminalEndorphin.heal(paneNum);
               keepFocus();
               return;
@@ -44621,6 +44685,7 @@ Aturan:
               keepFocus();
               return;
             }
+            this.resetImeLine(paneState);
             if (paneState?.term && !paneState.isFallbackMode) {
               this.sendPtyInput(sId, `${cmdType}\r`);
             } else {
@@ -44661,6 +44726,7 @@ Aturan:
           }
 
           if (keyType === 'paste') {
+            this.resetImeLine(paneState);
             try {
               if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
                 const text = await navigator.clipboard.readText();
@@ -44762,7 +44828,14 @@ Aturan:
           else if (keyType === 'ArrowRight') ptySeq = '\x1b[C';
 
           if (ptySeq) {
-            this.resetImeLine(paneState);
+            if (keyType === 'Backspace') {
+              if (paneState._imeBuffer && paneState._imeBuffer.length > 0) {
+                paneState._imeBuffer = paneState._imeBuffer.slice(0, -1);
+                if (paneState.term?.textarea) paneState.term.textarea.value = paneState._imeBuffer;
+              }
+            } else {
+              this.resetImeLine(paneState);
+            }
             if (paneState?.term && !paneState.isFallbackMode) {
               this.sendPtyInput(sId, ptySeq);
             } else {
