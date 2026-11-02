@@ -7189,7 +7189,7 @@ async function requestHandler(req, res) {
           }
           if (!data) return;
           data = cleanConptyData(data);
-          if (data.includes('\x1b[3J')) {
+          if (data.includes('\x1b[3J') || data.includes('\x1b[2J')) {
             session.buffer = [data];
           } else {
             if (session.buffer.length > 500) session.buffer.shift();
