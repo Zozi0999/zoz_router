@@ -3769,6 +3769,9 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
 async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, content, modelName, extraMeta) {
   const userDir = getUserSessionsDir(sanitizeUserId(effectiveUid || 'default'));
   const sessFile = path.join(userDir, `${cleanSid}.json`);
+  const cleanUserPrompt = userPrompt
+    ? String(userPrompt).replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim()
+    : null;
 
   let sessData = null;
     if (fs.existsSync(sessFile)) {
@@ -3784,18 +3787,18 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
     if (!sessData || typeof sessData !== 'object') {
       const initialMsgs = [];
 
-      if (userPrompt) {
+      if (cleanUserPrompt) {
         initialMsgs.push({
           id: 'msg_usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
           role: 'user',
-          content: userPrompt,
+          content: cleanUserPrompt,
           timestamp: new Date(Date.now() - 3000).toISOString()
         });
       }
 
       let dynamicTitle = 'Percakapan Baru';
-      if (userPrompt) {
-        const cleanP = String(userPrompt).trim().replace(/^#+\s*/, '');
+      if (cleanUserPrompt) {
+        const cleanP = String(cleanUserPrompt).trim().replace(/^#+\s*/, '');
         const shortP = cleanP.length > 32 ? cleanP.substring(0, 32) + '...' : cleanP;
         if (extraMeta?.isImageGen) {
           dynamicTitle = `🎨 Gambar: ${shortP}`;
@@ -3911,11 +3914,11 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
     }
 
     // Jika ini giliran baru yang belum dicatat di disk, tambahkan pesan user terlebih dahulu
-    if (isDifferentTurn && userPrompt) {
+    if (isDifferentTurn && cleanUserPrompt) {
       msgs.push({
         id: 'msg_usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
         role: 'user',
-        content: userPrompt,
+        content: cleanUserPrompt,
         timestamp: new Date(Date.now() - 2000).toISOString()
       });
     }
@@ -10374,6 +10377,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               rawUserPrompt = rawUserPrompt.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
             }
           }
+          rawUserPrompt = rawUserPrompt.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
           userPrompt = rawUserPrompt;
         }
       }
@@ -11102,6 +11106,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               rawUserPrompt = rawUserPrompt.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
             }
           }
+          rawUserPrompt = rawUserPrompt.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
           userPrompt = rawUserPrompt;
         }
       }

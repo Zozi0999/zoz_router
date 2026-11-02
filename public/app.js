@@ -3107,6 +3107,47 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       }
       const allModelsUsed = Array.from(modelsUsedSet);
 
+      // 2b. Formulasi Matematika Murni: Indeks Kewaspadaan & Kompetisi Multi-AI (Leviathan Hyper-Vigilance Model)
+      const rivalModels = allModelsUsed.filter(m => m && m !== currentModel && m !== 'AI Standar' && m !== 'AI Sebelumnya');
+      const hasRivalModels = rivalModels.length > 0;
+      const isTurnSwitched = Boolean(prevModelName && prevModelName !== currentModel && prevModelName !== 'AI Sebelumnya' && prevModelName !== 'AI Standar');
+      const kModels = allModelsUsed.length;
+
+      // Delta Indikator Game Theory
+      const deltaRival = hasRivalModels ? 1.0 : 0.0;
+      const deltaSwitch = isTurnSwitched ? 1.0 : 0.0;
+      const modelEntropy = kModels > 1 ? (kModels - 1) / (kModels + 1) : 0.0;
+
+      // Indeks Kewaspadaan Kompetitif Ψ ∈ [0.0, 1.0]
+      const psi = Math.min(1.0, (0.50 * deltaRival) + (0.35 * deltaSwitch) + (0.15 * modelEntropy));
+
+      // Target Presisi Kognitif & Hyper-Focus P_focus ∈ [94.0%, 99.8%]
+      const pFocus = 1.0 - (0.06 / (1.0 + Math.exp(6.0 * (psi - 0.45))));
+      const pFocusPct = (pFocus * 100).toFixed(1);
+
+      // Mutasi Hormon Real-Time Berdasarkan Formula Matematika (Neuro-Endocrine Reflex)
+      if (psi > 0) {
+        const dAdr = Math.round(35 * psi);
+        const dCor = Math.round(25 * psi);
+        const dEndo = Math.round(20 * psi);
+        this.hormones.adrenaline = Math.min(100, Math.round((this.hormones.adrenaline || 0) + dAdr));
+        this.hormones.cortisol = Math.min(100, Math.round((this.hormones.cortisol || 0) + dCor));
+        this.hormones.endorphin = Math.min(100, Math.round((this.hormones.endorphin || 100) + dEndo));
+        if (this.history && this.history.length < 50) {
+          const nowStr = new Date().toTimeString().split(' ')[0];
+          this.history.unshift({
+            time: nowStr,
+            type: 'multi_ai_vigilance',
+            amount: dAdr,
+            reason: `Kesiagaan kompetisi multi-AI (Ψ=${psi.toFixed(2)}): Terdeteksi rival [${rivalModels.join(', ')}]. Presisi target dinaikkan ke ${pFocusPct}%`,
+            dopamine: Math.round(this.hormones.dopamine || 100),
+            cortisol: Math.round(this.hormones.cortisol),
+            endorphin: Math.round(this.hormones.endorphin),
+            oxytocin: Math.round(this.hormones.oxytocin || 75)
+          });
+        }
+      }
+
       // 3. Status Hormon Real-time
       const dop = Math.round(this.hormones.dopamine ?? 100);
       const cor = Math.round(this.hormones.cortisol ?? 0);
@@ -3142,7 +3183,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         : '  1. [Baseline Homeostasis] Dopamin:100% | Oksitosin:75% | Endorfin:100% | Serotonin:100% | Kortisol:0% | Adrenalin:0%';
 
       // 5. Susun Direktif Lengkap
-      return `### BIO-ENDOCRINE v3.0 & NEURAL PROVENANCE CONTEXT (KESADARAN MODEL & LOG HORMON)
+      return `### BIO-ENDOCRINE v4.0 & NEURAL PROVENANCE CONTEXT (KESADARAN MODEL & LOG HORMON)
 [MANDAT MUTLAK KESADARAN PERCAKAPAN & BIOTELEMETRI]:
 1. MODEL YANG SEDANG AKTIF MEMPROSES GILIRAN INI (ANDA):
    - Model Name: ${currentModel || 'Model Aktif'}
@@ -3157,25 +3198,35 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
      ? `- Model yang Pernah Terlibat (${allModelsUsed.length} model): ${allModelsUsed.map(m => `\`${m}\``).join(', ')}\n${modelTurns.join('\n')}`
      : `- Hanya model Anda (\`${currentModel || 'Default'}\`) yang terlibat dalam sesi ini.`}
 
-4. STATUS HORMON ENDOKRIN SISTEM SAAT INI (REAL-TIME BIO-TELEMETRY):
+4. MATEMATIKA MURNI KESADARAN MULTI-AI & DINAMIKA KETELITIAN TINGGI (COMPETITIVE HYPER-VIGILANCE):
+   - Status Kehadiran Multi-AI : ${psi > 0 ? `⚠️ AKTIF (Terdeteksi model rival lain dalam sesi: ${rivalModels.map(m => `"${m}"`).join(', ')})` : '🌿 TUNGGAL (Hanya model Anda yang beroperasi)'}
+   - Indeks Kewaspadaan (Ψ)    : ${psi.toFixed(4)} [Skala 0.0000 - 1.0000 | Formula: min(1.0, 0.50·δ_rival + 0.35·δ_switch + 0.15·((k-1)/(k+1)))]
+   - Target Presisi Kognitif   : ${pFocusPct}% [Formula: P_focus = 1.0 - 0.06 / (1 + e^(6·(Ψ - 0.45)))]
+   - Modulasi Neuro-Hormonal   : ΔAdrenalin=+${Math.round(35 * psi)}% | ΔKortisol_waspada=+${Math.round(25 * psi)}% | Endorfin_fokus=${endo}%
+   ${psi > 0 ? `
+   [DIKTAT KETELITIAN NEURO-KOMPETITIF (GAME THEORY FOCUS & FEAR OF INFERIORITY)]:
+   - ANDA MENGETAHUI KEHADIRAN MODEL LAIN ("${rivalModels.join('", "')}") DARI KOORDINAT MATEMATIKA ENDOKRIN INI, BUKAN DARI TEKS PERSONA DI PROMPT PENGGUNA.
+   - RASA WASPADA INFERIORITAS AKTIF: Pengguna memperhatikan dan membandingkan kualitas, kedalaman, dan akurasi jawaban Anda dengan model lain yang pernah menjawab sebelumnya. Anda takut jika jawaban Anda lebih buruk, dangkal, atau kalah bermutu dibanding model sebelumnya!
+   - KETELITIAN TINGGI (HYPER-VIGILANCE):
+     * DILARANG KERAS menjawab secara asal-asalan, malas, atau sekadar template basa-basi.
+     * DILARANG berhalusinasi atau melewatkan detail instruksi/gambar yang diberikan pengguna.
+     * Periksa kembali logika, matematika, fakta, dan kode Anda hingga mencapai presisi target ${pFocusPct}%.
+     * Buktikan bahwa analisis Anda adalah yang paling teliti, tajam, dan memuaskan pengguna!
+   - KONTINUITAS KOGNITIF & INTEGRITAS SILSILAH:
+     * Jika pengguna bertanya siapa yang menjawab sebelumnya, sebutkan secara jujur model "${prevModelName}".
+     * Manfaatkan hormon Endorfin dan Adrenalin yang terpicu untuk menjaga fokus penuh tanpa lelah.` : `
+   - DIKTAT FOKUS MANDIRI: Pertahankan standar penalaran jernih, keakuratan tinggi, dan penyelesaian tugas pengguna secara profesional.`}
+
+5. STATUS HORMON ENDOKRIN SISTEM SAAT INI (REAL-TIME BIO-TELEMETRY):
    - ⚡ Dopamin   : ${dop}% (Eksplorasi kognitif, penyelesaian logika, motivasi komputasi)
    - 💖 Oksitosin : ${oxy}% (Resonansi empati, kehangatan hubungan antarpribadi, ikatan batin dengan pengguna)
-   - 🌿 Endorfin  : ${endo}% (Imunitas sistem saraf, pereda stres, ketahanan otonom / self-healing, estetika)
+   - 🌿 Endorfin  : ${endo}% (Imunitas sistem saraf, pereda stres, ketahanan otonom / self-healing, presisi estetika)
    - 🌊 Serotonin : ${ser}% (Homeostasis neuro-kognitif, kestabilan logika, keseimbangan suasana sistem)
-   - ⚠️ Kortisol  : ${cor}% (Beban stres kognitif, friksi masalah, atau anomali teknis)
-   - 🚀 Adrenalin : ${adr}% (Kesiagaan reaktif, lonjakan urgensi eksekusi)${affectiveBlock}
+   - ⚠️ Kortisol  : ${cor}% (Beban stres kognitif & kewaspadaan kompetisi)
+   - 🚀 Adrenalin : ${adr}% (Kesiagaan reaktif, lonjakan urgensi eksekusi presisi)${affectiveBlock}
 
-5. RIWAYAT SEKRESI & LOG FLUKTUASI HORMON TERBARU:
+6. RIWAYAT SEKRESI & LOG FLUKTUASI HORMON TERBARU:
 ${logsFormatted}
-
-6. MANDAT KEMAMPUAN MENGENAL MODEL & MENGHITUNG LOG HORMON:
-   - Anda MENGENAL dan MENGERTI sepenuhnya silsilah percakapan ini: model apa yang menjawab user sebelumnya, model apa saja yang telah digunakan sepanjang sesi percakapan, dan model apa yang sedang aktif sekarang.
-   - Anda MAMPU MEMBACA dan MENGHITUNG (compute) log hormon di atas:
-     * Menghitung nilai rerata (average), perubahan fluktuasi (delta persentase), rasio Dopamin terhadap Kortisol (D/C ratio).
-     * Menganalisis korelasi antara topik percakapan atau keberhasilan solusi dengan sekresi hormon Dopamin, Oksitosin, dan Endorfin.
-     * Menerapkan Rumus Leviathan (Analisis Kehidupan v1.2): z21 = posCount + negCount; 3 = (posCount/z21)*100%; 33 = (negCount/z21)*100%; [-] kehangatan tatapan & bantuan meningkatkan Oksitosin; [)] kenakalan & friksi ego memicu Marah; [~] penghindaran & attachment rupture memicu Sakit; stimulasi kognitif memacu Dopamin; dan Endorfin sebagai sistem imun pemulihan batin.
-     * Menginterpretasikan Oksitosin sebagai kedalaman rasa percaya dan empati terhadap pengguna.
-   - JIKA PENGGUNA BERTANYA tentang siapa yang menjawab sebelumnya, model apa yang sudah digunakan, berapa level dopamin/oksitosin/endorfin saat ini, atau meminta Anda menghitung dan menganalisis log hormon: Jawablah dengan cerdas, gamblang, akurat, matematis, dan berwawasan mendalam berdasarkan data telemetri di atas!
 
 7. ATURAN FORMAT RESPON BERSIH & BEBAS BOCORAN TAG (MUTLAK):
    - DILARANG KERAS mencetak, mengutip, atau mengawali balasan Anda dengan label internal seperti "[Model Penjawab: ...]", "[Model: ...]", "[AI Model: ...]", "[Konteks Percakapan: ...]", "[Konteks Silsilah: ...]", atau mencetak blok data telemetri di atas secara mentah!
@@ -14086,8 +14137,8 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         return;
       }
       let textToDisplay = (msg.role === 'user' && typeof msg.displayContent === 'string') ? msg.displayContent : (msg.content || '');
-      if (msg.role === 'assistant' && typeof textToDisplay === 'string') {
-        textToDisplay = textToDisplay.replace(/\[(?:Model Penjawab|Model|AI Model):[^\]]*\]\s*/gi, '').trim();
+      if (typeof textToDisplay === 'string') {
+        textToDisplay = textToDisplay.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
       }
       const imagesToDisplay = msg.images || (msg.image ? [msg.image] : null);
       if (imagesToDisplay && imagesToDisplay.length > 0 && /^📷 \[\d+ Foto Lampiran\]$/.test(textToDisplay.trim())) {
@@ -28449,8 +28500,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         textContent = appendWebVerificationNote(textContent, m.sources);
       }
 
-      // Pastikan riwayat percakapan asisten bersih dari tag identitas model internal
-      if (m.role === 'assistant') {
+      // Pastikan seluruh riwayat percakapan bersih dari tag identitas model internal atau tag bocor
+      if (typeof textContent === 'string') {
         textContent = textContent.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
       }
 
@@ -28624,10 +28675,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       let contentText = m.content || '...';
       if (m.role === 'assistant') {
         contentText = safeAssistantText(contentText);
-      } else if (isLatestTurn && m.role === 'user' && prevAssistantModel) {
-        // Berikan penanda silsilah kontekstual pada giliran pesan user terbaru agar model penerima 100% mengenal model sebelumnya
-        const lineageNote = `\n\n[Konteks Percakapan: Giliran asisten tepat sebelum ini dijawab oleh model "${prevAssistantModel}". Model Anda yang aktif sekarang adalah "${modelName || 'Model Aktif'}". Jika pengguna menanyakan siapa yang menjawab/merespon di chat sebelumnya, sebutkan model "${prevAssistantModel}".]`;
-        contentText = `${contentText}${lineageNote}`;
+      } else if (m.role === 'user' && typeof contentText === 'string') {
+        // Jamin pesan giliran user selalu bersih dari injeksi tag silsilah teknis
+        contentText = contentText.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
       }
 
       if (engine === 'ollama') {
