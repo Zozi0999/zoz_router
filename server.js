@@ -11857,7 +11857,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
   }
   const targetCwd = (reqCwd && fs.existsSync(reqCwd) && path.resolve(reqCwd).toLowerCase() !== WORKSPACE_ROOT.toLowerCase()) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
   const cols = Math.max(45, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
-  const rows = Math.max(15, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
+  const rows = Math.max(8, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
 
   let session = activeTerminalSessions.get(sessionId);
   if (!session || !session.pty) {
