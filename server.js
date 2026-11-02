@@ -387,8 +387,8 @@ function resolveHostShell(shellType) {
   return {
     exe: isWin ? 'powershell.exe' : 'pwsh',
     args: isWin
-      ? ['-ExecutionPolicy', 'Bypass', '-NoExit', '-Command', 'try { Set-PSReadLineOption -PredictionSource None -ErrorAction SilentlyContinue } catch {}']
-      : ['-ExecutionPolicy', 'Bypass']
+      ? ['-NoLogo', '-ExecutionPolicy', 'Bypass', '-NoExit', '-Command', 'try { Import-Module PSReadLine -ErrorAction SilentlyContinue; Set-PSReadLineOption -PredictionSource None -ErrorAction SilentlyContinue } catch {}']
+      : ['-NoLogo', '-ExecutionPolicy', 'Bypass']
   };
 }
 
@@ -408,25 +408,31 @@ function hasVisibleTerminalPrompt(bufferStr) {
 }
 
 /**
- * Helper normalisasi stream ConPTY Windows di level global untuk memurnikan sekuens hapus layar (cls / Clear-Host)
+ * Helper normalisasi stream ConPTY Windows di level global (Linear-Time O(N) Zero-Backtracking)
+ * untuk memurnikan sekuens hapus layar (cls / Clear-Host) tanpa risiko ReDoS pada TUI besar (codex/agy).
  * Diakses oleh jalur SSE (/api/terminal/stream) maupun jalur WebSocket (handleTerminalWebSocketUpgrade).
  */
 function cleanConptyData(str) {
   if (typeof str !== 'string' || !str) return str;
-  const csi = '(?:\\x1b\\[(?![23]J)[0-9;? -/]*[@-~])';
-  // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) berulang yang diakhiri cursor home (\x1b[H)
-  // Ubah menjadi ANSI clear screen murni: clear viewport \x1b[2J + clear scrollback \x1b[3J + cursor home \x1b[H
-  const wipeRe = new RegExp(`${csi}*(?:(?:\\r\\n|\\n)${csi}*\\x1b\\[2?K${csi}*|\\x1b\\[2?K${csi}*(?:\\r\\n|\\n)|\\x1b\\[2?K){3,}(?:\\r\\n|\\n|${csi})*\\x1b\\[(?:H|1;1H)(?:\\x1b\\[\\?25[hl])*`, 'g');
-  str = str.replace(wipeRe, '\x1b[2J\x1b[3J\x1b[H');
+  // 1 & 2. Deteksi atomik O(N) untuk ConPTY screen wipe (\x1b[K\r\n... -> \x1b[H)
+  // dan pembersihan sisa layar pasca-clear di baris pertama (PS ...> \x1b[K\r\n... -> \x1b[1;colH).
+  // Token [mhlK] dan [\r\n] saling asing (disjoint) terhadap terminal 'H', sehingga quantifier '+' 100% bebas backtracking.
+  const blockRe = /(PS [^\r\n\x1b>]+>[ \t]*)?((?:\x1b\[[0-9;?]*[mhlK]|[\r\n])+)\x1b\[(H|1;(\d+)H)((?:\x1b\[\?25[hl])*)/g;
+  str = str.replace(blockRe, (match, promptPrefix, body, pos, col, tail) => {
+    const kMatches = body.match(/\x1b\[2?K/g);
+    const kCount = kMatches ? kMatches.length : 0;
+    if ((pos === 'H' || pos === '1;1H') && kCount >= 3 && !promptPrefix) {
+      return '\x1b[2J\x1b[3J\x1b[H';
+    }
+    if (col && kCount >= 5) {
+      const prefix = promptPrefix ? ('\x1b[H' + promptPrefix) : '';
+      return prefix + '\x1b[K\x1b[J\x1b[1;' + col + 'H' + (tail || '');
+    }
+    return match;
+  });
 
-  // 2. Normalisasi pembersihan sisa layar pasca-clear di baris pertama (\x1b[1;colH) menjadi Erase in Display (\x1b[K\x1b[J)
-  // Tanpa pernah menghapus \r\n pada baris gulir (scroll) atau pembungkusan baris (line-wrap) di tengah/bawah layar!
-  const eraseBelowHomeRe = new RegExp(`(?:(?:\\r\\n|\\n)${csi}*\\x1b\\[2?K${csi}*|\\x1b\\[2?K${csi}*(?:\\r\\n|\\n)){5,}(?:\\x1b\\[2?K)?${csi}*\\x1b\\[1;(\\d+)H`, 'g');
-  str = str.replace(eraseBelowHomeRe, (m, c) => '\x1b[K\x1b[J\x1b[1;' + c + 'H');
-
-  // 3. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>")
-  // Tahan terhadap derau kode ANSI interleave (mis. cursor position \x1b[1;19H, clear-line \x1b[K, hide/show cursor)
-  const dedupRe = /(PS [^\r\n>]+>)(?:[\s\x00-\x1f]|\x1b\[[0-9;? -/]*[@-~])*(?:\x1b\[(?:H|1;1H|\d+;\d+H))?\1\s*/g;
+  // 3. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>") secara linear O(N)
+  const dedupRe = /(PS [A-Za-z]:\\[^\r\n\x1b>]*>)(?:[ \t]|\x1b\[[0-9;?]*[mhlK])*(?:\x1b\[(?:H|1;1H|\d+;\d+H))?[ \t]*\1[ \t]*/g;
   str = str.replace(dedupRe, '$1 ');
 
   return str;
@@ -613,7 +619,7 @@ function sendJSON(res, statusCode, data) {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Private-Network': 'true',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-pin, X-WA-PIN, x-terminal-pin, X-Terminal-Pin, Access-Control-Request-Private-Network'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-user-id, X-WA-User-ID, x-wa-pin, X-WA-PIN, x-terminal-pin, X-Terminal-Pin, Access-Control-Request-Private-Network'
   });
   res.end(JSON.stringify(data));
 }
@@ -5983,7 +5989,7 @@ async function requestHandler(req, res) {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Private-Network': 'true',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-pin, X-WA-PIN, x-terminal-pin, X-Terminal-Pin, Access-Control-Request-Private-Network'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-user-id, X-WA-User-ID, x-wa-pin, X-WA-PIN, x-terminal-pin, X-Terminal-Pin, Access-Control-Request-Private-Network'
     });
     return res.end();
   }
@@ -7204,7 +7210,7 @@ async function requestHandler(req, res) {
           if (data.includes('\x1b[3J') || data.includes('\x1b[2J')) {
             session.buffer = [data];
           } else {
-            if (session.buffer.length > 500) session.buffer.shift();
+            if (session.buffer.length > 120) session.buffer.shift();
             session.buffer.push(data);
           }
           handleServerAutoEnter(session, data);
@@ -7261,21 +7267,16 @@ async function requestHandler(req, res) {
     // Kirim konfirmasi terkoneksi dan buffer historis jika ada
     res.write(`data: ${JSON.stringify({ type: 'connected', session: sessionId, shell: session.shell, cwd: session.cwd, cols: session.cols || cols, rows: session.rows || rows, autoEnter: Boolean(session.autoEnter) })}\n\n`);
     if (session.buffer && session.buffer.length > 0) {
-      const replay = session.buffer.join('');
+      let replay = session.buffer.join('');
+      if (replay.length > 16384) replay = replay.slice(-16384);
       res.write(`data: ${JSON.stringify({ type: 'init', data: replay })}\n\n`);
-      if (!hasVisibleTerminalPrompt(replay) && session.pty) {
+      if (!hasVisibleTerminalPrompt(replay) && session.pty && (Date.now() - (session.createdAt || 0)) > 3000) {
         setTimeout(() => {
           if (session && session.pty) {
             try { session.pty.write('\r'); } catch (_) {}
           }
         }, 120);
       }
-    } else {
-      setTimeout(() => {
-        if (session && session.pty && (!session.buffer || session.buffer.length === 0)) {
-          try { session.pty.write('\r'); } catch (_) {}
-        }
-      }, 150);
     }
 
     const heartbeat = setInterval(() => {
@@ -11931,7 +11932,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
         if (data.includes('\x1b[3J') || data.includes('\x1b[2J')) {
           session.buffer = [data];
         } else {
-          if (session.buffer.length > 500) session.buffer.shift();
+          if (session.buffer.length > 120) session.buffer.shift();
           session.buffer.push(data);
         }
         handleServerAutoEnter(session, data);
@@ -12014,24 +12015,18 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       autoEnter: Boolean(session.autoEnter)
     })));
     if (session.buffer && session.buffer.length > 0) {
-      const replay = session.buffer.join('');
+      let replay = session.buffer.join('');
+      if (replay.length > 16384) replay = replay.slice(-16384);
       socket.write(encodeWsFrame(JSON.stringify({ type: 'init', data: replay })));
       // Jika buffer hanya berisi sekuens clear/wipe tanpa teks alfanumerik yang tampak,
       // refresh shell dengan carriage return lembut (\r) agar prompt host tidak kosong di layar klien
-      if (!hasVisibleTerminalPrompt(replay) && session.pty) {
+      if (!hasVisibleTerminalPrompt(replay) && session.pty && (Date.now() - (session.createdAt || 0)) > 3000) {
         setTimeout(() => {
           if (session && session.pty) {
             try { session.pty.write('\r'); } catch (_) {}
           }
         }, 120);
       }
-    } else {
-      // Hanya kirim carriage return bila sesi baru dan buffer masih kosong
-      setTimeout(() => {
-        if (session && session.pty && (!session.buffer || session.buffer.length === 0)) {
-          try { session.pty.write('\r'); } catch (_) {}
-        }
-      }, 100);
     }
   } catch (_) {}
 

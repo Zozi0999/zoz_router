@@ -36694,6 +36694,7 @@ Aturan:
   }
 
   function openModal(modalId) {
+    const hadSidebarHistory = (history.state?.modal === 'sidebar');
     if (window.innerWidth <= 768 || els.sidebar?.classList.contains('open') || els.sidebarBackdrop?.classList.contains('active')) {
       hideMobileSidebarAndBackdrop(false);
     }
@@ -36715,7 +36716,11 @@ Aturan:
       }
       modal.classList.add('show');
       syncBodyModalState();
-      history.pushState({ modal: modalId }, '');
+      if (hadSidebarHistory) {
+        try { history.replaceState({ modal: modalId }, ''); } catch (_) {}
+      } else if (history.state?.modal !== modalId) {
+        try { history.pushState({ modal: modalId }, ''); } catch (_) {}
+      }
       AudioEngine.click();
     }
   }
@@ -36727,6 +36732,14 @@ Aturan:
     }
     if (modalId === 'termQrScannerModal' && typeof TerminalManager !== 'undefined' && typeof TerminalManager.stopQrScanner === 'function') {
       TerminalManager.stopQrScanner();
+    }
+    if (modalId === 'terminalModal' && typeof TerminalManager !== 'undefined') {
+      try {
+        const tab = TerminalManager.getActiveTab?.();
+        [tab?.pane1, tab?.pane2].forEach(p => {
+          if (p?.term?.textarea) p.term.textarea.blur();
+        });
+      } catch (_) {}
     }
     const modal = document.getElementById(modalId);
     if (modal) {
@@ -38132,16 +38145,21 @@ Aturan:
       return window.innerWidth <= 768;
     }
 
+    let _lastSidebarToggleAt = 0;
     function openMobileSidebar() {
+      _lastSidebarToggleAt = Date.now();
       els.sidebar?.classList.add('open');
       els.sidebarBackdrop?.classList.add('active', 'show');
       document.body.classList.add('mobile-sidebar-open');
-      history.pushState({ modal: 'sidebar' }, '');
+      if (history.state?.modal !== 'sidebar') {
+        try { history.pushState({ modal: 'sidebar' }, ''); } catch (_) {}
+      }
       renderChatHistory(els.searchHistoryInput?.value || '');
       AudioEngine.click();
     }
 
     function closeMobileSidebar(triggerHistoryBack = true) {
+      _lastSidebarToggleAt = Date.now();
       hideMobileSidebarAndBackdrop(triggerHistoryBack);
     }
 
@@ -38157,7 +38175,11 @@ Aturan:
       AudioEngine.click();
     }
 
-    function toggleSidebar() {
+    function toggleSidebar(e) {
+      if (e) {
+        e.stopPropagation();
+      }
+      if (Date.now() - _lastSidebarToggleAt < 180) return;
       if (isMobile()) {
         if (els.sidebar?.classList.contains('open')) {
           closeMobileSidebar(true);
@@ -38171,34 +38193,29 @@ Aturan:
 
     // Sidebar Toggle Handler
     els.toggleSidebarBtn?.addEventListener('click', toggleSidebar);
-    
-    // Backdrop click & touch to dismiss immediately (DeepSeek style)
-    els.sidebarBackdrop?.addEventListener('click', (e) => {
+    document.getElementById('closeMobileSidebarBtn')?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
       closeMobileSidebar(true);
     });
-    els.sidebarBackdrop?.addEventListener('touchstart', (e) => {
+    
+    // Backdrop click to dismiss immediately without ghost-clicking underlying buttons
+    els.sidebarBackdrop?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (Date.now() - _lastSidebarToggleAt < 180) return;
       closeMobileSidebar(true);
-    }, { passive: false });
+    });
 
-    // Global document capture listener: ANY click outside the open sidebar on mobile closes it immediately!
+    // Global document click listener: ANY click outside the open sidebar on mobile closes it cleanly
     document.addEventListener('click', (e) => {
       if (isMobile() && els.sidebar?.classList.contains('open')) {
+        if (Date.now() - _lastSidebarToggleAt < 180) return;
         if (!els.sidebar.contains(e.target) && !els.toggleSidebarBtn?.contains(e.target)) {
           closeMobileSidebar(true);
         }
       }
     }, true);
-    document.addEventListener('touchstart', (e) => {
-      if (isMobile() && els.sidebar?.classList.contains('open')) {
-        if (!els.sidebar.contains(e.target) && !els.toggleSidebarBtn?.contains(e.target)) {
-          closeMobileSidebar(true);
-        }
-      }
-    }, { passive: true });
 
 
     // Status Buttons
@@ -40465,12 +40482,14 @@ Aturan:
     },
 
     async detectWindowsBridge(forceToast = false) {
+      const isHttpsRemote = window.location.protocol === 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+      const skipLocalLoopback = this.isMobileDevice() || isHttpsRemote;
       const candidates = [
         this.bridgeUrl,
         this.remoteHost,
-        (window.location.origin && !window.location.origin.includes('vercel.app')) ? window.location.origin : '',
-        'http://127.0.0.1:4040',
-        'http://localhost:4040'
+        (window.location.origin && !window.location.origin.includes('vercel.app') && !window.location.origin.includes('zozdocs.com')) ? window.location.origin : '',
+        (!skipLocalLoopback ? 'http://127.0.0.1:4040' : ''),
+        (!skipLocalLoopback ? 'http://localhost:4040' : '')
       ].filter(Boolean);
 
       const uniqueCandidates = [...new Set(candidates)];
@@ -40625,12 +40644,24 @@ Aturan:
       const params = new URLSearchParams(window.location.search);
       const qHost = params.get('remote_host');
       const qPin = params.get('pin');
+      const qMode = params.get('mode');
 
       const getCookiePin = () => {
         try {
           const m = document.cookie.match(/(?:^|;\s*)zoz_remote_pin=([^;]+)/);
           return m ? decodeURIComponent(m[1]).trim() : '';
         } catch (_) { return ''; }
+      };
+
+      const cleanUrlParams = () => {
+        try {
+          if (qHost || qPin) {
+            const cleanUrl = new URL(window.location.href);
+            cleanUrl.searchParams.delete('remote_host');
+            cleanUrl.searchParams.delete('pin');
+            history.replaceState(history.state, '', cleanUrl.pathname + (cleanUrl.search ? cleanUrl.search : '') + cleanUrl.hash);
+          }
+        } catch (_) {}
       };
 
       if (qHost) {
@@ -40650,6 +40681,7 @@ Aturan:
             document.cookie = `zoz_remote_pin=${encodeURIComponent(this.remotePin)}; Path=/; Max-Age=31536000; SameSite=Lax`;
           }
         } catch (_) {}
+        cleanUrlParams();
         this.connectRemoteTerminal(this.remoteHost, this.remotePin, true);
         setTimeout(() => {
           this.openTerminal(false);
@@ -40695,10 +40727,13 @@ Aturan:
             sessionStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
             document.cookie = `zoz_remote_pin=${encodeURIComponent(this.remotePin)}; Path=/; Max-Age=31536000; SameSite=Lax`;
           } catch (_) {}
+          cleanUrlParams();
           this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
-          setTimeout(() => {
-            this.openTerminal(false);
-          }, 120);
+          if (qPin || qMode === 'terminal') {
+            setTimeout(() => {
+              this.openTerminal(false);
+            }, 120);
+          }
           return;
         } else {
           // Bila belum ada PIN di storage lokal, query /api/terminal/tunnel-info secara mandiri
@@ -40716,9 +40751,11 @@ Aturan:
                 document.cookie = `zoz_remote_pin=${encodeURIComponent(this.remotePin)}; Path=/; Max-Age=31536000; SameSite=Lax`;
               } catch (_) {}
               this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
-              setTimeout(() => {
-                this.openTerminal(false);
-              }, 120);
+              if (qMode === 'terminal') {
+                setTimeout(() => {
+                  this.openTerminal(false);
+                }, 120);
+              }
             }
           }).catch(() => {});
         }
@@ -41078,19 +41115,23 @@ Aturan:
           this.updateMobileBannerUI();
 
           // Sesi PTY Mandiri & Terisolasi (Termux Mobile Architecture):
-          // Setiap perangkat remote/HP mendapatkan sesi Windows PowerShell mandiri di laptop
-          // tanpa membajak atau mengganggu layar laptop host (seperti arsitektur terminal-extension).
+          // Hanya sambungkan stream WebSocket jika modal terminal sedang terbuka agar tidak membebani tampilan awal.
+          const termModalOpen = document.getElementById('terminalModal')?.classList.contains('show');
           const tab = this.getActiveTab();
           if (tab) {
             if (tab.pane1) {
               tab.pane1.sessionId = this.getEffectiveSessionId(tab, 1);
               tab.pane1.isFallbackMode = false;
-              this.connectStream(tab, tab.pane1, 1);
+              if (termModalOpen) {
+                this.connectStream(tab, tab.pane1, 1);
+              }
             }
             if (tab.isSplit && tab.pane2) {
               tab.pane2.sessionId = this.getEffectiveSessionId(tab, 2);
               tab.pane2.isFallbackMode = false;
-              this.connectStream(tab, tab.pane2, 2);
+              if (termModalOpen) {
+                this.connectStream(tab, tab.pane2, 2);
+              }
             }
           }
 
@@ -41125,8 +41166,9 @@ Aturan:
           if (res.ok) {
             this.remotePingMs = Math.round(performance.now() - t0);
             this.updateRemoteStatusUI(true);
+            const termModalOpen = document.getElementById('terminalModal')?.classList.contains('show');
             const activeTab = this.getActiveTab();
-            if (activeTab) {
+            if (termModalOpen && activeTab) {
               const panesToSync = activeTab.isSplit ? [1, 2] : [1];
               panesToSync.forEach(num => {
                 const p = this.getPaneState(num);
@@ -42023,6 +42065,12 @@ Aturan:
     },
 
     minimize() {
+      try {
+        const tab = this.getActiveTab();
+        [tab?.pane1, tab?.pane2].forEach(p => {
+          if (p?.term?.textarea) p.term.textarea.blur();
+        });
+      } catch (_) {}
       const modal = document.getElementById('terminalModal');
       if (modal) {
         modal.classList.remove('show');
@@ -42191,8 +42239,22 @@ Aturan:
       screenEl.appendChild(container);
       paneState.screenContainer = container;
 
+      const isMob = this.isMobileDevice();
+      const approxCharW = (this.fontSize || 13) * 0.6;
+      const approxCharH = Math.round((this.fontSize || 13) * 1.38);
+      const rawW = container.clientWidth || screenEl.clientWidth || window.innerWidth || (isMob ? 390 : 960);
+      const rawH = container.clientHeight || screenEl.clientHeight || Math.max(240, (window.innerHeight || 720) - 130);
+      const initCols = Math.max(isMob ? 45 : 60, Math.floor(rawW / approxCharW));
+      const initRows = Math.max(20, Math.floor(rawH / approxCharH));
+      if (isMob) {
+        paneState._stableMobileCols = initCols;
+        paneState._stableMobileRows = initRows;
+      }
+
       const term = new window.Terminal({
-        cursorBlink: !this.isMobileDevice(),
+        cols: initCols,
+        rows: initRows,
+        cursorBlink: !isMob,
         cursorStyle: 'block',
         theme: this.getXtermTheme(),
         fontFamily: '"JetBrains Mono", Cascadia Code, Fira Code, Consolas, "Courier New", monospace',
@@ -43265,7 +43327,9 @@ Aturan:
         this.sendPtyResize(paneState.sessionId || sessionId, cols, rows);
       });
 
-      this.connectStream(tab, paneState, paneNum);
+      if (!this._inConnectStream) {
+        this.connectStream(tab, paneState, paneNum);
+      }
     },
 
     ensureActivePtySize(paneState) {
@@ -43345,9 +43409,23 @@ Aturan:
       }
 
       if (!paneState.term) {
-        this.initXtermPane(paneNum);
+        this._inConnectStream = true;
+        try {
+          this.initXtermPane(paneNum);
+        } finally {
+          this._inConnectStream = false;
+        }
       }
       this.fitPane(paneState, false);
+
+      // Pastikan tidak ada koneksi WebSocket yatim dari pemanggilan rekursif/sebelumnya
+      if (paneState.ws) {
+        try {
+          paneState.ws._manualClose = true;
+          paneState.ws.close();
+        } catch (_) {}
+        paneState.ws = null;
+      }
 
       const activeTerm = paneState.term;
       const dims = (paneState.fitAddon && paneState.fitAddon.proposeDimensions()) || null;
@@ -43391,6 +43469,10 @@ Aturan:
         paneState.ws = ws;
 
         ws.onopen = () => {
+          if (paneState.ws !== ws) {
+            try { ws._manualClose = true; ws.close(); } catch (_) {}
+            return;
+          }
           wsConnected = true;
           paneState.isFallbackMode = false;
           if (statusDot) statusDot.className = 'pane-status-dot online';
@@ -43416,6 +43498,7 @@ Aturan:
         };
 
         ws.onmessage = (evt) => {
+          if (paneState.ws !== ws) return;
           try {
             const msg = JSON.parse(evt.data);
             this._handleStreamMessage(tab, paneState, paneNum, msg, statusLabel, statusDot, sessionId);
@@ -43423,6 +43506,7 @@ Aturan:
         };
 
         ws.onerror = () => {
+          if (paneState.ws !== ws) return;
           if (paneState._stabilityTimer) {
             clearTimeout(paneState._stabilityTimer);
             paneState._stabilityTimer = null;
@@ -43446,6 +43530,7 @@ Aturan:
         };
 
         ws.onclose = () => {
+          if (paneState.ws !== ws) return;
           if (paneState._stabilityTimer) {
             clearTimeout(paneState._stabilityTimer);
             paneState._stabilityTimer = null;
@@ -43528,23 +43613,32 @@ Aturan:
       };
     },
 
-    // Helper normalisasi stream ConPTY Windows untuk memurnikan sekuens hapus layar (cls / Clear-Host)
+    // Helper normalisasi stream ConPTY Windows O(N) linier (bebas ReDoS backtracking) untuk sekuens cls / Clear-Host
     cleanConptyData(str) {
       if (typeof str !== 'string' || !str) return str;
-      const csi = '(?:\\x1b\\[(?![23]J)[0-9;? -/]*[@-~])';
-      // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) berulang yang diakhiri cursor home (\x1b[H)
-      // Ubah menjadi ANSI clear screen murni: clear viewport \x1b[2J + clear scrollback \x1b[3J + cursor home \x1b[H
-      const wipeRe = new RegExp(`${csi}*(?:(?:\\r\\n|\\n)${csi}*\\x1b\\[2?K${csi}*|\\x1b\\[2?K${csi}*(?:\\r\\n|\\n)|\\x1b\\[2?K){3,}(?:\\r\\n|\\n|${csi})*\\x1b\\[(?:H|1;1H)(?:\\x1b\\[\\?25[hl])*`, 'g');
-      str = str.replace(wipeRe, '\x1b[2J\x1b[3J\x1b[H');
+      // 1 & 2. Deteksi blok sekuens hapus baris ConPTY (\x1b[K + \r\n) dalam waktu O(N) murni tanpa kemungkinan backtracking:
+      const blockRe = /(?:(?:\x1b\[[0-9;?]*[A-Za-z])*[\r\n]+)+\x1b\[(?:H|1;1H|1;(\d+)H)(?:\x1b\[\?25[hl])*/g;
+      str = str.replace(blockRe, (match, col) => {
+        let kCount = 0;
+        let idx = -1;
+        while ((idx = match.indexOf('\x1b[', idx + 1)) !== -1) {
+          const nextCh = match[idx + 2];
+          if (nextCh === 'K' || (nextCh === '2' && match[idx + 3] === 'K')) {
+            kCount++;
+          }
+        }
+        if (!col) {
+          return kCount >= 3 ? '\x1b[2J\x1b[3J\x1b[H' : match;
+        }
+        return kCount >= 5 ? ('\x1b[K\x1b[J\x1b[1;' + col + 'H') : match;
+      });
 
-      // 2. Normalisasi pembersihan sisa layar pasca-clear di baris pertama (\x1b[1;colH) menjadi Erase in Display (\x1b[K\x1b[J)
-      // Tanpa pernah menghapus \r\n pada baris gulir (scroll) atau pembungkusan baris (line-wrap) di tengah/bawah layar!
-      const eraseBelowHomeRe = new RegExp(`(?:(?:\\r\\n|\\n)${csi}*\\x1b\\[2?K${csi}*|\\x1b\\[2?K${csi}*(?:\\r\\n|\\n)){5,}(?:\\x1b\\[2?K)?${csi}*\\x1b\\[1;(\\d+)H`, 'g');
-      str = str.replace(eraseBelowHomeRe, (m, c) => '\x1b[K\x1b[J\x1b[1;' + c + 'H');
+      // 2b. Jangkar prompt baris pertama yang diikuti sapuan pembersihan layar (\x1b[K\x1b[J\x1b[1;colH)
+      // ke kolom 1 (\x1b[H) agar tidak pernah menggandakan prompt horizontal jika chunk datang dua kali:
+      str = str.replace(/(PS [^\r\n>]+>\s*)(\x1b\[K\x1b\[J\x1b\[1;\d+H)/g, '\x1b[H$1$2');
 
       // 3. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>")
-      // Tahan terhadap derau kode ANSI interleave (mis. cursor position \x1b[1;19H, clear-line \x1b[K, hide/show cursor)
-      const dedupRe = /(PS [^\r\n>]+>)(?:[\s\x00-\x1f]|\x1b\[[0-9;? -/]*[@-~])*(?:\x1b\[(?:H|1;1H|\d+;\d+H))?\1\s*/g;
+      const dedupRe = /(PS [^\r\n>]+>)(?:[ \t]|\x1b\[[0-9;?]*[A-Za-z])*\1\s*/g;
       str = str.replace(dedupRe, '$1 ');
 
       return str;
@@ -43863,17 +43957,20 @@ Aturan:
 
     fitPane(paneState, forcePtyResize = true) {
       if (!paneState || !paneState.term || !paneState.screenContainer) return;
+      const modal = document.getElementById('terminalModal');
+      if (modal && !modal.classList.contains('show')) return;
       const term = paneState.term;
       const container = paneState.screenContainer;
       const isMobile = this.isMobileDevice();
 
       if (paneState._isRemoteResizing) return;
 
-      let targetCols = term.cols || 80;
-      let targetRows = term.rows || 24;
+      let targetCols = 0;
+      let targetRows = 0;
+      let dimsValid = false;
 
-      const charW = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.width) || 8.5;
-      const charH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
+      const charW = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.width) || ((this.fontSize || 13) * 0.6);
+      const charH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || Math.round((this.fontSize || 13) * 1.38);
       const vv = window.visualViewport;
       const isKeyboardOpen = isMobile && vv && (vv.height < window.innerHeight * 0.75);
 
@@ -43881,6 +43978,7 @@ Aturan:
         try {
           const dims = paneState.fitAddon.proposeDimensions();
           if (dims && dims.cols > 10 && dims.rows > 5) {
+            dimsValid = true;
             targetCols = Math.max(isMobile ? 45 : 60, dims.cols);
             if (isMobile) {
               if (isKeyboardOpen) {
@@ -43908,10 +44006,10 @@ Aturan:
         } catch (_) {}
       }
 
-      // Fallback penghitungan dimensi jika proposeDimensions belum siap
-      if (!targetCols || !targetRows || targetCols < 20 || targetRows < 8) {
-        const containerW = container.clientWidth || window.innerWidth;
-        const containerH = container.clientHeight || (window.innerHeight - 130);
+      // Fallback penghitungan dimensi jika proposeDimensions belum siap (sebelum render frame pertama)
+      if (!dimsValid || !targetCols || !targetRows || targetCols < 20 || targetRows < 8) {
+        const containerW = container.clientWidth || window.innerWidth || (isMobile ? 390 : 960);
+        const containerH = container.clientHeight || Math.max(240, (window.innerHeight || 720) - 130);
         targetCols = Math.max(isMobile ? 45 : 60, Math.floor(containerW / charW));
         if (isMobile) {
           if (isKeyboardOpen) {
@@ -46303,6 +46401,10 @@ Aturan:
         localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
         localStorage.setItem('zoz_wa_pin', '210560');
         return true;
+      }
+      // Jangan pernah mem-probe http://127.0.0.1:4040 pada halaman HTTPS publik atau perangkat mobile (mencegah Private Network Access / Mixed Content block)
+      if (window.location.protocol === 'https:' || window.innerWidth <= 768) {
+        return false;
       }
       try {
         const res = await fetch('http://127.0.0.1:4040/api/wa/status?userId=usr_kaisar_master&pin=210560', {

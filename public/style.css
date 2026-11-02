@@ -14806,8 +14806,8 @@ body.mermaid-has-fullscreen {
   .terminal-toolbar {
     height: 32px !important;
     min-height: 32px !important;
-    padding: 0 6px !important;
-    gap: 5px !important;
+    padding: 0 4px !important;
+    gap: 3px !important;
     background: #070c14 !important;
     border-bottom: 1px solid rgba(56, 189, 248, 0.2) !important;
     overflow-x: auto !important;
@@ -14825,18 +14825,23 @@ body.mermaid-has-fullscreen {
     display: none !important;
   }
   .terminal-title::after {
-    content: 'Terminal';
-    font-size: 0.78rem;
-    font-weight: 700;
-    color: #fff;
+    display: none !important;
   }
   .tb-divider {
-    margin: 0 2px !important;
+    margin: 0 1px !important;
   }
   .terminal-shell-wrap button#btnTerminalShell {
+    padding: 2px 5px !important;
+    font-size: 0.68rem !important;
+    gap: 3px !important;
+    height: 24px !important;
+  }
+  #btnTermOpenQrScanner #labelTermOpenQrScanner,
+  .tb-btn-wa-switch span {
+    display: none !important;
+  }
+  .tb-btn-wa-switch {
     padding: 2px 6px !important;
-    font-size: 0.7rem !important;
-    gap: 4px !important;
     height: 24px !important;
   }
   /* Tombol Toggle Mode Layar HP / Laptop di Toolbar Mobile */
@@ -14875,29 +14880,16 @@ body.mermaid-has-fullscreen {
     gap: 4px;
   }
   .terminal-toolbar-right .tb-group {
-    display: inline-flex !important;
-    align-items: center !important;
-    gap: 1px !important;
-    background: rgba(15, 23, 42, 0.85) !important;
-    border: 1px solid rgba(56, 189, 248, 0.3) !important;
-    border-radius: 5px !important;
-    padding: 0 3px !important;
-    height: 24px !important;
+    display: none !important;
   }
-  .terminal-toolbar-right .tb-group .tb-btn {
-    padding: 1px 4px !important;
-    height: 20px !important;
-    font-size: 0.65rem !important;
-    background: transparent !important;
-    border: none !important;
-    color: #e2e8f0 !important;
+  .terminal-toolbar-left {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    overflow-x: auto !important;
+    scrollbar-width: none !important;
   }
-  .terminal-toolbar-right .tb-group span#termFontSizeLabel {
-    font-size: 0.68rem !important;
-    color: #38bdf8 !important;
-    font-weight: 700 !important;
-    min-width: 26px !important;
-    text-align: center !important;
+  .terminal-toolbar-left::-webkit-scrollbar {
+    display: none !important;
   }
   /* Tombol Mobile Remote Connect di Toolbar */
   .tb-btn-mobile-connect {
@@ -14929,7 +14921,7 @@ body.mermaid-has-fullscreen {
   .tb-btn-minimize,
   .tb-btn-close {
     display: inline-flex !important;
-    padding: 3px 8px !important;
+    padding: 2px 6px !important;
     background: rgba(255, 255, 255, 0.08) !important;
     border: 1px solid rgba(255, 255, 255, 0.22) !important;
     border-radius: 6px !important;
