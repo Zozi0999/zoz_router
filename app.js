@@ -24494,6 +24494,9 @@ ${blocks}
     }
 
     updateModelOptionsMenuUI();
+    if (typeof WhatsAppController !== 'undefined' && typeof WhatsAppController.updateSummaryActiveModelBadge === 'function') {
+      WhatsAppController.updateSummaryActiveModelBadge();
+    }
   }
 
   function updateAutoRouterIndicatorUI() {
@@ -48987,93 +48990,48 @@ Aturan:
       }
     },
 
-    populateEngineModelSelect(selectEl, engine = 'ollama', selectedModel = '') {
-      if (!selectEl) return;
-      const prevVal = selectedModel || selectEl.value;
+    getActiveChatModel() {
+      const mode = (typeof STATE !== 'undefined' && STATE.mode) ? STATE.mode : 'ollama';
+      let engine = 'ollama';
+      let model = (typeof STATE !== 'undefined' && STATE.settings?.ollamaModel) ? STATE.settings.ollamaModel : 'llama3.2:3b';
 
-      if (engine === 'ollama') {
-        const rawOllamaList = (Array.isArray(STATE.ollamaModels) && STATE.ollamaModels.length > 0)
-          ? STATE.ollamaModels.map(m => m.name || m.model || m.id).filter(Boolean)
-          : [];
-        const ollamaList = rawOllamaList.filter(Boolean);
-
-        if (ollamaList.length === 0) {
-          selectEl.innerHTML = '<option value="" disabled selected>Tidak ada model Ollama (Offline)</option>';
-          if (typeof fetchOllamaModelsList === 'function') {
-            fetchOllamaModelsList().then(() => {
-              if (this.activeSummaryEngine === 'ollama' && selectEl && selectEl.parentElement) {
-                this.populateEngineModelSelect(selectEl, 'ollama', selectEl.value);
-              }
-            }).catch(() => {});
-          }
+      if (mode === 'openrouter') {
+        engine = 'openrouter';
+        model = (typeof STATE !== 'undefined' && STATE.settings?.openRouterModel) ? STATE.settings.openRouterModel : 'openrouter/free';
+      } else if (mode === 'auto') {
+        if (typeof STATE !== 'undefined' && STATE.settings?.openRouterApiKey && STATE.settings?.openRouterModel) {
+          engine = 'openrouter';
+          model = STATE.settings.openRouterModel;
         } else {
-          const activeCurrent = (STATE.settings?.ollamaModel && ollamaList.includes(STATE.settings.ollamaModel))
-            ? STATE.settings.ollamaModel
-            : ollamaList[0];
-
-          let html = '';
-          for (let i = 0; i < ollamaList.length; i++) {
-            const m = ollamaList[i];
-            const isAct = (m === activeCurrent);
-            html += `<option value="${escapeHtml(m)}">${escapeHtml(m)}${isAct ? ' (Aktif)' : ''}</option>`;
-          }
-          selectEl.innerHTML = html;
-          const targetVal = (prevVal && ollamaList.includes(prevVal)) ? prevVal : activeCurrent;
-          selectEl.value = targetVal;
+          engine = 'ollama';
+          model = (typeof STATE !== 'undefined' && STATE.settings?.ollamaModel) ? STATE.settings.ollamaModel : 'llama3.2:3b';
         }
       } else {
-        const rawList = (Array.isArray(STATE.openRouterModels) && STATE.openRouterModels.length > 0)
-          ? STATE.openRouterModels.filter(m => m && m.id).map(m => m.id)
-          : [];
-
-        if (!STATE.openRouterModels || STATE.openRouterModels.length === 0) {
-          if (typeof fetchOpenRouterModelsList === 'function') {
-            fetchOpenRouterModelsList().then(() => {
-              if (this.activeSummaryEngine === 'openrouter' && selectEl && selectEl.parentElement) {
-                this.populateEngineModelSelect(selectEl, 'openrouter', selectEl.value);
-              }
-            }).catch(() => {});
-          }
-        }
-
-        const activeCurrent = STATE.settings?.openRouterModel || 'openrouter/free';
-        const freeModels = [];
-        const otherModels = [];
-        const seen = new Set();
-        if (activeCurrent) seen.add(activeCurrent);
-
-        for (let i = 0; i < rawList.length; i++) {
-          const m = rawList[i];
-          if (!m || seen.has(m)) continue;
-          seen.add(m);
-          if (m.includes(':free') || m.includes('/free')) {
-            freeModels.push(m);
-          } else if (otherModels.length < 50) {
-            otherModels.push(m);
-          }
-        }
-
-        let html = `<optgroup label="Model Aktif"><option value="${escapeHtml(activeCurrent)}" selected>${escapeHtml(activeCurrent.split('/').pop())} (Aktif)</option></optgroup>`;
-        if (freeModels.length > 0) {
-          html += '<optgroup label="⭐ Model Gratis Rekomendasi">';
-          for (let i = 0; i < freeModels.length; i++) {
-            const m = freeModels[i];
-            html += `<option value="${escapeHtml(m)}">${escapeHtml(m.split('/').pop())} [Free]</option>`;
-          }
-          html += '</optgroup>';
-        }
-        if (otherModels.length > 0) {
-          html += '<optgroup label="Model Populer Lainnya">';
-          for (let i = 0; i < otherModels.length; i++) {
-            const m = otherModels[i];
-            html += `<option value="${escapeHtml(m)}">${escapeHtml(m.split('/').pop())}</option>`;
-          }
-          html += '</optgroup>';
-        }
-        selectEl.innerHTML = html;
-        const targetVal = (prevVal && seen.has(prevVal)) ? prevVal : activeCurrent;
-        selectEl.value = targetVal;
+        engine = 'ollama';
+        model = (typeof STATE !== 'undefined' && STATE.settings?.ollamaModel) ? STATE.settings.ollamaModel : 'llama3.2:3b';
       }
+
+      return { engine, model, mode };
+    },
+
+    updateSummaryActiveModelBadge() {
+      const badge = document.getElementById('waSummaryActiveModelBadge');
+      const engineBadge = document.getElementById('waSummaryActiveEngineBadge');
+      const { engine, model } = this.getActiveChatModel();
+      const cleanModelName = (model || '').split('/').pop() || model || 'Default';
+      const engineLabel = engine === 'openrouter' ? 'OpenRouter' : 'Ollama';
+      if (engineBadge) {
+        engineBadge.textContent = engineLabel;
+      }
+      if (badge) {
+        badge.textContent = cleanModelName;
+        badge.title = `Mesin: ${engineLabel} • ID Model: ${model}`;
+      }
+    },
+
+    populateEngineModelSelect() {
+      // Deprecated: Model AI kini otomatis mengikuti pilihan di Chat Utama
+      this.updateSummaryActiveModelBadge();
     },
 
     bindConsentAndSummaryModalListeners() {
@@ -49128,32 +49086,7 @@ Aturan:
         this.updateSummaryContactBadge();
       });
 
-      const summaryOllamaBtn = document.getElementById('waSummaryEngineOllama');
-      const summaryORBtn = document.getElementById('waSummaryEngineOpenRouter');
-      const summaryModelSelect = document.getElementById('waSummaryModelSelect');
-
-      summaryOllamaBtn?.addEventListener('click', () => {
-        AudioEngine.click();
-        this.activeSummaryEngine = 'ollama';
-        summaryOllamaBtn.classList.add('active');
-        summaryORBtn?.classList.remove('active');
-        this.populateEngineModelSelect(summaryModelSelect, 'ollama');
-      });
-
-      summaryORBtn?.addEventListener('click', () => {
-        AudioEngine.click();
-        this.activeSummaryEngine = 'openrouter';
-        summaryORBtn.classList.add('active');
-        summaryOllamaBtn?.classList.remove('active');
-        this.populateEngineModelSelect(summaryModelSelect, 'openrouter');
-      });
-
-      summaryModelSelect?.addEventListener('change', (e) => {
-        AudioEngine.click?.();
-        this.selectedSummaryModel = e.target.value;
-      });
-
-      // Tombol "Mulai Rangkum AI"
+      // Tombol "Mulai Rangkum" (Hitam Polos & Cepat)
       document.getElementById('btnStartWaSummary')?.addEventListener('click', () => {
         AudioEngine.click();
         this.handleStartSummaryClick();
@@ -49181,7 +49114,7 @@ Aturan:
         }
       });
 
-      // Tombol "Alihkan ke Percakapan Biasa"
+      // Tombol "Lanjut di AI Chat" (Alihkan ke Percakapan Biasa)
       document.getElementById('btnSendWaSummaryToAiChat')?.addEventListener('click', () => {
         AudioEngine.click();
         if (!this.lastSummaryMarkdown) {
@@ -49193,14 +49126,7 @@ Aturan:
         // 1. Alihkan ke mode chat AI biasa
         this.setChatMode('ai');
 
-        // 2. Sinkronkan model dan mesin AI yang dipakai saat merangkum
-        const targetModel = this.lastSummaryMeta?.model || summaryModelSelect?.value || (STATE.settings?.ollamaModel || 'llama3.2:3b');
-        const targetEngine = this.lastSummaryMeta?.engine || this.activeSummaryEngine || (targetModel.includes('/') ? 'openrouter' : 'ollama');
-        if (typeof selectModel === 'function') {
-          selectModel(targetModel, targetEngine, true);
-        }
-
-        // 3. Masukkan transkrip rangkuman terstruktur ke dalam input prompt AI
+        // 2. Masukkan transkrip rangkuman terstruktur ke dalam input prompt AI
         if (els.promptInput) {
           const intro = 'Berikut adalah hasil rangkuman chat WhatsApp yang telah saya setujui:\n\n' +
             this.lastSummaryMarkdown +
@@ -49210,13 +49136,12 @@ Aturan:
           els.promptInput.focus();
         }
 
-        showToast(`💬 Dialihkan ke AI Chat (${targetModel}). Silakan lanjutkan percakapan biasa!`, 'success');
+        showToast('💬 Dialihkan ke AI Chat. Silakan lanjutkan percakapan biasa!', 'success');
       });
     },
 
     async handleStartSummaryClick() {
       const contactSelect = document.getElementById('waSummaryContactSelect');
-      const modelSelect = document.getElementById('waSummaryModelSelect');
       const focusInput = document.getElementById('waSummaryPopupFocusInput');
 
       const selectedValue = contactSelect?.value || '__all__';
@@ -49233,12 +49158,9 @@ Aturan:
       }
 
       const focusTopic = (focusInput?.value || '').trim();
-      const chosenEngine = this.activeSummaryEngine || 'ollama';
-      const chosenModel = modelSelect?.value || (chosenEngine === 'ollama' ? (STATE.settings?.ollamaModel || 'llama3.2:3b') : (STATE.settings?.openRouterModel || 'openrouter/free'));
-
-      if (typeof selectModel === 'function') {
-        selectModel(chosenModel, chosenEngine, false);
-      }
+      const activeAi = this.getActiveChatModel();
+      const chosenEngine = activeAi.engine;
+      const chosenModel = activeAi.model;
 
       const result = await this.executeSummary(targetJids, focusTopic, { engine: chosenEngine, model: chosenModel });
 
@@ -49349,14 +49271,13 @@ Aturan:
       const subtitleEl = document.getElementById('waSummaryPopupSubtitle');
       const focusInput = document.getElementById('waSummaryPopupFocusInput');
       const contactSelect = document.getElementById('waSummaryContactSelect');
-      const modelSelect = document.getElementById('waSummaryModelSelect');
 
-      if (titleEl) titleEl.textContent = 'Rangkum Chat WhatsApp (AI)';
+      if (titleEl) titleEl.textContent = 'Rangkum Chat WhatsApp';
       if (subtitleEl) {
         if (fromAiTool) {
-          subtitleEl.innerHTML = '🤖 <b style="color:#a78bfa;">AI Tool Calling:</b> Konfirmasi obrolan yang ingin dirangkum, lalu klik Mulai.';
+          subtitleEl.innerHTML = '🤖 <b style="color:#ffffff;">AI Tool Calling:</b> Konfirmasi obrolan yang ingin dirangkum, lalu klik Mulai Rangkum.';
         } else {
-          subtitleEl.textContent = 'Pilih kontak dan model AI untuk merangkum obrolan';
+          subtitleEl.textContent = 'Rangkuman otomatis menggunakan model AI aktif dari Chat Utama';
         }
       }
 
@@ -49365,13 +49286,8 @@ Aturan:
       // Isi dropdown kontak
       this.populateSummaryContactDropdown(contactSelect, targetJid);
 
-      // Inisialisasi engine switcher & dropdown model
-      this.activeSummaryEngine = (options.engine || (STATE.mode === 'openrouter' ? 'openrouter' : 'ollama'));
-      const sOllama = document.getElementById('waSummaryEngineOllama');
-      const sOR = document.getElementById('waSummaryEngineOpenRouter');
-      if (sOllama) sOllama.classList.toggle('active', this.activeSummaryEngine === 'ollama');
-      if (sOR) sOR.classList.toggle('active', this.activeSummaryEngine === 'openrouter');
-      this.populateEngineModelSelect(modelSelect, this.activeSummaryEngine, options.model);
+      // Tampilkan badge model AI aktif dari Chat Utama (langsung dari STATE)
+      this.updateSummaryActiveModelBadge();
 
       // Jika kontak belum ada di memori, ambil di latar belakang tanpa menunda tampilan modal
       if (!this.contacts || this.contacts.length === 0) {
@@ -49382,15 +49298,15 @@ Aturan:
         }).catch(() => {});
       }
 
-      // Tampilkan placeholder siap pakai jika belum ada rangkuman
+      // Tampilkan placeholder siap pakai jika belum ada rangkuman (Pure Black Minimalist)
       const bodyEl = document.getElementById('waSummaryOutputBody');
       if (bodyEl && (!this.lastSummaryMarkdown || options.resetOutput)) {
         bodyEl.innerHTML = `
-          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 36px 16px; text-align: center; color: #94a3b8;">
-            <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 2.2rem; color: #34d399; margin-bottom: 12px; opacity: 0.85;"></i>
-            <div style="font-weight: 700; color: #f8fafc; font-size: 0.95rem;">Siap Merangkum Percakapan WhatsApp</div>
-            <p style="font-size: 0.8rem; color: #94a3b8; margin-top: 6px; max-width: 380px;">
-              Pilih kontak dan model AI di atas, lalu klik <b>Mulai Rangkum AI</b> untuk membuat rangkuman otomatis.
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 16px; text-align: center; color: #71717a;">
+            <i class="fa-solid fa-robot" style="font-size: 2rem; color: #52525b; margin-bottom: 12px;"></i>
+            <div style="font-weight: 600; color: #d4d4d8; font-size: 0.92rem;">Siap Merangkum Percakapan WhatsApp</div>
+            <p style="font-size: 0.78rem; color: #71717a; margin-top: 5px; max-width: 360px;">
+              Pilih kontak target di atas, lalu klik <b>Mulai Rangkum</b> untuk menganalisis obrolan secara otomatis.
             </p>
           </div>
         `;
@@ -49428,12 +49344,13 @@ Aturan:
       const statsMeta = document.getElementById('waSummaryStatsMeta');
       const startBtn = document.getElementById('btnStartWaSummary');
 
-      const chosenEngine = options.engine || this.activeSummaryEngine || 'ollama';
-      const chosenModel = options.model || (chosenEngine === 'ollama' ? (STATE.settings?.ollamaModel || 'llama3.2:3b') : (STATE.settings?.openRouterModel || 'openrouter/free'));
+      const activeAi = this.getActiveChatModel();
+      const chosenEngine = options.engine || activeAi.engine || 'ollama';
+      const chosenModel = options.model || activeAi.model || 'llama3.2:3b';
 
       if (startBtn) {
         startBtn.disabled = true;
-        startBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Merangkum...';
+        startBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> <span>Merangkum...</span>';
       }
 
       if (subtitleEl) {
@@ -49442,10 +49359,10 @@ Aturan:
 
       if (bodyEl) {
         bodyEl.innerHTML = `
-          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 16px; text-align: center; color: #a7f3d0;">
-            <i class="fa-solid fa-wand-magic-sparkles fa-spin" style="font-size: 2.2rem; color: #34d399; margin-bottom: 14px;"></i>
-            <div style="font-weight: 700; font-size: 0.98rem; color: #ecfdf5;">Mempersiapkan AI (${escapeHtml(chosenModel)})...</div>
-            <div style="font-size: 0.78rem; color: #6ee7b7; opacity: 0.85; margin-top: 6px;">Membaca riwayat pesan WhatsApp &amp; mendeteksi berkas tugas...</div>
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 16px; text-align: center; color: #a1a1aa;">
+            <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 2rem; color: #ffffff; margin-bottom: 14px;"></i>
+            <div style="font-weight: 600; font-size: 0.95rem; color: #f4f4f5;">Mempersiapkan Rangkuman (${escapeHtml(chosenModel)})...</div>
+            <div style="font-size: 0.78rem; color: #71717a; margin-top: 6px;">Membaca riwayat pesan WhatsApp &amp; mendeteksi berkas tugas...</div>
           </div>
         `;
       }
@@ -49483,10 +49400,10 @@ Aturan:
         if (totalMsgs === 0) {
           if (bodyEl) {
             bodyEl.innerHTML = `
-              <div style="padding: 24px; text-align: center; color: #94a3b8;">
-                <i class="fa-regular fa-comments" style="font-size: 2rem; color: #6ee7b7; margin-bottom: 10px;"></i>
-                <div style="font-weight: 700; color: #f8fafc; font-size: 0.95rem;">Belum Ada Riwayat Pesan</div>
-                <p style="font-size: 0.8rem; margin-top: 6px;">Tidak ditemukan pesan pada nomor/kontak yang Anda pilih.</p>
+              <div style="padding: 32px 16px; text-align: center; color: #71717a;">
+                <i class="fa-regular fa-comments" style="font-size: 2rem; color: #52525b; margin-bottom: 10px;"></i>
+                <div style="font-weight: 600; color: #d4d4d8; font-size: 0.92rem;">Belum Ada Riwayat Pesan</div>
+                <p style="font-size: 0.78rem; margin-top: 5px;">Tidak ditemukan pesan pada nomor/kontak yang Anda pilih.</p>
               </div>
             `;
           }
@@ -49495,18 +49412,18 @@ Aturan:
           return { success: true, summary: 'Belum ada riwayat pesan.' };
         }
 
-        // Wadah streaming langsung
+        // Wadah streaming langsung (Pure Black Minimalist)
         if (bodyEl) {
           bodyEl.innerHTML = `
-            <div style="font-size: 0.73rem; color: #34d399; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; padding: 7px 12px; border-radius: 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35);">
+            <div style="font-size: 0.73rem; color: #ffffff; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 6px; background: #09090b; border: 1px solid #222222;">
               <span style="display: flex; align-items: center; gap: 7px;">
-                <i class="fa-solid fa-wand-magic-sparkles fa-spin"></i>
+                <i class="fa-solid fa-circle-notch fa-spin" style="color: #ffffff; font-size: 0.8rem;"></i>
                 <span>Model AI <b>${escapeHtml(chosenModel)}</b> sedang merangkum...</span>
               </span>
-              <span style="font-size: 0.7rem; color: #a7f3d0; opacity: 0.85;">${totalMsgs} pesan • ${totalFiles} berkas 🔴</span>
+              <span style="font-size: 0.7rem; color: #a1a1aa; font-family: ui-monospace, SFMono-Regular, monospace;">${totalMsgs} pesan • ${totalFiles} berkas</span>
             </div>
-            <div id="waSummaryStreamContainer" class="wa-summary-content-box" style="line-height: 1.68;">
-              <span class="typing-cursor" style="display: inline-block; width: 8px; height: 15px; background: #34d399; vertical-align: middle; animation: blink 0.8s infinite;"></span>
+            <div id="waSummaryStreamContainer" class="wa-summary-content-box">
+              <span class="typing-cursor" style="display: inline-block; width: 6px; height: 14px; background: #ffffff; vertical-align: middle; animation: blink 0.8s infinite;"></span>
             </div>
           `;
         }
@@ -49595,8 +49512,8 @@ Gunakan format Markdown lengkap dengan struktur berikut:
 
         if (bodyEl) {
           bodyEl.innerHTML = `
-            <div style="padding: 9px 13px; margin-bottom: 12px; border-radius: 8px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: #fde68a; font-size: 0.76rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-              <span><i class="fa-solid fa-triangle-exclamation"></i> Model AI <b>${escapeHtml(chosenModel)}</b> sedang sibuk. Menampilkan ringkasan analitis terstruktur. Anda bisa mengganti Model AI di menu atas.</span>
+            <div style="padding: 9px 13px; margin-bottom: 12px; border-radius: 6px; background: #09090b; border: 1px solid #27272a; color: #d4d4d8; font-size: 0.76rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <span><i class="fa-solid fa-circle-info" style="color: #a1a1aa;"></i> Rangkuman analitis terstruktur menggunakan model <b>${escapeHtml(chosenModel)}</b>.</span>
             </div>
             <div class="wa-summary-content-box">
               ${this.renderMarkdownSummaryToHtml(finalFallback)}
@@ -49646,8 +49563,8 @@ Gunakan format Markdown lengkap dengan struktur berikut:
           if (localFallbackSummary) {
             this.lastSummaryMarkdown = localFallbackSummary;
             bodyEl.innerHTML = `
-              <div style="padding: 10px 14px; margin-bottom: 12px; border-radius: 8px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: #fde68a; font-size: 0.76rem;">
-                <i class="fa-solid fa-circle-info"></i> Memuat ringkasan cepat berbasis riwayat lokal.
+              <div style="padding: 10px 14px; margin-bottom: 12px; border-radius: 6px; background: #09090b; border: 1px solid #27272a; color: #d4d4d8; font-size: 0.76rem;">
+                <i class="fa-solid fa-circle-info" style="color: #a1a1aa;"></i> Memuat ringkasan cepat berbasis riwayat lokal.
               </div>
               <div class="wa-summary-content-box">
                 ${this.renderMarkdownSummaryToHtml(localFallbackSummary)}
@@ -49657,12 +49574,12 @@ Gunakan format Markdown lengkap dengan struktur berikut:
             if (statsMeta) statsMeta.textContent = `${validJids.length} Chat Diverifikasi`;
           } else {
             bodyEl.innerHTML = `
-              <div style="padding: 20px; border-radius: 12px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #fca5a5; text-align: center;">
+              <div style="padding: 24px; border-radius: 8px; background: #0a0a0a; border: 1px solid #27272a; color: #f4f4f5; text-align: center;">
                 <i class="fa-solid fa-triangle-exclamation" style="font-size: 1.8rem; color: #ef4444; margin-bottom: 10px;"></i>
-                <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 6px;">Gagal Menghubungi Layanan Rangkuman AI</div>
-                <p style="font-size: 0.8rem; color: #cbd5e1; margin-bottom: 14px;">${escapeHtml(err.message || 'Koneksi ke server WhatsApp terputus')}</p>
-                <button type="button" class="btn btn-sm btn-outline" id="btnRetryWaSummaryFromPopup" style="border-color: rgba(239, 68, 68, 0.5); color: #fecaca;">
-                  <i class="fa-solid fa-rotate-right"></i> Coba Rangkum Lagi
+                <div style="font-weight: 600; font-size: 0.92rem; margin-bottom: 6px;">Gagal Menghubungi Layanan Rangkuman AI</div>
+                <p style="font-size: 0.78rem; color: #a1a1aa; margin-bottom: 14px;">${escapeHtml(err.message || 'Koneksi ke server WhatsApp terputus')}</p>
+                <button type="button" class="btn btn-sm" id="btnRetryWaSummaryFromPopup" style="background: #18181b; border: 1px solid #3f3f46; color: #f4f4f5; border-radius: 6px; padding: 6px 14px; font-size: 0.76rem; cursor: pointer;">
+                  <i class="fa-solid fa-rotate-right"></i> <span>Coba Rangkum Lagi</span>
                 </button>
               </div>
             `;
@@ -49678,7 +49595,7 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       } finally {
         if (startBtn) {
           startBtn.disabled = false;
-          startBtn.innerHTML = '<i class="fa-solid fa-rocket"></i> Mulai Rangkum AI';
+          startBtn.innerHTML = '<i class="fa-solid fa-play" style="font-size: 0.75rem;"></i> <span>Mulai Rangkum</span>';
         }
       }
     },

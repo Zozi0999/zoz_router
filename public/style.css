@@ -17392,75 +17392,85 @@ body.mermaid-has-fullscreen {
     flex-shrink: 0;
 }
 
-.wa-summary-content-box h1,
-.wa-summary-content-box h2,
-.wa-summary-content-box h3,
-.wa-summary-content-box h4 {
-    color: #6ee7b7;
-    margin-top: 12px;
-    margin-bottom: 6px;
-    font-size: 0.95rem;
-}
-
-.wa-summary-content-box ul,
-.wa-summary-content-box ol {
-    padding-left: 20px;
-    margin: 6px 0 10px;
-}
-
-.wa-summary-content-box li {
-    margin-bottom: 4px;
-}
-
-.wa-summary-content-box p {
-    margin: 6px 0;
-}
-
-.wa-summary-approved-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 9px;
-    border-radius: 999px;
-    font-size: 0.72rem;
-    font-weight: 700;
-    background: rgba(16, 185, 129, 0.14);
-    border: 1px solid rgba(16, 185, 129, 0.35);
-    color: #6ee7b7;
-}
-
-
 /* =========================================================================
-   WHATSAPP SUMMARY ENGINE SWITCHER BUTTONS & PILLS
+   WHATSAPP SUMMARY MODAL - PURE BLACK PROFESSIONAL MINIMALIST THEME
    ========================================================================= */
-.wa-engine-btn {
-    color: #94a3b8;
-    background: transparent;
-    border: none;
-    cursor: pointer;
+#modalWaSummaryResult {
+    background: rgba(0, 0, 0, 0.82) !important;
+    backdrop-filter: blur(14px) !important;
+    -webkit-backdrop-filter: blur(14px) !important;
+}
+
+#modalWaSummaryResult .modal-dialog {
+    background: #000000 !important;
+    border: 1px solid #222222 !important;
+    border-radius: 12px !important;
+    box-shadow: 0 25px 70px rgba(0, 0, 0, 0.98), 0 0 1px rgba(255, 255, 255, 0.12) !important;
+}
+
+#modalWaSummaryResult .modal-header {
+    background: #050505 !important;
+    border-bottom: 1px solid #1a1a1a !important;
+}
+
+#modalWaSummaryResult .modal-footer {
+    background: #050505 !important;
+    border-top: 1px solid #1a1a1a !important;
+}
+
+.wa-summary-active-model-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #09090b;
+    border: 1px solid #222222;
+    border-radius: 6px;
+    font-size: 0.74rem;
+}
+
+.wa-summary-active-model-label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: #a1a1aa;
+}
+
+.wa-summary-active-model-name {
+    color: #ffffff;
+    font-weight: 600;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    background: #18181b;
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid #27272a;
+}
+
+#btnStartWaSummary {
+    background: #ffffff !important;
+    color: #000000 !important;
+    border: 1px solid #ffffff !important;
+    font-weight: 600 !important;
+    border-radius: 6px !important;
+    padding: 8px 16px !important;
+    white-space: nowrap !important;
+    cursor: pointer !important;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
-    transition: transform 0.08s ease, background 0.15s ease, color 0.15s ease;
+    transition: transform 0.08s ease, background 0.15s ease, opacity 0.15s ease;
 }
 
-.wa-engine-btn:hover {
-    color: #f8fafc;
-    background: rgba(255, 255, 255, 0.08);
+#btnStartWaSummary:hover {
+    background: #f4f4f5 !important;
+    color: #000000 !important;
 }
 
-.wa-engine-btn:active {
-    transform: scale(0.96);
-    background: rgba(255, 255, 255, 0.15);
+#btnStartWaSummary:active {
+    transform: scale(0.97);
+    background: #e4e4e7 !important;
+    opacity: 0.9;
 }
 
-.wa-engine-btn.active {
-    background: linear-gradient(135deg, rgba(168, 85, 247, 0.3), rgba(16, 185, 129, 0.3));
-    color: #34d399;
-    font-weight: 700;
-    box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
-}
-
-#btnStartWaSummary,
 #btnCopyWaSummaryOutput,
 #btnSendWaSummaryToAiChat,
 .wa-summary-close-btn,
@@ -17471,7 +17481,6 @@ body.mermaid-has-fullscreen {
     transition: transform 0.08s ease, opacity 0.15s ease, background 0.15s ease;
 }
 
-#btnStartWaSummary:active,
 #btnCopyWaSummaryOutput:active,
 #btnSendWaSummaryToAiChat:active,
 .wa-summary-close-btn:active,
@@ -17481,10 +17490,66 @@ body.mermaid-has-fullscreen {
     opacity: 0.85;
 }
 
-#waSummaryContactSelect option,
-#waSummaryModelSelect option {
-    background-color: #0f172a;
-    color: #f1f5f9;
+.wa-summary-content-box {
+    color: #d4d4d8;
+    line-height: 1.68;
+    font-size: 0.86rem;
+}
+
+.wa-summary-content-box h1,
+.wa-summary-content-box h2,
+.wa-summary-content-box h3,
+.wa-summary-content-box h4 {
+    color: #ffffff !important;
+    font-weight: 700;
+    margin-top: 16px;
+    margin-bottom: 8px;
+    letter-spacing: -0.01em;
+}
+
+.wa-summary-content-box p {
+    margin: 8px 0;
+    color: #e4e4e7;
+}
+
+.wa-summary-content-box strong {
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.wa-summary-content-box ul,
+.wa-summary-content-box ol {
+    margin: 6px 0 12px;
+    padding-left: 20px;
+    color: #d4d4d8;
+}
+
+.wa-summary-content-box li {
+    margin-bottom: 5px;
+}
+
+.wa-summary-content-box code {
+    background: #18181b;
+    border: 1px solid #27272a;
+    color: #f4f4f5;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.82em;
+}
+
+.wa-summary-content-box blockquote {
+    border-left: 3px solid #3f3f46;
+    background: #09090b;
+    padding: 8px 12px;
+    margin: 10px 0;
+    color: #a1a1aa;
+    border-radius: 0 6px 6px 0;
+}
+
+#waSummaryContactSelect option {
+    background-color: #09090b;
+    color: #f4f4f5;
     padding: 8px 12px;
 }
 
