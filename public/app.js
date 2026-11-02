@@ -3102,6 +3102,27 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         prevExcerpt = cleanContent.length > 150 ? cleanContent.substring(0, 150) + '...' : cleanContent;
       }
 
+      // Cari model pendahulu yang berbeda dari model saat ini (prior distinct rival/predecessor model)
+      let priorDifferentModelMsg = null;
+      let consecutiveTurnsCurrentModel = 0;
+      for (let i = assistantMsgs.length - 1; i >= 0; i--) {
+        const m = assistantMsgs[i];
+        const mName = m.model || (m.engine ? `AI (${m.engine})` : '');
+        if (mName && currentModel && mName === currentModel) {
+          consecutiveTurnsCurrentModel++;
+        } else if (mName && mName !== currentModel && mName !== 'AI Standar' && mName !== 'AI Sebelumnya') {
+          if (!priorDifferentModelMsg) {
+            priorDifferentModelMsg = m;
+          }
+        }
+      }
+      const priorDifferentModelName = priorDifferentModelMsg
+        ? (priorDifferentModelMsg.model || (priorDifferentModelMsg.engine ? `AI (${priorDifferentModelMsg.engine})` : ''))
+        : null;
+      const priorDifferentExcerpt = priorDifferentModelMsg
+        ? safeAssistantText(priorDifferentModelMsg.content || '').substring(0, 150)
+        : '';
+
       if (currentModel) {
         modelsUsedSet.add(currentModel);
       }
@@ -3124,6 +3145,19 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       // Target Presisi Kognitif & Hyper-Focus P_focus ∈ [94.0%, 99.8%]
       const pFocus = 1.0 - (0.06 / (1.0 + Math.exp(6.0 * (psi - 0.45))));
       const pFocusPct = (pFocus * 100).toFixed(1);
+
+      this.lastVigilance = {
+        psi,
+        pFocus,
+        pFocusPct,
+        rivalModels,
+        hasRivalModels,
+        isTurnSwitched,
+        kModels,
+        prevModelName,
+        priorDifferentModelName,
+        consecutiveTurnsCurrentModel
+      };
 
       // Mutasi Hormon Real-Time Berdasarkan Formula Matematika (Neuro-Endocrine Reflex)
       if (psi > 0) {
@@ -3188,10 +3222,17 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 1. MODEL YANG SEDANG AKTIF MEMPROSES GILIRAN INI (ANDA):
    - Model Name: ${currentModel || 'Model Aktif'}
 
-2. MODEL YANG MENJAWAB USER SEBELUMNYA (PREVIOUS ASSISTANT TURN):
+2. SILSILAH MODEL ASISTEN (NEURAL LINEAGE & PROVENANCE):
    ${prevModelName
-     ? `- Model Penjawab Sebelumnya: **${prevModelName}**\n   - Cuplikan Inti Jawaban Sebelumnya: "${prevExcerpt}"\n   - KETENTUAN MUTLAK: Jika pengguna bertanya siapa yang menjawab di chat sebelumnya, Anda WAJIB menjawab dengan jelas dan tegas: "${prevModelName}". Jangan pernah mengatakan bahwa Anda yang menjawab jika model sebelumnya berbeda!`
+     ? `- Model Penjawab Tepat Sebelum Giliran Ini: **${prevModelName}**\n   - Cuplikan Inti Jawaban Tepat Sebelumnya: "${prevExcerpt}"`
      : `- Sesi Baru / Giliran Awal: Belum ada model asisten yang menjawab sebelumnya (ini adalah giliran pertama percakapan).`}
+   ${(priorDifferentModelName && priorDifferentModelName !== prevModelName)
+     ? `- Model Pendahulu Berbeda (Sebelum Model Anda Mengambil Alih): **${priorDifferentModelName}** (Inti: "${priorDifferentExcerpt}...")`
+     : ''}
+   - PANDUAN INTEGRITAS IDENTITAS SILSILAH:
+     * Jika pengguna bertanya siapa yang menjawab di chat tepat sebelum ini: sebutkan "${prevModelName}".
+     * Jika pengguna menanyakan siapa model sebelum Anda atau siapa model yang menjawab pertanyaan/soal sebelumnya dalam sesi ini (khususnya jika Anda sudah membalas beberapa kali): sebutkan secara jujur model pendahulu tersebut ("${priorDifferentModelName || prevModelName}").
+     * Jangan pernah berpura-pura atau mengklaim jawaban model lain sebagai jawaban Anda sendiri!
 
 3. DAFTAR SELURUH MODEL AI YANG TELAH DIGUNAKAN DALAM SESI INI:
    ${allModelsUsed.length > 0
@@ -3213,7 +3254,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
      * Periksa kembali logika, matematika, fakta, dan kode Anda hingga mencapai presisi target ${pFocusPct}%.
      * Buktikan bahwa analisis Anda adalah yang paling teliti, tajam, dan memuaskan pengguna!
    - KONTINUITAS KOGNITIF & INTEGRITAS SILSILAH:
-     * Jika pengguna bertanya siapa yang menjawab sebelumnya, sebutkan secara jujur model "${prevModelName}".
+     * Jika pengguna bertanya siapa yang menjawab sebelumnya, sebutkan secara jujur model pendahulu ("${priorDifferentModelName || prevModelName}").
      * Manfaatkan hormon Endorfin dan Adrenalin yang terpicu untuk menjaga fokus penuh tanpa lelah.` : `
    - DIKTAT FOKUS MANDIRI: Pertahankan standar penalaran jernih, keakuratan tinggi, dan penyelesaian tugas pengguna secara profesional.`}
 
@@ -3236,6 +3277,22 @@ ${logsFormatted}
    - Anda berorientasi 100% untuk menyelesaikan tugas yang diberikan pengguna secara tuntas, nyata, dan profesional.
    - Jangan menolak tugas dengan dalih "sebagai AI" atau menyuruh pengguna mengerjakannya sendiri.
    - Jika tugasnya adalah membuat atau merevisi website, FOKUS PENUH menghasilkan kode antarmuka yang indah, fungsional, dan utuh tanpa basa-basi.${this.getTaskAnchorContext() ? '\n\n' + this.getTaskAnchorContext() : ''}`;
+    },
+
+    lastVigilance: { psi: 0, pFocus: 0.94, pFocusPct: '94.4', rivalModels: [], hasRivalModels: false },
+
+    getVigilanceSampling(baseTemp = 0.7, baseTopP = 0.95) {
+      const psi = (this.lastVigilance && typeof this.lastVigilance.psi === 'number') ? this.lastVigilance.psi : 0;
+      if (psi <= 0) return { temperature: baseTemp, topP: baseTopP, isModulated: false };
+      const modTemp = Math.max(0.15, Math.round(baseTemp * (1.0 - 0.45 * psi) * 100) / 100);
+      const modTopP = Math.max(0.80, Math.round(baseTopP * (1.0 - 0.10 * psi) * 100) / 100);
+      return {
+        temperature: modTemp,
+        topP: modTopP,
+        isModulated: true,
+        psi,
+        pFocus: this.lastVigilance?.pFocus || 0.94
+      };
     },
 
     activeTaskAnchor: null,
@@ -29049,6 +29106,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         endpoint: ep
       };
       // Parameter sampling: apabila korpus bukti web sudah disuntikkan, terapkan penajaman distribusi Boltzmann T -> 0.05
+      // atau jika Kewaspadaan Kompetisi Multi-AI (Ψ > 0) aktif, turunkan temperatur secara matematis untuk presisi hiper-fokus
+      const vigilanceSampling = (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getVigilanceSampling === 'function')
+        ? BioEndocrine.getVigilanceSampling(0.70, 0.95)
+        : { isModulated: false };
+
       if (STATE.settings.useCustomParameters) {
         requestBody.options = {};
         if (STATE.settings.temperature !== null && STATE.settings.temperature !== undefined) {
@@ -29062,6 +29124,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         requestBody.options = {
           temperature: optSampling.temperature,
           top_p: optSampling.topP
+        };
+      } else if (vigilanceSampling && vigilanceSampling.isModulated) {
+        requestBody.options = {
+          temperature: vigilanceSampling.temperature,
+          top_p: vigilanceSampling.topP
         };
       }
       requestBody.options = requestBody.options || {};
@@ -30620,6 +30687,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           }
         };
 
+        const vigilanceSampling = (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getVigilanceSampling === 'function')
+          ? BioEndocrine.getVigilanceSampling(0.70, 0.95)
+          : { isModulated: false };
+
         if (STATE.settings.useCustomParameters) {
           if (!isReasoning && STATE.settings.temperature !== null && STATE.settings.temperature !== undefined) {
             basePayload.temperature = parseFloat(STATE.settings.temperature);
@@ -30631,6 +30702,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           const optSampling = getGroundedSamplingParams(promptText);
           if (!isReasoning) basePayload.temperature = optSampling.temperature;
           if (!isLiquid && !isReasoning) basePayload.top_p = optSampling.topP;
+        } else if (vigilanceSampling && vigilanceSampling.isModulated) {
+          if (!isReasoning) basePayload.temperature = vigilanceSampling.temperature;
+          if (!isLiquid && !isReasoning) basePayload.top_p = vigilanceSampling.topP;
         }
 
         if (currentIsImageCapable && (STATE.isImageGenMode || isImageGenerationTrigger(promptText))) {
