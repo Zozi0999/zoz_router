@@ -229,6 +229,9 @@ class WhatsAppGateway {
       } else {
         name = this.cleanDisplayName(name, rawPhone);
       }
+      if (!isMe && (notify === myPushName || notify === 'We Are Here')) {
+        notify = '';
+      }
     }
 
     return {
@@ -833,7 +836,25 @@ class WhatsAppGateway {
 
     this._savePromise = (async () => {
       try {
-        const contactsArr = Array.from(this.contacts.values()).filter(c => this.isRealContact(c));
+        const myPhone = (this.status?.phone || (this.sock?.user?.id ? this.sock.user.id.split(':')[0] : '')).replace(/[^0-9]/g, '');
+        const myPushName = (this.sock?.user?.name || '').trim();
+        const contactsArr = Array.from(this.contacts.values())
+          .filter(c => this.isRealContact(c))
+          .map(c => {
+            const rawPhone = (c.phone || c.id.split('@')[0] || '').replace(/[^0-9]/g, '');
+            const isMe = myPhone && rawPhone === myPhone;
+            let cleanNotify = (c.notify || '').trim();
+            let cleanName = (c.name || '').trim();
+            if (!isMe) {
+              if (cleanNotify === 'We Are Here' || (myPushName && cleanNotify === myPushName)) cleanNotify = '';
+              if (cleanName === 'We Are Here' || (myPushName && cleanName === myPushName)) cleanName = '';
+            }
+            return {
+              ...c,
+              name: cleanName || c.name,
+              notify: cleanNotify
+            };
+          });
         const tmpContacts = `${this.contactsFile}.tmp`;
         await fsp.writeFile(tmpContacts, JSON.stringify(contactsArr, null, 2), 'utf8');
         await fsp.rename(tmpContacts, this.contactsFile);

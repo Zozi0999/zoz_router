@@ -14535,6 +14535,14 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
               const match = fullSourceText.match(docRegex);
               if (match && match[1]) {
                 docContent = match[1];
+              } else if (targetDoc.isAutoConvertedMarkdown || (docs && docs.length === 1)) {
+                // Fallback untuk dokumen markdown hasil auto-fold / rangkuman WhatsApp
+                const rawInstruction = extraMeta?.displayContent || (typeof content === 'string' ? content : '');
+                if (rawInstruction && fullSourceText.endsWith(rawInstruction)) {
+                  docContent = fullSourceText.slice(0, fullSourceText.length - rawInstruction.length).trim();
+                } else {
+                  docContent = fullSourceText;
+                }
               }
             }
           }
@@ -25203,7 +25211,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
     // Build user message object
     const docsWithContent = docs.map(d => ({ name: d.name, size: d.size, content: d.content, url: d.url, isWeb: d.isWeb }));
-    const docsMeta = docs.map(d => ({ name: d.name, size: d.size, url: d.url, isWeb: d.isWeb }));
+    const docsMeta = docs.map(d => ({
+      name: d.name,
+      size: d.size,
+      url: d.url,
+      isWeb: d.isWeb,
+      content: (typeof d.content === 'string' && d.content.length <= 500000) ? d.content : undefined,
+      isAutoConvertedMarkdown: Boolean(d.isAutoConvertedMarkdown)
+    }));
     const userMsg = {
       role: 'user',
       content: text,
@@ -49136,6 +49151,11 @@ Aturan:
           safeContactName = rawN.replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u1E00-\u1EFF]/g, '_').replace(/_+/g, '_').slice(0, 32);
         }
         const docFileName = `Rangkuman_${safeContactName || 'WhatsApp'}.md`;
+
+        // Bersihkan lampiran rangkuman lama sebelum konversi agar tidak terjadi counter duplikasi (-1, -2)
+        if (Array.isArray(STATE.attachedDocs)) {
+          STATE.attachedDocs = STATE.attachedDocs.filter(d => !d.name.startsWith(`Rangkuman_${safeContactName}`));
+        }
 
         let attachedDoc = null;
         if (typeof convertTextToMarkdownDoc === 'function') {
