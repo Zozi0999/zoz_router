@@ -45865,6 +45865,8 @@ Aturan:
       const isMeaningless = !raw ||
         raw === '...' || raw === '..' || raw === '.' || raw === '~' || raw === '-' || raw === '_' || raw === '!?' || raw === '\u200e' ||
         raw.startsWith('120363') || // ID grup WhatsApp yang bocor sebagai nama
+        (raw === 'We Are Here' && rawDigits !== '6287894270587') || // Profil master yang sempat mencemari kontak lain
+        raw.startsWith('~') || // PushName peserta yang bocor sebagai nama kontak/grup
         /^[\s._\-~:;*#@!?^$()\[\]{}|\\/]+$/.test(raw) ||
         raw.replace(/[\s._\-~:;*#@!?^$()\[\]{}|\\/]/g, '').length === 0;
 
@@ -49114,7 +49116,7 @@ Aturan:
         }
       });
 
-      // Tombol "Lanjut di AI Chat" (Alihkan ke Percakapan Biasa)
+      // Tombol "Lanjut di AI Chat" (Konversi langsung ke file Markdown tanpa memenuhi kolom prompt)
       document.getElementById('btnSendWaSummaryToAiChat')?.addEventListener('click', () => {
         AudioEngine.click();
         if (!this.lastSummaryMarkdown) {
@@ -49126,17 +49128,55 @@ Aturan:
         // 1. Alihkan ke mode chat AI biasa
         this.setChatMode('ai');
 
-        // 2. Masukkan transkrip rangkuman terstruktur ke dalam input prompt AI
+        // 2. Konversikan teks rangkuman langsung menjadi file markdown terlampir rapi (DeepSeek doc attachment)
+        const contact = this.activeContact;
+        let safeContactName = 'Obrolan_WhatsApp';
+        if (contact) {
+          const rawN = (contact.name || contact.phone || '').trim().replace(/^👥\s*/, '');
+          safeContactName = rawN.replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u1E00-\u1EFF]/g, '_').replace(/_+/g, '_').slice(0, 32);
+        }
+        const docFileName = `Rangkuman_${safeContactName || 'WhatsApp'}.md`;
+
+        let attachedDoc = null;
+        if (typeof convertTextToMarkdownDoc === 'function') {
+          attachedDoc = convertTextToMarkdownDoc(this.lastSummaryMarkdown, docFileName);
+        }
+        if (!attachedDoc) {
+          let bytes = 0;
+          try { bytes = new Blob([this.lastSummaryMarkdown]).size; } catch (_) { bytes = this.lastSummaryMarkdown.length; }
+          const sizeStr = bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+          const lineCount = this.lastSummaryMarkdown.split('\n').length;
+          attachedDoc = {
+            name: docFileName,
+            size: `${sizeStr} • ${lineCount} baris`,
+            content: this.lastSummaryMarkdown,
+            rawContent: this.lastSummaryMarkdown,
+            lang: 'markdown',
+            charCount: this.lastSummaryMarkdown.length,
+            lineCount,
+            isAutoConvertedMarkdown: true
+          };
+        }
+
+        if (attachedDoc) {
+          if (!Array.isArray(STATE.attachedDocs)) STATE.attachedDocs = [];
+          // Hapus dokumen lama jika namanya sama persis untuk mencegah duplikasi
+          STATE.attachedDocs = STATE.attachedDocs.filter(d => d.name !== attachedDoc.name);
+          STATE.attachedDocs.push(attachedDoc);
+
+          if (typeof renderAttachmentPreviews === 'function') {
+            renderAttachmentPreviews();
+          }
+        }
+
+        // 3. Kolom prompt tetap bersih dan hanya berisi instruksi singkat
         if (els.promptInput) {
-          const intro = 'Berikut adalah hasil rangkuman chat WhatsApp yang telah saya setujui:\n\n' +
-            this.lastSummaryMarkdown +
-            '\n\n---\nMari lanjutkan percakapan biasa mengenai informasi di atas. Analisis dan berikan saran tindak lanjut yang perlu kita lakukan: ';
-          els.promptInput.value = intro;
+          els.promptInput.value = 'Tolong analisis intisari rangkuman WhatsApp pada file dokumen terlampir di atas, lalu berikan poin penting serta rekomendasi tindak lanjutnya: ';
           if (typeof autoResizeTextarea === 'function') autoResizeTextarea(els.promptInput);
           els.promptInput.focus();
         }
 
-        showToast('💬 Dialihkan ke AI Chat. Silakan lanjutkan percakapan biasa!', 'success');
+        showToast(`📄 Rangkuman WhatsApp berhasil dikonversi ke file [${docFileName}]! Kolom prompt tetap bersih.`, 'success');
       });
     },
 

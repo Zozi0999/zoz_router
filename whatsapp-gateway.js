@@ -86,6 +86,7 @@ class WhatsAppGateway {
     this.contacts = new Map(); // jid -> { id, name, notify, phone, lastMessage, lastTimestamp, unreadCount }
     this.messages = new Map(); // jid -> [ { id, fromMe, text, timestamp, senderName, status, media } ]
     this.rawMessages = new Map(); // id -> raw Baileys WAMessage
+    this.groupMetadataCache = new Map(); // jid -> { id, subject, ... }
     this.uploadsDir = path.join(__dirname, 'data', 'uploads');
     this.config = { pinHash: null, createdAt: Date.now() };
 
@@ -204,20 +205,36 @@ class WhatsAppGateway {
   cleanContact(c) {
     if (!c || !c.id) return c;
     const isGroup = c.id.endsWith('@g.us');
-    let name = (c.name || c.notify || '').trim();
+    let name = (c.name || '').trim();
+    let notify = (c.notify || '').trim();
     const rawPhone = (c.phone || c.id.split('@')[0] || '').replace(/[^0-9]/g, '');
+    const myPhone = (this.status?.phone || (this.sock?.user?.id ? this.sock.user.id.split(':')[0] : '')).replace(/[^0-9]/g, '');
+    const myPushName = (this.sock?.user?.name || '').trim();
 
     if (isGroup) {
-      if (!name || name === '...' || name === '.') {
-        name = c.notify || `Grup ${this.formatPhoneNumber(rawPhone) || c.id.split('@')[0]}`;
+      // Jika nama grup masih nama pengirim individu (~Tinaaa, We Are Here, dsb) atau angka id grup
+      const isFakeGroupName = !name || name === '...' || name === '.' || name.startsWith('120363') ||
+        name === myPushName || name === 'We Are Here' || name.startsWith('~') || /^\d+$/.test(name);
+      if (isFakeGroupName) {
+        const cached = this.groupMetadataCache?.get(c.id);
+        name = (cached && cached.subject) ? cached.subject : 'Grup WhatsApp';
       }
     } else {
-      name = this.cleanDisplayName(name, rawPhone);
+      // Jika kontak individual: cegah pencemaran nama profil akun sendiri ('We Are Here')
+      const isMe = myPhone && rawPhone === myPhone;
+      if (!isMe && (name === myPushName || name === 'We Are Here')) {
+        name = (notify && notify !== myPushName && notify !== 'We Are Here' && notify !== '.' && notify !== '?')
+          ? notify
+          : this.formatPhoneNumber(rawPhone);
+      } else {
+        name = this.cleanDisplayName(name, rawPhone);
+      }
     }
 
     return {
       ...c,
       name,
+      notify,
       phone: isGroup ? 'Grup WhatsApp' : (this.formatPhoneNumber(rawPhone) || c.phone || 'Nomor WhatsApp')
     };
   }
@@ -837,6 +854,47 @@ class WhatsAppGateway {
     this._savePromise = null;
   }
 
+  async syncGroupMetadata(jid) {
+    if (!jid || !jid.endsWith('@g.us') || !this.sock || !this.status.connected) return null;
+    try {
+      const meta = await this.sock.groupMetadata(jid);
+      if (meta && meta.subject) {
+        this.groupMetadataCache.set(jid, meta);
+        let contact = this.contacts.get(jid);
+        if (!contact) {
+          contact = {
+            id: jid,
+            name: meta.subject,
+            notify: meta.subject,
+            phone: 'Grup WhatsApp',
+            unreadCount: 0,
+            lastMessage: '',
+            lastTimestamp: Date.now()
+          };
+          this.contacts.set(jid, contact);
+        } else {
+          contact.name = meta.subject;
+          contact.notify = meta.subject;
+        }
+        this.savePersistedData();
+        this.broadcast('contacts', this.getContacts());
+        return meta.subject;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  async syncAllGroupMetadata() {
+    if (!this.sock || !this.status.connected) return;
+    const groupJids = Array.from(this.contacts.keys()).filter(k => k && k.endsWith('@g.us'));
+    if (groupJids.length === 0) return;
+
+    for (const jid of groupJids) {
+      await this.syncGroupMetadata(jid);
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+
   hasStoredSession() {
     try {
       const credsFile = path.join(this.authDir, 'creds.json');
@@ -1082,6 +1140,12 @@ class WhatsAppGateway {
           console.log(`[WA-Gateway] 🟢 WhatsApp Terhubung! ID: ${this.status.phone}`);
           this.broadcast('status', this.getStatus());
           this.savePersistedData();
+
+          // Sinkronisasi nama grup WhatsApp asli dari Baileys di latar belakang
+          setTimeout(() => {
+            this.syncAllGroupMetadata().catch(() => {});
+          }, 800);
+
           if (resolveSettled) {
             resolveSettled(this.getStatus());
             resolveSettled = null;
@@ -1337,6 +1401,79 @@ class WhatsAppGateway {
         }
       });
 
+      // Sinkronisasi Nama Subjek Grup WhatsApp Asli
+      this.sock.ev.on('groups.update', async (groupUpdates) => {
+        let changed = false;
+        for (const update of groupUpdates) {
+          if (!update.id) continue;
+          const jid = update.id;
+          const subject = (update.subject || '').trim();
+          if (subject) {
+            let contact = this.contacts.get(jid);
+            if (!contact) {
+              contact = {
+                id: jid,
+                name: subject,
+                notify: subject,
+                phone: 'Grup WhatsApp',
+                unreadCount: 0,
+                lastMessage: '',
+                lastTimestamp: Date.now()
+              };
+              this.contacts.set(jid, contact);
+            } else {
+              contact.name = subject;
+              contact.notify = subject;
+            }
+            if (this.groupMetadataCache) {
+              const prev = this.groupMetadataCache.get(jid) || {};
+              this.groupMetadataCache.set(jid, { ...prev, id: jid, subject });
+            }
+            changed = true;
+          }
+        }
+        if (changed) {
+          this.savePersistedData();
+          this.broadcast('contacts', this.getContacts());
+        }
+      });
+
+      this.sock.ev.on('groups.upsert', async (groups) => {
+        let changed = false;
+        for (const g of groups) {
+          if (!g.id) continue;
+          const jid = g.id;
+          const subject = (g.subject || g.name || '').trim();
+          if (subject) {
+            let contact = this.contacts.get(jid);
+            if (!contact) {
+              contact = {
+                id: jid,
+                name: subject,
+                notify: subject,
+                phone: 'Grup WhatsApp',
+                unreadCount: 0,
+                lastMessage: '',
+                lastTimestamp: Date.now()
+              };
+              this.contacts.set(jid, contact);
+            } else {
+              contact.name = subject;
+              contact.notify = subject;
+            }
+            if (this.groupMetadataCache) {
+              const prev = this.groupMetadataCache.get(jid) || {};
+              this.groupMetadataCache.set(jid, { ...prev, id: jid, subject });
+            }
+            changed = true;
+          }
+        }
+        if (changed) {
+          this.savePersistedData();
+          this.broadcast('contacts', this.getContacts());
+        }
+      });
+
       // Menangani Pesan Masuk / Keluar
       this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
         let hasNew = false;
@@ -1476,24 +1613,55 @@ class WhatsAppGateway {
           list.push(messageItem);
           hasNew = true;
 
-          // Update kontak
+          // Update kontak secara akurat (Anti-Ngarang)
+          const isGroup = jid.endsWith('@g.us');
           let contact = this.contacts.get(jid);
+          const myPushName = (this.sock?.user?.name || '').trim();
+          const validPush = (!fromMe && msg.pushName && msg.pushName.trim() && msg.pushName.trim() !== myPushName && !/^[.~!@#$%^&*()_+=[\]{};':",.<>/?\s-]+$/.test(msg.pushName.trim()))
+            ? msg.pushName.trim()
+            : '';
+
           if (!contact) {
+            let initialName = isGroup ? 'Grup WhatsApp' : (validPush || this.formatPhoneNumber(jid.split('@')[0]) || jid.split('@')[0]);
+            if (isGroup && this.groupMetadataCache && this.groupMetadataCache.has(jid)) {
+              initialName = this.groupMetadataCache.get(jid).subject || initialName;
+            }
             contact = {
               id: jid,
-              name: msg.pushName || jid.split('@')[0],
-              notify: msg.pushName || '',
-              phone: jid.split('@')[0],
+              name: initialName,
+              notify: isGroup ? '' : validPush,
+              phone: isGroup ? 'Grup WhatsApp' : jid.split('@')[0],
               unreadCount: fromMe ? 0 : 1,
               lastMessage: text,
               lastTimestamp: ts
             };
             this.contacts.set(jid, contact);
+            if (isGroup) {
+              this.syncGroupMetadata(jid).catch(() => {});
+            }
           } else {
             contact.lastMessage = text;
             contact.lastTimestamp = ts;
             if (!fromMe) {
               contact.unreadCount = (contact.unreadCount || 0) + 1;
+              if (validPush && !isGroup) {
+                contact.notify = validPush;
+                const currentName = (contact.name || '').trim();
+                const isPlaceholder = !currentName ||
+                  currentName === contact.phone ||
+                  currentName === 'We Are Here' ||
+                  currentName === 'Pengguna WhatsApp' ||
+                  /^[0-9+()\-\s]+$/.test(currentName);
+                if (isPlaceholder) {
+                  contact.name = validPush;
+                }
+              }
+            }
+            if (isGroup) {
+              const currentGName = (contact.name || '').trim();
+              if (!currentGName || currentGName === 'Grup WhatsApp' || currentGName.startsWith('~') || currentGName === 'We Are Here' || currentGName.startsWith('120363')) {
+                this.syncGroupMetadata(jid).catch(() => {});
+              }
             }
           }
 
@@ -1839,13 +2007,40 @@ class WhatsAppGateway {
     return list.map(c => {
       let displayName = cleanText(c.name || '');
       const isGroup = c.id.endsWith('@g.us');
+      const myPhone = (this.status?.phone || (this.sock?.user?.id ? this.sock.user.id.split(':')[0] : '')).replace(/[^0-9]/g, '');
+      const myPushName = (this.sock?.user?.name || '').trim();
 
-      // Jika nama berupa digit mentah / belum dinamai di buku telepon
-      if (!displayName || /^\d+$/.test(displayName)) {
-        if (!isGroup) {
-          displayName = formatCleanPhone(c.phone || c.id.split('@')[0]);
-        } else {
-          displayName = 'Grup WhatsApp';
+      if (isGroup) {
+        // Jika nama grup masih berupa ID, '~Tinaaa', 'We Are Here', atau belum subjek asli
+        const isBadName = !displayName || displayName === '...' || displayName === 'Grup WhatsApp' ||
+          displayName.startsWith('120363') || displayName.startsWith('~') || displayName === 'We Are Here' || displayName === myPushName;
+        if (isBadName) {
+          const cached = this.groupMetadataCache?.get(c.id);
+          if (cached && cached.subject) {
+            displayName = cleanText(cached.subject);
+          } else {
+            displayName = 'Grup WhatsApp';
+            if (this.sock && this.status.connected) {
+              this.syncGroupMetadata(c.id).catch(() => {});
+            }
+          }
+        }
+      } else {
+        const rawPhone = (c.phone || c.id.split('@')[0] || '').replace(/[^0-9]/g, '');
+        const isMe = myPhone && rawPhone === myPhone;
+        // Jika kontak individual dinamai nama akun sendiri 'We Are Here'
+        if (!isMe && (displayName === 'We Are Here' || displayName === myPushName)) {
+          displayName = (c.notify && c.notify !== 'We Are Here' && c.notify !== myPushName && c.notify !== '.' && c.notify !== '?')
+            ? cleanText(c.notify)
+            : formatCleanPhone(rawPhone);
+        }
+        // Jika nama berupa digit mentah / belum dinamai di buku telepon
+        if (!displayName || /^\d+$/.test(displayName)) {
+          if (c.notify && c.notify !== '.' && c.notify !== '?' && c.notify !== 'We Are Here' && c.notify !== myPushName && !/^\d+$/.test(c.notify)) {
+            displayName = cleanText(c.notify);
+          } else {
+            displayName = formatCleanPhone(rawPhone);
+          }
         }
       }
 
