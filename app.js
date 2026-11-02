@@ -43613,33 +43613,117 @@ Aturan:
       };
     },
 
-    // Helper normalisasi stream ConPTY Windows O(N) linier (bebas ReDoS backtracking) untuk sekuens cls / Clear-Host
+    // Helper normalisasi stream ConPTY Windows deterministik murni (100% bebas ReDoS backtracking) untuk sekuens cls / Clear-Host
     cleanConptyData(str) {
       if (typeof str !== 'string' || !str) return str;
-      // 1 & 2. Deteksi blok sekuens hapus baris ConPTY (\x1b[K + \r\n) dalam waktu O(N) murni tanpa kemungkinan backtracking:
-      const blockRe = /(?:(?:\x1b\[[0-9;?]*[A-Za-z])*[\r\n]+)+\x1b\[(?:H|1;1H|1;(\d+)H)(?:\x1b\[\?25[hl])*/g;
-      str = str.replace(blockRe, (match, col) => {
+      if (str.indexOf('\x1b') === -1) return str;
+
+      // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) yang diakhiri cursor home (\x1b[H / \x1b[1;1H)
+      let targetIdx = -1;
+      let homeSeq = '';
+      let hPos = str.indexOf('\x1b[H');
+      let h11Pos = str.indexOf('\x1b[1;1H');
+      if (hPos !== -1 && (h11Pos === -1 || hPos <= h11Pos)) {
+        targetIdx = hPos;
+        homeSeq = '\x1b[H';
+      } else if (h11Pos !== -1) {
+        targetIdx = h11Pos;
+        homeSeq = '\x1b[1;1H';
+      }
+
+      if (targetIdx !== -1) {
+        let startIdx = targetIdx;
         let kCount = 0;
-        let idx = -1;
-        while ((idx = match.indexOf('\x1b[', idx + 1)) !== -1) {
-          const nextCh = match[idx + 2];
-          if (nextCh === 'K' || (nextCh === '2' && match[idx + 3] === 'K')) {
+        while (startIdx > 0) {
+          const prevChar = str[startIdx - 1];
+          if (prevChar === '\n' || prevChar === '\r') {
+            startIdx--;
+            continue;
+          }
+          if (startIdx >= 3 && str.slice(startIdx - 3, startIdx) === '\x1b[K') {
             kCount++;
+            startIdx -= 3;
+            continue;
+          }
+          if (startIdx >= 4 && str.slice(startIdx - 4, startIdx) === '\x1b[2K') {
+            kCount++;
+            startIdx -= 4;
+            continue;
+          }
+          if (prevChar === 'm' || prevChar === 'l' || prevChar === 'h') {
+            const escPos = str.lastIndexOf('\x1b[', startIdx - 1);
+            if (escPos !== -1 && escPos >= startIdx - 30) {
+              startIdx = escPos;
+              continue;
+            }
+          }
+          break;
+        }
+        if (kCount >= 3) {
+          const afterTarget = targetIdx + homeSeq.length;
+          let tailIdx = afterTarget;
+          if (str.startsWith('\x1b[?25h', tailIdx) || str.startsWith('\x1b[?25l', tailIdx)) {
+            tailIdx += 6;
+          }
+          str = str.slice(0, startIdx) + '\x1b[2J\x1b[3J\x1b[H' + str.slice(tailIdx);
+        }
+      }
+
+      // 2. Normalisasi pembersihan sisa layar pasca-clear di baris pertama (\x1b[1;colH)
+      let cPos = -1;
+      while ((cPos = str.indexOf('\x1b[1;', cPos + 1)) !== -1) {
+        const endH = str.indexOf('H', cPos);
+        if (endH !== -1 && endH <= cPos + 6) {
+          const colStr = str.slice(cPos + 4, endH);
+          if (/^\d+$/.test(colStr)) {
+            let startIdx = cPos;
+            let kCount = 0;
+            while (startIdx > 0) {
+              const prev = str[startIdx - 1];
+              if (prev === '\n' || prev === '\r') {
+                startIdx--;
+                continue;
+              }
+              if (startIdx >= 3 && str.slice(startIdx - 3, startIdx) === '\x1b[K') {
+                kCount++;
+                startIdx -= 3;
+                continue;
+              }
+              if (startIdx >= 4 && str.slice(startIdx - 4, startIdx) === '\x1b[2K') {
+                kCount++;
+                startIdx -= 4;
+                continue;
+              }
+              if (prev === 'm' || prev === 'l' || prev === 'h') {
+                const escPos = str.lastIndexOf('\x1b[', startIdx - 1);
+                if (escPos !== -1 && escPos >= startIdx - 30) {
+                  startIdx = escPos;
+                  continue;
+                }
+              }
+              break;
+            }
+            if (kCount >= 5) {
+              const tail = str.slice(endH + 1);
+              let promptPrefix = '';
+              let pStart = str.slice(0, startIdx);
+              const pMatch = pStart.match(/PS [^\r\n>]+>[ \t]*$/);
+              if (pMatch) {
+                promptPrefix = '\x1b[H' + pMatch[0];
+                pStart = pStart.slice(0, pMatch.index);
+              }
+              str = pStart + promptPrefix + '\x1b[K\x1b[J\x1b[1;' + colStr + 'H' + tail;
+              break;
+            }
           }
         }
-        if (!col) {
-          return kCount >= 3 ? '\x1b[2J\x1b[3J\x1b[H' : match;
-        }
-        return kCount >= 5 ? ('\x1b[K\x1b[J\x1b[1;' + col + 'H') : match;
-      });
-
-      // 2b. Jangkar prompt baris pertama yang diikuti sapuan pembersihan layar (\x1b[K\x1b[J\x1b[1;colH)
-      // ke kolom 1 (\x1b[H) agar tidak pernah menggandakan prompt horizontal jika chunk datang dua kali:
-      str = str.replace(/(PS [^\r\n>]+>\s*)(\x1b\[K\x1b\[J\x1b\[1;\d+H)/g, '\x1b[H$1$2');
+      }
 
       // 3. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>")
-      const dedupRe = /(PS [^\r\n>]+>)(?:[ \t]|\x1b\[[0-9;?]*[A-Za-z])*\1\s*/g;
-      str = str.replace(dedupRe, '$1 ');
+      const dIdx = str.indexOf('PS ');
+      if (dIdx !== -1) {
+        str = str.replace(/(PS [A-Za-z]:\\[^\r\n>]*>)[ \t]*(?:\x1b\[[0-9;?]*[a-zA-Z])*[ \t]*\1[ \t]*/g, '$1 ');
+      }
 
       return str;
     },

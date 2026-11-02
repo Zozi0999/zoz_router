@@ -414,26 +414,114 @@ function hasVisibleTerminalPrompt(bufferStr) {
  */
 function cleanConptyData(str) {
   if (typeof str !== 'string' || !str) return str;
-  // 1 & 2. Deteksi atomik O(N) untuk ConPTY screen wipe (\x1b[K\r\n... -> \x1b[H)
-  // dan pembersihan sisa layar pasca-clear di baris pertama (PS ...> \x1b[K\r\n... -> \x1b[1;colH).
-  // Token [mhlK] dan [\r\n] saling asing (disjoint) terhadap terminal 'H', sehingga quantifier '+' 100% bebas backtracking.
-  const blockRe = /(PS [^\r\n\x1b>]+>[ \t]*)?((?:\x1b\[[0-9;?]*[mhlK]|[\r\n])+)\x1b\[(H|1;(\d+)H)((?:\x1b\[\?25[hl])*)/g;
-  str = str.replace(blockRe, (match, promptPrefix, body, pos, col, tail) => {
-    const kMatches = body.match(/\x1b\[2?K/g);
-    const kCount = kMatches ? kMatches.length : 0;
-    if ((pos === 'H' || pos === '1;1H') && kCount >= 3 && !promptPrefix) {
-      return '\x1b[2J\x1b[3J\x1b[H';
+  if (str.indexOf('\x1b') === -1) return str;
+
+  // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) yang diakhiri cursor home (\x1b[H / \x1b[1;1H)
+  let targetIdx = -1;
+  let homeSeq = '';
+  let hPos = str.indexOf('\x1b[H');
+  let h11Pos = str.indexOf('\x1b[1;1H');
+  if (hPos !== -1 && (h11Pos === -1 || hPos <= h11Pos)) {
+    targetIdx = hPos;
+    homeSeq = '\x1b[H';
+  } else if (h11Pos !== -1) {
+    targetIdx = h11Pos;
+    homeSeq = '\x1b[1;1H';
+  }
+
+  if (targetIdx !== -1) {
+    let startIdx = targetIdx;
+    let kCount = 0;
+    while (startIdx > 0) {
+      const prevChar = str[startIdx - 1];
+      if (prevChar === '\n' || prevChar === '\r') {
+        startIdx--;
+        continue;
+      }
+      if (startIdx >= 3 && str.slice(startIdx - 3, startIdx) === '\x1b[K') {
+        kCount++;
+        startIdx -= 3;
+        continue;
+      }
+      if (startIdx >= 4 && str.slice(startIdx - 4, startIdx) === '\x1b[2K') {
+        kCount++;
+        startIdx -= 4;
+        continue;
+      }
+      if (prevChar === 'm' || prevChar === 'l' || prevChar === 'h') {
+        const escPos = str.lastIndexOf('\x1b[', startIdx - 1);
+        if (escPos !== -1 && escPos >= startIdx - 30) {
+          startIdx = escPos;
+          continue;
+        }
+      }
+      break;
     }
-    if (col && kCount >= 5) {
-      const prefix = promptPrefix ? ('\x1b[H' + promptPrefix) : '';
-      return prefix + '\x1b[K\x1b[J\x1b[1;' + col + 'H' + (tail || '');
+    if (kCount >= 3) {
+      const afterTarget = targetIdx + homeSeq.length;
+      let tailIdx = afterTarget;
+      if (str.startsWith('\x1b[?25h', tailIdx) || str.startsWith('\x1b[?25l', tailIdx)) {
+        tailIdx += 6;
+      }
+      str = str.slice(0, startIdx) + '\x1b[2J\x1b[3J\x1b[H' + str.slice(tailIdx);
     }
-    return match;
-  });
+  }
+
+  // 2. Normalisasi pembersihan sisa layar pasca-clear di baris pertama (\x1b[1;colH)
+  let cPos = -1;
+  while ((cPos = str.indexOf('\x1b[1;', cPos + 1)) !== -1) {
+    const endH = str.indexOf('H', cPos);
+    if (endH !== -1 && endH <= cPos + 6) {
+      const colStr = str.slice(cPos + 4, endH);
+      if (/^\d+$/.test(colStr)) {
+        let startIdx = cPos;
+        let kCount = 0;
+        while (startIdx > 0) {
+          const prev = str[startIdx - 1];
+          if (prev === '\n' || prev === '\r') {
+            startIdx--;
+            continue;
+          }
+          if (startIdx >= 3 && str.slice(startIdx - 3, startIdx) === '\x1b[K') {
+            kCount++;
+            startIdx -= 3;
+            continue;
+          }
+          if (startIdx >= 4 && str.slice(startIdx - 4, startIdx) === '\x1b[2K') {
+            kCount++;
+            startIdx -= 4;
+            continue;
+          }
+          if (prev === 'm' || prev === 'l' || prev === 'h') {
+            const escPos = str.lastIndexOf('\x1b[', startIdx - 1);
+            if (escPos !== -1 && escPos >= startIdx - 30) {
+              startIdx = escPos;
+              continue;
+            }
+          }
+          break;
+        }
+        if (kCount >= 5) {
+          const tail = str.slice(endH + 1);
+          let promptPrefix = '';
+          let pStart = str.slice(0, startIdx);
+          const pMatch = pStart.match(/PS [^\r\n>]+>[ \t]*$/);
+          if (pMatch) {
+            promptPrefix = '\x1b[H' + pMatch[0];
+            pStart = pStart.slice(0, pMatch.index);
+          }
+          str = pStart + promptPrefix + '\x1b[K\x1b[J\x1b[1;' + colStr + 'H' + tail;
+          break;
+        }
+      }
+    }
+  }
 
   // 3. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>") secara linear O(N)
-  const dedupRe = /(PS [A-Za-z]:\\[^\r\n\x1b>]*>)(?:[ \t]|\x1b\[[0-9;?]*[mhlK])*(?:\x1b\[(?:H|1;1H|\d+;\d+H))?[ \t]*\1[ \t]*/g;
-  str = str.replace(dedupRe, '$1 ');
+  const dIdx = str.indexOf('PS ');
+  if (dIdx !== -1) {
+    str = str.replace(/(PS [A-Za-z]:\\[^\r\n>]*>)[ \t]*(?:\x1b\[[0-9;?]*[a-zA-Z])*[ \t]*\1[ \t]*/g, '$1 ');
+  }
 
   return str;
 }
