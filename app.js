@@ -42552,6 +42552,7 @@ Aturan:
               paneState._lastScreenClearAt = now;
               paneState._userScrolledUp = false;
               try {
+                term.write('\x1b[2J\x1b[3J\x1b[H');
                 term.clear();
                 term.scrollToBottom();
               } catch (_) {}
@@ -43055,6 +43056,7 @@ Aturan:
             paneState._lastScreenClearAt = now;
             paneState._userScrolledUp = false;
             try {
+              term.write('\x1b[2J\x1b[3J\x1b[H');
               term.clear();
               term.scrollToBottom();
             } catch (_) {}
@@ -43410,14 +43412,23 @@ Aturan:
     // Helper normalisasi stream ConPTY Windows untuk memurnikan sekuens hapus layar (cls / Clear-Host)
     cleanConptyData(str) {
       if (typeof str !== 'string' || !str) return str;
-      // 1. Ganti simulasi loop hapus layar ConPTY yang berulang dengan ANSI Clear Viewport + Scrollback \x1b[2J\x1b[3J\x1b[H
-      const wipeRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;?]*[a-zA-Z]){3,}\x1b\[(?:H|1;1H)/g;
+      // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) berulang yang diakhiri cursor home (\x1b[H)
+      // Ubah menjadi ANSI clear screen murni: clear viewport \x1b[2J + clear scrollback \x1b[3J + cursor home \x1b[H
+      const wipeRe = /(?:\x1b\[\??[0-9;]*[a-zA-Z])*(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[2?K){3,}(?:\r\n|\n)*(?:\x1b\[\??[0-9;]*[a-zA-Z])*\x1b\[(?:H|1;1H)(?:\x1b\[\?25[hl])*/g;
       str = str.replace(wipeRe, '\x1b[2J\x1b[3J\x1b[H');
-      // 2. Hilangkan padding newline berulang yang diakhiri pemindahan kursor \x1b[row;colH
-      const padRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;?]*[a-zA-Z])+(?:(?:\r\n|\n))?\x1b\[(\d+);(\d+)H/g;
-      str = str.replace(padRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
-      const padHomeRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;?]*[a-zA-Z])+(?:(?:\r\n|\n))?\x1b\[H/g;
+
+      // 2. Padding newline ConPTY yang berulang diakhiri pemindahan kursor baris/kolom spesifik \x1b[row;colH
+      // Wajib membutuhkan minimal satu newline (\r\n|\n) agar TIDAK merusak sekuens ANSI viewport \x1b[2J\x1b[3J!
+      const padPosRe = /(?:(?:\r\n|\n)+(?:\x1b\[[0-9;?]*[a-zA-Z])*)+\x1b\[(\d+);(\d+)H/g;
+      str = str.replace(padPosRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
+
+      // 3. Padding newline ConPTY yang berulang diakhiri cursor home \x1b[H
+      const padHomeRe = /(?:(?:\r\n|\n)+(?:\x1b\[[0-9;?]*[a-zA-Z])*)+\x1b\[(?:H|1;1H)/g;
       str = str.replace(padHomeRe, '\x1b[H');
+
+      // 4. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>")
+      str = str.replace(/(PS [^\r\n>]+>)\s*(?:\x1b\[(?:H|1;1H))?\1\s*/g, '$1 ');
+
       return str;
     },
 
@@ -43460,25 +43471,6 @@ Aturan:
             try { currentTerm.scrollToBottom(); } catch (_) {}
           }
 
-          // Pemulihan Layar Blank Pekat (Screenshot 5): Jika setelah init buffer tidak menampilkan teks prompt, minta shell mencetak ulang prompt
-          if (msg.type === 'init') {
-            setTimeout(() => {
-              if (currentTerm && currentTerm.buffer && currentTerm.buffer.active) {
-                let hasVisibleText = false;
-                const checkLen = Math.min(currentTerm.rows || 20, currentTerm.buffer.active.length);
-                for (let i = 0; i < checkLen; i++) {
-                  const line = currentTerm.buffer.active.getLine(i);
-                  if (line && line.translateToString(true).trim().length > 0) {
-                    hasVisibleText = true;
-                    break;
-                  }
-                }
-                if (!hasVisibleText && paneState.sessionId && !paneState.isFallbackMode) {
-                  this.sendPtyInput(paneState.sessionId, '\r');
-                }
-              }
-            }, 300);
-          }
           this.handleAutoRespond(tab, paneState, paneNum, msg.data);
         } else if (typeof msg.data === 'string') {
           paneState._pendingBuffer = (paneState._pendingBuffer || '') + msg.data;
@@ -44185,9 +44177,12 @@ Aturan:
       if (pane && pane.term) {
         pane._lastScreenClearAt = Date.now();
         pane._userScrolledUp = false;
-        pane.term.clear();
+        try {
+          pane.term.write('\x1b[2J\x1b[3J\x1b[H');
+          pane.term.clear();
+          pane.term.scrollToBottom();
+        } catch (_) {}
         this.resetImeLine(pane);
-        pane.term.scrollToBottom();
         if (pane.updateScrollUI) pane.updateScrollUI();
         if (pane.sessionId && !pane.isFallbackMode) {
           this.sendPtyInput(pane.sessionId, '\x0c');
@@ -45446,7 +45441,7 @@ Aturan:
             TerminalManager.sendPtyInput(pane.sessionId, '\r');
           }
         }, 80);
-      } else if (pane.sessionId && !diag.metrics.isMouseActive && !options.noRedraw) {
+      } else if (pane.sessionId && !diag.metrics.isMouseActive && options.forceRedraw) {
         TerminalManager.sendPtyInput(pane.sessionId, '\x0c');
       }
 
