@@ -43614,24 +43614,55 @@ Aturan:
     },
 
     // Helper normalisasi stream ConPTY Windows deterministik murni (100% bebas ReDoS backtracking) untuk sekuens cls / Clear-Host
-    cleanConptyData(str) {
+    cleanConptyData(str, paneState) {
       if (typeof str !== 'string' || !str) return str;
-      if (str.indexOf('\x1b') === -1) return str;
 
-      // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) yang diakhiri cursor home (\x1b[H / \x1b[1;1H)
-      let targetIdx = -1;
-      let homeSeq = '';
-      let hPos = str.indexOf('\x1b[H');
-      let h11Pos = str.indexOf('\x1b[1;1H');
-      if (hPos !== -1 && (h11Pos === -1 || hPos <= h11Pos)) {
-        targetIdx = hPos;
-        homeSeq = '\x1b[H';
-      } else if (h11Pos !== -1) {
-        targetIdx = h11Pos;
-        homeSeq = '\x1b[1;1H';
+      // Cross-chunk horizontal duplicate prompt elimination:
+      if (paneState && paneState._lastHorizontalPrompt) {
+        const lastPrompt = paneState._lastHorizontalPrompt;
+        if (str.indexOf('\x1b') === -1) {
+          if (str.startsWith(lastPrompt)) {
+            str = str.slice(lastPrompt.length).replace(/^[ \t]+/, '');
+            if (!str) return '';
+          }
+        } else {
+          const escaped = lastPrompt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const leadRe = new RegExp('^(?:\\x1b\\[[0-9;?]*[a-zA-Z])*' + escaped + '[ \\t]*');
+          if (leadRe.test(str) && !str.startsWith('\x1b[H') && !str.startsWith('\x1b[2J') && !str.startsWith('\x1b[3J')) {
+            str = str.replace(leadRe, '');
+            if (!str) return '';
+          }
+        }
       }
 
-      if (targetIdx !== -1) {
+      if (str.indexOf('\x1b') === -1) {
+        if (paneState) {
+          const pEnd = str.match(/PS [A-Za-z]:\\[^\r\n>]*>[ \t]*$/);
+          if (pEnd) {
+            paneState._lastHorizontalPrompt = pEnd[0].trim();
+          } else if (str.includes('\n') || str.includes('\r')) {
+            paneState._lastHorizontalPrompt = '';
+          }
+        }
+        return str;
+      }
+
+      // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) yang diakhiri cursor home (\x1b[H / \x1b[1;1H / \x1b[1;colH)
+      const homePositions = [];
+      let pos = -1;
+      while ((pos = str.indexOf('\x1b[H', pos + 1)) !== -1) homePositions.push({ idx: pos, len: 3 });
+      pos = -1;
+      while ((pos = str.indexOf('\x1b[1;', pos + 1)) !== -1) {
+        const endH = str.indexOf('H', pos);
+        if (endH !== -1 && endH <= pos + 6) {
+          homePositions.push({ idx: pos, len: endH - pos + 1 });
+        }
+      }
+
+      // Urutkan dari indeks terbesar ke terkecil agar pemotongan string tidak merusak offset
+      homePositions.sort((a, b) => b.idx - a.idx);
+
+      for (const { idx: targetIdx, len: seqLen } of homePositions) {
         let startIdx = targetIdx;
         let kCount = 0;
         while (startIdx > 0) {
@@ -43659,70 +43690,38 @@ Aturan:
           }
           break;
         }
+
         if (kCount >= 3) {
-          const afterTarget = targetIdx + homeSeq.length;
+          // Ditemukan wipe loop! Ganti seluruh loop destruktif dengan clear screen standar ANSI murni
+          const afterTarget = targetIdx + seqLen;
           let tailIdx = afterTarget;
           if (str.startsWith('\x1b[?25h', tailIdx) || str.startsWith('\x1b[?25l', tailIdx)) {
             tailIdx += 6;
           }
-          str = str.slice(0, startIdx) + '\x1b[2J\x1b[3J\x1b[H' + str.slice(tailIdx);
-        }
-      }
-
-      // 2. Normalisasi pembersihan sisa layar pasca-clear di baris pertama (\x1b[1;colH)
-      let cPos = -1;
-      while ((cPos = str.indexOf('\x1b[1;', cPos + 1)) !== -1) {
-        const endH = str.indexOf('H', cPos);
-        if (endH !== -1 && endH <= cPos + 6) {
-          const colStr = str.slice(cPos + 4, endH);
-          if (/^\d+$/.test(colStr)) {
-            let startIdx = cPos;
-            let kCount = 0;
-            while (startIdx > 0) {
-              const prev = str[startIdx - 1];
-              if (prev === '\n' || prev === '\r') {
-                startIdx--;
-                continue;
-              }
-              if (startIdx >= 3 && str.slice(startIdx - 3, startIdx) === '\x1b[K') {
-                kCount++;
-                startIdx -= 3;
-                continue;
-              }
-              if (startIdx >= 4 && str.slice(startIdx - 4, startIdx) === '\x1b[2K') {
-                kCount++;
-                startIdx -= 4;
-                continue;
-              }
-              if (prev === 'm' || prev === 'l' || prev === 'h') {
-                const escPos = str.lastIndexOf('\x1b[', startIdx - 1);
-                if (escPos !== -1 && escPos >= startIdx - 30) {
-                  startIdx = escPos;
-                  continue;
-                }
-              }
-              break;
-            }
-            if (kCount >= 5) {
-              const tail = str.slice(endH + 1);
-              let promptPrefix = '';
-              let pStart = str.slice(0, startIdx);
-              const pMatch = pStart.match(/PS [^\r\n>]+>[ \t]*$/);
-              if (pMatch) {
-                promptPrefix = '\x1b[H' + pMatch[0];
-                pStart = pStart.slice(0, pMatch.index);
-              }
-              str = pStart + promptPrefix + '\x1b[K\x1b[J\x1b[1;' + colStr + 'H' + tail;
-              break;
-            }
+          // Hapus seluruh jejak prompt lama yang tertinggal di pStart sebelum wipe loop
+          let pStart = str.slice(0, startIdx);
+          const oldPromptMatch = pStart.match(/PS [^\r\n>]+>[ \t]*$/);
+          if (oldPromptMatch) {
+            pStart = pStart.slice(0, oldPromptMatch.index);
           }
+          str = pStart + '\x1b[2J\x1b[3J\x1b[H' + str.slice(tailIdx);
         }
       }
 
-      // 3. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>")
+      // 2. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>") secara linear O(N)
       const dIdx = str.indexOf('PS ');
       if (dIdx !== -1) {
         str = str.replace(/(PS [A-Za-z]:\\[^\r\n>]*>)[ \t]*(?:\x1b\[[0-9;?]*[a-zA-Z])*[ \t]*\1[ \t]*/g, '$1 ');
+      }
+
+      // Update status prompt horizontal terakhir
+      if (paneState) {
+        const pEnd = str.match(/PS [A-Za-z]:\\[^\r\n>]*>[ \t]*$/);
+        if (pEnd) {
+          paneState._lastHorizontalPrompt = pEnd[0].trim();
+        } else if (str.includes('\n') || str.includes('\r') || str.includes('\x1b[2J')) {
+          paneState._lastHorizontalPrompt = '';
+        }
       }
 
       return str;
@@ -43738,7 +43737,7 @@ Aturan:
             paneState._userScrolledUp = false;
           }
           let cleanData = msg.data.includes('\x07') ? msg.data.replace(/\x07/g, '') : msg.data;
-          cleanData = this.cleanConptyData(cleanData);
+          cleanData = this.cleanConptyData(cleanData, paneState);
 
           const isScreenClear = cleanData.includes('\x1b[2J') ||
                                 cleanData.includes('\x1b[3J') ||
@@ -48939,18 +48938,13 @@ Aturan:
 
     populateSummaryContactDropdown(selectEl, selectedJid = '') {
       if (!selectEl) return;
-      selectEl.innerHTML = '';
-
-      const optAll = document.createElement('option');
-      optAll.value = '__all__';
-      optAll.textContent = '⭐ Semua Obrolan Terkini (Rangkuman Kolektif)';
-      selectEl.appendChild(optAll);
-
       const list = Array.isArray(this.contacts) ? [...this.contacts] : [];
       list.sort((a, b) => (b.lastTimestamp || b.timestamp || 0) - (a.lastTimestamp || a.timestamp || 0));
 
-      list.forEach(c => {
-        if (!c || !c.id) return;
+      let html = '<option value="__all__">⭐ Semua Obrolan Terkini (Rangkuman Kolektif)</option>';
+      for (let i = 0; i < list.length; i++) {
+        const c = list[i];
+        if (!c || !c.id) continue;
         const isGroup = c.id.endsWith('@g.us');
         let name = (c.name || '').trim();
         if (isGroup) {
@@ -48961,19 +48955,16 @@ Aturan:
         const phone = isGroup ? 'Grup' : (this.formatPhoneNumber(c.phone || c.id) || c.phone || '');
         const hasFile = Boolean(c.hasFile || (c.lastMessage && (c.lastMessage.includes('[Dokumen:') || c.lastMessage.includes('[Foto]'))));
         const badge = hasFile ? ' 🔴 [Berkas]' : '';
+        html += `<option value="${escapeHtml(c.id)}">${escapeHtml(name)} (${escapeHtml(phone)})${badge}</option>`;
+      }
+      selectEl.innerHTML = html;
 
-        const opt = document.createElement('option');
-        opt.value = c.id;
-        opt.textContent = `${name} (${phone})${badge}`;
-        selectEl.appendChild(opt);
-      });
-
-      if (selectedJid && Array.from(selectEl.options).some(o => o.value === selectedJid)) {
+      if (selectedJid && list.some(c => c.id === selectedJid)) {
         selectEl.value = selectedJid;
-      } else if (this.activeContact?.id && Array.from(selectEl.options).some(o => o.value === this.activeContact.id)) {
+      } else if (this.activeContact?.id && list.some(c => c.id === this.activeContact.id)) {
         selectEl.value = this.activeContact.id;
       } else {
-        selectEl.value = selectEl.options[1]?.value || '__all__';
+        selectEl.value = list[0]?.id || '__all__';
       }
 
       this.updateSummaryContactBadge();
@@ -48999,23 +48990,15 @@ Aturan:
     populateEngineModelSelect(selectEl, engine = 'ollama', selectedModel = '') {
       if (!selectEl) return;
       const prevVal = selectedModel || selectEl.value;
-      selectEl.innerHTML = '';
 
       if (engine === 'ollama') {
         const rawOllamaList = (Array.isArray(STATE.ollamaModels) && STATE.ollamaModels.length > 0)
           ? STATE.ollamaModels.map(m => m.name || m.model || m.id).filter(Boolean)
           : [];
-
-        // Model nyata yang terverifikasi
         const ollamaList = rawOllamaList.filter(Boolean);
 
         if (ollamaList.length === 0) {
-          const opt = document.createElement('option');
-          opt.value = '';
-          opt.textContent = 'Tidak ada model Ollama (Offline)';
-          opt.disabled = true;
-          opt.selected = true;
-          selectEl.appendChild(opt);
+          selectEl.innerHTML = '<option value="" disabled selected>Tidak ada model Ollama (Offline)</option>';
           if (typeof fetchOllamaModelsList === 'function') {
             fetchOllamaModelsList().then(() => {
               if (this.activeSummaryEngine === 'ollama' && selectEl && selectEl.parentElement) {
@@ -49028,13 +49011,13 @@ Aturan:
             ? STATE.settings.ollamaModel
             : ollamaList[0];
 
-          ollamaList.forEach(m => {
-            const opt = document.createElement('option');
-            opt.value = m;
-            opt.textContent = m + (m === activeCurrent ? ' (Aktif)' : '');
-            selectEl.appendChild(opt);
-          });
-
+          let html = '';
+          for (let i = 0; i < ollamaList.length; i++) {
+            const m = ollamaList[i];
+            const isAct = (m === activeCurrent);
+            html += `<option value="${escapeHtml(m)}">${escapeHtml(m)}${isAct ? ' (Aktif)' : ''}</option>`;
+          }
+          selectEl.innerHTML = html;
           const targetVal = (prevVal && ollamaList.includes(prevVal)) ? prevVal : activeCurrent;
           selectEl.value = targetVal;
         }
@@ -49043,29 +49026,52 @@ Aturan:
           ? STATE.openRouterModels.filter(m => m && m.id).map(m => m.id)
           : [];
 
-        // Jika daftar OpenRouter belum di-fetch dari API, trigger live fetch di latar belakang
         if (!STATE.openRouterModels || STATE.openRouterModels.length === 0) {
-          fetchOpenRouterModelsList().then(() => {
-            if (this.activeSummaryEngine === 'openrouter' && selectEl && selectEl.parentElement) {
-              this.populateEngineModelSelect(selectEl, 'openrouter', selectEl.value);
-            }
-          }).catch(() => {});
+          if (typeof fetchOpenRouterModelsList === 'function') {
+            fetchOpenRouterModelsList().then(() => {
+              if (this.activeSummaryEngine === 'openrouter' && selectEl && selectEl.parentElement) {
+                this.populateEngineModelSelect(selectEl, 'openrouter', selectEl.value);
+              }
+            }).catch(() => {});
+          }
         }
 
         const activeCurrent = STATE.settings?.openRouterModel || 'openrouter/free';
-        if (!rawList.includes(activeCurrent)) {
-          rawList.unshift(activeCurrent);
+        const freeModels = [];
+        const otherModels = [];
+        const seen = new Set();
+        if (activeCurrent) seen.add(activeCurrent);
+
+        for (let i = 0; i < rawList.length; i++) {
+          const m = rawList[i];
+          if (!m || seen.has(m)) continue;
+          seen.add(m);
+          if (m.includes(':free') || m.includes('/free')) {
+            freeModels.push(m);
+          } else if (otherModels.length < 50) {
+            otherModels.push(m);
+          }
         }
 
-        rawList.forEach(m => {
-          const opt = document.createElement('option');
-          opt.value = m;
-          const label = m.split('/').pop() + (m === activeCurrent ? ' (Aktif)' : (m.includes(':free') ? ' [Free]' : ''));
-          opt.textContent = label;
-          selectEl.appendChild(opt);
-        });
-
-        const targetVal = (prevVal && rawList.includes(prevVal)) ? prevVal : activeCurrent;
+        let html = `<optgroup label="Model Aktif"><option value="${escapeHtml(activeCurrent)}" selected>${escapeHtml(activeCurrent.split('/').pop())} (Aktif)</option></optgroup>`;
+        if (freeModels.length > 0) {
+          html += '<optgroup label="⭐ Model Gratis Rekomendasi">';
+          for (let i = 0; i < freeModels.length; i++) {
+            const m = freeModels[i];
+            html += `<option value="${escapeHtml(m)}">${escapeHtml(m.split('/').pop())} [Free]</option>`;
+          }
+          html += '</optgroup>';
+        }
+        if (otherModels.length > 0) {
+          html += '<optgroup label="Model Populer Lainnya">';
+          for (let i = 0; i < otherModels.length; i++) {
+            const m = otherModels[i];
+            html += `<option value="${escapeHtml(m)}">${escapeHtml(m.split('/').pop())}</option>`;
+          }
+          html += '</optgroup>';
+        }
+        selectEl.innerHTML = html;
+        const targetVal = (prevVal && seen.has(prevVal)) ? prevVal : activeCurrent;
         selectEl.value = targetVal;
       }
     },
@@ -49143,10 +49149,8 @@ Aturan:
       });
 
       summaryModelSelect?.addEventListener('change', (e) => {
-        AudioEngine.click();
-        if (typeof selectModel === 'function' && e.target.value) {
-          selectModel(e.target.value, this.activeSummaryEngine, false);
-        }
+        AudioEngine.click?.();
+        this.selectedSummaryModel = e.target.value;
       });
 
       // Tombol "Mulai Rangkum AI"
@@ -49310,8 +49314,11 @@ Aturan:
 
     async openSummaryModal(options = {}) {
       this.bindSummaryModalListeners();
-      if (!this.contacts || this.contacts.length === 0) {
-        await this.fetchContacts().catch(() => {});
+
+      const modal = document.getElementById('modalWaSummaryResult');
+      // Buka modal secara instan 0ms tanpa menunggu respons jaringan
+      if (modal) {
+        modal.style.display = 'flex';
       }
 
       const {
@@ -49338,7 +49345,6 @@ Aturan:
         targetJid = this.activeContact.id;
       }
 
-      const modal = document.getElementById('modalWaSummaryResult');
       const titleEl = document.getElementById('waSummaryPopupTitle');
       const subtitleEl = document.getElementById('waSummaryPopupSubtitle');
       const focusInput = document.getElementById('waSummaryPopupFocusInput');
@@ -49366,6 +49372,15 @@ Aturan:
       if (sOllama) sOllama.classList.toggle('active', this.activeSummaryEngine === 'ollama');
       if (sOR) sOR.classList.toggle('active', this.activeSummaryEngine === 'openrouter');
       this.populateEngineModelSelect(modelSelect, this.activeSummaryEngine, options.model);
+
+      // Jika kontak belum ada di memori, ambil di latar belakang tanpa menunda tampilan modal
+      if (!this.contacts || this.contacts.length === 0) {
+        this.fetchContacts().then(() => {
+          if (contactSelect && modal && modal.style.display !== 'none') {
+            this.populateSummaryContactDropdown(contactSelect, targetJid);
+          }
+        }).catch(() => {});
+      }
 
       // Tampilkan placeholder siap pakai jika belum ada rangkuman
       const bodyEl = document.getElementById('waSummaryOutputBody');

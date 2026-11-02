@@ -17438,7 +17438,9 @@ body.mermaid-has-fullscreen {
     background: transparent;
     border: none;
     cursor: pointer;
-    transition: all 0.15s ease;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.08s ease, background 0.15s ease, color 0.15s ease;
 }
 
 .wa-engine-btn:hover {
@@ -17446,11 +17448,37 @@ body.mermaid-has-fullscreen {
     background: rgba(255, 255, 255, 0.08);
 }
 
+.wa-engine-btn:active {
+    transform: scale(0.96);
+    background: rgba(255, 255, 255, 0.15);
+}
+
 .wa-engine-btn.active {
     background: linear-gradient(135deg, rgba(168, 85, 247, 0.3), rgba(16, 185, 129, 0.3));
     color: #34d399;
     font-weight: 700;
     box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+}
+
+#btnStartWaSummary,
+#btnCopyWaSummaryOutput,
+#btnSendWaSummaryToAiChat,
+.wa-summary-close-btn,
+.wa-contact-dots-btn,
+.wa-contact-action-item {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.08s ease, opacity 0.15s ease, background 0.15s ease;
+}
+
+#btnStartWaSummary:active,
+#btnCopyWaSummaryOutput:active,
+#btnSendWaSummaryToAiChat:active,
+.wa-summary-close-btn:active,
+.wa-contact-dots-btn:active,
+.wa-contact-action-item:active {
+    transform: scale(0.96);
+    opacity: 0.85;
 }
 
 #waSummaryContactSelect option,

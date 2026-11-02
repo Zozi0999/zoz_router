@@ -412,24 +412,55 @@ function hasVisibleTerminalPrompt(bufferStr) {
  * untuk memurnikan sekuens hapus layar (cls / Clear-Host) tanpa risiko ReDoS pada TUI besar (codex/agy).
  * Diakses oleh jalur SSE (/api/terminal/stream) maupun jalur WebSocket (handleTerminalWebSocketUpgrade).
  */
-function cleanConptyData(str) {
+function cleanConptyData(str, sessionOrPane) {
   if (typeof str !== 'string' || !str) return str;
-  if (str.indexOf('\x1b') === -1) return str;
 
-  // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) yang diakhiri cursor home (\x1b[H / \x1b[1;1H)
-  let targetIdx = -1;
-  let homeSeq = '';
-  let hPos = str.indexOf('\x1b[H');
-  let h11Pos = str.indexOf('\x1b[1;1H');
-  if (hPos !== -1 && (h11Pos === -1 || hPos <= h11Pos)) {
-    targetIdx = hPos;
-    homeSeq = '\x1b[H';
-  } else if (h11Pos !== -1) {
-    targetIdx = h11Pos;
-    homeSeq = '\x1b[1;1H';
+  // Cross-chunk horizontal duplicate prompt elimination:
+  if (sessionOrPane && sessionOrPane._lastHorizontalPrompt) {
+    const lastPrompt = sessionOrPane._lastHorizontalPrompt;
+    if (str.indexOf('\x1b') === -1) {
+      if (str.startsWith(lastPrompt)) {
+        str = str.slice(lastPrompt.length).replace(/^[ \t]+/, '');
+        if (!str) return '';
+      }
+    } else {
+      const escaped = lastPrompt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const leadRe = new RegExp('^(?:\\x1b\\[[0-9;?]*[a-zA-Z])*' + escaped + '[ \\t]*');
+      if (leadRe.test(str) && !str.startsWith('\x1b[H') && !str.startsWith('\x1b[2J') && !str.startsWith('\x1b[3J')) {
+        str = str.replace(leadRe, '');
+        if (!str) return '';
+      }
+    }
   }
 
-  if (targetIdx !== -1) {
+  if (str.indexOf('\x1b') === -1) {
+    if (sessionOrPane) {
+      const pEnd = str.match(/PS [A-Za-z]:\\[^\r\n>]*>[ \t]*$/);
+      if (pEnd) {
+        sessionOrPane._lastHorizontalPrompt = pEnd[0].trim();
+      } else if (str.includes('\n') || str.includes('\r')) {
+        sessionOrPane._lastHorizontalPrompt = '';
+      }
+    }
+    return str;
+  }
+
+  // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) yang diakhiri cursor home (\x1b[H / \x1b[1;1H / \x1b[1;colH)
+  const homePositions = [];
+  let pos = -1;
+  while ((pos = str.indexOf('\x1b[H', pos + 1)) !== -1) homePositions.push({ idx: pos, len: 3 });
+  pos = -1;
+  while ((pos = str.indexOf('\x1b[1;', pos + 1)) !== -1) {
+    const endH = str.indexOf('H', pos);
+    if (endH !== -1 && endH <= pos + 6) {
+      homePositions.push({ idx: pos, len: endH - pos + 1 });
+    }
+  }
+
+  // Urutkan dari indeks terbesar ke terkecil agar pemotongan string tidak merusak offset
+  homePositions.sort((a, b) => b.idx - a.idx);
+
+  for (const { idx: targetIdx, len: seqLen } of homePositions) {
     let startIdx = targetIdx;
     let kCount = 0;
     while (startIdx > 0) {
@@ -457,70 +488,38 @@ function cleanConptyData(str) {
       }
       break;
     }
+
     if (kCount >= 3) {
-      const afterTarget = targetIdx + homeSeq.length;
+      // Ditemukan wipe loop! Ganti seluruh loop destruktif dengan clear screen standar ANSI murni
+      const afterTarget = targetIdx + seqLen;
       let tailIdx = afterTarget;
       if (str.startsWith('\x1b[?25h', tailIdx) || str.startsWith('\x1b[?25l', tailIdx)) {
         tailIdx += 6;
       }
-      str = str.slice(0, startIdx) + '\x1b[2J\x1b[3J\x1b[H' + str.slice(tailIdx);
-    }
-  }
-
-  // 2. Normalisasi pembersihan sisa layar pasca-clear di baris pertama (\x1b[1;colH)
-  let cPos = -1;
-  while ((cPos = str.indexOf('\x1b[1;', cPos + 1)) !== -1) {
-    const endH = str.indexOf('H', cPos);
-    if (endH !== -1 && endH <= cPos + 6) {
-      const colStr = str.slice(cPos + 4, endH);
-      if (/^\d+$/.test(colStr)) {
-        let startIdx = cPos;
-        let kCount = 0;
-        while (startIdx > 0) {
-          const prev = str[startIdx - 1];
-          if (prev === '\n' || prev === '\r') {
-            startIdx--;
-            continue;
-          }
-          if (startIdx >= 3 && str.slice(startIdx - 3, startIdx) === '\x1b[K') {
-            kCount++;
-            startIdx -= 3;
-            continue;
-          }
-          if (startIdx >= 4 && str.slice(startIdx - 4, startIdx) === '\x1b[2K') {
-            kCount++;
-            startIdx -= 4;
-            continue;
-          }
-          if (prev === 'm' || prev === 'l' || prev === 'h') {
-            const escPos = str.lastIndexOf('\x1b[', startIdx - 1);
-            if (escPos !== -1 && escPos >= startIdx - 30) {
-              startIdx = escPos;
-              continue;
-            }
-          }
-          break;
-        }
-        if (kCount >= 5) {
-          const tail = str.slice(endH + 1);
-          let promptPrefix = '';
-          let pStart = str.slice(0, startIdx);
-          const pMatch = pStart.match(/PS [^\r\n>]+>[ \t]*$/);
-          if (pMatch) {
-            promptPrefix = '\x1b[H' + pMatch[0];
-            pStart = pStart.slice(0, pMatch.index);
-          }
-          str = pStart + promptPrefix + '\x1b[K\x1b[J\x1b[1;' + colStr + 'H' + tail;
-          break;
-        }
+      // Hapus seluruh jejak prompt lama yang tertinggal di pStart sebelum wipe loop
+      let pStart = str.slice(0, startIdx);
+      const oldPromptMatch = pStart.match(/PS [^\r\n>]+>[ \t]*$/);
+      if (oldPromptMatch) {
+        pStart = pStart.slice(0, oldPromptMatch.index);
       }
+      str = pStart + '\x1b[2J\x1b[3J\x1b[H' + str.slice(tailIdx);
     }
   }
 
-  // 3. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>") secara linear O(N)
+  // 2. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>") secara linear O(N)
   const dIdx = str.indexOf('PS ');
   if (dIdx !== -1) {
     str = str.replace(/(PS [A-Za-z]:\\[^\r\n>]*>)[ \t]*(?:\x1b\[[0-9;?]*[a-zA-Z])*[ \t]*\1[ \t]*/g, '$1 ');
+  }
+
+  // Update status prompt horizontal terakhir
+  if (sessionOrPane) {
+    const pEnd = str.match(/PS [A-Za-z]:\\[^\r\n>]*>[ \t]*$/);
+    if (pEnd) {
+      sessionOrPane._lastHorizontalPrompt = pEnd[0].trim();
+    } else if (str.includes('\n') || str.includes('\r') || str.includes('\x1b[2J')) {
+      sessionOrPane._lastHorizontalPrompt = '';
+    }
   }
 
   return str;
@@ -7294,7 +7293,7 @@ async function requestHandler(req, res) {
             data = data.replace(/\x07/g, '');
           }
           if (!data) return;
-          data = cleanConptyData(data);
+          data = cleanConptyData(data, session);
           if (data.includes('\x1b[3J') || data.includes('\x1b[2J')) {
             session.buffer = [data];
           } else {
@@ -12000,7 +11999,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       const flushWsBatch = () => {
         wsFlushScheduled = false;
         if (!pendingWsData) return;
-        const out = cleanConptyData(pendingWsData);
+        const out = cleanConptyData(pendingWsData, session);
         pendingWsData = '';
         if (session.wsClients && session.wsClients.size > 0) {
           const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data: out }));
@@ -12016,7 +12015,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
           data = data.replace(/\x07/g, '');
         }
         if (!data) return;
-        data = cleanConptyData(data);
+        data = cleanConptyData(data, session);
         if (data.includes('\x1b[3J') || data.includes('\x1b[2J')) {
           session.buffer = [data];
         } else {
