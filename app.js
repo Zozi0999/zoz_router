@@ -40243,37 +40243,60 @@ Aturan:
       }
       if (this._mobileVvTimer) clearTimeout(this._mobileVvTimer);
       this._mobileVvTimer = setTimeout(() => {
-        // Redam resize saat pengguna sedang aktif mengetik di keyboard ponsel (< 1000ms yang lalu)
+        const vv = window.visualViewport;
+        const isKeyboardOpen = vv && (vv.height < window.innerHeight * 0.75);
         const activePane = this.getPaneState(this.activePane || 1);
-        if (activePane && activePane._lastDataEmitAt && (Date.now() - activePane._lastDataEmitAt) < 1000) {
-          if (this._mobileVvTimer) clearTimeout(this._mobileVvTimer);
-          this._mobileVvTimer = setTimeout(() => this.fitAllPanes(), 600);
+        if (isKeyboardOpen) {
+          // Keyboard masih terbuka: JANGAN picu fitAllPanes / PTY resize agar tidak ada reflow / redraw flicker!
+          // Cukup sinkronkan posisi translasi kanvas agar kursor tetap tampak di atas keyboard
+          if (activePane) this.syncMobileScreenPosition(activePane);
           return;
         }
+        // Keyboard telah ditutup: Pulihkan kanvas dan lakukan fitAllPanes ke dimensi layar penuh
         this.fitAllPanes();
-        // Ketika keyboard virtual ditutup, pastikan viewport xterm kembali terkunci ke dasar dan tombol scroll disinkronkan
-        const vv = window.visualViewport;
-        const isKeyboardClosed = !vv || (vv.height >= window.innerHeight * 0.75);
-        if (isKeyboardClosed && activePane && activePane.term) {
+        if (activePane && activePane.term) {
           activePane._userScrolledUp = false;
           try { activePane.term.scrollToBottom(); } catch (_) {}
           if (activePane.updateScrollUI) activePane.updateScrollUI();
+          this.syncMobileScreenPosition(activePane);
         }
-      }, 250);
+      }, 150);
     },
 
     syncMobileScreenPosition(paneState) {
       if (!this.isMobileDevice() || !paneState || !paneState.term) return;
       const term = paneState.term;
       const xtermScreen = paneState.screenContainer ? paneState.screenContainer.querySelector('.xterm-screen') : null;
-      if (xtermScreen && xtermScreen.style.transform) {
-        xtermScreen.style.transform = '';
-      }
-      if (term.buffer && term.buffer.active) {
-        const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
-        if (linesFromBottom <= 2 || !paneState._userScrolledUp) {
-          paneState._userScrolledUp = false;
-          try { term.scrollToBottom(); } catch (_) {}
+      if (!xtermScreen) return;
+
+      const vv = window.visualViewport;
+      const isKeyboardOpen = vv && (vv.height < window.innerHeight * 0.75);
+
+      if (!isKeyboardOpen) {
+        if (xtermScreen.style.transform) {
+          xtermScreen.style.transform = '';
+        }
+        if (term.buffer && term.buffer.active) {
+          const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
+          if (linesFromBottom <= 2 || !paneState._userScrolledUp) {
+            paneState._userScrolledUp = false;
+            try { term.scrollToBottom(); } catch (_) {}
+          }
+        }
+      } else {
+        // Keyboard terbuka: Hitung posisi kursor relatif terhadap area pandang di atas keyboard
+        const container = paneState.screenContainer;
+        const containerH = (container && container.clientHeight > 0) ? container.clientHeight : Math.max(160, (vv ? vv.height - 120 : 250));
+        const cellH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
+        const cursorY = (term.buffer && term.buffer.active) ? term.buffer.active.cursorY : 0;
+        const cursorPx = (cursorY + 1) * cellH;
+
+        if (cursorPx > containerH - (cellH * 1.5)) {
+          // Kursor berada di bawah area tampak: Geser kanvas ke atas sehingga baris kursor berada tepat di atas keybar
+          const targetOffset = Math.max(0, cursorPx - containerH + (cellH * 2));
+          xtermScreen.style.transform = `translateY(-${targetOffset}px)`;
+        } else {
+          xtermScreen.style.transform = '';
         }
       }
       if (paneState.updateScrollUI) paneState.updateScrollUI();
@@ -42394,7 +42417,11 @@ Aturan:
 
           // Selalu jangkar terminal ke dasar dan pulihkan status scroll setiap kali pengguna mengetik
           paneState._userScrolledUp = false;
-          try { term.scrollToBottom(); } catch (_) {}
+          if (this.isMobileDevice()) {
+            this.syncMobileScreenPosition(paneState);
+          } else {
+            try { term.scrollToBottom(); } catch (_) {}
+          }
           if (paneState.updateScrollUI) paneState.updateScrollUI();
 
           const isImeComposing = Boolean(paneState._isComposing || (now - (paneState._lastCompositionEndAt || 0)) < 300);
@@ -42821,6 +42848,12 @@ Aturan:
           if (paneState._desktopResizeTimer) clearTimeout(paneState._desktopResizeTimer);
           paneState._desktopResizeTimer = setTimeout(() => {
             if (!paneState.term || paneState._isRemoteResizing) return;
+            const vv = window.visualViewport;
+            const isKeyboardOpen = this.isMobileDevice() && vv && (vv.height < window.innerHeight * 0.75);
+            if (isKeyboardOpen) {
+              this.syncMobileScreenPosition(paneState);
+              return;
+            }
             this.fitPane(paneState, true);
           }, 200);
         });
@@ -43455,6 +43488,9 @@ Aturan:
             paneState._userScrolledUp = false;
           }
           currentTerm.write(cleanData, () => {
+            if (this.isMobileDevice()) {
+              this.syncMobileScreenPosition(paneState);
+            }
             if (msg.type === 'init' || isScreenClear) {
               paneState._userScrolledUp = false;
               try { currentTerm.scrollToBottom(); } catch (_) {}
@@ -43463,13 +43499,6 @@ Aturan:
               try { currentTerm.scrollToBottom(); } catch (_) {}
             }
           });
-          if (msg.type === 'init' || isScreenClear) {
-            paneState._userScrolledUp = false;
-            try { currentTerm.scrollToBottom(); } catch (_) {}
-            if (paneState.updateScrollUI) paneState.updateScrollUI();
-          } else if (!paneState._userScrolledUp) {
-            try { currentTerm.scrollToBottom(); } catch (_) {}
-          }
 
           this.handleAutoRespond(tab, paneState, paneNum, msg.data);
         } else if (typeof msg.data === 'string') {
@@ -43764,16 +43793,17 @@ Aturan:
           if (dims && dims.cols > 10 && dims.rows > 5) {
             targetCols = Math.max(isMobile ? 45 : 60, dims.cols);
             if (isMobile) {
-              // Invarian Baris Mobile Stabil (Sticky Mobile Rows Invariant):
-              // Saat keyboard ponsel terbuka (visualViewport menyusut < 75%), JANGAN menciutkan baris PTY
-              // menjadi 8-10 baris! Menciutkan PTY menyebabkan ConPTY me-reflow teks, dan saat keyboard ditutup,
-              // prompt terdampar di baris 10 di tengah layar. Pertahankan baris stabil baseline!
               const vv = window.visualViewport;
               const isKeyboardOpen = vv && (vv.height < window.innerHeight * 0.75);
-              if (isKeyboardOpen && paneState._stableMobileRows) {
-                targetRows = paneState._stableMobileRows;
+              if (isKeyboardOpen) {
+                // Saat keyboard terbuka di ponsel: Kunci dimensi baris dan kolom agar identik baseline,
+                // cegah reflow ConPTY yang merusak prompt & tata letak pengetikan
+                if (paneState._stableMobileCols) targetCols = paneState._stableMobileCols;
+                if (paneState._stableMobileRows) targetRows = paneState._stableMobileRows;
               } else {
+                targetCols = Math.max(45, dims.cols);
                 targetRows = Math.max(20, dims.rows);
+                paneState._stableMobileCols = targetCols;
                 paneState._stableMobileRows = targetRows;
               }
             } else {
@@ -43793,10 +43823,13 @@ Aturan:
         if (isMobile) {
           const vv = window.visualViewport;
           const isKeyboardOpen = vv && (vv.height < window.innerHeight * 0.75);
-          if (isKeyboardOpen && paneState._stableMobileRows) {
-            targetRows = paneState._stableMobileRows;
+          if (isKeyboardOpen) {
+            if (paneState._stableMobileCols) targetCols = paneState._stableMobileCols;
+            if (paneState._stableMobileRows) targetRows = paneState._stableMobileRows;
           } else {
+            targetCols = Math.max(45, targetCols);
             targetRows = Math.max(20, Math.floor(containerH / charH));
+            paneState._stableMobileCols = targetCols;
             paneState._stableMobileRows = targetRows;
           }
         } else {
