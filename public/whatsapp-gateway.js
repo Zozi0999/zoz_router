@@ -104,6 +104,8 @@ class WhatsAppGateway {
     this.devices = new Map(); // devId -> { id, platform, icon, userAgent, ip, lastSeen }
     this.reconnectTimer = null;
     this.isExplicitDisconnect = false;
+    this._saveTimer = null;
+    this._savePromise = null;
 
     // Pastikan direktori data terisolasi ada
     if (!fs.existsSync(this.baseDir)) {
@@ -789,19 +791,50 @@ class WhatsAppGateway {
     }
   }
 
-  async savePersistedData() {
-    try {
-      const contactsArr = Array.from(this.contacts.values()).filter(c => this.isRealContact(c));
-      await fsp.writeFile(this.contactsFile, JSON.stringify(contactsArr, null, 2), 'utf8');
-
-      const msgObj = {};
-      for (const [jid, list] of this.messages.entries()) {
-        msgObj[jid] = list.slice(-200);
+  savePersistedData(immediate = false) {
+    if (immediate) {
+      if (this._saveTimer) {
+        clearTimeout(this._saveTimer);
+        this._saveTimer = null;
       }
-      await fsp.writeFile(this.messagesFile, JSON.stringify(msgObj, null, 2), 'utf8');
-    } catch (e) {
-      console.error('[WA-Gateway] Gagal menyimpan data WhatsApp:', e.message);
+      return this._executeAtomicSave();
     }
+    if (this._saveTimer) return Promise.resolve();
+    return new Promise((resolve) => {
+      this._saveTimer = setTimeout(async () => {
+        this._saveTimer = null;
+        await this._executeAtomicSave();
+        resolve();
+      }, 1000);
+    });
+  }
+
+  async _executeAtomicSave() {
+    if (this._savePromise) {
+      try { await this._savePromise; } catch (_) {}
+    }
+
+    this._savePromise = (async () => {
+      try {
+        const contactsArr = Array.from(this.contacts.values()).filter(c => this.isRealContact(c));
+        const tmpContacts = `${this.contactsFile}.tmp`;
+        await fsp.writeFile(tmpContacts, JSON.stringify(contactsArr, null, 2), 'utf8');
+        await fsp.rename(tmpContacts, this.contactsFile);
+
+        const msgObj = {};
+        for (const [jid, list] of this.messages.entries()) {
+          msgObj[jid] = list.slice(-200);
+        }
+        const tmpMessages = `${this.messagesFile}.tmp`;
+        await fsp.writeFile(tmpMessages, JSON.stringify(msgObj, null, 2), 'utf8');
+        await fsp.rename(tmpMessages, this.messagesFile);
+      } catch (e) {
+        console.error('[WA-Gateway] Gagal menyimpan data WhatsApp secara atomik:', e.message);
+      }
+    })();
+
+    await this._savePromise;
+    this._savePromise = null;
   }
 
   hasStoredSession() {

@@ -389,6 +389,50 @@ function resolveHostShell(shellType) {
 }
 
 /**
+ * Helper deteksi ada atau tidaknya teks prompt terminal yang tampak (visible prompt).
+ * Memeriksa apakah buffer berisi teks alfanumerik nyata setelah membersihkan seluruh kode ANSI CSI, OSC, dan control sequences.
+ */
+function hasVisibleTerminalPrompt(bufferStr) {
+  if (!bufferStr) return false;
+  const stripped = bufferStr
+    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+    .replace(/\x1b[()][A-Za-z0-9]/g, '')
+    .replace(/[\x00-\x1f\x7f]/g, ' ')
+    .trim();
+  return stripped.length >= 2;
+}
+
+/**
+ * Helper normalisasi stream ConPTY Windows di level global untuk memurnikan sekuens hapus layar (cls / Clear-Host)
+ * Diakses oleh jalur SSE (/api/terminal/stream) maupun jalur WebSocket (handleTerminalWebSocketUpgrade).
+ */
+function cleanConptyData(str) {
+  if (typeof str !== 'string' || !str) return str;
+  // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) berulang yang diakhiri cursor home (\x1b[H)
+  // Ubah menjadi ANSI clear screen murni: clear viewport \x1b[2J + clear scrollback \x1b[3J + cursor home \x1b[H
+  const wipeRe = /(?:\x1b\[\??[0-9;]*[a-zA-Z])*(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[2?K){3,}(?:\r\n|\n)*(?:\x1b\[\??[0-9;]*[a-zA-Z])*\x1b\[(?:H|1;1H)(?:\x1b\[\?25[hl])*/g;
+  str = str.replace(wipeRe, '\x1b[2J\x1b[3J\x1b[H');
+
+  // 2. Padding newline ConPTY yang berulang diakhiri pemindahan kursor baris/kolom spesifik \x1b[row;colH
+  // Wajib membutuhkan minimal satu newline (\r\n|\n) dan TIDAK BOLEH memakan sekuens ANSI viewport \x1b[2J\x1b[3J!
+  const padPosRe = /(?:(?:\r\n|\n)+(?:\x1b\[(?![23]J)[0-9;?]*[a-zA-Z])*)+\x1b\[(\d+);(\d+)H/g;
+  str = str.replace(padPosRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
+
+  // 3. Padding newline ConPTY yang berulang diakhiri cursor home \x1b[H
+  // TIDAK BOLEH memakan sekuens ANSI viewport \x1b[2J\x1b[3J!
+  const padHomeRe = /(?:(?:\r\n|\n)+(?:\x1b\[(?![23]J)[0-9;?]*[a-zA-Z])*)+\x1b\[(?:H|1;1H)/g;
+  str = str.replace(padHomeRe, '\x1b[H');
+
+  // 4. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>")
+  // Tahan terhadap derau kode ANSI interleave (mis. cursor position \x1b[1;19H, clear-line \x1b[K, hide/show cursor)
+  const dedupRe = /(PS [^\r\n>]+>)(?:[\s\x00-\x1f]|\x1b\[[0-9;?]*[a-zA-Z])*(?:\x1b\[(?:H|1;1H|\d+;\d+H))?\1\s*/g;
+  str = str.replace(dedupRe, '$1 ');
+
+  return str;
+}
+
+/**
  * Autonomous Server-Side Auto Y / Auto Enter Engine
  * Memantau output PTY secara real-time di background Windows host.
  * Ketika mendeteksi prompt perizinan (Claude Code, Antigravity CLI, Gemini CLI, PowerShell, npm),
@@ -7081,7 +7125,7 @@ async function requestHandler(req, res) {
     }
     const targetCwd = (reqCwd && fs.existsSync(reqCwd) && path.resolve(reqCwd).toLowerCase() !== WORKSPACE_ROOT.toLowerCase()) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
     const cols = Math.max(45, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
-    const rows = Math.max(15, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
+    const rows = Math.max(8, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -7156,8 +7200,13 @@ async function requestHandler(req, res) {
             data = data.replace(/\x07/g, '');
           }
           if (!data) return;
-          if (session.buffer.length > 500) session.buffer.shift();
-          session.buffer.push(data);
+          data = cleanConptyData(data);
+          if (data.includes('\x1b[3J') || data.includes('\x1b[2J')) {
+            session.buffer = [data];
+          } else {
+            if (session.buffer.length > 500) session.buffer.shift();
+            session.buffer.push(data);
+          }
           handleServerAutoEnter(session, data);
           const payload = `data: ${JSON.stringify({ type: 'data', data })}\n\n`;
           for (const client of session.clients) {
@@ -7194,10 +7243,10 @@ async function requestHandler(req, res) {
       if (reqUrl.searchParams.has('autoEnter')) {
         session.autoEnter = (reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true');
       }
-      if (session && session.pty && typeof session.pty.resize === 'function') {
+      if (session && session.pty && typeof session.pty.resize === 'function' && reqUrl.searchParams.has('cols') && reqUrl.searchParams.has('rows')) {
         const isRemote = isRemoteTunnelRequest(req);
         const hasActiveClients = (session.clients && session.clients.size > 0) || (session.wsClients && session.wsClients.size > 0);
-        if (!isRemote || !hasActiveClients) {
+        if (sessionId.startsWith('mob-') || !isRemote || !hasActiveClients) {
           try {
             session.pty.resize(cols, rows);
             session.cols = cols;
@@ -7214,6 +7263,13 @@ async function requestHandler(req, res) {
     if (session.buffer && session.buffer.length > 0) {
       const replay = session.buffer.join('');
       res.write(`data: ${JSON.stringify({ type: 'init', data: replay })}\n\n`);
+      if (!hasVisibleTerminalPrompt(replay) && session.pty) {
+        setTimeout(() => {
+          if (session && session.pty) {
+            try { session.pty.write('\r'); } catch (_) {}
+          }
+        }, 120);
+      }
     } else {
       setTimeout(() => {
         if (session && session.pty && (!session.buffer || session.buffer.length === 0)) {
@@ -7352,20 +7408,17 @@ async function requestHandler(req, res) {
       }
       const sessionId = (body.session || 'default').trim();
       const cols = Math.max(45, Math.min(400, parseInt(body.cols || '100', 10)));
-      const rows = Math.max(15, Math.min(200, parseInt(body.rows || '28', 10)));
+      const rows = Math.max(8, Math.min(200, parseInt(body.rows || '28', 10)));
       const session = activeTerminalSessions.get(sessionId);
       if (session && session.pty && typeof session.pty.resize === 'function') {
         try {
-          if (session.cols !== cols || session.rows !== rows) {
-            const now = Date.now();
-            if (session._lastResizeTime && (now - session._lastResizeTime) < 200) {
-              return sendJSON(res, 200, { success: true, debounced: true, cols: session.cols, rows: session.rows });
-            }
-            session._lastResizeTime = now;
-            session.pty.resize(cols, rows);
-            session.cols = cols;
-            session.rows = rows;
-            const resizePayload = JSON.stringify({ type: 'pty-resize', cols, rows });
+          const applyPtyResize = (targetC, targetR) => {
+            if (!session.pty || (session.cols === targetC && session.rows === targetR)) return;
+            session._lastResizeTime = Date.now();
+            try { session.pty.resize(targetC, targetR); } catch (_) {}
+            session.cols = targetC;
+            session.rows = targetR;
+            const resizePayload = JSON.stringify({ type: 'pty-resize', cols: targetC, rows: targetR });
             for (const client of session.clients) {
               try { if (!client.writableEnded) client.write(`data: ${resizePayload}\n\n`); } catch (_) {}
             }
@@ -7375,6 +7428,22 @@ async function requestHandler(req, res) {
                 try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
               }
             }
+          };
+          if (session.cols !== cols || session.rows !== rows) {
+            const now = Date.now();
+            const elapsed = session._lastResizeTime ? (now - session._lastResizeTime) : 9999;
+            if (session._resizeTimer) {
+              clearTimeout(session._resizeTimer);
+              session._resizeTimer = null;
+            }
+            if (elapsed < 120) {
+              session._resizeTimer = setTimeout(() => {
+                session._resizeTimer = null;
+                applyPtyResize(cols, rows);
+              }, 120 - elapsed);
+              return sendJSON(res, 200, { success: true, scheduled: true, cols, rows });
+            }
+            applyPtyResize(cols, rows);
           }
           return sendJSON(res, 200, { success: true, cols, rows });
         } catch (resizeErr) {
@@ -11788,7 +11857,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
   }
   const targetCwd = (reqCwd && fs.existsSync(reqCwd) && path.resolve(reqCwd).toLowerCase() !== WORKSPACE_ROOT.toLowerCase()) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
   const cols = Math.max(45, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
-  const rows = Math.max(15, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
+  const rows = Math.max(8, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
 
   let session = activeTerminalSessions.get(sessionId);
   if (!session || !session.pty) {
@@ -11842,7 +11911,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       const flushWsBatch = () => {
         wsFlushScheduled = false;
         if (!pendingWsData) return;
-        const out = pendingWsData;
+        const out = cleanConptyData(pendingWsData);
         pendingWsData = '';
         if (session.wsClients && session.wsClients.size > 0) {
           const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data: out }));
@@ -11858,8 +11927,13 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
           data = data.replace(/\x07/g, '');
         }
         if (!data) return;
-        if (session.buffer.length > 500) session.buffer.shift();
-        session.buffer.push(data);
+        data = cleanConptyData(data);
+        if (data.includes('\x1b[3J') || data.includes('\x1b[2J')) {
+          session.buffer = [data];
+        } else {
+          if (session.buffer.length > 500) session.buffer.shift();
+          session.buffer.push(data);
+        }
         handleServerAutoEnter(session, data);
         const payload = `data: ${JSON.stringify({ type: 'data', data })}\n\n`;
         for (const client of session.clients) {
@@ -11912,10 +11986,10 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
     if (reqUrl.searchParams.has('autoEnter')) {
       session.autoEnter = (reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true');
     }
-    if (session && session.pty && typeof session.pty.resize === 'function') {
+    if (session && session.pty && typeof session.pty.resize === 'function' && reqUrl.searchParams.has('cols') && reqUrl.searchParams.has('rows')) {
       const isRemote = isRemoteTunnelRequest(req);
       const hasActiveClients = (session.clients && session.clients.size > 0) || (session.wsClients && session.wsClients.size > 0);
-      if (!isRemote || !hasActiveClients) {
+      if (sessionId.startsWith('mob-') || !isRemote || !hasActiveClients) {
         try {
           session.pty.resize(cols, rows);
           session.cols = cols;
@@ -11940,7 +12014,17 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       autoEnter: Boolean(session.autoEnter)
     })));
     if (session.buffer && session.buffer.length > 0) {
-      socket.write(encodeWsFrame(JSON.stringify({ type: 'init', data: session.buffer.join('') })));
+      const replay = session.buffer.join('');
+      socket.write(encodeWsFrame(JSON.stringify({ type: 'init', data: replay })));
+      // Jika buffer hanya berisi sekuens clear/wipe tanpa teks alfanumerik yang tampak,
+      // refresh shell dengan carriage return lembut (\r) agar prompt host tidak kosong di layar klien
+      if (!hasVisibleTerminalPrompt(replay) && session.pty) {
+        setTimeout(() => {
+          if (session && session.pty) {
+            try { session.pty.write('\r'); } catch (_) {}
+          }
+        }, 120);
+      }
     } else {
       // Hanya kirim carriage return bila sesi baru dan buffer masih kosong
       setTimeout(() => {
@@ -11989,17 +12073,14 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
             return;
           } else if (parsed.type === 'resize' && session.pty) {
             const c = Math.max(45, Math.min(300, parseInt(parsed.cols, 10) || cols));
-            const r = Math.max(15, Math.min(100, parseInt(parsed.rows, 10) || rows));
-            if (session.cols !== c || session.rows !== r) {
-              const now = Date.now();
-              if (session._lastResizeTime && (now - session._lastResizeTime) < 200) {
-                return;
-              }
-              session._lastResizeTime = now;
-              session.pty.resize(c, r);
-              session.cols = c;
-              session.rows = r;
-              const resizePayload = JSON.stringify({ type: 'pty-resize', cols: c, rows: r });
+            const r = Math.max(8, Math.min(100, parseInt(parsed.rows, 10) || rows));
+            const applyWsPtyResize = (targetC, targetR) => {
+              if (!session.pty || (session.cols === targetC && session.rows === targetR)) return;
+              session._lastResizeTime = Date.now();
+              try { session.pty.resize(targetC, targetR); } catch (_) {}
+              session.cols = targetC;
+              session.rows = targetR;
+              const resizePayload = JSON.stringify({ type: 'pty-resize', cols: targetC, rows: targetR });
               for (const client of session.clients) {
                 try { if (!client.writableEnded) client.write(`data: ${resizePayload}\n\n`); } catch (_) {}
               }
@@ -12011,6 +12092,22 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
                   }
                 }
               }
+            };
+            if (session.cols !== c || session.rows !== r) {
+              const now = Date.now();
+              const elapsed = session._lastResizeTime ? (now - session._lastResizeTime) : 9999;
+              if (session._resizeTimer) {
+                clearTimeout(session._resizeTimer);
+                session._resizeTimer = null;
+              }
+              if (elapsed < 120) {
+                session._resizeTimer = setTimeout(() => {
+                  session._resizeTimer = null;
+                  applyWsPtyResize(c, r);
+                }, 120 - elapsed);
+                return;
+              }
+              applyWsPtyResize(c, r);
             }
             return;
           } else if (parsed.type === 'input' && typeof parsed.data === 'string' && session.pty) {

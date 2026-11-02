@@ -40243,29 +40243,67 @@ Aturan:
       }
       if (this._mobileVvTimer) clearTimeout(this._mobileVvTimer);
       this._mobileVvTimer = setTimeout(() => {
-        // Redam resize saat pengguna sedang aktif mengetik di keyboard ponsel (< 1000ms yang lalu)
+        const vv = window.visualViewport;
+        const isKeyboardOpen = vv && (vv.height < window.innerHeight * 0.75);
         const activePane = this.getPaneState(this.activePane || 1);
-        if (activePane && activePane._lastDataEmitAt && (Date.now() - activePane._lastDataEmitAt) < 1000) {
-          if (this._mobileVvTimer) clearTimeout(this._mobileVvTimer);
-          this._mobileVvTimer = setTimeout(() => this.fitAllPanes(), 600);
+        if (isKeyboardOpen) {
+          // Keyboard masih terbuka: JANGAN picu fitAllPanes / PTY resize agar tidak ada reflow / redraw flicker!
+          // Cukup sinkronkan posisi translasi kanvas agar kursor tetap tampak di atas keyboard
+          if (activePane) this.syncMobileScreenPosition(activePane);
           return;
         }
+        // Keyboard telah ditutup: Pulihkan kanvas dan lakukan fitAllPanes ke dimensi layar penuh
         this.fitAllPanes();
-      }, 350);
+        if (activePane && activePane.term) {
+          activePane._userScrolledUp = false;
+          try { activePane.term.scrollToBottom(); } catch (_) {}
+          if (activePane.updateScrollUI) activePane.updateScrollUI();
+          this.syncMobileScreenPosition(activePane);
+        }
+      }, 150);
     },
 
     syncMobileScreenPosition(paneState) {
       if (!this.isMobileDevice() || !paneState || !paneState.term) return;
       const term = paneState.term;
-      const xtermScreen = paneState.screenContainer ? paneState.screenContainer.querySelector('.xterm-screen') : null;
+      const container = paneState.screenContainer;
+      const xtermScreen = container ? container.querySelector('.xterm-screen') : null;
       if (xtermScreen && xtermScreen.style.transform) {
         xtermScreen.style.transform = '';
       }
-      if (!paneState._userScrolledUp && term.buffer && term.buffer.active) {
-        if (term.buffer.active.viewportY !== term.buffer.active.baseY) {
-          try { term.scrollToBottom(); } catch (_) {}
+
+      const vv = window.visualViewport;
+      const isKeyboardOpen = vv && (vv.height < window.innerHeight * 0.75);
+
+      if (!isKeyboardOpen) {
+        if (container && container.scrollTop > 0) {
+          container.scrollTop = 0;
+        }
+        if (term.buffer && term.buffer.active) {
+          const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
+          if (linesFromBottom <= 2 || !paneState._userScrolledUp) {
+            paneState._userScrolledUp = false;
+            try { term.scrollToBottom(); } catch (_) {}
+          }
+        }
+      } else {
+        // Keyboard terbuka: Gunakan DOM scrollTop murni pada container tanpa merusak CSS transform canvas!
+        // Menjaga teks di atas tetap terbaca alami, tanpa clipping aneh di bawah toolbar/tabs
+        if (container) {
+          const cellH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
+          const cursorY = (term.buffer && term.buffer.active) ? term.buffer.active.cursorY : 0;
+          const cursorPx = (cursorY + 1) * cellH;
+          const containerH = container.clientHeight;
+
+          if (cursorPx > containerH - (cellH * 1.5)) {
+            const targetScroll = Math.max(0, cursorPx - containerH + (cellH * 1.5));
+            container.scrollTop = targetScroll;
+          } else {
+            container.scrollTop = 0;
+          }
         }
       }
+      if (paneState.updateScrollUI) paneState.updateScrollUI();
     },
 
     syncTerminalFrameDisplay(paneState) {
@@ -41945,26 +41983,24 @@ Aturan:
         openModal('terminalModal');
       }
       this.syncMobileViewport();
-      if (this.remoteHost && this.remotePin && (!this.isRemoteConnected || forceRemote)) {
-        this.connectRemoteTerminal(this.remoteHost, this.remotePin, false).finally(() => {
-          this.initActiveTabPanes();
-          this.updatePaneHeaders();
-          this.focusActiveInput();
-          [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
-        });
-      } else {
+      const afterOpenSetup = () => {
         this.initActiveTabPanes();
         this.updatePaneHeaders();
         this.focusActiveInput();
-        [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
+        [80, 250].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
+      };
+
+      if (this.remoteHost && this.remotePin && (!this.isRemoteConnected || forceRemote)) {
+        this.connectRemoteTerminal(this.remoteHost, this.remotePin, false).finally(() => {
+          afterOpenSetup();
+        });
+      } else {
+        afterOpenSetup();
       }
       this.checkAndPromptRemoteIfMobileOrUnreachable();
       this.detectWindowsBridge(false).then(() => {
         this.syncServerCwd();
       });
-      this.updatePaneHeaders();
-      this.focusActiveInput();
-      [50, 150, 300, 600].forEach(delay => setTimeout(() => this.fitAllPanes(), delay));
       if (typeof TerminalEndorphin !== 'undefined' && typeof TerminalEndorphin.startAutoWatch === 'function') {
         TerminalEndorphin.startAutoWatch();
       }
@@ -42254,11 +42290,25 @@ Aturan:
           if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
             e.preventDefault();
             e.stopImmediatePropagation();
+            const enteredCmd = (paneState._imeBuffer || term.textarea?.value || '').trim().toLowerCase();
             this.resetImeLine(paneState);
             if (paneState._lastEnterSentAt && (now - paneState._lastEnterSentAt) < 120) {
               return;
             }
             paneState._lastEnterSentAt = now;
+            if (enteredCmd === 'cls' || enteredCmd === 'clear') {
+              paneState._lastScreenClearAt = now;
+              paneState._userScrolledUp = false;
+              try {
+                term.write('\x1b[2J\x1b[3J\x1b[H');
+                term.clear();
+                term.scrollToBottom();
+              } catch (_) {}
+              if (paneState.updateScrollUI) paneState.updateScrollUI();
+            } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
+              if (window.TerminalEndorphin) window.TerminalEndorphin.heal(paneNum);
+              return;
+            }
             paneState._userScrolledUp = false;
             term.scrollToBottom();
             if (paneState.updateScrollUI) paneState.updateScrollUI();
@@ -42359,10 +42409,24 @@ Aturan:
                 }
               }
             }
+            const enteredCmd = (paneState._imeBuffer || cleanVal || '').trim().toLowerCase();
             this.resetImeLine(paneState);
             const now = Date.now();
             if (!paneState._lastEnterSentAt || (now - paneState._lastEnterSentAt) >= 120) {
               paneState._lastEnterSentAt = now;
+              if (enteredCmd === 'cls' || enteredCmd === 'clear') {
+                paneState._lastScreenClearAt = now;
+                paneState._userScrolledUp = false;
+                try {
+                  term.write('\x1b[2J\x1b[3J\x1b[H');
+                  term.clear();
+                  term.scrollToBottom();
+                } catch (_) {}
+                if (paneState.updateScrollUI) paneState.updateScrollUI();
+              } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
+                if (window.TerminalEndorphin) window.TerminalEndorphin.heal(paneNum);
+                return;
+              }
               paneState._userScrolledUp = false;
               term.scrollToBottom();
               if (paneState.updateScrollUI) paneState.updateScrollUI();
@@ -42383,19 +42447,32 @@ Aturan:
 
           const now = Date.now();
 
+          // Selalu jangkar terminal ke dasar dan pulihkan status scroll setiap kali pengguna mengetik
+          paneState._userScrolledUp = false;
+          if (this.isMobileDevice()) {
+            this.syncMobileScreenPosition(paneState);
+          } else {
+            try { term.scrollToBottom(); } catch (_) {}
+          }
+          if (paneState.updateScrollUI) paneState.updateScrollUI();
+
+          const isImeComposing = Boolean(paneState._isComposing || (now - (paneState._lastCompositionEndAt || 0)) < 300);
+
           // 2. Fast-Path A: Penambahan murni di akhir kursor (Append Delta)
           if (val.startsWith(oldText)) {
             const insertText = val.slice(oldText.length);
             paneState._imeBuffer = val;
 
             // Temporal Anti-Stutter & IME Duplicate Filter:
-            // Mencegah emisi ganda dari Gboard (mis. insertCompositionText + insertText atau translasi ganda)
-            // di mana karakter yang persis sama dikirim dalam rentang waktu < 50ms
+            // Mencegah emisi ganda dari Gboard (mis. insertCompositionText + insertText atau Google Translate)
+            // di mana karakter yang persis sama dikirim dalam rentang waktu < 180ms, atau selama siklus komposisi IME aktif (< 350ms)
             if (insertText.length === 1 &&
                 paneState._lastEmittedChar === insertText &&
-                paneState._lastEmitTime &&
-                (now - paneState._lastEmitTime) < 50) {
-              return;
+                paneState._lastEmitTime) {
+              const emitDelta = now - paneState._lastEmitTime;
+              if (emitDelta < 180 || (isImeComposing && emitDelta < 350)) {
+                return;
+              }
             }
 
             if (insertText.length > 0) {
@@ -42461,10 +42538,12 @@ Aturan:
           if (delCount === 0 &&
               insertText.length === 1 &&
               paneState._lastEmittedChar === insertText &&
-              paneState._lastEmitTime &&
-              (now - paneState._lastEmitTime) < 50) {
-            paneState._imeBuffer = val;
-            return;
+              paneState._lastEmitTime) {
+            const emitDelta = now - paneState._lastEmitTime;
+            if (emitDelta < 180 || (isImeComposing && emitDelta < 350)) {
+              paneState._imeBuffer = val;
+              return;
+            }
           }
 
           if (delCount > 0) {
@@ -42532,6 +42611,7 @@ Aturan:
               paneState._lastScreenClearAt = now;
               paneState._userScrolledUp = false;
               try {
+                term.write('\x1b[2J\x1b[3J\x1b[H');
                 term.clear();
                 term.scrollToBottom();
               } catch (_) {}
@@ -42800,6 +42880,12 @@ Aturan:
           if (paneState._desktopResizeTimer) clearTimeout(paneState._desktopResizeTimer);
           paneState._desktopResizeTimer = setTimeout(() => {
             if (!paneState.term || paneState._isRemoteResizing) return;
+            const vv = window.visualViewport;
+            const isKeyboardOpen = this.isMobileDevice() && vv && (vv.height < window.innerHeight * 0.75);
+            if (isKeyboardOpen) {
+              this.syncMobileScreenPosition(paneState);
+              return;
+            }
             this.fitPane(paneState, true);
           }, 200);
         });
@@ -43035,6 +43121,7 @@ Aturan:
             paneState._lastScreenClearAt = now;
             paneState._userScrolledUp = false;
             try {
+              term.write('\x1b[2J\x1b[3J\x1b[H');
               term.clear();
               term.scrollToBottom();
             } catch (_) {}
@@ -43390,14 +43477,26 @@ Aturan:
     // Helper normalisasi stream ConPTY Windows untuk memurnikan sekuens hapus layar (cls / Clear-Host)
     cleanConptyData(str) {
       if (typeof str !== 'string' || !str) return str;
-      // 1. Ganti simulasi loop hapus layar ConPTY yang berulang dengan ANSI Clear Viewport + Scrollback \x1b[2J\x1b[3J\x1b[H
-      const wipeRe = /(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[[0-9;]*m){3,}\x1b\[(?:H|1;1H)/g;
+      // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) berulang yang diakhiri cursor home (\x1b[H)
+      // Ubah menjadi ANSI clear screen murni: clear viewport \x1b[2J + clear scrollback \x1b[3J + cursor home \x1b[H
+      const wipeRe = /(?:\x1b\[\??[0-9;]*[a-zA-Z])*(?:(?:\r\n|\n)\x1b\[K|\x1b\[K(?:\r\n|\n)|\x1b\[2?K){3,}(?:\r\n|\n)*(?:\x1b\[\??[0-9;]*[a-zA-Z])*\x1b\[(?:H|1;1H)(?:\x1b\[\?25[hl])*/g;
       str = str.replace(wipeRe, '\x1b[2J\x1b[3J\x1b[H');
-      // 2. Hilangkan padding newline berulang yang diakhiri pemindahan kursor \x1b[row;colH
-      const padRe = /(?:(?:\r\n|\n)\x1b\[K)+(?:(?:\r\n|\n))?\x1b\[(\d+);(\d+)H/g;
-      str = str.replace(padRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
-      const padHomeRe = /(?:(?:\r\n|\n)\x1b\[K)+(?:(?:\r\n|\n))?\x1b\[H/g;
+
+      // 2. Padding newline ConPTY yang berulang diakhiri pemindahan kursor baris/kolom spesifik \x1b[row;colH
+      // Wajib membutuhkan minimal satu newline (\r\n|\n) dan TIDAK BOLEH memakan sekuens ANSI viewport \x1b[2J\x1b[3J!
+      const padPosRe = /(?:(?:\r\n|\n)+(?:\x1b\[(?![23]J)[0-9;?]*[a-zA-Z])*)+\x1b\[(\d+);(\d+)H/g;
+      str = str.replace(padPosRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
+
+      // 3. Padding newline ConPTY yang berulang diakhiri cursor home \x1b[H
+      // TIDAK BOLEH memakan sekuens ANSI viewport \x1b[2J\x1b[3J!
+      const padHomeRe = /(?:(?:\r\n|\n)+(?:\x1b\[(?![23]J)[0-9;?]*[a-zA-Z])*)+\x1b\[(?:H|1;1H)/g;
       str = str.replace(padHomeRe, '\x1b[H');
+
+      // 4. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>")
+      // Tahan terhadap derau kode ANSI interleave (mis. cursor position \x1b[1;19H, clear-line \x1b[K, hide/show cursor)
+      const dedupRe = /(PS [^\r\n>]+>)(?:[\s\x00-\x1f]|\x1b\[[0-9;?]*[a-zA-Z])*(?:\x1b\[(?:H|1;1H|\d+;\d+H))?\1\s*/g;
+      str = str.replace(dedupRe, '$1 ');
+
       return str;
     },
 
@@ -43424,17 +43523,18 @@ Aturan:
             paneState._userScrolledUp = false;
           }
           currentTerm.write(cleanData, () => {
+            if (this.isMobileDevice()) {
+              this.syncMobileScreenPosition(paneState);
+            }
             if (msg.type === 'init' || isScreenClear) {
               paneState._userScrolledUp = false;
               try { currentTerm.scrollToBottom(); } catch (_) {}
               if (paneState.updateScrollUI) paneState.updateScrollUI();
+            } else if (!paneState._userScrolledUp) {
+              try { currentTerm.scrollToBottom(); } catch (_) {}
             }
           });
-          if (msg.type === 'init' || isScreenClear) {
-            paneState._userScrolledUp = false;
-            try { currentTerm.scrollToBottom(); } catch (_) {}
-            if (paneState.updateScrollUI) paneState.updateScrollUI();
-          }
+
           this.handleAutoRespond(tab, paneState, paneNum, msg.data);
         } else if (typeof msg.data === 'string') {
           paneState._pendingBuffer = (paneState._pendingBuffer || '') + msg.data;
@@ -43728,16 +43828,17 @@ Aturan:
           if (dims && dims.cols > 10 && dims.rows > 5) {
             targetCols = Math.max(isMobile ? 45 : 60, dims.cols);
             if (isMobile) {
-              // Invarian Baris Mobile Stabil (Sticky Mobile Rows Invariant):
-              // Saat keyboard ponsel terbuka (visualViewport menyusut < 75%), JANGAN menciutkan baris PTY
-              // menjadi 8-10 baris! Menciutkan PTY menyebabkan ConPTY me-reflow teks, dan saat keyboard ditutup,
-              // prompt terdampar di baris 10 di tengah layar. Pertahankan baris stabil baseline!
               const vv = window.visualViewport;
               const isKeyboardOpen = vv && (vv.height < window.innerHeight * 0.75);
-              if (isKeyboardOpen && paneState._stableMobileRows) {
-                targetRows = paneState._stableMobileRows;
+              if (isKeyboardOpen) {
+                // Saat keyboard terbuka di ponsel: Kunci dimensi baris dan kolom agar identik baseline,
+                // cegah reflow ConPTY yang merusak prompt & tata letak pengetikan
+                if (paneState._stableMobileCols) targetCols = paneState._stableMobileCols;
+                if (paneState._stableMobileRows) targetRows = paneState._stableMobileRows;
               } else {
+                targetCols = Math.max(45, dims.cols);
                 targetRows = Math.max(20, dims.rows);
+                paneState._stableMobileCols = targetCols;
                 paneState._stableMobileRows = targetRows;
               }
             } else {
@@ -43757,10 +43858,13 @@ Aturan:
         if (isMobile) {
           const vv = window.visualViewport;
           const isKeyboardOpen = vv && (vv.height < window.innerHeight * 0.75);
-          if (isKeyboardOpen && paneState._stableMobileRows) {
-            targetRows = paneState._stableMobileRows;
+          if (isKeyboardOpen) {
+            if (paneState._stableMobileCols) targetCols = paneState._stableMobileCols;
+            if (paneState._stableMobileRows) targetRows = paneState._stableMobileRows;
           } else {
+            targetCols = Math.max(45, targetCols);
             targetRows = Math.max(20, Math.floor(containerH / charH));
+            paneState._stableMobileCols = targetCols;
             paneState._stableMobileRows = targetRows;
           }
         } else {
@@ -44141,9 +44245,12 @@ Aturan:
       if (pane && pane.term) {
         pane._lastScreenClearAt = Date.now();
         pane._userScrolledUp = false;
-        pane.term.clear();
+        try {
+          pane.term.write('\x1b[2J\x1b[3J\x1b[H');
+          pane.term.clear();
+          pane.term.scrollToBottom();
+        } catch (_) {}
         this.resetImeLine(pane);
-        pane.term.scrollToBottom();
         if (pane.updateScrollUI) pane.updateScrollUI();
         if (pane.sessionId && !pane.isFallbackMode) {
           this.sendPtyInput(pane.sessionId, '\x0c');
@@ -45254,14 +45361,15 @@ Aturan:
         fixes.push(`Sinkronkan baris terminal kembali ke jangkar stabil mobile (${pane._stableMobileRows} baris).`);
       }
 
-      // 3. Audit Scroll Lock / Stuck Trap
-      if (metrics.userScrolledUp && !metrics.isMouseActive) {
-        if (term.buffer && term.buffer.active) {
-          const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
-          if (linesFromBottom <= 1) {
-            issues.push('Scroll Trap: Flag _userScrolledUp terkunci padahal posisi kursor di dasar layar.');
-            fixes.push('Reset flag _userScrolledUp dan posisikan viewport ke dasar.');
-          }
+      // 3. Audit Scroll Lock / Stuck Trap / Stranded Prompt in Center (Screenshot 1 & 4)
+      if (term.buffer && term.buffer.active) {
+        const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
+        if (linesFromBottom > 2 && !pane._isTouchActive && !metrics.isMouseActive) {
+          issues.push(`Viewport Terangkat (${linesFromBottom} baris dari dasar): Prompt berisiko melayang di tengah layar.`);
+          fixes.push('Kunci kembali viewport ke posisi dasar (term.scrollToBottom()).');
+        } else if (metrics.userScrolledUp && !metrics.isMouseActive && linesFromBottom <= 1) {
+          issues.push('Scroll Trap: Flag _userScrolledUp terkunci padahal posisi kursor di dasar layar.');
+          fixes.push('Reset flag _userScrolledUp dan posisikan viewport ke dasar.');
         }
       }
 
@@ -45401,7 +45509,7 @@ Aturan:
             TerminalManager.sendPtyInput(pane.sessionId, '\r');
           }
         }, 80);
-      } else if (pane.sessionId && !diag.metrics.isMouseActive && !options.noRedraw) {
+      } else if (pane.sessionId && !diag.metrics.isMouseActive && options.forceRedraw) {
         TerminalManager.sendPtyInput(pane.sessionId, '\x0c');
       }
 
