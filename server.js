@@ -415,16 +415,19 @@ function cleanConptyData(str) {
   str = str.replace(wipeRe, '\x1b[2J\x1b[3J\x1b[H');
 
   // 2. Padding newline ConPTY yang berulang diakhiri pemindahan kursor baris/kolom spesifik \x1b[row;colH
-  // Wajib membutuhkan minimal satu newline (\r\n|\n) agar TIDAK merusak sekuens ANSI viewport \x1b[2J\x1b[3J!
-  const padPosRe = /(?:(?:\r\n|\n)+(?:\x1b\[[0-9;?]*[a-zA-Z])*)+\x1b\[(\d+);(\d+)H/g;
+  // Wajib membutuhkan minimal satu newline (\r\n|\n) dan TIDAK BOLEH memakan sekuens ANSI viewport \x1b[2J\x1b[3J!
+  const padPosRe = /(?:(?:\r\n|\n)+(?:\x1b\[(?![23]J)[0-9;?]*[a-zA-Z])*)+\x1b\[(\d+);(\d+)H/g;
   str = str.replace(padPosRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
 
   // 3. Padding newline ConPTY yang berulang diakhiri cursor home \x1b[H
-  const padHomeRe = /(?:(?:\r\n|\n)+(?:\x1b\[[0-9;?]*[a-zA-Z])*)+\x1b\[(?:H|1;1H)/g;
+  // TIDAK BOLEH memakan sekuens ANSI viewport \x1b[2J\x1b[3J!
+  const padHomeRe = /(?:(?:\r\n|\n)+(?:\x1b\[(?![23]J)[0-9;?]*[a-zA-Z])*)+\x1b\[(?:H|1;1H)/g;
   str = str.replace(padHomeRe, '\x1b[H');
 
   // 4. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>")
-  str = str.replace(/(PS [^\r\n>]+>)\s*(?:\x1b\[(?:H|1;1H))?\1\s*/g, '$1 ');
+  // Tahan terhadap derau kode ANSI interleave (mis. cursor position \x1b[1;19H, clear-line \x1b[K, hide/show cursor)
+  const dedupRe = /(PS [^\r\n>]+>)(?:[\s\x00-\x1f]|\x1b\[[0-9;?]*[a-zA-Z])*(?:\x1b\[(?:H|1;1H|\d+;\d+H))?\1\s*/g;
+  str = str.replace(dedupRe, '$1 ');
 
   return str;
 }

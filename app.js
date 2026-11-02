@@ -40266,15 +40266,18 @@ Aturan:
     syncMobileScreenPosition(paneState) {
       if (!this.isMobileDevice() || !paneState || !paneState.term) return;
       const term = paneState.term;
-      const xtermScreen = paneState.screenContainer ? paneState.screenContainer.querySelector('.xterm-screen') : null;
-      if (!xtermScreen) return;
+      const container = paneState.screenContainer;
+      const xtermScreen = container ? container.querySelector('.xterm-screen') : null;
+      if (xtermScreen && xtermScreen.style.transform) {
+        xtermScreen.style.transform = '';
+      }
 
       const vv = window.visualViewport;
       const isKeyboardOpen = vv && (vv.height < window.innerHeight * 0.75);
 
       if (!isKeyboardOpen) {
-        if (xtermScreen.style.transform) {
-          xtermScreen.style.transform = '';
+        if (container && container.scrollTop > 0) {
+          container.scrollTop = 0;
         }
         if (term.buffer && term.buffer.active) {
           const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
@@ -40284,19 +40287,20 @@ Aturan:
           }
         }
       } else {
-        // Keyboard terbuka: Hitung posisi kursor relatif terhadap area pandang di atas keyboard
-        const container = paneState.screenContainer;
-        const containerH = (container && container.clientHeight > 0) ? container.clientHeight : Math.max(160, (vv ? vv.height - 120 : 250));
-        const cellH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
-        const cursorY = (term.buffer && term.buffer.active) ? term.buffer.active.cursorY : 0;
-        const cursorPx = (cursorY + 1) * cellH;
+        // Keyboard terbuka: Gunakan DOM scrollTop murni pada container tanpa merusak CSS transform canvas!
+        // Menjaga teks di atas tetap terbaca alami, tanpa clipping aneh di bawah toolbar/tabs
+        if (container) {
+          const cellH = (term._core && term._core._renderService && term._core._renderService.dimensions && term._core._renderService.dimensions.css.cell.height) || 18;
+          const cursorY = (term.buffer && term.buffer.active) ? term.buffer.active.cursorY : 0;
+          const cursorPx = (cursorY + 1) * cellH;
+          const containerH = container.clientHeight;
 
-        if (cursorPx > containerH - (cellH * 1.5)) {
-          // Kursor berada di bawah area tampak: Geser kanvas ke atas sehingga baris kursor berada tepat di atas keybar
-          const targetOffset = Math.max(0, cursorPx - containerH + (cellH * 2));
-          xtermScreen.style.transform = `translateY(-${targetOffset}px)`;
-        } else {
-          xtermScreen.style.transform = '';
+          if (cursorPx > containerH - (cellH * 1.5)) {
+            const targetScroll = Math.max(0, cursorPx - containerH + (cellH * 1.5));
+            container.scrollTop = targetScroll;
+          } else {
+            container.scrollTop = 0;
+          }
         }
       }
       if (paneState.updateScrollUI) paneState.updateScrollUI();
@@ -42286,11 +42290,25 @@ Aturan:
           if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
             e.preventDefault();
             e.stopImmediatePropagation();
+            const enteredCmd = (paneState._imeBuffer || term.textarea?.value || '').trim().toLowerCase();
             this.resetImeLine(paneState);
             if (paneState._lastEnterSentAt && (now - paneState._lastEnterSentAt) < 120) {
               return;
             }
             paneState._lastEnterSentAt = now;
+            if (enteredCmd === 'cls' || enteredCmd === 'clear') {
+              paneState._lastScreenClearAt = now;
+              paneState._userScrolledUp = false;
+              try {
+                term.write('\x1b[2J\x1b[3J\x1b[H');
+                term.clear();
+                term.scrollToBottom();
+              } catch (_) {}
+              if (paneState.updateScrollUI) paneState.updateScrollUI();
+            } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
+              if (window.TerminalEndorphin) window.TerminalEndorphin.heal(paneNum);
+              return;
+            }
             paneState._userScrolledUp = false;
             term.scrollToBottom();
             if (paneState.updateScrollUI) paneState.updateScrollUI();
@@ -42391,10 +42409,24 @@ Aturan:
                 }
               }
             }
+            const enteredCmd = (paneState._imeBuffer || cleanVal || '').trim().toLowerCase();
             this.resetImeLine(paneState);
             const now = Date.now();
             if (!paneState._lastEnterSentAt || (now - paneState._lastEnterSentAt) >= 120) {
               paneState._lastEnterSentAt = now;
+              if (enteredCmd === 'cls' || enteredCmd === 'clear') {
+                paneState._lastScreenClearAt = now;
+                paneState._userScrolledUp = false;
+                try {
+                  term.write('\x1b[2J\x1b[3J\x1b[H');
+                  term.clear();
+                  term.scrollToBottom();
+                } catch (_) {}
+                if (paneState.updateScrollUI) paneState.updateScrollUI();
+              } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
+                if (window.TerminalEndorphin) window.TerminalEndorphin.heal(paneNum);
+                return;
+              }
               paneState._userScrolledUp = false;
               term.scrollToBottom();
               if (paneState.updateScrollUI) paneState.updateScrollUI();
@@ -43451,16 +43483,19 @@ Aturan:
       str = str.replace(wipeRe, '\x1b[2J\x1b[3J\x1b[H');
 
       // 2. Padding newline ConPTY yang berulang diakhiri pemindahan kursor baris/kolom spesifik \x1b[row;colH
-      // Wajib membutuhkan minimal satu newline (\r\n|\n) agar TIDAK merusak sekuens ANSI viewport \x1b[2J\x1b[3J!
-      const padPosRe = /(?:(?:\r\n|\n)+(?:\x1b\[[0-9;?]*[a-zA-Z])*)+\x1b\[(\d+);(\d+)H/g;
+      // Wajib membutuhkan minimal satu newline (\r\n|\n) dan TIDAK BOLEH memakan sekuens ANSI viewport \x1b[2J\x1b[3J!
+      const padPosRe = /(?:(?:\r\n|\n)+(?:\x1b\[(?![23]J)[0-9;?]*[a-zA-Z])*)+\x1b\[(\d+);(\d+)H/g;
       str = str.replace(padPosRe, (m, r, c) => '\x1b[' + r + ';' + c + 'H');
 
       // 3. Padding newline ConPTY yang berulang diakhiri cursor home \x1b[H
-      const padHomeRe = /(?:(?:\r\n|\n)+(?:\x1b\[[0-9;?]*[a-zA-Z])*)+\x1b\[(?:H|1;1H)/g;
+      // TIDAK BOLEH memakan sekuens ANSI viewport \x1b[2J\x1b[3J!
+      const padHomeRe = /(?:(?:\r\n|\n)+(?:\x1b\[(?![23]J)[0-9;?]*[a-zA-Z])*)+\x1b\[(?:H|1;1H)/g;
       str = str.replace(padHomeRe, '\x1b[H');
 
       // 4. Dedup prompt kembar horizontal di baris yang sama (mis. "PS C:\...> PS C:\...>")
-      str = str.replace(/(PS [^\r\n>]+>)\s*(?:\x1b\[(?:H|1;1H))?\1\s*/g, '$1 ');
+      // Tahan terhadap derau kode ANSI interleave (mis. cursor position \x1b[1;19H, clear-line \x1b[K, hide/show cursor)
+      const dedupRe = /(PS [^\r\n>]+>)(?:[\s\x00-\x1f]|\x1b\[[0-9;?]*[a-zA-Z])*(?:\x1b\[(?:H|1;1H|\d+;\d+H))?\1\s*/g;
+      str = str.replace(dedupRe, '$1 ');
 
       return str;
     },
