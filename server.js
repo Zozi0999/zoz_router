@@ -103,6 +103,25 @@ function extractLatestTunnelUrlFromLog() {
   return null;
 }
 
+function isTunnelZombieDead() {
+  const logPaths = [
+    path.join(__dirname, 'data', 'cloudflared-service.log'),
+    path.join(__dirname, 'data', 'cloudflared.log')
+  ];
+  for (const lp of logPaths) {
+    try {
+      if (fs.existsSync(lp)) {
+        const content = fs.readFileSync(lp, 'utf8');
+        const tail = content.slice(-4000);
+        if (tail.includes('Unauthorized: Tunnel not found') || tail.includes('Register tunnel error')) {
+          return true;
+        }
+      }
+    } catch (_) {}
+  }
+  return false;
+}
+
 let cloudflareTunnelProcess = null;
 let cloudflareTunnelPid = null;
 
@@ -180,8 +199,9 @@ function startCloudflareTunnel(customPort, forceRestart = false) {
     // 1. Re-check running cloudflared process on Windows host
     const runningPid = findRunningCloudflaredPid();
     const latestUrlInLog = extractLatestTunnelUrlFromLog();
+    const isZombie = isTunnelZombieDead();
 
-    if (!forceRestart && runningPid && latestUrlInLog) {
+    if (!forceRestart && !isZombie && runningPid && latestUrlInLog) {
       cloudflareTunnelPid = runningPid;
       cloudflareTunnelUrl = latestUrlInLog;
       cloudflareTunnelActive = true;
@@ -12319,10 +12339,17 @@ if (require.main === module && !process.env.VERCEL) {
       console.warn('[Cloudflare] Tunnel auto-start deferred:', err && err.message);
     });
 
-    // Watchdog penjaga Cloudflare Tunnel agar selalu hidup
+    // Watchdog penjaga Cloudflare Tunnel agar selalu hidup dan sehat
     setInterval(() => {
-      if (!isTunnelIntentionallyStopped && (!cloudflareTunnelPid || !isPidAlive(cloudflareTunnelPid))) {
-        startCloudflareTunnel().catch(() => {});
+      if (isTunnelIntentionallyStopped) return;
+      const pid = cloudflareTunnelPid;
+      const deadProcess = !pid || !isPidAlive(pid);
+      const isZombie = isTunnelZombieDead();
+      if (deadProcess || isZombie) {
+        if (isZombie) {
+          console.warn('[Cloudflare] Terdeteksi status "Unauthorized: Tunnel not found" (Zombie tunnel). Memaksa auto-restart tunnel...');
+        }
+        startCloudflareTunnel(null, true).catch(() => {});
       }
     }, 25000);
   });

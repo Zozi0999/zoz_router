@@ -32,13 +32,12 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://roommate-flashers-flags-briefly.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://ftp-garmin-frame-understanding.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
     const s = url.toLowerCase().trim();
-    if (!s.includes('.trycloudflare.com')) return false;
-    return s.includes('roommate-flashers-flags-briefly');
+    return s.includes('.trycloudflare.com') && /^https?:\/\/[a-z0-9-]+\.trycloudflare\.com(?::\d+)?$/i.test(s);
   }
 
   function getActiveTunnelUrl() {
@@ -45984,7 +45983,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://roommate-flashers-flags-briefly.trycloudflare.com',
+    activeTunnelUrl: 'https://ftp-garmin-frame-understanding.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
