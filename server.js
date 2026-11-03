@@ -176,6 +176,72 @@ function savePersistedTunnelState() {
     fs.writeFileSync(TUNNEL_STATE_FILE, JSON.stringify(payload, null, 2));
     persistedTunnel = payload;
   } catch (_) {}
+  scheduleEdgeTunnelSync(cloudflareTunnelUrl);
+}
+
+// ===== AUTO-SYNC URL TUNNEL KE EDGE (Cloudflare Pages z21.zozdocs.com) =====
+// Quick tunnel trycloudflare mendapat URL BARU setiap kali cloudflared di-restart,
+// sedangkan _worker.js & app.js (yang dilayani Cloudflare Pages) meng-hardcode URL tunnel.
+// Tanpa sinkronisasi, seluruh request dari z21.zozdocs.com menembak tunnel mati → "Failed to fetch".
+// Fungsi ini menulis ulang konstanta URL tunnel lalu commit + push (memicu redeploy Pages).
+// Nonaktifkan dengan env ZOZ_AUTO_TUNNEL_SYNC=0.
+const EDGE_TUNNEL_SYNC_TARGETS = [
+  { file: '_worker.js', patterns: [/(const TUNNEL_GATEWAY_URL = ')https:\/\/[a-z0-9-]+\.trycloudflare\.com(')/] },
+  { file: 'app.js', patterns: [/(const ACTIVE_CLOUDFLARE_TUNNEL = ')https:\/\/[a-z0-9-]+\.trycloudflare\.com(')/, /(activeTunnelUrl: ')https:\/\/[a-z0-9-]+\.trycloudflare\.com(')/] },
+  { file: path.join('public', 'app.js'), patterns: [/(const ACTIVE_CLOUDFLARE_TUNNEL = ')https:\/\/[a-z0-9-]+\.trycloudflare\.com(')/, /(activeTunnelUrl: ')https:\/\/[a-z0-9-]+\.trycloudflare\.com(')/] }
+];
+let edgeTunnelSyncTimer = null;
+let edgeTunnelSyncInFlight = false;
+let edgeTunnelLastSyncedUrl = '';
+
+function scheduleEdgeTunnelSync(url) {
+  if (process.env.ZOZ_AUTO_TUNNEL_SYNC === '0' || process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) return;
+  if (!url || !/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/i.test(url) || url === edgeTunnelLastSyncedUrl) return;
+  if (edgeTunnelSyncTimer) clearTimeout(edgeTunnelSyncTimer);
+  // Debounce: beri waktu tunnel benar-benar stabil sebelum men-deploy
+  edgeTunnelSyncTimer = setTimeout(() => { edgeTunnelSyncTimer = null; syncTunnelUrlToEdge(url); }, 8000);
+}
+
+function runGit(args) {
+  return new Promise((resolve) => {
+    execFile('git', args, { cwd: __dirname, windowsHide: true, timeout: 60000 }, (err, stdout, stderr) => {
+      resolve({ ok: !err, stdout: String(stdout || ''), stderr: String(stderr || (err && err.message) || '') });
+    });
+  });
+}
+
+async function syncTunnelUrlToEdge(url) {
+  if (edgeTunnelSyncInFlight) { scheduleEdgeTunnelSync(url); return; }
+  edgeTunnelSyncInFlight = true;
+  try {
+    const changedFiles = [];
+    for (const target of EDGE_TUNNEL_SYNC_TARGETS) {
+      const abs = path.join(__dirname, target.file);
+      if (!fs.existsSync(abs)) continue;
+      const original = fs.readFileSync(abs, 'utf8');
+      let updated = original;
+      for (const re of target.patterns) updated = updated.replace(re, `$1${url}$2`);
+      if (updated !== original) {
+        fs.writeFileSync(abs, updated, 'utf8');
+        changedFiles.push(target.file.split(path.sep).join('/'));
+      }
+    }
+    edgeTunnelLastSyncedUrl = url;
+    if (changedFiles.length === 0) return;
+    console.log(`[Edge Tunnel Sync] URL tunnel baru ditulis ke: ${changedFiles.join(', ')}`);
+    if (!fs.existsSync(path.join(__dirname, '.git'))) return;
+    const add = await runGit(['add', '--', ...changedFiles]);
+    if (!add.ok) return console.warn('[Edge Tunnel Sync] git add gagal:', add.stderr.trim());
+    const commit = await runGit(['commit', '-m', `chore(tunnel): auto-sync active tunnel ${url}`, '--', ...changedFiles]);
+    if (!commit.ok) return console.warn('[Edge Tunnel Sync] git commit gagal:', commit.stderr.trim());
+    const push = await runGit(['push', 'origin', 'HEAD']);
+    if (!push.ok) return console.warn('[Edge Tunnel Sync] git push gagal:', push.stderr.trim());
+    console.log('[Edge Tunnel Sync] Terdorong ke origin — Cloudflare Pages akan redeploy otomatis.');
+  } catch (err) {
+    console.warn('[Edge Tunnel Sync] Gagal:', err && err.message);
+  } finally {
+    edgeTunnelSyncInFlight = false;
+  }
 }
 
 // Initial state persistence ensuring PIN is locked to disk

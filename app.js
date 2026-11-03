@@ -28521,9 +28521,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     let advice = '';
 
     if (isMixedContentLocal && engine === 'ollama') {
-      title = `Koneksi Ollama Cloud Dialihkan ke Jalur Cadangan`;
-      desc = `Model cloud <code>${escapeHtml(modelName)}</code> sedang dialihkan ke jalur streaming Cloud AI yang aktif.`;
-      advice = `💡 <strong>Solusi Cepat:</strong> Klik <strong>Coba Kirim Ulang</strong> atau pilih model resmi lainnya dari katalog Model Hub.`;
+      title = `Koneksi ke Server Ollama Terputus`;
+      desc = `Model <code>${escapeHtml(modelName)}</code> tidak dapat dihubungi karena tunnel server laptop sedang berganti alamat atau offline. Model TIDAK dialihkan ke provider lain.`;
+      advice = `💡 <strong>Solusi:</strong> Tunggu ±1 menit hingga sinkronisasi tunnel otomatis selesai, lalu muat ulang halaman dan klik <strong>Coba Kirim Ulang</strong>.`;
     } else if (isVisionUnsupported) {
       title = `Model ${escapeHtml(modelName)} Tidak Mendukung Input Gambar`;
       desc = `Model ini menolak pemrosesan gambar multimodal karena beroperasi dalam mode teks murni (text-only).`;

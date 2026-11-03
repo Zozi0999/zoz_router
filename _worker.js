@@ -1268,7 +1268,7 @@ export default {
     if ((url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) && !isEdgeNativeRoute) {
       const targetUrl = TUNNEL_GATEWAY_URL + url.pathname + url.search;
       const fwdHeaders = new Headers(request.headers);
-      fwdHeaders.set('Host', 'tue-graphics-favor-private.trycloudflare.com');
+      fwdHeaders.set('Host', new URL(TUNNEL_GATEWAY_URL).host);
       fwdHeaders.set('X-Forwarded-Host', url.host);
       fwdHeaders.set('X-Forwarded-Proto', 'https');
       fwdHeaders.set('X-Real-IP', request.headers.get('cf-connecting-ip') || '127.0.0.1');
