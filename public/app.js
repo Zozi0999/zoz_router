@@ -370,7 +370,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       localStorage.removeItem('zoz_auto_start_model_v1');
       localStorage.removeItem('zoz_auto_start_model');
       STATE.autoStartModel = null;
-      showToast(`⚡ Auto-Start dinonaktifkan.`, 'info');
     } else {
       const cfg = {
         modelId,
@@ -381,7 +380,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       localStorage.setItem('zoz_auto_start_model_v1', JSON.stringify(cfg));
       localStorage.setItem('zoz_auto_start_model', JSON.stringify(cfg));
       STATE.autoStartModel = cfg;
-      showToast(`🚀 Auto-Start diaktifkan! Model "${modelId}" (${cleanProvider.toUpperCase()}) akan otomatis aktif setiap kali aplikasi dibuka.`, 'success');
     }
 
     updateModelOptionsMenuUI();
@@ -50096,11 +50094,6 @@ Gunakan format Markdown lengkap dengan struktur berikut:
         STATE.settings.ollamaModel = autoCfg.modelId;
       }
       STATE.mode = targetProvider;
-      if (!isTabReload) {
-        setTimeout(() => {
-          showToast(`🚀 Auto-Start: Model "${autoCfg.modelId}" (${(autoCfg.provider || 'AI').toUpperCase()}) siap digunakan.`, 'success');
-        }, 600);
-      }
     }
 
     // 3. RENDER ALL UI CONTROLS INSTANTLY (Synchronous, 0ms, Zero Lag)
