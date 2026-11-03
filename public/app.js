@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://sphere-eight-charitable-minolta.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://latina-okay-registry-governments.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -46249,7 +46249,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://sphere-eight-charitable-minolta.trycloudflare.com',
+    activeTunnelUrl: 'https://latina-okay-registry-governments.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
