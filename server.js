@@ -3834,11 +3834,16 @@ function persistUserImagesToUploads(images) {
   for (let idx = 0; idx < list.length; idx++) {
     const img = list[idx];
     if (typeof img === 'string' && img.trim()) {
-      if (img.startsWith('data:image')) {
+      const cleanImg = img.trim();
+      // Cegah keracunan placeholder string '[data:image]'
+      if (cleanImg === '[data:image]' || cleanImg.startsWith('[data:image')) {
+        continue;
+      }
+      if (cleanImg.startsWith('data:image') || (/^[A-Za-z0-9+/=]+$/.test(cleanImg) && cleanImg.length > 100)) {
         try {
-          const mimeMatch = img.match(/^data:(image\/[a-zA-Z0-9.+_-]+);base64,/i);
+          const mimeMatch = cleanImg.match(/^data:(image\/[a-zA-Z0-9.+_-]+);base64,/i);
           const ext = mimeMatch ? (mimeMatch[1].split('/')[1] || 'webp') : 'webp';
-          const rawBase64 = img.replace(/^data:image\/[a-zA-Z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
+          const rawBase64 = cleanImg.replace(/^data:image\/[a-zA-Z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
           const buffer = Buffer.from(rawBase64, 'base64');
           if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
           const filename = `img_carried_${Date.now()}_${idx}_${crypto.randomBytes(4).toString('hex')}.${ext}`;

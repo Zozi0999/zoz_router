@@ -1265,7 +1265,7 @@ export default {
       url.pathname === '/api/prepare-image-display' ||
       url.pathname.startsWith('/api/tools/image-asset/');
 
-    if (url.pathname.startsWith('/api/') && !isEdgeNativeRoute) {
+    if ((url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) && !isEdgeNativeRoute) {
       const targetUrl = TUNNEL_GATEWAY_URL + url.pathname + url.search;
       const fwdHeaders = new Headers(request.headers);
       fwdHeaders.set('Host', 'tue-graphics-favor-private.trycloudflare.com');
@@ -4097,7 +4097,7 @@ export default {
         const rawToken = decodeURIComponent(url.pathname.replace(/^\/api\/tools\/image-asset\//, ''));
         // A. Token dari laptop server (membawa signature tanda titik '.')
         if (rawToken.includes('.')) {
-          const tunnelBase = 'https://roommate-flashers-flags-briefly.trycloudflare.com';
+          const tunnelBase = TUNNEL_GATEWAY_URL;
           const laptopRes = await fetch(`${tunnelBase}${url.pathname}`, {
             headers: { 'Accept': 'image/*' },
             signal: AbortSignal.timeout(6000)
@@ -4175,7 +4175,7 @@ export default {
         }
 
         // C. Fallback: coba alirkan melalui laptop tunnel
-        const tunnelFallback = 'https://roommate-flashers-flags-briefly.trycloudflare.com';
+        const tunnelFallback = TUNNEL_GATEWAY_URL;
         const fallbackRes = await fetch(`${tunnelFallback}${url.pathname}`, {
           headers: { 'Accept': 'image/*' },
           signal: AbortSignal.timeout(6000)

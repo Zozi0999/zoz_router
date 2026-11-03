@@ -4306,15 +4306,16 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     destMessages.forEach((dMsg, idx) => {
       const sMsg = sourceMessages[idx];
       if (sMsg && dMsg) {
-        const sImgs = (Array.isArray(sMsg.images) && sMsg.images.length > 0) ? sMsg.images : (sMsg.image ? [sMsg.image] : null);
-        const dImgs = (Array.isArray(dMsg.images) && dMsg.images.length > 0) ? dMsg.images : (dMsg.image ? [dMsg.image] : null);
-        const sHasDataUrl = sImgs && sImgs.some(img => typeof img === 'string' && img.startsWith('data:image'));
-        if (sHasDataUrl) {
-          dMsg.images = sImgs;
-          dMsg.image = sMsg.image || sImgs[0];
-        } else if (sImgs && (!dImgs || dImgs.length === 0)) {
-          dMsg.images = sImgs;
-          dMsg.image = sMsg.image || sImgs[0];
+        const rawSImgs = (Array.isArray(sMsg.images) && sMsg.images.length > 0) ? sMsg.images : (sMsg.image ? [sMsg.image] : null);
+        const rawDImgs = (Array.isArray(dMsg.images) && dMsg.images.length > 0) ? dMsg.images : (dMsg.image ? [dMsg.image] : null);
+        const sImgs = rawSImgs ? rawSImgs.filter(img => typeof img === 'string' && img !== '[data:image]' && !img.startsWith('[data:image')) : null;
+        const dImgs = rawDImgs ? rawDImgs.filter(img => typeof img === 'string' && img !== '[data:image]' && !img.startsWith('[data:image')) : null;
+        if (sImgs && sImgs.length > 0) {
+          const sHasDataUrl = sImgs.some(img => typeof img === 'string' && img.startsWith('data:image'));
+          if (sHasDataUrl || (!dImgs || dImgs.length === 0)) {
+            dMsg.images = sImgs;
+            dMsg.image = sImgs[0];
+          }
         }
       }
     });
@@ -28598,23 +28599,25 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   // Helper cerdas: Mengonversi path gambar lokal (/uploads/) menjadi Base64 Data URL di browser
   async function resolveImageToDataUrlSafe(img) {
     if (!img || typeof img !== 'string') return img;
-    if (img.startsWith('data:image')) return img;
-    if (img.startsWith('/uploads/') || img.includes('/uploads/')) {
+    const cleanImg = img.trim();
+    if (cleanImg === '[data:image]' || cleanImg.startsWith('[data:image')) return null;
+    if (cleanImg.startsWith('data:image')) return cleanImg;
+    if (cleanImg.startsWith('/uploads/') || cleanImg.includes('/uploads/')) {
       try {
-        const fetchTarget = (img.startsWith('http://') || img.startsWith('https://')) ? img : getUniversalApiUrl(img);
+        const fetchTarget = (cleanImg.startsWith('http://') || cleanImg.startsWith('https://')) ? cleanImg : getUniversalApiUrl(cleanImg);
         const resp = await fetch(fetchTarget);
         if (resp.ok) {
           const blob = await resp.blob();
           return await new Promise((resolve) => {
             const reader = new FileReader();
             reader.onloadend = () => resolve(reader.result);
-            reader.onerror = () => resolve(img);
+            reader.onerror = () => resolve(cleanImg);
             reader.readAsDataURL(blob);
           });
         }
       } catch (_) {}
     }
-    return img;
+    return cleanImg;
   }
 
   // ==================== SYSTEM VERIFICATION & TEMPORAL GROUNDING ENGINE ====================
@@ -28668,7 +28671,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   // Kini gambar user TERAKHIR (dalam jendela N pesan) ikut dibawa ulang selama giliran aktif
   // tidak melampirkan gambar baru.
   const CARRIED_IMAGE_WINDOW = 20;
-  const msgImagesOf = (m) => (m ? (Array.isArray(m.images) && m.images.length > 0 ? m.images : (m.image ? [m.image] : [])) : []);
+  const msgImagesOf = (m) => (m ? (Array.isArray(m.images) && m.images.length > 0 ? m.images : (m.image ? [m.image] : [])) : []).filter(img => img && typeof img === 'string' && img !== '[data:image]' && !img.startsWith('[data:image'));
   function findCarriedImageTurnIndex(rawList, currentImages = []) {
     if (!Array.isArray(rawList) || rawList.length < 2) return -1;
     const lastIdx = rawList.length - 1;
