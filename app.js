@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://latina-okay-registry-governments.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://survive-undertaken-cho-ian.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -84,6 +84,25 @@
     if (isLocal) return cleanPath;
     const tunnelBase = getActiveTunnelUrl();
     return (tunnelBase || VERCEL_BACKEND_GATEWAY) + cleanPath;
+  }
+
+  // Universal Chat Image Resolver: Memastikan path /uploads/ dan API gambar proxy selalu dapat dijangkau
+  // dari domain publik (z21.zozdocs.com) melalui Edge Tunnel aktif, serta menyaring residu '[data:image]'
+  function resolveChatImageSrc(src) {
+    if (!src || typeof src !== 'string') return '';
+    const trimmed = src.trim();
+    if (trimmed === '[data:image]' || trimmed.startsWith('[data:image')) return '';
+    if (trimmed.startsWith('data:image/')) return trimmed;
+    if (trimmed.startsWith('/uploads/') || trimmed.startsWith('/api/tools/image-asset/') || trimmed.startsWith('/api/')) {
+      return getUniversalApiUrl(trimmed);
+    }
+    try {
+      const u = new URL(trimmed);
+      if ((u.protocol === 'https:' || u.protocol === 'http:') && !u.username && !u.password) {
+        return u.toString();
+      }
+    } catch (_) {}
+    return trimmed;
   }
 
   // Otonomi Pemulihan Tunnel: Menyelidiki apakah Pages Edge telah men-deploy URL tunnel baru saat terjadi Failed to fetch
@@ -4374,7 +4393,33 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       return new Promise((resolve) => {
         try {
           const tx = this.db.transaction('sessions', 'readwrite');
-          tx.objectStore('sessions').put(cleanSession);
+          const store = tx.objectStore('sessions');
+          const getReq = store.get(cleanSession.id);
+          getReq.onsuccess = () => {
+            const existing = getReq.result;
+            if (existing && Array.isArray(existing.messages) && Array.isArray(cleanSession.messages)) {
+              cleanSession.messages.forEach((cMsg, idx) => {
+                const exMsg = existing.messages[idx];
+                if (!exMsg) return;
+                const cImgs = Array.isArray(cMsg.images) ? cMsg.images : (cMsg.image ? [cMsg.image] : []);
+                const exImgs = Array.isArray(exMsg.images) ? exMsg.images : (exMsg.image ? [exMsg.image] : []);
+                const validExImgs = exImgs.filter(img => typeof img === 'string' && img && img !== '[data:image]' && !img.startsWith('[data:image'));
+                const hasCorrupted = cImgs.some(img => typeof img === 'string' && (img === '[data:image]' || img.startsWith('[data:image')));
+                if ((cImgs.length === 0 || hasCorrupted) && validExImgs.length > 0) {
+                  cMsg.images = validExImgs;
+                  cMsg.image = validExImgs[0];
+                  if (session.messages && session.messages[idx]) {
+                    session.messages[idx].images = validExImgs;
+                    session.messages[idx].image = validExImgs[0];
+                  }
+                }
+              });
+            }
+            store.put(cleanSession);
+          };
+          getReq.onerror = () => {
+            store.put(cleanSession);
+          };
           tx.oncomplete = () => resolve(true);
           tx.onerror = (err) => {
             console.warn('ChatDB.saveSession tx error:', err);
@@ -4410,7 +4455,32 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           const store = tx.objectStore('sessions');
           sessions.forEach(s => {
             const clean = sanitizeSessionForCloning(s);
-            if (clean && clean.id) store.put(clean);
+            if (clean && clean.id) {
+              const getReq = store.get(clean.id);
+              getReq.onsuccess = () => {
+                const existing = getReq.result;
+                if (existing && Array.isArray(existing.messages) && Array.isArray(clean.messages)) {
+                  clean.messages.forEach((cMsg, idx) => {
+                    const exMsg = existing.messages[idx];
+                    if (!exMsg) return;
+                    const cImgs = Array.isArray(cMsg.images) ? cMsg.images : (cMsg.image ? [cMsg.image] : []);
+                    const exImgs = Array.isArray(exMsg.images) ? exMsg.images : (exMsg.image ? [exMsg.image] : []);
+                    const validExImgs = exImgs.filter(img => typeof img === 'string' && img && img !== '[data:image]' && !img.startsWith('[data:image'));
+                    const hasCorrupted = cImgs.some(img => typeof img === 'string' && (img === '[data:image]' || img.startsWith('[data:image')));
+                    if ((cImgs.length === 0 || hasCorrupted) && validExImgs.length > 0) {
+                      cMsg.images = validExImgs;
+                      cMsg.image = validExImgs[0];
+                      if (s.messages && s.messages[idx]) {
+                        s.messages[idx].images = validExImgs;
+                        s.messages[idx].image = validExImgs[0];
+                      }
+                    }
+                  });
+                }
+                store.put(clean);
+              };
+              getReq.onerror = () => store.put(clean);
+            }
           });
           tx.oncomplete = () => resolve(true);
           tx.onerror = (err) => {
@@ -4868,8 +4938,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (!this.isDeviceBackendAvailable) return null;
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2500);
-        const res = await fetch('/api/sessions', {
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        const res = await fetch(getUniversalApiUrl('/api/sessions'), {
           headers: { 'X-User-ID': STATE.userId },
           signal: controller.signal
         });
@@ -4889,8 +4959,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (this.isDeviceBackendAvailable) {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3000);
-          const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+          const timeoutId = setTimeout(() => controller.abort(), 4000);
+          const res = await fetch(getUniversalApiUrl(`/api/sessions/${encodeURIComponent(id)}`), {
             headers: { 'X-User-ID': STATE.userId },
             signal: controller.signal
           });
@@ -4923,7 +4993,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         : session;
       if (this.isDeviceBackendAvailable) {
         try {
-          const res = await fetch('/api/sessions', {
+          const res = await fetch(getUniversalApiUrl('/api/sessions'), {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -4932,7 +5002,23 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             body: JSON.stringify({ ...cleanSession, userId: STATE.userId }),
             keepalive: true
           });
-          if (!res.ok) console.warn('[DeviceStorage] save gagal:', res.status);
+          if (res.ok) {
+            const data = await res.json().catch(() => null);
+            if (data && data.session && Array.isArray(data.session.messages)) {
+              data.session.messages.forEach((srvMsg, idx) => {
+                if (session.messages && session.messages[idx] && srvMsg.images) {
+                  const srvImgs = Array.isArray(srvMsg.images) ? srvMsg.images : [srvMsg.images];
+                  const hasUploads = srvImgs.some(img => typeof img === 'string' && img.startsWith('/uploads/'));
+                  if (hasUploads) {
+                    session.messages[idx].images = srvImgs;
+                    session.messages[idx].image = srvImgs[0];
+                  }
+                }
+              });
+            }
+          } else {
+            console.warn('[DeviceStorage] save gagal:', res.status);
+          }
         } catch (e) {
           console.warn('DeviceStorage saveSession failed:', e.message);
         }
@@ -4945,7 +5031,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (!id || !patch) return;
       if (this.isDeviceBackendAvailable) {
         try {
-          await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+          await fetch(getUniversalApiUrl(`/api/sessions/${encodeURIComponent(id)}`), {
             method: 'PATCH',
             headers: {
               'Content-Type': 'application/json',
@@ -4971,7 +5057,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (!id || !newTitle) return;
       if (this.isDeviceBackendAvailable) {
         try {
-          await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+          await fetch(getUniversalApiUrl(`/api/sessions/${encodeURIComponent(id)}`), {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -4995,7 +5081,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       if (!id) return;
       if (this.isDeviceBackendAvailable) {
         try {
-          await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
+          await fetch(getUniversalApiUrl(`/api/sessions/${encodeURIComponent(id)}`), {
             method: 'DELETE',
             headers: { 'X-User-ID': STATE.userId }
           });
@@ -5009,7 +5095,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     async clearAllSessions() {
       if (this.isDeviceBackendAvailable) {
         try {
-          await fetch('/api/sessions', {
+          await fetch(getUniversalApiUrl('/api/sessions'), {
             method: 'DELETE',
             headers: { 'X-User-ID': STATE.userId }
           });
@@ -5296,10 +5382,32 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             if (!validIds.has(s.id)) await ChatDB.deleteSession(s.id);
           }
         }
+        let didRestoreAnyImage = false;
+        validDbSessions.forEach(dbSess => {
+          const memSess = STATE.sessions.find(s => s.id === dbSess.id);
+          if (memSess && Array.isArray(memSess.messages) && Array.isArray(dbSess.messages)) {
+            preserveMultimodalImages(memSess.messages, dbSess.messages);
+            memSess.messages.forEach((mMsg, idx) => {
+              const dMsg = dbSess.messages[idx];
+              if (!dMsg) return;
+              const mImgs = Array.isArray(mMsg.images) ? mMsg.images : (mMsg.image ? [mMsg.image] : []);
+              const dImgs = Array.isArray(dMsg.images) ? dMsg.images : (dMsg.image ? [dMsg.image] : []);
+              const validDImgs = dImgs.filter(img => typeof img === 'string' && img && img !== '[data:image]' && !img.startsWith('[data:image'));
+              const mCorrupted = mImgs.length === 0 || mImgs.some(img => typeof img === 'string' && (img === '[data:image]' || img.startsWith('[data:image')));
+              if (mCorrupted && validDImgs.length > 0) {
+                mMsg.images = validDImgs;
+                mMsg.image = validDImgs[0];
+                didRestoreAnyImage = true;
+              }
+            });
+          }
+        });
         if (validDbSessions.length >= STATE.sessions.length) {
           STATE.sessions = validDbSessions;
           renderChatHistory();
           if (STATE.currentSessionId) renderCurrentSession(false);
+        } else if (didRestoreAnyImage && STATE.currentSessionId) {
+          renderCurrentSession(false);
         }
       }
 
@@ -5360,7 +5468,15 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
                   diskLast && memLast && (diskLast.content !== memLast.content || isDiskImageDisplaysChanged)
                 );
 
-                if (activeSess._isLazyDisk || diskLen > memLen || diskTime > memTime || isDiskContentChanged || (diskLast && diskLast.backgroundCompleted)) {
+                const hasCorruptedMemImages = Boolean(
+                  Array.isArray(activeSess.messages) &&
+                  activeSess.messages.some(m => {
+                    const imgs = Array.isArray(m.images) ? m.images : (m.image ? [m.image] : []);
+                    return imgs.some(img => typeof img === 'string' && (img === '[data:image]' || img.startsWith('[data:image')));
+                  })
+                );
+
+                if (activeSess._isLazyDisk || diskLen > memLen || diskTime > memTime || isDiskContentChanged || hasCorruptedMemImages || (diskLast && diskLast.backgroundCompleted)) {
                   // Multimodal Preservation: Pertahankan lampiran gambar di memori jika versi disk belum menyimpannya
                   if (Array.isArray(activeSess.messages) && Array.isArray(full.messages)) {
                     preserveMultimodalImages(full.messages, activeSess.messages);
@@ -5924,9 +6040,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
           messages: (s.messages || []).map((m, mIdx) => {
             let safeImages = undefined;
             if (Array.isArray(m.images)) {
-              safeImages = m.images.map(img => (typeof img === 'string' && img.startsWith('data:')) ? '[data:image]' : img);
+              safeImages = m.images.map(img => (typeof img === 'string' && img.startsWith('data:') && img.length > 60000) ? '[data:image]' : img);
             }
-            let safeImage = (typeof m.image === 'string' && m.image.startsWith('data:')) ? '[data:image]' : m.image;
+            let safeImage = (typeof m.image === 'string' && m.image.startsWith('data:') && m.image.length > 60000) ? '[data:image]' : m.image;
             let safeDocs = undefined;
             if (Array.isArray(m.docs)) {
               safeDocs = m.docs.map(d => ({ name: d.name, size: d.size }));
@@ -9149,12 +9265,14 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
   function resolveSafeAssetUrl(rawRef) {
     if (!rawRef || typeof rawRef !== 'string') return '';
     const trimmed = rawRef.trim();
-    if (trimmed.startsWith('/api/tools/image-asset/')) {
+    if (trimmed === '[data:image]' || trimmed.startsWith('[data:image')) return '';
+    if (trimmed.startsWith('data:image/')) return trimmed;
+    if (trimmed.startsWith('/api/tools/image-asset/') || trimmed.startsWith('/uploads/') || trimmed.startsWith('/api/')) {
       return getUniversalApiUrl(trimmed);
     }
     try {
       const u = new URL(trimmed);
-      if (u.protocol === 'https:' && !u.username && !u.password) {
+      if ((u.protocol === 'https:' || u.protocol === 'http:') && !u.username && !u.password) {
         return u.toString();
       }
     } catch (_) {}
@@ -9165,7 +9283,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     if (!rawUrl || typeof rawUrl !== 'string') return '';
     try {
       const u = new URL(rawUrl.trim());
-      if (u.protocol === 'https:' && !u.username && !u.password) {
+      if ((u.protocol === 'https:' || u.protocol === 'http:') && !u.username && !u.password) {
         return u.toString();
       }
     } catch (_) {}
@@ -9197,7 +9315,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     const grid = document.createElement('div');
     grid.className = 'zoz-grounded-grid';
 
-    const lightboxUrls = items.map((it) => resolveSafeAssetUrl(it.direct_media_url) || resolveSafeAssetUrl(it.preview_url) || resolveSafeAssetUrl(it.image_url) || resolveSafeAssetUrl(it.asset_ref)).filter(Boolean);
+    const lightboxUrls = items.map((it) => resolveSafeAssetUrl(it.direct_media_url) || resolveSafeAssetUrl(it.fallback_asset_ref) || resolveSafeAssetUrl(it.preview_url) || resolveSafeAssetUrl(it.image_url) || resolveSafeAssetUrl(it.asset_ref)).filter(Boolean);
 
     items.forEach((item, idx) => {
       const figure = document.createElement('figure');
@@ -9205,8 +9323,10 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       figure.dataset.imageId = String(item.image_id || '');
       figure.dataset.renderState = 'loading';
 
-      const primarySrc = resolveSafeAssetUrl(item.asset_ref) || resolveSafeAssetUrl(item.direct_media_url) || resolveSafeAssetUrl(item.preview_url) || resolveSafeAssetUrl(item.image_url);
-      const fallbackSrc = resolveSafeAssetUrl(item.fallback_asset_ref) || resolveSafeAssetUrl(item.direct_media_url) || resolveSafeAssetUrl(item.preview_url) || resolveSafeAssetUrl(item.image_url);
+      const directSrc = resolveSafeAssetUrl(item.direct_media_url) || resolveSafeAssetUrl(item.fallback_asset_ref) || resolveSafeAssetUrl(item.preview_url) || resolveSafeAssetUrl(item.image_url);
+      const proxySrc = resolveSafeAssetUrl(item.asset_ref);
+      const primarySrc = directSrc || proxySrc;
+      const fallbackSrc = (proxySrc && proxySrc !== primarySrc) ? proxySrc : (resolveSafeAssetUrl(item.fallback_asset_ref) || directSrc);
       const safeSourcePage = resolveSafeExternalLink(item.source_page_url);
 
       const renderFallbackNotice = (reasonCode) => {
@@ -14385,7 +14505,8 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
   }
 
   function createGeneratedImageCardHtml(item) {
-    const imgUrl = item.url || item.imageUrl || item.localUrl || '';
+    const rawImgUrl = item.url || item.imageUrl || item.localUrl || '';
+    const imgUrl = (typeof resolveChatImageSrc === 'function') ? (resolveChatImageSrc(rawImgUrl) || rawImgUrl) : rawImgUrl;
     const prompt = item.prompt || '';
     const model = item.model || 'Flux.1 Schnell';
     const duration = item.duration || item.stats?.duration || '3.5';
@@ -14563,7 +14684,10 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     const avatarIcon = role === 'user' ? '<i class="fa-solid fa-user-ninja"></i>' : '<i class="fa-solid fa-microchip-ai"></i>';
     const roleLabel = role === 'user' ? 'Anda' : 'Zoz AI';
 
-    const imgList = Array.isArray(image) ? image.filter(Boolean) : (image ? [image] : []);
+    const rawImgList = Array.isArray(image) ? image.filter(Boolean) : (image ? [image] : []);
+    const imgList = (typeof resolveChatImageSrc === 'function')
+      ? rawImgList.map(resolveChatImageSrc).filter(Boolean)
+      : rawImgList.filter(Boolean);
     let imageGalleryHtml = '';
     if (imgList.length > 0) {
       const gridClass = imgList.length === 1 ? 'grid-1' : (imgList.length === 2 ? 'grid-2' : 'grid-multi');
@@ -46249,7 +46373,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://latina-okay-registry-governments.trycloudflare.com',
+    activeTunnelUrl: 'https://survive-undertaken-cho-ian.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
