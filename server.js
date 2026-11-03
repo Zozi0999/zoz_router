@@ -3791,6 +3791,14 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
       userPrompt = extraMeta.prompt;
     }
 
+    let userImages = (rawSid && dbActiveChatTasks[rawSid]?.userImages) ? dbActiveChatTasks[rawSid].userImages : null;
+    if (!userImages && cleanSid && dbActiveChatTasks[cleanSid]?.userImages) {
+      userImages = dbActiveChatTasks[cleanSid].userImages;
+    }
+    if (!userImages && extraMeta && typeof extraMeta === 'object' && (extraMeta.images || extraMeta.image)) {
+      userImages = extraMeta.images || (extraMeta.image ? [extraMeta.image] : null);
+    }
+
 
     // ===== ANTREAN TULIS PER-SESI =====
     // Konteks (userPrompt & effectiveUid) sudah ditangkap sinkron DI ATAS — sebelum
@@ -3801,7 +3809,7 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
     const prevTail = sessionAppendQueues.get(cleanSid) || Promise.resolve();
     const tail = prevTail
       .catch(() => {})
-      .then(() => _appendSessionFileSerialized(cleanSid, effectiveUid || null, userPrompt, content, modelName, extraMeta))
+      .then(() => _appendSessionFileSerialized(cleanSid, effectiveUid || null, userPrompt, content, modelName, extraMeta, userImages))
       .catch(err => {
         console.warn(`[Background Chat Engine] Gagal menyimpan respons asisten ke sesi disk ${sessionId}:`, err && err.message);
         return false;
@@ -3817,15 +3825,48 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
   }
 }
 
+// Helper: Persist Base64 images to local /uploads/ files to keep session JSON files compact and fast
+function persistUserImagesToUploads(images) {
+  if (!images) return undefined;
+  const list = Array.isArray(images) ? images : [images];
+  if (list.length === 0) return undefined;
+  const out = [];
+  for (let idx = 0; idx < list.length; idx++) {
+    const img = list[idx];
+    if (typeof img === 'string' && img.trim()) {
+      if (img.startsWith('data:image')) {
+        try {
+          const mimeMatch = img.match(/^data:(image\/[a-zA-Z0-9.+_-]+);base64,/i);
+          const ext = mimeMatch ? (mimeMatch[1].split('/')[1] || 'webp') : 'webp';
+          const rawBase64 = img.replace(/^data:image\/[a-zA-Z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
+          const buffer = Buffer.from(rawBase64, 'base64');
+          if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+          const filename = `img_carried_${Date.now()}_${idx}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
+          const filePath = path.join(UPLOADS_DIR, filename);
+          fs.writeFileSync(filePath, buffer);
+          out.push(`/uploads/${filename}`);
+          continue;
+        } catch (e) {
+          out.push(img);
+          continue;
+        }
+      }
+      out.push(img);
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 // ===== BODY RMW FILE SESI — dijalankan HANYA di dalam antrean per-sesi =====
 // (lihat rantai antrean di appendAssistantMessageToSessionDisk). Path file dihitung
 // ulang di sini karena fungsi induk hanya menangkap konteks, tidak mengeksekusi I/O.
-async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, content, modelName, extraMeta) {
+async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, content, modelName, extraMeta, userImages = null) {
   const userDir = getUserSessionsDir(sanitizeUserId(effectiveUid || 'default'));
   const sessFile = path.join(userDir, `${cleanSid}.json`);
   const cleanUserPrompt = userPrompt
     ? String(userPrompt).replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim()
     : null;
+  const savedUserImgs = persistUserImagesToUploads(userImages);
 
   let sessData = null;
     if (fs.existsSync(sessFile)) {
@@ -3841,11 +3882,13 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
     if (!sessData || typeof sessData !== 'object') {
       const initialMsgs = [];
 
-      if (cleanUserPrompt) {
+      if (cleanUserPrompt || (savedUserImgs && savedUserImgs.length > 0)) {
         initialMsgs.push({
           id: 'msg_usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
           role: 'user',
-          content: cleanUserPrompt,
+          content: cleanUserPrompt || (savedUserImgs ? 'Analisis gambar terlampir ini.' : '...'),
+          images: savedUserImgs || undefined,
+          image: (savedUserImgs && savedUserImgs[0]) || undefined,
           timestamp: new Date(Date.now() - 3000).toISOString()
         });
       }
@@ -3968,13 +4011,18 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
     }
 
     // Jika ini giliran baru yang belum dicatat di disk, tambahkan pesan user terlebih dahulu
-    if (isDifferentTurn && cleanUserPrompt) {
+    if (isDifferentTurn && (cleanUserPrompt || (savedUserImgs && savedUserImgs.length > 0))) {
       msgs.push({
         id: 'msg_usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
         role: 'user',
-        content: cleanUserPrompt,
+        content: cleanUserPrompt || (savedUserImgs ? 'Analisis gambar terlampir ini.' : '...'),
+        images: savedUserImgs || undefined,
+        image: (savedUserImgs && savedUserImgs[0]) || undefined,
         timestamp: new Date(Date.now() - 2000).toISOString()
       });
+    } else if (lastUserMsg && savedUserImgs && savedUserImgs.length > 0 && (!lastUserMsg.images || lastUserMsg.images.length === 0)) {
+      lastUserMsg.images = savedUserImgs;
+      lastUserMsg.image = savedUserImgs[0];
     }
 
     const newMsg = {
@@ -6452,6 +6500,26 @@ async function requestHandler(req, res) {
       if (fs.existsSync(sessFile)) {
         try {
           const existing = JSON.parse(fs.readFileSync(sessFile, 'utf8'));
+          if (existing && Array.isArray(existing.messages) && Array.isArray(body.messages)) {
+            let mergedAnyImage = false;
+            body.messages.forEach((cMsg, idx) => {
+              const cImgs = Array.isArray(cMsg.images) && cMsg.images.length > 0 ? cMsg.images : (cMsg.image ? [cMsg.image] : null);
+              if (cImgs && cImgs.length > 0 && idx < existing.messages.length) {
+                const dMsg = existing.messages[idx];
+                const dImgs = Array.isArray(dMsg.images) && dMsg.images.length > 0 ? dMsg.images : (dMsg.image ? [dMsg.image] : null);
+                if (!dImgs || dImgs.length === 0) {
+                  const saved = persistUserImagesToUploads(cImgs);
+                  dMsg.images = saved;
+                  dMsg.image = (saved && saved[0]) || undefined;
+                  mergedAnyImage = true;
+                }
+              }
+            });
+            if (mergedAnyImage) {
+              fs.writeFileSync(sessFile, JSON.stringify(existing, null, 2), 'utf8');
+            }
+          }
+
           if (existing && existing.updatedAt && body.updatedAt) {
             const diskTime = new Date(existing.updatedAt).getTime();
             const clientTime = new Date(body.updatedAt).getTime();
@@ -6469,6 +6537,19 @@ async function requestHandler(req, res) {
       body.userId = effectiveUid;
       if (Array.isArray(body.messages)) {
         body.messageCount = body.messages.length;
+        // Compact base64 data URLs to uploads files so JSON file remains lightweight
+        body.messages.forEach(m => {
+          if (m && m.role === 'user' && (m.images || m.image)) {
+            const mImgs = Array.isArray(m.images) ? m.images : (m.image ? [m.image] : []);
+            if (mImgs.some(img => typeof img === 'string' && img.startsWith('data:image'))) {
+              const saved = persistUserImagesToUploads(mImgs);
+              if (saved) {
+                m.images = saved;
+                m.image = saved[0];
+              }
+            }
+          }
+        });
       }
       if (!fs.existsSync(userDir)) {
         fs.mkdirSync(userDir, { recursive: true });
@@ -10427,6 +10508,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       sessionId = sanitizeTaskKey(body.sessionId || req.headers['x-session-id'] || null);
       const chatUserId = reqUserId;
       let userPrompt = null;
+      let userImages = null;
       if (Array.isArray(body.messages) && body.messages.length > 0) {
         const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
         if (lastUser) {
@@ -10445,6 +10527,20 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           }
           rawUserPrompt = rawUserPrompt.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
           userPrompt = rawUserPrompt;
+
+          if (Array.isArray(lastUser.images) && lastUser.images.length > 0) {
+            userImages = lastUser.images;
+          } else if (lastUser.image) {
+            userImages = [lastUser.image];
+          } else if (Array.isArray(lastUser.content)) {
+            const extracted = [];
+            for (const part of lastUser.content) {
+              if (part && part.type === 'image_url' && part.image_url?.url) {
+                extracted.push(part.image_url.url);
+              }
+            }
+            if (extracted.length > 0) userImages = extracted;
+          }
         }
       }
       // Defense-in-depth: Gerbang Nol-Informasi Shannon di sisi OpenRouter
@@ -10508,6 +10604,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           model: body.model || 'Ollama Model',
           provider: 'ollama',
           userPrompt: userPrompt || null,
+          userImages: userImages || null,
           fullText: '',
           fullBytes: 0,
           fullEpoch: 0,
@@ -10534,7 +10631,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
       });
 
-      const dispatchOllamaUpstream = async (targetEndpoint, targetModel, targetAuthKey, allowLocalFallback) => {
+      const dispatchOllamaUpstream = async (targetEndpoint, targetModel, targetAuthKey, allowLocalFallback, canRetryCloud = true) => {
         if (/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])/i.test(targetEndpoint || '')) {
           targetModel = await resolveLocalDaemonCloudManifest(targetModel);
         }
@@ -10590,7 +10687,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               if (Array.isArray(body.tools) && body.tools.length > 0 && (statusCode === 400 || statusCode === 422 || statusCode === 500) && /tool/i.test(errData) && !res.headersSent && !clientDisconnected) {
                 delete body.tools;
                 delete body.tool_choice;
-                return dispatchOllamaUpstream(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback);
+                return dispatchOllamaUpstream(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback, canRetryCloud);
               }
 
               // Multi-Tier Fallback: Jika https://ollama.com mengembalikan HTTP >= 400 (misal 401/403/404/429/500),
@@ -10598,7 +10695,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
                 const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
                 console.warn(`[Ollama Cloud Failover] Upstream ${targetEndpoint} (${targetModel}) returned HTTP ${statusCode}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
-                return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
+                return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false, false);
               }
 
               if (sessionId) {
@@ -10613,9 +10710,13 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               } catch (e) {}
             });
             proxyRes.on('error', async (err) => {
+              if (canRetryCloud && targetEndpoint.includes('ollama.com') && !res.headersSent && (!clientDisconnected || sessionId)) {
+                console.warn(`[Ollama Cloud Retry] Network glitch on ${targetEndpoint}: ${err.message}. Retrying once...`);
+                return dispatchOllamaUpstream(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback, false);
+              }
               if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
                 const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
-                return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
+                return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false, false);
               }
               if (sessionId) {
                 delete dbActiveChatTasks[sessionId];
@@ -10822,10 +10923,14 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
         proxyReq.on('error', async (err) => {
           if (hasSplicedRefusal || horocycleHalted) return;
+          if (canRetryCloud && targetEndpoint.includes('ollama.com') && !res.headersSent && (!clientDisconnected || sessionId)) {
+            console.warn(`[Ollama Cloud Retry] Network error on ${targetEndpoint}: ${err.message}. Retrying once with fresh connection...`);
+            return dispatchOllamaUpstream(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback, false);
+          }
           if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
             const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
             console.warn(`[Ollama Cloud Failover] Network error on ${targetEndpoint}: ${err.message}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
-            return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
+            return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false, false);
           }
           if (sessionId && dbActiveChatTasks[sessionId]) {
             markChatTaskInterrupted(sessionId, err.message || 'Ollama connection error');
@@ -10836,7 +10941,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           }
           try {
             if (!res.headersSent) {
-              return sendJSON(res, 503, { error: `Ollama Stream Error (offline/unreachable): ${err.message}` });
+              const errHint = targetEndpoint.includes('ollama.com')
+                ? `Ollama Cloud Timeout (${err.message}). Koneksi ke server ollama.com sedang mengalami latensi atau timeout. Silakan ulangi sesaat lagi atau alihkan ke OpenRouter.`
+                : `Ollama Stream Error (offline/unreachable): ${err.message}`;
+              return sendJSON(res, 503, { error: errHint });
             }
             res.write(JSON.stringify({ error: `Ollama Stream Error: ${err.message}` }) + '\n');
             res.end();
@@ -10847,7 +10955,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         proxyReq.end();
       };
 
-      dispatchOllamaUpstream(customEndpoint, body.model, rawOllamaKey, true);
+      const isCloudTarget = Boolean(rawOllamaKey || (body.model && body.model.includes(':cloud')) || customEndpoint.includes('ollama.com'));
+      const allowLocalFallback = !isCloudTarget;
+      dispatchOllamaUpstream(customEndpoint, body.model, rawOllamaKey, allowLocalFallback, true);
     } catch (err) {
       // Pembersihan aman jika terjadi throw sinkron (ERR_INVALID_CHAR, payload error, socket write error)
       if (sessionId && dbActiveChatTasks[sessionId]) {
@@ -11170,6 +11280,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       sessionId = sanitizeTaskKey(body.sessionId || req.headers['x-session-id'] || null);
       const chatUserId = reqUserId;
       let userPrompt = null;
+      let userImages = null;
       if (Array.isArray(body.messages) && body.messages.length > 0) {
         const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
         if (lastUser) {
@@ -11188,6 +11299,20 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           }
           rawUserPrompt = rawUserPrompt.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
           userPrompt = rawUserPrompt;
+
+          if (Array.isArray(lastUser.images) && lastUser.images.length > 0) {
+            userImages = lastUser.images;
+          } else if (lastUser.image) {
+            userImages = [lastUser.image];
+          } else if (Array.isArray(lastUser.content)) {
+            const extracted = [];
+            for (const part of lastUser.content) {
+              if (part && part.type === 'image_url' && part.image_url?.url) {
+                extracted.push(part.image_url.url);
+              }
+            }
+            if (extracted.length > 0) userImages = extracted;
+          }
         }
       }
       // Defense-in-depth: Gerbang Nol-Informasi Shannon di sisi OpenRouter
@@ -11210,6 +11335,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           model: body.model || 'OpenRouter Model',
           provider: 'openrouter',
           userPrompt: userPrompt || null,
+          userImages: userImages || null,
           fullText: '',
           fullBytes: 0,
           fullEpoch: 0,

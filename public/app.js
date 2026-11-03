@@ -4980,7 +4980,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     async uploadFile(base64Data) {
       if (!this.isDeviceBackendAvailable || !base64Data) return null;
       try {
-        const res = await fetch('/api/upload', {
+        const uploadUrl = (typeof getUniversalApiUrl === 'function') ? getUniversalApiUrl('/api/upload') : '/api/upload';
+        const res = await fetch(uploadUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -5317,6 +5318,20 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
                 );
 
                 if (activeSess._isLazyDisk || diskLen > memLen || diskTime > memTime || isDiskContentChanged || (diskLast && diskLast.backgroundCompleted)) {
+                  // Multimodal Preservation: Pertahankan lampiran gambar di memori jika versi disk belum menyimpannya
+                  if (Array.isArray(activeSess.messages) && Array.isArray(full.messages)) {
+                    full.messages.forEach((dMsg, dIdx) => {
+                      const mMsg = activeSess.messages[dIdx];
+                      if (mMsg) {
+                        const mImgs = (Array.isArray(mMsg.images) && mMsg.images.length > 0) ? mMsg.images : (mMsg.image ? [mMsg.image] : null);
+                        const dImgs = (Array.isArray(dMsg.images) && dMsg.images.length > 0) ? dMsg.images : (dMsg.image ? [dMsg.image] : null);
+                        if (mImgs && (!dImgs || dImgs.length === 0)) {
+                          dMsg.images = mImgs;
+                          dMsg.image = mMsg.image || mImgs[0];
+                        }
+                      }
+                    });
+                  }
                   activeSess.messages = full.messages;
                   if (full.updatedAt) activeSess.updatedAt = full.updatedAt;
                   delete activeSess._isLazyDisk;
@@ -28630,7 +28645,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   // ("itu pilihan ganda, pilih lagi") membuat model buta terhadap soal di gambar sebelumnya.
   // Kini gambar user TERAKHIR (dalam jendela N pesan) ikut dibawa ulang selama giliran aktif
   // tidak melampirkan gambar baru.
-  const CARRIED_IMAGE_WINDOW = 10;
+  const CARRIED_IMAGE_WINDOW = 20;
   const msgImagesOf = (m) => (m ? (Array.isArray(m.images) && m.images.length > 0 ? m.images : (m.image ? [m.image] : [])) : []);
   function findCarriedImageTurnIndex(rawList, currentImages = []) {
     if (!Array.isArray(rawList) || rawList.length < 2) return -1;
@@ -28670,11 +28685,24 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     rawList.forEach((m, idx) => {
       const isLatestTurn = (idx === rawList.length - 1);
       const isCarriedTurn = (idx === carriedImageIdx);
-      const mImgs = (isLatestTurn && Array.isArray(currentImages) && currentImages.length > 0)
+      let mImgs = (isLatestTurn && Array.isArray(currentImages) && currentImages.length > 0)
         ? currentImages
         : ((isCarriedTurn && Array.isArray(m._carriedDataImages) && m._carriedDataImages.length > 0)
             ? m._carriedDataImages
             : msgImagesOf(m));
+
+      // Jika giliran terbaru adalah pertanyaan lanjutan tanpa gambar baru, dan terdapat carriedImageIdx,
+      // wariskan gambar acuan langsung ke giliran aktif agar model visi (Gemma 4, Ollama, OpenRouter)
+      // dapat langsung memproses piksel gambar pada prompt yang sedang dievaluasi!
+      if (isLatestTurn && (!mImgs || mImgs.length === 0) && carriedImageIdx !== -1) {
+        const carriedTarget = rawList[carriedImageIdx];
+        const carriedImgs = (carriedTarget && Array.isArray(carriedTarget._carriedDataImages) && carriedTarget._carriedDataImages.length > 0)
+          ? carriedTarget._carriedDataImages
+          : msgImagesOf(carriedTarget);
+        if (carriedImgs && carriedImgs.length > 0) {
+          mImgs = carriedImgs;
+        }
+      }
 
       let textContent = (m.content || '').trim();
       if (m.role === 'assistant') {
@@ -28896,6 +28924,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
                 if (raw) rawImages.push(raw);
               } else if (/^[A-Za-z0-9+/=]+$/.test(img.trim()) && img.trim().length > 50) {
                 rawImages.push(img.trim().replace(/[\r\n\s]/g, ''));
+              } else if (img.startsWith('/uploads/') || img.includes('/uploads/')) {
+                rawImages.push(img);
               }
             }
           });
