@@ -28625,18 +28625,56 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     return Math.max(1, Math.round(words * 1.33 + nonAlpha * 0.25));
   }
 
+  // ==================== VISUAL CONTEXT CARRY-OVER (MEMORI GAMBAR LINTAS GILIRAN) ====================
+  // Sebelumnya gambar HANYA dikirim pada giliran terakhir, sehingga pertanyaan lanjutan
+  // ("itu pilihan ganda, pilih lagi") membuat model buta terhadap soal di gambar sebelumnya.
+  // Kini gambar user TERAKHIR (dalam jendela N pesan) ikut dibawa ulang selama giliran aktif
+  // tidak melampirkan gambar baru.
+  const CARRIED_IMAGE_WINDOW = 10;
+  const msgImagesOf = (m) => (m ? (Array.isArray(m.images) && m.images.length > 0 ? m.images : (m.image ? [m.image] : [])) : []);
+  function findCarriedImageTurnIndex(rawList, currentImages = []) {
+    if (!Array.isArray(rawList) || rawList.length < 2) return -1;
+    const lastIdx = rawList.length - 1;
+    const latest = rawList[lastIdx];
+    const latestHasImages = (Array.isArray(currentImages) && currentImages.length > 0) || msgImagesOf(latest).length > 0;
+    if (latestHasImages) return -1;
+    const floor = Math.max(0, lastIdx - CARRIED_IMAGE_WINDOW);
+    for (let i = lastIdx - 1; i >= floor; i--) {
+      const m = rawList[i];
+      if (m && m.role === 'user' && msgImagesOf(m).length > 0) return i;
+    }
+    return -1;
+  }
+  async function hydrateCarriedHistoryImages(sessionOrMessages, currentImages = []) {
+    try {
+      const rawList = Array.isArray(sessionOrMessages?.messages) ? sessionOrMessages.messages : (Array.isArray(sessionOrMessages) ? sessionOrMessages : []);
+      const idx = findCarriedImageTurnIndex(rawList, currentImages);
+      if (idx < 0) return;
+      const target = rawList[idx];
+      const resolved = (await Promise.all(msgImagesOf(target).map(resolveImageToDataUrlSafe))).filter(Boolean);
+      // Non-enumerable: tidak ikut tersimpan ke disk/localStorage (payload sesi tetap ringan)
+      Object.defineProperty(target, '_carriedDataImages', { value: resolved, enumerable: false, configurable: true, writable: true });
+    } catch (e) {
+      console.warn('Carry-over gambar riwayat gagal dihidrasi:', e && e.message);
+    }
+  }
+
   function buildSanitizedMessagesPayload(sessionOrMessages, currentImages = [], engine = 'openrouter', systemContent = '', modelName = '') {
     const messagesPayload = [];
     const supportsSystem = doesModelSupportSystemRole(modelName, engine);
 
     const rawList = Array.isArray(sessionOrMessages?.messages) ? sessionOrMessages.messages : (Array.isArray(sessionOrMessages) ? sessionOrMessages : []);
     const validList = [];
+    const carriedImageIdx = findCarriedImageTurnIndex(rawList, currentImages);
 
     rawList.forEach((m, idx) => {
       const isLatestTurn = (idx === rawList.length - 1);
+      const isCarriedTurn = (idx === carriedImageIdx);
       const mImgs = (isLatestTurn && Array.isArray(currentImages) && currentImages.length > 0)
         ? currentImages
-        : (Array.isArray(m.images) && m.images.length > 0 ? m.images : (m.image ? [m.image] : []));
+        : ((isCarriedTurn && Array.isArray(m._carriedDataImages) && m._carriedDataImages.length > 0)
+            ? m._carriedDataImages
+            : msgImagesOf(m));
 
       let textContent = (m.content || '').trim();
       if (m.role === 'assistant') {
@@ -28668,6 +28706,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         role: m.role || 'user',
         content: textContent || (mImgs.length > 0 ? 'Analisis gambar terlampir ini.' : '...'),
         images: mImgs,
+        carryImages: isCarriedTurn,
         model: m.model || undefined,
         engine: m.engine || undefined
       });
@@ -28739,6 +28778,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         if (msg.images && msg.images.length > 0) {
           prev.images = [...(prev.images || []), ...msg.images];
         }
+        if (msg.carryImages) prev.carryImages = true;
         if (msg.model && !prev.model) prev.model = msg.model;
         if (msg.engine && !prev.engine) prev.engine = msg.engine;
       } else {
@@ -28779,9 +28819,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           itemTokens = estimateTurnTokens(item);
         }
 
-        if (currentBudgetTokens + itemTokens <= MAX_CONTEXT_TOKENS_BUDGET) {
+        if (currentBudgetTokens + itemTokens <= MAX_CONTEXT_TOKENS_BUDGET || item.carryImages) {
           keptIntermediate.unshift(item);
           currentBudgetTokens += itemTokens;
+        } else if (intermediateMessages.slice(0, i).some(x => x && x.carryImages)) {
+          // Lewati giliran ini tetapi lanjutkan pencarian agar giliran gambar acuan tidak terbuang
+          continue;
         } else {
           break;
         }
@@ -28801,6 +28844,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           if (msg.images && msg.images.length > 0) {
             prev.images = [...(prev.images || []), ...msg.images];
           }
+          if (msg.carryImages) prev.carryImages = true;
           if (msg.model && !prev.model) prev.model = msg.model;
           if (msg.engine && !prev.engine) prev.engine = msg.engine;
         } else {
@@ -28830,6 +28874,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     budgetedList.forEach((m, idx) => {
       const isLatestTurn = (idx === lastIdx);
       const imgs = m.images || [];
+      // Gambar dikirim pada giliran aktif ATAU pada giliran gambar acuan yang dibawa ulang
+      const shouldSendImages = isLatestTurn || Boolean(m.carryImages);
 
       let contentText = m.content || '...';
       if (m.role === 'assistant') {
@@ -28841,7 +28887,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
       if (engine === 'ollama') {
         const item = { role: m.role, content: contentText };
-        if (imgs.length > 0 && isLatestTurn) {
+        if (imgs.length > 0 && shouldSendImages) {
           const rawImages = [];
           imgs.forEach(img => {
             if (typeof img === 'string') {
@@ -28859,7 +28905,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       } else {
         // OpenRouter / OpenAI format
         if (imgs.length > 0 && m.role === 'user') {
-          if (isLatestTurn) {
+          if (shouldSendImages) {
             const contentParts = [
               { type: 'text', text: m.content || 'Jelaskan dan analisis gambar terlampir ini.' }
             ];
@@ -29187,6 +29233,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
       const resolvedImgs = await Promise.all(rawImgs.map(resolveImageToDataUrlSafe));
+      await hydrateCarriedHistoryImages(session, resolvedImgs);
       const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'ollama', systemContent, modelName);
       if (isDocRequest && !hasNegativePreview && messagesPayload.length > 0) {
         const lastMsg = messagesPayload[messagesPayload.length - 1];
@@ -30731,6 +30778,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       const rawImgs = Array.isArray(image) ? image : (image ? [image] : []);
       const resolvedImgs = await Promise.all(rawImgs.map(resolveImageToDataUrlSafe));
+      await hydrateCarriedHistoryImages(session, resolvedImgs);
       const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, effectiveInitialModel);
       if (isDocRequest && !hasNegativePreview && messagesPayload.length > 0) {
         const lastMsg = messagesPayload[messagesPayload.length - 1];
