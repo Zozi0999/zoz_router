@@ -4312,11 +4312,11 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   const activeOllamaKey = rawCandidateOllamaKey && !rawCandidateOllamaKey.startsWith('sk-or-') ? rawCandidateOllamaKey : null;
   let rawEp = (endpoint || '').trim();
 
-  // Pure Cloud Architecture: Hanya jika Auto-Router aktif dan tidak ada Ollama lokal,
-  // alihkan ke OpenRouter Cloud. Jika Auto-Router tidak aktif, hormati pilihan Ollama pengguna!
+  // Pure Cloud Architecture: Hanya jika Auto-Router aktif secara eksplisit dan tidak ada Ollama lokal,
+  // alihkan ke OpenRouter Cloud. DILARANG KERAS berpindah ke OpenRouter jika Auto-Router tidak aktif!
   const hasCustomOllama = Boolean(activeOllamaKey && rawEp && !rawEp.includes('127.0.0.1') && !rawEp.includes('localhost') && !rawEp.includes('ollama.com'));
   const hasOpenRouterKey = Boolean(openRouterKey || (apiKey && String(apiKey).startsWith('sk-or-')) || (rawCandidateOllamaKey && rawCandidateOllamaKey.startsWith('sk-or-')) || process.env.OPENROUTER_API_KEY);
-  if ((isAutoRouterActive || (rawCandidateOllamaKey && rawCandidateOllamaKey.startsWith('sk-or-'))) && !isOpenRouter && !hasCustomOllama && hasOpenRouterKey) {
+  if (isAutoRouterActive && !isOpenRouter && !hasCustomOllama && hasOpenRouterKey) {
     try {
       const mappedModel = mapOllamaModelToOpenRouter(rawModel);
       return await callLLMBackend({
@@ -10287,7 +10287,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       // Defense-in-depth: Gerbang Nol-Informasi Shannon di sisi server (mencegah unconditioned prior collapse)
       applyContextIntegrityGuard(body.messages);
 
-      const shouldUseCloudBridge = Boolean((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (isOpenRouterKeySupplied && !isCustomRemoteEndpoint));
+      // DILARANG KERAS memindahkan chat Ollama ke OpenRouter jika Auto-Router tidak diaktifkan secara eksplisit!
+      const isAutoRouterExplicit = Boolean(req.headers['x-auto-router'] === 'true' || body.isAutoRouter);
+      const shouldUseCloudBridge = Boolean(isAutoRouterExplicit && ((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (isOpenRouterKeySupplied && !isCustomRemoteEndpoint)));
 
       if (shouldUseCloudBridge) {
         // Pure Cloud Architecture Bridge:

@@ -1411,11 +1411,9 @@ export default {
         }
 
         const isLoopback = cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1');
-        // Cloud Bridge (OpenRouter fallback) HANYA dipakai jika pengguna TIDAK memiliki Ollama API Key / credit
-        // DAN target endpoint adalah localhost/loopback atau ollama.com.
-        // Jika pengguna MEMILIKI Ollama API Key (rawOllamaKey), mereka MEMILIKI kredit di Ollama, sehingga
-        // WAJIB diteruskan langsung ke endpoint Ollama resmi (https://ollama.com/api/chat) tanpa dibajak ke OpenRouter!
-        const shouldUseCloudBridge = !rawOllamaKey && (isLoopback || cleanEndpoint.includes('ollama.com'));
+        // DILARANG KERAS memindahkan chat Ollama ke OpenRouter jika Auto-Router tidak diaktifkan secara eksplisit!
+        const isAutoRouterExplicit = Boolean(request.headers.get('x-auto-router') === 'true' || body.isAutoRouter);
+        const shouldUseCloudBridge = Boolean(isAutoRouterExplicit && !rawOllamaKey && (isLoopback || cleanEndpoint.includes('ollama.com')));
 
         if (shouldUseCloudBridge) {
           // Pure Cloud Fallback: Hanya jika pengguna belum mengisi Ollama API Key

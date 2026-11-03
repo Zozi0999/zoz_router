@@ -29109,15 +29109,19 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   async function runOllamaStreaming(session, promptText, image, modelName, runOptions = {}) {
     const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
     if (IS_GITHUB_PAGES && !STATE.settings.ollamaApiKey && location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
-      const targetCloudModel = modelName.includes('/')
-        ? modelName
-        : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
-      return await runOpenRouterStreaming(session, promptText, image, targetCloudModel, {
-        displayModel: modelName,
-        engineLabel: 'Ollama Cloud',
-        engineMode: 'ollama',
-        ...runOptions
-      });
+      const isAutoRouter = (STATE.mode === 'auto') || Boolean(runOptions && runOptions.isAutoRouter);
+      if (isAutoRouter) {
+        const targetCloudModel = modelName.includes('/')
+          ? modelName
+          : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
+        return await runOpenRouterStreaming(session, promptText, image, targetCloudModel, {
+          displayModel: modelName,
+          engineLabel: 'Ollama Cloud',
+          engineMode: 'ollama',
+          ...runOptions
+        });
+      }
+      throw new Error('mixed_content: Browser HTTPS memblokir koneksi ke Ollama localhost HTTP di GitHub Pages. Hubungkan Cloudflare Tunnel aktif atau masukkan Ollama API Key.');
     }
 
     setGeneratingState(true);
@@ -29352,8 +29356,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         requestBody.apiKey = cleanOllamaKey;
         requestBody.ollamaApiKey = cleanOllamaKey;
       }
-      if (STATE.settings.openRouterKey) {
+      // DILARANG menyuntikkan OpenRouter key ke Ollama kecuali Auto-Router aktif!
+      const isAutoRouterCall = (STATE.mode === 'auto') || Boolean(runOptions && runOptions.isAutoRouter);
+      if (isAutoRouterCall && STATE.settings.openRouterKey) {
         requestBody.openRouterKey = STATE.settings.openRouterKey;
+        requestBody.isAutoRouter = true;
       }
 
       const headers = { 'Content-Type': 'application/json' };
@@ -29367,8 +29374,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         headers['Authorization'] = `Bearer ${cleanOllamaKey}`;
         headers['x-ollama-key'] = cleanOllamaKey;
       }
-      if (STATE.settings.openRouterKey) {
-        headers['x-openrouter-key'] = STATE.settings.openRouterKey;
+      if (isAutoRouterCall) {
+        headers['X-Auto-Router'] = 'true';
+        if (STATE.settings.openRouterKey) {
+          headers['x-openrouter-key'] = STATE.settings.openRouterKey;
+        }
       }
 
       let chatUrl = '/api/ollama/chat';
@@ -30450,7 +30460,8 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
           fetch(getUniversalApiUrl('/api/ollama/start'), { method: 'POST' }).catch(() => {});
         }
 
-        const isAutoRouterActive = (STATE.mode === 'auto') || Boolean(runOptions.isAutoRouter) || !DeviceStorage.isDeviceBackendAvailable || Boolean(STATE.settings.openRouterKey);
+        // DILARANG KERAS berpindah ke OpenRouter jika Auto-Router tidak diaktifkan oleh pengguna!
+        const isAutoRouterActive = (STATE.mode === 'auto') || Boolean(runOptions && runOptions.isAutoRouter);
         const allowCloudFallback = isAutoRouterActive && (runOptions ? (runOptions.autoCloudFallback !== false) : true);
         if (allowCloudFallback && isNotFoundOrOffline && tokenCount === 0 && (!streamRenderer || !streamRenderer.text)) {
           try { assistantRow.remove(); } catch (_) {}
