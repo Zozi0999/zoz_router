@@ -14515,7 +14515,13 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       statsHtml = `<span class="meta-model-badge">${escapeHtml(model)}</span>`;
     }
 
-    let safeContent = role === 'assistant' ? safeAssistantText(content || '') : (content || '');
+    let safeContent = (content || '');
+    if (typeof safeContent === 'string') {
+      safeContent = safeContent.replace(MODEL_TAG_REGEX, '').trim();
+    }
+    if (role === 'assistant') {
+      safeContent = safeAssistantText(safeContent);
+    }
     if (role === 'user' && docs && Array.isArray(docs) && docs.length > 0 && typeof safeContent === 'string') {
       if (/^\[File:\s*[^\]]+\]$/i.test(safeContent.trim())) {
         safeContent = '';
@@ -20696,7 +20702,16 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
     if (!session || !Array.isArray(session.messages)) return false;
     let mutated = false;
     session.messages.forEach((msg) => {
-      if (!msg || msg.role !== 'assistant') return;
+      if (!msg) return;
+      if (typeof msg.content === 'string' && MODEL_TAG_REGEX.test(msg.content)) {
+        msg.content = msg.content.replace(MODEL_TAG_REGEX, '').trim();
+        mutated = true;
+      }
+      if (typeof msg.displayContent === 'string' && MODEL_TAG_REGEX.test(msg.displayContent)) {
+        msg.displayContent = msg.displayContent.replace(MODEL_TAG_REGEX, '').trim();
+        mutated = true;
+      }
+      if (msg.role !== 'assistant') return;
       const content = String(msg.content || '');
       const NAKED_HTML_START = /^<(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form|template)\b/im;
       const hasCodeLeak = content.includes('<<<ZOZ_') ||
@@ -25335,10 +25350,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       content: (typeof d.content === 'string' && d.content.length <= 500000) ? d.content : undefined,
       isAutoConvertedMarkdown: Boolean(d.isAutoConvertedMarkdown)
     }));
+    const cleanUserContent = typeof text === 'string' ? text.replace(MODEL_TAG_REGEX, '').trim() : text;
+    const cleanDisplayPrompt = typeof displayPrompt === 'string' ? displayPrompt.replace(MODEL_TAG_REGEX, '').trim() : displayPrompt;
     const userMsg = {
       role: 'user',
-      content: text,
-      displayContent: displayPrompt,
+      content: cleanUserContent,
+      displayContent: cleanDisplayPrompt,
       docs: docsMeta.length > 0 ? docsMeta : undefined,
       images: images,
       image: image,
