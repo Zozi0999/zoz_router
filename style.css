@@ -2378,25 +2378,30 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 }
 
 .message-bubble {
-  padding: 12px 18px;
+  padding: 14px 20px;
   border-radius: var(--radius-lg);
-  font-size: 0.92rem;
-  line-height: 1.65;
+  font-size: 1rem;
+  line-height: 1.68;
+  letter-spacing: 0.15px;
   position: relative;
   user-select: text !important;
   -webkit-user-select: text !important;
 }
 
 .message-row.user .message-bubble {
-  background: linear-gradient(135deg, rgba(0, 240, 255, 0.12), rgba(0, 255, 194, 0.06));
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.14), rgba(0, 255, 194, 0.08));
   border: 1.5px solid var(--neon-cyan);
   color: #FFF;
   border-top-right-radius: 4px;
+  border-radius: 18px 18px 4px 18px;
   box-shadow: 0 4px 18px rgba(0, 240, 255, 0.16);
   width: fit-content;
   max-width: 100%;
   margin-left: auto;
   text-align: left;
+  font-size: 1rem;
+  line-height: 1.6;
+  padding: 12px 18px;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
@@ -2424,9 +2429,10 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   border: 1px solid var(--border-subtle);
 }
 
-/* Markdown typography inside assistant bubble */
+/* Markdown typography inside assistant bubble (Meta AI grade readability) */
 .message-bubble p {
-  margin-bottom: 10px;
+  margin-bottom: 14px;
+  line-height: 1.68;
 }
 .message-bubble p:last-child {
   margin-bottom: 0;
@@ -2434,8 +2440,9 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 
 .message-bubble h1, .message-bubble h2, .message-bubble h3 {
   font-family: var(--font-display);
-  margin: 14px 0 8px;
+  margin: 18px 0 10px;
   color: #FFF;
+  line-height: 1.4;
 }
 
 /* ==================== CODE BLOCKS & COPY BUTTONS ==================== */
@@ -2572,26 +2579,30 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 
 .message-bubble strong, .message-bubble b {
   color: #FFFFFF;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: 0.15px;
 }
 
 .message-bubble blockquote {
   border-left: 3px solid #00F0FF;
   background: rgba(0, 240, 255, 0.06);
-  padding: 8px 14px;
+  padding: 10px 16px;
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   color: #D1D8E6;
-  margin: 10px 0;
+  margin: 14px 0;
+  font-size: 0.98rem;
+  line-height: 1.65;
 }
 
 .message-bubble ul, .message-bubble ol {
-  padding-left: 22px;
-  margin-bottom: 10px;
+  padding-left: 24px;
+  margin-bottom: 14px;
 }
 
 .message-bubble li {
-  margin-bottom: 4px;
+  margin-bottom: 8px;
   color: var(--text-main);
+  line-height: 1.65;
 }
 
 .message-bubble table {
@@ -5309,24 +5320,25 @@ body.mobile-sidebar-open #sidebar.open + .sidebar-backdrop {
     font-size: 0.8rem;
   }
 
-  /* Chat Bubbles */
+  /* Chat Bubbles (Optimized Meta AI-Grade Readability on Mobile) */
   .message-row {
-    margin-bottom: 12px;
-    gap: 8px;
+    margin-bottom: 18px;
+    gap: 10px;
   }
 
   .message-avatar {
-    width: 28px;
-    height: 28px;
-    font-size: 0.75rem;
+    width: 32px;
+    height: 32px;
+    font-size: 0.8rem;
+    flex-shrink: 0;
   }
 
   .message-content-box {
-    max-width: calc(100% - 36px);
+    max-width: calc(100% - 42px);
   }
 
   .message-row.user .message-content-box {
-    max-width: 78%;
+    max-width: 88%;
     align-items: flex-end;
     margin-left: auto;
   }
@@ -5335,28 +5347,105 @@ body.mobile-sidebar-open #sidebar.open + .sidebar-backdrop {
     width: fit-content;
     max-width: 100%;
     margin-left: auto;
+    font-size: 1.02rem;
+    line-height: 1.58;
+    padding: 11px 18px;
+    border-radius: 20px 20px 4px 20px;
+    background: linear-gradient(135deg, rgba(0, 240, 255, 0.16), rgba(0, 255, 194, 0.08));
     border: 1.5px solid var(--neon-cyan);
+    box-shadow: 0 4px 18px rgba(0, 240, 255, 0.18);
+    color: #FFFFFF;
+  }
+
+  .message-row.assistant .message-bubble {
+    background: rgba(14, 18, 28, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 16px 16px 16px 4px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
   }
 
   .message-meta {
-    font-size: 0.68rem;
-    margin-bottom: 2px;
+    font-size: 0.74rem;
+    margin-bottom: 4px;
+    gap: 6px;
   }
 
   .message-bubble {
-    padding: 10px 12px;
-    font-size: 0.86rem;
-    line-height: 1.5;
-    border-radius: 10px;
+    padding: 14px 18px;
+    font-size: 1.02rem;
+    line-height: 1.68;
+    letter-spacing: 0.12px;
+    border-radius: 14px;
     word-break: break-word;
     overflow-wrap: anywhere;
+    color: #F1F5F9;
+  }
+
+  .message-bubble p {
+    font-size: 1.02rem;
+    line-height: 1.68;
+    margin-bottom: 14px;
+  }
+
+  .message-bubble p:last-child {
+    margin-bottom: 0;
+  }
+
+  .message-bubble ul, .message-bubble ol {
+    padding-left: 22px;
+    margin-bottom: 14px;
+  }
+
+  .message-bubble li {
+    font-size: 1.02rem;
+    line-height: 1.65;
+    margin-bottom: 9px;
+    color: #E2E8F0;
+  }
+
+  .message-bubble strong, .message-bubble b {
+    color: #FFFFFF;
+    font-weight: 600;
+    letter-spacing: 0.15px;
+  }
+
+  .message-bubble h1, .message-bubble h2, .message-bubble h3 {
+    font-size: 1.15rem;
+    line-height: 1.4;
+    margin: 16px 0 8px;
+    color: #FFFFFF;
+    font-weight: 700;
+  }
+
+  .message-bubble blockquote {
+    font-size: 0.96rem;
+    line-height: 1.6;
+    padding: 8px 14px;
+    margin: 12px 0;
   }
 
   .message-bubble pre {
     max-width: 100%;
-    font-size: 0.75rem;
-    padding: 8px;
+    font-size: 0.84rem;
+    padding: 10px 12px;
+    border-radius: 10px;
+    margin: 12px 0;
     overflow-x: auto;
+  }
+
+  .message-bubble pre code {
+    font-size: 0.84rem;
+    line-height: 1.52;
+  }
+
+  .message-actions-bar {
+    margin-top: 6px;
+    gap: 12px;
+  }
+
+  .msg-action-btn {
+    font-size: 0.78rem;
+    padding: 4px 8px;
   }
 
   .inline-edit-box {
