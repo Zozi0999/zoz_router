@@ -6146,6 +6146,7 @@ async function requestHandler(req, res) {
   // Front-end resmi (.vercel.app, localhost, Cloudflare domain, tunnel) atau ZOX_ALLOW_CROSS_ORIGIN=1 selalu diizinkan.
   const isExemptCrossOriginPath = pathname === '/api/ping' ||
                                  pathname === '/api/health' ||
+                                 pathname === '/api/storage-mode' ||
                                  pathname === '/api/youtube-info' ||
                                  pathname === '/api/video-probe' ||
                                  pathname.startsWith('/api/tools/') ||
@@ -6219,6 +6220,7 @@ async function requestHandler(req, res) {
     const isPublicUtility = (
       pathname === '/api' || pathname === '/api/' ||
       pathname === '/api/health' ||
+      pathname === '/api/storage-mode' ||
       pathname === '/api/ping' ||
       pathname === '/api/models' ||
       pathname === '/api/tags' ||
@@ -6272,8 +6274,8 @@ async function requestHandler(req, res) {
     });
   }
 
-  // Health check
-  if (pathname === '/api/health' && method === 'GET') {
+  // Health & Storage Mode check
+  if ((pathname === '/api/health' || pathname === '/api/storage-mode') && method === 'GET') {
     return sendJSON(res, 200, {
       status: 'online',
       name: 'Zoz Router',
@@ -9913,6 +9915,14 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     }
 
     rawEndpoint = rawEndpoint.trim();
+
+    // PURE CLOUD DETEKSI: Jika ada API Key Ollama Cloud (authHeader/rawHeaderKey)
+    // dan endpoint masih berupa localhost/127.0.0.1 atau loopback bawaan,
+    // alihkan otomatis 100% ke https://ollama.com secara Cloud Murni tanpa perlu ollama.exe lokal!
+    const isLoopbackCandidate = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(rawEndpoint);
+    if (rawHeaderKey && isLoopbackCandidate) {
+      rawEndpoint = 'https://ollama.com';
+    }
     if (!/^https?:\/\//i.test(rawEndpoint)) {
       rawEndpoint = (rawEndpoint.includes(':443') || rawEndpoint.includes('ollama.com') || rawEndpoint.includes('.com') || rawEndpoint.includes('.io') || rawEndpoint.includes('.ai') || rawEndpoint.includes('.app')) 
         ? `https://${rawEndpoint}` 
@@ -10033,9 +10043,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         });
       }
 
-      // If remote returned empty or failed, coba hidupkan Ollama jika target loopback
+      // If remote returned empty or failed, coba hidupkan Ollama HANYA jika target loopback dan TIDAK menggunakan API key Ollama Cloud
       const isLoopback = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(rawEndpoint);
-      if (isLoopback) {
+      if (isLoopback && !rawHeaderKey) {
         ensureOllamaService().catch(() => {});
       }
 

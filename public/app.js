@@ -8,6 +8,10 @@
 
   const TEXT_SAFETY = window.ZozTextSafety || null;
   const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):[^\]]*\]\s*/gi;
+  const stripModelTags = (str) => {
+    if (typeof str !== 'string' || !str) return '';
+    return str.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):[^\]]*\]\s*/gi, '').trim();
+  };
   const safeAssistantText = (text) => {
     if (typeof text !== 'string' || !text) return '';
     let out = TEXT_SAFETY ? TEXT_SAFETY.stripReasoningText(text) : text
@@ -15,7 +19,7 @@
       .replace(/\[(?:THOUGHT|REASONING)\][\s\S]*?(?:\[\/(?:THOUGHT|REASONING)\]|$)/gi, '')
       .replace(/<\/?(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
       .replace(/\[\/?(?:THOUGHT|REASONING)\]/gi, '');
-    return out.replace(MODEL_TAG_REGEX, '').trim();
+    return stripModelTags(out);
   };
 
   const IS_VERCEL = Boolean(location.hostname && location.hostname.endsWith('vercel.app'));
@@ -32,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://versus-charges-hwy-accessible.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://lafayette-ssl-massive-provide.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -42,6 +46,13 @@
 
   function getActiveTunnelUrl() {
     try {
+      if (isValidTunnelUrl(ACTIVE_CLOUDFLARE_TUNNEL)) {
+        try {
+          localStorage.setItem('zoz_last_tunnel_url', ACTIVE_CLOUDFLARE_TUNNEL);
+          localStorage.setItem('zoz_wa_api_url', ACTIVE_CLOUDFLARE_TUNNEL);
+        } catch (_) {}
+        return ACTIVE_CLOUDFLARE_TUNNEL;
+      }
       const saved = localStorage.getItem('zoz_last_tunnel_url') || localStorage.getItem('zoz_wa_api_url') || '';
       if (isValidTunnelUrl(saved)) {
         return saved.replace(/\/+$/, '');
@@ -4791,8 +4802,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       }
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
-        const res = await fetch('/api/health', {
+        const timeoutId = setTimeout(() => controller.abort(), 2500);
+        const healthUrl = getUniversalApiUrl('/api/health');
+        const res = await fetch(healthUrl, {
           method: 'GET',
           headers: { 'X-User-ID': STATE.userId },
           signal: controller.signal
@@ -4800,7 +4812,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
-          if (data && data.storage === 'device-disk') {
+          if (data && (data.storage === 'device-disk' || data.status === 'online')) {
             this.isDeviceBackendAvailable = true;
           }
         }
@@ -14246,9 +14258,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         return;
       }
       let textToDisplay = (msg.role === 'user' && typeof msg.displayContent === 'string') ? msg.displayContent : (msg.content || '');
-      if (typeof textToDisplay === 'string') {
-        textToDisplay = textToDisplay.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
-      }
+      textToDisplay = stripModelTags(textToDisplay);
       const imagesToDisplay = msg.images || (msg.image ? [msg.image] : null);
       if (imagesToDisplay && imagesToDisplay.length > 0 && /^📷 \[\d+ Foto Lampiran\]$/.test(textToDisplay.trim())) {
         textToDisplay = '';
@@ -14485,11 +14495,12 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     if (resolvedTimestamp) {
       row.dataset.reportDate = resolvedTimestamp;
     }
+    const cleanedInitialContent = stripModelTags(content);
     if (content) {
-      row.dataset.fullContent = role === 'assistant' ? safeAssistantText(content) : content;
+      row.dataset.fullContent = role === 'assistant' ? safeAssistantText(content) : cleanedInitialContent;
     }
     if (role === 'user' && extraMeta?.content) {
-      row.dataset.rawSessionContent = extraMeta.content;
+      row.dataset.rawSessionContent = stripModelTags(extraMeta.content);
     }
 
     const avatarIcon = role === 'user' ? '<i class="fa-solid fa-user-ninja"></i>' : '<i class="fa-solid fa-microchip-ai"></i>';
@@ -14559,10 +14570,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       statsHtml = `<span class="meta-model-badge">${escapeHtml(model)}</span>`;
     }
 
-    let safeContent = (content || '');
-    if (typeof safeContent === 'string') {
-      safeContent = safeContent.replace(MODEL_TAG_REGEX, '').trim();
-    }
+    let safeContent = stripModelTags(content);
     if (role === 'assistant') {
       safeContent = safeAssistantText(safeContent);
     }
@@ -20747,13 +20755,19 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
     let mutated = false;
     session.messages.forEach((msg) => {
       if (!msg) return;
-      if (typeof msg.content === 'string' && MODEL_TAG_REGEX.test(msg.content)) {
-        msg.content = msg.content.replace(MODEL_TAG_REGEX, '').trim();
-        mutated = true;
+      if (typeof msg.content === 'string') {
+        const cleaned = stripModelTags(msg.content);
+        if (cleaned !== msg.content) {
+          msg.content = cleaned;
+          mutated = true;
+        }
       }
-      if (typeof msg.displayContent === 'string' && MODEL_TAG_REGEX.test(msg.displayContent)) {
-        msg.displayContent = msg.displayContent.replace(MODEL_TAG_REGEX, '').trim();
-        mutated = true;
+      if (typeof msg.displayContent === 'string') {
+        const cleaned = stripModelTags(msg.displayContent);
+        if (cleaned !== msg.displayContent) {
+          msg.displayContent = cleaned;
+          mutated = true;
+        }
       }
       if (msg.role !== 'assistant') return;
       const content = String(msg.content || '');
@@ -23922,8 +23936,12 @@ ${blocks}
     let rawModels = [];
     let isRunning = false;
     try {
-      const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+      let ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const cleanOllamaKey = sanitizeOllamaApiKey(STATE.settings.ollamaApiKey || '');
+      // Jika ada API Key Ollama Cloud dan endpoint masih loopback bawaan, arahkan ke https://ollama.com secara Cloud Murni
+      if (cleanOllamaKey && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+        ep = 'https://ollama.com';
+      }
       const headers = {};
       if (cleanOllamaKey) {
         headers['Authorization'] = `Bearer ${cleanOllamaKey}`;
@@ -23970,9 +23988,11 @@ ${blocks}
       if (rawModels.length > 0) {
         STATE.ollamaModels = rawModels;
         try { localStorage.setItem('zoz_cached_ollama_models', JSON.stringify(rawModels)); } catch (_) {}
-        const statusText = isRunning ? `Ollama (${rawModels.length} Model Aktif)` : `Ollama (${rawModels.length} Model Siap)`;
+        const statusText = cleanOllamaKey
+          ? `Ollama Cloud (${rawModels.length} Model Aktif)`
+          : (isRunning ? `Ollama (${rawModels.length} Model Aktif)` : `Ollama (${rawModels.length} Model Siap)`);
         if (els.ollamaStatusVal) els.ollamaStatusVal.innerText = statusText;
-        if (els.ollamaIndicator) els.ollamaIndicator.className = isRunning ? 'status-indicator online' : 'status-indicator';
+        if (els.ollamaIndicator) els.ollamaIndicator.className = (isRunning || Boolean(cleanOllamaKey)) ? 'status-indicator online' : 'status-indicator';
 
         // v617: Invarian Matematis Integritas Model:
         // Jangan pernah menimpa model yang telah dipilih pengguna (misal gemma4:31b atau model cloud).
@@ -30820,10 +30840,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
 
         // DUAL-PATH RESILIENCE: Coba rute primer, jika terhambat CORS/network/401/404, otomatis coba rute sekunder.
-        // Hanya utamakan 'direct' jika pengguna memang telah memasukkan API Key OpenRouter di pengaturan lokal peramban.
+        // Pada perangkat seluler atau domain publik seperti z21.zozdocs.com, proxy backend selalu menjadi rute paling andal
+        // karena bebas dari blokir CORS, VPN seluler, dan kuota direct-origin browser.
         const hasUserKey = Boolean(STATE.settings.openRouterKey && String(STATE.settings.openRouterKey).trim());
-        const tryDirectFirst = Boolean(hasUserKey && (IS_GITHUB_PAGES || IS_VERCEL || !DeviceStorage.isDeviceBackendAvailable));
-        const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
+        const isPublicDomain = Boolean(IS_CLOUD_HOSTED || location.hostname.includes('zozdocs.com') || location.hostname.includes('trycloudflare.com'));
+        const routesToTry = (hasUserKey && !isPublicDomain) ? ['direct', 'proxy'] : (hasUserKey ? ['proxy', 'direct'] : ['proxy']);
 
         let routeErrDetail = '';
 
