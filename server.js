@@ -6267,7 +6267,7 @@ async function requestHandler(req, res) {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Private-Network': 'true',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-user-id, X-WA-User-ID, x-wa-pin, X-WA-PIN, x-terminal-pin, X-Terminal-Pin, Access-Control-Request-Private-Network'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, HTTP-Referer, x-ollama-key, x-api-key, x-openrouter-key, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-user-id, X-WA-User-ID, x-wa-pin, X-WA-PIN, x-terminal-pin, X-Terminal-Pin, x-auto-router, X-Auto-Router, Access-Control-Request-Private-Network'
     });
     return res.end();
   }
@@ -6314,6 +6314,8 @@ async function requestHandler(req, res) {
                           originHost.endsWith('localhost') ||
                           originHost.startsWith('127.0.0.1') ||
                           originHost.startsWith('[::1]') ||
+                          originHost.includes('zozdocs.com') ||
+                          originHost.endsWith('pages.dev') ||
                           originHost.endsWith('.trycloudflare.com') ||
                           reqHost.endsWith('.trycloudflare.com');
         crossSite = !isTrusted;
@@ -11065,7 +11067,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       };
 
       const isCloudTarget = Boolean(rawOllamaKey || (body.model && body.model.includes(':cloud')) || customEndpoint.includes('ollama.com'));
-      const allowLocalFallback = !isCloudTarget;
+      const allowLocalFallback = !isServerlessChat;
       dispatchOllamaUpstream(customEndpoint, body.model, rawOllamaKey, allowLocalFallback, true);
     } catch (err) {
       // Pembersihan aman jika terjadi throw sinkron (ERR_INVALID_CHAR, payload error, socket write error)

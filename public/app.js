@@ -86,6 +86,28 @@
     return (tunnelBase || VERCEL_BACKEND_GATEWAY) + cleanPath;
   }
 
+  // Otonomi Pemulihan Tunnel: Menyelidiki apakah Pages Edge telah men-deploy URL tunnel baru saat terjadi Failed to fetch
+  async function refreshActiveTunnelFromRemote() {
+    try {
+      const res = await fetch('/app.js?_t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const text = await res.text();
+        const match = text.match(/const ACTIVE_CLOUDFLARE_TUNNEL = '(https:\/\/[a-z0-9-]+\.trycloudflare\.com)';/);
+        if (match && match[1] && match[1] !== ACTIVE_CLOUDFLARE_TUNNEL) {
+          console.log('[Tunnel Auto-Healing] Menemukan URL tunnel baru dari deploy edge:', match[1]);
+          localStorage.setItem('zoz_last_tunnel_url', match[1]);
+          localStorage.setItem('zoz_wa_api_url', match[1]);
+          if (typeof showToast === 'function') {
+            showToast('Menyinkronkan tunnel server laptop baru... Memuat ulang.', 'info');
+          }
+          setTimeout(() => window.location.reload(true), 1200);
+          return match[1];
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   const extractDomainSafe = (url) => {
     try {
       const u = new URL(url);
@@ -30459,6 +30481,11 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
                                     errLower.includes('timed out') ||
                                     errLower.includes('timeout') ||
                                     err?.name === 'TypeError';
+
+        // Penyelidikan auto-heal jika koneksi fetch terputus karena rotasi tunnel
+        if (errLower.includes('failed to fetch') || errLower.includes('networkerror') || err?.name === 'TypeError') {
+          refreshActiveTunnelFromRemote().catch(() => {});
+        }
 
         // Pemicu auto-revive daemon Ollama lokal jika terdeteksi offline
         if (errLower.includes('offline') || errLower.includes('unreachable') || errLower.includes('503') || errLower.includes('econnrefused')) {
