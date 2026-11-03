@@ -6591,15 +6591,26 @@ async function requestHandler(req, res) {
           if (existing && Array.isArray(existing.messages) && Array.isArray(body.messages)) {
             let mergedAnyImage = false;
             body.messages.forEach((cMsg, idx) => {
-              const cImgs = Array.isArray(cMsg.images) && cMsg.images.length > 0 ? cMsg.images : (cMsg.image ? [cMsg.image] : null);
-              if (cImgs && cImgs.length > 0 && idx < existing.messages.length) {
+              if (idx < existing.messages.length) {
                 const dMsg = existing.messages[idx];
-                const dImgs = Array.isArray(dMsg.images) && dMsg.images.length > 0 ? dMsg.images : (dMsg.image ? [dMsg.image] : null);
-                if (!dImgs || dImgs.length === 0) {
-                  const saved = persistUserImagesToUploads(cImgs);
+                const cImgs = Array.isArray(cMsg.images) && cMsg.images.length > 0 ? cMsg.images : (cMsg.image ? [cMsg.image] : []);
+                const dImgs = Array.isArray(dMsg.images) && dMsg.images.length > 0 ? dMsg.images : (dMsg.image ? [dMsg.image] : []);
+                const validDImgs = dImgs.filter(img => typeof img === 'string' && img && img !== '[data:image]' && !img.startsWith('[data:image'));
+                const validCImgs = cImgs.filter(img => typeof img === 'string' && img && img !== '[data:image]' && !img.startsWith('[data:image'));
+
+                // Jika disk belum punya gambar tapi klien kirim gambar valid, simpan ke uploads disk
+                if ((!validDImgs || validDImgs.length === 0) && validCImgs.length > 0) {
+                  const saved = persistUserImagesToUploads(validCImgs);
                   dMsg.images = saved;
                   dMsg.image = (saved && saved[0]) || undefined;
+                  cMsg.images = saved;
+                  cMsg.image = (saved && saved[0]) || undefined;
                   mergedAnyImage = true;
+                }
+                // Jika klien kirim [data:image] atau gambar kosong, tapi disk punya gambar valid, lindungi dari penimpaan
+                else if (validDImgs.length > 0 && (validCImgs.length === 0 || cImgs.some(img => typeof img === 'string' && (img === '[data:image]' || img.startsWith('[data:image'))))) {
+                  cMsg.images = validDImgs;
+                  cMsg.image = validDImgs[0];
                 }
               }
             });
