@@ -32,7 +32,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://ftp-garmin-frame-understanding.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://versus-charges-hwy-accessible.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -520,6 +520,50 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     } catch (_) {}
   }
 
+  // Model Fallback & Offline Self-Healing Defaults
+  const FALLBACK_OLLAMA_MODELS = [
+    { name: 'llama3.2:3b', model: 'llama3.2:3b', tag: 'Lokal • Fast', capabilities: ['completion', 'tools'] },
+    { name: 'qwen2.5:1.5b', model: 'qwen2.5:1.5b', tag: 'Lokal • Ultra-Fast', capabilities: ['completion', 'tools'] },
+    { name: 'granite4.2:3b', model: 'granite4.2:3b', tag: 'Lokal • Reasoning', capabilities: ['completion', 'tools', 'thinking'] },
+    { name: 'deepseek-v4.1-flash:cloud', model: 'deepseek-v4.1-flash:cloud', tag: 'Ollama Cloud', capabilities: ['completion', 'thinking', 'tools'] },
+    { name: 'nemotron-3-ultra:cloud', model: 'nemotron-3-ultra:cloud', tag: 'Ollama Cloud', capabilities: ['completion', 'thinking', 'tools'] },
+    { name: 'gemma4:31b', model: 'gemma4:31b', tag: 'Ollama Cloud', capabilities: ['completion', 'tools'] }
+  ];
+
+  const FALLBACK_OPENROUTER_MODELS = [
+    { id: 'openrouter/free', name: 'OpenRouter Free Auto (Free)', tag: 'Free', cat: 'free', supportsTools: true },
+    { id: 'openrouter/auto', name: 'OpenRouter Auto Router', tag: 'Cloud', cat: 'flagship', supportsTools: true },
+    { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Meta Llama 3.3 70B (Free)', tag: 'Free', cat: 'free', supportsTools: true },
+    { id: 'google/gemini-2.0-flash-exp:free', name: 'Google Gemini 2.0 Flash (Free)', tag: 'Free', cat: 'free', supportsTools: true },
+    { id: 'deepseek/deepseek-r1:free', name: 'DeepSeek R1 Reasoning (Free)', tag: 'Free', cat: 'free', supportsTools: true },
+    { id: 'deepseek/deepseek-chat:free', name: 'DeepSeek V3 (Free)', tag: 'Free', cat: 'free', supportsTools: true },
+    { id: 'qwen/qwen-2.5-72b-instruct:free', name: 'Qwen 2.5 72B (Free)', tag: 'Free', cat: 'free', supportsTools: true },
+    { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', tag: 'Cloud', cat: 'flagship', supportsTools: true },
+    { id: 'openai/gpt-4o', name: 'OpenAI GPT-4o', tag: 'Cloud', cat: 'flagship', supportsTools: true }
+  ];
+
+  function getInitialOllamaModels() {
+    try {
+      const saved = localStorage.getItem('zoz_cached_ollama_models');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return [...FALLBACK_OLLAMA_MODELS];
+  }
+
+  function getInitialOpenRouterModels() {
+    try {
+      const saved = localStorage.getItem('zoz_cached_openrouter_models');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return [...FALLBACK_OPENROUTER_MODELS];
+  }
+
   // ==================== STATE MANAGEMENT ====================
   const STATE = {
     userId: getOrCreateUserId(),
@@ -547,8 +591,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     isSending: false, // Guard anti pengiriman ganda (Enter berulang saat masih ada await)
     abortController: null,
     soundEnabled: false,
-    ollamaModels: [],
-    openRouterModels: [],
+    ollamaModels: getInitialOllamaModels(),
+    openRouterModels: getInitialOpenRouterModels(),
     openRouterImageModels: [],
     openRouterMusicModels: [],
     availableImageModels: [...DEFAULT_IMAGE_MODELS],
@@ -23925,6 +23969,7 @@ ${blocks}
 
       if (rawModels.length > 0) {
         STATE.ollamaModels = rawModels;
+        try { localStorage.setItem('zoz_cached_ollama_models', JSON.stringify(rawModels)); } catch (_) {}
         const statusText = isRunning ? `Ollama (${rawModels.length} Model Aktif)` : `Ollama (${rawModels.length} Model Siap)`;
         if (els.ollamaStatusVal) els.ollamaStatusVal.innerText = statusText;
         if (els.ollamaIndicator) els.ollamaIndicator.className = isRunning ? 'status-indicator online' : 'status-indicator';
@@ -23958,21 +24003,31 @@ ${blocks}
         updateOllamaStatusUI();
         return true;
       } else {
-        STATE.ollamaModels = [];
-        if (els.badgeOllamaCount) els.badgeOllamaCount.innerText = '0';
-        if (els.ollamaStatusVal) els.ollamaStatusVal.innerText = 'Offline (Cek Ollama)';
-        if (els.ollamaIndicator) els.ollamaIndicator.className = 'status-indicator error';
+        // Pertahankan cache lokal / model bawaan agar dropdown tidak kosong melompong saat offline
+        if (!STATE.ollamaModels || STATE.ollamaModels.length === 0) {
+          STATE.ollamaModels = getInitialOllamaModels();
+        }
+        if (els.badgeOllamaCount) els.badgeOllamaCount.innerText = STATE.ollamaModels.length;
+        if (els.ollamaStatusVal) els.ollamaStatusVal.innerText = `Ollama (${STATE.ollamaModels.length} Model • Standby)`;
+        if (els.ollamaIndicator) els.ollamaIndicator.className = 'status-indicator';
         populateModelDropdown();
         if (STATE.activeCatalogTab === 'ollama') {
           renderLiveModelCatalog();
         }
         updateOllamaStatusUI();
+        // Coba auto-revive Ollama lewat gateway jika endpoint lokal loopback
+        if (/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+          fetch(getUniversalApiUrl('/api/ollama/start'), { method: 'POST' }).catch(() => {});
+        }
         return false;
       }
     } catch (e) {
-      if (els.ollamaStatusVal) els.ollamaStatusVal.innerText = 'Tidak Terhubung';
-      if (els.ollamaIndicator) els.ollamaIndicator.className = 'status-indicator error';
-      if (els.badgeOllamaCount) els.badgeOllamaCount.innerText = '0';
+      if (!STATE.ollamaModels || STATE.ollamaModels.length === 0) {
+        STATE.ollamaModels = getInitialOllamaModels();
+      }
+      if (els.ollamaStatusVal) els.ollamaStatusVal.innerText = `Ollama (${STATE.ollamaModels.length} Model • Standby)`;
+      if (els.ollamaIndicator) els.ollamaIndicator.className = 'status-indicator';
+      if (els.badgeOllamaCount) els.badgeOllamaCount.innerText = STATE.ollamaModels.length;
       updateOllamaStatusUI();
       return false;
     }
@@ -24237,16 +24292,14 @@ ${blocks}
 
   async function fetchOpenRouterModelsList() {
     try {
-      const url = IS_GITHUB_PAGES ? 'https://openrouter.ai/api/v1/models' : '/api/openrouter/models';
+      const url = getUniversalApiUrl('/api/openrouter/models');
       const headers = {};
       if (STATE.settings.openRouterKey) {
         headers['Authorization'] = `Bearer ${STATE.settings.openRouterKey}`;
       }
       let res = await fetch(url, { headers }).catch(() => null);
       if (!res || !res.ok) {
-        if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
-          res = await fetch('https://openrouter.ai/api/v1/models', { headers }).catch(() => null);
-        }
+        res = await fetch('https://openrouter.ai/api/v1/models', { headers }).catch(() => null);
       }
 
       const dynamicImgMap = new Map();
@@ -24275,7 +24328,10 @@ ${blocks}
               cat: (m.id.includes(':free') || m.id.endsWith('/free') || m.id === 'openrouter/free' || (m.pricing && parseFloat(m.pricing.prompt) === 0 && parseFloat(m.pricing.completion) === 0)) ? 'free' : 'flagship'
             };
           });
-          STATE.openRouterModels = mapped;
+          if (mapped && mapped.length > 0) {
+            STATE.openRouterModels = mapped;
+            try { localStorage.setItem('zoz_cached_openrouter_models', JSON.stringify(mapped)); } catch (_) {}
+          }
 
           // 2. Saring model visual/gambar secara dinamis dari endpoint
           data.data.filter(isOpenRouterImageModel).forEach(im => {
@@ -24334,12 +24390,10 @@ ${blocks}
 
       // Ambil katalog model khusus Image Generation OpenRouter secara live jika ada endpoint terdedikasi
       try {
-        const imgUrl = IS_GITHUB_PAGES ? 'https://openrouter.ai/api/v1/images/models' : '/api/openrouter/images/models';
+        const imgUrl = getUniversalApiUrl('/api/openrouter/images/models');
         let imgRes = await fetch(imgUrl, { headers }).catch(() => null);
         if (!imgRes || !imgRes.ok) {
-          if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
-            imgRes = await fetch('https://openrouter.ai/api/v1/images/models', { headers }).catch(() => null);
-          }
+          imgRes = await fetch('https://openrouter.ai/api/v1/images/models', { headers }).catch(() => null);
         }
         if (imgRes && imgRes.ok) {
           const imgData = await imgRes.json();
@@ -24381,6 +24435,9 @@ ${blocks}
       }
     } catch (e) {
       console.warn('Could not fetch dynamic OpenRouter model catalog:', e);
+      if (!STATE.openRouterModels || STATE.openRouterModels.length === 0) {
+        STATE.openRouterModels = getInitialOpenRouterModels();
+      }
     }
   }
 
@@ -30262,7 +30319,19 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
                                     errLower.includes('mixed_content') ||
                                     errLower.includes('unauthorized') ||
                                     errLower.includes('401') ||
+                                    errLower.includes('offline') ||
+                                    errLower.includes('unreachable') ||
+                                    errLower.includes('503') ||
+                                    errLower.includes('502') ||
+                                    errLower.includes('econnrefused') ||
+                                    errLower.includes('timed out') ||
+                                    errLower.includes('timeout') ||
                                     err?.name === 'TypeError';
+
+        // Pemicu auto-revive daemon Ollama lokal jika terdeteksi offline
+        if (errLower.includes('offline') || errLower.includes('unreachable') || errLower.includes('503') || errLower.includes('econnrefused')) {
+          fetch(getUniversalApiUrl('/api/ollama/start'), { method: 'POST' }).catch(() => {});
+        }
 
         const isAutoRouterActive = (STATE.mode === 'auto') || Boolean(runOptions.isAutoRouter) || !DeviceStorage.isDeviceBackendAvailable || Boolean(STATE.settings.openRouterKey);
         const allowCloudFallback = isAutoRouterActive && (runOptions ? (runOptions.autoCloudFallback !== false) : true);
@@ -46000,7 +46069,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://ftp-garmin-frame-understanding.trycloudflare.com',
+    activeTunnelUrl: 'https://versus-charges-hwy-accessible.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,

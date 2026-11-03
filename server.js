@@ -3335,8 +3335,42 @@ function sanitizeTaskKey(sid) {
   return (/^[a-zA-Z0-9_-]{1,128}$/.test(s)) ? s : null;
 }
 
-// F12: jeda minimum antar spawn `ollama serve` (endpoint tak ber-auth).
+// Watchdog & Self-Healing Ollama Local Service (Port 11434)
 let lastOllamaSpawnAt = 0;
+function checkOllamaPortOpen(timeoutMs = 1200) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host: '127.0.0.1', port: 11434 }, () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.setTimeout(timeoutMs);
+    socket.on('timeout', () => { socket.destroy(); resolve(false); });
+    socket.on('error', () => { resolve(false); });
+  });
+}
+
+async function ensureOllamaService() {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) return false;
+  const isUp = await checkOllamaPortOpen(1000);
+  if (isUp) return true;
+  const now = Date.now();
+  if (now - lastOllamaSpawnAt < 20000) return false; // Cooldown 20 detik
+  lastOllamaSpawnAt = now;
+  console.log('[Ollama Watchdog] Port 11434 belum aktif. Menjalankan auto-spawn `ollama serve`...');
+  try {
+    const child = spawn('ollama', ['serve'], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      shell: true
+    });
+    child.unref();
+    return true;
+  } catch (err) {
+    console.warn('[Ollama Watchdog] Gagal auto-spawn ollama:', err && err.message);
+    return false;
+  }
+}
 
 // F19: catat exception terakhir untuk /api/health agar kegagalan di luar request
 // tetap teramati tanpa harus membuka log (proses sengaja dipertahankan hidup).
@@ -9988,6 +10022,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
       if (result && result.models && result.models.length > 0) {
         const liveModels = result.models.filter(m => !isUnsupportedOllamaChatModel(m));
+        try {
+          fs.writeFile(path.join(DATA_DIR, 'ollama-models-cache.json'), JSON.stringify(liveModels, null, 2), () => {});
+        } catch (_) {}
         return sendJSON(res, 200, {
           models: liveModels,
           server_running: true,
@@ -9996,13 +10033,28 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         });
       }
 
-      // If remote returned empty or failed, return empty array
+      // If remote returned empty or failed, coba hidupkan Ollama jika target loopback
+      const isLoopback = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(rawEndpoint);
+      if (isLoopback) {
+        ensureOllamaService().catch(() => {});
+      }
+
+      // Pulihkan model dari disk cache agar UI pengguna tidak kosong saat Ollama sedang booting
+      let cachedModels = [];
+      try {
+        const cPath = path.join(DATA_DIR, 'ollama-models-cache.json');
+        if (fs.existsSync(cPath)) {
+          cachedModels = JSON.parse(fs.readFileSync(cPath, 'utf8'));
+        }
+      } catch (_) {}
+
       return sendJSON(res, 200, {
-        models: [],
+        models: Array.isArray(cachedModels) ? cachedModels : [],
         server_running: false,
         cloud_ready: false,
         cloud_auth: Boolean(authHeader),
-        note: 'Ollama offline atau tidak ada model terpasang'
+        cached: cachedModels.length > 0,
+        note: cachedModels.length > 0 ? 'Menggunakan cache model tersimpan (Ollama sedang dinyalakan)' : 'Ollama offline atau tidak ada model terpasang'
       });
     })().catch(err => {
       if (!res.headersSent) {
@@ -10071,32 +10123,16 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
   // Ollama: Start Background Service
   if (pathname === '/api/ollama/start' && method === 'POST') {
-    // F12: endpoint ini TANPA auth dan men-spawn proses (shell:true) — tanpa jeda,
-    // loop request membanjiri host dengan proses ollama/cmd.exe. Cooldown10 menit.
-    const spawnNow = Date.now();
-    if (spawnNow - lastOllamaSpawnAt < 10 * 60 * 1000) {
-      return sendJSON(res, 429, {
-        error: 'Ollama baru saja dipicu. Tunggu 10 menit sebelum memicu ulang.',
-        retryAfterSec: Math.ceil((10 * 60 * 1000 - (spawnNow - lastOllamaSpawnAt)) / 1000)
-      });
+    const isUp = await checkOllamaPortOpen(1000);
+    if (isUp) {
+      return sendJSON(res, 200, { status: 'already_running', message: 'Ollama sudah aktif pada 127.0.0.1:11434' });
     }
-    const { spawn } = require('child_process');
-    try {
-      const child = spawn('ollama', ['serve'], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true,
-        shell: true
-      });
-      child.on('error', (err) => {
-        console.warn('[Ollama Background Spawn Error]:', err?.message || err);
-      });
-      child.unref();
-      lastOllamaSpawnAt = spawnNow;
-      return sendJSON(res, 200, { status: 'starting', message: 'Perintah `ollama serve` telah dipicu di latar belakang.' });
-    } catch (e) {
-      return sendJSON(res, 500, { error: 'Gagal menjalankan ollama: ' + e.message });
-    }
+    const spawned = await ensureOllamaService();
+    return sendJSON(res, 200, {
+      status: 'starting',
+      message: 'Perintah `ollama serve` telah dipicu di latar belakang.',
+      spawned: spawned
+    });
   }
 
   // Ollama Cloud: Chat Completion (Streaming Proxy)
@@ -10818,9 +10854,20 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
   }
 
   // OpenRouter Models In-Memory Optimization & CDN Cache
+  const OPENROUTER_MODELS_CACHE_FILE = path.join(DATA_DIR, 'openrouter-models-cache.json');
   const OPENROUTER_MODELS_CACHE_TTL = 10 * 60 * 1000; // 10 menit
   let cachedOpenRouterModelsPayload = null;
   let cachedOpenRouterModelsAt = 0;
+
+  try {
+    if (fs.existsSync(OPENROUTER_MODELS_CACHE_FILE)) {
+      const saved = JSON.parse(fs.readFileSync(OPENROUTER_MODELS_CACHE_FILE, 'utf8'));
+      if (saved && Array.isArray(saved.data) && saved.data.length > 0) {
+        cachedOpenRouterModelsPayload = saved;
+        cachedOpenRouterModelsAt = Date.now();
+      }
+    }
+  } catch (_) {}
 
   // OpenRouter: Get Model List (Optimized & Compacted)
   if (pathname === '/api/openrouter/models' && method === 'GET') {
@@ -10883,6 +10930,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             };
             cachedOpenRouterModelsPayload = compactPayload;
             cachedOpenRouterModelsAt = Date.now();
+            try {
+              fs.writeFile(OPENROUTER_MODELS_CACHE_FILE, JSON.stringify(compactPayload, null, 2), () => {});
+            } catch (_) {}
             return sendJSON(res, 200, compactPayload);
           }
 
@@ -12330,6 +12380,11 @@ if (require.main === module && !process.env.VERCEL) {
       crawlPrimaryFeeds(false).catch(() => {});
     } catch (_) {}
 
+    // Auto-start persistent Ollama Service on laptop host
+    ensureOllamaService().then(ok => {
+      if (ok) console.log('[Ollama] Local Engine Watchdog Active (127.0.0.1:11434)');
+    }).catch(() => {});
+
     // Auto-start persistent Cloudflare Tunnel on laptop host
     startCloudflareTunnel().then(info => {
       if (info && info.active) {
@@ -12339,8 +12394,9 @@ if (require.main === module && !process.env.VERCEL) {
       console.warn('[Cloudflare] Tunnel auto-start deferred:', err && err.message);
     });
 
-    // Watchdog penjaga Cloudflare Tunnel agar selalu hidup dan sehat
+    // Watchdog penjaga Cloudflare Tunnel & Ollama Daemon agar selalu hidup dan sehat
     setInterval(() => {
+      ensureOllamaService().catch(() => {});
       if (isTunnelIntentionallyStopped) return;
       const pid = cloudflareTunnelPid;
       const deadProcess = !pid || !isPidAlive(pid);
