@@ -1252,10 +1252,11 @@ export default {
     }
 
     // Universal WhatsApp, AI & Daemon Tunnel Proxy (Edge Bridge)
-    const TUNNEL_GATEWAY_URL = 'https://roommate-flashers-flags-briefly.trycloudflare.com';
+    const TUNNEL_GATEWAY_URL = 'https://tue-graphics-favor-private.trycloudflare.com';
     let reqBodyBytes = null;
     const isEdgeNativeRoute = url.pathname === '/api/ping' ||
       url.pathname === '/api/health' ||
+      url.pathname === '/api/storage-mode' ||
       url.pathname === '/api/tools/search-images' ||
       url.pathname === '/api/search-images' ||
       url.pathname === '/api/tools/inspect-image' ||
@@ -1267,7 +1268,7 @@ export default {
     if (url.pathname.startsWith('/api/') && !isEdgeNativeRoute) {
       const targetUrl = TUNNEL_GATEWAY_URL + url.pathname + url.search;
       const fwdHeaders = new Headers(request.headers);
-      fwdHeaders.set('Host', 'roommate-flashers-flags-briefly.trycloudflare.com');
+      fwdHeaders.set('Host', 'tue-graphics-favor-private.trycloudflare.com');
       fwdHeaders.set('X-Forwarded-Host', url.host);
       fwdHeaders.set('X-Forwarded-Proto', 'https');
       fwdHeaders.set('X-Real-IP', request.headers.get('cf-connecting-ip') || '127.0.0.1');
@@ -1363,8 +1364,8 @@ export default {
       });
     }
 
-    // Health Check Endpoint
-    if (url.pathname === '/api/health' && request.method === 'GET') {
+    // Health & Storage Mode Check Endpoint
+    if ((url.pathname === '/api/health' || url.pathname === '/api/storage-mode') && request.method === 'GET') {
       return new Response(JSON.stringify({
         status: 'online',
         name: 'Zoz Router Cloud Gateway',
@@ -1432,9 +1433,31 @@ export default {
 
           const targetModel = mapOllamaModelToOpenRouter(body.model || 'qwen2.5:1.5b');
           const isStream = body.stream !== false;
+
+          // Multimodal Translation: Konversi skema images Ollama ke OpenRouter multimodal content parts
+          const normalizedOrMessages = (body.messages || []).map(m => {
+            if (!m) return m;
+            const imgs = Array.isArray(m.images) ? m.images : (m.image ? [m.image] : []);
+            if (imgs.length > 0 && m.role === 'user') {
+              const rawContent = (typeof m.content === 'string') ? m.content : '';
+              const textPart = { type: 'text', text: rawContent || 'Analisis gambar ini.' };
+              const imageParts = imgs.map(img => {
+                let url = img;
+                if (typeof img === 'string') {
+                  if (!img.startsWith('data:image') && !img.startsWith('http://') && !img.startsWith('https://')) {
+                    url = `data:image/webp;base64,${img}`;
+                  }
+                }
+                return { type: 'image_url', image_url: { url } };
+              });
+              return { ...m, content: [textPart, ...imageParts] };
+            }
+            return m;
+          });
+
           const openRouterPayload = {
             model: targetModel,
-            messages: body.messages || [],
+            messages: normalizedOrMessages,
             stream: isStream,
             provider: { allow_fallbacks: true }
           };
@@ -1583,9 +1606,32 @@ export default {
 
         const resolvedModel = body.model || 'llama3.2:3b';
 
+        // Multimodal Defense: Bersihkan skema images agar hanya berisi base64 valid untuk native Ollama
+        const sanitizedOllamaMessages = (body.messages || []).map(m => {
+          if (!m) return m;
+          const cleanM = { ...m };
+          if (Array.isArray(cleanM.images)) {
+            cleanM.images = cleanM.images
+              .map(img => {
+                if (typeof img === 'string') {
+                  if (img.startsWith('data:image')) {
+                    return img.replace(/^data:image\/[a-z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
+                  }
+                  if (/^[A-Za-z0-9+/=]+$/.test(img.trim()) && img.trim().length > 50) {
+                    return img.trim().replace(/[\r\n\s]/g, '');
+                  }
+                }
+                return null;
+              })
+              .filter(Boolean);
+            if (cleanM.images.length === 0) delete cleanM.images;
+          }
+          return cleanM;
+        });
+
         const outBody = {
           model: resolvedModel,
-          messages: body.messages || [],
+          messages: sanitizedOllamaMessages,
           stream: body.stream !== false
         };
         if (body.options && typeof body.options === 'object' && Object.keys(body.options).length > 0) {

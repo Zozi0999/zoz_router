@@ -14,7 +14,7 @@
 
   const THINKING_TAG_REGEX = /<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>[\s\S]*?(?:<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)>|$)/gi;
   const BRACKET_THINK_REGEX = /\[(?:THOUGHT|REASONING)\][\s\S]*?(?:\[\/(?:THOUGHT|REASONING)\]|$)/gi;
-  const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):[^\]]*\]\s*/gi;
+  const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|INSTRUKSI FORMAT WAJIB|Instruksi Sistem & Konteks|INTEGRITAS KONTEKS|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):(?:[^\[\]]|\[[^\]]*\])*\](?:\n\n|\s*)/gi;
 
   // ==================== PURE MATHEMATICAL TOKEN TRANSPORT & NON-EUCLIDEAN ENGINE ====================
   // Beroperasi murni pada lapisan Byte-Stream, Ruang Hilbert, & Manifold Poincaré Disk (K = -1)

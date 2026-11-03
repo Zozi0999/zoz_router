@@ -3864,7 +3864,7 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
   const userDir = getUserSessionsDir(sanitizeUserId(effectiveUid || 'default'));
   const sessFile = path.join(userDir, `${cleanSid}.json`);
   const cleanUserPrompt = userPrompt
-    ? String(userPrompt).replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim()
+    ? String(userPrompt).replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|INSTRUKSI FORMAT WAJIB|Instruksi Sistem & Konteks|INTEGRITAS KONTEKS|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):(?:[^\[\]]|\[[^\]]*\])*\](?:\n\n|\s*)/gi, '').trim()
     : null;
   const savedUserImgs = persistUserImagesToUploads(userImages);
 
@@ -10300,9 +10300,30 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
         const openRouterKey = `Bearer ${rawOrKey}`;
 
+        // Multimodal Translation: Konversi skema images Ollama ke OpenRouter multimodal content parts
+        const normalizedOrMessages = (body.messages || []).map(m => {
+          if (!m) return m;
+          const imgs = Array.isArray(m.images) ? m.images : (m.image ? [m.image] : []);
+          if (imgs.length > 0 && m.role === 'user') {
+            const rawContent = (typeof m.content === 'string') ? m.content : '';
+            const textPart = { type: 'text', text: rawContent || 'Analisis gambar ini.' };
+            const imageParts = imgs.map(img => {
+              let url = img;
+              if (typeof img === 'string') {
+                if (!img.startsWith('data:image') && !img.startsWith('http://') && !img.startsWith('https://')) {
+                  url = `data:image/webp;base64,${img}`;
+                }
+              }
+              return { type: 'image_url', image_url: { url } };
+            });
+            return { ...m, content: [textPart, ...imageParts] };
+          }
+          return m;
+        });
+
         const orPayload = {
           model: targetCloudModel,
-          messages: body.messages || [],
+          messages: normalizedOrMessages,
           stream: body.stream !== false,
           max_tokens: 32768,
           provider: { allow_fallbacks: Boolean(req.headers['x-auto-router'] === 'true' || body.isAutoRouter) }
@@ -10525,7 +10546,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               rawUserPrompt = rawUserPrompt.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
             }
           }
-          rawUserPrompt = rawUserPrompt.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
+          rawUserPrompt = rawUserPrompt.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|INSTRUKSI FORMAT WAJIB|Instruksi Sistem & Konteks|INTEGRITAS KONTEKS|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):(?:[^\[\]]|\[[^\]]*\])*\](?:\n\n|\s*)/gi, '').trim();
           userPrompt = rawUserPrompt;
 
           if (Array.isArray(lastUser.images) && lastUser.images.length > 0) {
@@ -11297,7 +11318,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               rawUserPrompt = rawUserPrompt.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
             }
           }
-          rawUserPrompt = rawUserPrompt.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
+          rawUserPrompt = rawUserPrompt.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|INSTRUKSI FORMAT WAJIB|Instruksi Sistem & Konteks|INTEGRITAS KONTEKS|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):(?:[^\[\]]|\[[^\]]*\])*\](?:\n\n|\s*)/gi, '').trim();
           userPrompt = rawUserPrompt;
 
           if (Array.isArray(lastUser.images) && lastUser.images.length > 0) {

@@ -7,10 +7,10 @@
   'use strict';
 
   const TEXT_SAFETY = window.ZozTextSafety || null;
-  const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):[^\]]*\]\s*/gi;
+  const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|INSTRUKSI FORMAT WAJIB|Instruksi Sistem & Konteks|INTEGRITAS KONTEKS|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):(?:[^\[\]]|\[[^\]]*\])*\](?:\n\n|\s*)/gi;
   const stripModelTags = (str) => {
     if (typeof str !== 'string' || !str) return '';
-    return str.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):[^\]]*\]\s*/gi, '').trim();
+    return str.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|INSTRUKSI FORMAT WAJIB|Instruksi Sistem & Konteks|INTEGRITAS KONTEKS|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):(?:[^\[\]]|\[[^\]]*\])*\](?:\n\n|\s*)/gi, '').trim();
   };
   const safeAssistantText = (text) => {
     if (typeof text !== 'string' || !text) return '';
@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://lafayette-ssl-massive-provide.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://tue-graphics-favor-private.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -4300,6 +4300,28 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     }
   }
 
+  // Multimodal Context Preservation Shield:
+  // Jangan biarkan sync sesi dari disk/server yang hanya menyimpan path /uploads/ atau array kosong
+  // menghapus Base64 data URL gambar yang sudah aktif di memori browser pengguna!
+  function preserveMultimodalImages(destMessages, sourceMessages) {
+    if (!Array.isArray(destMessages) || !Array.isArray(sourceMessages)) return;
+    destMessages.forEach((dMsg, idx) => {
+      const sMsg = sourceMessages[idx];
+      if (sMsg && dMsg) {
+        const sImgs = (Array.isArray(sMsg.images) && sMsg.images.length > 0) ? sMsg.images : (sMsg.image ? [sMsg.image] : null);
+        const dImgs = (Array.isArray(dMsg.images) && dMsg.images.length > 0) ? dMsg.images : (dMsg.image ? [dMsg.image] : null);
+        const sHasDataUrl = sImgs && sImgs.some(img => typeof img === 'string' && img.startsWith('data:image'));
+        if (sHasDataUrl) {
+          dMsg.images = sImgs;
+          dMsg.image = sMsg.image || sImgs[0];
+        } else if (sImgs && (!dImgs || dImgs.length === 0)) {
+          dMsg.images = sImgs;
+          dMsg.image = sMsg.image || sImgs[0];
+        }
+      }
+    });
+  }
+
   // ==================== INDEXEDDB CHAT VAULT ====================
   const ChatDB = {
     db: null,
@@ -5320,17 +5342,7 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
                 if (activeSess._isLazyDisk || diskLen > memLen || diskTime > memTime || isDiskContentChanged || (diskLast && diskLast.backgroundCompleted)) {
                   // Multimodal Preservation: Pertahankan lampiran gambar di memori jika versi disk belum menyimpannya
                   if (Array.isArray(activeSess.messages) && Array.isArray(full.messages)) {
-                    full.messages.forEach((dMsg, dIdx) => {
-                      const mMsg = activeSess.messages[dIdx];
-                      if (mMsg) {
-                        const mImgs = (Array.isArray(mMsg.images) && mMsg.images.length > 0) ? mMsg.images : (mMsg.image ? [mMsg.image] : null);
-                        const dImgs = (Array.isArray(dMsg.images) && dMsg.images.length > 0) ? dMsg.images : (dMsg.image ? [dMsg.image] : null);
-                        if (mImgs && (!dImgs || dImgs.length === 0)) {
-                          dMsg.images = mImgs;
-                          dMsg.image = mMsg.image || mImgs[0];
-                        }
-                      }
-                    });
+                    preserveMultimodalImages(full.messages, activeSess.messages);
                   }
                   activeSess.messages = full.messages;
                   if (full.updatedAt) activeSess.updatedAt = full.updatedAt;
@@ -5538,6 +5550,9 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
             if (matchedSession) {
               const fullDisk = await DeviceStorage.getSession(matchedSession.id);
               if (fullDisk && Array.isArray(fullDisk.messages)) {
+                if (Array.isArray(matchedSession.messages)) {
+                  preserveMultimodalImages(fullDisk.messages, matchedSession.messages);
+                }
                 matchedSession.messages = fullDisk.messages;
                 delete matchedSession._isLazyDisk;
                 matchedSession.userId = STATE.userId;
@@ -13538,6 +13553,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         );
 
         if (targetSession._isLazyDisk || diskLen !== memLen || diskTime > memTime || isDiskContentChanged || (diskLast && diskLast.backgroundCompleted)) {
+          if (Array.isArray(targetSession.messages)) {
+            preserveMultimodalImages(fullSess.messages, targetSession.messages);
+          }
           targetSession.messages = fullSess.messages;
           if (fullSess.updatedAt) targetSession.updatedAt = fullSess.updatedAt;
           delete targetSession._isLazyDisk;
@@ -14227,6 +14245,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         DeviceStorage.getSession(session.id).then(full => {
           session._isHydrating = false;
           if (full && Array.isArray(full.messages)) {
+            if (Array.isArray(session.messages)) {
+              preserveMultimodalImages(full.messages, session.messages);
+            }
             session.messages = full.messages;
             delete session._isLazyDisk;
             ChatDB.saveSession(session);
@@ -25411,6 +25432,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       try {
         const fullSess = await DeviceStorage.getSession(session.id);
         if (fullSess && Array.isArray(fullSess.messages)) {
+          if (Array.isArray(session.messages)) {
+            preserveMultimodalImages(fullSess.messages, session.messages);
+          }
           session.messages = fullSess.messages;
           delete session._isLazyDisk;
         }
@@ -28858,9 +28882,6 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
       }
 
-      if (keptIntermediate.length < intermediateMessages.length) {
-        anchorUser.content = `${anchorUser.content}\n\n[Catatan Konteks: Sebagian riwayat percakapan lama di antara turn awal dan turn terkini telah diringkas untuk mengoptimalkan jendela konteks token.]`.trim();
-      }
       const rawBudgeted = [anchorUser, ...keptIntermediate, ...tailMessages];
 
       // Terapkan Operator Alternasi Deterministik \Pi_{alt} untuk menjamin kepatuhan skema API AI 100%
@@ -28910,7 +28931,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         contentText = safeAssistantText(contentText);
       } else if (m.role === 'user' && typeof contentText === 'string') {
         // Jamin pesan giliran user selalu bersih dari injeksi tag silsilah teknis
-        contentText = contentText.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
+        contentText = stripModelTags(contentText);
       }
 
       if (engine === 'ollama') {
@@ -28924,8 +28945,6 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
                 if (raw) rawImages.push(raw);
               } else if (/^[A-Za-z0-9+/=]+$/.test(img.trim()) && img.trim().length > 50) {
                 rawImages.push(img.trim().replace(/[\r\n\s]/g, ''));
-              } else if (img.startsWith('/uploads/') || img.includes('/uploads/')) {
-                rawImages.push(img);
               }
             }
           });
@@ -36920,6 +36939,9 @@ Aturan:
       try {
         const fullSess = await DeviceStorage.getSession(session.id);
         if (fullSess && Array.isArray(fullSess.messages)) {
+          if (Array.isArray(session.messages)) {
+            preserveMultimodalImages(fullSess.messages, session.messages);
+          }
           session.messages = fullSess.messages;
           delete session._isLazyDisk;
         }
@@ -46168,7 +46190,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://versus-charges-hwy-accessible.trycloudflare.com',
+    activeTunnelUrl: 'https://tue-graphics-favor-private.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
