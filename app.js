@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://reaching-beginners-pcs-fed.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://geometry-rings-madonna-insider.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -46202,7 +46202,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://reaching-beginners-pcs-fed.trycloudflare.com',
+    activeTunnelUrl: 'https://geometry-rings-madonna-insider.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
