@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://geometry-rings-madonna-insider.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://sphere-eight-charitable-minolta.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -46222,7 +46222,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://geometry-rings-madonna-insider.trycloudflare.com',
+    activeTunnelUrl: 'https://sphere-eight-charitable-minolta.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
