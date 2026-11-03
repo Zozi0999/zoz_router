@@ -24106,18 +24106,20 @@ ${blocks}
 
     try {
       const isDirect = IS_GITHUB_PAGES;
-      const endpoint = isDirect ? 'https://openrouter.ai/api/v1/credits' : '/api/openrouter/credits';
+      const endpoint = isDirect ? 'https://openrouter.ai/api/v1/credits' : getUniversalApiUrl('/api/openrouter/credits');
       const headers = {
-        'Authorization': `Bearer ${key}`
+        'Authorization': `Bearer ${key}`,
+        'HTTP-Referer': location.origin || 'https://z21.zozdocs.com',
+        'X-Title': 'ZOZ Router'
       };
-      if (isDirect) {
-        headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
-        headers['X-Title'] = 'ZOZ Router';
-      }
 
-      const res = await fetch(endpoint, { headers, cache: 'no-store' });
+      let res = await fetch(endpoint, { headers, cache: 'no-store' }).catch(() => null);
+      if (!res || !res.ok) {
+        // Fallback langsung via CORS OpenRouter jika tunnel lokal sedang berotasi/offline
+        res = await fetch('https://openrouter.ai/api/v1/credits', { headers, cache: 'no-store' }).catch(() => null);
+      }
       let creditsData = null;
-      if (res.ok) {
+      if (res && res.ok) {
         const json = await res.json();
         creditsData = json.data || json;
       }
@@ -24125,9 +24127,12 @@ ${blocks}
       // Ambil metadata key & tier via auth/key
       let keyData = null;
       try {
-        const authEndpoint = isDirect ? 'https://openrouter.ai/api/v1/auth/key' : '/api/openrouter/auth-check';
-        const authRes = await fetch(authEndpoint, { headers, cache: 'no-store' });
-        if (authRes.ok) {
+        const authEndpoint = isDirect ? 'https://openrouter.ai/api/v1/auth/key' : getUniversalApiUrl('/api/openrouter/auth-check');
+        let authRes = await fetch(authEndpoint, { headers, cache: 'no-store' }).catch(() => null);
+        if (!authRes || !authRes.ok) {
+          authRes = await fetch('https://openrouter.ai/api/v1/auth/key', { headers, cache: 'no-store' }).catch(() => null);
+        }
+        if (authRes && authRes.ok) {
           const authJson = await authRes.json();
           keyData = authJson.data || authJson;
         }
@@ -28541,9 +28546,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       desc = `Penyedia upstream untuk model <code>${escapeHtml(modelName)}</code> sedang mengalami antrean penuh atau limit kapasitas sementara di OpenRouter (${escapeHtml(rawMsg)}).`;
       advice = `💡 <strong>Solusi Cepat:</strong> Gunakan rute otomatis cerdas <code>openrouter/free</code> (bebas biaya) atau <code>openrouter/auto</code> / <code>deepseek/deepseek-chat</code> (kredit berbayar) yang memiliki puluhan penyedia berlatensi kilat.`;
     } else if (isCorsOrNetwork && engine === 'ollama') {
-      title = `Jalur Cloud Sedang Menyinkronkan Model`;
-      desc = `Koneksi ke endpoint cloud untuk model <code>${escapeHtml(modelName)}</code> mengalami kendala jaringan sementara (${escapeHtml(rawMsg)}).`;
-      advice = `💡 <strong>Solusi Cepat:</strong> Klik <strong>Coba Kirim Ulang</strong> untuk menjalankan via jalur cloud tercepat.`;
+      title = `Koneksi ke Server Ollama Terputus`;
+      desc = `Koneksi ke server Ollama untuk model <code>${escapeHtml(modelName)}</code> mengalami kendala jaringan atau server laptop (${escapeHtml(rawMsg)}). Model TIDAK dialihkan ke provider lain.`;
+      advice = `💡 <strong>Solusi Cepat:</strong> Pastikan koneksi server laptop aktif, lalu klik <strong>Coba Kirim Ulang</strong>.`;
     } else if (isAuthError) {
       title = `Autentikasi / API Key Diperlukan`;
       desc = `API Key untuk provider <strong>${engine === 'ollama' ? 'Ollama Cloud' : 'OpenRouter'}</strong> tidak valid, belum diisi, atau kadaluarsa.`;
@@ -28553,8 +28558,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       desc = `Permintaan ditolak oleh server provider karena batas kuota sementara atau beban server sedang tinggi.`;
       advice = `💡 <strong>Solusi:</strong> Pilih model gratis lainnya dari katalog Model Hub atau tunggu beberapa detik sebelum mencoba kembali.`;
     } else if (isModelNotFound) {
-      title = `Model Cloud Sedang Dialihkan ke Provider Alternatif`;
-      desc = `ID Model <code>${escapeHtml(modelName)}</code> sedang dialihkan secara otomatis ke model cloud aktif yang setara di katalog Cloud Hub.`;
+      title = `Model ${escapeHtml(modelName)} Tidak Ditemukan`;
+      desc = `ID Model <code>${escapeHtml(modelName)}</code> tidak ditemukan di server ${engine === 'ollama' ? 'Ollama' : 'OpenRouter'}. Model TIDAK dialihkan ke model lain tanpa izin.`;
       advice = `💡 <strong>Solusi Cepat:</strong> Klik <strong>Coba Kirim Ulang</strong> atau pilih model resmi lainnya dari katalog Model Hub.`;
     } else if (isContextLength) {
       title = `Batas Panjang Konteks Terlampaui`;
@@ -30531,19 +30536,32 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
 
         const rescuedHtml = '';
 
-        bubbleText.innerHTML = `
-          ${rescuedHtml}
-          ${errorHtml}
-          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="btn btn-sm btn-primary switch-openrouter-btn" style="font-size:0.75rem;">
-              <i class="fa-solid fa-bolt"></i> Beralih & Jalankan via OpenRouter
+        const actionButtonsHtml = isAutoRouterActive
+          ? `
+            <button class="btn btn-sm btn-primary retry-send-btn" style="font-size:0.75rem;">
+              <i class="fa-solid fa-rotate-right"></i> Coba Kirim Ulang
             </button>
-            <button class="btn btn-sm btn-outline retry-send-btn" style="border-color:var(--neon-cyan); color:var(--neon-cyan); font-size:0.75rem;">
+            <button class="btn btn-sm btn-outline switch-openrouter-btn" style="border-color:var(--neon-cyan); color:var(--neon-cyan); font-size:0.75rem;">
+              <i class="fa-solid fa-bolt"></i> Beralih ke OpenRouter
+            </button>
+            <button class="btn btn-sm btn-outline open-settings-btn" style="border-color:var(--neon-amber); color:var(--neon-amber); font-size:0.75rem;">
+              <i class="fa-solid fa-gear"></i> Buka Pengaturan
+            </button>
+          `
+          : `
+            <button class="btn btn-sm btn-primary retry-send-btn" style="font-size:0.75rem;">
               <i class="fa-solid fa-rotate-right"></i> Coba Kirim Ulang
             </button>
             <button class="btn btn-sm btn-outline open-settings-btn" style="border-color:var(--neon-amber); color:var(--neon-amber); font-size:0.75rem;">
               <i class="fa-solid fa-gear"></i> Buka Pengaturan
             </button>
+          `;
+
+        bubbleText.innerHTML = `
+          ${rescuedHtml}
+          ${errorHtml}
+          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+            ${actionButtonsHtml}
           </div>
         `;
 
@@ -30555,14 +30573,16 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
           }
         }
 
-        bubbleText.querySelector('.switch-openrouter-btn')?.addEventListener('click', () => {
-          if (STATE.isGenerating || STATE.isSending) return;
-          assistantRow.remove();
-          setEngineMode('openrouter');
-          const targetFallback = mapOllamaModelToOpenRouter(modelName) || STATE.settings.openRouterModel || 'openrouter/free';
-          selectModel(targetFallback, 'openrouter');
-          runOpenRouterStreaming(session, promptText, image, targetFallback);
-        });
+        if (isAutoRouterActive) {
+          bubbleText.querySelector('.switch-openrouter-btn')?.addEventListener('click', () => {
+            if (STATE.isGenerating || STATE.isSending) return;
+            assistantRow.remove();
+            setEngineMode('openrouter');
+            const targetFallback = mapOllamaModelToOpenRouter(modelName) || STATE.settings.openRouterModel || 'openrouter/free';
+            selectModel(targetFallback, 'openrouter');
+            runOpenRouterStreaming(session, promptText, image, targetFallback);
+          });
+        }
 
         bubbleText.querySelector('.retry-send-btn')?.addEventListener('click', () => {
           if (STATE.isGenerating || STATE.isSending) return;

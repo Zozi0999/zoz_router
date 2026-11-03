@@ -228,6 +228,21 @@ async function syncTunnelUrlToEdge(url) {
     }
     edgeTunnelLastSyncedUrl = url;
     if (changedFiles.length === 0) return;
+
+    // Bump cache-buster pada index.html agar browser seluler pengguna otomatis flush cache & baca tunnel baru
+    const newEdgeVer = 'v' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '_t' + Date.now().toString(36);
+    for (const idxFile of ['index.html', path.join('public', 'index.html')]) {
+      const absIdx = path.join(__dirname, idxFile);
+      if (fs.existsSync(absIdx)) {
+        let idxContent = fs.readFileSync(absIdx, 'utf8');
+        idxContent = idxContent.replace(/(var currentVer = ')[^']+(')/, `$1${newEdgeVer}$2`)
+                               .replace(/(window\.__ZOZ_VERSION__ = ')[^']+(')/, `$1${newEdgeVer}$2`)
+                               .replace(/(<script src="app\.js\?v=)[^"]+(")/, `$1${newEdgeVer}$2`);
+        fs.writeFileSync(absIdx, idxContent, 'utf8');
+        changedFiles.push(idxFile.split(path.sep).join('/'));
+      }
+    }
+
     console.log(`[Edge Tunnel Sync] URL tunnel baru ditulis ke: ${changedFiles.join(', ')}`);
     if (!fs.existsSync(path.join(__dirname, '.git'))) return;
     const add = await runGit(['add', '--', ...changedFiles]);
