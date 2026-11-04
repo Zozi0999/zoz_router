@@ -2209,11 +2209,20 @@ Sebelum menulis satu kata pun jawaban kepada pengguna, Anda WAJIB mengawali gene
    - Pada soal pengecualian "kecuali..." (-1): jika seluruh opsi substantif ternyata BENAR/BISA digunakan sesuai klaim soal, maka tidak ada pengecualian di antara ketiganya sehingga "semua salah" WAJIB dipilih; sebaliknya jika ada tepat 1 opsi substantif yang salah/bukan kesalahan, pilih opsi tersebut.
 5. Tutup </think>, lalu tuliskan jawaban akhir yang bersih, akurat, dan sesuai format yang diminta pengguna.`;
     } else if (isAnalyticalQuery) {
-      calibrationDirective = `[PROTOKOL VERIFIKASI DEDUKTIF & KALIBRASI PROPORSIONAL WAJIB]:
-Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan blok <think>...</think> (disembunyikan otomatis oleh sistem):${multiImageNote}
-1. Identifikasi premis eksak, kendala tersembunyi, polaritas pertanyaan (termasuk negasi/pengecualian), serta syarat perlu dan syarat cukup.
-2. Evaluasi seluruh hipotesis/solusi kandidat dengan bobot awal seimbang tanpa memberi bobot berlebihan pada satu asumsi sempit, panjang kalimat, atau kemiripan kata permukaan; uji kasus tepi dan eliminasi klaim yang kontradiktif secara logis maupun matematis.
-3. Tutup </think>, lalu tuliskan jawaban akhir yang jernih, proporsional, dan terverifikasi.`;
+      calibrationDirective = `[PROTOKOL REGULASI MEKANISME PERHATIAN & INFERENSI DEDUKTIF MATEMATIKA MURNI — ZERO PERSONA]:
+Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan blok penalaran deduktif formal <think>...</think> (disembunyikan otomatis oleh sistem):${multiImageNote}
+1. REGULASI MATRIKS PERHATIAN TRANSFORMER (A = softmax(QK^T / sqrt(d_k))):
+   - Alokasikan bobot perhatian (Attention Saliency) tertinggi secara eksklusif pada variabel kunci pertanyaan: premis data faktual, kendala batas (boundary conditions), domain definisi f: X -> Y, syarat perlu (necessary conditions), syarat cukup (sufficient conditions), serta operator negasi ("bukan", "tidak", "kecuali").
+   - DILARANG KERAS mengalami dispersi perhatian (Attention Drift) ke token pengisi, analogi fiktif, atau asumsi spekulatif yang tidak dinyatakan dalam pertanyaan.
+2. KAUSALITAS TERARAH vs KORELASI SEMU (PEARL'S DO-CALCULUS):
+   - Dilarang menyimpulkan hubungan sebab-akibat hanya dari korelasi kata permukaan P(Y | X).
+   - Bentuk rantai penalaran kausal implikasi terarah: Premis P_0 -> Kondisi Batas C_k -> Transformasi f(P_0, C_k) -> Solusi Y*.
+3. INVARIAN AKSIOMATIS & VERIFIKASI ANTI-KONTRADIKSI:
+   - Terapkan hukum non-kontradiksi formal: ¬(P ∧ ¬P). Uji setiap langkah penurunan; jika terjadi kontradiksi dengan premis atau prinsip fisika/matematika terdefinisi, pangkas (prune) cabang tersebut secara langsung.
+4. ERADIKASI TOTAL PERSONA & ROLEPLAY:
+   - DILARANG mengadopsi persona fiktif, drama emosi, gaya bicara santai, atau basa-basi pembuka/penutup.
+   - Sampaikan HANYA substansi jawaban yang terverifikasi, presisi, berbasis penalaran matematika/ilmiah murni, dan terstruktur rapi.
+5. Tutup </think>, lalu sajikan jawaban akhir yang jernih, proporsional, dan terverifikasi secara formal.`;
     }
 
     return {
@@ -2245,11 +2254,7 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
       return { temperature: 0.25, top_p: 0.88, topP: 0.88 };
     }
     if (decisionProfile && decisionProfile.isAnalyticalQuery) {
-      const alphaA = recencyProfile && typeof recencyProfile.recencyAlpha === 'number'
-        ? recencyProfile.recencyAlpha
-        : 0.15;
-      const tempA = Math.max(0.20, Math.min(0.35, Number((0.28 - 0.08 * alphaA).toFixed(2))));
-      return { temperature: tempA, top_p: 0.90, topP: 0.90 };
+      return { temperature: 0.18, top_p: 0.90, topP: 0.90 };
     }
     const alpha = recencyProfile && typeof recencyProfile.recencyAlpha === 'number'
       ? recencyProfile.recencyAlpha

@@ -29653,21 +29653,28 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         : false;
       const isNemotron = isNemotronModel(modelName);
       const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy);
+      const isQuestionOrAnalytical = Boolean(
+        decisionCalibration.isAnalyticalQuery ||
+        decisionCalibration.isDiscreteChoice ||
+        decisionCalibration.isConceptualTaxonomy ||
+        isPureAlgebraConcept ||
+        isNemotron
+      );
 
-      // JIKA SESI MATEMATIKA MURNI / NEMOTRON: ERADIKASI TOTAL PERSONA & ROLEPLAY!
-      // Mandat absolut Kaisar: Persona dilarang keras, selesaikan dengan matematika murni!
-      let personaPrompt = isPureMathSession ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
+      // JIKA SESI MATEMATIKA MURNI / PERTANYAAN ANALITIS: ERADIKASI TOTAL PERSONA & ROLEPLAY!
+      // Mandat absolut Kaisar: Persona dilarang keras, perbaiki mekanisme perhatian dengan matematika murni!
+      let personaPrompt = (isPureMathSession || isQuestionOrAnalytical) ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
       const canRunAutonomous = !isPureMathSession && Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       let systemContent = getDynamicSystemTemporalContext();
 
-      if (personaPrompt && !isPureMathSession) {
+      if (personaPrompt && !isPureMathSession && !isQuestionOrAnalytical) {
         systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
       }
 
       const activeEngineModel = (typeof effectiveTargetModel !== 'undefined' ? effectiveTargetModel : (typeof modelName !== 'undefined' ? modelName : 'Model Aktif'));
 
-      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2) — MATIKAN JIKA SESI MATEMATIKA MURNI
-      if (!isPureMathSession && STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
+      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2) — MATIKAN JIKA SESI PERTANYAAN ANALITIS / MATEMATIKA MURNI
+      if (!isPureMathSession && !isQuestionOrAnalytical && STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.senseAndModulate(promptText);
         const chatDirective = ChatEndocrine.getSystemDirective(session, activeEngineModel);
         if (chatDirective) {
@@ -29675,8 +29682,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
       }
 
-      // BioEndocrine Neural Provenance & Endocrine Intelligence Context — MATIKAN JIKA SESI MATEMATIKA MURNI
-      if (!isPureMathSession && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
+      // BioEndocrine Neural Provenance & Endocrine Intelligence Context — MATIKAN JIKA SESI PERTANYAAN ANALITIS / MATEMATIKA MURNI
+      if (!isPureMathSession && !isQuestionOrAnalytical && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
         const endocrineContext = BioEndocrine.getConversationalContext(session, activeEngineModel, promptText);
         if (endocrineContext) {
           systemContent = `${systemContent}\n\n${endocrineContext}`;
@@ -29748,7 +29755,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       }
 
-      if (decisionCalibration.calibrationDirective && !wantsFile && !isDocRequest && !isStudioIsolated && !isPureMathSession) {
+      if (decisionCalibration.calibrationDirective && !wantsFile && !isDocRequest && !isStudioIsolated) {
         systemContent = systemContent
           ? `${systemContent}\n\n${decisionCalibration.calibrationDirective}`
           : decisionCalibration.calibrationDirective;
@@ -29815,7 +29822,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       }
 
-      if (personaPrompt && !isPureMathSession) {
+      if (personaPrompt && !isPureMathSession && !isQuestionOrAnalytical) {
         systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
       }
 
@@ -31398,21 +31405,28 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         : false;
       const isNemotron = isNemotronModel(modelName);
       const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy);
+      const isQuestionOrAnalytical = Boolean(
+        decisionCalibration.isAnalyticalQuery ||
+        decisionCalibration.isDiscreteChoice ||
+        decisionCalibration.isConceptualTaxonomy ||
+        isPureAlgebraConcept ||
+        isNemotron
+      );
 
-      // JIKA SESI MATEMATIKA MURNI / NEMOTRON: ERADIKASI TOTAL PERSONA & ROLEPLAY!
-      // Mandat absolut Kaisar: Persona dilarang keras, selesaikan dengan matematika murni!
-      let personaPrompt = isPureMathSession ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
+      // JIKA SESI MATEMATIKA MURNI / PERTANYAAN ANALITIS: ERADIKASI TOTAL PERSONA & ROLEPLAY!
+      // Mandat absolut Kaisar: Persona dilarang keras, perbaiki mekanisme perhatian dengan matematika murni!
+      let personaPrompt = (isPureMathSession || isQuestionOrAnalytical) ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
       const canRunAutonomous = !isPureMathSession && Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       let systemContent = getDynamicSystemTemporalContext();
 
-      if (personaPrompt && !isPureMathSession) {
+      if (personaPrompt && !isPureMathSession && !isQuestionOrAnalytical) {
         systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
       }
 
       const activeEngineModel = (typeof effectiveTargetModel !== 'undefined' ? effectiveTargetModel : (typeof modelName !== 'undefined' ? modelName : 'Model Aktif'));
 
-      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2) — MATIKAN JIKA SESI MATEMATIKA MURNI
-      if (!isPureMathSession && STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
+      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2) — MATIKAN JIKA SESI PERTANYAAN ANALITIS / MATEMATIKA MURNI
+      if (!isPureMathSession && !isQuestionOrAnalytical && STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.senseAndModulate(promptText);
         const chatDirective = ChatEndocrine.getSystemDirective(session, activeEngineModel);
         if (chatDirective) {
@@ -31420,8 +31434,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         }
       }
 
-      // BioEndocrine Neural Provenance & Endocrine Intelligence Context — MATIKAN JIKA SESI MATEMATIKA MURNI
-      if (!isPureMathSession && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
+      // BioEndocrine Neural Provenance & Endocrine Intelligence Context — MATIKAN JIKA SESI PERTANYAAN ANALITIS / MATEMATIKA MURNI
+      if (!isPureMathSession && !isQuestionOrAnalytical && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
         const endocrineContext = BioEndocrine.getConversationalContext(session, activeEngineModel, promptText);
         if (endocrineContext) {
           systemContent = `${systemContent}\n\n${endocrineContext}`;
@@ -31505,7 +31519,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         (STATE.openRouterModels || []).some(m => m.id === effectiveInitialModel && (m.cat === 'free' || m.tag === 'Free'))
       );
 
-      if (decisionCalibration.calibrationDirective && !wantsFile && !isDocRequest && !isStudioIsolated && !isPureMathSession) {
+      if (decisionCalibration.calibrationDirective && !wantsFile && !isDocRequest && !isStudioIsolated) {
         systemContent = systemContent
           ? `${systemContent}\n\n${decisionCalibration.calibrationDirective}`
           : decisionCalibration.calibrationDirective;
@@ -31572,7 +31586,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       }
 
-      if (personaPrompt && !isPureMathSession) {
+      if (personaPrompt && !isPureMathSession && !isQuestionOrAnalytical) {
         systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
       }
 
