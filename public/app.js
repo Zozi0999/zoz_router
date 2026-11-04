@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://cat-closing-ends-grant.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://enb-logan-trainers-informational.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -9853,6 +9853,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       this.lastRenderTime = 0;
       this.isDone = false;
       this.isLoopTerminated = false;
+      this.thinkStripper = (typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.createThinkTagStripper === 'function')
+        ? TEXT_SAFETY.createThinkTagStripper()
+        : null;
       this.transportGate = (!this.options.skipEntropyGate && typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.createEntropyStreamGate === 'function')
         ? TEXT_SAFETY.createEntropyStreamGate(this.options.userPrompt || '', this.options)
         : null;
@@ -9922,6 +9925,18 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       if (this.isLoopTerminated || this.isDone) return;
       let str = String(delta);
       if (!str) return;
+
+      if (this.thinkStripper) {
+        const stripped = this.thinkStripper.push(str, false);
+        if (!stripped) {
+          if (this.thinkStripper.isInsideThought && this.thinkStripper.isInsideThought() && !this.text) {
+            this.isThinking = true;
+            this.scheduleRender();
+          }
+          return;
+        }
+        str = stripped;
+      }
       this.isThinking = false;
 
       if (this.transportGate) {
@@ -10015,6 +10030,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       if (this.renderTimer !== null) {
         clearTimeout(this.renderTimer);
         this.renderTimer = null;
+      }
+      if (this.thinkStripper) {
+        const rem = this.thinkStripper.push('', true);
+        if (rem) {
+          this.text += this.transportGate ? this.transportGate.push(rem, true) : rem;
+        }
       }
       if (this.transportGate) {
         const tail = this.transportGate.flush();
@@ -29012,8 +29033,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         // Tempelkan instruksi sistem ke pesan USER TERAKHIR (turn aktif yang sedang dijawab saat ini),
         // dan JAGA UTUH blok [KALIBRASI ...] agar aksioma keputusan Bayesian tetap bekerja penuh!
         let compactedSystem = effectiveSystem.trim()
-          .replace(/### (?:BIO-ENDOCRINE|NEURAL PROVENANCE)[\s\S]*?(?=(?:\[KALIBRASI|\[SKEMA TOOL|\[KORPUS BUKTI|\[REFERENSI PENELUSURAN|$))/i, '')
-          .replace(/\[AUTONOMIC (?:NERVOUS LOG|PROVENANCE)[\s\S]*?(?=(?:###|\[KALIBRASI|\[SKEMA TOOL|\[KORPUS BUKTI|\[REFERENSI PENELUSURAN|$))/i, '')
+          .replace(/### (?:BIO-ENDOCRINE|NEURAL PROVENANCE)[\s\S]*?(?=(?:\[PROTOKOL|\[KALIBRASI|\[SKEMA TOOL|\[KORPUS BUKTI|\[REFERENSI PENELUSURAN|$))/i, '')
+          .replace(/\[AUTONOMIC (?:NERVOUS LOG|PROVENANCE)[\s\S]*?(?=(?:###|\[PROTOKOL|\[KALIBRASI|\[SKEMA TOOL|\[KORPUS BUKTI|\[REFERENSI PENELUSURAN|$))/i, '')
           .replace(/\n{3,}/g, '\n\n')
           .trim();
 
@@ -29054,19 +29075,26 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const estimateTurnTokens = (m) => Math.ceil(((m && m.content) ? m.content.length : 0) / 3.6);
 
     const latestRawUserMsg = [...rawList].reverse().find(m => m && m.role === 'user');
+    const activeTurnImageCount = (Array.isArray(currentImages) && currentImages.length > 0)
+      ? currentImages.length
+      : (latestRawUserMsg ? msgImagesOf(latestRawUserMsg).length : 0);
     const latestDecisionCheck = (tsModule && typeof tsModule.computeBayesianDecisionCalibration === 'function' && latestRawUserMsg)
-      ? tsModule.computeBayesianDecisionCalibration(latestRawUserMsg.content || '', { hasImages: Array.isArray(currentImages) && currentImages.length > 0 })
+      ? tsModule.computeBayesianDecisionCalibration(latestRawUserMsg.content || '', {
+          hasImages: activeTurnImageCount > 0,
+          imageCount: activeTurnImageCount
+        })
       : null;
 
     let totalHistoryTokens = mergedList.reduce((sum, m) => sum + estimateTurnTokens(m), 0);
     let budgetedList = mergedList;
 
-    if (latestDecisionCheck && latestDecisionCheck.isSelfContainedDiscreteTurn && mergedList.length > 6) {
-      let isolatedSlice = mergedList.slice(-6);
-      while (isolatedSlice.length > 1 && isolatedSlice[0].role !== 'user') {
-        isolatedSlice = isolatedSlice.slice(1);
+    if (latestDecisionCheck && latestDecisionCheck.isSelfContainedDiscreteTurn && mergedList.length > 1) {
+      // Isolasi mutlak ke giliran soal aktif terakhir agar matriks perhatian & induction heads
+      // tidak tercemar oleh puluhan/ratusan jawaban pendek lama yang tidak memiliki <think>.
+      const lastTurn = mergedList[mergedList.length - 1];
+      if (lastTurn && lastTurn.role === 'user') {
+        budgetedList = [lastTurn];
       }
-      budgetedList = isolatedSlice;
     } else if (totalHistoryTokens > MAX_CONTEXT_TOKENS_BUDGET && mergedList.length > 4) {
       const keepInitialAnchor = mergedList.length <= 24;
       const anchorUser = keepInitialAnchor ? mergedList[0] : null;
@@ -29474,12 +29502,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q), PELURUHAN W(Δt), & KALIBRASI BAYESIAN
-      const hasAttachedImages = Array.isArray(image) ? image.length > 0 : Boolean(image);
+      const attachedImageCount = Array.isArray(image) ? image.length : (image ? 1 : 0);
+      const hasAttachedImages = attachedImageCount > 0;
       const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
         ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
         : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
       const decisionCalibration = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
-        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { hasImages: hasAttachedImages })
+        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { hasImages: hasAttachedImages, imageCount: attachedImageCount })
         : { isDiscreteChoice: false, isAnalyticalQuery: false, calibrationDirective: '' };
       if (decisionCalibration.calibrationDirective && !wantsFile && !isDocRequest && !isStudioIsolated) {
         systemContent = systemContent
@@ -29562,7 +29591,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
       requestBody.options = requestBody.options || {};
       if (!requestBody.options.num_ctx) requestBody.options.num_ctx = 16384;
-      if (wantsFile || isWebRequest) {
+      if (wantsFile || isWebRequest || decisionCalibration.isDiscreteChoice || decisionCalibration.isAnalyticalQuery) {
         if (!requestBody.options.num_predict) requestBody.options.num_predict = 4096;
       }
       // Pasang tools ke Ollama HANYA jika model memiliki kapabilitas tools terverifikasi
@@ -31058,12 +31087,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       );
 
       // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q), PELURUHAN W(Δt), & KALIBRASI BAYESIAN
-      const hasAttachedImages = Array.isArray(image) ? image.length > 0 : Boolean(image);
+      const attachedImageCount = Array.isArray(image) ? image.length : (image ? 1 : 0);
+      const hasAttachedImages = attachedImageCount > 0;
       const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
         ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
         : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
       const decisionCalibration = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
-        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { hasImages: hasAttachedImages })
+        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { hasImages: hasAttachedImages, imageCount: attachedImageCount })
         : { isDiscreteChoice: false, isAnalyticalQuery: false, calibrationDirective: '' };
       if (decisionCalibration.calibrationDirective && !wantsFile && !isDocRequest && !isStudioIsolated) {
         systemContent = systemContent
@@ -31167,10 +31197,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           messages: currentMessagesPayload,
           stream: true,
           stream_options: { include_usage: true },
-          provider: {
-            sort: 'latency',
-            allow_fallbacks: isAutoRouterActive
-          }
+          provider: (decisionCalibration.isDiscreteChoice || decisionCalibration.isAnalyticalQuery)
+            ? { allow_fallbacks: isAutoRouterActive }
+            : { sort: 'latency', allow_fallbacks: isAutoRouterActive }
         };
 
         const hasGroundedWeb = Boolean(webSources && webSources.length > 0);
@@ -33109,8 +33138,8 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
     return imageExtensions.includes(ext);
   }
 
-  // Client-side instant image compressor (Reduces 10MB camera photo to ~80KB WebP)
-  function compressImageToWebP(file, maxDimension = 1024, quality = 0.8) {
+  // Client-side instant image compressor (Preserves crisp typography up to 1600px @ 0.88 WebP for OCR/exam screenshots)
+  function compressImageToWebP(file, maxDimension = 1600, quality = 0.88) {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -33150,7 +33179,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
   async function processSingleImageFile(file) {
     if (!file || typeof file.size !== 'number' || file.size <= 0) return false;
     try {
-      const compressedDataUrl = await compressImageToWebP(file, 1024, 0.8) || (await new Promise(r => {
+      const compressedDataUrl = await compressImageToWebP(file, 1600, 0.88) || (await new Promise(r => {
         const reader = new FileReader();
         reader.onload = ev => r(ev.target.result);
         reader.onerror = () => r(null);
@@ -46460,7 +46489,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://cat-closing-ends-grant.trycloudflare.com',
+    activeTunnelUrl: 'https://enb-logan-trainers-informational.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
