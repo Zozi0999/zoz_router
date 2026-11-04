@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://survive-undertaken-cho-ian.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://mart-shuttle-terminals-investigate.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -139,6 +139,19 @@
       return 'web';
     }
   };
+
+  function isInternalSystemPayload(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    return trimmed.startsWith('[DATA HASIL PENELUSURAN INTERNAL]') ||
+           trimmed.startsWith('[HASIL prepare_image_display') ||
+           trimmed.startsWith('[HASIL search_images') ||
+           trimmed.startsWith('[HASIL ') ||
+           trimmed.startsWith('[INSTRUKSI PENYAJIAN JAWABAN AKHIR]') ||
+           trimmed.startsWith('[SPESIFIKASI SINTESIS BUKTI') ||
+           trimmed.startsWith('[ALUR VERIFIKASI VISUAL AKTIF]') ||
+           trimmed.startsWith('[HASIL EKSEKUSI TOOL]');
+  }
 
   // ==================== SYSTEM PRESETS ====================
   const SYSTEM_PRESETS = {
@@ -9295,18 +9308,25 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       return null;
     }
 
-    const items = displayPayload.display_items.slice(0, 3);
+    const allItems = displayPayload.display_items.slice(0, 12);
     const layout = ['single', 'gallery', 'collage'].includes(displayPayload.layout)
-      ? (items.length === 1 ? 'single' : displayPayload.layout)
-      : (items.length === 1 ? 'single' : 'gallery');
+      ? (allItems.length === 1 ? 'single' : displayPayload.layout)
+      : (allItems.length === 1 ? 'single' : (allItems.length >= 2 ? 'collage' : 'gallery'));
     const placement = ['after_intro', 'within_section'].includes(displayPayload.placement)
       ? displayPayload.placement
       : 'after_intro';
+
+    // Kolase editorial ala ChatGPT: ambil 3 foto terdepan untuk grid visual, simpan sisanya untuk galeri lightbox penuh
+    const items = (layout === 'collage' && allItems.length >= 3)
+      ? allItems.slice(0, 3)
+      : (layout === 'gallery' ? allItems.slice(0, 8) : allItems.slice(0, Math.min(3, allItems.length)));
+    const extraCount = allItems.length - items.length;
 
     const section = document.createElement('section');
     section.className = `zoz-grounded-image-display zoz-layout-${layout}`;
     section.dataset.placement = placement;
     section.dataset.count = String(items.length);
+    section.dataset.totalImages = String(allItems.length);
     if (displayPayload.display_id) {
       section.dataset.displayId = String(displayPayload.display_id);
     }
@@ -9315,7 +9335,8 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
     const grid = document.createElement('div');
     grid.className = 'zoz-grounded-grid';
 
-    const lightboxUrls = items.map((it) => resolveSafeAssetUrl(it.direct_media_url) || resolveSafeAssetUrl(it.fallback_asset_ref) || resolveSafeAssetUrl(it.preview_url) || resolveSafeAssetUrl(it.image_url) || resolveSafeAssetUrl(it.asset_ref)).filter(Boolean);
+    // Lightbox memuat seluruh spektrum foto terverifikasi (hingga 12 foto), bukan hanya 3 foto grid
+    const lightboxUrls = allItems.map((it) => resolveSafeAssetUrl(it.direct_media_url) || resolveSafeAssetUrl(it.fallback_asset_ref) || resolveSafeAssetUrl(it.preview_url) || resolveSafeAssetUrl(it.image_url) || resolveSafeAssetUrl(it.asset_ref)).filter(Boolean);
 
     items.forEach((item, idx) => {
       const figure = document.createElement('figure');
@@ -9412,6 +9433,16 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
         });
 
         frame.appendChild(img);
+
+        // Badge counter editorial ala ChatGPT (+N Foto atau Total Foto) pada kartu terakhir kolase
+        if (layout === 'collage' && idx === items.length - 1 && (extraCount > 0 || allItems.length > 2)) {
+          const moreBadge = document.createElement('div');
+          moreBadge.className = 'zoz-grounded-more-badge';
+          const badgeText = extraCount > 0 ? `+${extraCount}` : `${allItems.length}`;
+          moreBadge.innerHTML = `<i class="fa-solid fa-images"></i> <span>${badgeText}</span>`;
+          frame.appendChild(moreBadge);
+        }
+
         figure.appendChild(frame);
       }
 
@@ -14430,6 +14461,10 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       }
     }
     session.messages.forEach((msg, idx) => {
+      // Keamanan Antarmuka: Saring tuntas kebocoran payload internal agar tidak pernah tampil di gelembung obrolan pengguna
+      if (msg && msg.role === 'user' && typeof msg.content === 'string' && isInternalSystemPayload(msg.content)) {
+        return;
+      }
       if (msg.type === 'image_generation' || msg.isImageGen) {
         renderSavedImageMessage(msg, idx);
         return;
@@ -26186,7 +26221,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       type: 'function',
       function: {
         name: 'prepare_image_display',
-        description: 'Menyiapkan 1 hingga maksimal 3 gambar yang telah lolos pemeriksaan (accessible: true dan usage_status: "allowed") untuk dirender secara visual oleh komponen antarmuka obrolan.',
+        description: 'Menyiapkan 1 hingga 12 gambar yang telah lolos pemeriksaan (accessible: true dan usage_status: "allowed") untuk dirender secara visual dalam format kolase editorial atau galeri oleh antarmuka.',
         parameters: {
           type: 'object',
           properties: {
@@ -26194,13 +26229,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
               type: 'array',
               items: { type: 'string', minLength: 1 },
               minItems: 1,
-              maxItems: 3,
-              description: 'Daftar 1–3 image_id terpilih yang relevan dan diizinkan.'
+              maxItems: 12,
+              description: 'Daftar 1–12 image_id terpilih yang relevan dan diizinkan.'
             },
             layout: {
               type: 'string',
               enum: ['single', 'gallery', 'collage'],
-              description: 'Tata letak tampilan gambar: "single" (1 gambar), "gallery" (kisi sejajar), atau "collage" (kolase editorial).'
+              description: 'Tata letak tampilan gambar: "single" (1 gambar), "gallery" (kisi sejajar banyak foto), atau "collage" (kolase editorial ala ChatGPT).'
             },
             placement: {
               type: 'string',
@@ -26211,11 +26246,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
               type: 'array',
               items: { type: 'string', minLength: 1 },
               minItems: 1,
-              maxItems: 3,
-              description: 'Teks alternatif deskriptif, tepat satu string untuk setiap gambar dalam image_ids.'
+              maxItems: 12,
+              description: 'Teks alternatif deskriptif untuk gambar dalam image_ids.'
             }
           },
-          required: ['image_ids', 'layout', 'placement', 'alt_texts'],
+          required: ['image_ids', 'layout', 'placement'],
           additionalProperties: false
         }
       }
@@ -29976,10 +30011,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const currentIsoDate = currentDateObj.toISOString().slice(0, 10);
         const roundInstruction = isMidImagePipeline
           ? `[ALUR VERIFIKASI VISUAL AKTIF]:
-${hasExecutedImageSearch ? '1. Pilih 1–3 image_id yang paling cocok secara subjek dari daftar kandidat di atas, lalu panggil inspect_image({"image_id": "..."}) terlebih dahulu (jangan langsung mengklaim gambar tampil).' : '1. Untuk kandidat yang lolos verifikasi (accessible: true dan usage_status: "allowed"), panggil prepare_image_display({"image_ids": [...], "layout": "single"|"gallery"|"collage", "placement": "after_intro"|"within_section", "alt_texts": [...]}). Jika semua kandidat ditolak, jawab langsung pertanyaan pengguna dan jelaskan keterbatasannya tanpa mengarang URL gambar.'}`
+${hasExecutedImageSearch ? '1. Pilih 3–6 image_id yang paling cocok secara subjek dari daftar kandidat di atas, lalu panggil inspect_image({"image_id": "..."}) terlebih dahulu (jangan langsung mengklaim gambar tampil).' : '1. Untuk seluruh kandidat yang lolos verifikasi (accessible: true dan usage_status: "allowed"), panggil prepare_image_display({"image_ids": [...], "layout": "collage"|"gallery", "placement": "after_intro"|"within_section", "alt_texts": [...]}) untuk menyajikan banyak contoh foto sekaligus dalam format kolase. Jika semua kandidat ditolak, jawab langsung pertanyaan pengguna secara faktual tanpa mengarang URL gambar.'}`
           : ((isLastRound || hasExecutedImagePrepare || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasExecutedGrounding)
           ? `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:
-${circuitBreakerTripped ? 'Eksekusi tool dihentikan karena batas kegagalan jaringan. Berikan jawaban langsung berdasarkan konteks yang tersedia.' : (hasExecutedImagePrepare ? 'Susun jawaban akhir dengan format: (1) Jawaban pembuka singkat, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] sesuai hasil prepare_image_display di dekat pembahasan terkait, (3) Penjelasan utama terstruktur, serta (4) Kredit gambar dan tautan halaman sumber. Jangan menampilkan JSON tool mentah.' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual dalam Bahasa Indonesia berdasarkan korpus bukti penelusuran di atas.')))))}
+${circuitBreakerTripped ? 'Eksekusi tool dihentikan karena batas kegagalan jaringan. Berikan jawaban langsung berdasarkan konteks yang tersedia.' : (hasExecutedImagePrepare ? 'MANDAT ANALISIS MATEMATIS & OBJEKTIF MURNI (ZERO PERSONA GIMMICK): Susun jawaban akhir dengan format: (1) Penjelasan pembuka lugas tanpa persona fiktif atau analogi berbelit-belit, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat (seperti klasifikasi persenjataan, struktur sistematis, dan rincian data ala ChatGPT), serta (4) Kredit gambar dan tautan halaman sumber. DILARANG KERAS menggunakan persona khayalan!' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual dalam Bahasa Indonesia berdasarkan korpus bukti penelusuran di atas.')))))}
 
 BATASAN DOMAIN KLAIM:
 1. Hanya cantumkan entitas, nomor versi, metrik, dan tanggal rilis yang tertulis eksplisit di dalam bukti dokumen di atas (tanggal referensi hari ini: ${currentFormattedDate}).
@@ -30349,7 +30384,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
           const autoImgSearch = await executeAutonomousWebTool('search_images', {
             query: visualEntityTargetOllama,
             sources: ['wikimedia_commons'],
-            limit: 6,
+            limit: 8,
             orientation: 'any',
             image_type: 'photo',
             safe_search: true
@@ -30360,29 +30395,32 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
             : (Array.isArray(autoImgSearch?.data?.images) ? autoImgSearch.data.images : []);
 
           if (candidateList.length > 0 && !STATE.abortController?.signal?.aborted) {
-            let verifiedCandidate = null;
-            let verifiedInspectData = null;
+            const verifiedItems = [];
 
-            for (const cand of candidateList.slice(0, 3)) {
+            // Evaluasi beberapa kandidat untuk kolase kaya banyak foto (ala benchmark ChatGPT)
+            for (const cand of candidateList.slice(0, 6)) {
               if (STATE.abortController?.signal?.aborted) break;
               const inspectRes = await executeAutonomousWebTool('inspect_image', {
                 image_id: cand.image_id
               }, promptText, session);
               const inspectData = inspectRes?.data || inspectRes || {};
               if (inspectData.accessible && inspectData.usage_status === 'allowed' && (inspectData.subject_match === 'confirmed' || inspectData.subject_match === 'likely')) {
-                verifiedCandidate = cand;
-                verifiedInspectData = inspectData;
-                break;
+                verifiedItems.push({
+                  candidate: cand,
+                  inspectData: inspectData
+                });
+                if (verifiedItems.length >= 6) break;
               }
             }
 
-            if (verifiedCandidate && verifiedInspectData && !STATE.abortController?.signal?.aborted) {
-              const targetId = verifiedInspectData.image_id || verifiedCandidate.image_id;
+            if (verifiedItems.length > 0 && !STATE.abortController?.signal?.aborted) {
+              const targetIds = verifiedItems.map(it => it.inspectData.image_id || it.candidate.image_id);
+              const layoutType = targetIds.length >= 2 ? 'collage' : 'single';
               const prepRes = await executeAutonomousWebTool('prepare_image_display', {
-                image_ids: [targetId],
-                layout: 'single',
+                image_ids: targetIds,
+                layout: layoutType,
                 placement: 'after_intro',
-                alt_texts: [verifiedCandidate.title || visualEntityTargetOllama]
+                alt_texts: verifiedItems.map(it => it.candidate.title || visualEntityTargetOllama)
               }, promptText, session);
 
               const displayObj = prepRes?.imageDisplay || prepRes?.data;
@@ -31816,10 +31854,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const currentIsoDate = currentDateObj.toISOString().slice(0, 10);
         const roundInstruction = isMidImagePipeline
           ? `[ALUR VERIFIKASI VISUAL AKTIF]:
-${hasExecutedImageSearch ? '1. Pilih 1–3 image_id yang paling cocok secara subjek dari daftar kandidat di atas, lalu panggil inspect_image({"image_id": "..."}) terlebih dahulu (apabila native tool tidak tersedia, keluarkan blok <tool_call>{"name":"inspect_image","arguments":{"image_id":"..."}}</tool_call>).' : '1. Untuk kandidat yang lolos verifikasi (accessible: true dan usage_status: "allowed"), panggil prepare_image_display({"image_ids": [...], "layout": "single"|"gallery"|"collage", "placement": "after_intro"|"within_section", "alt_texts": [...]}) (atau blok <tool_call> yang setara). Jika semua kandidat ditolak, jawab langsung pertanyaan pengguna dan jelaskan keterbatasannya tanpa mengarang URL gambar.'}`
+${hasExecutedImageSearch ? '1. Pilih 3–6 image_id yang paling cocok secara subjek dari daftar kandidat di atas, lalu panggil inspect_image({"image_id": "..."}) terlebih dahulu (apabila native tool tidak tersedia, keluarkan blok <tool_call>{"name":"inspect_image","arguments":{"image_id":"..."}}</tool_call>).' : '1. Untuk seluruh kandidat yang lolos verifikasi (accessible: true dan usage_status: "allowed"), panggil prepare_image_display({"image_ids": [...], "layout": "collage"|"gallery", "placement": "after_intro"|"within_section", "alt_texts": [...]}) (atau blok <tool_call> yang setara) untuk menyajikan banyak contoh foto sekaligus dalam format kolase. Jika semua kandidat ditolak, jawab langsung pertanyaan pengguna secara faktual tanpa mengarang URL gambar.'}`
           : ((isLastRound || hasExecutedImagePrepare || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasExecutedGrounding)
           ? `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:
-${circuitBreakerTripped ? 'Eksekusi tool dihentikan karena batas kegagalan jaringan. Berikan jawaban langsung berdasarkan konteks yang tersedia.' : (hasExecutedImagePrepare ? 'Susun jawaban akhir dengan format: (1) Jawaban pembuka singkat, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] sesuai hasil prepare_image_display di dekat pembahasan terkait, (3) Penjelasan utama terstruktur, serta (4) Kredit gambar dan tautan halaman sumber. Jangan menampilkan JSON tool mentah.' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual dalam Bahasa Indonesia berdasarkan korpus bukti penelusuran di atas.')))))}
+${circuitBreakerTripped ? 'Eksekusi tool dihentikan karena batas kegagalan jaringan. Berikan jawaban langsung berdasarkan konteks yang tersedia.' : (hasExecutedImagePrepare ? 'MANDAT ANALISIS MATEMATIS & OBJEKTIF MURNI (ZERO PERSONA GIMMICK): Susun jawaban akhir dengan format: (1) Penjelasan pembuka lugas tanpa persona fiktif atau analogi berbelit-belit, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat (seperti klasifikasi persenjataan, struktur sistematis, dan rincian data ala ChatGPT), serta (4) Kredit gambar dan tautan halaman sumber. DILARANG KERAS menggunakan persona khayalan!' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual dalam Bahasa Indonesia berdasarkan korpus bukti penelusuran di atas.')))))}
 
 BATASAN DOMAIN KLAIM:
 1. Hanya cantumkan entitas, nomor versi, metrik, dan tanggal rilis yang tertulis eksplisit di dalam bukti dokumen di atas (tanggal referensi hari ini: ${currentFormattedDate}).
@@ -32293,7 +32331,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
           const autoImgSearch = await executeAutonomousWebTool('search_images', {
             query: visualEntityTargetOpenRouter,
             sources: ['wikimedia_commons'],
-            limit: 6,
+            limit: 8,
             orientation: 'any',
             image_type: 'photo',
             safe_search: true
@@ -32304,29 +32342,32 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
             : (Array.isArray(autoImgSearch?.data?.images) ? autoImgSearch.data.images : []);
 
           if (candidateList.length > 0 && !STATE.abortController?.signal?.aborted) {
-            let verifiedCandidate = null;
-            let verifiedInspectData = null;
+            const verifiedItems = [];
 
-            for (const cand of candidateList.slice(0, 3)) {
+            // Evaluasi beberapa kandidat untuk kolase kaya banyak foto (ala benchmark ChatGPT)
+            for (const cand of candidateList.slice(0, 6)) {
               if (STATE.abortController?.signal?.aborted) break;
               const inspectRes = await executeAutonomousWebTool('inspect_image', {
                 image_id: cand.image_id
               }, promptText, session);
               const inspectData = inspectRes?.data || inspectRes || {};
               if (inspectData.accessible && inspectData.usage_status === 'allowed' && (inspectData.subject_match === 'confirmed' || inspectData.subject_match === 'likely')) {
-                verifiedCandidate = cand;
-                verifiedInspectData = inspectData;
-                break;
+                verifiedItems.push({
+                  candidate: cand,
+                  inspectData: inspectData
+                });
+                if (verifiedItems.length >= 6) break;
               }
             }
 
-            if (verifiedCandidate && verifiedInspectData && !STATE.abortController?.signal?.aborted) {
-              const targetId = verifiedInspectData.image_id || verifiedCandidate.image_id;
+            if (verifiedItems.length > 0 && !STATE.abortController?.signal?.aborted) {
+              const targetIds = verifiedItems.map(it => it.inspectData.image_id || it.candidate.image_id);
+              const layoutType = targetIds.length >= 2 ? 'collage' : 'single';
               const prepRes = await executeAutonomousWebTool('prepare_image_display', {
-                image_ids: [targetId],
-                layout: 'single',
+                image_ids: targetIds,
+                layout: layoutType,
                 placement: 'after_intro',
-                alt_texts: [verifiedCandidate.title || visualEntityTargetOpenRouter]
+                alt_texts: verifiedItems.map(it => it.candidate.title || visualEntityTargetOpenRouter)
               }, promptText, session);
 
               const displayObj = prepRes?.imageDisplay || prepRes?.data;
@@ -46373,7 +46414,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://survive-undertaken-cho-ian.trycloudflare.com',
+    activeTunnelUrl: 'https://mart-shuttle-terminals-investigate.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
