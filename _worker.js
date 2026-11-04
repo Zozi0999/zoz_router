@@ -1252,7 +1252,7 @@ export default {
     }
 
     // Universal WhatsApp, AI & Daemon Tunnel Proxy (Edge Bridge)
-    const TUNNEL_GATEWAY_URL = 'https://enb-logan-trainers-informational.trycloudflare.com';
+    const TUNNEL_GATEWAY_URL = 'https://doug-tour-penn-exchanges.trycloudflare.com';
     let reqBodyBytes = null;
     const isEdgeNativeRoute = url.pathname === '/api/ping' ||
       url.pathname === '/api/health' ||

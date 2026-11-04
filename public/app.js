@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://enb-logan-trainers-informational.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://doug-tour-penn-exchanges.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -29591,8 +29591,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
       requestBody.options = requestBody.options || {};
       if (!requestBody.options.num_ctx) requestBody.options.num_ctx = 16384;
-      if (wantsFile || isWebRequest || decisionCalibration.isDiscreteChoice || decisionCalibration.isAnalyticalQuery) {
-        if (!requestBody.options.num_predict) requestBody.options.num_predict = 4096;
+      if (wantsFile || isWebRequest) {
+        if (!requestBody.options.num_predict) requestBody.options.num_predict = 8192;
+      }
+      if ((decisionCalibration.isDiscreteChoice || decisionCalibration.isAnalyticalQuery) && !wantsFile && !isDocRequest) {
+        requestBody.think = true;
       }
       // Pasang tools ke Ollama HANYA jika model memiliki kapabilitas tools terverifikasi
       const canOllamaUseTools = doesModelSupportTools(modelName);
@@ -29662,10 +29665,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         signal: STATE.abortController?.signal
       });
 
-      // Auto-retry fallback: jika model lokal Ollama menolak parameter tools (HTTP 400/422/500 "model does not support tools")
-      if (!response.ok && requestBody.tools && (response.status === 400 || response.status === 422 || response.status === 500)) {
-        console.warn(`[Ollama] Model ${modelName} returned HTTP ${response.status} with tools enabled. Retrying without tools parameter...`);
+      // Auto-retry fallback: jika model lokal Ollama menolak parameter tools atau think (HTTP 400/422/500)
+      if (!response.ok && (requestBody.tools || requestBody.think) && (response.status === 400 || response.status === 422 || response.status === 500)) {
+        console.warn(`[Ollama] Model ${modelName} returned HTTP ${response.status} with tools/think enabled. Retrying cleanly...`);
         delete requestBody.tools;
+        delete requestBody.think;
         response = await fetch(chatUrl, {
           method: 'POST',
           headers,
@@ -46489,7 +46493,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://enb-logan-trainers-informational.trycloudflare.com',
+    activeTunnelUrl: 'https://doug-tour-penn-exchanges.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
