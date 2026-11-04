@@ -1252,17 +1252,11 @@ export default {
     }
 
     // Universal WhatsApp, AI & Daemon Tunnel Proxy (Edge Bridge)
-    const TUNNEL_GATEWAY_URL = 'https://mart-shuttle-terminals-investigate.trycloudflare.com';
+    const TUNNEL_GATEWAY_URL = 'https://pilot-coast-myspace-shelter.trycloudflare.com';
     let reqBodyBytes = null;
     const isEdgeNativeRoute = url.pathname === '/api/ping' ||
       url.pathname === '/api/health' ||
       url.pathname === '/api/storage-mode' ||
-      url.pathname === '/api/tools/search-images' ||
-      url.pathname === '/api/search-images' ||
-      url.pathname === '/api/tools/inspect-image' ||
-      url.pathname === '/api/inspect-image' ||
-      url.pathname === '/api/tools/prepare-image-display' ||
-      url.pathname === '/api/prepare-image-display' ||
       url.pathname.startsWith('/api/tools/image-asset/');
 
     if ((url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) && !isEdgeNativeRoute) {
@@ -3791,28 +3785,48 @@ export default {
       return ALLOWED_CDN.some((d) => h === d || h.endsWith(`.${d}`));
     };
 
-    // 1. Search Images
+    const readEdgeJsonBody = async () => {
+      if (reqBodyBytes && reqBodyBytes.byteLength > 0) {
+        try {
+          return JSON.parse(new TextDecoder().decode(reqBodyBytes));
+        } catch (_) {
+          return {};
+        }
+      }
+      return await request.json().catch(() => ({}));
+    };
+
+    // 1. Search Images (Fallback Edge saat tunnel backend offline)
     if ((url.pathname === '/api/tools/search-images' || url.pathname === '/api/search-images') && (request.method === 'GET' || request.method === 'POST')) {
       try {
         let query = '';
-        let limit = 6;
+        let per_page = undefined;
+        let limit = undefined;
+        let sources = undefined;
         let orientation = 'any';
         let image_type = 'photo';
         let safe_search = true;
         if (request.method === 'GET') {
           query = url.searchParams.get('query') || url.searchParams.get('q') || '';
-          limit = parseInt(url.searchParams.get('limit') || '6', 10);
+          if (url.searchParams.get('per_page')) per_page = parseInt(url.searchParams.get('per_page'), 10);
+          if (url.searchParams.get('limit')) limit = parseInt(url.searchParams.get('limit'), 10);
+          if (url.searchParams.get('sources')) sources = url.searchParams.get('sources').split(',').map((s) => s.trim()).filter(Boolean);
           orientation = url.searchParams.get('orientation') || 'any';
           image_type = url.searchParams.get('image_type') || 'photo';
         } else {
-          const body = await request.json().catch(() => ({}));
+          const body = await readEdgeJsonBody();
           query = body.query || body.q || '';
-          if (body.limit) limit = parseInt(body.limit, 10);
+          if (body.per_page !== undefined) per_page = parseInt(body.per_page, 10);
+          if (body.limit !== undefined) limit = parseInt(body.limit, 10);
+          if (body.sources !== undefined) {
+            sources = Array.isArray(body.sources) ? body.sources : String(body.sources || '').split(',').map((s) => s.trim()).filter(Boolean);
+          }
           if (body.orientation) orientation = body.orientation;
           if (body.image_type) image_type = body.image_type;
           if (typeof body.safe_search === 'boolean') safe_search = body.safe_search;
         }
-        limit = Number.isFinite(limit) ? Math.max(1, Math.min(20, limit)) : 6;
+        const rawCount = per_page !== undefined ? per_page : (limit !== undefined ? limit : 3);
+        limit = Number.isFinite(rawCount) ? Math.max(1, Math.min(20, rawCount)) : 3;
 
         const cleanQ = String(query || '').trim();
         if (!cleanQ) {
@@ -3820,6 +3834,75 @@ export default {
             status: 200,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
           });
+        }
+
+        const edgeUnsplashKey = String((env && env.UNSPLASH_ACCESS_KEY) || '').trim();
+        const wantsOnlyWmc = Array.isArray(sources) && sources.length > 0 && !sources.some((s) => String(s).toLowerCase().includes('unsplash'));
+        if (edgeUnsplashKey && !wantsOnlyWmc) {
+          try {
+            const unsParams = new URLSearchParams({
+              query: cleanQ,
+              per_page: String(Math.min(20, Math.max(1, limit))),
+              content_filter: safe_search === false ? 'low' : 'high'
+            });
+            if (orientation === 'landscape' || orientation === 'portrait') unsParams.set('orientation', orientation);
+            else if (orientation === 'square') unsParams.set('orientation', 'squarish');
+
+            const unsRes = await fetch(`https://api.unsplash.com/search/photos?${unsParams.toString()}`, {
+              headers: {
+                'Authorization': `Client-ID ${edgeUnsplashKey}`,
+                'Accept-Version': 'v1',
+                'Accept': 'application/json'
+              },
+              signal: AbortSignal.timeout(8000)
+            });
+            if (unsRes.ok) {
+              const unsData = await unsRes.json().catch(() => null);
+              const unsResults = Array.isArray(unsData && unsData.results) ? unsData.results : [];
+              const unsCandidates = [];
+              for (const item of unsResults.slice(0, limit)) {
+                const previewUrl = item?.urls?.small || null;
+                const imageUrl = item?.urls?.regular || previewUrl;
+                const pageUrl = item?.links?.html ? `${item.links.html}${item.links.html.includes('?') ? '&' : '?'}utm_source=zoz_router&utm_medium=referral` : 'https://unsplash.com';
+                if (!imageUrl) continue;
+                const creator = item?.user?.name || 'Unsplash Photographer';
+                const candId = `img_uns_${String(item.id || Math.random().toString(36).slice(2, 10))}`;
+                const parsed = {
+                  image_id: candId,
+                  title: String(item.alt_description || item.description || cleanQ).slice(0, 220),
+                  description: String(item.description || item.alt_description || cleanQ).slice(0, 500),
+                  source_name: 'unsplash',
+                  source_page_url: pageUrl,
+                  preview_url: previewUrl || imageUrl,
+                  image_url: imageUrl,
+                  creator,
+                  creator_url: item?.user?.links?.html || null,
+                  license_name: 'Unsplash License',
+                  license_url: 'https://unsplash.com/license',
+                  attribution_text: `Foto oleh ${creator} di Unsplash`,
+                  width: Number.isInteger(item.width) ? item.width : null,
+                  height: Number.isInteger(item.height) ? item.height : null,
+                  _mime: 'image/jpeg',
+                  _categories: [],
+                  _query: cleanQ
+                };
+                putEdgeCandidate(candId, parsed);
+                const { _mime, _categories, _query, ...pub } = parsed;
+                unsCandidates.push(pub);
+              }
+              if (unsCandidates.length > 0) {
+                return new Response(JSON.stringify({
+                  status: 'success',
+                  english_query: cleanQ,
+                  images: unsCandidates,
+                  source_errors: []
+                }), {
+                  status: 200,
+                  headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                });
+              }
+            }
+          } catch (_) {}
         }
 
         const fetchCount = Math.min(30, Math.max(10, limit * 2));
@@ -3902,13 +3985,13 @@ export default {
     }
 
     // 2. Inspect Image
-    if (url.pathname === '/api/tools/inspect-image' && (request.method === 'GET' || request.method === 'POST')) {
+    if ((url.pathname === '/api/tools/inspect-image' || url.pathname === '/api/inspect-image') && (request.method === 'GET' || request.method === 'POST')) {
       try {
         let image_id = '';
         if (request.method === 'GET') {
           image_id = url.searchParams.get('image_id') || url.searchParams.get('id') || '';
         } else {
-          const body = await request.json().catch(() => ({}));
+          const body = await readEdgeJsonBody();
           image_id = body.image_id || body.id || '';
         }
         image_id = String(image_id || '').trim();
@@ -3941,6 +4024,8 @@ export default {
         let subject_match = 'likely';
         if (isSpoof) {
           subject_match = 'mismatch';
+        } else if (cand.source_name === 'unsplash') {
+          subject_match = 'likely';
         } else if (qTokens.length > 0) {
           const cov = hitCount / qTokens.length;
           subject_match = cov >= 0.85 ? 'confirmed' : (cov >= 0.5 ? 'likely' : (cov > 0 ? 'uncertain' : 'mismatch'));
@@ -3984,11 +4069,11 @@ export default {
     }
 
     // 3. Prepare Image Display
-    if (url.pathname === '/api/tools/prepare-image-display' && request.method === 'POST') {
+    if ((url.pathname === '/api/tools/prepare-image-display' || url.pathname === '/api/prepare-image-display') && request.method === 'POST') {
       try {
-        const body = await request.json().catch(() => ({}));
-        const image_ids = Array.isArray(body.image_ids) ? body.image_ids.map((id) => String(id || '').trim()).filter(Boolean).slice(0, 3) : [];
-        const layout = ['single', 'gallery', 'collage'].includes(body.layout) ? body.layout : (image_ids.length === 1 ? 'single' : 'gallery');
+        const body = await readEdgeJsonBody();
+        const image_ids = Array.isArray(body.image_ids) ? body.image_ids.map((id) => String(id || '').trim()).filter(Boolean).slice(0, 12) : [];
+        const layout = ['single', 'gallery', 'collage'].includes(body.layout) ? body.layout : (image_ids.length === 1 ? 'single' : 'collage');
         const placement = ['after_intro', 'within_section'].includes(body.placement) ? body.placement : 'after_intro';
         const alt_texts = Array.isArray(body.alt_texts) ? body.alt_texts : [];
 
@@ -4007,7 +4092,9 @@ export default {
             item_errors.push({ image_id: id, code: licEval.usage_status === 'restricted' ? 'access_denied' : 'license_unknown', message: licEval.warning || 'Lisensi tidak terverifikasi.' });
             continue;
           }
-          const verifiedMediaUrl = cand.preview_url || cand.image_url;
+          const verifiedMediaUrl = cand.source_name === 'unsplash'
+            ? (cand.image_url || cand.preview_url)
+            : (cand.preview_url || cand.image_url);
           if (!verifiedMediaUrl) {
             item_errors.push({ image_id: id, code: 'invalid_image', message: 'URL media kandidat kosong.' });
             continue;
@@ -4015,7 +4102,7 @@ export default {
           const alt = String(alt_texts[idx] || cand.title || `Visual terverifikasi ${idx + 1}`).trim();
           const tokenPayload = JSON.stringify({ id: cand.image_id, u: verifiedMediaUrl, ts: Date.now() });
           const token = btoa(unescape(encodeURIComponent(tokenPayload))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-          const asset_ref = `/api/tools/image-asset/${token}`;
+          const asset_ref = cand.source_name === 'unsplash' ? verifiedMediaUrl : `/api/tools/image-asset/${token}`;
           display_items.push({
             image_id: cand.image_id,
             asset_ref,

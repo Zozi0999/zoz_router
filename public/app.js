@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://mart-shuttle-terminals-investigate.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://pilot-coast-myspace-shelter.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -25004,142 +25004,266 @@ ${blocks}
     return classifyCreationIntent(text) === 'document';
   }
 
-  // Deteksi target entitas visual untuk Grounded Image Search (Tokoh, Foto, Candi, Monumen, Fauna, Karya Seni, Tempat Bersejarah)
-  function detectVisualEntityGroundingTarget(promptText, fullText = '') {
-    function extractEntityFromRawText(rawText) {
+  // Kamus frasa & kosakata klien untuk menerjemahkan konsep visual ke Bahasa Inggris (ID -> EN) secara instan
+  const CLIENT_VISUAL_PHRASE_EN_MAP = Object.freeze({
+    'kopi hangat': 'hot coffee',
+    'kopi panas': 'hot coffee',
+    'secangkir kopi hangat': 'cup of hot coffee',
+    'secangkir kopi': 'cup of coffee',
+    'es kopi': 'iced coffee',
+    'es kopi susu': 'iced milk coffee',
+    'teh hangat': 'hot tea',
+    'teh panas': 'hot tea',
+    'teh hijau': 'green tea',
+    'cokelat hangat': 'hot chocolate',
+    'coklat hangat': 'hot chocolate',
+    'kesatria abad pertengahan': 'medieval knight',
+    'ksatria abad pertengahan': 'medieval knight',
+    'keatria abad pertengahan': 'medieval knight',
+    'prajurit abad pertengahan': 'medieval knight armor',
+    'gunung berapi': 'volcano',
+    'gunung himalaya': 'himalaya mountains',
+    'gunung bromo': 'mount bromo indonesia',
+    'gunung rinjani': 'mount rinjani',
+    'gunung semeru': 'mount semeru indonesia',
+    'gunung fuji': 'mount fuji japan',
+    'danau toba': 'lake toba indonesia',
+    'kawah ijen': 'ijen crater blue fire',
+    'raja ampat': 'raja ampat islands',
+    'pulau komodo': 'komodo island indonesia',
+    'labuan bajo': 'labuan bajo indonesia',
+    'matahari terbit': 'sunrise landscape',
+    'matahari terbenam': 'sunset landscape',
+    'hutan hujan tropis': 'tropical rainforest',
+    'terumbu karang': 'coral reef underwater',
+    'air terjun': 'waterfall nature',
+    'bima sakti': 'milky way night sky',
+    'lubang hitam': 'black hole space',
+    'tata surya': 'solar system planets',
+    'harimau sumatera': 'sumatran tiger',
+    'badak jawa': 'javan rhinoceros',
+    'burung cendrawasih': 'bird of paradise',
+    'jalak bali': 'bali myna bird',
+    'gajah sumatera': 'sumatran elephant',
+    'paus biru': 'blue whale ocean',
+    'hiu paus': 'whale shark underwater',
+    'nasi goreng': 'indonesian fried rice',
+    'mobil listrik': 'electric car',
+    'kereta cepat': 'high speed train',
+    'pesawat tempur': 'fighter jet',
+    'ruang kerja minimalis': 'minimalist workspace desk'
+  });
+
+  const CLIENT_VISUAL_WORD_EN_MAP = Object.freeze({
+    kopi: 'coffee', hangat: 'hot', panas: 'hot', dingin: 'iced', es: 'iced', teh: 'tea', susu: 'milk',
+    cokelat: 'chocolate', coklat: 'chocolate', roti: 'bread', kue: 'cake', makanan: 'food', minuman: 'drink',
+    nasi: 'rice', goreng: 'fried', sate: 'satay', buah: 'fruit', apel: 'apple', jeruk: 'orange',
+    kesatria: 'knight', ksatria: 'knight', keatria: 'knight', abad: 'century', pertengahan: 'medieval',
+    pedang: 'sword', perisai: 'shield', zirah: 'armor', samurai: 'samurai', viking: 'viking',
+    gunung: 'mountain', berapi: 'volcano', danau: 'lake', pantai: 'beach', laut: 'ocean', pulau: 'island',
+    air: 'water', terjun: 'waterfall', hutan: 'forest', hujan: 'rain', tropis: 'tropical', gurun: 'desert',
+    matahari: 'sun', terbit: 'sunrise', terbenam: 'sunset', senja: 'sunset', langit: 'sky', malam: 'night',
+    bintang: 'stars', bulan: 'moon', awan: 'clouds', pelangi: 'rainbow', salju: 'snow',
+    kucing: 'cat', anjing: 'dog', kuda: 'horse', singa: 'lion', harimau: 'tiger', gajah: 'elephant',
+    burung: 'bird', elang: 'eagle', ikan: 'fish', paus: 'whale', hiu: 'shark', kupu: 'butterfly',
+    bunga: 'flower', mawar: 'rose', anggrek: 'orchid', pohon: 'tree', daun: 'leaf',
+    candi: 'temple', pura: 'balinese temple', masjid: 'mosque', gereja: 'church', katedral: 'cathedral',
+    istana: 'palace', kastil: 'castle', benteng: 'fortress', museum: 'museum', jembatan: 'bridge',
+    menara: 'tower', gedung: 'building', rumah: 'house', kamar: 'room', ruang: 'room', kerja: 'workspace',
+    mobil: 'car', listrik: 'electric', motor: 'motorcycle', kereta: 'train', cepat: 'high speed',
+    pesawat: 'airplane', kapal: 'ship', robot: 'robot', lukisan: 'painting', patung: 'sculpture'
+  });
+
+  function translateVisualKeywordToEnglishClient(rawSubject) {
+    if (!rawSubject || typeof rawSubject !== 'string') return '';
+    const cleaned = rawSubject.trim()
+      .replace(/\bfhoto\b/gi, 'foto')
+      .replace(/\b(?:keatria|ksatria)\b/gi, 'kesatria')
+      .replace(/[?!.,;:"]+$/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    if (!cleaned) return '';
+
+    const lower = cleaned.toLowerCase();
+    if (CLIENT_VISUAL_PHRASE_EN_MAP[lower]) {
+      return CLIENT_VISUAL_PHRASE_EN_MAP[lower];
+    }
+
+    // Jika frasa idiomatik ada sebagai bagian utuh
+    for (const [idKey, enVal] of Object.entries(CLIENT_VISUAL_PHRASE_EN_MAP)) {
+      if (lower.includes(idKey)) {
+        return enVal;
+      }
+    }
+
+    const tokens = lower.split(/\s+/).filter(Boolean);
+    let hit = 0;
+    const mapped = tokens.map((tok) => {
+      const bare = tok.replace(/[^a-z0-9\-]/g, '');
+      if (CLIENT_VISUAL_WORD_EN_MAP[bare]) {
+        hit++;
+        return CLIENT_VISUAL_WORD_EN_MAP[bare];
+      }
+      return bare || tok;
+    });
+
+    if (hit === 0) {
+      return cleaned; // Biarkan backend translateVisualQueryToEnglish menerjemahkan secara penuh jika kosakata di luar kamus lokal
+    }
+
+    // Pembalikan urutan Kata Benda + Kata Sifat Bahasa Indonesia -> Bahasa Inggris (contoh: "kopi hangat" -> "hot coffee")
+    if (mapped.length === 2 && hit === 2) {
+      const EN_ADJ = new Set(['hot', 'iced', 'medieval', 'tropical', 'electric', 'fried']);
+      if (EN_ADJ.has(mapped[1]) && !EN_ADJ.has(mapped[0])) {
+        return `${mapped[1]} ${mapped[0]}`;
+      }
+    }
+    return mapped.join(' ').replace(/\bwarm\s+coffee\b/gi, 'hot coffee').replace(/\bwarm\s+tea\b/gi, 'hot tea');
+  }
+
+  // Analisis pertanyaan pengguna & penentuan spesifikasi visual pendukung jawaban (Unsplash per_page: 3 vs Wikimedia untuk tokoh spesifik)
+  function resolveVisualSearchSpec(promptText, fullText = '') {
+    if (!promptText || typeof promptText !== 'string') return null;
+    const pTrim = promptText.trim();
+    if (pTrim.length < 3 || pTrim.length > 500) return null;
+
+    // 1. Tolak kueri coding, matematika simbolik, perintah studio/dokumen, atau obrolan emosional/basa-basi abstrak
+    if (/\b(?:function|def |class |const |let |var |import |SELECT |UPDATE |DELETE |INSERT |<script|<html>|<\?php|print\(|console\.log|regex|fourier|integral|diferensial|turunan|matriks|eigen|debug|error|bug|syntax)\b/i.test(pTrim)) {
+      return null;
+    }
+    if (/^\/(?:diagram|website|web|dokumen|kodenya-saja|edit|code)\b/i.test(pTrim)) {
+      return null;
+    }
+    if (/^(?:hai|halo|hi|hello|hey|tes|test|ping|ok|oke|okay|sip|mantap|wah|hmm+|oh+|ya|tidak|makasih|terima\s+kasih|thanks|lanjut(?:kan)?|continue)\b/i.test(pTrim) &&
+        !/\b(?:foto|fhoto|gambar|visual|photo|picture|image)\b/i.test(pTrim)) {
+      return null;
+    }
+
+    // Jika jawaban model menyatakan subjek bukan figur publik / tidak ditemukan di pencarian publik, jangan paksakan foto
+    if (fullText && /\b(?:belum ada figur publik|bukan profil biografi|akun privat|belum masuk pencarian publik)\b/i.test(fullText.slice(0, 500))) {
+      return null;
+    }
+
+    function analyzeRawText(rawText, allowBroadTopicMatch) {
       if (!rawText || typeof rawText !== 'string') return null;
       const text = rawText.trim();
-      if (text.length < 3 || text.length > 500) return null;
+      if (text.length < 3) return null;
 
-      // Abaikan jika kueri pemrograman, coding, regex, JSON, terminal, file, atau matematika murni
-      if (/\b(?:function|def |class |const |let |var |import |SELECT |UPDATE |DELETE |INSERT |SELECT \*|<script|<html>|<\?php|print\(|console\.log|regex|fourier|integral|diferensial|turunan|matriks|eigen)\b/i.test(text)) {
-        return null;
+      // A. Tokoh Terkenal Dunia & Nasional -> gunakan wikimedia_commons agar wajah tokoh otentik (bukan foto stok)
+      const KNOWN_PEOPLE = [
+        [/\b(?:donald\s+)?trump\b/i, 'Donald Trump'],
+        [/\b(?:bung\s+)?(?:s(?:oe|u)karno|karno)\b/i, 'Sukarno'],
+        [/\b(?:mohammad\s+)?hatta\b/i, 'Mohammad Hatta'],
+        [/\b(?:joko\s+widodo|jokowi)\b/i, 'Joko Widodo'],
+        [/\bprabowo(?:\s+subianto)?\b/i, 'Prabowo Subianto'],
+        [/\b(?:b\.?\s*j\.?\s*)?habibie\b/i, 'B. J. Habibie'],
+        [/\b(?:gus\s+dur|abdurrahman\s+wahid)\b/i, 'Abdurrahman Wahid'],
+        [/\bmegawati(?:\s+soekarnoputri)?\b/i, 'Megawati Soekarnoputri'],
+        [/\b(?:susilo\s+bambang\s+yudhoyono|sby)\b/i, 'Susilo Bambang Yudhoyono'],
+        [/\b(?:albert\s+)?einstein\b/i, 'Albert Einstein'],
+        [/\b(?:isaac\s+)?newton\b/i, 'Isaac Newton'],
+        [/\b(?:nikola\s+)?tesla\b/i, 'Nikola Tesla'],
+        [/\b(?:marie\s+)?curie\b/i, 'Marie Curie'],
+        [/\bgalileo(?:\s+galilei)?\b/i, 'Galileo Galilei'],
+        [/\bstephen\s+hawking\b/i, 'Stephen Hawking'],
+        [/\b(?:barack\s+)?obama\b/i, 'Barack Obama'],
+        [/\b(?:joe\s+)?biden\b/i, 'Joe Biden'],
+        [/\b(?:abraham\s+)?lincoln\b/i, 'Abraham Lincoln'],
+        [/\bgeorge\s+washington\b/i, 'George Washington'],
+        [/\bnelson\s+mandela\b/i, 'Nelson Mandela'],
+        [/\bwinston\s+churchill\b/i, 'Winston Churchill'],
+        [/\bsteve\s+jobs\b/i, 'Steve Jobs'],
+        [/\belon\s+musk\b/i, 'Elon Musk'],
+        [/\bbill\s+gates\b/i, 'Bill Gates'],
+        [/\bmark\s+zuckerberg\b/i, 'Mark Zuckerberg'],
+        [/\bjeff\s+bezos\b/i, 'Jeff Bezos'],
+        [/\bwilliam\s+james\s+sidis\b/i, 'William James Sidis'],
+        [/\btom\s+mitchell\b/i, 'Tom M. Mitchell']
+      ];
+      for (const [rx, canonicalName] of KNOWN_PEOPLE) {
+        if (rx.test(text)) {
+          return { rawTarget: canonicalName, englishQuery: canonicalName, isNamedPerson: true, sources: ['wikimedia_commons'], perPage: 3 };
+        }
       }
 
-      // Abaikan jika meminta dokumen, website, kode saja, dsb
-      if (/^\/(?:diagram|website|web|dokumen|kodenya-saja|edit|code)\b/i.test(text)) {
-        return null;
-      }
-
-      // 1. Tokoh Terkenal Dunia & Nasional (Kepala Negara, Tokoh Sejarah, Ilmuwan, Pelopor)
-      if (/\b(?:donald\s+)?trump\b/i.test(text)) return 'Donald Trump';
-      if (/\b(?:bung\s+)?(?:s(?:oe|u)karno|karno)\b/i.test(text)) return 'Sukarno';
-      if (/\b(?:mohammad\s+)?hatta\b/i.test(text)) return 'Mohammad Hatta';
-      if (/\b(?:joko\s+widodo|jokowi)\b/i.test(text)) return 'Joko Widodo';
-      if (/\bprabowo(?:\s+subianto)?\b/i.test(text)) return 'Prabowo Subianto';
-      if (/\b(?:b\.?\s*j\.?\s*)?habibie\b/i.test(text)) return 'B. J. Habibie';
-      if (/\b(?:gus\s+dur|abdurrahman\s+wahid)\b/i.test(text)) return 'Abdurrahman Wahid';
-      if (/\bmegawati(?:\s+soekarnoputri)?\b/i.test(text)) return 'Megawati Soekarnoputri';
-      if (/\b(?:susilo\s+bambang\s+yudhoyono|sby)\b/i.test(text)) return 'Susilo Bambang Yudhoyono';
-      if (/\b(?:albert\s+)?einstein\b/i.test(text)) return 'Albert Einstein';
-      if (/\b(?:isaac\s+)?newton\b/i.test(text)) return 'Isaac Newton';
-      if (/\b(?:nikola\s+)?tesla\b/i.test(text)) return 'Nikola Tesla';
-      if (/\b(?:marie\s+)?curie\b/i.test(text)) return 'Marie Curie';
-      if (/\bgalileo(?:\s+galilei)?\b/i.test(text)) return 'Galileo Galilei';
-      if (/\bstephen\s+hawking\b/i.test(text)) return 'Stephen Hawking';
-      if (/\b(?:barack\s+)?obama\b/i.test(text)) return 'Barack Obama';
-      if (/\b(?:joe\s+)?biden\b/i.test(text)) return 'Joe Biden';
-      if (/\b(?:abraham\s+)?lincoln\b/i.test(text)) return 'Abraham Lincoln';
-      if (/\bgeorge\s+washington\b/i.test(text)) return 'George Washington';
-      if (/\bnelson\s+mandela\b/i.test(text)) return 'Nelson Mandela';
-      if (/\bwinston\s+churchill\b/i.test(text)) return 'Winston Churchill';
-      if (/\bsteve\s+jobs\b/i.test(text)) return 'Steve Jobs';
-      if (/\belon\s+musk\b/i.test(text)) return 'Elon Musk';
-      if (/\bbill\s+gates\b/i.test(text)) return 'Bill Gates';
-      if (/\bmark\s+zuckerberg\b/i.test(text)) return 'Mark Zuckerberg';
-      if (/\bjeff\s+bezos\b/i.test(text)) return 'Jeff Bezos';
-
-      // 2. Permintaan Foto / Gambar Eksplisit (Indonesian & English)
-      const explicitPhotoMatch = text.match(/\b(?:berikan|tampilkan|sertakan|mana|lihat|show|give|display|find)?\s*(?:contoh\s+)?(?:foto|fhoto|gambar|photo|picture|image|visual)(?:nya|s)?\s*(?:dari|tentang|mengenai|of|about)?\s+([a-zA-Z0-9\s\-]{3,40})/i);
+      // B. Permintaan Foto / Gambar Eksplisit -> terjemahkan ke Bahasa Inggris & panggil Unsplash (per_page: 3)
+      const explicitPhotoMatch = text.match(/\b(?:carikan|cari|berikan|tampilkan|sertakan|mana|lihat|ambilkan|show|give|display|find)?\s*(?:beberapa\s+|banyak\s+)?(?:contoh\s+)?(?:foto|fhoto|gambar|photo|picture|image|visual)(?:nya|s)?\s*(?:dari|tentang|mengenai|untuk|of|about|for)?\s+([a-zA-Z0-9\s\-]{3,50})/i);
       if (explicitPhotoMatch && explicitPhotoMatch[1]) {
-        let rawSubject = explicitPhotoMatch[1].trim()
-          .replace(/^(?:of|about|dari|tentang|mengenai)\s+/i, '')
-          .replace(/\b(?:saat|ketika|waktu|di|pada|nya|dong|ya|ini|itu|tersebut|adalah|when|in|at|is|the)\b.*$/i, '')
+        const rawSubject = explicitPhotoMatch[1].trim()
+          .replace(/^(?:of|about|for|dari|tentang|mengenai|untuk)\s+/i, '')
+          .replace(/\b(?:saat|ketika|waktu|dong|ya|ini|itu|tersebut|adalah|when|is)\b.*$/i, '')
           .trim();
         if (rawSubject.length >= 3 && !/^(?:yang|ini|itu|tersebut|adalah|the|this|that)$/i.test(rawSubject)) {
-          return rawSubject;
+          const enQ = translateVisualKeywordToEnglishClient(rawSubject);
+          return { rawTarget: rawSubject, englishQuery: enQ, isNamedPerson: false, sources: ['unsplash'], perPage: 3 };
         }
       }
 
-      // 3. Pertanyaan Tokoh / Subjek: "siapa X" / "who is X" / "who was X" / "profil X" / "profile of X"
-      const personMatch = text.match(/\b(?:siapa|who\s+is|who\s+was|profil(?:e)?(?:\s+of)?|tokoh)\s+([a-zA-Z0-9\s\-]{3,40}?)(?:[,\.\?!]|\s+(?:dan|berikan|kasih|tampilkan|sertakan|contoh|foto|fhoto|gambar|photo|picture|image)|$)/i);
+      // C. Pertanyaan Tokoh Spesifik ("siapa X" / "who is X") -> arahkan ke wikimedia_commons
+      const personMatch = text.match(/\b(?:siapa(?:kah)?|who\s+is|who\s+was|profil(?:e)?(?:\s+of)?|biografi)\s+([a-zA-Z0-9\s\.\-]{3,40}?)(?:[,\.\?!]|\s+(?:dan|berikan|kasih|tampilkan|sertakan|contoh|foto|fhoto|gambar|photo|picture|image)|$)/i);
       if (personMatch && personMatch[1]) {
-        let rawName = personMatch[1].trim().replace(/^(?:the|a|an|sang|si)\s+/i, '');
-        const isRoleOrGeneric = /\b(?:presiden|menteri|gubernur|bupati|walikota|raja|ratu|pangeran|putri|penemu|pencipta|pemimpin|ketua|pendiri|bapak|ibu|juara|president|minister|governor|king|queen|prince|princess|inventor|founder|leader|champion)\b/i.test(rawName);
-        if (!isRoleOrGeneric && rawName.length >= 3 && !/^(?:dia|mereka|anda|kamu|yang|ini|itu|nama|he|she|they|you|it|name)$/i.test(rawName)) {
-          return rawName;
+        const rawName = personMatch[1].trim().replace(/^(?:the|a|an|sang|si|itu)\s+/i, '');
+        const isRoleOrGeneric = /\b(?:presiden|menteri|gubernur|bupati|walikota|raja|ratu|pangeran|putri|kesatria|ksatria|keatria|prajurit|penemu|pencipta|pemimpin|ketua|pendiri|juara|president|minister|king|queen|knight|warrior|inventor|founder|leader)\b/i.test(rawName);
+        if (!isRoleOrGeneric && rawName.length >= 3 && !/^(?:dia|mereka|anda|kamu|saya|aku|yang|ini|itu|nama|he|she|they|you|it|name)$/i.test(rawName)) {
+          return { rawTarget: rawName, englishQuery: rawName, isNamedPerson: true, sources: ['wikimedia_commons'], perPage: 3 };
         }
       }
 
-      // 4. Candi & Situs Arkeologi
-      const candiMatch = text.match(/\b(?:candi|temple)\s+([a-zA-Z0-9\-]+(?:\s+(?:muara takus|gedong songo|lawang sewu|sewu))?)/i);
-      if (candiMatch && candiMatch[1]) {
-        const singleWord = candiMatch[1].trim().split(/\s+/)[0];
-        if (singleWord.length >= 3 && !/^(?:yang|ini|itu|tersebut|adalah|di|pada)$/i.test(singleWord)) {
-          return `Candi ${singleWord}`;
+      if (!allowBroadTopicMatch) return null;
+
+      // D. Frasa Idiomatik Visual Prioritas (misal "kopi hangat" -> "hot coffee", "kesatria abad pertengahan" -> "medieval knight")
+      const lowerText = text.toLowerCase().replace(/\bfhoto\b/g, 'foto').replace(/\b(?:keatria|ksatria)\b/g, 'kesatria');
+      for (const [idPhrase, enPhrase] of Object.entries(CLIENT_VISUAL_PHRASE_EN_MAP)) {
+        if (lowerText.includes(idPhrase)) {
+          return { rawTarget: idPhrase, englishQuery: enPhrase, isNamedPerson: false, sources: ['unsplash'], perPage: 3 };
         }
       }
 
-      // 5. Monumen, Tugu, Patung terkenal & Landmark Arsitektur
-      if (/\bborobudur\b/i.test(text)) return 'Borobudur temple';
-      if (/\bprambanan\b/i.test(text)) return 'Prambanan temple';
-      if (/\bmonas\b/i.test(text) || /\bmonumen nasional\b/i.test(text)) return 'Monas Jakarta';
-      if (/\bgaruda wisnu kencana\b/i.test(text) || /\bgwk\b/i.test(text)) return 'Garuda Wisnu Kencana';
-      if (/\btaj mahal\b/i.test(text)) return 'Taj Mahal';
-      if (/\bcolosseum\b/i.test(text)) return 'Colosseum Rome';
-      if (/\beiffel\b/i.test(text)) return 'Eiffel Tower';
-      if (/\b(?:piramida|pyramids?)\s+(?:giza|mesir|egypt)?\b/i.test(text)) return 'Giza Pyramids';
-      if (/\b(?:lawang sewu)\b/i.test(text)) return 'Lawang Sewu';
-      if (/\b(?:masjid istiqlal)\b/i.test(text)) return 'Istiqlal Mosque';
-      if (/\b(?:katedral jakarta)\b/i.test(text)) return 'Jakarta Cathedral';
-      if (/\b(?:hagia sophia)\b/i.test(text)) return 'Hagia Sophia';
-      if (/\b(?:benteng vredeburg)\b/i.test(text)) return 'Fort Vredeburg';
-      if (/\b(?:keraton yogyakarta)\b/i.test(text)) return 'Kraton Ngayogyakarta';
+      // E. Landmark, Monumen & Mahakarya Seni Terkenal
+      if (/\bborobudur\b/i.test(text)) return { rawTarget: 'Candi Borobudur', englishQuery: 'Borobudur temple', isNamedPerson: false, sources: ['unsplash'], perPage: 3 };
+      if (/\bprambanan\b/i.test(text)) return { rawTarget: 'Candi Prambanan', englishQuery: 'Prambanan temple', isNamedPerson: false, sources: ['unsplash'], perPage: 3 };
+      if (/\bmonas\b|\bmonumen nasional\b/i.test(text)) return { rawTarget: 'Monas Jakarta', englishQuery: 'Monas Jakarta monument', isNamedPerson: false, sources: ['unsplash'], perPage: 3 };
+      if (/\btaj mahal\b/i.test(text)) return { rawTarget: 'Taj Mahal', englishQuery: 'Taj Mahal India', isNamedPerson: false, sources: ['unsplash'], perPage: 3 };
+      if (/\bcolosseum\b/i.test(text)) return { rawTarget: 'Colosseum', englishQuery: 'Colosseum Rome', isNamedPerson: false, sources: ['unsplash'], perPage: 3 };
+      if (/\beiffel\b/i.test(text)) return { rawTarget: 'Menara Eiffel', englishQuery: 'Eiffel Tower Paris', isNamedPerson: false, sources: ['unsplash'], perPage: 3 };
+      if (/\b(?:piramida|pyramids?)\s*(?:giza|mesir|egypt)?\b/i.test(text)) return { rawTarget: 'Piramida Mesir', englishQuery: 'Giza Pyramids Egypt', isNamedPerson: false, sources: ['unsplash'], perPage: 3 };
+      if (/\bhagia sophia\b/i.test(text)) return { rawTarget: 'Hagia Sophia', englishQuery: 'Hagia Sophia Istanbul', isNamedPerson: false, sources: ['unsplash'], perPage: 3 };
+      if (/\bmona lisa\b/i.test(text)) return { rawTarget: 'Mona Lisa', englishQuery: 'Mona Lisa Leonardo da Vinci', isNamedPerson: false, sources: ['wikimedia_commons'], perPage: 3 };
+      if (/\bstarry night\b/i.test(text)) return { rawTarget: 'The Starry Night', englishQuery: 'The Starry Night Van Gogh', isNamedPerson: false, sources: ['wikimedia_commons'], perPage: 3 };
 
-      // 6. Landmark & Wisata Alam terkemuka
-      const landmarkMatch = text.match(/\b(?:danau toba|gunung bromo|kawah ijen|raja ampat|pulau komodo|labuan bajo|gunung rinjani|mount fuji|grand canyon|niagara falls)\b/i);
-      if (landmarkMatch) {
-        return landmarkMatch[0].trim();
-      }
-
-      // 7. Fauna Langka & Hewan Ikonik
-      const faunaMatch = text.match(/\b(?:komodo|badak jawa|harimau sumatera|orangutan|burung cendrawasih|jalak bali|anoa|babirusa|gajah sumatera|paus biru|hiu paus)\b/i);
-      if (faunaMatch) {
-        return faunaMatch[0].trim();
-      }
-
-      // 8. Mahakarya Seni & Lukisan Terkenal
-      if (/\bmona lisa\b/i.test(text)) return 'Mona Lisa Leonardo da Vinci';
-      if (/\b(?:the )?starry night\b/i.test(text)) return 'The Starry Night Van Gogh';
-      if (/\bpenangkapan pangeran diponegoro\b/i.test(text)) return 'Penangkapan Pangeran Diponegoro Raden Saleh';
-      if (/\bguernica\b/i.test(text)) return 'Guernica Picasso';
-      if (/\bthe scream\b/i.test(text)) return 'The Scream Munch';
-
-      // 9. Pola umum Candi / Museum / Istana
-      const generalPlaceMatch = text.match(/\b(?:museum|istana|kastil|pura|kelenteng)\s+([a-zA-Z0-9\s\-]{3,30})/i);
-      if (generalPlaceMatch && generalPlaceMatch[1]) {
-        const cleanPlace = generalPlaceMatch[1].trim().replace(/\b(?:di|in|pada|jawa|indonesia|daerah|wilayah)\b.*$/i, '').trim();
-        if (cleanPlace.length >= 3 && !/^(?:yang|ini|itu|tersebut)$/i.test(cleanPlace)) {
-          return `${generalPlaceMatch[0].split(/\s+/)[0]} ${cleanPlace}`;
+      // F. Analisis Topik Objek / Kuliner / Sejarah / Alam / Hewan / Arsitektur Konkret pada Pertanyaan Pengguna
+      const concreteVisualMatch = text.match(/\b((?:kopi|espresso|cappuccino|latte|matcha|teh|cokelat|coklat|ramen|sushi|pizza|pasta|rendang|sate|kesatria|ksatria|keatria|samurai|viking|gladiator|kastil|benteng|candi|pura|masjid|katedral|istana|gunung|kawah|danau|pantai|air\s+terjun|hutan|gurun|aurora|galaksi|nebula|terumbu\s+karang|komodo|orangutan|harimau|singa|elang|paus|hiu|kucing|anjing|kuda|bunga\s+sakura|anggrek|bonsai)(?:\s+[a-zA-Z]{3,18}){0,2})\b/i);
+      if (concreteVisualMatch && concreteVisualMatch[1]) {
+        const cleanedTopic = concreteVisualMatch[1].trim()
+          .replace(/\b(?:adalah|merupakan|yang|dan|atau|di|ke|dari|untuk|pada|dengan|dalam|itu|ini|tersebut|sangat|paling|bisa|dapat|akan|harus)\b.*$/i, '')
+          .trim();
+        if (cleanedTopic.length >= 3) {
+          const enQ = translateVisualKeywordToEnglishClient(cleanedTopic);
+          return { rawTarget: cleanedTopic, englishQuery: enQ, isNamedPerson: false, sources: ['unsplash'], perPage: 3 };
         }
       }
 
       return null;
     }
 
-    // 1. Ekstraksi langsung dari prompt pengguna
-    const directTarget = extractEntityFromRawText(promptText);
-    if (directTarget) return directTarget;
+    // 1. Analisis langsung terhadap pertanyaan pengguna (prioritas tertinggi)
+    const directSpec = analyzeRawText(pTrim, true);
+    if (directSpec) return directSpec;
 
-    // 2. Proyeksi kontekstual: jika prompt tidak memuat nama entitas spesifik (misal kueri deskriptif: "Siapa presiden AS ke-45?"),
-    // ekstrak entitas dari 400 karakter pembuka jawaban sintetis model.
-    if (fullText && typeof fullText === 'string') {
-      const opening = fullText.slice(0, 400).trim();
-      const contextualTarget = extractEntityFromRawText(opening);
-      if (contextualTarget) return contextualTarget;
+    // 2. Proyeksi kontekstual dari pembuka jawaban hanya bila pertanyaan menyiratkan pencarian entitas ("siapa...", "apa nama tempat...")
+    if (fullText && typeof fullText === 'string' && /\b(?:siapa|presiden|penemu|tokoh|monumen|candi|lukisan)\b/i.test(pTrim)) {
+      const opening = fullText.slice(0, 360).trim();
+      const contextualSpec = analyzeRawText(opening, false);
+      if (contextualSpec) return contextualSpec;
     }
 
     return null;
+  }
+
+  // Deteksi target entitas visual kompatibel (mengembalikan kata kunci Bahasa Inggris teroptimasi)
+  function detectVisualEntityGroundingTarget(promptText, fullText = '') {
+    const spec = resolveVisualSearchSpec(promptText, fullText);
+    return spec ? spec.englishQuery : null;
   }
 
   // Klasifikasi intent pembuatan sebelum modal/tool dipanggil:
@@ -26150,14 +26274,21 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       type: 'function',
       function: {
         name: 'search_images',
-        description: 'Mencari kandidat foto atau gambar yang relevan ketika pengguna membahas tokoh, tempat, benda, hewan, karya seni, atau topik lain yang terbantu oleh visual dari sumber resmi yang diizinkan (pinterest, unsplash, pexels, pixabay, kaboompics, wikimedia_commons). Mengembalikan status, array kandidat images beserta metadata lengkap (null jika tidak diketahui), dan source_errors.',
+        description: 'Mencari 3 foto paling relevan untuk mendukung jawaban visual menggunakan API resmi Unsplash (prioritas utama untuk objek, kuliner/minuman, alam, sejarah umum, arsitektur, dan suasana) atau Wikimedia Commons (khusus potret tokoh biografi spesifik). ATURAN WAJIB: (1) Analisis pertanyaan pengguna dan tentukan visual apa yang paling cocok mendukung jawaban; (2) Terjemahkan kata kunci ke Bahasa Inggris agar pencarian Unsplash akurat (contoh: "kopi hangat" -> "hot coffee").',
         parameters: {
           type: 'object',
           properties: {
             query: {
               type: 'string',
               minLength: 1,
-              description: 'Kueri spesifik berdasarkan subjek yang dibahas (contoh: "Borobudur temple central java", "Panthera tigris sumatrae", "Bacharuddin Jusuf Habibie portrait").'
+              description: 'Kata kunci visual dalam Bahasa Inggris hasil analisis pertanyaan pengguna (contoh: "hot coffee", "medieval knight", "Borobudur temple").'
+            },
+            per_page: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 20,
+              default: 3,
+              description: 'Jumlah foto paling relevan yang diambil dari Unsplash (default 3).'
             },
             sources: {
               type: 'array',
@@ -26166,14 +26297,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
                 enum: ['pinterest', 'unsplash', 'pexels', 'pixabay', 'kaboompics', 'wikimedia_commons']
               },
               uniqueItems: true,
-              description: 'Opsional: daftar sumber spesifik yang ingin dicari. Untuk tokoh, tempat nyata, spesies, atau peristiwa sejarah, utamakan ["wikimedia_commons"].'
+              description: 'Opsional: gunakan ["unsplash"] (default utama) untuk visual objek/kuliner/alam/sejarah umum, atau ["wikimedia_commons"] khusus potret tokoh bernama spesifik.'
             },
             limit: {
               type: 'integer',
               minimum: 1,
               maximum: 20,
-              default: 6,
-              description: 'Jumlah maksimum kandidat gambar (default 6, maksimum 20).'
+              default: 3,
+              description: 'Batas jumlah kandidat gambar (default 3).'
             },
             orientation: {
               type: 'string',
@@ -27755,11 +27886,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       }
 
       if (toolName === 'search_images') {
-        const query = String(args.query || args.q || (typeof args === 'string' ? args : '')).trim();
+        const rawQuery = String(args.query || args.q || (typeof args === 'string' ? args : '')).trim();
         const sources = Array.isArray(args.sources)
           ? args.sources
-          : (args.sources ? String(args.sources).split(',').map((s) => s.trim()).filter(Boolean) : undefined);
-        const limit = Math.max(1, Math.min(20, parseInt(args.limit || 6, 10) || 6));
+          : (args.sources ? String(args.sources).split(',').map((s) => s.trim()).filter(Boolean) : ['unsplash']);
+        const isOnlyWikimedia = Array.isArray(sources) && sources.length === 1 && sources[0] === 'wikimedia_commons';
+        const query = isOnlyWikimedia ? rawQuery : (translateVisualKeywordToEnglishClient(rawQuery) || rawQuery);
+        const per_page = Math.max(1, Math.min(20, parseInt(args.per_page ?? args.limit ?? 3, 10) || 3));
+        const limit = Math.max(1, Math.min(20, parseInt(args.limit ?? args.per_page ?? 3, 10) || 3));
         const orientation = ['any', 'landscape', 'portrait', 'square'].includes(args.orientation) ? args.orientation : 'any';
         const image_type = ['photo', 'illustration', 'any'].includes(args.image_type) ? args.image_type : 'any';
         const safe_search = args.safe_search !== false;
@@ -27769,7 +27903,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           const res = await fetch(getUniversalApiUrl('/api/tools/search-images'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, sources, limit, orientation, image_type, safe_search }),
+            body: JSON.stringify({ query, per_page, sources, limit, orientation, image_type, safe_search }),
             signal: makeToolSignal(14000)
           });
           searchRes = await res.json().catch(() => null);
@@ -27777,13 +27911,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           searchRes = { status: 'error', images: [], source_errors: [{ source: 'network', code: 'access_denied', message: e.message }] };
         }
 
+        const effectiveEnQuery = String(searchRes?.english_query || query).trim();
         let imgs = Array.isArray(searchRes?.images) ? searchRes.images : [];
-        if (imgs.length === 0 && query) {
+        if (imgs.length === 0 && effectiveEnQuery) {
           try {
-            const fb = await searchWikimediaCommonsDirect(query, limit);
+            const fb = await searchWikimediaCommonsDirect(effectiveEnQuery, limit);
             if (fb && fb.length > 0) {
               imgs = fb;
-              searchRes = { status: 'success', images: imgs, source_errors: [] };
+              searchRes = { status: 'success', english_query: effectiveEnQuery, images: imgs, source_errors: [] };
             }
           } catch (fbErr) {
             console.warn('[search_images Client Fallback] Error:', fbErr);
@@ -27793,7 +27928,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         if (imgs.length > 0) {
           imgs.forEach((im) => {
             if (im && im.image_id) {
-              cacheGroundedCandidateClient(im.image_id, { ...im, _searchQuery: im._searchQuery || query });
+              cacheGroundedCandidateClient(im.image_id, { ...im, _searchQuery: im._searchQuery || effectiveEnQuery });
             }
           });
         }
@@ -27870,6 +28005,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             let subject_match = 'likely';
             if (isSpoof) {
               subject_match = 'mismatch';
+            } else if (cached.source_name === 'unsplash') {
+              subject_match = 'likely';
             } else if (qTokens.length > 0) {
               const cov = hitCount / qTokens.length;
               subject_match = cov >= 0.85 ? 'confirmed' : (cov >= 0.5 ? 'likely' : (cov > 0 ? 'uncertain' : 'mismatch'));
@@ -27939,9 +28076,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
       if (toolName === 'prepare_image_display') {
         const image_ids = Array.isArray(args.image_ids)
-          ? args.image_ids.map((id) => String(id || '').trim()).filter(Boolean).slice(0, 3)
-          : (args.image_ids ? String(args.image_ids).split(',').map((s) => s.trim()).filter(Boolean).slice(0, 3) : []);
-        const layout = ['single', 'gallery', 'collage'].includes(args.layout) ? args.layout : (image_ids.length === 1 ? 'single' : 'gallery');
+          ? args.image_ids.map((id) => String(id || '').trim()).filter(Boolean).slice(0, 12)
+          : (args.image_ids ? String(args.image_ids).split(',').map((s) => s.trim()).filter(Boolean).slice(0, 12) : []);
+        const layout = ['single', 'gallery', 'collage'].includes(args.layout) ? args.layout : (image_ids.length === 1 ? 'single' : 'collage');
         const placement = ['after_intro', 'within_section'].includes(args.placement) ? args.placement : 'after_intro';
         let alt_texts = Array.isArray(args.alt_texts) ? args.alt_texts.map((a) => String(a || '').trim()) : [];
         if (alt_texts.length !== image_ids.length) {
@@ -28606,7 +28743,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   5. \`summarize_sources({"query": "<topik>", "urls": ["<url1>", "<url2>"], "summary_style": "detailed", "include_citations": true})\`: Sintesis multi-sumber whitelist bersitasi.
   6. \`find_related_videos({"video_url": "<URL video>", "query": "<topik>", "platform": "auto", "limit": 5})\`: Pencarian video lintas platform yang dapat diputar di obrolan.
   7. \`summarize_whatsapp_chat({"target_number_or_name": "<nama/nomor>", "focus_topic": "<fokus>"})\`: Rangkuman obrolan WhatsApp dengan gerbang persetujuan pengguna.
-  8. \`search_images({"query": "<subjek spesifik>", "sources": ["wikimedia_commons"], "limit": 6, "orientation": "any", "image_type": "photo", "safe_search": true})\` -> \`inspect_image({"image_id": "<id>"})\` -> \`prepare_image_display({"image_ids": ["<id>"], "layout": "single", "placement": "after_intro", "alt_texts": ["<deskripsi>"]})\`: Siklus pencarian, verifikasi metadata/lisensi, dan perenderan 1–3 gambar relevan di dalam jawaban (gunakan hanya bila topik terbantu oleh visual; utamakan kecocokan identitas subjek pada metadata sumber, jangan gunakan foto stok sebagai bukti peristiwa nyata, dan sisipkan token \`[[ZOZ_IMAGE_DISPLAY:disp_...]]\` di dekat pembahasan tanpa menampilkan JSON mentah).`;
+  8. \`search_images({"query": "<kata kunci bahasa Inggris>", "per_page": 3, "sources": ["unsplash"], "orientation": "any", "image_type": "photo", "safe_search": true})\` -> \`inspect_image({"image_id": "<id>"})\` -> \`prepare_image_display({"image_ids": ["<id1>", "<id2>", "<id3>"], "layout": "collage", "placement": "after_intro", "alt_texts": ["<deskripsi>"]})\`: Siklus pencarian dan perenderan 3 foto paling relevan untuk mendukung jawaban visual. ATURAN PEMROSESAN: (1) Analisis pertanyaan pengguna dan tentukan visual apa yang paling cocok mendukung jawaban; (2) Terjemahkan kata kunci tersebut ke Bahasa Inggris agar pencarian Unsplash akurat (contoh: "kopi hangat" menjadi "hot coffee"); (3) Ambil per_page: 3 dari ["unsplash"] untuk objek/kuliner/alam/sejarah umum atau ["wikimedia_commons"] khusus potret tokoh bernama spesifik, lalu sisipkan token \`[[ZOZ_IMAGE_DISPLAY:disp_...]]\` di dekat pembahasan tanpa menampilkan JSON mentah.`;
   }
   const AUTONOMOUS_SYSTEM_DIRECTIVE = '';
 
@@ -30374,17 +30511,18 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
         : (streamDuration > 0 ? (evalTokens / streamDuration).toFixed(1) : '0');
 
       // ===== GERBANG VISUAL GROUNDING OTONOM (OLLAMA - FINAL TURN) =====
-      // Dijalankan tepat setelah jawaban teks tuntas disintesis agar token penempatan tidak terhapus oleh rescue round/epistemic gate.
-      const visualEntityTargetOllama = detectVisualEntityGroundingTarget(promptText, fullText);
-      if (groundedImageDisplays.length === 0 && visualEntityTargetOllama && !wantsFile && !isDocRequest && !isStudioIsolated && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
+      // Analisis pertanyaan pengguna -> terjemahkan kata kunci ke Bahasa Inggris -> ambil 3 foto paling relevan via API Unsplash (per_page: 3).
+      const visualSpecOllama = resolveVisualSearchSpec(promptText, fullText);
+      if (groundedImageDisplays.length === 0 && visualSpecOllama && !wantsFile && !isDocRequest && !isStudioIsolated && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
           const existingGeneratedHtml = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
-          bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari visual resmi & memverifikasi lisensi untuk "${visualEntityTargetOllama}"...</span></div>`;
+          bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari 3 foto relevan untuk "${visualSpecOllama.englishQuery}"...</span></div>`;
           smartScrollChatToBottom(true);
           const autoImgSearch = await executeAutonomousWebTool('search_images', {
-            query: visualEntityTargetOllama,
-            sources: ['wikimedia_commons'],
-            limit: 8,
+            query: visualSpecOllama.englishQuery,
+            per_page: visualSpecOllama.perPage || 3,
+            limit: visualSpecOllama.perPage || 3,
+            sources: visualSpecOllama.sources || ['unsplash'],
             orientation: 'any',
             image_type: 'photo',
             safe_search: true
@@ -30395,23 +30533,21 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
             : (Array.isArray(autoImgSearch?.data?.images) ? autoImgSearch.data.images : []);
 
           if (candidateList.length > 0 && !STATE.abortController?.signal?.aborted) {
-            const verifiedItems = [];
-
-            // Evaluasi beberapa kandidat untuk kolase kaya banyak foto (ala benchmark ChatGPT)
-            for (const cand of candidateList.slice(0, 6)) {
-              if (STATE.abortController?.signal?.aborted) break;
-              const inspectRes = await executeAutonomousWebTool('inspect_image', {
-                image_id: cand.image_id
-              }, promptText, session);
-              const inspectData = inspectRes?.data || inspectRes || {};
-              if (inspectData.accessible && inspectData.usage_status === 'allowed' && (inspectData.subject_match === 'confirmed' || inspectData.subject_match === 'likely')) {
-                verifiedItems.push({
-                  candidate: cand,
-                  inspectData: inspectData
-                });
-                if (verifiedItems.length >= 6) break;
-              }
-            }
+            const topCandidates = candidateList.slice(0, visualSpecOllama.perPage || 3);
+            const inspectedBatch = await Promise.all(
+              topCandidates.map(async (cand) => {
+                if (STATE.abortController?.signal?.aborted) return null;
+                const inspectRes = await executeAutonomousWebTool('inspect_image', {
+                  image_id: cand.image_id
+                }, promptText, session);
+                const inspectData = inspectRes?.data || inspectRes || {};
+                if (inspectData.accessible && inspectData.usage_status === 'allowed' && (inspectData.subject_match === 'confirmed' || inspectData.subject_match === 'likely')) {
+                  return { candidate: cand, inspectData };
+                }
+                return null;
+              })
+            );
+            const verifiedItems = inspectedBatch.filter(Boolean);
 
             if (verifiedItems.length > 0 && !STATE.abortController?.signal?.aborted) {
               const targetIds = verifiedItems.map(it => it.inspectData.image_id || it.candidate.image_id);
@@ -30420,7 +30556,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
                 image_ids: targetIds,
                 layout: layoutType,
                 placement: 'after_intro',
-                alt_texts: verifiedItems.map(it => it.candidate.title || visualEntityTargetOllama)
+                alt_texts: verifiedItems.map(it => it.candidate.title || visualSpecOllama.englishQuery)
               }, promptText, session);
 
               const displayObj = prepRes?.imageDisplay || prepRes?.data;
@@ -32321,17 +32457,18 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
       const tps = streamDuration > 0 ? (evalTokens / streamDuration).toFixed(1) : '0';
 
       // ===== GERBANG VISUAL GROUNDING OTONOM (OPENROUTER - FINAL TURN) =====
-      // Dijalankan tepat setelah jawaban teks tuntas disintesis agar token penempatan tidak terhapus oleh rescue round/epistemic gate.
-      const visualEntityTargetOpenRouter = detectVisualEntityGroundingTarget(promptText, fullText);
-      if (groundedImageDisplays.length === 0 && visualEntityTargetOpenRouter && !wantsFile && !isDocRequest && !isStudioIsolated && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
+      // Analisis pertanyaan pengguna -> terjemahkan kata kunci ke Bahasa Inggris -> ambil 3 foto paling relevan via API Unsplash (per_page: 3).
+      const visualSpecOpenRouter = resolveVisualSearchSpec(promptText, fullText);
+      if (groundedImageDisplays.length === 0 && visualSpecOpenRouter && !wantsFile && !isDocRequest && !isStudioIsolated && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
           const existingGeneratedHtml = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
-          bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari visual resmi & memverifikasi lisensi untuk "${visualEntityTargetOpenRouter}"...</span></div>`;
+          bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari 3 foto relevan untuk "${visualSpecOpenRouter.englishQuery}"...</span></div>`;
           smartScrollChatToBottom(true);
           const autoImgSearch = await executeAutonomousWebTool('search_images', {
-            query: visualEntityTargetOpenRouter,
-            sources: ['wikimedia_commons'],
-            limit: 8,
+            query: visualSpecOpenRouter.englishQuery,
+            per_page: visualSpecOpenRouter.perPage || 3,
+            limit: visualSpecOpenRouter.perPage || 3,
+            sources: visualSpecOpenRouter.sources || ['unsplash'],
             orientation: 'any',
             image_type: 'photo',
             safe_search: true
@@ -32342,23 +32479,21 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
             : (Array.isArray(autoImgSearch?.data?.images) ? autoImgSearch.data.images : []);
 
           if (candidateList.length > 0 && !STATE.abortController?.signal?.aborted) {
-            const verifiedItems = [];
-
-            // Evaluasi beberapa kandidat untuk kolase kaya banyak foto (ala benchmark ChatGPT)
-            for (const cand of candidateList.slice(0, 6)) {
-              if (STATE.abortController?.signal?.aborted) break;
-              const inspectRes = await executeAutonomousWebTool('inspect_image', {
-                image_id: cand.image_id
-              }, promptText, session);
-              const inspectData = inspectRes?.data || inspectRes || {};
-              if (inspectData.accessible && inspectData.usage_status === 'allowed' && (inspectData.subject_match === 'confirmed' || inspectData.subject_match === 'likely')) {
-                verifiedItems.push({
-                  candidate: cand,
-                  inspectData: inspectData
-                });
-                if (verifiedItems.length >= 6) break;
-              }
-            }
+            const topCandidates = candidateList.slice(0, visualSpecOpenRouter.perPage || 3);
+            const inspectedBatch = await Promise.all(
+              topCandidates.map(async (cand) => {
+                if (STATE.abortController?.signal?.aborted) return null;
+                const inspectRes = await executeAutonomousWebTool('inspect_image', {
+                  image_id: cand.image_id
+                }, promptText, session);
+                const inspectData = inspectRes?.data || inspectRes || {};
+                if (inspectData.accessible && inspectData.usage_status === 'allowed' && (inspectData.subject_match === 'confirmed' || inspectData.subject_match === 'likely')) {
+                  return { candidate: cand, inspectData };
+                }
+                return null;
+              })
+            );
+            const verifiedItems = inspectedBatch.filter(Boolean);
 
             if (verifiedItems.length > 0 && !STATE.abortController?.signal?.aborted) {
               const targetIds = verifiedItems.map(it => it.inspectData.image_id || it.candidate.image_id);
@@ -32367,7 +32502,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
                 image_ids: targetIds,
                 layout: layoutType,
                 placement: 'after_intro',
-                alt_texts: verifiedItems.map(it => it.candidate.title || visualEntityTargetOpenRouter)
+                alt_texts: verifiedItems.map(it => it.candidate.title || visualSpecOpenRouter.englishQuery)
               }, promptText, session);
 
               const displayObj = prepRes?.imageDisplay || prepRes?.data;
@@ -46414,7 +46549,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://mart-shuttle-terminals-investigate.trycloudflare.com',
+    activeTunnelUrl: 'https://pilot-coast-myspace-shelter.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
