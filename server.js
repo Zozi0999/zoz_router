@@ -12130,10 +12130,12 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       }
 
 
-      // Defense-in-depth: Hapus tool jika model gratis, atau kueri konsep aljabar murni
+      // Defense-in-depth: Hapus tool jika model gratis, model Nemotron, atau kueri konsep aljabar murni
+      const reqModel = String(body.model || '');
+      const isNemotron = reqModel.toLowerCase().includes('nemotron');
       const isPureAlgebraQuery = typeof textSafety.isPureAlgebraOrConceptualQuery === 'function' && textSafety.isPureAlgebraOrConceptualQuery(userPrompt);
       const isFree = body.model && (body.model.includes(':free') || body.model.endsWith('/free') || body.model === 'openrouter/free');
-      if ((isFree || isPureAlgebraQuery) && Array.isArray(body.tools)) {
+      if ((isFree || isPureAlgebraQuery || isNemotron) && Array.isArray(body.tools)) {
         delete body.tools;
         delete body.tool_choice;
       } else if (Array.isArray(body.tools)) {
@@ -12148,15 +12150,18 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       }
 
       // Defense-in-depth: Hapus parameter yang tidak didukung pada model tertentu (misal: top_p pada Liquid AI / reasoning)
-      const reqModel = String(body.model || '');
       const isLiquid = reqModel.includes('liquid') || reqModel.includes('lfm-');
-      const isReasoning = Boolean(reqModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(reqModel) || reqModel.toLowerCase().includes('reasoning') || reqModel.toLowerCase().includes('-r1')));
+      const isReasoning = Boolean(reqModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r|nemotron)\b/i.test(reqModel) || reqModel.toLowerCase().includes('reasoning') || reqModel.toLowerCase().includes('-r1') || isNemotron));
       if (isLiquid && body.top_p !== undefined) {
         delete body.top_p;
       }
+      if (isNemotron) {
+        body.reasoning = { effort: 'high' };
+        body.include_reasoning = true;
+      }
       if (isReasoning) {
-        if (body.temperature !== undefined) delete body.temperature;
-        if (body.top_p !== undefined) delete body.top_p;
+        if (body.temperature !== undefined && !isNemotron) delete body.temperature;
+        if (body.top_p !== undefined && !isNemotron) delete body.top_p;
       }
 
       // Defense-in-depth: Resolusi gambar lokal (/uploads/) menjadi Base64 data URL agar OpenRouter tidak merejeksi private IP

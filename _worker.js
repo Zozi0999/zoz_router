@@ -1529,8 +1529,9 @@ export default {
           if (body.options?.temperature !== undefined) openRouterPayload.temperature = body.options.temperature;
           if (body.options?.top_p !== undefined) openRouterPayload.top_p = body.options.top_p;
 
+          const isNemotronModel = targetModel.toLowerCase().includes('nemotron');
           const isFreeModel = targetModel.includes(':free') || targetModel.endsWith('/free') || targetModel === 'openrouter/free';
-          if (!isFreeModel && Array.isArray(body.tools) && body.tools.length > 0) {
+          if (!isFreeModel && !isNemotronModel && Array.isArray(body.tools) && body.tools.length > 0) {
             const clean = body.tools.filter(t => t && t.type === 'function' && t.function && t.function.name);
             if (clean.length > 0) {
               openRouterPayload.tools = clean;
@@ -1945,8 +1946,9 @@ export default {
             if (reqModel && !reqModel.includes('/')) {
               reqModel = mapOllamaModelToOpenRouter(reqModel);
             }
+            const isNemotronReq = reqModel.toLowerCase().includes('nemotron');
             const isLiquid = reqModel.includes('liquid') || reqModel.includes('lfm-');
-            const isReasoning = Boolean(reqModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(reqModel) || reqModel.toLowerCase().includes('reasoning') || reqModel.toLowerCase().includes('-r1')));
+            const isReasoning = Boolean(reqModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r|nemotron)\b/i.test(reqModel) || reqModel.toLowerCase().includes('reasoning') || reqModel.toLowerCase().includes('-r1') || isNemotronReq));
             const out = {
               model: reqModel,
               messages: body.messages || [],
@@ -1954,7 +1956,7 @@ export default {
               ...(body.provider ? { provider: body.provider } : { provider: { allow_fallbacks: true } }),
               ...(body.plugins ? { plugins: body.plugins } : {}),
               ...(body.modalities ? { modalities: body.modalities } : {}),
-              ...(body.reasoning ? { reasoning: body.reasoning } : {}),
+              ...(isNemotronReq ? { reasoning: { effort: 'high' }, include_reasoning: true } : (body.reasoning ? { reasoning: body.reasoning } : {})),
               ...(body.max_tokens ? { max_tokens: body.max_tokens } : {})
             };
             if (!isReasoning) {
@@ -1963,7 +1965,7 @@ export default {
             if (!isLiquid && !isReasoning) {
               out.top_p = body.top_p ?? 0.9;
             }
-            if (body.tools && Array.isArray(body.tools) && (!reqModel.includes(':free') && !reqModel.endsWith('/free') && reqModel !== 'openrouter/free')) {
+            if (!isNemotronReq && body.tools && Array.isArray(body.tools) && (!reqModel.includes(':free') && !reqModel.endsWith('/free') && reqModel !== 'openrouter/free')) {
               const clean = body.tools.filter(t => t && t.type === 'function' && t.function && t.function.name);
               if (clean.length > 0) {
                 out.tools = clean;

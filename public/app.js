@@ -6453,11 +6453,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return true;
     }
 
-    // Jika teks memiliki panjang substantif (> 180 karakter) atau memiliki format list/heading/tabel,
+    // Jika teks memiliki panjang substantif (> 140 karakter) atau memiliki format list/heading/tabel/simbol matematika,
     // ini adalah konten jawaban yang sah, bukan scratchpad semata!
-    if (trimmed.length > 180 || trimmed.includes('###') || trimmed.includes('```') || /^\s*(?:[-*•]|\d+\.)\s+/m.test(trimmed)) {
+    if (trimmed.length > 140 || trimmed.includes('###') || trimmed.includes('```') || trimmed.includes('|') || /^\s*(?:[-*•]|\d+\.)\s+/m.test(trimmed) || /[\u2200-\u22FF\u2A00-\u2AFF\u0391-\u03C9\u2202\u0394\u2208\u2192]/.test(trimmed)) {
       const remaining = stripModelInternalMonologuePreamble(trimmed);
-      if (remaining && remaining.length >= 40) {
+      if (remaining && remaining.length >= 25) {
         return false;
       }
     }
@@ -6514,14 +6514,36 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     return { temperature: 0.25, topP: 0.88 };
   }
 
-  function buildWebRescueMessages(question, evidenceText) {
+  function buildWebRescueMessages(question, evidenceText, model = '') {
     const now = new Date();
     const isoDate = now.toISOString().slice(0, 10);
+    const isNemotron = isNemotronModel(model);
+    const isPureMath = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isPureAlgebraOrConceptualQuery === 'function')
+      ? ZozTextSafety.isPureAlgebraOrConceptualQuery(question)
+      : false;
+    const hasSubstantiveEvidence = evidenceText && !evidenceText.includes('tidak menemukan dokumen') && !evidenceText.includes('tidak memberikan fakta spesifik') && evidenceText.length > 80;
+
+    if (!hasSubstantiveEvidence || isNemotron || isPureMath) {
+      return [
+        {
+          role: 'system',
+          content: `[MANDAT PENALARAN FAKTUIL, ALJABAR & ILMIAH MURNI — UTC ${isoDate}]\n` +
+            `1. Berikan dekonstruksi komprehensif, terstruktur, mendalam, dan langsung menjawab esensi kueri "${String(question || '').slice(0, 500)}" menggunakan penalaran deduktif ilmiah dan basis pengetahuan analitis Anda.\n` +
+            `2. Sajikan perbandingan struktural, matriks, atau tabel Markdown yang elegan.\n` +
+            `3. DILARANG KERAS mengeluhkan ketiadaan indeks atau dokumen, dilarang menolak menjawab, dan dilarang menyebutkan kendala pencarian internal.`
+        },
+        {
+          role: 'user',
+          content: `Kueri: ${String(question || '').slice(0, 1000)}\n\nSajikan analisis dan dekonstruksi komprehensif, presisi, dan mendalam untuk menjawab kueri di atas.`
+        }
+      ];
+    }
+
     return [
       {
         role: 'system',
         content: `[SPESIFIKASI SINTESIS BUKTI TERVERIFIKASI — UTC ${isoDate}]\n` +
-          `1. Domain klaim dibatasi secara ketat pada himpunan bukti dokumen di bawah: hanya cantumkan entitas, versi, angka, dan tanggal kalender yang termuat eksplisit di dalam bukti.\n` +
+          `1. Domain klaim dibatasi secara proporsional pada himpunan bukti dokumen di bawah: cantumkan entitas, versi, angka, dan tanggal kalender yang termuat di dalam bukti.\n` +
           `2. Sajikan analisis teknis terstruktur dalam Bahasa Indonesia menggunakan Markdown (heading, poin rincian isi artikel, dan sitasi tautan sumber).\n` +
           `3. Jangan mencetak blok tool call atau monolog internal.`
       },
@@ -6534,12 +6556,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
   // Ronde penyelamat OpenRouter: distribusi Boltzmann T -> 0.05 untuk meminimumkan entropi halusinasi parametrik.
   async function rescueWebAnswerOpenRouter({ url, headers, model, question, evidenceText, extraBody, signal }) {
-    const isReasoning = Boolean(model && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(model)));
+    const isReasoning = Boolean(model && (/\/o[1-9]|\b(r1|reasoning|deepseek-r|nemotron)\b/i.test(model) || model.toLowerCase().includes('nemotron')));
     const isLiquid = Boolean(model && (model.includes('liquid') || model.includes('lfm-')));
     const sampling = getGroundedSamplingParams(question);
     const baseBody = {
       model,
-      messages: buildWebRescueMessages(question, evidenceText),
+      messages: buildWebRescueMessages(question, evidenceText, model),
       stream: true,
       provider: { allow_fallbacks: (STATE.mode === 'auto') },
       ...(extraBody || {})
@@ -26037,6 +26059,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
   function doesModelSupportTools(modelName) {
     if (!modelName || typeof modelName !== 'string') return false;
+    // NVIDIA Nemotron adalah frontier reasoning & mathematical MoE (agentic_index: 20.1).
+    // Native function calling tools pada Nemotron memicu tool loops dan kegagalan circuit breaker.
+    // Nemotron wajib menggunakan Direct Grounded Context (RAG murni) tanpa skema tools.
+    if (/nemotron/i.test(modelName)) return false;
     const liveModel = (STATE.openRouterModels || []).find(m => m.id === modelName);
     if (liveModel && typeof liveModel.supportsTools === 'boolean') {
       return liveModel.supportsTools;
@@ -26062,7 +26088,6 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       lower.includes('devstral') ||
       lower.includes('pixtral') ||
       lower.includes('llama') ||
-      lower.includes('nemotron') ||
       lower.includes('hermes') ||
       lower.includes('command-r') ||
       lower.includes('deepseek') ||
@@ -29734,8 +29759,19 @@ Kueri pengguna terdiri dari kumpulan konsep formal atau himpunan opsi diskrit.
       }
 
       if (isNemotronModel(modelName)) {
-        const nemotronDirective = `[NVIDIA NEMOTRON STRUCTURAL REASONING ALIGNMENT]:
-Gunakan kapasitas penalaran matematis dan aljabar tingkat tinggi Anda untuk menyajikan dekonstruksi konsep yang sistematis. Sajikan definisi presisi, matriks perbandingan, dan analisis komparasi komprehensif tanpa kata-kata filler atau keraguan.`;
+        const nemotronDirective = `[MANDAT PENALARAN STRUKTURAL, ALJABAR & MATEMATIKA MURNI NVIDIA NEMOTRON]:
+Anda beroperasi sebagai engine penalaran deduktif formal dan dekonstruksi aljabar murni.
+1. FONDASI FORMAL & RUANG KEADAAN (STATE SPACE):
+   - Dekonstruksi setiap kueri, himpunan istilah, atau konsep ke dalam variabel ontologis, matriks utilitas, atau ruang keadaan formal S = {s_1, ..., s_n}.
+   - Analisis relasi ketergantungan formal: jika kueri memuat istilah relasional (seperti Competitive, Independent, Cooperative, Interdependent), petakan ke dalam Social Interdependence Theory (Morton Deutsch), Game Theory (Zero-sum vs Non-zero-sum Pareto optimal), serta derivatif parsial utilitas:
+     * Independent: ∂U_A/∂U_B = 0
+     * Competitive: ΔU_A · ΔU_B < 0 (Zero-sum conflict)
+     * Cooperative: ΔU_A · ΔU_B > 0 (Pareto-optimal positive synergy)
+     * Interdependent: U_i = f(s_1, ..., s_n) (Systemic coupled dynamics)
+2. INTEGRITAS AKADEMIS & STRUKTUR TABEL:
+   - Gunakan tabel Markdown komparatif dan notasi matematika presisi.
+   - DILARANG menggunakan kata-kata filler, keraguan, atau keluhan tentang ketiadaan data web.
+   - Langsung berikan jawaban yang komprehensif, elegan, dan mendalam.`;
         systemContent = systemContent ? `${systemContent}\n\n${nemotronDirective}` : nemotronDirective;
       }
 
@@ -30754,8 +30790,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         }
       }
 
-      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB (Lewati jika kueri konsep aljabar murni atau video)
-      if (webSources && webSources.length > 0 && fullText && !isPureAlgebraConcept) {
+      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB (Lewati jika kueri konsep aljabar murni, video, atau model Nemotron)
+      if (webSources && webSources.length > 0 && fullText && !isPureAlgebraConcept && !isNemotronModel(modelName)) {
         fullText = verifyAndSanitizeWebDigestion(fullText, webSources, allAccumulatedToolResponsesText);
       }
 
@@ -31464,8 +31500,19 @@ Kueri pengguna terdiri dari kumpulan konsep formal atau himpunan opsi diskrit.
       }
 
       if (isNemotronModel(modelName)) {
-        const nemotronDirective = `[NVIDIA NEMOTRON STRUCTURAL REASONING ALIGNMENT]:
-Gunakan kapasitas penalaran matematis dan aljabar tingkat tinggi Anda untuk menyajikan dekonstruksi konsep yang sistematis. Sajikan definisi presisi, matriks perbandingan, dan analisis komparasi komprehensif tanpa kata-kata filler atau keraguan.`;
+        const nemotronDirective = `[MANDAT PENALARAN STRUKTURAL, ALJABAR & MATEMATIKA MURNI NVIDIA NEMOTRON]:
+Anda beroperasi sebagai engine penalaran deduktif formal dan dekonstruksi aljabar murni.
+1. FONDASI FORMAL & RUANG KEADAAN (STATE SPACE):
+   - Dekonstruksi setiap kueri, himpunan istilah, atau konsep ke dalam variabel ontologis, matriks utilitas, atau ruang keadaan formal S = {s_1, ..., s_n}.
+   - Analisis relasi ketergantungan formal: jika kueri memuat istilah relasional (seperti Competitive, Independent, Cooperative, Interdependent), petakan ke dalam Social Interdependence Theory (Morton Deutsch), Game Theory (Zero-sum vs Non-zero-sum Pareto optimal), serta derivatif parsial utilitas:
+     * Independent: ∂U_A/∂U_B = 0
+     * Competitive: ΔU_A · ΔU_B < 0 (Zero-sum conflict)
+     * Cooperative: ΔU_A · ΔU_B > 0 (Pareto-optimal positive synergy)
+     * Interdependent: U_i = f(s_1, ..., s_n) (Systemic coupled dynamics)
+2. INTEGRITAS AKADEMIS & STRUKTUR TABEL:
+   - Gunakan tabel Markdown komparatif dan notasi matematika presisi.
+   - DILARANG menggunakan kata-kata filler, keraguan, atau keluhan tentang ketiadaan data web.
+   - Langsung berikan jawaban yang komprehensif, elegan, dan mendalam.`;
         systemContent = systemContent ? `${systemContent}\n\n${nemotronDirective}` : nemotronDirective;
       }
 
@@ -31552,8 +31599,9 @@ Gunakan kapasitas penalaran matematis dan aljabar tingkat tinggi Anda untuk meny
         const currentIsImageCapable = isModelCapableOfImageGeneration(currentModel);
         const currentMessagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, currentModel);
 
+        const isNemotronCur = isNemotronModel(currentModel);
         const isLiquid = Boolean(currentModel && (currentModel.includes('liquid') || currentModel.includes('lfm-')));
-        const isReasoning = Boolean(currentModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(currentModel) || currentModel.toLowerCase().includes('reasoning') || currentModel.toLowerCase().includes('-r1')));
+        const isReasoning = Boolean(currentModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r|nemotron)\b/i.test(currentModel) || currentModel.toLowerCase().includes('reasoning') || currentModel.toLowerCase().includes('-r1') || isNemotronCur));
 
         // PAYLOAD BERSIH & TERKALIBRASI OPENROUTER:
         // - Mengizinkan latent reasoning alami model (streamRenderer & ZozTextSafety memisahkan reasoning dari jawaban utama)
@@ -31564,10 +31612,15 @@ Gunakan kapasitas penalaran matematis dan aljabar tingkat tinggi Anda untuk meny
           messages: currentMessagesPayload,
           stream: true,
           stream_options: { include_usage: true },
-          provider: (decisionCalibration.isDiscreteChoice || decisionCalibration.isAnalyticalQuery)
+          provider: (decisionCalibration.isDiscreteChoice || decisionCalibration.isAnalyticalQuery || isNemotronCur)
             ? { allow_fallbacks: isAutoRouterActive }
             : { sort: 'latency', allow_fallbacks: isAutoRouterActive }
         };
+
+        if (isNemotronCur) {
+          basePayload.reasoning = { effort: 'high' };
+          basePayload.include_reasoning = true;
+        }
 
         const hasGroundedWeb = Boolean(webSources && webSources.length > 0);
         const calibratedOrSampling = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeOptimalSamplingTemperature === 'function')
@@ -31590,9 +31643,9 @@ Gunakan kapasitas penalaran matematis dan aljabar tingkat tinggi Anda untuk meny
           basePayload.modalities = ['text', 'image'];
         }
 
-        // Pasang tools jika model mendukung tools dan BUKAN kueri konsep aljabar murni
-        // (Kueri konsep aljabar tertutup IG=0; meniadakan web tools membebaskan model bernalar murni tanpa noise)
-        const canUseTools = doesModelSupportTools(currentModel) && !isPureAlgebraConcept && !decisionCalibration.isConceptualTaxonomy;
+        // Pasang tools jika model mendukung tools, BUKAN kueri konsep aljabar murni, dan BUKAN model Nemotron
+        // (Nemotron beroperasi dengan RAG Grounded murni; meniadakan web tools membebaskan model bernalar murni tanpa loop)
+        const canUseTools = doesModelSupportTools(currentModel) && !isPureAlgebraConcept && !decisionCalibration.isConceptualTaxonomy && !isNemotronCur;
         if (canUseTools) {
           const validFunctionTools = (selectedAutonomousTools || []).filter(t => t && t.type === 'function' && t.function && t.function.name);
           if (validFunctionTools.length > 0) {
@@ -32817,8 +32870,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         }
       }
 
-      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB (Lewati jika kueri konsep aljabar murni atau video)
-      if (webSources && webSources.length > 0 && fullText && !isPureAlgebraConcept) {
+      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB (Lewati jika kueri konsep aljabar murni, video, atau model Nemotron)
+      if (webSources && webSources.length > 0 && fullText && !isPureAlgebraConcept && !isNemotronModel(modelName)) {
         fullText = verifyAndSanitizeWebDigestion(fullText, webSources, allAccumulatedToolResponsesText);
       }
 
