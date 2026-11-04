@@ -2116,6 +2116,20 @@
       }
     }
 
+    // 2b. Deteksi himpunan opsi/istilah diskrit murni (Aljabar Taksonomi Diskrit):
+    //     Pengguna mengirimkan 2 s/d 8 baris istilah konsep terpisah tanpa teks pengantar panjang
+    //     (contoh: "Competitive \n Independent \n Cooperative \n Interdependent")
+    let pureListOptionCount = 0;
+    if (lines.length >= 2 && lines.length <= 8 && !hasImages && unlabeledOptionCount === 0 && labeledOptionLines.length === 0) {
+      const allLinesShort = lines.every(l => {
+        const wc = l.split(/\s+/).filter(Boolean).length;
+        return wc >= 1 && wc <= 12 && !/^(?:buatkan|tolong|halo|hai|jelaskan|analisis|terima kasih|thanks)\b/i.test(l);
+      });
+      if (allLinesShort) {
+        pureListOptionCount = lines.length;
+      }
+    }
+
     // 3. Deteksi kueri evaluasi soal bergambar atau pilihan eksplisit
     const hasQuizCue = /\b(pilihan\s+ganda|multiple\s+choice|which\s+(?:of\s+the\s+following|type|evaluation|response|approach|scenario|situation|technique|opening|statement)|what(?:'s|\s+is)\s+the\s+(?:best|most\s+effective|primary|correct|main)\b|manakah\s+(?:dari|pernyataan|opsi|pilihan|kata\s+kunci|berikut)|berikut\s+adalah\s+.*kecuali|pilih\s+satu|jawaban\s+yang\s+(?:benar|tepat)|true\s+or\s+false|benar\s+atau\s+salah)\b/i.test(lower);
     const hasImageQuizCue = hasImages && (raw.length === 0 || /\b(analisis\s+gambar|jawab|soal|pilihan|opsi|benar|tepat|quiz|ujian|nomor|pertanyaan|singkat)\b/i.test(lower));
@@ -2125,6 +2139,8 @@
       optionCount = labeledOptionLines.length;
     } else if (unlabeledOptionCount >= 2) {
       optionCount = unlabeledOptionCount;
+    } else if (pureListOptionCount >= 2) {
+      optionCount = pureListOptionCount;
     } else if (inlineOptionsMatch) {
       optionCount = 4;
     } else if (hasQuizCue || hasImageQuizCue) {
@@ -2654,8 +2670,48 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
     return substantive.length === 0;
   }
 
+  // ============================================================================
+  // 18. GERBANG ALJABAR & DETEKSI KONSEP DEDUKTIF MURNI (PURE CONCEPTUAL ALGEBRA)
+  // Mendeteksi kueri yang terdiri dari himpunan konsep tertutup, taksonomi formal,
+  // atau relasi aljabar/logika murni di mana Information Gain web search adalah nol:
+  // IG(Search | Q) = 0. Menjaga agar penalaran deduktif model (seperti NVIDIA Nemotron)
+  // tidak dikotori snippet pencarian acak atau dimusnahkan oleh template penolakan web.
+  // ============================================================================
+  function isPureAlgebraOrConceptualQuery(query) {
+    if (!query || typeof query !== 'string') return false;
+    const raw = query.trim();
+    if (!raw) return false;
+    const lower = raw.toLowerCase();
+
+    // Jika memuat indikator waktu aktual eksplisit (berita, hari ini, rilis baru, tahun ini), bukan konsep murni
+    const hasTemporal = /\b(hari\s+ini|kemarin|sekarang|terbaru|terkini|minggu\s+ini|bulan\s+ini|tahun\s+ini|today|yesterday|right\s+now|latest|breaking|news|berita|harga|kurs|jadwal|cuaca|update|rilis|202[4-9])\b/i.test(lower);
+    if (hasTemporal) return false;
+
+    // Kriteria 1: Himpunan istilah konsep diskrit baris-demi-baris (2-8 baris konsep pendek)
+    // Contoh eksplisit:
+    // Competitive
+    // Independent
+    // Cooperative
+    // Interdependent
+    const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length >= 2 && lines.length <= 8) {
+      const allShortConcepts = lines.every(l => {
+        const wc = l.split(/\s+/).filter(Boolean).length;
+        return wc >= 1 && wc <= 10 && !/^(?:tolong|halo|hai|buatkan|cari|apa|siapa|kenapa)\b/i.test(l);
+      });
+      if (allShortConcepts) return true;
+    }
+
+    // Kriteria 2: Istilah aljabar, matematika, logika formal, teori relasional, atau dikotomi konsep abstrak
+    const conceptualTermsRegex = /\b(?:competitive|independent|cooperative|interdependent|zero-sum|non-zero-sum|game\s+theory|nash\s+equilibrium|social\s+interdependence|relational\s+algebra|boolean\s+algebra|truth\s+table|monoid|semigroup|group\s+theory|ring\s+theory|field\s+theory|isomorphism|homomorphism|bijection|injection|surjection|set\s+theory|predicate\s+logic|modal\s+logic|epistemic|ontology|taxonomy|dichotomy|trichotomy|inductive|deductive|abductive|apriori|a\s+priori|aposteriori|a\s+posteriori|modus\s+ponens|modus\s+tollens|contrapositive|tautology|contradiction|contingency|matrix|determinant|eigenvalue|eigenvector|vector\s+space|subspace|orthogonal|basis|dimension|kernel|nullity|topology|metric\s+space|limit|derivative|integral)\b/i;
+    if (conceptualTermsRegex.test(lower)) return true;
+
+    return false;
+  }
+
   return {
     isZeroInformationQuery,
+    isPureAlgebraOrConceptualQuery,
     splitReasoningAndContent,
     stripReasoningText,
     reflowShreddedProse,
