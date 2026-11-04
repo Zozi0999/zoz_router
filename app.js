@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://fonts-celebs-soon-validation.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://genealogy-grab-alcohol-declared.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -46603,7 +46603,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://fonts-celebs-soon-validation.trycloudflare.com',
+    activeTunnelUrl: 'https://genealogy-grab-alcohol-declared.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
