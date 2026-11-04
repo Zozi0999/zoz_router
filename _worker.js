@@ -1308,7 +1308,7 @@ export default {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-ollama-key, x-api-key, x-openrouter-key, x-title, X-Title, HTTP-Referer, http-referer, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-pin, X-WA-PIN'
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-ollama-key, x-api-key, x-openrouter-key, x-serper-key, x-auto-router, X-Auto-Router, x-title, X-Title, HTTP-Referer, http-referer, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-user-id, X-WA-USER-ID, x-wa-pin, X-WA-PIN, x-terminal-pin, X-Terminal-Pin, Access-Control-Request-Private-Network'
         }
       });
     }
@@ -1325,6 +1325,7 @@ export default {
       url.pathname.startsWith('/api/wa/') ||
       url.pathname.startsWith('/api/tunnel/') ||
       url.pathname.startsWith('/api/daemon/') ||
+      url.pathname.startsWith('/api/workspace/') ||
       url.pathname === '/api/ollama/start' ||
       url.pathname.startsWith('/uploads/');
 

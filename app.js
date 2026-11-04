@@ -83,7 +83,15 @@
            cleanPath.startsWith('/api/wa/') ||
            cleanPath.startsWith('/api/daemon/') ||
            cleanPath.startsWith('/api/tunnel/') ||
+           cleanPath.startsWith('/api/workspace/') ||
            cleanPath === '/api/ollama/start';
+  }
+
+  function isKnownOllamaCloudModel(modelId) {
+    const id = String(modelId || '').trim().toLowerCase();
+    if (!id) return false;
+    if (id.endsWith(':cloud') || id.includes('-cloud')) return true;
+    return /^(?:gemma4:31b|gemma4:27b|deepseek-v3|deepseek-v4|deepseek-r1:671b|qwen3-coder:480b|qwen3:235b|kimi-k2|kimi-k3|glm-4|glm-5|minimax-m2|nemotron-3-ultra|llama4|mistral-large|gpt-oss:(?:120b|20b)|cogito:671b)/i.test(id);
   }
 
   function getUniversalApiUrl(path) {
@@ -92,7 +100,7 @@
     const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
     if (isLocal) return cleanPath;
 
-    // Bedakan tegas: Terminal, WhatsApp, dan kontrol daemon hardware laptop WAJIB melalui tunnel laptop
+    // Bedakan tegas: Terminal, WhatsApp, Workspace disk lokal, dan kontrol daemon hardware laptop WAJIB melalui tunnel laptop
     if (isLaptopHardwarePath(cleanPath)) {
       const tunnelBase = getActiveTunnelUrl();
       return (tunnelBase || '') + cleanPath;
@@ -104,9 +112,13 @@
       return tunnelBase ? (tunnelBase + cleanPath) : cleanPath;
     }
 
-    // Pemanggilan AI & API Key (OpenRouter, Ollama Cloud, Search Web, Models, Sessions, dll):
-    // Bebas 100% dari ketergantungan laptop — gunakan rute same-origin hosting aktif!
-    return cleanPath;
+    // Jika sedang berjalan langsung di domain Vercel Serverless, gunakan same-origin
+    if (IS_VERCEL) return cleanPath;
+
+    // Pada domain hosting statis publik (z21.zozdocs.com, github.io, pages.dev, netlify.app):
+    // Seluruh pemanggilan AI Cloud, API Key Proxy, Web Search RRF, Image Grounding, & Tools
+    // diarahkan ke Cloud Serverless Gateway 24/7 (VERCEL_BACKEND_GATEWAY) — 0% ketergantungan pada laptop!
+    return VERCEL_BACKEND_GATEWAY + cleanPath;
   }
 
   // Universal Chat Image Resolver: Memastikan path /uploads/ dan API gambar proxy selalu dapat dijangkau
@@ -765,12 +777,15 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
           const isVercel = Boolean(location.hostname && location.hostname.endsWith('vercel.app'));
 
-          // Pada domain publik/statis (z21.zozdocs.com, github.io, pages.dev, dll), arahkan ke Active Cloudflare Tunnel Gateway jika tersedia
+          // Pada domain publik/statis (z21.zozdocs.com, github.io, pages.dev, dll):
+          // JANGAN PERNAH membelokkan seluruh /api/ secara buta ke tunnel laptop!
+          // Gunakan getUniversalApiUrl(url) yang memisahkan rute hardware laptop (Terminal/WA/Daemon)
+          // dari rute Cloud AI / API Key / Tools (VERCEL_BACKEND_GATEWAY 24/7 bebas-laptop).
           if (!isLocal && !isVercel && typeof url === 'string') {
-            if (url.startsWith('/api/')) {
-              const targetBase = getActiveTunnelUrl();
-              if (targetBase) {
-                url = targetBase + url;
+            if (url.startsWith('/api/') || url.startsWith('/uploads/')) {
+              const resolvedUrl = getUniversalApiUrl(url);
+              if (resolvedUrl && resolvedUrl !== url) {
+                url = resolvedUrl;
                 if (typeof input === 'string') {
                   input = url;
                 } else if (input instanceof URL) {
@@ -4713,14 +4728,16 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     rootDir: '',
 
     async checkStatus() {
-      if (IS_GITHUB_PAGES) {
+      const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
+      const isLocalOrigin = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
+      if (IS_GITHUB_PAGES || (!isLocalOrigin && !STATE.settings.localWorkspaceEnabled)) {
         this.isAvailable = false;
         return false;
       }
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 2500);
-        const res = await fetch('/api/workspace/status', {
+        const res = await fetch(getUniversalApiUrl('/api/workspace/status'), {
           method: 'GET',
           headers: { 'X-User-ID': STATE.userId },
           signal: controller.signal
@@ -4821,7 +4838,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     isDeviceBackendAvailable: false,
 
     async init() {
-      if (IS_GITHUB_PAGES && !location.hostname.includes('zozdocs.com') && !location.hostname.includes('trycloudflare.com')) {
+      const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
+      const isLocalOrigin = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
+      // Pada domain cloud/statis publik (z21.zozdocs.com, vercel.app, github.io, pages.dev),
+      // penyimpanan sesi & gambar multimodal dilakukan 100% mandiri di IndexedDB browser (ChatDB)
+      // tanpa bergantung pada disk fisik laptop ataupun /tmp ephemeral serverless.
+      if (!isLocalOrigin) {
         this.isDeviceBackendAvailable = false;
         return;
       }
@@ -4837,8 +4859,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
-          if (data && (data.storage === 'device-disk' || data.status === 'online')) {
+          if (data && data.storage === 'device-disk') {
             this.isDeviceBackendAvailable = true;
+          } else {
+            this.isDeviceBackendAvailable = false;
           }
         }
       } catch (e) {
@@ -5545,7 +5569,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // memanggil setGeneratingState(true) + attachToActiveBackgroundChat dan
     // membajak gelembung yang sedang dipakai stream aktif.
     if (STATE.isGenerating || STATE.isSending) return;
-    if (IS_GITHUB_PAGES || isCheckingBackgroundSync) return;
+    if (IS_GITHUB_PAGES || !DeviceStorage.isDeviceBackendAvailable || isCheckingBackgroundSync) return;
     isCheckingBackgroundSync = true;
     try {
       const activeSession = findCurrentActiveSession();
@@ -11771,8 +11795,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   async function streamContinuationOllama(session, modelName, promptInstruction, bubbleText, currentFullText, options = {}) {
     let ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
     const cleanKey = sanitizeOllamaApiKey(STATE.settings.ollamaApiKey || '');
+    const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
+    const isLocalOrigin = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
     const isLoopbackEp = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(ep);
-    if (cleanKey && isLoopbackEp) {
+    const isTargetingCloud = Boolean((ep || '').includes('ollama.com') || (cleanKey && isLoopbackEp) || (!isLocalOrigin && isKnownOllamaCloudModel(modelName)));
+    if (isTargetingCloud) {
       ep = 'https://ollama.com';
     }
     const headers = { 'Content-Type': 'application/json' };
@@ -11816,7 +11843,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     }
 
     const effectiveModel = ep.includes('ollama.com') ? resolveOllamaCloudModel(modelName) : modelName;
-    const chatUrl = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? resolveEndpointUrl(ep, 'api/chat') : getUniversalApiUrl('/api/ollama/chat');
+    const chatUrl = (!isTargetingCloud && isLoopbackEp && !cleanKey && !isLocalOrigin)
+      ? ((getActiveTunnelUrl() || '') + '/api/ollama/chat')
+      : getUniversalApiUrl('/api/ollama/chat');
     const isolatedOllamaSessionId = session?.id ? `${session.id}_cont_${Date.now()}` : undefined;
     const res = await fetch(chatUrl, {
       method: 'POST',
@@ -12757,8 +12786,11 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       if (engine === 'ollama') {
         let ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
         const cleanKey = sanitizeOllamaApiKey(STATE.settings.ollamaApiKey || '');
+        const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
+        const isLocalOrigin = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
         const isLoopbackEp = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(ep);
-        if (cleanKey && isLoopbackEp) {
+        const isTargetingCloud = Boolean((ep || '').includes('ollama.com') || (cleanKey && isLoopbackEp) || (!isLocalOrigin && isKnownOllamaCloudModel(model)));
+        if (isTargetingCloud) {
           ep = 'https://ollama.com';
         }
         const effectiveModel = ep.includes('ollama.com') ? resolveOllamaCloudModel(model) : model;
@@ -12768,7 +12800,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           headers['x-ollama-key'] = cleanKey;
         }
         if (STATE.settings.openRouterKey) headers['x-openrouter-key'] = STATE.settings.openRouterKey;
-        const url = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? resolveEndpointUrl(ep, 'api/chat') : getUniversalApiUrl('/api/ollama/chat');
+        const url = (!isTargetingCloud && isLoopbackEp && !cleanKey && !isLocalOrigin)
+          ? ((getActiveTunnelUrl() || '') + '/api/ollama/chat')
+          : getUniversalApiUrl('/api/ollama/chat');
         const res = await fetch(url, {
           method: 'POST',
           headers,
@@ -12798,6 +12832,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       }
 
       // OpenRouter Cloud (dengan failover antar-model free jika model utama sibuk)
+      const errors = [];
       const key = STATE.settings.openRouterKey || '';
       const routes = (key && key.trim()) ? ['direct', 'proxy'] : ['proxy'];
       const initialModel = model && model.includes('/') ? model : (mapOllamaModelToOpenRouter(model) || 'openrouter/free');
@@ -22226,12 +22261,10 @@ ${organicBlock}
     const hit = clientVideoProbeCache.get(url);
     if (hit && (hit.success || (hit._exp && hit._exp > Date.now()))) return hit;
     let result = null;
-    if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
-      try {
-        const resp = await fetch(`/api/video-probe?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(12000) });
-        if (resp.ok) result = await resp.json();
-      } catch (_) { result = null; }
-    }
+    try {
+      const resp = await fetch(getUniversalApiUrl(`/api/video-probe?url=${encodeURIComponent(url)}`), { signal: AbortSignal.timeout(12000) });
+      if (resp.ok) result = await resp.json();
+    } catch (_) { result = null; }
     // Hanya cache hasil sukses secara permanen; kegagalan di-cache singkat (2 menit)
     // agar memuat ulang riwayat chat tidak memicu probe berulang untuk tautan non-video.
     if (result && result.success) {
@@ -22268,7 +22301,7 @@ ${organicBlock}
 
     let result = null;
 
-    // 1. Prioritaskan server backend/tunnel universal gateway (dukungan yt-dlp & InnerTube transkrip penuh)
+    // 1. Prioritaskan Cloud Serverless / Backend Gateway (dukungan InnerTube & ekstraksi metadata bebas-laptop)
     const primaryYtEndpoint = getUniversalApiUrl(`/api/youtube-info?url=${encodeURIComponent(canonicalUrl)}`);
     try {
       const resp = await fetch(primaryYtEndpoint, {
@@ -22281,22 +22314,7 @@ ${organicBlock}
         }
       }
     } catch (err) {
-      console.warn('Primary YouTube info gateway fetch error, trying relative endpoint:', err?.message || err);
-    }
-
-    // 1b. Fallback ke endpoint relatif jika gateway universal berbeda
-    if (!result || !result.success) {
-      try {
-        const respRel = await fetch(`/api/youtube-info?url=${encodeURIComponent(canonicalUrl)}`, {
-          signal: AbortSignal.timeout(8000)
-        });
-        if (respRel.ok) {
-          const dataRel = await respRel.json();
-          if (dataRel && dataRel.success) {
-            result = dataRel;
-          }
-        }
-      } catch (_) {}
+      console.warn('Primary YouTube info gateway fetch error:', err?.message || err);
     }
 
     // 2. Fallback to direct YouTube oEmbed API
@@ -24124,8 +24142,12 @@ ${blocks}
     try {
       let ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
       const cleanOllamaKey = sanitizeOllamaApiKey(STATE.settings.ollamaApiKey || '');
-      // Jika ada API Key Ollama Cloud dan endpoint masih loopback bawaan, arahkan ke https://ollama.com secara Cloud Murni
-      if (cleanOllamaKey && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+      const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
+      const isLocalOrigin = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
+      const isLoopbackEp = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep);
+      // Jika ada API Key Ollama Cloud atau sedang di domain cloud publik dengan endpoint loopback bawaan,
+      // arahkan discovery katalog ke https://ollama.com secara Cloud Murni (tanpa bergantung pada laptop!)
+      if (isLoopbackEp && (cleanOllamaKey || !isLocalOrigin)) {
         ep = 'https://ollama.com';
       }
       const headers = {};
@@ -24134,41 +24156,19 @@ ${blocks}
         headers['x-ollama-key'] = cleanOllamaKey;
       }
 
-      // Ollama Discovery: Ambil daftar model nyata lewat gateway proxy atau direct endpoint
-      if (!IS_GITHUB_PAGES || cleanOllamaKey) {
-        try {
-          const gwUrl = getUniversalApiUrl('/api/ollama/models?endpoint=' + encodeURIComponent(ep));
-          const gwRes = await fetch(gwUrl, { headers }).catch(() => null);
-          if (gwRes && gwRes.ok) {
-            const gwData = await gwRes.json();
-            if (Array.isArray(gwData.models) && gwData.models.length > 0) {
-              rawModels = gwData.models.filter(m => !isUnsupportedOllamaChatModel(m));
-              isRunning = gwData.server_running !== false;
-            }
+      // Ollama Discovery: Ambil daftar model nyata lewat Cloud Serverless / Local Gateway
+      try {
+        const gwUrl = getUniversalApiUrl('/api/ollama/models?endpoint=' + encodeURIComponent(ep));
+        const gwRes = await fetch(gwUrl, { headers }).catch(() => null);
+        if (gwRes && gwRes.ok) {
+          const gwData = await gwRes.json();
+          if (Array.isArray(gwData.models) && gwData.models.length > 0) {
+            rawModels = gwData.models.filter(m => !isUnsupportedOllamaChatModel(m));
+            isRunning = gwData.server_running !== false;
           }
-        } catch (gwErr) {
-          console.warn('Gagal memuat daftar model Ollama via gateway:', gwErr && gwErr.message);
         }
-      } else if (ep.startsWith('https://') || !/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
-        try {
-          let directRes = await fetch(resolveEndpointUrl(ep, 'api/tags'), { headers, signal: AbortSignal.timeout(4000) }).catch(() => null);
-          if (!directRes || !directRes.ok) {
-            directRes = await fetch(resolveEndpointUrl(ep, 'v1/models'), { headers, signal: AbortSignal.timeout(3000) }).catch(() => null);
-          }
-          if (directRes && directRes.ok) {
-            const directData = await directRes.json();
-            const list = Array.isArray(directData.models)
-              ? directData.models
-              : (Array.isArray(directData.data) ? directData.data.map(m => ({ name: m.id, model: m.id, capabilities: m.capabilities, visibility: m.visibility, supported_in_api: m.supported_in_api })) : []);
-            const filteredList = list.filter(m => !isUnsupportedOllamaChatModel(m));
-            if (filteredList.length > 0) {
-              rawModels = filteredList;
-              isRunning = true;
-            }
-          }
-        } catch (dErr) {
-          console.warn('Gagal memuat daftar model Ollama langsung di GitHub Pages:', dErr && dErr.message);
-        }
+      } catch (gwErr) {
+        console.warn('Gagal memuat daftar model Ollama via gateway:', gwErr && gwErr.message);
       }
 
       if (rawModels.length > 0) {
@@ -24221,8 +24221,8 @@ ${blocks}
           renderLiveModelCatalog();
         }
         updateOllamaStatusUI();
-        // Coba auto-revive Ollama lewat gateway jika endpoint lokal loopback
-        if (/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+        // Coba auto-revive Ollama lokal HANYA jika benar-benar sedang di origin lokal laptop
+        if (isLocalOrigin && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
           fetch(getUniversalApiUrl('/api/ollama/start'), { method: 'POST' }).catch(() => {});
         }
         return false;
@@ -28790,7 +28790,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   function formatModelErrorMessage(engine, modelName, err, hasImage = false, hasWebSearch = false) {
     const rawMsg = (err && err.message) ? err.message : String(err || 'Unknown error');
     const msg = rawMsg.toLowerCase();
-    const isMixedContentLocal = (location.protocol === 'https:' || IS_CLOUD_HOSTED) && (
+    const isOllamaCloudContext = engine === 'ollama' && Boolean(
+      STATE.settings.ollamaApiKey ||
+      (STATE.settings.ollamaEndpoint || '').includes('ollama.com') ||
+      isKnownOllamaCloudModel(modelName) ||
+      msg.includes('ollama_cloud_api_key_required')
+    );
+    const isMissingOllamaCloudKey = msg.includes('ollama_cloud_api_key_required');
+    const isMixedContentLocal = !isOllamaCloudContext && (location.protocol === 'https:' || IS_CLOUD_HOSTED) && (
       msg.includes('mixed_content') || 
       ((msg.includes('failed to fetch') || msg.includes('networkerror') || err?.name === 'TypeError') && engine === 'ollama')
     );
@@ -28804,7 +28811,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       msg.includes('unsupported image') ||
       msg.includes('no endpoints found that support image')
     );
-    const isAuthError = msg.includes('401') || msg.includes('unauthorized') || msg.includes('api key') || msg.includes('user not found');
+    const isAuthError = isMissingOllamaCloudKey || msg.includes('401') || msg.includes('unauthorized') || msg.includes('api key') || msg.includes('user not found');
     const isModelNotFound = msg.includes('404') || msg.includes('not found') || msg.includes('no endpoints') || msg.includes('does not exist');
     const isRateLimit = msg.includes('429') || msg.includes('rate limit') || msg.includes('quota') || msg.includes('credits') || msg.includes('free tier limit');
     const isProviderReturnedError = msg.includes('provider returned error') || 
@@ -28819,10 +28826,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     let desc = escapeHtml(rawMsg);
     let advice = '';
 
-    if (isMixedContentLocal && engine === 'ollama') {
-      title = `Koneksi ke Server Ollama Terputus`;
-      desc = `Model <code>${escapeHtml(modelName)}</code> tidak dapat dihubungi karena tunnel server laptop sedang berganti alamat atau offline. Model TIDAK dialihkan ke provider lain.`;
-      advice = `💡 <strong>Solusi:</strong> Tunggu ±1 menit hingga sinkronisasi tunnel otomatis selesai, lalu muat ulang halaman dan klik <strong>Coba Kirim Ulang</strong>.`;
+    if (isMissingOllamaCloudKey) {
+      title = `Ollama Cloud API Key Diperlukan`;
+      desc = `Untuk menjalankan model <code>${escapeHtml(modelName)}</code> secara langsung ke server <code>ollama.com</code> tanpa bergantung pada tunnel laptop, masukkan <strong>Ollama Cloud API Key</strong> Anda.`;
+      advice = `💡 <strong>Solusi:</strong> Klik <strong>Buka Pengaturan (⚙️)</strong> lalu isi kolom <strong>Ollama Cloud API Key</strong>, kemudian klik <strong>Coba Kirim Ulang</strong>.`;
+    } else if (isMixedContentLocal && engine === 'ollama') {
+      title = `Koneksi ke Ollama Lokal Laptop Terputus`;
+      desc = `Model lokal <code>${escapeHtml(modelName)}</code> diarahkan ke daemon laptop, namun tunnel laptop sedang offline. Jika ingin menjalankan tanpa laptop, masukkan <strong>Ollama Cloud API Key</strong> di Pengaturan.`;
+      advice = `💡 <strong>Solusi:</strong> Masukkan Ollama Cloud API Key di <strong>Pengaturan (⚙️)</strong> untuk mode Cloud mandiri 24/7, atau nyalakan server laptop untuk model lokal.`;
     } else if (isVisionUnsupported) {
       title = `Model ${escapeHtml(modelName)} Tidak Mendukung Input Gambar`;
       desc = `Model ini menolak pemrosesan gambar multimodal karena beroperasi dalam mode teks murni (text-only).`;
@@ -28840,9 +28851,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       desc = `Penyedia upstream untuk model <code>${escapeHtml(modelName)}</code> sedang mengalami antrean penuh atau limit kapasitas sementara di OpenRouter (${escapeHtml(rawMsg)}).`;
       advice = `💡 <strong>Solusi Cepat:</strong> Gunakan rute otomatis cerdas <code>openrouter/free</code> (bebas biaya) atau <code>openrouter/auto</code> / <code>deepseek/deepseek-chat</code> (kredit berbayar) yang memiliki puluhan penyedia berlatensi kilat.`;
     } else if (isCorsOrNetwork && engine === 'ollama') {
-      title = `Koneksi ke Server Ollama Terputus`;
-      desc = `Koneksi ke server Ollama untuk model <code>${escapeHtml(modelName)}</code> mengalami kendala jaringan atau server laptop (${escapeHtml(rawMsg)}). Model TIDAK dialihkan ke provider lain.`;
-      advice = `💡 <strong>Solusi Cepat:</strong> Pastikan koneksi server laptop aktif, lalu klik <strong>Coba Kirim Ulang</strong>.`;
+      title = isOllamaCloudContext ? `Koneksi ke Gateway Ollama Cloud Terganggu` : `Koneksi ke Ollama Lokal Terputus`;
+      desc = isOllamaCloudContext
+        ? `Koneksi ke server Ollama Cloud untuk model <code>${escapeHtml(modelName)}</code> mengalami kendala jaringan (${escapeHtml(rawMsg)}). Model TIDAK dialihkan ke provider lain.`
+        : `Koneksi ke server Ollama lokal untuk model <code>${escapeHtml(modelName)}</code> mengalami kendala jaringan (${escapeHtml(rawMsg)}). Model TIDAK dialihkan ke provider lain.`;
+      advice = isOllamaCloudContext
+        ? `💡 <strong>Solusi Cepat:</strong> Periksa koneksi internet &amp; API Key Ollama Cloud Anda di <strong>Pengaturan (⚙️)</strong>, lalu klik <strong>Coba Kirim Ulang</strong>.`
+        : `💡 <strong>Solusi Cepat:</strong> Pastikan daemon Ollama lokal aktif atau masukkan Ollama Cloud API Key di Pengaturan, lalu klik <strong>Coba Kirim Ulang</strong>.`;
     } else if (isAuthError) {
       title = `Autentikasi / API Key Diperlukan`;
       desc = `API Key untuk provider <strong>${engine === 'ollama' ? 'Ollama Cloud' : 'OpenRouter'}</strong> tidak valid, belum diisi, atau kadaluarsa.`;
@@ -29486,6 +29501,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const isWebRequest = false;
 
     const wantsFile = (isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
+    let isUsingLaptopOllamaTunnel = false;
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -29713,33 +29729,46 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       }
 
-      let chatUrl = '/api/ollama/chat';
+      let chatUrl = getUniversalApiUrl('/api/ollama/chat');
+      const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
+      const isLocalOrigin = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
       const isLoopbackEp = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(ep);
-      const isCloudDeployment = Boolean((IS_VERCEL || (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable)) && !DeviceStorage.isDeviceBackendAvailable);
-      const isTargetingOllamaCloud = Boolean((ep || '').includes('ollama.com') || (cleanOllamaKey && isLoopbackEp) || (isCloudDeployment && !DeviceStorage.isDeviceBackendAvailable && (isLoopbackEp || cleanOllamaKey)));
+      const isTargetingOllamaCloud = Boolean(
+        (ep || '').includes('ollama.com') ||
+        (cleanOllamaKey && isLoopbackEp) ||
+        (!isLocalOrigin && isKnownOllamaCloudModel(requestBody.model))
+      );
       if (isTargetingOllamaCloud) {
+        // Normalisasi ep secara mutlak agar Putaran 1, Putaran 2 (digestionBody), dan Rescue Round
+        // semuanya mengirim endpoint 'https://ollama.com' (tidak pernah bocor ke 127.0.0.1)!
+        ep = 'https://ollama.com';
         requestBody.endpoint = 'https://ollama.com';
         const resolvedModel = resolveOllamaCloudModel(requestBody.model);
         if (resolvedModel !== requestBody.model) {
           requestBody.model = resolvedModel;
           modelName = resolvedModel;
         }
-      }
-      if (isLoopbackEp && !cleanOllamaKey) {
-        // Pengguna sengaja memilih Ollama lokal di laptop tanpa API Key
-        const isLocalHost = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]');
-        if (isLocalHost) {
+        if (!cleanOllamaKey && !isLocalOrigin && !isAutoRouterCall) {
+          throw new Error('OLLAMA_CLOUD_API_KEY_REQUIRED: Masukkan Ollama Cloud API Key di Pengaturan untuk menjalankan model cloud langsung ke server ollama.com tanpa laptop.');
+        }
+        // Ollama Cloud / API Key: jalurnya langsung via Cloud Serverless Gateway ke ollama.com tanpa menyentuh laptop!
+        chatUrl = getUniversalApiUrl('/api/ollama/chat');
+        isUsingLaptopOllamaTunnel = false;
+      } else if (isLoopbackEp && !cleanOllamaKey) {
+        // Pengguna sengaja memilih model lokal murni di laptop tanpa API Key
+        if (isLocalOrigin) {
           chatUrl = '/api/ollama/chat';
-        } else if (IS_GITHUB_PAGES) {
-          chatUrl = resolveEndpointUrl(ep, 'api/chat');
+          isUsingLaptopOllamaTunnel = isTunnelOrigin;
         } else {
-          // Dari ponsel ke Ollama laptop: gunakan jalur tunnel laptop
+          // Dari ponsel ke Ollama lokal laptop: gunakan jalur tunnel laptop
           const tunnelBase = getActiveTunnelUrl();
           chatUrl = (tunnelBase ? tunnelBase : '') + '/api/ollama/chat';
+          isUsingLaptopOllamaTunnel = true;
         }
       } else {
-        // Ollama Cloud / API Key / Remote: jalurnya mandiri same-origin edge tanpa menunggu laptop!
-        chatUrl = '/api/ollama/chat';
+        // Endpoint Ollama Remote / Custom HTTPS: jalankan mandiri via Cloud Serverless Gateway
+        chatUrl = getUniversalApiUrl('/api/ollama/chat');
+        isUsingLaptopOllamaTunnel = false;
       }
 
       let response = await fetch(chatUrl, {
@@ -30809,14 +30838,15 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
                                     errLower.includes('timeout') ||
                                     err?.name === 'TypeError';
 
-        // Penyelidikan auto-heal jika koneksi fetch terputus karena rotasi tunnel
-        if (errLower.includes('failed to fetch') || errLower.includes('networkerror') || err?.name === 'TypeError') {
-          refreshActiveTunnelFromRemote().catch(() => {});
-        }
-
-        // Pemicu auto-revive daemon Ollama lokal jika terdeteksi offline
-        if (errLower.includes('offline') || errLower.includes('unreachable') || errLower.includes('503') || errLower.includes('econnrefused')) {
-          fetch(getUniversalApiUrl('/api/ollama/start'), { method: 'POST' }).catch(() => {});
+        // Penyelidikan auto-heal & auto-revive HANYA jika koneksi memang menargetkan tunnel/daemon lokal laptop!
+        // JANGAN PERNAH me-reload halaman atau memanggil /api/ollama/start saat pengguna memakai Ollama Cloud!
+        if (isUsingLaptopOllamaTunnel) {
+          if (errLower.includes('failed to fetch') || errLower.includes('networkerror') || err?.name === 'TypeError') {
+            refreshActiveTunnelFromRemote().catch(() => {});
+          }
+          if (errLower.includes('offline') || errLower.includes('unreachable') || errLower.includes('503') || errLower.includes('econnrefused')) {
+            fetch(getUniversalApiUrl('/api/ollama/start'), { method: 'POST' }).catch(() => {});
+          }
         }
 
         // DILARANG KERAS berpindah ke OpenRouter jika Auto-Router tidak diaktifkan oleh pengguna!
@@ -31075,6 +31105,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
     const isWebRequest = false;
 
     const wantsFile = (isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
+    let isUsingLaptopOllamaTunnel = false;
 
     try {
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
@@ -35821,10 +35852,10 @@ Aturan:
       let resultModel = activeImageModel;
       let actualSeed = Math.floor(Math.random() * 100000000);
 
-      if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
+      if (!IS_GITHUB_PAGES || VERCEL_BACKEND_GATEWAY || DeviceStorage.isDeviceBackendAvailable) {
         try {
           const targetSessId = session ? session.id : (STATE.currentSessionId || null);
-          const res = await fetch('/api/generate-image', {
+          const res = await fetch(getUniversalApiUrl('/api/generate-image'), {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -37030,11 +37061,11 @@ Aturan:
       let trackAiProvider = 'openrouter';
       let generatedSuccessfully = false;
 
-      // 1. Coba panggil server backend lokal jika bukan di GitHub Pages
-      if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
+      // 1. Coba panggil server backend / Cloud Serverless Gateway Zoz Router
+      if (!IS_GITHUB_PAGES || VERCEL_BACKEND_GATEWAY || DeviceStorage.isDeviceBackendAvailable) {
         try {
           updateHudStep(`[Langkah 2/3] Menghubungi server musik Zoz Router...`, 45);
-          const res = await fetch('/api/generate-music', {
+          const res = await fetch(getUniversalApiUrl('/api/generate-music'), {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -40323,8 +40354,11 @@ Aturan:
     });
 
     els.testOllamaBtn?.addEventListener('click', async () => {
-      const ep = normalizeEndpoint(els.settingOllamaEndpoint?.value.trim() || 'https://ollama.com');
+      let ep = normalizeEndpoint(els.settingOllamaEndpoint?.value.trim() || 'https://ollama.com');
       const key = sanitizeOllamaApiKey(els.settingOllamaApiKey ? els.settingOllamaApiKey.value : '');
+      if (key && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+        ep = 'https://ollama.com';
+      }
       try {
         const headers = {};
         if (key) {
@@ -40332,45 +40366,29 @@ Aturan:
           headers['x-ollama-key'] = key;
         }
 
-        if (IS_GITHUB_PAGES && !key && !STATE.settings.ollamaApiKey) {
-          if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
-            showToast('⚠️ Di GitHub Pages HTTPS, browser memblokir koneksi HTTP localhost (mixed-content). Gunakan Ollama Cloud atau URL HTTPS publik.', 'error');
-            return;
-          }
-          // Direct browser testing (GitHub Pages)
-          let res = await fetch(resolveEndpointUrl(ep, 'api/tags'), { headers, mode: 'cors' }).catch(() => null);
-          if (!res || !res.ok) {
-            res = await fetch(resolveEndpointUrl(ep, 'v1/models'), { headers, mode: 'cors' }).catch(() => null);
-          }
-          if (res && res.ok) {
-            const data = await res.json();
-            const count = data.models?.length || data.data?.length || 0;
-            showToast(`✅ Koneksi Ollama sukses! Ditemukan ${count} model.`);
-          } else if (key) {
-            showToast(`✅ Ollama API Key tersimpan! Model Cloud siap dijalankan.`);
-          } else {
-            showToast(`⚠️ Tidak dapat menjangkau ${ep}. Periksa endpoint atau izin CORS.`, 'error');
-          }
+        // Gateway Proxy testing (Cloud Serverless 24/7 atau Local Backend)
+        const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
+        const isLocalOrigin = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
+        const targetModelsUrl = (!isLocalOrigin && !key && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep))
+          ? ((getActiveTunnelUrl() || '') + `/api/ollama/models?endpoint=${encodeURIComponent(ep)}`)
+          : getUniversalApiUrl(`/api/ollama/models?endpoint=${encodeURIComponent(ep)}`);
+        const res = await fetch(targetModelsUrl, { headers });
+        const data = await res.json();
+        if (res.ok && data.models && data.models.length > 0) {
+          showToast(`✅ Koneksi Ollama sukses! Ditemukan ${data.models.length} model (${data.cloud_auth || ep.includes('ollama.com') ? 'Ollama Cloud' : 'Local'}).`);
+          await checkOllamaHealth();
+          updateOllamaStatusUI();
+        } else if (data.server_running) {
+          showToast(`✅ Ollama terhubung & siap digunakan.`);
+          await checkOllamaHealth();
+          updateOllamaStatusUI();
+        } else if (key) {
+          showToast(`✅ Ollama API Key tersimpan! Mode Cloud aktif.`);
+          await checkOllamaHealth();
+          updateOllamaStatusUI();
         } else {
-          // Gateway Proxy testing
-          const res = await fetch(getUniversalApiUrl(`/api/ollama/models?endpoint=${encodeURIComponent(ep)}`), { headers });
-          const data = await res.json();
-          if (res.ok && data.models && data.models.length > 0) {
-            showToast(`✅ Koneksi Ollama sukses! Ditemukan ${data.models.length} model (${data.cloud_auth ? 'Cloud Auth' : 'Local'}).`);
-            await checkOllamaHealth();
-            updateOllamaStatusUI();
-          } else if (data.server_running) {
-            showToast(`✅ Ollama terhubung & siap digunakan.`);
-            await checkOllamaHealth();
-            updateOllamaStatusUI();
-          } else if (key) {
-            showToast(`✅ Ollama API Key tersimpan! Mode Cloud aktif.`);
-            await checkOllamaHealth();
-            updateOllamaStatusUI();
-          } else {
-            showToast(`❌ Gagal: ${data.error || data.warning || 'Ollama tidak merespons'}`, 'error');
-            updateOllamaStatusUI();
-          }
+          showToast(`❌ Gagal: ${data.error || data.warning || 'Ollama tidak merespons'}`, 'error');
+          updateOllamaStatusUI();
         }
       } catch (e) {
         showToast('❌ Gagal memeriksa endpoint Ollama: ' + e.message, 'error');
@@ -40428,9 +40446,10 @@ Aturan:
       }
       try {
         const isDirectFirst = Boolean(IS_CLOUD_HOSTED || IS_GITHUB_PAGES || IS_VERCEL || !DeviceStorage.isDeviceBackendAvailable);
+        const proxyAuthCheckUrl = getUniversalApiUrl('/api/openrouter/auth-check');
         const endpoints = isDirectFirst
-          ? ['https://openrouter.ai/api/v1/auth/key', '/api/openrouter/auth-check']
-          : ['/api/openrouter/auth-check', 'https://openrouter.ai/api/v1/auth/key'];
+          ? ['https://openrouter.ai/api/v1/auth/key', proxyAuthCheckUrl]
+          : [proxyAuthCheckUrl, 'https://openrouter.ai/api/v1/auth/key'];
         
         let valid = false;
         let lastErrorMsg = 'Key tidak valid';
