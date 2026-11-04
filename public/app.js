@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://pilot-coast-myspace-shelter.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://mental-quizzes-contacted-librarian.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -25107,8 +25107,8 @@ ${blocks}
       return bare || tok;
     });
 
-    if (hit === 0) {
-      return cleaned; // Biarkan backend translateVisualQueryToEnglish menerjemahkan secara penuh jika kosakata di luar kamus lokal
+    if (hit === 0 || hit < tokens.length) {
+      return cleaned; // Biarkan backend translateVisualQueryToEnglish menerjemahkan kalimat penuh secara utuh tanpa mencampur bahasa
     }
 
     // Pembalikan urutan Kata Benda + Kata Sifat Bahasa Indonesia -> Bahasa Inggris (contoh: "kopi hangat" -> "hot coffee")
@@ -46549,7 +46549,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://pilot-coast-myspace-shelter.trycloudflare.com',
+    activeTunnelUrl: 'https://mental-quizzes-contacted-librarian.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
