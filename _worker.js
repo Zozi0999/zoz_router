@@ -1325,7 +1325,7 @@ export default {
     // yang diteruskan ke TUNNEL_GATEWAY_URL (server laptop).
     // Pemanggilan AI & API Key (OpenRouter, Ollama Cloud, Search Web, Models, Sessions)
     // BERJALAN 100% MANDIRI DI CLOUDFLARE EDGE TANPA PERNAH BERGANTUNG PADA LAPTOP!
-    const TUNNEL_GATEWAY_URL = 'https://kidney-locale-bears-online.trycloudflare.com';
+    const TUNNEL_GATEWAY_URL = 'https://murray-smoking-representation-plain.trycloudflare.com';
     let reqBodyBytes = null;
 
     const isLaptopOnlyRoute = url.pathname.startsWith('/api/terminal') ||
