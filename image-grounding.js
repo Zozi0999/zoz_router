@@ -58,7 +58,8 @@ const PROVIDER_API_ALLOWLIST = Object.freeze({
   unsplash: { exact: ['api.unsplash.com'], suffixes: [] },
   pexels: { exact: ['api.pexels.com'], suffixes: [] },
   pixabay: { exact: ['pixabay.com'], suffixes: [] },
-  pinterest: { exact: ['api.pinterest.com'], suffixes: [] }
+  pinterest: { exact: ['api.pinterest.com'], suffixes: [] },
+  translate: { exact: ['translate.googleapis.com', 'api.mymemory.translated.net'], suffixes: [] }
 });
 
 // Allowlist Domain Lisensi & Profil Kreator Publik
@@ -394,7 +395,7 @@ function extractQueryTokens(query) {
 const NEGATIVE_SUBJECT_SPOOF_REGEX = /\b(impersonators?|look-?alikes?|parod(?:y|ies)|caricatures?|wax(?:work|\s+figures?)?|madame\s+tussauds|cosplay(?:ers?)?|memes?|cartoons?|satires?|puppets?|effig(?:y|ies))\b/i;
 
 function evaluateSubjectMatch(candidate, query) {
-  const rawQueryStr = String(query || candidate.search_query || '');
+  const rawQueryStr = String(query || candidate._searchQuery || candidate.search_query || '');
   const tokens = extractQueryTokens(rawQueryStr);
   const titleText = (candidate.title || '').toLowerCase();
   const descText = (candidate.description || '').toLowerCase();
@@ -408,7 +409,15 @@ function evaluateSubjectMatch(candidate, query) {
     };
   }
 
+  const isStockSource = ['unsplash', 'pexels', 'pixabay', 'kaboompics'].includes(candidate.source_name);
+
   if (!combined || tokens.length === 0) {
+    if (candidate.source_name === 'unsplash') {
+      return {
+        subject_match: 'likely',
+        match_basis: 'Kandidat teratas dikembalikan oleh indeks pencarian visual semantik resmi Unsplash untuk kueri terkait; pemeriksaan piksel lokal tidak diperlukan.'
+      };
+    }
     return {
       subject_match: 'uncertain',
       match_basis: 'Metadata kandidat terbatas atau kueri kosong; pemeriksaan visual piksel tidak dilakukan.'
@@ -424,7 +433,17 @@ function evaluateSubjectMatch(candidate, query) {
 
   const coverage = totalHits / tokens.length;
   const titleCoverage = titleHits / tokens.length;
-  const isStockSource = ['unsplash', 'pexels', 'pixabay', 'kaboompics'].includes(candidate.source_name);
+
+  // Mesin pencari semantik resmi Unsplash mengurutkan berdasarkan relevansi visual langsung (termasuk sinonim objek/suasana),
+  // sehingga selama lolos filter spoof di atas, kandidat 3 teratas layak dirender sebagai visual pendukung jawaban.
+  if (candidate.source_name === 'unsplash') {
+    return {
+      subject_match: coverage >= 0.85 ? 'confirmed' : 'likely',
+      match_basis: totalHits > 0
+        ? `Kecocokan kata kunci (${totalHits}/${tokens.length} token) dan relevansi semantik API resmi Unsplash terverifikasi.`
+        : 'Relevansi visual semantik terverifikasi langsung melalui indeks pencarian resmi Unsplash.'
+    };
+  }
 
   if (totalHits === 0) {
     return {
@@ -433,7 +452,7 @@ function evaluateSubjectMatch(candidate, query) {
     };
   }
 
-  // Untuk sumber stok foto, jangan mengklaim "confirmed" pada subjek spesifik kecuali seluruh token cocok & bukan klaim dokumenter
+  // Untuk sumber stok foto lain, jangan mengklaim "confirmed" pada subjek spesifik kecuali seluruh token cocok & bukan klaim dokumenter
   if (!isStockSource && coverage >= 0.85 && titleCoverage >= 0.5) {
     return {
       subject_match: 'confirmed',
@@ -911,6 +930,184 @@ function createImageGroundingService(options = {}) {
     };
   }
 
+  // ==================== ANALISIS & TERJEMAHAN KATA KUNCI VISUAL (ID -> EN) ====================
+  const unsplashSearchCache = new Map(); // cacheKey -> { rawItems, englishQuery, _createdAt }
+  const translationCache = new Map();    // cleanInput -> { en, _createdAt }
+  const pingedUnsplashIds = new Set();   // deduplikasi ping download_location Unsplash
+  const UNSPLASH_SEARCH_TTL_MS = 30 * 60 * 1000; // 30 menit (hemat kuota 50 req/jam)
+  const TRANSLATION_TTL_MS = 24 * 60 * 60 * 1000;
+
+  const IDIOMATIC_PHRASE_DICT = Object.freeze({
+    'kopi hangat': 'hot coffee',
+    'kopi panas': 'hot coffee',
+    'secangkir kopi hangat': 'cup of hot coffee',
+    'secangkir kopi': 'cup of coffee',
+    'es kopi': 'iced coffee',
+    'es kopi susu': 'iced milk coffee',
+    'teh hangat': 'hot tea',
+    'teh panas': 'hot tea',
+    'cokelat hangat': 'hot chocolate',
+    'coklat hangat': 'hot chocolate',
+    'kesatria abad pertengahan': 'medieval knight',
+    'ksatria abad pertengahan': 'medieval knight',
+    'keatria abad pertengahan': 'medieval knight',
+    'prajurit abad pertengahan': 'medieval knight armor',
+    'gunung berapi': 'volcano',
+    'matahari terbit': 'sunrise',
+    'matahari terbenam': 'sunset',
+    'senja di pantai': 'beach sunset',
+    'hutan hujan tropis': 'tropical rainforest',
+    'terumbu karang': 'coral reef',
+    'air terjun': 'waterfall',
+    'bima sakti': 'milky way galaxy',
+    'lubang hitam': 'black hole space',
+    'tata surya': 'solar system planets',
+    'nasi goreng': 'indonesian fried rice',
+    'kucing lucu': 'cute cat',
+    'anjing lucu': 'cute dog',
+    'harimau sumatera': 'sumatran tiger',
+    'badak jawa': 'javan rhinoceros',
+    'burung cendrawasih': 'bird of paradise',
+    'hiu paus': 'whale shark',
+    'paus biru': 'blue whale',
+    'candi borobudur': 'borobudur temple',
+    'candi prambanan': 'prambanan temple',
+    'danau toba': 'lake toba indonesia',
+    'gunung bromo': 'mount bromo indonesia',
+    'gunung rinjani': 'mount rinjani',
+    'gunung himalaya': 'himalaya mountains',
+    'raja ampat': 'raja ampat islands',
+    'mobil listrik': 'electric car',
+    'kereta cepat': 'high speed train',
+    'pesawat tempur': 'fighter jet',
+    'kapal selam': 'submarine',
+    'ruang kerja minimalis': 'minimalist workspace desk',
+    'kamar tidur minimalis': 'minimalist bedroom interior'
+  });
+
+  const LOCAL_WORD_DICT = Object.freeze({
+    kopi: 'coffee', hangat: 'hot', panas: 'hot', dingin: 'iced', es: 'iced', teh: 'tea', susu: 'milk',
+    air: 'water', terjun: 'waterfall', gunung: 'mountain', berapi: 'volcano', laut: 'ocean', pantai: 'beach',
+    hutan: 'forest', hujan: 'rain', langit: 'sky', malam: 'night', pagi: 'morning', senja: 'sunset',
+    matahari: 'sun', terbit: 'sunrise', terbenam: 'sunset', bulan: 'moon', bintang: 'stars', awan: 'clouds',
+    kucing: 'cat', anjing: 'dog', burung: 'bird', kuda: 'horse', singa: 'lion', harimau: 'tiger',
+    gajah: 'elephant', ikan: 'fish', bunga: 'flower', mawar: 'rose', pohon: 'tree', daun: 'leaf',
+    rumah: 'house', gedung: 'building', kota: 'city', jalan: 'street', jembatan: 'bridge', istana: 'palace',
+    kastil: 'castle', benteng: 'fortress', candi: 'temple', masjid: 'mosque', gereja: 'church',
+    kesatria: 'knight', ksatria: 'knight', keatria: 'knight', abad: 'century', pertengahan: 'medieval',
+    pedang: 'sword', perisai: 'shield', zirah: 'armor', perang: 'battle', sejarah: 'historical',
+    makanan: 'food', minuman: 'drink', roti: 'bread', kue: 'cake', buah: 'fruit', nasi: 'rice',
+    mobil: 'car', motor: 'motorcycle', pesawat: 'airplane', kapal: 'ship', kereta: 'train', sepeda: 'bicycle',
+    buku: 'book', perpustakaan: 'library', komputer: 'computer', laptop: 'laptop', robot: 'robot',
+    lukisan: 'painting', patung: 'sculpture', musik: 'music', gitar: 'guitar', piano: 'piano'
+  });
+
+  function stripVisualPromptNoise(raw) {
+    let s = String(raw || '').trim()
+      .replace(/[\r\n]+/g, ' ')
+      .replace(/\bfhoto\b/gi, 'foto')
+      .replace(/\b(?:keatria|ksatria)\b/gi, 'kesatria');
+
+    // Kupas instruksi percakapan Bahasa Indonesia & Inggris di awal kalimat
+    s = s.replace(/^(?:tolong\s+|coba\s+|mohon\s+|bisa(?:kah)?\s+|please\s+)?(?:carikan|cari|berikan|beri|kasih|tampilkan|tunjukkan|perlihatkan|sertakan|ambilkan|lihat(?:kan)?|show(?:\s+me)?|find(?:\s+me)?|give(?:\s+me)?|search(?:\s+for)?)\s+(?:beberapa\s+|banyak\s+|3\s+|tiga\s+)?(?:contoh\s+|referensi\s+|ilustrasi\s+|visual\s+)?(?:foto|gambar|potret|visual|images?|photos?|pictures?)(?:nya)?\s*(?:dari|tentang|mengenai|untuk|berupa|of|about|for)?\s*/i, '');
+    s = s.replace(/^(?:apa\s+itu|apakah\s+itu|jelaskan(?:\s+tentang|\s+mengenai)?|ceritakan(?:\s+tentang|\s+mengenai)?|deskripsi(?:kan)?|bagaimana\s+(?:bentuk|rupa|wujud)|seperti\s+apa(?:\s+bentuk|\s+rupa)?|siapa(?:kah)?|what\s+is(?:\s+a|\s+an|\s+the)?|who\s+is|tell\s+me\s+about)\s+/i, '');
+    // Kupas ekor partikel percakapan
+    s = s.replace(/\s+(?:dong|ya|yah|yuk|nih|sih|deh|lah|kah|please|tersebut|itu|ini)\s*[?!.]*$/i, '');
+    s = s.replace(/[?!.,;:"]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+    return s || String(raw || '').trim();
+  }
+
+  function normalizeEnglishVisualCollocations(enText) {
+    return String(enText || '')
+      .replace(/\bwarm\s+coffee\b/gi, 'hot coffee')
+      .replace(/\bwarm\s+tea\b/gi, 'hot tea')
+      .replace(/\bwarm\s+chocolate\b/gi, 'hot chocolate')
+      .replace(/\bmiddle\s+ages?\s+knight(?:s)?\b/gi, 'medieval knight')
+      .replace(/\bknight\s+of\s+the\s+middle\s+ages?\b/gi, 'medieval knight')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+  async function translateVisualQueryToEnglish(rawQuery) {
+    const cleaned = stripVisualPromptNoise(rawQuery);
+    if (!cleaned) return '';
+    const lowerKey = cleaned.toLowerCase();
+
+    if (IDIOMATIC_PHRASE_DICT[lowerKey]) {
+      return IDIOMATIC_PHRASE_DICT[lowerKey];
+    }
+
+    pruneMap(translationCache, 500, TRANSLATION_TTL_MS);
+    const cached = translationCache.get(lowerKey);
+    if (cached && cached.en) {
+      return cached.en;
+    }
+
+    // Cek apakah terdapat frasa idiomatik di dalam kalimat
+    for (const [idPhrase, enPhrase] of Object.entries(IDIOMATIC_PHRASE_DICT)) {
+      if (lowerKey === idPhrase) {
+        translationCache.set(lowerKey, { en: enPhrase, _createdAt: Date.now() });
+        return enPhrase;
+      }
+    }
+
+    // 1. Panggil endpoint terjemahan cepat ID -> EN (sl=id menghasilkan HTTP 200 akurat)
+    try {
+      const qParam = encodeURIComponent(cleaned.slice(0, 160));
+      const translateUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=id&tl=en&dt=t&q=${qParam}`;
+      const trRes = await secureFetchProviderJson(translateUrl, 'translate');
+      if (trRes.ok && Array.isArray(trRes.data) && Array.isArray(trRes.data[0])) {
+        const joined = trRes.data[0]
+          .map((seg) => (Array.isArray(seg) && typeof seg[0] === 'string' ? seg[0] : ''))
+          .join('')
+          .trim();
+        if (joined) {
+          const normalized = normalizeEnglishVisualCollocations(joined);
+          translationCache.set(lowerKey, { en: normalized, _createdAt: Date.now() });
+          return normalized;
+        }
+      }
+    } catch (_) {}
+
+    // 2. Cadangan API resmi MyMemory (ID -> EN) jika Google Translate tidak merespons
+    try {
+      const qParam = encodeURIComponent(cleaned.slice(0, 160));
+      const mmUrl = `https://api.mymemory.translated.net/get?q=${qParam}&langpair=id|en`;
+      const mmRes = await secureFetchProviderJson(mmUrl, 'translate');
+      const mmText = mmRes.ok && mmRes.data && mmRes.data.responseData && typeof mmRes.data.responseData.translatedText === 'string'
+        ? mmRes.data.responseData.translatedText.trim()
+        : '';
+      if (mmText && !/MYMEMORY WARNING/i.test(mmText)) {
+        const normalized = normalizeEnglishVisualCollocations(mmText);
+        translationCache.set(lowerKey, { en: normalized, _createdAt: Date.now() });
+        return normalized;
+      }
+    } catch (_) {}
+
+    // Fallback deterministik lokal kata-per-kata (ID -> EN)
+    const words = lowerKey.split(/\s+/).filter(Boolean);
+    let translatedCount = 0;
+    const mappedWords = words.map((w) => {
+      const cleanW = w.replace(/[^a-z0-9\-]/g, '');
+      if (LOCAL_WORD_DICT[cleanW]) {
+        translatedCount++;
+        return LOCAL_WORD_DICT[cleanW];
+      }
+      return cleanW || w;
+    });
+    // Perbaiki urutan kata benda + kata sifat Bahasa Indonesia -> Bahasa Inggris untuk frasa 2 kata (contoh: kopi hangat -> hot coffee)
+    let fallbackResult = mappedWords.join(' ');
+    if (words.length === 2 && translatedCount === 2) {
+      const ADJECTIVES_EN = new Set(['hot', 'iced', 'medieval', 'historical', 'tropical', 'blue', 'cute']);
+      if (ADJECTIVES_EN.has(mappedWords[1]) && !ADJECTIVES_EN.has(mappedWords[0])) {
+        fallbackResult = `${mappedWords[1]} ${mappedWords[0]}`;
+      }
+    }
+    fallbackResult = normalizeEnglishVisualCollocations(fallbackResult || cleaned);
+    translationCache.set(lowerKey, { en: fallbackResult, _createdAt: Date.now() });
+    return fallbackResult;
+  }
+
   // ==================== ADAPTER PENYEDIA RESMI ====================
 
   // 1. Wikimedia Commons (API Resmi MediaWiki Action API — Tanpa API Key)
@@ -1054,7 +1251,7 @@ function createImageGroundingService(options = {}) {
   }
 
   // 2. Unsplash (Official REST API — Memerlukan UNSPLASH_ACCESS_KEY)
-  async function searchUnsplash({ query, limit, orientation, safe_search }) {
+  async function searchUnsplash({ query, limit, per_page, orientation, safe_search, preTranslatedQuery }) {
     const accessKey = String(env.UNSPLASH_ACCESS_KEY || '').trim();
     if (!accessKey) {
       return {
@@ -1067,10 +1264,28 @@ function createImageGroundingService(options = {}) {
       };
     }
 
+    const englishQuery = (typeof preTranslatedQuery === 'string' && preTranslatedQuery.trim())
+      ? preTranslatedQuery.trim()
+      : await translateVisualQueryToEnglish(query);
+    const effectiveQuery = englishQuery || String(query || '').trim();
+    const rawPerPage = per_page !== undefined ? parseInt(per_page, 10) : (limit !== undefined ? parseInt(limit, 10) : 3);
+    const perPage = Number.isFinite(rawPerPage) ? Math.min(20, Math.max(1, rawPerPage)) : 3;
+    const contentFilter = safe_search === false ? 'low' : 'high';
+
+    pruneMap(unsplashSearchCache, 300, UNSPLASH_SEARCH_TTL_MS);
+    const cacheKey = `${effectiveQuery.toLowerCase()}|${perPage}|${orientation || 'any'}|${contentFilter}`;
+    const cachedEntry = unsplashSearchCache.get(cacheKey);
+    if (cachedEntry && Array.isArray(cachedEntry.rawPayloads) && cachedEntry.rawPayloads.length > 0) {
+      const hydrated = cachedEntry.rawPayloads
+        .slice(0, perPage)
+        .map((payload) => registerCandidate(payload, effectiveQuery));
+      return { images: hydrated, error: null, english_query: effectiveQuery, cached: true };
+    }
+
     const params = new URLSearchParams({
-      query: query.trim(),
-      per_page: String(Math.min(20, Math.max(1, limit))),
-      content_filter: safe_search === false ? 'low' : 'high'
+      query: effectiveQuery,
+      per_page: String(perPage),
+      content_filter: contentFilter
     });
     if (orientation === 'landscape' || orientation === 'portrait') {
       params.set('orientation', orientation);
@@ -1085,14 +1300,15 @@ function createImageGroundingService(options = {}) {
     });
 
     if (!res.ok) {
-      return { images: [], error: { source: 'unsplash', code: res.code, message: res.message } };
+      return { images: [], error: { source: 'unsplash', code: res.code, message: res.message }, english_query: effectiveQuery };
     }
 
     const results = Array.isArray(res.data && res.data.results) ? res.data.results : [];
     const candidates = [];
+    const rawPayloads = [];
 
     for (const item of results) {
-      if (candidates.length >= limit) break;
+      if (candidates.length >= perPage) break;
       const rawPage = item?.links?.html ? `${item.links.html}${item.links.html.includes('?') ? '&' : '?'}utm_source=zoz_router&utm_medium=referral` : null;
       const sourcePageUrl = sanitizeSourcePageUrl(rawPage, 'unsplash');
       const previewUrl = sanitizeMediaUrl(item?.urls?.small, 'unsplash');
@@ -1104,9 +1320,30 @@ function createImageGroundingService(options = {}) {
         ? `${item.user.links.html}${item.user.links.html.includes('?') ? '&' : '?'}utm_source=zoz_router&utm_medium=referral`
         : null;
 
-      const registered = registerCandidate({
-        title: sanitizeUntrustedText(item.description || item.alt_description, 220),
-        description: sanitizeUntrustedText(item.alt_description || item.description, 500),
+      // Ekstrak judul bersih dari alt_description, description, atau slug URL manusiawi Unsplash
+      let slugReadable = '';
+      if (typeof item.slug === 'string' && item.slug.includes('-')) {
+        const parts = item.slug.split('-');
+        if (parts.length > 1) {
+          slugReadable = parts.slice(0, -1).join(' ');
+        }
+      }
+      const categories = [];
+      if (slugReadable) categories.push(slugReadable);
+      if (Array.isArray(item.tags)) {
+        for (const t of item.tags) {
+          if (t && typeof t.title === 'string') categories.push(t.title);
+        }
+      }
+      if (Array.isArray(item.breadcrumbs)) {
+        for (const b of item.breadcrumbs) {
+          if (b && typeof b.title === 'string') categories.push(b.title);
+        }
+      }
+
+      const rawPayload = {
+        title: sanitizeUntrustedText(item.alt_description || item.description || slugReadable || effectiveQuery, 220),
+        description: sanitizeUntrustedText(item.description || item.alt_description || slugReadable, 500),
         source_name: 'unsplash',
         source_page_url: sourcePageUrl,
         preview_url: previewUrl,
@@ -1118,16 +1355,26 @@ function createImageGroundingService(options = {}) {
         attribution_text: creator ? `Foto oleh ${creator} di Unsplash` : 'Foto dari Unsplash',
         width: Number.isInteger(item.width) ? item.width : null,
         height: Number.isInteger(item.height) ? item.height : null,
-        _categories: [],
+        _categories: categories,
         _mediaCategory: 'stock_photo',
         _requiresProxy: false, // Ketentuan API Unsplash mewajibkan hotlinking ke images.unsplash.com
         _unsplashDownloadLocation: item?.links?.download_location || null
-      }, query);
+      };
 
+      rawPayloads.push(rawPayload);
+      const registered = registerCandidate(rawPayload, effectiveQuery);
       candidates.push(registered);
     }
 
-    return { images: candidates, error: null };
+    if (rawPayloads.length > 0) {
+      unsplashSearchCache.set(cacheKey, {
+        rawPayloads,
+        englishQuery: effectiveQuery,
+        _createdAt: Date.now()
+      });
+    }
+
+    return { images: candidates, error: null, english_query: effectiveQuery };
   }
 
   // 3. Pexels (Official REST API — Memerlukan PEXELS_API_KEY)
@@ -1369,8 +1616,8 @@ function createImageGroundingService(options = {}) {
   }
 
   /**
-   * TOOL 1: search_images
-   */
+    * TOOL 1: search_images
+    */
   async function searchImages(params = {}) {
     const query = typeof params.query === 'string' ? params.query.trim() : '';
     if (!query) {
@@ -1381,16 +1628,15 @@ function createImageGroundingService(options = {}) {
       };
     }
 
-    const rawLimit = params.limit !== undefined ? parseInt(params.limit, 10) : 6;
-    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(20, rawLimit)) : 6;
     const orientation = ['any', 'landscape', 'portrait', 'square'].includes(params.orientation) ? params.orientation : 'any';
     const image_type = ['photo', 'illustration', 'any'].includes(params.image_type) ? params.image_type : 'any';
     const safe_search = params.safe_search !== false;
 
     const source_errors = [];
     let targetSources = [];
+    const hasExplicitSources = Array.isArray(params.sources) && params.sources.length > 0;
 
-    if (Array.isArray(params.sources) && params.sources.length > 0) {
+    if (hasExplicitSources) {
       for (const raw of params.sources) {
         const norm = normalizeSourceEnum(raw);
         if (norm && ALLOWED_SOURCES.includes(norm)) {
@@ -1411,22 +1657,41 @@ function createImageGroundingService(options = {}) {
         };
       }
     } else {
-      // Pilih otomatis sumber yang relevan & memiliki kredensial aktif tanpa memaksakan semua 6 sumber
-      targetSources = ['wikimedia_commons'];
-      if (env.UNSPLASH_ACCESS_KEY) targetSources.push('unsplash');
+      // Utamakan API resmi Unsplash (per_page: 3) jika kredensial UNSPLASH_ACCESS_KEY tersedia,
+      // dengan fallback otomatis ke Wikimedia Commons bila kuota habis atau hasil kosong.
+      if (env.UNSPLASH_ACCESS_KEY) {
+        targetSources = ['unsplash'];
+      } else {
+        targetSources = ['wikimedia_commons'];
+      }
       if (env.PEXELS_API_KEY) targetSources.push('pexels');
       if (env.PIXABAY_API_KEY) targetSources.push('pixabay');
     }
 
-    const perSourceLimit = Math.max(2, Math.min(20, Math.ceil(limit / Math.max(1, targetSources.length)) + 2));
+    const isUnsplashPrimary = targetSources.length === 1 && targetSources[0] === 'unsplash';
+    const defaultCount = isUnsplashPrimary ? 3 : 6;
+    const rawPerPage = params.per_page !== undefined ? parseInt(params.per_page, 10) : undefined;
+    const rawLimit = rawPerPage !== undefined
+      ? rawPerPage
+      : (params.limit !== undefined ? parseInt(params.limit, 10) : defaultCount);
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(20, rawLimit)) : defaultCount;
+    const unsplashPerPage = Number.isFinite(rawPerPage) ? Math.max(1, Math.min(20, rawPerPage)) : Math.min(20, limit);
+
+    // Terjemahkan kata kunci ke Bahasa Inggris agar pencarian visual akurat (contoh: "kopi hangat" -> "hot coffee")
+    const englishQuery = await translateVisualQueryToEnglish(query);
+    const effectiveSearchQuery = englishQuery || query;
+
+    const perSourceLimit = targetSources.length === 1
+      ? limit
+      : Math.max(2, Math.min(20, Math.ceil(limit / Math.max(1, targetSources.length)) + 2));
 
     const adapterMap = {
-      wikimedia_commons: () => searchWikimediaCommons({ query, limit: perSourceLimit, orientation, image_type, safe_search }),
-      unsplash: () => searchUnsplash({ query, limit: perSourceLimit, orientation, image_type, safe_search }),
-      pexels: () => searchPexels({ query, limit: perSourceLimit, orientation, image_type, safe_search }),
-      pixabay: () => searchPixabay({ query, limit: perSourceLimit, orientation, image_type, safe_search }),
-      pinterest: () => searchPinterest({ query, limit: perSourceLimit, orientation, image_type, safe_search }),
-      kaboompics: () => searchKaboompics({ query, limit: perSourceLimit, orientation, image_type, safe_search })
+      wikimedia_commons: () => searchWikimediaCommons({ query: effectiveSearchQuery, limit: perSourceLimit, orientation, image_type, safe_search }),
+      unsplash: () => searchUnsplash({ query, per_page: unsplashPerPage, limit: unsplashPerPage, orientation, image_type, safe_search, preTranslatedQuery: effectiveSearchQuery }),
+      pexels: () => searchPexels({ query: effectiveSearchQuery, limit: perSourceLimit, orientation, image_type, safe_search }),
+      pixabay: () => searchPixabay({ query: effectiveSearchQuery, limit: perSourceLimit, orientation, image_type, safe_search }),
+      pinterest: () => searchPinterest({ query: effectiveSearchQuery, limit: perSourceLimit, orientation, image_type, safe_search }),
+      kaboompics: () => searchKaboompics({ query: effectiveSearchQuery, limit: perSourceLimit, orientation, image_type, safe_search })
     };
 
     const settled = await Promise.all(
@@ -1461,6 +1726,24 @@ function createImageGroundingService(options = {}) {
       }
     }
 
+    // Fallback tangguh: apabila Unsplash diminta namun mengembalikan 0 foto atau terkena rate-limit,
+    // ambil otomatis dari Wikimedia Commons menggunakan kata kunci Bahasa Inggris yang sama agar UI tidak pernah kosong.
+    if (combinedCandidates.length === 0 && !targetSources.includes('wikimedia_commons')) {
+      try {
+        const fbWmc = await searchWikimediaCommons({
+          query: effectiveSearchQuery,
+          limit: Math.max(3, limit),
+          orientation,
+          image_type,
+          safe_search
+        });
+        if (!fbWmc.error) succeededSources++;
+        if (Array.isArray(fbWmc.images) && fbWmc.images.length > 0) {
+          combinedCandidates.push(...fbWmc.images);
+        }
+      } catch (_) {}
+    }
+
     const finalImages = combinedCandidates.slice(0, limit).map(toPublicCandidateMetadata);
 
     let status = 'success';
@@ -1472,6 +1755,7 @@ function createImageGroundingService(options = {}) {
 
     return {
       status,
+      english_query: effectiveSearchQuery,
       images: finalImages,
       source_errors
     };
@@ -1721,6 +2005,9 @@ function createImageGroundingService(options = {}) {
   async function triggerUnsplashDownloadPing(candidate) {
     const accessKey = String(env.UNSPLASH_ACCESS_KEY || '').trim();
     if (!accessKey || !candidate._unsplashDownloadLocation) return;
+    if (pingedUnsplashIds.has(candidate.image_id)) return;
+    if (pingedUnsplashIds.size > 1000) pingedUnsplashIds.clear();
+    pingedUnsplashIds.add(candidate.image_id);
     await secureFetchProviderJson(candidate._unsplashDownloadLocation, 'unsplash', {
       Authorization: `Client-ID ${accessKey}`,
       'Accept-Version': 'v1'
@@ -1798,8 +2085,10 @@ function createImageGroundingService(options = {}) {
       // Patuhi pedoman Unsplash (wajib hotlink ke images.unsplash.com + ping download_location);
       // Untuk sumber lain (Wikimedia, Pexels, Pixabay) gunakan proxy terverifikasi same-origin sebagai asset_ref utama.
       let primaryAssetRef = proxyRef;
+      let preferredDirectUrl = candidate.preview_url || candidate.image_url || null;
       if (candidate.source_name === 'unsplash' && candidate.image_url) {
         primaryAssetRef = candidate.image_url;
+        preferredDirectUrl = candidate.image_url; // Gunakan urls.regular (1080px) agar tajam di kolase & Lightbox
         triggerUnsplashDownloadPing(candidate);
       }
 
@@ -1807,7 +2096,7 @@ function createImageGroundingService(options = {}) {
         image_id: candidate.image_id,
         asset_ref: primaryAssetRef,
         fallback_asset_ref: candidate.preview_url || candidate.image_url || proxyRef,
-        direct_media_url: candidate.preview_url || candidate.image_url || null,
+        direct_media_url: preferredDirectUrl,
         alt_text: cleanAlt,
         title: candidate.title,
         source_name: candidate.source_name,

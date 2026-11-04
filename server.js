@@ -7158,14 +7158,15 @@ async function requestHandler(req, res) {
   }
 
   // ==================== GROUNDED IMAGE DISCOVERY, INSPECTION & DISPLAY TOOLS ====================
-  // 1. search_images — Pencarian kandidat gambar dari 6 sumber resmi terizinkan
-  if (pathname === '/api/tools/search-images' && (method === 'GET' || method === 'POST')) {
+  // 1. search_images — Pencarian kandidat gambar dari sumber resmi terizinkan (termasuk API resmi Unsplash per_page: 3)
+  if ((pathname === '/api/tools/search-images' || pathname === '/api/search-images') && (method === 'GET' || method === 'POST')) {
     try {
       let query = reqUrl.searchParams.get('query') || reqUrl.searchParams.get('q') || '';
       let sources = reqUrl.searchParams.get('sources')
         ? reqUrl.searchParams.get('sources').split(',').map((s) => s.trim()).filter(Boolean)
         : undefined;
-      let limit = reqUrl.searchParams.get('limit') ? parseInt(reqUrl.searchParams.get('limit'), 10) : 6;
+      let per_page = reqUrl.searchParams.get('per_page') ? parseInt(reqUrl.searchParams.get('per_page'), 10) : undefined;
+      let limit = reqUrl.searchParams.get('limit') ? parseInt(reqUrl.searchParams.get('limit'), 10) : undefined;
       let orientation = reqUrl.searchParams.get('orientation') || 'any';
       let image_type = reqUrl.searchParams.get('image_type') || 'any';
       let safe_search = reqUrl.searchParams.get('safe_search') !== 'false';
@@ -7179,6 +7180,7 @@ async function requestHandler(req, res) {
             ? body.sources
             : (body.sources ? String(body.sources).split(',').map((s) => s.trim()).filter(Boolean) : undefined);
         }
+        if (body.per_page !== undefined) per_page = parseInt(body.per_page, 10);
         if (body.limit !== undefined) limit = parseInt(body.limit, 10);
         if (body.orientation !== undefined) orientation = String(body.orientation);
         if (body.image_type !== undefined) image_type = String(body.image_type);
@@ -7188,6 +7190,7 @@ async function requestHandler(req, res) {
       const result = await imageGroundingService.searchImages({
         query,
         sources,
+        per_page,
         limit,
         orientation,
         image_type,
@@ -7204,7 +7207,7 @@ async function requestHandler(req, res) {
   }
 
   // 2. inspect_image — Verifikasi aksesibilitas HTTP, magic-bytes MIME, dimensi, kecocokan subjek, & lisensi
-  if (pathname === '/api/tools/inspect-image' && (method === 'GET' || method === 'POST')) {
+  if ((pathname === '/api/tools/inspect-image' || pathname === '/api/inspect-image') && (method === 'GET' || method === 'POST')) {
     try {
       let image_id = reqUrl.searchParams.get('image_id') || '';
       if (method === 'POST') {
@@ -7229,8 +7232,8 @@ async function requestHandler(req, res) {
     }
   }
 
-  // 3. prepare_image_display — Persiapan payload aset terverifikasi maksimal 3 gambar untuk UI renderer
-  if (pathname === '/api/tools/prepare-image-display' && method === 'POST') {
+  // 3. prepare_image_display — Persiapan payload aset terverifikasi hingga 12 gambar untuk UI renderer
+  if ((pathname === '/api/tools/prepare-image-display' || pathname === '/api/prepare-image-display') && method === 'POST') {
     try {
       const body = await safeParseBody(req);
       if (!body) return;
