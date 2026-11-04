@@ -43,7 +43,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://confidential-educators-latina-webmasters.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://wings-variation-pac-publicly.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -47016,7 +47016,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://confidential-educators-latina-webmasters.trycloudflare.com',
+    activeTunnelUrl: 'https://wings-variation-pac-publicly.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
