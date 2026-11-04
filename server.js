@@ -1482,21 +1482,32 @@ async function resolveLocalDaemonCloudManifest(modelId) {
   // 2. Remote model match (e.g. remote_model === clean)
   const remote = models.find(m => m.remote_model === clean);
   if (remote) return remote.name;
-  // 3. Name with :cloud tag match
-  const cloudVariant = models.find(m => m.name === `${clean}:cloud` || m.model === `${clean}:cloud`);
+  // 3. Name with :cloud or -cloud tag match (e.g. gemma4:31b -> gemma4:31b-cloud)
+  const cloudVariant = models.find(m =>
+    m.name === `${clean}:cloud` || m.model === `${clean}:cloud` ||
+    m.name === `${clean}-cloud` || m.model === `${clean}-cloud`
+  );
   if (cloudVariant) return cloudVariant.name;
-  // 4. Base name match (prefix before colon)
-  const baseMatch = models.find(m => m.name.split(':')[0] === clean || m.model.split(':')[0] === clean);
-  if (baseMatch) return baseMatch.name;
-  // 5. Family / prefix match (e.g. minimax -> minimax-m2.7:cloud)
-  const cleanFamily = clean.split(/[-:.]/)[0].toLowerCase();
-  if (cleanFamily.length >= 3) {
-    const familyMatch = models.find(m => m.name.toLowerCase().startsWith(cleanFamily));
-    if (familyMatch) return familyMatch.name;
+  // 4. Base name match (prefix before colon) ONLY if no explicit parameter size mismatch
+  if (!clean.includes(':')) {
+    const baseMatch = models.find(m => m.name.split(':')[0] === clean || m.model.split(':')[0] === clean);
+    if (baseMatch) return baseMatch.name;
   }
-  // 6. Fallback to resilient local model if requested model is missing
-  const defaultFallback = models.find(m => m.name.includes('glm-5.3-flash') || m.name.includes('llama3.2') || m.name.includes('qwen'));
-  return defaultFallback ? defaultFallback.name : clean;
+  // 5. Jika model yang diminta sudah berakhiran -cloud / :cloud, pertahankan utuh (daemon Ollama Cloud Relay menjalankannya langsung!)
+  if (/(?:[:-]cloud)$/i.test(clean)) {
+    return clean;
+  }
+  // 6. Untuk model resmi bereksplisit tag (mis. gemma4:31b, qwen3.5:27b), konversi ke konvensi Cloud Relay lokal (${clean}-cloud)
+  //    TANPA membajaknya ke model lain (seperti glm-5.3-flash) agar kedaulatan model & kapabilitas vision tetap terjaga!
+  if (clean.includes(':')) {
+    if (/:latest$/i.test(clean)) {
+      const base = clean.replace(/:latest$/i, '');
+      const fam = models.find(m => m.name.toLowerCase().startsWith(base.toLowerCase()));
+      return fam ? fam.name : `${base}:cloud`;
+    }
+    return `${clean}-cloud`;
+  }
+  return `${clean}:cloud`;
 }
 fetchLocalOllamaTags().catch(() => {});
 
@@ -3643,8 +3654,9 @@ function accumulateChatChunk(sessionId, chunk, provider) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     if (provider === 'openrouter') {
+      const isSseLine = trimmed.startsWith('data:');
       let jsonStr = null;
-      if (trimmed.startsWith('data:')) {
+      if (isSseLine) {
         jsonStr = trimmed.replace(/^data:\s*/, '').trim();
         if (jsonStr === '[DONE]') continue;
       } else {
@@ -3657,7 +3669,10 @@ function accumulateChatChunk(sessionId, chunk, provider) {
         const parsed = JSON.parse(jsonStr);
         // Keep answer channel only. Reasoning fields never enter background
         // status text, session persistence, copy, or export.
-        const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || parsed.choices?.[0]?.message?.content || '';
+        // Cegah duplikasi kalimat akhir ketika provider mengirim message.content utuh di chunk SSE terakhir.
+        const delta = isSseLine
+          ? (parsed.choices?.[0]?.delta?.content ?? parsed.choices?.[0]?.text ?? (!task.fullText ? parsed.choices?.[0]?.message?.content : '') ?? '')
+          : (parsed.choices?.[0]?.message?.content ?? parsed.choices?.[0]?.delta?.content ?? parsed.choices?.[0]?.text ?? '');
         if (delta) {
           // Limit fullText buffer to prevent memory exhaustion on very long responses.
           // Akumulasi byte per-chunk (O(delta)) — byteLength(fullText + delta) yang
@@ -3706,8 +3721,9 @@ function flushChatTaskBuffer(sessionId, provider) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       if (provider === 'openrouter') {
+        const isSseLine = trimmed.startsWith('data:');
         let jsonStr = null;
-        if (trimmed.startsWith('data:')) {
+        if (isSseLine) {
           jsonStr = trimmed.replace(/^data:\s*/, '').trim();
           if (jsonStr === '[DONE]') continue;
         } else {
@@ -3718,8 +3734,10 @@ function flushChatTaskBuffer(sessionId, provider) {
         }
         try {
           const parsed = JSON.parse(jsonStr);
-          // Flush akhir juga hanya menyimpan kanal jawaban eksplisit.
-          const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text || parsed.choices?.[0]?.message?.content || '';
+          // Flush akhir juga hanya menyimpan kanal jawaban eksplisit tanpa duplikasi message.content SSE.
+          const delta = isSseLine
+            ? (parsed.choices?.[0]?.delta?.content ?? parsed.choices?.[0]?.text ?? (!task.fullText ? parsed.choices?.[0]?.message?.content : '') ?? '')
+            : (parsed.choices?.[0]?.message?.content ?? parsed.choices?.[0]?.delta?.content ?? parsed.choices?.[0]?.text ?? '');
           if (delta) {
             task.fullText += delta;
             task.fullBytes = (task.fullBytes || 0) + Buffer.byteLength(delta, 'utf8');
@@ -3845,6 +3863,167 @@ function applyContextIntegrityGuard(messages, userPrompt) {
       const firstUser = messages.find(m => m && m.role === 'user');
       if (firstUser && typeof firstUser.content === 'string' && !firstUser.content.includes('[INTEGRITAS KONTEKS:')) {
         firstUser.content = `[Instruksi Sistem & Konteks:\n${zeroNotice}]\n\n${firstUser.content}`;
+      }
+    }
+  }
+}
+
+// Defense-in-depth: Jaring Pengaman Kalibrasi Deduksi Proposisional & Bayesian di Sisi Server
+// Menjamin tab peramban dengan cache lama maupun panggilan API langsung tetap mendapat:
+// 1. Protokol rantai transisi laten <think>...</think> (disaring bersih dari output oleh createProviderStreamFilter)
+// 2. Isolasi giliran soal diskrit mandiri dari ratusan pesan kuis lama (bebas kontaminasi induction heads)
+// 3. Sanitasi penalti logit & pencegahan routing 'latency' ke sub-model lemah
+function applyServerSideDecisionCalibration(body, provider = 'ollama') {
+  if (!body || !Array.isArray(body.messages) || body.messages.length === 0) return;
+  if (typeof textSafety.computeBayesianDecisionCalibration !== 'function') return;
+
+  // Bersihkan penalti frekuensi/kehadiran & blokir reasoning lama jika tersisa dari cache klien lawas
+  if (body.presence_penalty !== undefined) delete body.presence_penalty;
+  if (body.frequency_penalty !== undefined) delete body.frequency_penalty;
+  if (body.include_reasoning === false) delete body.include_reasoning;
+  if (body.options && typeof body.options === 'object') {
+    if (body.options.presence_penalty !== undefined) delete body.options.presence_penalty;
+    if (body.options.frequency_penalty !== undefined) delete body.options.frequency_penalty;
+  }
+
+  // Jangan ubah putaran sintesis tool internal atau permintaan generator berkas <<<ZOZ_FILE
+  const tailMsg = body.messages[body.messages.length - 1];
+  if (tailMsg && tailMsg.role === 'tool') return;
+  const serializedAll = body.messages.map(m => {
+    if (!m) return '';
+    if (typeof m.content === 'string') return m.content;
+    if (Array.isArray(m.content)) return m.content.map(p => (p && typeof p.text === 'string') ? p.text : '').join('\n');
+    return '';
+  }).join('\n');
+  if (serializedAll.includes('<<<ZOZ_FILE') || serializedAll.includes('[INSTRUKSI FORMAT WAJIB:')) return;
+
+  // Temukan pesan user aktif terakhir
+  let lastUserIdx = -1;
+  for (let i = body.messages.length - 1; i >= 0; i--) {
+    const m = body.messages[i];
+    if (!m || m.role !== 'user') continue;
+    const txt = typeof m.content === 'string'
+      ? m.content
+      : (Array.isArray(m.content) ? m.content.map(p => (p && typeof p.text === 'string') ? p.text : '').join('\n') : '');
+    if (!isInternalSystemPayload(txt)) {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  if (lastUserIdx === -1) return;
+  const lastUser = body.messages[lastUserIdx];
+
+  // Hitung jumlah lampiran gambar pada giliran aktif
+  let imageCount = 0;
+  if (Array.isArray(lastUser.images)) {
+    imageCount = lastUser.images.filter(Boolean).length;
+  } else if (lastUser.image) {
+    imageCount = 1;
+  } else if (Array.isArray(lastUser.content)) {
+    imageCount = lastUser.content.filter(p => p && p.type === 'image_url' && p.image_url?.url).length;
+  }
+
+  // Ekstrak teks murni pengguna tanpa pembungkus [Instruksi Sistem & Konteks: ...]
+  let rawUserText = typeof lastUser.content === 'string'
+    ? lastUser.content
+    : (Array.isArray(lastUser.content) ? lastUser.content.map(p => (p && typeof p.text === 'string') ? p.text : '').filter(Boolean).join('\n') : '');
+  if (rawUserText.startsWith('[Instruksi Sistem & Konteks:')) {
+    const lastBracketIdx = rawUserText.lastIndexOf(']\n\n');
+    if (lastBracketIdx !== -1) {
+      rawUserText = rawUserText.slice(lastBracketIdx + 3).trim();
+    } else {
+      rawUserText = rawUserText.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
+    }
+  }
+  rawUserText = rawUserText.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
+
+  const calib = textSafety.computeBayesianDecisionCalibration(rawUserText, {
+    hasImages: imageCount > 0,
+    imageCount
+  });
+  if (!calib || (!calib.isDiscreteChoice && !calib.isAnalyticalQuery)) return;
+
+  // 1. Kalibrasi suhu Boltzmann & parameter router
+  if (provider === 'openrouter') {
+    if (body.provider && typeof body.provider === 'object' && body.provider.sort === 'latency') {
+      delete body.provider.sort;
+    }
+    const modelStr = String(body.model || '').toLowerCase();
+    const isReasoningModel = Boolean(/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(modelStr) || modelStr.includes('reasoning') || modelStr.includes('-r1'));
+    if (!isReasoningModel) {
+      if (body.temperature === undefined || (typeof body.temperature === 'number' && body.temperature <= 0.08)) {
+        body.temperature = calib.temperature;
+      }
+    }
+  } else {
+    body.options = (body.options && typeof body.options === 'object') ? body.options : {};
+    if (body.options.temperature === undefined || (typeof body.options.temperature === 'number' && body.options.temperature <= 0.08)) {
+      body.options.temperature = calib.temperature;
+    }
+    if (!body.options.num_ctx) body.options.num_ctx = 16384;
+    // Jangan batasi num_predict ke angka kecil (mis. 4096) karena model hybrid-thinking (GLM/Gemma4/Nemotron)
+    // memakai budget tersebut untuk message.thinking sebelum mengeluarkan message.content!
+    if (body.options.num_predict && body.options.num_predict <= 4096) {
+      delete body.options.num_predict;
+    }
+    // Aktifkan native latent reasoning pada Ollama (auto-retry di dispatchOllamaUpstream jika model lokal lama tidak mendukung)
+    if (body.think === undefined) {
+      body.think = true;
+    }
+  }
+
+  // 2. Isolasi konteks giliran soal diskrit mandiri (mencegah puluhan pesan kuis lama membajak induction heads)
+  if (calib.isSelfContainedDiscreteTurn) {
+    const nonSysCount = body.messages.filter(m => m && m.role !== 'system').length;
+    if (nonSysCount > 1) {
+      const sysMsgs = body.messages.filter(m => m && m.role === 'system');
+      body.messages = [...sysMsgs, lastUser];
+    }
+  }
+
+  // 3. Suntikkan direktif deduksi proposisional v680 jika belum ada di payload
+  const hasV680Protocol = serializedAll.includes('[PROTOKOL DEDUKSI PROPOSISIONAL') || serializedAll.includes('[PROTOKOL VERIFIKASI DEDUKTIF');
+  if (!hasV680Protocol && calib.calibrationDirective) {
+    // Bersihkan blok v679 lama (tanpa <think>) jika dikirim oleh tab browser belum di-refresh
+    for (const m of body.messages) {
+      if (m && typeof m.content === 'string' && m.content.includes('[KALIBRASI ')) {
+        m.content = m.content
+          .replace(/\n*\[KALIBRASI (?:KEPUTUSAN BAYESIAN|ANALITIS PROPORSIONAL)[^\]]*\]:[\s\S]*$/i, '')
+          .trim();
+      }
+    }
+
+    const modelLower = String(body.model || '').toLowerCase();
+    const supportsSystem = (provider === 'ollama') || !(
+      modelLower.includes('gemma') ||
+      modelLower.includes('mistral-tiny') ||
+      modelLower.includes('lfm') ||
+      modelLower.includes('liquid') ||
+      modelLower.includes('inkling') ||
+      modelLower.includes('dots-') ||
+      modelLower.includes('ling-') ||
+      modelLower.includes('apodex')
+    );
+
+    if (supportsSystem) {
+      const sysMsg = body.messages.find(m => m && m.role === 'system');
+      if (sysMsg && typeof sysMsg.content === 'string') {
+        sysMsg.content = sysMsg.content.trim()
+          ? `${sysMsg.content.trim()}\n\n${calib.calibrationDirective}`
+          : calib.calibrationDirective;
+      } else {
+        body.messages.unshift({ role: 'system', content: calib.calibrationDirective });
+      }
+    } else {
+      if (typeof lastUser.content === 'string') {
+        lastUser.content = `[Instruksi Sistem & Konteks:\n${calib.calibrationDirective}]\n\n${lastUser.content}`;
+      } else if (Array.isArray(lastUser.content)) {
+        const textPart = lastUser.content.find(p => p && p.type === 'text' && typeof p.text === 'string');
+        if (textPart) {
+          textPart.text = `[Instruksi Sistem & Konteks:\n${calib.calibrationDirective}]\n\n${textPart.text}`;
+        } else {
+          lastUser.content.unshift({ type: 'text', text: `[Instruksi Sistem & Konteks:\n${calib.calibrationDirective}]` });
+        }
       }
     }
   }
@@ -10755,6 +10934,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
       }
 
+      // Defense-in-depth: Kalibrasi Deduksi Proposisional & Bayesian di Sisi Server (Ollama)
+      applyServerSideDecisionCalibration(body, 'ollama');
+
       if (sessionId) {
         if (dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].status === 'streaming') {
           return sendJSON(res, 429, { error: 'Stream already active for this session' });
@@ -10844,11 +11026,29 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               if (!clientDisconnected) errData += chunk;
             });
             proxyRes.on('end', async () => {
-              // Auto-retry tanpa tools jika model menolak parameter tools
-              if (Array.isArray(body.tools) && body.tools.length > 0 && (statusCode === 400 || statusCode === 422 || statusCode === 500) && /tool/i.test(errData) && !res.headersSent && !clientDisconnected) {
-                delete body.tools;
-                delete body.tool_choice;
+              // Auto-retry tanpa tools atau tanpa think jika model lokal tidak mendukung parameter tersebut
+              if (((Array.isArray(body.tools) && body.tools.length > 0 && /tool/i.test(errData)) || (body.think && /think/i.test(errData))) && (statusCode === 400 || statusCode === 422 || statusCode === 500) && !res.headersSent && !clientDisconnected) {
+                if (/tool/i.test(errData)) {
+                  delete body.tools;
+                  delete body.tool_choice;
+                }
+                if (/think/i.test(errData)) {
+                  delete body.think;
+                }
                 return dispatchOllamaUpstream(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback, canRetryCloud);
+              }
+
+              // Jika percobaan -cloud/:cloud pada daemon lokal mengembalikan 404 (model belum ditarik/tidak tersedia di relay),
+              // jatuhkan secara terkendali ke model lokal yang terinstal di /api/tags
+              if (statusCode === 404 && /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])/i.test(targetEndpoint || '') && !res.headersSent && (!clientDisconnected || sessionId)) {
+                const installedModels = (localDaemonTagsCache && Array.isArray(localDaemonTagsCache.tags) && localDaemonTagsCache.tags.length > 0)
+                  ? localDaemonTagsCache.tags
+                  : await fetchLocalOllamaTags();
+                const fallbackLocal = installedModels.find(m => m.name !== targetModel && (m.name.includes('glm-5.3-flash') || m.name.includes('nemotron') || m.name.includes('llama3.2') || m.name.includes('qwen')));
+                if (fallbackLocal && fallbackLocal.name !== targetModel) {
+                  console.warn(`[Ollama Local Relay] Model ${targetModel} not found (404). Falling back to installed model ${fallbackLocal.name}...`);
+                  return dispatchOllamaUpstream(targetEndpoint, fallbackLocal.name, targetAuthKey, false, false);
+                }
               }
 
               // Multi-Tier Fallback: Jika https://ollama.com mengembalikan HTTP >= 400 (misal 401/403/404/429/500),
@@ -11583,6 +11783,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           }
         }
       }
+
+      // Defense-in-depth: Kalibrasi Deduksi Proposisional & Bayesian di Sisi Server (OpenRouter)
+      applyServerSideDecisionCalibration(body, 'openrouter');
 
       const isStream = body.stream !== false;
       const postData = JSON.stringify(body);

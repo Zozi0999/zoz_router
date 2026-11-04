@@ -1075,15 +1075,33 @@
     };
   }
 
+  function extractFallbackConclusionFromUnclosedThought(thoughtBody) {
+    const raw = String(thoughtBody || '').replace(MODEL_TAG_REGEX, '').trim();
+    if (!raw) return '';
+    const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const l = lines[i];
+      if (/^(?:langkah|step|transkripsi|polaritas|uji\s+opsi|opsi\s+\d|evaluasi)\b/i.test(l)) continue;
+      const m = l.match(/(?:kesimpulan|jawaban(?:\s+akhir|\s+yang\s+benar)?|final\s+answer|therefore|jadi\s+jawabannya)\s*[:=-]\s*(.+)$/i);
+      if (m && m[1].trim()) return m[1].trim();
+    }
+    return lines.length > 0 ? lines[lines.length - 1] : '';
+  }
+
   function stripReasoningText(rawText) {
     if (typeof rawText !== 'string' || !rawText) return '';
-    return rawText
+    const cleaned = rawText
       .replace(THINKING_TAG_REGEX, '')
       .replace(BRACKET_THINK_REGEX, '')
       .replace(/<\/?(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
       .replace(/\[\/?(?:THOUGHT|REASONING)\]/gi, '')
       .replace(MODEL_TAG_REGEX, '')
       .trim();
+    if (!cleaned && /<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b/i.test(rawText)) {
+      const inner = rawText.replace(/^[\s\S]*?<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/i, '');
+      return extractFallbackConclusionFromUnclosedThought(inner);
+    }
+    return cleaned;
   }
 
   function splitReasoningAndContent(rawText) {
@@ -1102,9 +1120,30 @@
   function createThinkTagStripper() {
     let inside = false;
     let pending = '';
+    let capturedThought = '';
+    let emittedVisibleChars = 0;
 
     const OPEN_REGEX = /<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|\[(?:thought|reasoning)\]/i;
     const CLOSE_REGEX = /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)>|\[\/(?:thought|reasoning)\]/i;
+    const OPEN_PREFIXES = ['<think', '<thought', '<thinking', '<reasoning', '<ant_thought', '<thought_process', '[thought]', '[reasoning]'];
+    const CLOSE_TAGS = ['</think>', '</thought>', '</thinking>', '</reasoning>', '</ant_thought>', '</thought_process>', '[/thought]', '[/reasoning]'];
+
+    function findPartialTagTailIndex(s, closingMode) {
+      const minPos = Math.max(0, s.length - 36);
+      for (let i = minPos; i < s.length; i++) {
+        const ch = s[i];
+        if (ch !== '<' && ch !== '[') continue;
+        const tail = s.slice(i).toLowerCase();
+        if (closingMode) {
+          if (CLOSE_TAGS.some(tag => tag.startsWith(tail))) return i;
+        } else {
+          if (OPEN_PREFIXES.some(pref => pref.startsWith(tail) || (pref.startsWith('<') && tail.startsWith(pref) && !tail.includes('>')))) {
+            return i;
+          }
+        }
+      }
+      return -1;
+    }
 
     function push(text, final = false) {
       let input = pending + String(text || '');
@@ -1115,23 +1154,32 @@
         if (inside) {
           const closeMatch = CLOSE_REGEX.exec(input);
           if (!closeMatch) {
-            const lastLt = Math.max(input.lastIndexOf('<'), input.lastIndexOf('['));
-            if (!final && lastLt >= 0 && input.length - lastLt < 25) {
-              pending = input.slice(lastLt);
+            const partialIdx = !final ? findPartialTagTailIndex(input, true) : -1;
+            if (partialIdx >= 0) {
+              if (capturedThought.length < 6000) capturedThought += input.slice(0, partialIdx);
+              pending = input.slice(partialIdx);
+            } else if (capturedThought.length < 6000) {
+              capturedThought += input;
             }
             break;
           }
+          capturedThought = '';
           input = input.slice(closeMatch.index + closeMatch[0].length);
+          // Buang whitespace pembatas tepat setelah </think> jika belum ada teks jawaban sebelumnya
+          if (emittedVisibleChars === 0 && !output.trim()) {
+            input = input.replace(/^\s+/, '');
+            output = '';
+          }
           inside = false;
           continue;
         }
 
         const openMatch = OPEN_REGEX.exec(input);
         if (!openMatch) {
-          const lastLt = Math.max(input.lastIndexOf('<'), input.lastIndexOf('['));
-          if (!final && lastLt >= 0 && input.length - lastLt < 20) {
-            output += input.slice(0, lastLt);
-            pending = input.slice(lastLt);
+          const partialIdx = !final ? findPartialTagTailIndex(input, false) : -1;
+          if (partialIdx >= 0) {
+            output += input.slice(0, partialIdx);
+            pending = input.slice(partialIdx);
           } else {
             output += input;
           }
@@ -1147,10 +1195,19 @@
         output += pending;
         pending = '';
       }
-      return output.replace(MODEL_TAG_REGEX, '');
+      const cleanOut = output.replace(MODEL_TAG_REGEX, '');
+      if (cleanOut.trim()) {
+        emittedVisibleChars += cleanOut.trim().length;
+      }
+      if (final && inside && emittedVisibleChars === 0 && capturedThought.trim()) {
+        const fallback = extractFallbackConclusionFromUnclosedThought(capturedThought);
+        capturedThought = '';
+        return fallback;
+      }
+      return cleanOut;
     }
 
-    return { push };
+    return { push, isInsideThought: () => inside };
   }
 
   function sanitizeRecord(record, tagStrippers, entropyGate = null, isFinalRecord = false) {
@@ -1194,10 +1251,15 @@
         out[key] = value;
       }
     }
-    // Jika record OpenRouter memiliki finish_reason pada choice tetapi delta.content tidak ada, flush sisa gate
-    if (localFinal && entropyGate && out.delta && typeof out.delta === 'object' && typeof out.delta.content !== 'string') {
-      const flushed = entropyGate.flush();
-      if (flushed) out.delta.content = flushed;
+    // Jika record OpenRouter memiliki finish_reason pada choice tetapi delta.content tidak ada, flush sisa tagStripper & gate
+    if (localFinal && out.delta && typeof out.delta === 'object' && typeof out.delta.content !== 'string') {
+      let rem = '';
+      for (const stripper of tagStrippers.values()) rem += stripper.push('', true);
+      tagStrippers.clear();
+      if (entropyGate) {
+        rem = entropyGate.push(rem, true) + entropyGate.flush();
+      }
+      if (rem) out.delta.content = rem;
     }
     return out;
   }
@@ -1238,7 +1300,7 @@
         const hadOllamaText = Boolean(parsed && parsed.message && typeof parsed.message.content === 'string' && parsed.message.content.length > 0);
         const hadOpenRouterText = Boolean(parsed && Array.isArray(parsed.choices) && parsed.choices.some(c => c && c.delta && typeof c.delta.content === 'string' && c.delta.content.length > 0));
         const clean = sanitizeRecord(parsed, tagStrippers, entropyGate, isFinalRec);
-        if (!isFinalRec && entropyGate) {
+        if (!isFinalRec) {
           if (hadOllamaText && clean && clean.message && clean.message.content === '' && !clean.message.tool_calls && !clean.message.images) {
             return '';
           }
@@ -1262,11 +1324,9 @@
         const payload = trimmed.replace(/^data:\s*/, '');
         if (payload === '[DONE]') {
           let prefixFrame = '';
-          if (entropyGate) {
-            const flushed = entropyGate.flush();
-            if (flushed) {
-              prefixFrame = 'data: ' + JSON.stringify({ choices: [{ index: 0, delta: { content: flushed } }] }) + eol;
-            }
+          const flushed = finishTagStrippers();
+          if (flushed) {
+            prefixFrame = 'data: ' + JSON.stringify({ choices: [{ index: 0, delta: { content: flushed } }] }) + eol;
           }
           return prefixFrame + 'data: [DONE]' + eol;
         }
@@ -1890,22 +1950,26 @@
   }
 
   // ============================================================================
-  // 16B. KALIBRASI KEPUTUSAN BAYESIAN, PRIOR ENTROPI MAKSIMUM, & SUHU BOLTZMANN
-  // Mengatasi bias pembobotan berlebih (over-weighting / greedy mode collapse)
-  // melalui:
-  //   1. Prior Seragam Maksimum-Entropi: P_0(H_i) = 1 / K, H_0 = log2(K)
-  //   2. Uji Rasio Log-Likelihood: \Lambda(H_i) = log P(E | H_i) - log P(E | \neg H_i)
-  //   3. Kalibrasi Suhu Boltzmann P_T(w) \propto exp(z_w / T) tanpa kolaps T=0.05
-  //      dan tanpa distorsi penalti presensi/frekuensi pada kata kunci soal.
+  // 16B. DEDUKSI PROPOSISIONAL, RANTAI MARKOV LATEN <think>, & KALIBRASI BAYESIAN
+  // Mengatasi kegagalan kompleksitas sirkuit dangkal O(1) (tebakan token ke-1),
+  // bias panjang kalimat, jebakan negasi ("kecuali"), & jebakan "Semua benar/salah":
+  //   1. Rantai Transisi Laten Wajib <think>...</think> sebelum emisi jawaban akhir
+  //      (disaring bersih secara real-time oleh createThinkTagStripper).
+  //   2. Polaritas Operator Proposisional P_op ∈ {+1, -1} & Resolusi Negasi Ganda.
+  //   3. Tabel Kebenaran Independen v(H_i) ∈ {0,1} dengan Prior Seragam P_0 = 1/K.
+  //   4. Aljabar Boole Eksak untuk Opsi Komposit ("Semua benar" / "Semua salah").
   // ============================================================================
   function computeBayesianDecisionCalibration(promptText, options = {}) {
     const raw = String(promptText || '').trim();
-    const hasImages = Boolean(options && options.hasImages);
+    const imageCount = (options && typeof options.imageCount === 'number')
+      ? options.imageCount
+      : (options && options.hasImages ? 1 : 0);
+    const hasImages = Boolean((options && options.hasImages) || imageCount > 0);
     const lower = raw.toLowerCase();
 
-    //abaikan sapaan murni sangat pendek atau perintah pembuatan berkas/visual murni
-    const isTrivialGreeting = raw.length < 18 && /^(halo|hai|hi|hello|pagi|siang|sore|malam|tes|test|ping|ok|oke|makasih|terima kasih|thanks)[\s!.,?]*$/i.test(raw);
-    const isPureMediaGen = /\b(buatkan\s+(gambar|foto|ilustrasi|logo|website|dokumen|pdf|word|makalah)|carikan\s+(foto|gambar|video))\b/i.test(lower);
+    // Abaikan sapaan murni sangat pendek atau perintah pembuatan berkas/visual murni
+    const isTrivialGreeting = !hasImages && raw.length < 18 && /^(halo|hai|hi|hello|pagi|siang|sore|malam|tes|test|ping|ok|oke|makasih|terima kasih|thanks)[\s!.,?]*$/i.test(raw);
+    const isPureMediaGen = !hasImages && /\b(buatkan\s+(gambar|foto|ilustrasi|logo|website|landing\s*page|aplikasi|dokumen|pdf|word|makalah)|carikan\s+(foto|gambar|video))\b/i.test(lower);
 
     const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 
@@ -1913,19 +1977,19 @@
     const labeledOptionLines = lines.filter(l => /^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+\S)/.test(l));
     const inlineOptionsMatch = raw.match(/(?:^|\s)(?:\([A-Da-d]\)|[A-Da-d][.)])\s+[^\n]+(?:\s+(?:\([B-Eb-e]\)|[B-Eb-e][.)])\s+[^\n]+)/);
 
-    // 2. Deteksi pilihan ganda tanpa huruf (format kuis Coursera / Skilljar / IBM / Google):
-    //    Terdapat baris kalimat tanya ('?' atau ':') diikuti >= 2 baris opsi kandidat pendek-menengah
+    // 2. Deteksi pilihan ganda tanpa huruf (format kuis Coursera / Skilljar / IBM / Dicoding / Google):
+    //    Terdapat baris kalimat tanya ('?' atau ':' atau '...') diikuti >= 2 baris opsi kandidat pendek-menengah
     let unlabeledOptionCount = 0;
-    const questionLineIdx = lines.findIndex(l => /[?:]\s*$/.test(l) || /\b(what|which|how|why|when|where|who|manakah|apakah|bagaimana|mengapa|pilih|select|choose|true or false|benar atau salah)\b/i.test(l));
+    const questionLineIdx = lines.findIndex(l => /[?:]\s*$|\.{3}\s*$/.test(l) || /\b(what|which|how|why|when|where|who|manakah|apakah|bagaimana|mengapa|pilih|select|choose|true or false|benar atau salah|kecuali)\b/i.test(l));
     if (questionLineIdx !== -1 && lines.length >= questionLineIdx + 3) {
       const tailLines = lines.slice(questionLineIdx + 1).filter(l => {
-        // Abaikan baris perintah meta di akhir seperti "Jawab singkat saja jawabannya"
-        if (/^(jawab|berikan|pilih|tuliskan)\s+(singkat|langsung|hanya|saja|jawaban)/i.test(l)) return false;
+        if (/^(?:jawab|berikan|pilih|tuliskan)\s+(?:singkat|langsung|hanya|saja|jawaban)/i.test(l)) return false;
+        if (/^(?:submit|next(?:\s+question)?|sebelumnya|selanjutnya|selesaikan)$/i.test(l)) return false;
         return true;
       });
       const candidateLines = tailLines.filter(l => {
         const wc = l.split(/\s+/).filter(Boolean).length;
-        return wc >= 1 && wc <= 28 && !/\?\s*$/.test(l) && !/^[-*#>`]/.test(l);
+        return wc >= 1 && wc <= 32 && !/\?\s*$/.test(l) && !/^[-*#>`]/.test(l);
       });
       if (candidateLines.length >= 2 && candidateLines.length <= 7 && candidateLines.length >= tailLines.length * 0.7) {
         unlabeledOptionCount = candidateLines.length;
@@ -1933,8 +1997,8 @@
     }
 
     // 3. Deteksi kueri evaluasi soal bergambar atau pilihan eksplisit
-    const hasQuizCue = /\b(pilihan\s+ganda|multiple\s+choice|which\s+of\s+the\s+following|what(?:'s|\s+is)\s+the\s+(?:best|most\s+effective|primary|correct|main)\b|manakah\s+(?:dari|pernyataan|opsi|pilihan|berikut)|pilih\s+satu|jawaban\s+yang\s+(?:benar|tepat)|true\s+or\s+false|benar\s+atau\s+salah)\b/i.test(lower);
-    const hasImageQuizCue = hasImages && (raw.length === 0 || /\b(jawab|soal|pilihan|opsi|benar|tepat|quiz|ujian|nomor|pertanyaan|singkat)\b/i.test(lower));
+    const hasQuizCue = /\b(pilihan\s+ganda|multiple\s+choice|which\s+(?:of\s+the\s+following|type|evaluation|response|approach|scenario|situation|technique|opening|statement)|what(?:'s|\s+is)\s+the\s+(?:best|most\s+effective|primary|correct|main)\b|manakah\s+(?:dari|pernyataan|opsi|pilihan|kata\s+kunci|berikut)|berikut\s+adalah\s+.*kecuali|pilih\s+satu|jawaban\s+yang\s+(?:benar|tepat)|true\s+or\s+false|benar\s+atau\s+salah)\b/i.test(lower);
+    const hasImageQuizCue = hasImages && (raw.length === 0 || /\b(analisis\s+gambar|jawab|soal|pilihan|opsi|benar|tepat|quiz|ujian|nomor|pertanyaan|singkat)\b/i.test(lower));
 
     let optionCount = 0;
     if (labeledOptionLines.length >= 2) {
@@ -1949,21 +2013,23 @@
 
     const isDiscreteChoice = !isPureMediaGen && (optionCount >= 2 || hasQuizCue || hasImageQuizCue);
 
-    // 4. Deteksi apakah soal pilihan ganda ini mandiri (self-contained) tanpa rujukan ke giliran masa lalu
-    const hasAnaphoricBackRef = /\b(sebelumnya|di\s+atas|tadi|barusan|ulang|ulangi|koreksi|salah|itu\s+pilihan|lanjutkan|nomor\s+berikutnya|previous|above|earlier)\b/i.test(lower);
+    // 4. Deteksi rujukan balik percakapan (anaphoric back-reference ke giliran sebelumnya):
+    //    Jika TIDAK ada rujukan balik, giliran soal diskrit (baik teks maupun gambar baru!)
+    //    diisolasi dari puluhan/ratusan riwayat soal lama agar induction heads tidak meniru jawaban tanpa <think>.
+    const hasAnaphoricBackRef = /\b(sebelumnya|di\s+atas|tadi|barusan|ulang|ulangi|koreksi|salah|itu\s+pilihan|lanjutkan|nomor\s+berikutnya|kenapa\s+jawabannya|mengapa\s+itu|jelaskan\s+jawaban|previous|above|earlier)\b/i.test(lower);
     const isSelfContainedDiscreteTurn = Boolean(
       isDiscreteChoice &&
-      !hasImages &&
       !hasAnaphoricBackRef &&
-      raw.length >= 80 &&
-      (labeledOptionLines.length >= 2 || unlabeledOptionCount >= 2 || inlineOptionsMatch)
+      (hasImages || (raw.length >= 60 && (labeledOptionLines.length >= 2 || unlabeledOptionCount >= 2 || inlineOptionsMatch || hasQuizCue)))
     );
 
-    // 5. Deteksi pertanyaan analitis / kausal / diagnostik / konseptual umum
+    // 5. Deteksi persoalan analitis / logika / matematika / sains / kausalitas umum
     const isAnalyticalQuery = !isTrivialGreeting && !isPureMediaGen && (
       isDiscreteChoice ||
+      hasImages ||
       /\?/.test(raw) ||
-      /\b(apa|apakah|mengapa|kenapa|bagaimana|jelaskan|analisis|analisa|bandingkan|perbedaan|manakah|benarkah|siapa|berapa|kapan|dimana|evaluasi|hitung|buktikan|what|why|how|which|explain|compare|analyze|is\s+it|does|can|should|would)\b/i.test(lower)
+      raw.split(/\s+/).length >= 6 ||
+      /\b(apa|apakah|mengapa|kenapa|bagaimana|jelaskan|analisis|analisa|bandingkan|perbedaan|manakah|benarkah|siapa|berapa|kapan|dimana|evaluasi|hitung|buktikan|pecahkan|solusi|masalah|kasus|what|why|how|which|explain|compare|analyze|solve|is\s+it|does|can|should|would)\b/i.test(lower)
     );
 
     // 6. Parameter Matematis Prior Entropi Maksimum & Suhu Boltzmann Terkalibrasi
@@ -1971,29 +2037,45 @@
     const uniformPrior = Number((1 / effectiveK).toFixed(4));
     const maxEntropyBits = Number(Math.log2(effectiveK).toFixed(4));
 
-    // Pada seleksi diskrit objektif: T = 0.22 mencegah greedy mode collapse (T=0.05 -> rasio e^(20*Δz))
-    // sekaligus menjaga varians sampling tetap rendah agar konsisten pada argmax posterior.
-    const calibratedTemp = isDiscreteChoice ? 0.22 : (isAnalyticalQuery ? 0.35 : 0.55);
+    // T = 0.15 pada evaluasi diskrit memaksimalkan konsistensi deduksi logis setelah <think> selesai
+    const calibratedTemp = isDiscreteChoice ? 0.15 : (isAnalyticalQuery ? 0.25 : 0.50);
     const calibratedTopP = isDiscreteChoice ? 0.90 : 0.92;
+
+    const multiImageNote = imageCount > 1
+      ? ` Terdapat ${imageCount} gambar terlampir; evaluasi setiap gambar secara berurutan (1 s/d ${imageCount}) tanpa mencampur opsi antar-gambar, lalu tuliskan jawaban akhir bernomor 1 s/d ${imageCount}.`
+      : '';
 
     let calibrationDirective = '';
     if (isDiscreteChoice) {
-      calibrationDirective = `[KALIBRASI KEPUTUSAN BAYESIAN & PRIOR ENTROPI MAKSIMUM — H_0 = ${maxEntropyBits} bit, P_0(H_i) = ${uniformPrior}]:
-1. PRIOR SERAGAM SETARA: Tetapkan bobot awal identik P_0(H_i) = 1/${effectiveK} pada setiap kandidat jawaban. Nolkan bias panjang kalimat (opsi yang lebih panjang/umum TIDAK otomatis lebih benar), bias posisi urutan, dan jebakan kemiripan kata permukaan (surface lexical overlap) dengan kalimat soal.
-2. EVALUASI LOG-LIKELIHOOD & ELIMINASI SYARAT PERLU (Λ(H_i) = log P(E|H_i) - log P(E|¬H_i)): Uji setiap kandidat terhadap akar masalah spesifik pada soal E:
-   - Eliminasi opsi pengecoh yang bersifat generik/kabur (misal sekadar memperpanjang instruksi tanpa arah spesifik, menyuruh lebih teliti/berhati-hati, menebak, atau klaim absolut tanpa dasar mekanisme).
-   - Berikan skor tertinggi pada opsi yang memiliki mekanisme kausal/definisional paling spesifik, langsung, dan teruji pada domain tersebut (misal: kegagalan menangkap pola/nuansa spesifik seperti sarkasme atau format tertentu diselesaikan dengan contoh berlabel / few-shot examples, bukan sekadar menambah panjang instruksi umum).
-3. VERIFIKASI SEBELUM KOMITMEN (Ĥ = argmax_i P(H_i | E)): Bandingkan seluruh kandidat secara proporsional terlebih dahulu sebelum menetapkan pilihan akhir. Apabila pengguna meminta jawaban singkat, tetap lakukan uji eliminasi seluruh opsi secara internal sebelum menuliskan satu jawaban Ĥ yang paling akurat.`;
+      calibrationDirective = `[PROTOKOL DEDUKSI PROPOSISIONAL & KALIBRASI BAYESIAN WAJIB — H_0 = ${maxEntropyBits} bit, P_0(H_i) = ${uniformPrior}]:
+Sebelum menulis satu kata pun jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan blok <think>...</think> (meskipun pesan sebelumnya di riwayat tidak menampilkan <think> dan meskipun pengguna meminta jawaban singkat; isi <think> disembunyikan otomatis oleh sistem).${multiImageNote} Di dalam <think>, hitung secara berurutan:
+1. TRANSKRIPSI & POLARITAS OPERATOR LOGIKA: Baca teliti setiap kata pada soal/gambar. Tetapkan polaritas operator:
+   - Positif (+1): mencari pernyataan benar atau langkah perbaikan positif (jika ditanya "hal apakah yang perlu ditingkatkan/diperbaiki", pilih aksi perbaikan positif yang terukur, BUKAN mengulang kalimat kelemahan/penyebab gagalnya).
+   - Negasi/Pengecualian (-1) ("kecuali", "bukan", "tidak termasuk", "except", "not", "least"): mencari opsi yang SALAH terhadap klaim soal. Hati-hati negasi ganda: "kesalahan yang perlu dihindari, kecuali X" berarti mencari X yang merupakan tindakan BENAR (bukan kesalahan).
+2. PEMETAAN KENDALA SYARAT PERLU (E = E_std ∧ E_anom): Identifikasi batas desain atau situasi khusus di soal. Jika sistem otomatis/AI disebut tidak dirancang menangani anomali/kejadian mendadak tertentu (mis. dam failure, weather anomaly, irregular pattern), strategi efektif WAJIB menugaskan AI pada kondisi standar E_std DAN menugaskan manusia secara spesifik menangani anomali E_anom tersebut (bukan tugas lain yang melenceng atau menyuruh AI auto-adjust di luar desainnya).
+3. UJI BIIMPLIKASI TAKSONOMI KETAT vs CONTOH KATEGORI (TANPA BIAS KEMIRIPAN PARSIAL):
+   - Evaluasi setiap opsi secara independen dari prior setara P_0 = 1/${effectiveK} (nolkan bias panjang kalimat).
+   - Pada soal DEFINISI KONSEP/PERAN ("X adalah ..."): DILARANG memilih opsi yang sekadar mendekati/umum jika opsi tersebut sebenarnya adalah definisi konsep tetangga Y != X! (Contoh ketat: "mengelola proyek sehari-hari" = Manajer Proyek; "mengelola banyak proyek" atau "bertanggung jawab atas program satu klien" = Manajer Program, BUKAN Manajer Portofolio; Manajer Portofolio WAJIB memuat pengelolaan portofolio/kumpulan program & proyek strategis organisasi; mengeksekusi rencana yang telah disusun tim manajemen proyek = anggota pelaksana, BUKAN peran manajemen proyek).
+   - Pada soal CONTOH PENERAPAN / KATA KUNCI RESUME / KARAKTERISTIK: periksa apakah setiap opsi memuat indikator/kata kerja kunci yang sesuai kategori (mis. kata kunci resume manajer: "Berkolaborasi...", "Mengevaluasi...", "Memiliki komunikasi yang efektif saat memimpin..." semuanya adalah contoh penulisan kata kunci resume yang valid).
+4. ALJABAR BOOLE OPSI KOMPOSIT ("Semua benar" / "Semua salah" / "All/None of the above"):
+   - Jangan pernah mengabaikan opsi "Semua benar" atau "Semua salah"!
+   - Jika tersedia "Semua benar" pada soal positif (+1): apabila >=2 opsi substantif sama-sama merupakan contoh/pernyataan yang valid sesuai kategori yang ditanyakan (v=1), maka "Semua benar" WAJIB dipilih (jangan memaksakan memilih 1 contoh saja).
+   - Jika tersedia "Semua salah" pada soal definisi positif (+1): apabila seluruh opsi substantif merupakan definisi konsep tetangga Y != X atau meleset syarat spesifiknya (semua v=0), maka "Semua salah" WAJIB dipilih!
+   - Pada soal pengecualian "kecuali..." (-1): jika seluruh opsi substantif ternyata BENAR/BISA digunakan sesuai klaim soal, maka tidak ada pengecualian di antara ketiganya sehingga "semua salah" WAJIB dipilih; sebaliknya jika ada tepat 1 opsi substantif yang salah/bukan kesalahan, pilih opsi tersebut.
+5. Tutup </think>, lalu tuliskan jawaban akhir yang bersih, akurat, dan sesuai format yang diminta pengguna.`;
     } else if (isAnalyticalQuery) {
-      calibrationDirective = `[KALIBRASI INFERENSI PROPORSIONAL — ANTI-OVERWEIGHTING]:
-- Gunakan prior seimbang sebelum mengambil kesimpulan: dilarang memberi bobot berlebihan pada satu hipotesis tunggal, asumsi permukaan di kalimat pertanyaan, atau opsi yang sekadar terdengar paling rumit/panjang.
-- Uji syarat perlu, syarat cukup, dan bukti kausal setiap kemungkinan secara proporsional; gugurkan asumsi yang kontradiktif dan tetapkan kesimpulan sesuai bobot bukti objektif terkuat.`;
+      calibrationDirective = `[PROTOKOL VERIFIKASI DEDUKTIF & KALIBRASI PROPORSIONAL WAJIB]:
+Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan blok <think>...</think> (disembunyikan otomatis oleh sistem):${multiImageNote}
+1. Identifikasi premis eksak, kendala tersembunyi, polaritas pertanyaan (termasuk negasi/pengecualian), serta syarat perlu dan syarat cukup.
+2. Evaluasi seluruh hipotesis/solusi kandidat dengan bobot awal seimbang tanpa memberi bobot berlebihan pada satu asumsi sempit, panjang kalimat, atau kemiripan kata permukaan; uji kasus tepi dan eliminasi klaim yang kontradiktif secara logis maupun matematis.
+3. Tutup </think>, lalu tuliskan jawaban akhir yang jernih, proporsional, dan terverifikasi.`;
     }
 
     return {
       isDiscreteChoice,
       isSelfContainedDiscreteTurn,
       isAnalyticalQuery,
+      imageCount,
       optionCount: isDiscreteChoice ? effectiveK : 0,
       uniformPrior,
       maxEntropyBits,
@@ -2008,24 +2090,22 @@
 
   function computeOptimalSamplingTemperature(recencyProfile, hasGroundedEvidence = false, decisionProfile = null) {
     if (decisionProfile && decisionProfile.isDiscreteChoice) {
-      return { temperature: 0.22, top_p: 0.90, topP: 0.90 };
+      return { temperature: 0.15, top_p: 0.90, topP: 0.90 };
     }
     if (hasGroundedEvidence) {
-      // Kalibrasi distribusi Boltzmann P_T(w) ∝ exp(z_w / T) pada T = 0.25:
-      // Menjaga kesetiaan fakta bukti web tanpa memicu greedy prefix lock-in ekstrem (T = 0.05).
       return { temperature: 0.25, top_p: 0.88, topP: 0.88 };
     }
     if (decisionProfile && decisionProfile.isAnalyticalQuery) {
       const alphaA = recencyProfile && typeof recencyProfile.recencyAlpha === 'number'
         ? recencyProfile.recencyAlpha
         : 0.15;
-      const tempA = Math.max(0.22, Math.min(0.42, Number((0.38 - 0.16 * alphaA).toFixed(2))));
+      const tempA = Math.max(0.20, Math.min(0.35, Number((0.28 - 0.08 * alphaA).toFixed(2))));
       return { temperature: tempA, top_p: 0.90, topP: 0.90 };
     }
     const alpha = recencyProfile && typeof recencyProfile.recencyAlpha === 'number'
       ? recencyProfile.recencyAlpha
       : 0.15;
-    const temp = Math.max(0.22, Number((0.58 * (1 - 0.55 * alpha)).toFixed(2)));
+    const temp = Math.max(0.22, Number((0.55 * (1 - 0.55 * alpha)).toFixed(2)));
     const pVal = alpha >= 0.7 ? 0.88 : 0.92;
     return { temperature: temp, top_p: pVal, topP: pVal };
   }
