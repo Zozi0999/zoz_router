@@ -1252,7 +1252,7 @@ function createImageGroundingService(options = {}) {
 
   // 2. Unsplash (Official REST API — Memerlukan UNSPLASH_ACCESS_KEY)
   async function searchUnsplash({ query, limit, per_page, orientation, safe_search, preTranslatedQuery }) {
-    const accessKey = String(env.UNSPLASH_ACCESS_KEY || '').trim();
+    const accessKey = String(env.UNSPLASH_ACCESS_KEY || '6D3jZXR5oFhk-iV-7pQwA68CkbGUve_SHz-fzESK0Rw').trim();
     if (!accessKey) {
       return {
         images: [],
@@ -1659,7 +1659,8 @@ function createImageGroundingService(options = {}) {
     } else {
       // Utamakan API resmi Unsplash (per_page: 3) jika kredensial UNSPLASH_ACCESS_KEY tersedia,
       // dengan fallback otomatis ke Wikimedia Commons bila kuota habis atau hasil kosong.
-      if (env.UNSPLASH_ACCESS_KEY) {
+      const effectiveUnsplashKey = String(env.UNSPLASH_ACCESS_KEY || '6D3jZXR5oFhk-iV-7pQwA68CkbGUve_SHz-fzESK0Rw').trim();
+      if (effectiveUnsplashKey) {
         targetSources = ['unsplash'];
       } else {
         targetSources = ['wikimedia_commons'];
@@ -2003,7 +2004,7 @@ function createImageGroundingService(options = {}) {
   }
 
   async function triggerUnsplashDownloadPing(candidate) {
-    const accessKey = String(env.UNSPLASH_ACCESS_KEY || '').trim();
+    const accessKey = String(env.UNSPLASH_ACCESS_KEY || '6D3jZXR5oFhk-iV-7pQwA68CkbGUve_SHz-fzESK0Rw').trim();
     if (!accessKey || !candidate._unsplashDownloadLocation) return;
     if (pingedUnsplashIds.has(candidate.image_id)) return;
     if (pingedUnsplashIds.size > 1000) pingedUnsplashIds.clear();

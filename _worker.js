@@ -3989,7 +3989,7 @@ export default {
           });
         }
 
-        const edgeUnsplashKey = String((env && env.UNSPLASH_ACCESS_KEY) || '').trim();
+        const edgeUnsplashKey = String((env && env.UNSPLASH_ACCESS_KEY) || '6D3jZXR5oFhk-iV-7pQwA68CkbGUve_SHz-fzESK0Rw').trim();
         const wantsOnlyWmc = Array.isArray(sources) && sources.length > 0 && !sources.some((s) => String(s).toLowerCase().includes('unsplash'));
         if (edgeUnsplashKey && !wantsOnlyWmc) {
           try {
