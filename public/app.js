@@ -43,7 +43,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://wings-variation-pac-publicly.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://sequence-surrounding-induction-signatures.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -47030,7 +47030,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://wings-variation-pac-publicly.trycloudflare.com',
+    activeTunnelUrl: 'https://sequence-surrounding-induction-signatures.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
