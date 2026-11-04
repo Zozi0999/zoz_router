@@ -43,7 +43,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://genealogy-grab-alcohol-declared.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://kidney-locale-bears-online.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -46655,7 +46655,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://genealogy-grab-alcohol-declared.trycloudflare.com',
+    activeTunnelUrl: 'https://kidney-locale-bears-online.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
