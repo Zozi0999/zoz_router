@@ -1442,7 +1442,9 @@
     mutakhir: ['frontier', 'latest', 'advanced'],
     berita: ['news', 'report', 'updates'],
     pembaruan: ['update', 'updates', 'upgrade'],
+    perkembangan: ['development', 'developments', 'progress', 'advances', 'trends'],
     kecerdasan: ['artificial', 'intelligence', 'ai'],
+    buatan: ['artificial', 'ai'],
     makalah: ['paper', 'papers', 'article', 'articles', 'preprint', 'study'],
     jurnal: ['journal', 'paper', 'research'],
     riset: ['research', 'study', 'findings', 'paper'],
@@ -1454,14 +1456,81 @@
     harga: ['price', 'pricing', 'cost'],
     saham: ['stock', 'stocks', 'market'],
     gempa: ['earthquake', 'seismic'],
-    perang: ['war', 'conflict']
+    perang: ['war', 'conflict'],
+    perbedaan: ['difference', 'differences', 'vs', 'versus', 'comparison', 'compare'],
+    manajer: ['manager', 'managers', 'management', 'manajemen'],
+    manajemen: ['management', 'manager', 'managers', 'pengelolaan', 'manajer'],
+    pengelolaan: ['management', 'manajemen', 'governance'],
+    proyek: ['project', 'projects'],
+    program: ['program', 'programs', 'programme', 'programmes'],
+    portofolio: ['portfolio', 'portfolios'],
+    alat: ['tool', 'tools'],
+    perkakas: ['tool', 'tools'],
+    pencarian: ['search', 'searching', 'retrieval'],
+    penelusuran: ['search', 'searching', 'retrieval'],
+    penyunting: ['editor', 'editors'],
+    teks: ['text'],
+    bawaan: ['built', 'builtin', 'built-in', 'native', 'default'],
+    kustom: ['custom', 'customized'],
+    dokumentasi: ['docs', 'documentation', 'reference', 'guide']
   };
+
+  // Proyeksi Lintas-Bahasa Simetris (ID <-> EN): Membangun penutupan dua arah atas BILINGUAL_QUERY_BASIS
+  const SYMMETRIC_BILINGUAL_BASIS = (() => {
+    const map = new Map();
+    const addEdge = (a, b) => {
+      if (!a || !b || a === b) return;
+      if (!map.has(a)) map.set(a, new Set());
+      map.get(a).add(b);
+    };
+    for (const [k, arr] of Object.entries(BILINGUAL_QUERY_BASIS)) {
+      const lk = k.toLowerCase();
+      for (const v of arr) {
+        const lv = v.toLowerCase();
+        addEdge(lk, lv);
+        addEdge(lv, lk);
+      }
+    }
+    return map;
+  })();
+
+  function expandMorphologicalAndBilingualVariants(token) {
+    const t = String(token || '').toLowerCase().trim();
+    const out = new Set();
+    if (!t || t.length < 2) return out;
+    out.add(t);
+
+    // 1. Dekomposisi kata majemuk bertanda hubung (e.g. "built-in" -> "built", "text-editor" -> "text", "editor")
+    if (t.includes('-')) {
+      for (const part of t.split('-')) {
+        if (part.length >= 3 && !STOPWORDS_AND_VERBS.has(part)) out.add(part);
+      }
+    }
+
+    // 2. Normalisasi infleksi jamak/tunggal EN & enklitik ID (-nya, -lah, -kah)
+    if (t.endsWith('nya') && t.length >= 5) out.add(t.slice(0, -3));
+    if ((t.endsWith('lah') || t.endsWith('kah')) && t.length >= 6) out.add(t.slice(0, -3));
+    if (t.endsWith('ies') && t.length >= 5) out.add(t.slice(0, -3) + 'y');
+    else if (t.endsWith('es') && t.length >= 5 && /(?:ches|shes|xes|zes|ses)$/.test(t)) out.add(t.slice(0, -2));
+    else if (t.endsWith('s') && !t.endsWith('ss') && !t.endsWith('us') && !t.endsWith('is') && t.length >= 4) out.add(t.slice(0, -1));
+    else if (t.length >= 3 && !t.endsWith('s')) out.add(t + 's');
+
+    // 3. Ekspansi padanan dwi-bahasa simetris atas seluruh bentuk akar
+    const seeds = [...out];
+    for (const s of seeds) {
+      const syns = SYMMETRIC_BILINGUAL_BASIS.get(s);
+      if (syns) {
+        for (const syn of syns) out.add(syn);
+      }
+    }
+    return out;
+  }
 
   const IR_STOPWORDS = new Set([
     ...STOPWORDS_AND_VERBS,
-    'cari', 'carikan', 'coba', 'tolong', 'web', 'internet', 'google', 'search', 'find', 'look',
+    'cari', 'carikan', 'coba', 'tolong', 'internet', 'google', 'find', 'look',
     'terbaru', 'terkini', 'hari', 'minggu', 'bulan', 'tahun', 'sekarang', 'saat', 'latest', 'recent',
-    'today', 'week', 'month', 'year', 'now', 'current', 'new', 'baru'
+    'today', 'week', 'month', 'year', 'now', 'current', 'new', 'baru', 'from', 'different', 'makes', 'make', 'what', 'which', 'how', 'does', 'do'
   ]);
 
   function parseAuthenticTimestamp(rawDateStr, urlStr = '', bodyStr = '', nowMs = Date.now()) {
@@ -1733,14 +1802,14 @@
         expanded.set(t, 0.25);
         continue;
       }
-      const syns = BILINGUAL_QUERY_BASIS[t];
-      if (syns) {
-        for (const syn of syns) {
-          expanded.set(syn, Math.max(expanded.get(syn) || 0, 0.85));
-        }
-      }
       if (IR_STOPWORDS.has(t)) continue;
       expanded.set(t, Math.max(expanded.get(t) || 0, 1.0));
+      const variants = expandMorphologicalAndBilingualVariants(t);
+      for (const v of variants) {
+        if (v !== t && !IR_STOPWORDS.has(v)) {
+          expanded.set(v, Math.max(expanded.get(v) || 0, 0.85));
+        }
+      }
     }
     // If all tokens were stopwords/temporal (e.g. "berita terbaru hari ini"), retain core topical tokens
     if (expanded.size === 0) {
@@ -1755,9 +1824,12 @@
     'harga', 'terbaru', 'terkini', 'berita', 'update', 'jadwal', 'rilis', 'daftar', 'informasi',
     'spesifikasi', 'fitur', 'cara', 'panduan', 'tutorial', 'review', 'ulasan', 'kelebihan',
     'kekurangan', 'biografi', 'profil', 'asal', 'sejarah', 'penyebab', 'dampak', 'solusi',
-    'arti', 'makna', 'definisi', 'pengertian', 'contoh', 'hasil', 'skor', 'klasemen', 'stat',
-    'statistik', 'populer', 'viral', 'resmi', 'official', 'news', 'price', 'specs', 'release',
-    'date', 'schedule', 'guide', 'history', 'meaning', 'result', 'hari', 'bulan', 'tahun', 'minggu'
+    'arti', 'makna', 'definisi', 'pengertian', 'perbedaan', 'persamaan', 'perbandingan', 'antara',
+    'contoh', 'hasil', 'skor', 'klasemen', 'stat', 'statistik', 'populer', 'viral', 'resmi',
+    'official', 'news', 'price', 'specs', 'release', 'date', 'schedule', 'guide', 'history',
+    'meaning', 'result', 'hari', 'bulan', 'tahun', 'minggu', 'different', 'difference',
+    'differences', 'between', 'versus', 'vs', 'compare', 'comparison', 'custom', 'built',
+    'in', 'built-in', 'using', 'use', 'used', 'work', 'works', 'working', 'perkembangan'
   ]);
 
   function extractEssentialTokensIR(query) {
@@ -1778,6 +1850,19 @@
     const queryWeights = expandQueryTokensMathematically(query, profile.curYear);
     const qTerms = [...queryWeights.keys()];
     const essentialTokens = extractEssentialTokensIR(query);
+    const essentialVariantsMap = new Map();
+    for (const eq of essentialTokens) {
+      essentialVariantsMap.set(eq, expandMorphologicalAndBilingualVariants(eq));
+    }
+
+    const addTokenWithSubparts = (tfMap, tok) => {
+      tfMap.set(tok, (tfMap.get(tok) || 0) + 1);
+      if (/[._-]/.test(tok)) {
+        for (const sub of tok.split(/[._-]+/)) {
+          if (sub.length >= 2) tfMap.set(sub, (tfMap.get(sub) || 0) + 1);
+        }
+      }
+    };
 
     // Pre-tokenize documents & extract authentic timestamps
     const docs = candidates.map((item) => {
@@ -1788,16 +1873,24 @@
       const rawDate = item.published_at || item.pubDate || item.published_date || item.date || '';
 
       const titleTokens = tokenizeForIR(title);
-      const snippetTokens = tokenizeForIR(snippet);
+      const effectiveSnippet = snippet.length >= 30 ? snippet : `${snippet} ${content.slice(0, 280)}`;
+      const snippetTokens = tokenizeForIR(effectiveSnippet);
       const contentTokens = tokenizeForIR(content.slice(0, 4000));
+      let urlPathTokens = [];
+      try {
+        const uObj = new URL(url);
+        urlPathTokens = tokenizeForIR(`${uObj.hostname.replace(/^www\./i, '')} ${decodeURIComponent(uObj.pathname)}`);
+      } catch (_) {}
 
       const tfTitle = new Map();
       const tfSnippet = new Map();
       const tfContent = new Map();
-      for (const t of titleTokens) tfTitle.set(t, (tfTitle.get(t) || 0) + 1);
-      for (const t of snippetTokens) tfSnippet.set(t, (tfSnippet.get(t) || 0) + 1);
-      for (const t of contentTokens) tfContent.set(t, (tfContent.get(t) || 0) + 1);
+      for (const t of titleTokens) addTokenWithSubparts(tfTitle, t);
+      for (const t of snippetTokens) addTokenWithSubparts(tfSnippet, t);
+      for (const t of urlPathTokens) addTokenWithSubparts(tfSnippet, t);
+      for (const t of contentTokens) addTokenWithSubparts(tfContent, t);
 
+      const surfaceTextLower = `${title} ${effectiveSnippet} ${url}`.toLowerCase();
       const docLen = titleTokens.length * 2 + snippetTokens.length + contentTokens.length;
       const verifiedTs = parseAuthenticTimestamp(rawDate, url, `${title} ${snippet} ${content.slice(0, 400)}`, nowMs);
       const ageDays = verifiedTs !== null ? ((nowMs - verifiedTs) / 86400000) : null;
@@ -1809,6 +1902,7 @@
         tfTitle,
         tfSnippet,
         tfContent,
+        surfaceTextLower,
         docLen: Math.max(1, docLen),
         verifiedTs,
         ageDays
@@ -1862,17 +1956,36 @@
         }
       }
 
-      // Hard Essential Entity Gate \mathcal{G}_{essential}(Q, D)
+      // Sublinear Essential Entity Gate \mathcal{G}_{essential}(Q, D) on Surface Representation (Title ∪ Snippet ∪ URL)
+      // Mencegah artikel panjang tak relevan lolos hanya karena kata umum tersebar acak di paragraf bawah body 5000 karakter.
       if (essentialTokens.length > 0 && !options.keepCandidateFloor && !options.isWhitelistedPool) {
-        let matchedEssential = 0;
+        let matchedEssentialSurface = 0;
         for (const eq of essentialTokens) {
-          if (d.tfTitle.has(eq) || d.tfSnippet.has(eq) || d.tfContent.has(eq)) {
-            matchedEssential++;
+          const variants = essentialVariantsMap.get(eq) || new Set([eq]);
+          let hit = false;
+          for (const v of variants) {
+            if (d.tfTitle.has(v) || d.tfSnippet.has(v)) {
+              hit = true;
+              break;
+            }
           }
+          if (hit) matchedEssentialSurface++;
         }
-        const minReq = essentialTokens.length === 1 ? 1 : Math.ceil(essentialTokens.length * 0.5);
-        if (matchedEssential < minReq) {
-          continue; // Gugurkan kandidat yang tidak memuat entitas esensial kueri
+        const E = essentialTokens.length;
+        const minReq = E === 1 ? 1 : (E <= 4 ? 2 : Math.min(4, Math.max(2, Math.ceil(Math.sqrt(E)))));
+        if (matchedEssentialSurface < minReq) {
+          continue; // Gugurkan kandidat yang tidak memuat entitas esensial pada judul/ringkasan/URL
+        }
+      }
+
+      // Sequential Dependence Model (Metzler-Croft MRF) Bigram Proximity Bonus
+      if (essentialTokens.length >= 2) {
+        for (let bi = 0; bi < essentialTokens.length - 1; bi++) {
+          const w1 = essentialTokens[bi];
+          const w2 = essentialTokens[bi + 1];
+          if (d.surfaceTextLower.includes(`${w1} ${w2}`) || d.surfaceTextLower.includes(`${w1}-${w2}`)) {
+            bm25 += 1.35;
+          }
         }
       }
       const lexNorm = bm25 / (bm25 + kappa);
@@ -1898,7 +2011,8 @@
         }
         temporalWeight = Math.exp(-profile.lambda * Math.max(0, d.ageDays));
       } else {
-        // Unverified / missing publication timestamp penalty under maximum entropy prior
+        // Evergreen documentation / encyclopedia / profile pages without news pubDate:
+        // Do NOT penalize when query is non-temporal (recencyAlpha < 0.55)
         const combinedLower = `${d.item.title || ''} ${d.item.snippet || ''}`.toLowerCase();
         const mentionsPastYear = /\b(201\d|202[0-5])\b/.test(combinedLower) && !combinedLower.includes(String(profile.curYear));
         if (profile.recencyAlpha >= 0.72) {
@@ -1907,17 +2021,21 @@
           } else {
             temporalWeight = 0.18;
           }
+        } else if (profile.recencyAlpha >= 0.55) {
+          temporalWeight = 0.75;
         } else {
-          temporalWeight = 0.65;
+          temporalWeight = 1.0;
         }
       }
 
       if (temporalWeight <= 1e-6) continue;
 
-      // 3. Joint Multiplicative-Harmonic Retrieval Score
+      // 3. Joint Multiplicative-Harmonic Retrieval Score × Multi-Channel Reciprocal Rank Fusion (RRF) Boost
       const alpha = profile.recencyAlpha;
       const blend = (1 - alpha) + alpha * temporalWeight;
-      const mathScore = lexNorm * blend * Math.pow(temporalWeight, alpha);
+      const rrfNorm = Math.min(1.0, Math.max(0, Number(d.item.rrfNorm || 0)));
+      const rrfBoost = 1.0 + 0.30 * rrfNorm;
+      const mathScore = Math.min(1.0, lexNorm * blend * Math.pow(temporalWeight, alpha) * rrfBoost);
 
       if (mathScore <= 1e-5) continue;
 
@@ -1928,11 +2046,13 @@
         timestamp: d.verifiedTs || 0,
         pubDate: isoDate || (d.verifiedTs !== null ? d.item.pubDate : ''),
         published_at: d.verifiedTs !== null ? (d.item.published_at || isoDate) : '',
+        mathematicalScore: Number(mathScore.toFixed(5)),
         mathDiagnostics: {
           mathScore: Number(mathScore.toFixed(5)),
           bm25Score: Number(bm25.toFixed(4)),
           lexNorm: Number(lexNorm.toFixed(4)),
           temporalWeight: Number(temporalWeight.toFixed(5)),
+          rrfNorm: Number(rrfNorm.toFixed(4)),
           ageDays: d.ageDays !== null ? Number(d.ageDays.toFixed(2)) : null,
           recencyAlpha: alpha
         }
@@ -2556,6 +2676,8 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
     extractCalendarDateCoordinates,
     extractVersionedEntityAnchors,
     computeTemporalRecencyProfile,
+    expandMorphologicalAndBilingualVariants,
+    extractEssentialTokensIR,
     rankDocumentsMathematically,
     computeBayesianDecisionCalibration,
     computeOptimalSamplingTemperature,
