@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://wealth-terry-tours-chemistry.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://fonts-celebs-soon-validation.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -21641,7 +21641,9 @@ ${msg.content.slice(0, 3000)}
     const splitWords = (str) => String(str || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
     const titleWords = new Set(splitWords(doc.title || ''));
     const urlWords = splitWords(doc.url || doc.link || '');
-    const snippetWords = new Set([...splitWords(doc.snippet || ''), ...urlWords]);
+    const rawSnip = String(doc.snippet || '');
+    const effectiveSnip = rawSnip.length >= 30 ? rawSnip : `${rawSnip} ${String(doc.content || '').slice(0, 280)}`;
+    const snippetWords = new Set([...splitWords(effectiveSnip), ...urlWords]);
     const contentWords = new Set(splitWords(String(doc.content || '').slice(0, 4000)));
 
     const buildTokenVariants = (token) => {
@@ -21685,11 +21687,13 @@ ${msg.content.slice(0, 3000)}
       return { inT, inS, inC, matched: inT || inS || inC };
     };
 
-    // 1. Evaluasi Sublinear Essential Entity Gate \mathcal{G}_{essential}(Q, D)
+    // 1. Evaluasi Sublinear Essential Entity Gate \mathcal{G}_{essential}(Q, D) pada Permukaan (Title ∪ Snippet ∪ URL)
     let essentialMatches = 0;
+    let essentialSurfaceMatches = 0;
     let essentialWeightedSum = 0;
     for (const et of essentialTokens) {
       const { inT, inS, inC, matched } = checkWordSet(et);
+      if (inT || inS) essentialSurfaceMatches++;
       if (matched) {
         essentialMatches++;
         essentialWeightedSum += inT ? 3.0 : (inS ? 1.8 : 0.9);
@@ -21699,8 +21703,8 @@ ${msg.content.slice(0, 3000)}
     if (essentialTokens.length > 0) {
       const E = essentialTokens.length;
       const minReq = E === 1 ? 1 : (E <= 4 ? 2 : Math.min(4, Math.max(2, Math.ceil(Math.sqrt(E)))));
-      if (essentialMatches < minReq) {
-        // Diskualifikasi dokumen jika tidak memuat entitas esensial kueri
+      if (essentialSurfaceMatches < minReq) {
+        // Diskualifikasi dokumen jika tidak memuat entitas esensial pada judul/ringkasan/URL
         return 0.0;
       }
     }
@@ -46546,7 +46550,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://wealth-terry-tours-chemistry.trycloudflare.com',
+    activeTunnelUrl: 'https://fonts-celebs-soon-validation.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
