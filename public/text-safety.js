@@ -2175,9 +2175,9 @@
     const uniformPrior = Number((1 / effectiveK).toFixed(4));
     const maxEntropyBits = Number(Math.log2(effectiveK).toFixed(4));
 
-    // T = 0.15 pada kuis pilihan ganda, T = 0.20 pada taksonomi konsep relasional, T = 0.25 analitis umum
-    const calibratedTemp = isDiscreteChoice ? 0.15 : (isConceptualTaxonomy ? 0.20 : (isAnalyticalQuery ? 0.25 : 0.50));
-    const calibratedTopP = (isDiscreteChoice || isConceptualTaxonomy) ? 0.90 : 0.92;
+    // T = 0.15 pada kuis pilihan ganda, T = 0.18 pada penalaran analitis/sains, T = 0.20 pada taksonomi relasional
+    const calibratedTemp = isDiscreteChoice ? 0.15 : (isAnalyticalQuery ? 0.18 : (isConceptualTaxonomy ? 0.20 : 0.45));
+    const calibratedTopP = (isDiscreteChoice || isConceptualTaxonomy || isAnalyticalQuery) ? 0.90 : 0.92;
 
     const multiImageNote = imageCount > 1
       ? ` Terdapat ${imageCount} gambar terlampir; evaluasi setiap gambar secara berurutan (1 s/d ${imageCount}) tanpa mencampur opsi antar-gambar, lalu tuliskan jawaban akhir bernomor 1 s/d ${imageCount}.`
@@ -2720,9 +2720,17 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
       if (allShortConcepts) return true;
     }
 
-    // Kriteria 2: Istilah aljabar, matematika, logika formal, teori relasional, atau dikotomi konsep abstrak
-    const conceptualTermsRegex = /\b(?:competitive|independent|cooperative|interdependent|zero-sum|non-zero-sum|game\s+theory|nash\s+equilibrium|social\s+interdependence|relational\s+algebra|boolean\s+algebra|truth\s+table|monoid|semigroup|group\s+theory|ring\s+theory|field\s+theory|isomorphism|homomorphism|bijection|injection|surjection|set\s+theory|predicate\s+logic|modal\s+logic|epistemic|ontology|taxonomy|dichotomy|trichotomy|inductive|deductive|abductive|apriori|a\s+priori|aposteriori|a\s+posteriori|modus\s+ponens|modus\s+tollens|contrapositive|tautology|contradiction|contingency|matrix|determinant|eigenvalue|eigenvector|vector\s+space|subspace|orthogonal|basis|dimension|kernel|nullity|topology|metric\s+space|limit|derivative|integral)\b/i;
+    // Kriteria 2: Istilah aljabar, matematika, logika formal, teori relasional, atau dikotomi konsep abstrak (EN + ID)
+    const conceptualTermsRegex = /\b(?:competitive|independent|cooperative|interdependent|zero-sum|non-zero-sum|game\s+theory|nash\s+equilibrium|social\s+interdependence|relational\s+algebra|boolean\s+algebra|truth\s+table|monoid|semigroup|group\s+theory|ring\s+theory|field\s+theory|isomorphism|homomorphism|bijection|injection|surjection|set\s+theory|predicate\s+logic|modal\s+logic|epistemic|ontology|taxonomy|dichotomy|trichotomy|inductive|deductive|abductive|apriori|a\s+priori|aposteriori|a\s+posteriori|modus\s+ponens|modus\s+tollens|contrapositive|tautology|contradiction|contingency|matrix|determinant|eigenvalue|eigenvector|vector\s+space|subspace|orthogonal|basis|dimension|kernel|nullity|topology|metric\s+space|limit|derivative|integral|turunan|diferensial|kalkulus|aljabar|matriks|vektor|aritmatika|persamaan|pertidaksamaan|trigonometri|geometri|peluang|probabilitas|permutasi|kombinasi|himpunan|teorema|aksioma|silogisme|premis|silogistis|kontradiksi|faktorial|logaritma|deret|barisan|calculus|algebra|polynomial|quadratic|logarithm|factorial|permutation|combination|syllogism|premise|axiom|theorem)\b/i;
     if (conceptualTermsRegex.test(lower)) return true;
+
+    // Kriteria 3: Ekspresi simbolik matematika murni, fungsi, kalkulus, atau aritmatika numerik
+    const hasSymbolicMath = /(?:[\d\w]\s*[\+\-\*\/\^=><≤≥≠≈]\s*[\d\w]|f\([a-z]\)\s*=|dy\/dx|d\/dx|\\(?:int|sum|prod|lim|frac|sqrt)|sqrt\s*\(|\bsin\s*\(|\bcos\s*\(|\btan\s*\(|\blog\s*\(|\bln\s*\(|\b\d+\s*[\*x×\+\-\/÷\^]\s*\d+\b)/i.test(raw);
+    if (hasSymbolicMath) return true;
+
+    // Kriteria 4: Struktur silogisme atau penalaran logika formal proposisional
+    const hasFormalLogic = /\b(?:jika\s+(?:semua|ada|setiap|beberapa)|semua\s+\w+\s+adalah|apakah\s+(?:semua|setiap|ada)|if\s+all\s+|if\s+p\s+then\s+q)\b/i.test(lower);
+    if (hasFormalLogic) return true;
 
     return false;
   }

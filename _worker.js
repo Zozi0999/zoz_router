@@ -1949,7 +1949,8 @@ export default {
             }
             const isNemotronReq = reqModel.toLowerCase().includes('nemotron');
             const isLiquid = reqModel.includes('liquid') || reqModel.includes('lfm-');
-            const isReasoning = Boolean(reqModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r|nemotron)\b/i.test(reqModel) || reqModel.toLowerCase().includes('reasoning') || reqModel.toLowerCase().includes('-r1') || isNemotronReq));
+            // Hanya model OpenAI o-series dan DeepSeek R1 ketat yang menolak kustomisasi temperature di OpenRouter
+            const isStrictReasoning = Boolean(reqModel && (/\/o[1-9]|\b(r1|deepseek-r)\b/i.test(reqModel) || reqModel.toLowerCase().includes('-r1')));
             const out = {
               model: reqModel,
               messages: body.messages || [],
@@ -1960,10 +1961,10 @@ export default {
               ...(isNemotronReq ? { reasoning: { effort: 'high' }, include_reasoning: true } : (body.reasoning ? { reasoning: body.reasoning } : {})),
               ...(body.max_tokens ? { max_tokens: body.max_tokens } : {})
             };
-            if (!isReasoning) {
+            if (!isStrictReasoning) {
               out.temperature = body.temperature ?? 0.7;
             }
-            if (!isLiquid && !isReasoning) {
+            if (!isLiquid && !isStrictReasoning) {
               out.top_p = body.top_p ?? 0.9;
             }
             if (!isNemotronReq && body.tools && Array.isArray(body.tools) && (!reqModel.includes(':free') && !reqModel.endsWith('/free') && reqModel !== 'openrouter/free')) {
