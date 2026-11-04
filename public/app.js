@@ -94,11 +94,22 @@
            cleanPath === '/api/ollama/start';
   }
 
+  const KNOWN_OLLAMA_CLOUD_MODELS = new Set([
+    'beam', 'muse-spark-open', 'clef:27b', 'nemotron-3-super', 'nemotron-3-nano:30b',
+    'nemotron-3-ultra', 'gpt-oss:120b', 'gpt-oss:20b', 'mistral-large-3:675b',
+    'mistral-large-4', 'glm-5.2', 'glm-5.3', 'glm-5.3-flash', 'kimi-k2.7-code',
+    'kimi-k2.6', 'kimi-k3', 'gemma4:31b', 'gemma4:27b', 'deepseek-v4.1-flash:1017',
+    'deepseek-v4.1-flash', 'deepseek-v4-pro:0813', 'deepseek-v4', 'deepseek-v3',
+    'deepseek-r1:671b', 'minimax-m3.1-flash', 'minimax-m3', 'minimax-m2.7', 'minimax-m2',
+    'mimo-v2.6-pro', 'mimo-v2.6-flash', 'qwen3-coder:480b', 'qwen3:235b', 'cogito:671b'
+  ]);
+
   function isKnownOllamaCloudModel(modelId) {
     const id = String(modelId || '').trim().toLowerCase();
     if (!id) return false;
     if (id.endsWith(':cloud') || id.includes('-cloud')) return true;
-    return /^(?:gemma4:31b|gemma4:27b|deepseek-v3|deepseek-v4|deepseek-r1:671b|qwen3-coder:480b|qwen3:235b|kimi-k2|kimi-k3|glm-4|glm-5|minimax-m2|nemotron-3-ultra|llama4|mistral-large|gpt-oss:(?:120b|20b)|cogito:671b)/i.test(id);
+    if (KNOWN_OLLAMA_CLOUD_MODELS.has(id)) return true;
+    return /^(?:beam\b|clef\b|muse-spark|mimo-|minimax-|glm-|kimi-|nemotron-|mistral-large|gpt-oss|deepseek-|gemma4|cogito|qwen3)/i.test(id);
   }
 
   function getUniversalApiUrl(path) {
@@ -265,6 +276,13 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
     const id = modelId.trim();
     if (id.includes('/')) return id;
+    const lower = id.toLowerCase();
+    if (lower === 'beam') return 'reflection/beam-1.0-501b-a23b';
+    if (lower.startsWith('gemma4')) return 'google/gemma-4-31b-it:free';
+    if (lower.startsWith('deepseek-r1')) return 'deepseek/deepseek-r1:free';
+    if (lower.startsWith('deepseek-v3') || lower.startsWith('deepseek-v4')) return 'deepseek/deepseek-chat';
+    if (lower.startsWith('qwen')) return 'qwen/qwen-2.5-72b-instruct';
+    if (lower.startsWith('llama3')) return 'meta-llama/llama-3.3-70b-instruct:free';
     return 'openrouter/free';
   }
 
@@ -705,7 +723,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     openRouterMusicModels: [],
     availableImageModels: [...DEFAULT_IMAGE_MODELS],
     settings: {
-      ollamaEndpoint: 'http://127.0.0.1:11434',
+      ollamaEndpoint: (typeof location !== 'undefined' && location.hostname && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) && !location.hostname.includes('trycloudflare.com')) ? 'https://ollama.com' : 'http://127.0.0.1:11434',
       ollamaApiKey: '',
       openRouterKey: '',
       ollamaModel: 'llama3.2:3b',
@@ -5168,7 +5186,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       }
 
       // Pastikan endpoint Ollama terdefinisi (mendukung penuh Cloud https://ollama.com maupun Daemon Lokal/LAN 127.0.0.1:11434)
-      if (!STATE.settings.ollamaEndpoint || typeof STATE.settings.ollamaEndpoint !== 'string' || !STATE.settings.ollamaEndpoint.trim()) {
+      const isPublicHostEnv = Boolean(typeof location !== 'undefined' && location.hostname && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) && !location.hostname.includes('trycloudflare.com'));
+      if (isPublicHostEnv && (STATE.settings.ollamaEndpoint === 'http://127.0.0.1:11434' || !STATE.settings.ollamaEndpoint)) {
+        STATE.settings.ollamaEndpoint = 'https://ollama.com';
+      } else if (!STATE.settings.ollamaEndpoint || typeof STATE.settings.ollamaEndpoint !== 'string' || !STATE.settings.ollamaEndpoint.trim()) {
         STATE.settings.ollamaEndpoint = 'https://ollama.com';
       }
 
@@ -11815,7 +11836,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
     const isLocalOrigin = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
     const isLoopbackEp = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(ep);
-    const isTargetingCloud = Boolean((ep || '').includes('ollama.com') || (cleanKey && isLoopbackEp) || (!isLocalOrigin && isKnownOllamaCloudModel(modelName)));
+    const isTargetingCloud = Boolean((ep || '').includes('ollama.com') || (cleanKey && isLoopbackEp) || (!isLocalOrigin && (isKnownOllamaCloudModel(modelName) || isLoopbackEp)));
     if (isTargetingCloud) {
       ep = 'https://ollama.com';
     }
@@ -12806,7 +12827,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
         const isLocalOrigin = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
         const isLoopbackEp = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(ep);
-        const isTargetingCloud = Boolean((ep || '').includes('ollama.com') || (cleanKey && isLoopbackEp) || (!isLocalOrigin && isKnownOllamaCloudModel(model)));
+        const isTargetingCloud = Boolean((ep || '').includes('ollama.com') || (cleanKey && isLoopbackEp) || (!isLocalOrigin && (isKnownOllamaCloudModel(model) || isLoopbackEp)));
         if (isTargetingCloud) {
           ep = 'https://ollama.com';
         }
@@ -28815,7 +28836,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       msg.includes('ollama_cloud_api_key_required')
     );
     const isMissingOllamaCloudKey = msg.includes('ollama_cloud_api_key_required');
-    const isMixedContentLocal = !isOllamaCloudContext && (location.protocol === 'https:' || IS_CLOUD_HOSTED) && (
+    const isMixedContentLocal = !isOllamaCloudContext && !isKnownOllamaCloudModel(modelName) && (location.protocol === 'https:' || IS_CLOUD_HOSTED) && (
       msg.includes('mixed_content') || 
       ((msg.includes('failed to fetch') || msg.includes('networkerror') || err?.name === 'TypeError') && engine === 'ollama')
     );
@@ -29465,10 +29486,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
   // --- OLLAMA STREAMING EXECUTION ---
   async function runOllamaStreaming(session, promptText, image, modelName, runOptions = {}) {
-    const ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
-    if (IS_GITHUB_PAGES && !STATE.settings.ollamaApiKey && location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+    let ep = normalizeEndpoint(STATE.settings.ollamaEndpoint);
+    if (!STATE.settings.ollamaApiKey && location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
       const isAutoRouter = (STATE.mode === 'auto') || Boolean(runOptions && runOptions.isAutoRouter);
-      if (isAutoRouter) {
+      if (isAutoRouter || STATE.settings.openRouterKey) {
         const targetCloudModel = modelName.includes('/')
           ? modelName
           : (mapOllamaModelToOpenRouter(modelName) || 'openrouter/free');
@@ -29479,7 +29500,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           ...runOptions
         });
       }
-      throw new Error('mixed_content: Browser HTTPS memblokir koneksi ke Ollama localhost HTTP di GitHub Pages. Hubungkan Cloudflare Tunnel aktif atau masukkan Ollama API Key.');
+      if (IS_GITHUB_PAGES) {
+        throw new Error('mixed_content: Browser HTTPS memblokir koneksi ke Ollama localhost HTTP di GitHub Pages. Hubungkan Cloudflare Tunnel aktif atau masukkan Ollama API Key.');
+      }
     }
 
     setGeneratingState(true);
@@ -29754,7 +29777,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const isTargetingOllamaCloud = Boolean(
         (ep || '').includes('ollama.com') ||
         (cleanOllamaKey && isLoopbackEp) ||
-        (!isLocalOrigin && isKnownOllamaCloudModel(requestBody.model))
+        (!isLocalOrigin && (isKnownOllamaCloudModel(requestBody.model) || cleanOllamaKey || isLoopbackEp))
       );
       if (isTargetingOllamaCloud) {
         // Normalisasi ep secara mutlak agar Putaran 1, Putaran 2 (digestionBody), dan Rescue Round
@@ -29767,7 +29790,18 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           modelName = resolvedModel;
         }
         if (!cleanOllamaKey && !isLocalOrigin && !isAutoRouterCall) {
-          throw new Error('OLLAMA_CLOUD_API_KEY_REQUIRED: Masukkan Ollama Cloud API Key di Pengaturan untuk menjalankan model cloud langsung ke server ollama.com tanpa laptop.');
+          // Jika pengguna memasukkan OpenRouter API Key di Pengaturan peramban domain z21:
+          if (STATE.settings.openRouterKey) {
+            const fallbackCloudModel = mapOllamaModelToOpenRouter(modelName) || 'openrouter/free';
+            console.log(`[Ollama Cloud -> Direct Cloud AI] Mengalirkan ${modelName} langsung via Cloud Provider (${fallbackCloudModel}) menggunakan API Key pengguna...`);
+            return await runOpenRouterStreaming(session, promptText, image, fallbackCloudModel, {
+              displayModel: modelName,
+              engineLabel: 'Ollama Cloud',
+              engineMode: 'ollama',
+              ...runOptions
+            });
+          }
+          throw new Error(`OLLAMA_CLOUD_API_KEY_REQUIRED: Masukkan API Key di menu Pengaturan (⚙️) untuk menjalankan model cloud "${modelName}" langsung ke server penyedia tanpa laptop.`);
         }
         // Ollama Cloud / API Key: jalurnya langsung via Cloud Serverless Gateway ke ollama.com tanpa menyentuh laptop!
         chatUrl = getUniversalApiUrl('/api/ollama/chat');

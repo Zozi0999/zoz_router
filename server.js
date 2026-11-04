@@ -1511,10 +1511,35 @@ async function resolveLocalDaemonCloudManifest(modelId) {
 }
 fetchLocalOllamaTags().catch(() => {});
 
+const KNOWN_OLLAMA_CLOUD_MODELS = new Set([
+  'beam', 'muse-spark-open', 'clef:27b', 'nemotron-3-super', 'nemotron-3-nano:30b',
+  'nemotron-3-ultra', 'gpt-oss:120b', 'gpt-oss:20b', 'mistral-large-3:675b',
+  'mistral-large-4', 'glm-5.2', 'glm-5.3', 'glm-5.3-flash', 'kimi-k2.7-code',
+  'kimi-k2.6', 'kimi-k3', 'gemma4:31b', 'gemma4:27b', 'deepseek-v4.1-flash:1017',
+  'deepseek-v4.1-flash', 'deepseek-v4-pro:0813', 'deepseek-v4', 'deepseek-v3',
+  'deepseek-r1:671b', 'minimax-m3.1-flash', 'minimax-m3', 'minimax-m2.7', 'minimax-m2',
+  'mimo-v2.6-pro', 'mimo-v2.6-flash', 'qwen3-coder:480b', 'qwen3:235b', 'cogito:671b'
+]);
+
+function isKnownOllamaCloudModel(modelId) {
+  const id = String(modelId || '').trim().toLowerCase();
+  if (!id) return false;
+  if (id.endsWith(':cloud') || id.includes('-cloud')) return true;
+  if (KNOWN_OLLAMA_CLOUD_MODELS.has(id)) return true;
+  return /^(?:beam\b|clef\b|muse-spark|mimo-|minimax-|glm-|kimi-|nemotron-|mistral-large|gpt-oss|deepseek-|gemma4|cogito|qwen3)/i.test(id);
+}
+
 function mapOllamaModelToOpenRouter(modelId) {
   if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
   const id = modelId.trim();
   if (id.includes('/')) return id;
+  const lower = id.toLowerCase();
+  if (lower === 'beam') return 'reflection/beam-1.0-501b-a23b';
+  if (lower.startsWith('gemma4')) return 'google/gemma-4-31b-it:free';
+  if (lower.startsWith('deepseek-r1')) return 'deepseek/deepseek-r1:free';
+  if (lower.startsWith('deepseek-v3') || lower.startsWith('deepseek-v4')) return 'deepseek/deepseek-chat';
+  if (lower.startsWith('qwen')) return 'qwen/qwen-2.5-72b-instruct';
+  if (lower.startsWith('llama3')) return 'meta-llama/llama-3.3-70b-instruct:free';
   return 'openrouter/free';
 }
 
@@ -10957,9 +10982,11 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       const rawOllamaKey = (rawKey && !isOpenRouterKeySupplied) ? rawKey : null;
 
       let isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint);
+      const isCloudModelRequested = isKnownOllamaCloudModel(body.model) || Boolean(body.model && body.model.includes(':cloud'));
       // Jika pengguna menyertakan Ollama Cloud API Key pada endpoint default/loopback,
+      // atau jika target model adalah model Ollama Cloud resmi (seperti beam),
       // arahkan ke https://ollama.com resmi (selaras dengan /api/ollama/models & callLLMBackend).
-      if ((isServerlessChat || rawOllamaKey) && isLoopbackTarget) {
+      if ((isServerlessChat || rawOllamaKey || isCloudModelRequested) && isLoopbackTarget) {
         customEndpoint = 'https://ollama.com';
         isLoopbackTarget = false;
       }
@@ -10969,19 +10996,18 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       // Defense-in-depth: Gerbang Nol-Informasi Shannon di sisi server (mencegah unconditioned prior collapse)
       applyContextIntegrityGuard(body.messages);
 
-      // DILARANG KERAS memindahkan chat Ollama ke OpenRouter jika Auto-Router tidak diaktifkan secara eksplisit!
+      const rawOrKey = sanitizeOllamaApiKey(
+        req.headers['x-openrouter-key'] || req.headers['x-api-key'] || body.openRouterKey ||
+        (isOpenRouterKeySupplied ? rawKey : '') || process.env.OPENROUTER_API_KEY || ''
+      );
       const isAutoRouterExplicit = Boolean(req.headers['x-auto-router'] === 'true' || body.isAutoRouter);
-      const shouldUseCloudBridge = Boolean(isAutoRouterExplicit && ((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (isOpenRouterKeySupplied && !isCustomRemoteEndpoint)));
+      const shouldUseCloudBridge = Boolean((isAutoRouterExplicit || (isCloudModelRequested && !rawOllamaKey && rawOrKey)) && ((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (isOpenRouterKeySupplied && !isCustomRemoteEndpoint)));
 
       if (shouldUseCloudBridge) {
         // Pure Cloud Architecture Bridge:
         // Ketika tidak ada daemon lokal atau key yang diberikan adalah OpenRouter key, alihkan secara transparan ke OpenRouter Cloud AI
         // dan konversikan stream SSE OpenRouter ke format newline-delimited JSON Ollama.
         const targetCloudModel = mapOllamaModelToOpenRouter(body.model || 'qwen2.5:1.5b');
-        const rawOrKey = sanitizeOllamaApiKey(
-          req.headers['x-openrouter-key'] || req.headers['x-api-key'] || body.openRouterKey ||
-          (isOpenRouterKeySupplied ? rawKey : '') || process.env.OPENROUTER_API_KEY || ''
-        );
         if (!rawOrKey) {
           return sendJSON(res, 401, {
             error: 'Ollama API Key diperlukan untuk menggunakan model Ollama Cloud. Silakan masukkan Ollama API Key Anda di menu Pengaturan.'
@@ -11690,8 +11716,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         proxyReq.end();
       };
 
-      const isCloudTarget = Boolean(rawOllamaKey || (body.model && body.model.includes(':cloud')) || customEndpoint.includes('ollama.com'));
-      const allowLocalFallback = !isServerlessChat;
+      const isCloudTarget = Boolean(rawOllamaKey || isCloudModelRequested || (body.model && body.model.includes(':cloud')) || customEndpoint.includes('ollama.com'));
+      const allowLocalFallback = !isServerlessChat && !isCloudTarget;
       dispatchOllamaUpstream(customEndpoint, body.model, rawOllamaKey, allowLocalFallback, true);
     } catch (err) {
       // Pembersihan aman jika terjadi throw sinkron (ERR_INVALID_CHAR, payload error, socket write error)

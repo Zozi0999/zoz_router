@@ -79,6 +79,13 @@ function mapOllamaModelToOpenRouter(modelId) {
   if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
   const id = modelId.trim();
   if (id.includes('/')) return id;
+  const lower = id.toLowerCase();
+  if (lower === 'beam') return 'reflection/beam-1.0-501b-a23b';
+  if (lower.startsWith('gemma4')) return 'google/gemma-4-31b-it:free';
+  if (lower.startsWith('deepseek-r1')) return 'deepseek/deepseek-r1:free';
+  if (lower.startsWith('deepseek-v3') || lower.startsWith('deepseek-v4')) return 'deepseek/deepseek-chat';
+  if (lower.startsWith('qwen')) return 'qwen/qwen-2.5-72b-instruct';
+  if (lower.startsWith('llama3')) return 'meta-llama/llama-3.3-70b-instruct:free';
   return 'openrouter/free';
 }
 
@@ -1466,15 +1473,20 @@ export default {
         }
 
         const isLoopback = cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1');
-        // DILARANG KERAS memindahkan chat Ollama ke OpenRouter jika Auto-Router tidak diaktifkan secara eksplisit!
+        const isCloudModel = Boolean(
+          body.model === 'beam' ||
+          (body.model && body.model.includes(':cloud')) ||
+          (body.model && body.model.includes('-cloud')) ||
+          /^(?:beam\b|clef\b|muse-spark|mimo-|minimax-|glm-|kimi-|nemotron-|mistral-large|gpt-oss|deepseek-|gemma4|cogito|qwen3)/i.test(body.model || '')
+        );
+        let orKey = body.openRouterKey || (body.apiKey && String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (request.headers.get('Authorization') && request.headers.get('Authorization').includes('sk-or-') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
+        if (orKey) orKey = String(orKey).replace(/^Bearer\s+/i, '').trim();
+
+        // DILARANG KERAS memindahkan chat Ollama ke OpenRouter jika Auto-Router tidak diaktifkan secara eksplisit kecuali fallback model cloud dengan key OpenRouter!
         const isAutoRouterExplicit = Boolean(request.headers.get('x-auto-router') === 'true' || body.isAutoRouter);
-        const shouldUseCloudBridge = Boolean(isAutoRouterExplicit && !rawOllamaKey && (isLoopback || cleanEndpoint.includes('ollama.com')));
+        const shouldUseCloudBridge = Boolean((isAutoRouterExplicit || (isCloudModel && !rawOllamaKey && orKey)) && !rawOllamaKey && (isLoopback || cleanEndpoint.includes('ollama.com')));
 
         if (shouldUseCloudBridge) {
-          // Pure Cloud Fallback: Hanya jika pengguna belum mengisi Ollama API Key
-          let orKey = body.openRouterKey || (body.apiKey && String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (request.headers.get('Authorization') && request.headers.get('Authorization').includes('sk-or-') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
-          if (orKey) orKey = String(orKey).replace(/^Bearer\s+/i, '').trim();
-
           if (!orKey) {
             return new Response(JSON.stringify({
               error: 'Ollama API Key diperlukan untuk menggunakan model Ollama Cloud di https://z21.zozdocs.com/. Silakan masukkan Ollama API Key Anda di menu Pengaturan.'
