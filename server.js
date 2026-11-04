@@ -3779,10 +3779,28 @@ function resolveParentSessionId(sid) {
   return m ? m[1] : clean;
 }
 
+// Deteksi absolut muatan digest/tool/instruksi internal agar tidak pernah bocor atau dianggap pesan pengguna
+function isInternalSystemPayload(text) {
+  if (!text || typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  return trimmed.startsWith('[DATA HASIL PENELUSURAN INTERNAL]') ||
+         trimmed.startsWith('[HASIL prepare_image_display') ||
+         trimmed.startsWith('[HASIL search_images') ||
+         trimmed.startsWith('[HASIL ') ||
+         trimmed.startsWith('[INSTRUKSI PENYAJIAN JAWABAN AKHIR]') ||
+         trimmed.startsWith('[SPESIFIKASI SINTESIS BUKTI') ||
+         trimmed.startsWith('[ALUR VERIFIKASI VISUAL AKTIF]') ||
+         trimmed.startsWith('[HASIL EKSEKUSI TOOL]');
+}
+
 // Defense-in-depth: Gerbang Nol-Informasi Shannon di sisi server (mencegah unconditioned prior collapse & halusinasi gambar)
 function applyContextIntegrityGuard(messages, userPrompt) {
   if (!Array.isArray(messages) || messages.length === 0) return;
-  const lastUser = [...messages].reverse().find(m => m && m.role === 'user');
+  const lastUser = [...messages].reverse().find(m => {
+    if (!m || m.role !== 'user') return false;
+    const str = typeof m.content === 'string' ? m.content : '';
+    return !isInternalSystemPayload(str);
+  });
   if (!lastUser) return;
 
   let uPrompt = userPrompt;
@@ -4007,8 +4025,12 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
     const trimmedContent = content.trim();
 
     // Temukan pesan user terakhir dalam percakapan untuk validasi integritas giliran (turn integrity)
-    const lastUserMsg = [...msgs].reverse().find(m => m && m.role === 'user');
-    const normUserPrompt = userPrompt ? String(userPrompt).trim().toLowerCase() : '';
+    const lastUserMsg = [...msgs].reverse().find(m => {
+      if (!m || m.role !== 'user') return false;
+      const str = typeof m.content === 'string' ? m.content : '';
+      return !isInternalSystemPayload(str);
+    });
+    const normUserPrompt = (userPrompt && !isInternalSystemPayload(userPrompt)) ? String(userPrompt).trim().toLowerCase() : '';
     const normLastUser = lastUserMsg ? String(lastUserMsg.content || lastUserMsg.displayContent || '').trim().toLowerCase() : '';
 
     // Cek apakah prompt yang memicu respons ini adalah giliran obrolan yang berbeda dari giliran user terakhir di disk
@@ -4097,7 +4119,8 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
     }
 
     // Jika ini giliran baru yang belum dicatat di disk, tambahkan pesan user terlebih dahulu
-    if (isDifferentTurn && (cleanUserPrompt || (savedUserImgs && savedUserImgs.length > 0))) {
+    // PERINGATAN KETAT: DILARANG menambahkan pesan user palsu jika payload berupa digest/hasil penelusuran internal!
+    if (isDifferentTurn && !isInternalSystemPayload(cleanUserPrompt) && (cleanUserPrompt || (savedUserImgs && savedUserImgs.length > 0))) {
       msgs.push({
         id: 'msg_usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
         role: 'user',
@@ -6635,6 +6658,15 @@ async function requestHandler(req, res) {
       body.id = id;
       body.userId = effectiveUid;
       if (Array.isArray(body.messages)) {
+        // Sanitasi ketat: Hapus residu pesan internal yang bocor sebagai role 'user'
+        body.messages = body.messages.filter(m => {
+          if (!m) return false;
+          if (m.role === 'user') {
+            const str = typeof m.content === 'string' ? m.content : '';
+            if (isInternalSystemPayload(str)) return false;
+          }
+          return true;
+        });
         body.messageCount = body.messages.length;
         // Compact base64 data URLs to uploads files so JSON file remains lightweight
         body.messages.forEach(m => {
@@ -10632,7 +10664,11 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       let userPrompt = null;
       let userImages = null;
       if (Array.isArray(body.messages) && body.messages.length > 0) {
-        const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
+        const lastUser = [...body.messages].reverse().find(m => {
+          if (!m || m.role !== 'user') return false;
+          const str = typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? JSON.stringify(m.content) : '');
+          return !isInternalSystemPayload(str);
+        });
         if (lastUser) {
           let rawUserPrompt = typeof lastUser.content === 'string'
             ? lastUser.content
@@ -11404,7 +11440,11 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       let userPrompt = null;
       let userImages = null;
       if (Array.isArray(body.messages) && body.messages.length > 0) {
-        const lastUser = [...body.messages].reverse().find(m => m.role === 'user');
+        const lastUser = [...body.messages].reverse().find(m => {
+          if (!m || m.role !== 'user') return false;
+          const str = typeof m.content === 'string' ? m.content : (Array.isArray(m.content) ? JSON.stringify(m.content) : '');
+          return !isInternalSystemPayload(str);
+        });
         if (lastUser) {
           let rawUserPrompt = typeof lastUser.content === 'string'
             ? lastUser.content

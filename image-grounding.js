@@ -1738,11 +1738,11 @@ function createImageGroundingService(options = {}) {
     const placement = ['after_intro', 'within_section'].includes(params.placement) ? params.placement : 'after_intro';
     const rawAlts = Array.isArray(params.alt_texts) ? params.alt_texts : [];
 
-    if (rawIds.length === 0 || rawIds.length > 3) {
+    if (rawIds.length === 0 || rawIds.length > 12) {
       return {
         status: 'error',
         error_code: 'invalid_image',
-        message: 'Parameter "image_ids" wajib berisi 1 hingga maksimal 3 ID kandidat gambar.',
+        message: 'Parameter "image_ids" wajib berisi 1 hingga maksimal 12 ID kandidat gambar.',
         display_items: [],
         layout,
         placement,
@@ -1753,19 +1753,10 @@ function createImageGroundingService(options = {}) {
       };
     }
 
-    if (rawAlts.length !== rawIds.length) {
-      return {
-        status: 'error',
-        error_code: 'invalid_alt_texts',
-        message: 'Parameter "alt_texts" wajib menyediakan tepat satu teks alternatif untuk setiap image_id.',
-        display_items: [],
-        layout,
-        placement,
-        rendering_requirements: {
-          requires_client_renderer: true,
-          payload_is_not_render_confirmation: true
-        }
-      };
+    // Toleransi cerdas untuk alt_texts: tidak perlu reject kaku jika model tidak menyediakan array berukuran sama
+    const safeAlts = [];
+    for (let i = 0; i < rawIds.length; i++) {
+      safeAlts.push(rawAlts[i] || rawAlts[0] || '');
     }
 
     const display_items = [];
@@ -1800,7 +1791,7 @@ function createImageGroundingService(options = {}) {
         continue;
       }
 
-      const cleanAlt = sanitizeUntrustedText(rawAlts[i], 240) || candidate.title || 'Gambar referensi terverifikasi';
+      const cleanAlt = sanitizeUntrustedText(safeAlts[i], 240) || candidate.title || 'Gambar referensi terverifikasi';
       const token = mintSignedAssetToken(candidate, inspection.mime_type);
       const proxyRef = `/api/tools/image-asset/${encodeURIComponent(token)}`;
 
