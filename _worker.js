@@ -404,36 +404,84 @@ function computeEdgeRecencyProfile(query, contextText = '', nowMs = Date.now()) 
   return { alpha, halfLifeDays, lambda: Math.LN2 / halfLifeDays, targetHistoricalYear: null };
 }
 
-function rankEdgeDocumentsMathematically(candidates, query, profile, nowMs = Date.now()) {
+function rankEdgeDocumentsMathematically(candidates, query, profile, nowMs = Date.now(), options = {}) {
   if (!Array.isArray(candidates) || candidates.length === 0) return [];
-  const STOP = new Set(['apa','siapa','kapan','dimana','bagaimana','mengapa','yang','dan','atau','di','ke','dari','untuk','pada','dengan','ini','itu','coba','cari','tolong','web','internet','terbaru','terkini','hari','minggu','bulan','tahun','what','who','when','where','how','why','the','and','or','in','to','from','for','with','this','that','please','search','find','latest','newest','recent','today']);
+  const STOP = new Set([
+    'apa','siapa','kapan','dimana','bagaimana','mengapa','kenapa','apakah','adalah','yang','dan','atau','di','ke','dari',
+    'untuk','pada','dengan','ini','itu','coba','cari','carikan','tolong','internet','google','terbaru','terkini','hari',
+    'minggu','bulan','tahun','antara','tentang','what','which','who','when','where','how','why','does','do','makes','make',
+    'different','from','between','the','and','or','in','to','for','with','this','that','please','find','latest','newest','recent','today'
+  ]);
+  const MODIFIERS = new Set([
+    'perbedaan','persamaan','perbandingan','definisi','pengertian','arti','cara','panduan','harga','berita','update','rilis',
+    'perkembangan','difference','differences','versus','vs','compare','comparison','custom','built','built-in','guide','news','price','release'
+  ]);
   const SYN = {
     rilis: ['release','released','launch','launched','announcing','introduced'],
     model: ['models','llm','foundation','frontier','architecture'],
-    ai: ['artificial','intelligence','llm','genai'],
+    ai: ['artificial','intelligence','llm','genai','kecerdasan'],
+    kecerdasan: ['artificial','intelligence','ai'],
+    buatan: ['artificial','ai'],
     berita: ['news','report','update'],
     makalah: ['paper','papers','article','preprint','study'],
     jurnal: ['journal','paper','research'],
     riset: ['research','study','paper'],
-    terbaik: ['best','top','benchmark']
+    terbaik: ['best','top','benchmark'],
+    manajer: ['manager','managers','management','manajemen'],
+    manajemen: ['management','manager','managers','manajer'],
+    proyek: ['project','projects'],
+    program: ['program','programs','programme'],
+    portofolio: ['portfolio','portfolios'],
+    alat: ['tool','tools'],
+    pencarian: ['search','retrieval'],
+    penyunting: ['editor','editors']
+  };
+  const expandVar = (tok) => {
+    const out = new Set([tok]);
+    if (tok.includes('-')) for (const p of tok.split('-')) if (p.length >= 3 && !STOP.has(p)) out.add(p);
+    if (tok.endsWith('nya') && tok.length >= 5) out.add(tok.slice(0, -3));
+    if (tok.endsWith('ies') && tok.length >= 5) out.add(tok.slice(0, -3) + 'y');
+    else if (tok.endsWith('es') && tok.length >= 5 && /(?:ches|shes|xes|zes|ses)$/.test(tok)) out.add(tok.slice(0, -2));
+    else if (tok.endsWith('s') && !tok.endsWith('ss') && !tok.endsWith('us') && !tok.endsWith('is') && tok.length >= 4) out.add(tok.slice(0, -1));
+    else if (tok.length >= 3 && !tok.endsWith('s')) out.add(tok + 's');
+    for (const s of [...out]) {
+      for (const syn of (SYN[s] || [])) out.add(syn);
+    }
+    return out;
   };
   const baseTokens = String(query || '').toLowerCase().replace(/[^\p{L}\p{N}.+-]+/gu, ' ').split(/\s+/).filter(t => t.length >= 2 && !STOP.has(t) && !/^20[12]\d$/.test(t));
+  const essentialTokens = [...new Set(baseTokens.filter(t => !MODIFIERS.has(t)))];
+  const essentialSet = essentialTokens.length > 0 ? essentialTokens : [...new Set(baseTokens)];
   const qTerms = [];
   const seenT = new Set();
   for (const t of baseTokens) {
     if (!seenT.has(t)) { seenT.add(t); qTerms.push({ term: t, weight: 1.0 }); }
-    for (const s of (SYN[t] || [])) {
-      if (!seenT.has(s)) { seenT.add(s); qTerms.push({ term: s, weight: 0.65 }); }
+    for (const s of expandVar(t)) {
+      if (!seenT.has(s) && !STOP.has(s)) { seenT.add(s); qTerms.push({ term: s, weight: 0.80 }); }
     }
   }
   const N = candidates.length;
+  const tokenizeDoc = (str) => {
+    const raw = String(str || '').toLowerCase().replace(/[^\p{L}\p{N}.+-]+/gu, ' ').split(/\s+/).filter(Boolean);
+    const out = [];
+    for (const r of raw) {
+      out.push(r);
+      if (r.includes('-')) for (const sub of r.split('-')) if (sub.length >= 2) out.push(sub);
+    }
+    return out;
+  };
   const docs = candidates.map(item => {
-    const titleToks = String(item.title || '').toLowerCase().replace(/[^\p{L}\p{N}.+-]+/gu, ' ').split(/\s+/).filter(Boolean);
-    const snipToks = String(item.snippet || '').toLowerCase().replace(/[^\p{L}\p{N}.+-]+/gu, ' ').split(/\s+/).filter(Boolean);
-    const contToks = String(item.content || '').slice(0, 3500).toLowerCase().replace(/[^\p{L}\p{N}.+-]+/gu, ' ').split(/\s+/).filter(Boolean);
+    const titleToks = tokenizeDoc(item.title || '');
+    const snipToks = tokenizeDoc(item.snippet || '');
+    let urlToks = [];
+    try {
+      const uo = new URL(item.url || '');
+      urlToks = tokenizeDoc(`${uo.hostname.replace(/^www\./i, '')} ${decodeURIComponent(uo.pathname)}`);
+    } catch (_) {}
+    const contToks = tokenizeDoc(String(item.content || '').slice(0, 3500));
     const tf = new Map();
     const add = (arr, w) => { for (const tok of arr) tf.set(tok, (tf.get(tok) || 0) + w); };
-    add(titleToks, 4.0); add(snipToks, 2.0); add(contToks, 1.0);
+    add(titleToks, 4.0); add(snipToks, 2.0); add(urlToks, 2.0); add(contToks, 1.0);
     const dl = titleToks.length * 4 + snipToks.length * 2 + contToks.length + 1;
     const ts = parseEdgeAuthenticTimestamp(item.published_at || item.published_date || item.pubDate || '', item.url || '', `${item.title || ''} ${item.snippet || ''}`, nowMs);
     return { item, tf, dl, ts };
@@ -446,7 +494,7 @@ function rankEdgeDocumentsMathematically(candidates, query, profile, nowMs = Dat
     df.set(q.term, c);
   }
   const hasFreshVerified = docs.some(d => d.ts !== null && ((nowMs - d.ts) / 864e5) <= 90);
-  const k1 = 1.5, b = 0.75;
+  const k1 = 1.5, b = 0.75, kappa = 3.2;
   const scored = [];
   for (const d of docs) {
     let bm25 = 0;
@@ -454,15 +502,28 @@ function rankEdgeDocumentsMathematically(candidates, query, profile, nowMs = Dat
       const f = d.tf.get(q.term) || 0;
       if (f <= 0) continue;
       const dfi = df.get(q.term) || 0;
-      const idf = Math.log(1 + (N - dfi + 0.5) / (dfi + 0.5));
+      const idf = Math.log(1 + (N - dfi + 0.5) / (dfi + 0.5)) + 0.35;
       bm25 += q.weight * idf * ((f * (k1 + 1)) / (f + k1 * (1 - b + b * (d.dl / avgDl))));
     }
     if (qTerms.length > 0 && bm25 <= 0.05) {
-      if (d.item.source_name || d.item.url) {
+      if (options.isWhitelistedPool) {
         bm25 = 0.25;
       } else {
         continue;
       }
+    }
+    if (!options.isWhitelistedPool && essentialSet.length > 0) {
+      let matchedE = 0;
+      for (const eq of essentialSet) {
+        let hit = false;
+        for (const v of expandVar(eq)) {
+          if ((d.tf.get(v) || 0) > 0) { hit = true; break; }
+        }
+        if (hit) matchedE++;
+      }
+      const E = essentialSet.length;
+      const minReq = E === 1 ? 1 : (E <= 4 ? 2 : Math.min(4, Math.max(2, Math.ceil(Math.sqrt(E)))));
+      if (matchedE < minReq) continue;
     }
     let ageDays = null;
     let temporalFactor = 1.0;
@@ -471,9 +532,10 @@ function rankEdgeDocumentsMathematically(candidates, query, profile, nowMs = Dat
       if (profile.alpha >= 0.70 && hasFreshVerified && ageDays > 120) continue;
       temporalFactor = (1 - profile.alpha) + profile.alpha * Math.exp(-profile.lambda * ageDays);
     } else {
-      temporalFactor = profile.alpha >= 0.70 ? 0.18 : 0.65;
+      temporalFactor = profile.alpha >= 0.70 ? 0.18 : (profile.alpha >= 0.55 ? 0.75 : 1.0);
     }
-    const finalScore = (bm25 > 0 ? bm25 : 0.25) * temporalFactor;
+    const lexNorm = bm25 / (bm25 + kappa);
+    const finalScore = lexNorm * temporalFactor;
     scored.push({
       ...d.item,
       timestamp: d.ts || 0,
@@ -699,7 +761,7 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     await Promise.allSettled(searchTasks);
   }
 
-  const ranked = rankEdgeDocumentsMathematically(results, cleanQ, recencyProfile, nowMs);
+  const ranked = rankEdgeDocumentsMathematically(results, cleanQ, recencyProfile, nowMs, { isWhitelistedPool: true });
   const finalResults = ranked.slice(0, safeLimit).map(item => ({
     title: item.title,
     url: item.url,
@@ -1252,7 +1314,7 @@ export default {
     }
 
     // Universal WhatsApp, AI & Daemon Tunnel Proxy (Edge Bridge)
-    const TUNNEL_GATEWAY_URL = 'https://doug-tour-penn-exchanges.trycloudflare.com';
+    const TUNNEL_GATEWAY_URL = 'https://wealth-terry-tours-chemistry.trycloudflare.com';
     let reqBodyBytes = null;
     const isEdgeNativeRoute = url.pathname === '/api/ping' ||
       url.pathname === '/api/health' ||
@@ -2512,31 +2574,44 @@ export default {
         const nowMs = Date.now();
         const profile = computeEdgeRecencyProfile(cleanQuery, context, nowMs);
 
-        // Dekomposisi Aljabar Boolean K ∧ (e₁ ∨ ... ∨ eₘ) untuk mencegah over-conjunction multi-lab
-        const KNOWN_LABS = new Set(['openai','anthropic','google','deepmind','meta','mistral','deepseek','qwen','alibaba','xai','nvidia','microsoft','cohere','zhipu']);
+        // Dekomposisi Aljabar Boolean K ∧ (e₁ ∨ ... ∨ eₘ) hanya untuk >= 2 KELUARGA LAB BERBEDA
+        const LAB_FAMILY = {
+          openai: 'openai', chatgpt: 'openai', gpt: 'openai',
+          anthropic: 'anthropic', claude: 'anthropic',
+          google: 'google', deepmind: 'google', gemini: 'google', gemma: 'google',
+          meta: 'meta', llama: 'meta',
+          mistral: 'mistral', deepseek: 'deepseek',
+          qwen: 'qwen', alibaba: 'qwen',
+          xai: 'xai', grok: 'xai',
+          nvidia: 'nvidia', microsoft: 'microsoft', cohere: 'cohere', zhipu: 'zhipu'
+        };
         const rawWords = cleanQuery.replace(/[?,!;:()[\]{}"'`]+/g, ' ').split(/\s+/).filter(Boolean);
-        const NOISE = new Set(['apa','siapa','kapan','dimana','bagaimana','coba','cari','tolong','di','ke','dari','web','internet','terbaru','terkini','minggu','hari','bulan','ini','itu','please','search','find','latest','newest','recent']);
+        const NOISE = new Set(['apa','siapa','kapan','dimana','bagaimana','coba','cari','carikan','tolong','di','ke','dari','internet','terbaru','terkini','minggu','hari','bulan','ini','itu','please','find','latest','newest','recent','what','makes','make','different','from','between']);
         const ents = [];
         const core = [];
         for (const w of rawWords) {
           const lw = w.toLowerCase();
           if (NOISE.has(lw) || /^20[12]\d$/.test(lw)) continue;
-          if (KNOWN_LABS.has(lw)) ents.push(lw);
+          if (LAB_FAMILY[lw]) ents.push(lw);
           else core.push(w);
         }
-        const coreStr = core.join(' ').trim() || cleanQuery;
+        const distinctFamilies = new Set(ents.map(e => LAB_FAMILY[e] || e));
+        const fullCleanStr = [...rawWords.filter(w => !NOISE.has(w.toLowerCase()))].slice(0, 8).join(' ').trim() || cleanQuery;
+        const coreStr = (distinctFamilies.size >= 2 ? core.join(' ').trim() : fullCleanStr) || cleanQuery;
         const enCore = coreStr
           .replace(/\brilis\b/gi, 'release')
           .replace(/\bberita\b/gi, 'news')
-          .replace(/\bharga\b/gi, 'price');
+          .replace(/\bharga\b/gi, 'price')
+          .replace(/\bkecerdasan\s+buatan\b/gi, 'AI');
         const subQueries = [];
-        if (ents.length >= 2) {
+        if (distinctFamilies.size >= 2 && core.length >= 2) {
           subQueries.push(`${enCore} (${ents.slice(0, 6).join(' OR ')})`.trim());
           subQueries.push(enCore);
         } else {
           subQueries.push(enCore);
           if (enCore.toLowerCase() !== coreStr.toLowerCase()) subQueries.push(coreStr);
         }
+        const isIndoEdge = /\b(indonesia|jakarta|perbedaan|pengertian|manajer|manajemen|proyek|portofolio|siapa|bagaimana|mengapa|kenapa|apakah|adalah|cara|sejarah|perkembangan|kecerdasan|buatan)\b/i.test(cleanQuery);
 
         const PRIMARY_FEEDS = [
           'https://feeds.arstechnica.com/arstechnica/index',
@@ -2592,6 +2667,85 @@ export default {
         const tasks = [];
         const mainSubQ = subQueries[0] || cleanQuery;
         const whenSuffix = profile.alpha >= 0.65 ? ' when:30d' : '';
+
+        // 0A. General Web Search (DuckDuckGo HTML dengan unwrapping uddg= & Sec-Fetch headers)
+        tasks.push((async () => {
+          try {
+            const webQ = isIndoEdge ? fullCleanStr : mainSubQ;
+            const r = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(webQ)}`, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': isIndoEdge ? 'id-ID,id;q=0.9,en-US;q=0.8' : 'en-US,en;q=0.9,id;q=0.7',
+                'Sec-Ch-Ua': '"Chromium";v="131", "Not_A Brand";v="24"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Upgrade-Insecure-Requests': '1'
+              },
+              signal: AbortSignal.timeout(4200)
+            });
+            if (!r.ok || r.status !== 200) return [];
+            const html = await r.text();
+            if (!html || html.includes('anomaly-modal')) return [];
+            const out = [];
+            const chunks = html.split(/<div\b[^>]*class="[^"]*\bresults_links\b[^"]*"[^>]*>/i).slice(1);
+            for (const ch of chunks) {
+              if (out.length >= 10) break;
+              if (/result--ad|badge--ad/i.test(ch.slice(0, 600))) continue;
+              const aM = /<a\b[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(ch)
+                || /<a\b[^>]*href="([^"]+)"[^>]*class="[^"]*result__a[^"]*"[^>]*>([\s\S]*?)<\/a>/i.exec(ch);
+              if (!aM) continue;
+              let href = aM[1].replace(/&amp;/g, '&').trim();
+              if (href.startsWith('//')) href = 'https:' + href;
+              let link = '';
+              try {
+                const uo = new URL(href, 'https://html.duckduckgo.com');
+                if (uo.pathname.includes('/y.js') || uo.searchParams.has('ad_domain')) continue;
+                const uddg = uo.searchParams.get('uddg');
+                if (uddg && /^https?:\/\//i.test(uddg)) link = uddg;
+                else if (/^https?:\/\//i.test(uo.href) && !/duckduckgo\.com$/i.test(uo.hostname)) link = uo.href;
+              } catch (_) {}
+              if (!link) continue;
+              const title = aM[2].replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/\s+/g, ' ').trim();
+              const sM = /<(?:a|div|span)\b[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/(?:a|div|span)>/i.exec(ch);
+              const snippet = sM ? sM[1].replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/\s+/g, ' ').trim().slice(0, 420) : '';
+              let domain = 'web';
+              try { domain = new URL(link).hostname.replace(/^www\./i, ''); } catch (_) {}
+              if (title && link) out.push({ url: link, domain, title, snippet, content: snippet || title, category: 'general_web', published_at: '' });
+            }
+            return out;
+          } catch (_) { return []; }
+        })());
+
+        // 0B. Wikipedia MediaWiki Search API (ID / EN)
+        tasks.push((async () => {
+          try {
+            const wLang = isIndoEdge ? 'id' : 'en';
+            const wQuery = (isIndoEdge ? fullCleanStr : enCore).split(/\s+/).slice(0, 5).join(' ');
+            const r = await fetch(`https://${wLang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(wQuery)}&srlimit=4&format=json`, {
+              headers: { 'User-Agent': 'ZozRouterIR/2.1 (https://z21.zozdocs.com)' },
+              signal: AbortSignal.timeout(3500)
+            });
+            if (!r.ok) return [];
+            const data = await r.json();
+            return ((data && data.query && data.query.search) || []).map(h => {
+              const pageTitle = String(h.title || '').trim();
+              const snippet = String(h.snippet || '').replace(/<[^>]+>/g, ' ').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+              return {
+                url: `https://${wLang}.wikipedia.org/wiki/${encodeURIComponent(pageTitle.replace(/\s+/g, '_'))}`,
+                domain: `${wLang}.wikipedia.org`,
+                title: `${pageTitle} - Wikipedia`,
+                snippet,
+                content: snippet || pageTitle,
+                category: 'encyclopedia',
+                published_at: ''
+              };
+            });
+          } catch (_) { return []; }
+        })());
 
         // 1. Bing News RSS Live Query (dengan unwrapping URL penerbit asli)
         for (const sq of subQueries.slice(0, 2)) {

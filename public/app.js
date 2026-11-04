@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://doug-tour-penn-exchanges.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://wealth-terry-tours-chemistry.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -21422,14 +21422,26 @@ ${msg.content.slice(0, 3000)}
   ]);
 
   const SEARCH_SYNONYM_MAP = new Map([
-    ['usia', ['umur', 'berumur', 'berusia']],
-    ['umur', ['usia', 'berusia', 'berumur']],
-    ['lahir', ['kelahiran', 'dilahirkan']],
-    ['kelahiran', ['lahir', 'dilahirkan']],
-    ['meninggal', ['wafat', 'tewas', 'gugur']],
-    ['wafat', ['meninggal', 'tewas', 'gugur']],
-    ['istri', ['pasangan', 'nyonya']],
-    ['suami', ['pasangan', 'tuan']]
+    ['usia', ['umur', 'berumur', 'berusia', 'age']],
+    ['umur', ['usia', 'berusia', 'berumur', 'age']],
+    ['lahir', ['kelahiran', 'dilahirkan', 'born']],
+    ['kelahiran', ['lahir', 'dilahirkan', 'born']],
+    ['meninggal', ['wafat', 'tewas', 'gugur', 'died']],
+    ['wafat', ['meninggal', 'tewas', 'gugur', 'died']],
+    ['istri', ['pasangan', 'nyonya', 'wife', 'spouse']],
+    ['suami', ['pasangan', 'tuan', 'husband', 'spouse']],
+    ['manajer', ['manajemen', 'pengelolaan', 'manager', 'managers', 'management']],
+    ['manajemen', ['manajer', 'pengelolaan', 'management', 'manager', 'managers']],
+    ['proyek', ['project', 'projects']],
+    ['program', ['programs', 'programme', 'programmes']],
+    ['portofolio', ['portfolio', 'portfolios']],
+    ['perbedaan', ['beda', 'difference', 'differences', 'vs', 'versus', 'comparison']],
+    ['kecerdasan', ['ai', 'artificial', 'intelligence']],
+    ['buatan', ['ai', 'artificial']],
+    ['alat', ['tool', 'tools', 'perkakas']],
+    ['pencarian', ['search', 'penelusuran', 'retrieval']],
+    ['penelusuran', ['search', 'pencarian', 'retrieval']],
+    ['penyunting', ['editor', 'editors']]
   ]);
 
   function extractSalientEntityFromSession(session) {
@@ -21562,23 +21574,27 @@ ${msg.content.slice(0, 3000)}
       .trim();
   }
 
-  // Taksonomi Token & Metrik Relevansi Leksikal-Semantik Murni (Anti-Halusinasi v624)
+  // Taksonomi Token & Metrik Relevansi Leksikal-Semantik Murni (Anti-Halusinasi v681)
   const IR_QUERY_STOPWORDS = new Set([
     'dan', 'atau', 'yang', 'untuk', 'dengan', 'pada', 'dari', 'ke', 'di', 'ini', 'itu', 'adalah',
     'sebagai', 'dalam', 'oleh', 'saat', 'hari', 'tentang', 'apa', 'siapa', 'bagaimana', 'berapa',
     'kapan', 'kenapa', 'mengapa', 'mana', 'dimana', 'apakah', 'ada', 'bisa', 'dapat', 'akan',
     'sudah', 'telah', 'sedang', 'masih', 'juga', 'hanya', 'saja', 'tersebut', 'cari', 'carikan',
-    'coba', 'tolong', 'web', 'internet', 'google', 'search', 'find', 'the', 'a', 'an', 'and',
-    'or', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'it', 'its'
+    'coba', 'tolong', 'internet', 'google', 'find', 'the', 'a', 'an', 'and',
+    'or', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were',
+    'does', 'do', 'did', 'makes', 'make', 'what', 'which', 'how', 'it', 'its'
   ]);
 
   const GENERIC_QUERY_MODIFIERS = new Set([
     'harga', 'terbaru', 'terkini', 'berita', 'update', 'jadwal', 'rilis', 'daftar', 'informasi',
     'spesifikasi', 'fitur', 'cara', 'panduan', 'tutorial', 'review', 'ulasan', 'kelebihan',
     'kekurangan', 'biografi', 'profil', 'asal', 'sejarah', 'penyebab', 'dampak', 'solusi',
-    'arti', 'makna', 'definisi', 'pengertian', 'contoh', 'hasil', 'skor', 'klasemen', 'stat',
-    'statistik', 'populer', 'viral', 'resmi', 'official', 'news', 'price', 'specs', 'release',
-    'date', 'schedule', 'guide', 'history', 'meaning', 'result', 'hari', 'bulan', 'tahun', 'minggu'
+    'arti', 'makna', 'definisi', 'pengertian', 'perbedaan', 'persamaan', 'perbandingan', 'antara',
+    'contoh', 'hasil', 'skor', 'klasemen', 'stat', 'statistik', 'populer', 'viral', 'resmi',
+    'official', 'news', 'price', 'specs', 'release', 'date', 'schedule', 'guide', 'history',
+    'meaning', 'result', 'hari', 'bulan', 'tahun', 'minggu', 'different', 'difference',
+    'differences', 'between', 'versus', 'vs', 'compare', 'comparison', 'custom', 'built',
+    'built-in', 'using', 'use', 'used', 'work', 'works', 'working', 'perkembangan'
   ]);
 
   function extractQueryTokenTaxonomy(query) {
@@ -21622,19 +21638,42 @@ ${msg.content.slice(0, 3000)}
     const { essentialTokens, modifierTokens, allContentTokens } = extractQueryTokenTaxonomy(query);
     if (allContentTokens.length === 0) return 0.5;
 
-    const titleWords = new Set(String(doc.title || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
-    const snippetWords = new Set(String(doc.snippet || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
-    const contentWords = new Set(String(doc.content || '').slice(0, 3000).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+    const splitWords = (str) => String(str || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    const titleWords = new Set(splitWords(doc.title || ''));
+    const urlWords = splitWords(doc.url || doc.link || '');
+    const snippetWords = new Set([...splitWords(doc.snippet || ''), ...urlWords]);
+    const contentWords = new Set(splitWords(String(doc.content || '').slice(0, 4000)));
+
+    const buildTokenVariants = (token) => {
+      const variants = new Set([token]);
+      if (token.includes('-')) {
+        for (const p of token.split('-')) {
+          if (p.length >= 3 && !IR_QUERY_STOPWORDS.has(p)) variants.add(p);
+        }
+      }
+      if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.expandMorphologicalAndBilingualVariants === 'function') {
+        for (const v of ZozTextSafety.expandMorphologicalAndBilingualVariants(token)) {
+          variants.add(v);
+        }
+      } else {
+        if (token.endsWith('nya') && token.length >= 5) variants.add(token.slice(0, -3));
+        if (token.endsWith('ies') && token.length >= 5) variants.add(token.slice(0, -3) + 'y');
+        else if (token.endsWith('es') && token.length >= 5 && /(?:ches|shes|xes|zes|ses)$/.test(token)) variants.add(token.slice(0, -2));
+        else if (token.endsWith('s') && !token.endsWith('ss') && !token.endsWith('us') && !token.endsWith('is') && token.length >= 4) variants.add(token.slice(0, -1));
+        else if (token.length >= 3 && !token.endsWith('s')) variants.add(token + 's');
+      }
+      for (const cur of [...variants]) {
+        const syns = SEARCH_SYNONYM_MAP.get(cur);
+        if (syns) for (const s of syns) variants.add(s);
+      }
+      return variants;
+    };
 
     const checkWordSet = (token) => {
-      const rootToken = (token.endsWith('nya') && token.length >= 5) ? token.slice(0, -3) : null;
-      const synonyms = SEARCH_SYNONYM_MAP.get(token) || (rootToken ? SEARCH_SYNONYM_MAP.get(rootToken) : null) || [];
-
+      const variants = buildTokenVariants(token);
       const inWordSet = (wordSet) => {
-        if (wordSet.has(token)) return true;
-        if (rootToken && wordSet.has(rootToken)) return true;
-        for (const syn of synonyms) {
-          if (wordSet.has(syn)) return true;
+        for (const v of variants) {
+          if (wordSet.has(v)) return true;
         }
         return false;
       };
@@ -21646,19 +21685,20 @@ ${msg.content.slice(0, 3000)}
       return { inT, inS, inC, matched: inT || inS || inC };
     };
 
-    // 1. Evaluasi Hard Essential Entity Gate \mathcal{G}_{essential}(Q, D)
+    // 1. Evaluasi Sublinear Essential Entity Gate \mathcal{G}_{essential}(Q, D)
     let essentialMatches = 0;
     let essentialWeightedSum = 0;
     for (const et of essentialTokens) {
       const { inT, inS, inC, matched } = checkWordSet(et);
       if (matched) {
         essentialMatches++;
-        essentialWeightedSum += inT ? 3.0 : (inS ? 1.8 : 0.8);
+        essentialWeightedSum += inT ? 3.0 : (inS ? 1.8 : 0.9);
       }
     }
 
     if (essentialTokens.length > 0) {
-      const minReq = essentialTokens.length === 1 ? 1 : Math.ceil(essentialTokens.length * 0.5);
+      const E = essentialTokens.length;
+      const minReq = E === 1 ? 1 : (E <= 4 ? 2 : Math.min(4, Math.max(2, Math.ceil(Math.sqrt(E)))));
       if (essentialMatches < minReq) {
         // Diskualifikasi dokumen jika tidak memuat entitas esensial kueri
         return 0.0;
@@ -21676,19 +21716,23 @@ ${msg.content.slice(0, 3000)}
       }
     }
 
-    // 3. Formula Skor Relevansi Matematis
+    // 3. Formula Skor Relevansi Matematis (Leksikal + Fusi Skor BM25F-RRF Backend)
     const covE = essentialTokens.length > 0 ? (essentialMatches / essentialTokens.length) : 1.0;
     const covM = modifierTokens.length > 0 ? (modifierMatches / modifierTokens.length) : 1.0;
 
     const jointCoverage = essentialTokens.length > 0
-      ? (0.75 * covE + 0.25 * covM)
+      ? (0.80 * covE + 0.20 * covM)
       : covM;
 
     const totalWeighted = essentialWeightedSum + modifierWeightedSum;
     const maxPossibleWeight = Math.max(1, (essentialTokens.length * 3.0 + modifierTokens.length * 2.0));
     const fieldRatio = Math.min(1.0, totalWeighted / maxPossibleWeight);
 
-    const finalScore = jointCoverage * (0.60 + 0.40 * fieldRatio);
+    let finalScore = jointCoverage * (0.60 + 0.40 * fieldRatio);
+    const backendIrScore = Number(doc.mathematicalScore || (doc.mathDiagnostics && doc.mathDiagnostics.mathScore) || 0);
+    if (backendIrScore > 0) {
+      finalScore = Math.max(finalScore, 0.55 * finalScore + 0.45 * Math.min(1.0, backendIrScore));
+    }
     return Number(finalScore.toFixed(4));
   }
 
@@ -21845,13 +21889,14 @@ ${msg.content.slice(0, 3000)}
           content: cleanWebSnippetText(String(item.content || '')),
           date: item.date || item.pubDate || null,
           domain,
+          mathematicalScore: item.mathematicalScore || (item.mathDiagnostics && item.mathDiagnostics.mathScore) || 0,
           timestamp: item.timestamp || (item.date ? (Date.parse(item.date) || Date.now()) : Date.now())
         });
       }
 
       // 3. Filter Dokumen Berdasarkan Ambang Batas Relevansi Matematis \tau_{rel}
-      // Membuang artikel spam / kecocokan leksikal dangkal yang menjadi pemicu pembobotan keliru
-      const RELEVANCE_THRESHOLD = 0.48;
+      // Sublinear Essential Entity Gate sudah menggugurkan dokumen tanpa entitas inti (skor = 0.0)
+      const RELEVANCE_THRESHOLD = 0.25;
       const relevantOrganicList = [];
 
       for (const item of cleanOrganicList) {
@@ -27183,24 +27228,24 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
 
         if (results.length > 0) {
-          // Filter Token Relevansi Matematis Murni & Pareto Knee Pruning (Anti-Halusinasi v624)
+          // Filter Token Relevansi Matematis Murni & Pareto Knee Pruning (v681)
           const filteredResults = [];
           for (const item of results) {
             const score = computeLexicalRelevanceScore(query, item);
             item.relevanceScore = score;
-            if (score >= 0.30) {
+            if (score >= 0.24) {
               filteredResults.push(item);
             }
           }
           filteredResults.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
           const maxScore = filteredResults[0]?.relevanceScore || 0;
           const displayCandidates = maxScore > 0
-            ? filteredResults.filter(r => r.relevanceScore >= maxScore * 0.45).slice(0, Math.min(maxResults, 4))
+            ? filteredResults.filter(r => r.relevanceScore >= maxScore * 0.40).slice(0, Math.min(maxResults, 5))
             : [];
 
           if (displayCandidates.length === 0) {
             return cacheAndReturn({
-              text: `[HASIL PENELUSURAN WEB UNTUK "${query}"]:\nTidak ditemukan hasil spesifik yang memuat token/entitas esensial kueri. Seluruh sumber yang ditemukan tidak relevan dan disaring secara matematis untuk mencegah halusinasi. Silakan formulasikan kueri yang lebih spesifik atau gunakan pengetahuan dasar Anda.`,
+              text: `[CATATAN PENELUSURAN INTERNAL UNTUK "${query}"]:\nIndeks web publik tidak mengembalikan dokumen baru yang spesifik untuk kata kunci persis tersebut. Jawab pertanyaan pengguna secara langsung berdasarkan analisis deduktif dan pengetahuan terverifikasi tanpa menyebut pesan sistem internal; hanya jika pengguna menanyakan profil individu privat atau peristiwa baru yang belum terindeks publik, sampaikan secara wajar bahwa entitas tersebut belum terindeks luas di pencarian publik.`,
               sources: [],
               success: false
             });
@@ -27215,7 +27260,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             const domain = item.domain || (link ? link.replace(/^https?:\/\//i, '').split('/')[0] : 'web');
             const provider = item.sourceProvider || domain;
             const dateStr = item.pubDate ? ` [${item.pubDate}]` : '';
-            const bodyText = cleanWebSnippetText(String(item.content || '')).slice(0, idx < 2 ? 1800 : 500);
+            const bodyText = cleanWebSnippetText(String(item.content || '')).slice(0, idx < 2 ? 2200 : 750);
             const bodyBlock = bodyText && bodyText.length > snippet.length ? `\n    Isi Artikel: ${bodyText}` : '';
 
             lines.push(`[${idx + 1}] "${title}"${dateStr} (${provider}) [Kesesuaian Token: ${(item.relevanceScore * 100).toFixed(0)}%]\n    Tautan: ${link}\n    Ringkasan: ${snippet}${bodyBlock}`);
@@ -27232,7 +27277,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           });
 
           const formattedText = `[HASIL PENELUSURAN TERVERIFIKASI UNTUK "${query}"]:\n` + lines.join('\n\n') +
-            `\n\n[BATASAN BUKTI]: Sintesis jawaban hanya dari fakta, entitas, versi, dan tanggal publikasi yang tercantum eksplisit pada "Isi Artikel" dan "Ringkasan" di atas. Uraikan rincian teknis secara langsung dalam Bahasa Indonesia dan sertakan tautan sumber sebagai sitasi pendukung.`;
+            `\n\n[BATASAN BUKTI]: Sintesis jawaban secara akurat berdasarkan fakta, entitas, versi, dan informasi yang tercantum pada "Isi Artikel" dan "Ringkasan" di atas sesuai bahasa pertanyaan pengguna, serta sertakan tautan sumber sebagai sitasi pendukung.`;
 
           return cacheAndReturn({
             text: formattedText,
@@ -27242,9 +27287,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
 
         return cacheAndReturn({
-          text: `[HASIL PENELUSURAN WEB UNTUK "${query}"]:\nTidak ditemukan hasil spesifik di internet untuk kueri tersebut saat ini.`,
+          text: `[CATATAN PENELUSURAN INTERNAL UNTUK "${query}"]:\nIndeks web publik saat ini tidak menemukan halaman spesifik untuk kata kunci tersebut. Jawab pertanyaan pengguna secara langsung menggunakan analisis logis dan pengetahuan faktual Anda; hanya bila pengguna menanyakan profil privat atau peristiwa baru yang belum terindeks publik, jelaskan secara lugas bahwa entitas tersebut belum terindeks di pencarian publik.`,
           sources: [],
-          success: true
+          success: false
         });
       }
 
@@ -30075,6 +30120,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const hasExecutedImageSearch = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'search_images');
         const hasExecutedImageInspect = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'inspect_image');
         const hasExecutedImagePrepare = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'prepare_image_display');
+        const hasGroundedSearchSources = Boolean(webSources && webSources.length > 0);
         const isMidImagePipeline = (hasExecutedImageSearch || hasExecutedImageInspect) && !hasExecutedImagePrepare;
         const isLastRound = circuitBreakerTripped || hasExecutedImagePrepare || (!isMidImagePipeline && (hasBrowsedWeb || hasExecutedVideo || hasExecutedSourceSummary)) || (autonomousRound >= maxAutonomousRounds - 1);
         const currentDateObj = new Date();
@@ -30083,16 +30129,19 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const roundInstruction = isMidImagePipeline
           ? `[ALUR VERIFIKASI VISUAL AKTIF]:
 ${hasExecutedImageSearch ? '1. Pilih 3–6 image_id yang paling cocok secara subjek dari daftar kandidat di atas, lalu panggil inspect_image({"image_id": "..."}) terlebih dahulu (jangan langsung mengklaim gambar tampil).' : '1. Untuk seluruh kandidat yang lolos verifikasi (accessible: true dan usage_status: "allowed"), panggil prepare_image_display({"image_ids": [...], "layout": "collage"|"gallery", "placement": "after_intro"|"within_section", "alt_texts": [...]}) untuk menyajikan banyak contoh foto sekaligus dalam format kolase. Jika semua kandidat ditolak, jawab langsung pertanyaan pengguna secara faktual tanpa mengarang URL gambar.'}`
+          : ((hasExecutedSearch && !hasGroundedSearchSources && !hasBrowsedWeb && !hasExecutedGrounding && !hasExecutedImagePrepare && !hasExecutedVideo)
+          ? `[INSTRUKSI JAWABAN LANGSUNG]:
+Berikan jawaban akhir yang akurat, objektif, dan langsung menjawab inti persoalan sesuai bahasa pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Jangan menyebutkan catatan tool internal, jangan mengeluh bahwa sumber tidak relevan, dan jangan mengarang URL tautan. Jangan memanggil ulang fungsi search_web dengan kueri yang sama.`
           : ((isLastRound || hasExecutedImagePrepare || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasExecutedGrounding)
           ? `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:
-${circuitBreakerTripped ? 'Eksekusi tool dihentikan karena batas kegagalan jaringan. Berikan jawaban langsung berdasarkan konteks yang tersedia.' : (hasExecutedImagePrepare ? 'MANDAT ANALISIS MATEMATIS & OBJEKTIF MURNI (ZERO PERSONA GIMMICK): Susun jawaban akhir dengan format: (1) Penjelasan pembuka lugas tanpa persona fiktif atau analogi berbelit-belit, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat (seperti klasifikasi persenjataan, struktur sistematis, dan rincian data ala ChatGPT), serta (4) Kredit gambar dan tautan halaman sumber. DILARANG KERAS menggunakan persona khayalan!' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual dalam Bahasa Indonesia berdasarkan korpus bukti penelusuran di atas.')))))}
+${circuitBreakerTripped ? 'Eksekusi tool dihentikan karena batas kegagalan jaringan. Berikan jawaban langsung berdasarkan konteks yang tersedia.' : (hasExecutedImagePrepare ? 'MANDAT ANALISIS MATEMATIS & OBJEKTIF MURNI (ZERO PERSONA GIMMICK): Susun jawaban akhir dengan format: (1) Penjelasan pembuka lugas tanpa persona fiktif atau analogi berbelit-belit, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat (seperti klasifikasi persenjataan, struktur sistematis, dan rincian data ala ChatGPT), serta (4) Kredit gambar dan tautan halaman sumber. DILARANG KERAS menggunakan persona khayalan!' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual sesuai bahasa pertanyaan pengguna berdasarkan korpus bukti penelusuran terverifikasi di atas.')))))}
 
 BATASAN DOMAIN KLAIM:
-1. Hanya cantumkan entitas, nomor versi, metrik, dan tanggal rilis yang tertulis eksplisit di dalam bukti dokumen di atas (tanggal referensi hari ini: ${currentFormattedDate}).
+1. Gunakan entitas, nomor versi, metrik, dan tanggal rilis yang selaras dengan bukti dokumen di atas (tanggal referensi hari ini: ${currentFormattedDate}).
 2. Uraikan rincian teknis secara langsung menggunakan Markdown terstruktur (heading, poin analisis, dan baris baru \\n yang valid bila memakai tabel).
 3. Jangan memanggil ulang fungsi (${toolSummaryList.map(s => s.split('(')[0]).join(', ') || 'search_web'}) yang sudah dieksekusi.`
           : `[HASIL EKSEKUSI TOOL]:
-Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika diperlukan ekstraksi lanjutan (seperti browse_web_page, inspect_image, prepare_image_display, search_memory, atau execute_python_code), panggil fungsi terkait.`);
+Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika diperlukan ekstraksi lanjutan (seperti browse_web_page, inspect_image, prepare_image_display, search_memory, atau execute_python_code), panggil fungsi terkait.`));
 
         conversationChain.push({
           role: 'user',
@@ -31927,6 +31976,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const hasExecutedImageSearch = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'search_images');
         const hasExecutedImageInspect = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'inspect_image');
         const hasExecutedImagePrepare = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'prepare_image_display');
+        const hasGroundedSearchSources = Boolean(webSources && webSources.length > 0);
         const isMidImagePipeline = (hasExecutedImageSearch || hasExecutedImageInspect) && !hasExecutedImagePrepare;
         const isLastRound = circuitBreakerTripped || hasExecutedImagePrepare || (!isMidImagePipeline && (hasBrowsedWeb || hasExecutedVideo || hasExecutedSourceSummary)) || (autonomousRound >= maxAutonomousRounds - 1);
         const currentDateObj = new Date();
@@ -31935,16 +31985,19 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const roundInstruction = isMidImagePipeline
           ? `[ALUR VERIFIKASI VISUAL AKTIF]:
 ${hasExecutedImageSearch ? '1. Pilih 3–6 image_id yang paling cocok secara subjek dari daftar kandidat di atas, lalu panggil inspect_image({"image_id": "..."}) terlebih dahulu (apabila native tool tidak tersedia, keluarkan blok <tool_call>{"name":"inspect_image","arguments":{"image_id":"..."}}</tool_call>).' : '1. Untuk seluruh kandidat yang lolos verifikasi (accessible: true dan usage_status: "allowed"), panggil prepare_image_display({"image_ids": [...], "layout": "collage"|"gallery", "placement": "after_intro"|"within_section", "alt_texts": [...]}) (atau blok <tool_call> yang setara) untuk menyajikan banyak contoh foto sekaligus dalam format kolase. Jika semua kandidat ditolak, jawab langsung pertanyaan pengguna secara faktual tanpa mengarang URL gambar.'}`
+          : ((hasExecutedSearch && !hasGroundedSearchSources && !hasBrowsedWeb && !hasExecutedGrounding && !hasExecutedImagePrepare && !hasExecutedVideo)
+          ? `[INSTRUKSI JAWABAN LANGSUNG]:
+Berikan jawaban akhir yang akurat, objektif, dan langsung menjawab inti persoalan sesuai bahasa pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Jangan menyebutkan catatan tool internal, jangan mengeluh bahwa sumber tidak relevan, dan jangan mengarang URL tautan. Jangan memanggil ulang fungsi search_web dengan kueri yang sama.`
           : ((isLastRound || hasExecutedImagePrepare || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasExecutedGrounding)
           ? `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:
-${circuitBreakerTripped ? 'Eksekusi tool dihentikan karena batas kegagalan jaringan. Berikan jawaban langsung berdasarkan konteks yang tersedia.' : (hasExecutedImagePrepare ? 'MANDAT ANALISIS MATEMATIS & OBJEKTIF MURNI (ZERO PERSONA GIMMICK): Susun jawaban akhir dengan format: (1) Penjelasan pembuka lugas tanpa persona fiktif atau analogi berbelit-belit, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat (seperti klasifikasi persenjataan, struktur sistematis, dan rincian data ala ChatGPT), serta (4) Kredit gambar dan tautan halaman sumber. DILARANG KERAS menggunakan persona khayalan!' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual dalam Bahasa Indonesia berdasarkan korpus bukti penelusuran di atas.')))))}
+${circuitBreakerTripped ? 'Eksekusi tool dihentikan karena batas kegagalan jaringan. Berikan jawaban langsung berdasarkan konteks yang tersedia.' : (hasExecutedImagePrepare ? 'MANDAT ANALISIS MATEMATIS & OBJEKTIF MURNI (ZERO PERSONA GIMMICK): Susun jawaban akhir dengan format: (1) Penjelasan pembuka lugas tanpa persona fiktif atau analogi berbelit-belit, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat (seperti klasifikasi persenjataan, struktur sistematis, dan rincian data ala ChatGPT), serta (4) Kredit gambar dan tautan halaman sumber. DILARANG KERAS menggunakan persona khayalan!' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual sesuai bahasa pertanyaan pengguna berdasarkan korpus bukti penelusuran terverifikasi di atas.')))))}
 
 BATASAN DOMAIN KLAIM:
-1. Hanya cantumkan entitas, nomor versi, metrik, dan tanggal rilis yang tertulis eksplisit di dalam bukti dokumen di atas (tanggal referensi hari ini: ${currentFormattedDate}).
+1. Gunakan entitas, nomor versi, metrik, dan tanggal rilis yang selaras dengan bukti dokumen di atas (tanggal referensi hari ini: ${currentFormattedDate}).
 2. Uraikan rincian teknis secara langsung menggunakan Markdown terstruktur (heading, poin analisis, dan baris baru \\n yang valid bila memakai tabel).
 3. Jangan memanggil ulang fungsi search_web yang sudah dieksekusi.`
           : `[HASIL EKSEKUSI TOOL]:
-Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika diperlukan ekstraksi lanjutan (seperti browse_web_page, inspect_image, prepare_image_display, search_memory, atau execute_python_code), panggil fungsi terkait.`);
+Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika diperlukan ekstraksi lanjutan (seperti browse_web_page, inspect_image, prepare_image_display, search_memory, atau execute_python_code), panggil fungsi terkait.`));
 
         conversationChain.push({
           role: 'user',
@@ -46493,7 +46546,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://doug-tour-penn-exchanges.trycloudflare.com',
+    activeTunnelUrl: 'https://wealth-terry-tours-chemistry.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
