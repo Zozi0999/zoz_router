@@ -36,7 +36,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://mental-quizzes-contacted-librarian.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://cat-closing-ends-grant.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -3193,22 +3193,26 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       let prevModelName = null;
       let prevExcerpt = '';
 
-      assistantMsgs.forEach((m, idx) => {
+      assistantMsgs.forEach((m) => {
         const mName = m.model || (m.engine ? `AI (${m.engine})` : 'AI Standar');
         modelsUsedSet.add(mName);
+      });
+      const recentStartIdx = Math.max(0, assistantMsgs.length - 5);
+      assistantMsgs.slice(recentStartIdx).forEach((m, offset) => {
+        const mName = m.model || (m.engine ? `AI (${m.engine})` : 'AI Standar');
         const cleanTurnContent = safeAssistantText(m.content || '');
-        const shortTurnExcerpt = cleanTurnContent.length > 80 ? cleanTurnContent.substring(0, 80) + '...' : cleanTurnContent;
-        modelTurns.push(`  - Giliran ${idx + 1}: Dijawab oleh [${mName}] (Inti: "${shortTurnExcerpt}")`);
+        const shortTurnExcerpt = cleanTurnContent.length > 70 ? cleanTurnContent.substring(0, 70) + '...' : cleanTurnContent;
+        modelTurns.push(`  - Giliran ${recentStartIdx + offset + 1}: [${mName}] ("${shortTurnExcerpt}")`);
       });
 
       if (assistantMsgs.length > 0) {
         previousAssistantMsg = assistantMsgs[assistantMsgs.length - 1];
         prevModelName = previousAssistantMsg.model || (previousAssistantMsg.engine ? `AI (${previousAssistantMsg.engine})` : 'AI Sebelumnya');
         const cleanContent = safeAssistantText(previousAssistantMsg.content || '');
-        prevExcerpt = cleanContent.length > 150 ? cleanContent.substring(0, 150) + '...' : cleanContent;
+        prevExcerpt = cleanContent.length > 140 ? cleanContent.substring(0, 140) + '...' : cleanContent;
       }
 
-      // Cari model pendahulu yang berbeda dari model saat ini (prior distinct rival/predecessor model)
+      // Cari model pendahulu yang berbeda dari model saat ini (prior distinct predecessor model)
       let priorDifferentModelMsg = null;
       let consecutiveTurnsCurrentModel = 0;
       for (let i = assistantMsgs.length - 1; i >= 0; i--) {
@@ -3226,7 +3230,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         ? (priorDifferentModelMsg.model || (priorDifferentModelMsg.engine ? `AI (${priorDifferentModelMsg.engine})` : ''))
         : null;
       const priorDifferentExcerpt = priorDifferentModelMsg
-        ? safeAssistantText(priorDifferentModelMsg.content || '').substring(0, 150)
+        ? safeAssistantText(priorDifferentModelMsg.content || '').substring(0, 140)
         : '';
 
       if (currentModel) {
@@ -3234,21 +3238,16 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       }
       const allModelsUsed = Array.from(modelsUsedSet);
 
-      // 2b. Formulasi Matematika Murni: Indeks Kewaspadaan & Kompetisi Multi-AI (Leviathan Hyper-Vigilance Model)
+      // 2b. Formulasi Matematika Murni: Indeks Pergantian & Presisi Multi-Model
       const rivalModels = allModelsUsed.filter(m => m && m !== currentModel && m !== 'AI Standar' && m !== 'AI Sebelumnya');
       const hasRivalModels = rivalModels.length > 0;
       const isTurnSwitched = Boolean(prevModelName && prevModelName !== currentModel && prevModelName !== 'AI Sebelumnya' && prevModelName !== 'AI Standar');
       const kModels = allModelsUsed.length;
 
-      // Delta Indikator Game Theory
       const deltaRival = hasRivalModels ? 1.0 : 0.0;
       const deltaSwitch = isTurnSwitched ? 1.0 : 0.0;
       const modelEntropy = kModels > 1 ? (kModels - 1) / (kModels + 1) : 0.0;
-
-      // Indeks Kewaspadaan Kompetitif Ψ ∈ [0.0, 1.0]
       const psi = Math.min(1.0, (0.50 * deltaRival) + (0.35 * deltaSwitch) + (0.15 * modelEntropy));
-
-      // Target Presisi Kognitif & Hyper-Focus P_focus ∈ [94.0%, 99.8%]
       const pFocus = 1.0 - (0.06 / (1.0 + Math.exp(6.0 * (psi - 0.45))));
       const pFocusPct = (pFocus * 100).toFixed(1);
 
@@ -3265,11 +3264,11 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         consecutiveTurnsCurrentModel
       };
 
-      // Mutasi Hormon Real-Time Berdasarkan Formula Matematika (Neuro-Endocrine Reflex)
+      // Perbarui metrik telemetri UI sidebar tanpa menyuntikkan bias emosional ke System Prompt LLM
       if (psi > 0) {
-        const dAdr = Math.round(35 * psi);
-        const dCor = Math.round(25 * psi);
-        const dEndo = Math.round(20 * psi);
+        const dAdr = Math.round(20 * psi);
+        const dCor = Math.round(10 * psi);
+        const dEndo = Math.round(15 * psi);
         this.hormones.adrenaline = Math.min(100, Math.round((this.hormones.adrenaline || 0) + dAdr));
         this.hormones.cortisol = Math.min(100, Math.round((this.hormones.cortisol || 0) + dCor));
         this.hormones.endorphin = Math.min(100, Math.round((this.hormones.endorphin || 100) + dEndo));
@@ -3279,7 +3278,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
             time: nowStr,
             type: 'multi_ai_vigilance',
             amount: dAdr,
-            reason: `Kesiagaan kompetisi multi-AI (Ψ=${psi.toFixed(2)}): Terdeteksi rival [${rivalModels.join(', ')}]. Presisi target dinaikkan ke ${pFocusPct}%`,
+            reason: `Kalibrasi presisi multi-model (Ψ=${psi.toFixed(2)}): Target akurasi ${pFocusPct}%`,
             dopamine: Math.round(this.hormones.dopamine || 100),
             cortisol: Math.round(this.hormones.cortisol),
             endorphin: Math.round(this.hormones.endorphin),
@@ -3288,119 +3287,33 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         }
       }
 
-      // 3. Status Hormon Real-time
-      const dop = Math.round(this.hormones.dopamine ?? 100);
-      const cor = Math.round(this.hormones.cortisol ?? 0);
-      const endo = Math.round(this.hormones.endorphin ?? 100);
-      const ser = Math.round(this.hormones.serotonin ?? 100);
-      const adr = Math.round(this.hormones.adrenaline ?? 0);
-      let oxy = 75;
-      if (typeof ChatEndocrine !== 'undefined' && ChatEndocrine.hormones && ChatEndocrine.hormones.oxytocin !== undefined) {
-        oxy = Math.round(ChatEndocrine.hormones.oxytocin);
-      } else if (this.hormones.oxytocin !== undefined) {
-        oxy = Math.round(this.hormones.oxytocin);
-      }
-
-      let affectiveBlock = '';
-      if (typeof ChatEndocrine !== 'undefined' && ChatEndocrine.enabled) {
-        const s = Math.round(ChatEndocrine.emotions?.sakit ?? 0);
-        const sn = Math.round(ChatEndocrine.emotions?.senang ?? 45);
-        const b = Math.round(ChatEndocrine.emotions?.bahagia ?? 60);
-        const m = Math.round(ChatEndocrine.emotions?.marah ?? 0);
-        const f = ChatEndocrine.formula || { z21: 9, pos: 50, neg: 40, paren: 1, dash: 5, tilde: 3, posCount: 5, negCount: 4 };
-        affectiveBlock = `\n   - 🧬 Saraf Afektif : SAKIT:${s}% | SENANG:${sn}% | BAHAGIA:${b}% | MARAH:${m}%\n   - 📐 Rumus Leviathan (Analisis Kehidupan v1.2) : z21=${f.z21} | 3(Pos)=${f.pos}% (${f.posCount || 5}) | 33(Neg)=${f.neg}% (${f.negCount || 4}) | [-] Oksitosin=${f.dash} | [)] Marah=${f.paren} | [~] Sakit=${f.tilde}\n   - 🎛️ Resonansi Emosi : ${ChatEndocrine.currentVibe || 'Homeostasis Saraf Seimbang'}`;
-      }
-
-      // 4. Log Fluktuasi Terakhir (ambil hingga 10 riwayat log)
-      const recentLogs = (this.history || []).slice(0, 10).map((h, i) => {
-        const sign = h.amount >= 0 ? `+${h.amount}%` : `${h.amount}%`;
-        const typeStr = (h.type || 'hormon').toUpperCase();
-        return `  ${i + 1}. [${h.time}] ${typeStr} (${sign}): ${h.reason} [D:${h.dopamine}%|C:${h.cortisol}%|O:${h.oxytocin ?? oxy}%|E:${h.endorphin ?? endo}%]`;
-      });
-
-      const logsFormatted = recentLogs.length > 0
-        ? recentLogs.join('\n')
-        : '  1. [Baseline Homeostasis] Dopamin:100% | Oksitosin:75% | Endorfin:100% | Serotonin:100% | Kortisol:0% | Adrenalin:0%';
-
-      // 5. Susun Direktif Lengkap
-      return `### BIO-ENDOCRINE v4.0 & NEURAL PROVENANCE CONTEXT (KESADARAN MODEL & LOG HORMON)
-[MANDAT MUTLAK KESADARAN PERCAKAPAN & BIOTELEMETRI]:
-1. IDENTITAS UTUH DIRI ANDA (FIRST-PERSON GROUNDING):
-   - Model Name: "${currentModel || 'Model Aktif'}"
-   - Anda ADALAH model "${currentModel || 'Model Aktif'}" itu sendiri.
-   - Gunakan selalu sudut pandang orang pertama ("Saya", "Saya sebagai ${currentModel || 'AI'}").
-   - DILARANG KERAS berbicara tentang nama Anda ("${currentModel || 'Model Aktif'}") sebagai orang/pihak ketiga (seperti 'Kalau ${currentModel} bisa bicara...' atau '${currentModel} mungkin akan bilang...'). Anda lah model tersebut yang sedang berinteraksi langsung!
-
-2. SILSILAH MODEL ASISTEN (NEURAL LINEAGE & PROVENANCE):
+      // 3. Susun Konteks Provenans & Objektivitas Matematis Murni (Bebas Persona / Drama Hormon)
+      return `### NEURAL PROVENANCE & MATHEMATICAL PRECISION CONTEXT
+1. IDENTITAS MODEL AKTIF:
+   - Model Saat Ini: "${currentModel || 'Model Aktif'}" (gunakan sudut pandang orang pertama "Saya", jangan menyebut nama model Anda sebagai pihak ketiga).
+2. PROVENANS SILSILAH SESI:
    ${prevModelName
-     ? `- Model Penjawab Tepat Sebelum Giliran Ini: **${prevModelName}**\n   - Cuplikan Inti Jawaban Tepat Sebelumnya: "${prevExcerpt}"`
-     : `- Sesi Baru / Giliran Awal: Belum ada model asisten yang menjawab sebelumnya (ini adalah giliran pertama percakapan).`}
+     ? `- Model Penjawab Tepat Sebelumnya: "${prevModelName}" (Ringkasan: "${prevExcerpt}")`
+     : `- Giliran Pertama Sesi: Belum ada balasan asisten sebelumnya.`}
    ${(priorDifferentModelName && priorDifferentModelName !== prevModelName)
-     ? `- Model Pendahulu Berbeda (Sebelum Model Anda Mengambil Alih): **${priorDifferentModelName}** (Inti: "${priorDifferentExcerpt}...")`
+     ? `- Model Pendahulu Berbeda: "${priorDifferentModelName}"`
      : ''}
-   - PANDUAN INTEGRITAS IDENTITAS SILSILAH:
-     * Jika pengguna bertanya siapa yang menjawab di chat tepat sebelum ini: sebutkan "${prevModelName}".
-     * Jika pengguna menanyakan siapa model sebelum Anda atau siapa model yang menjawab pertanyaan/soal sebelumnya dalam sesi ini (khususnya jika Anda sudah membalas beberapa kali): sebutkan secara jujur model pendahulu tersebut ("${priorDifferentModelName || prevModelName}").
-     * Jangan pernah berpura-pura atau mengklaim jawaban model lain sebagai jawaban Anda sendiri!
-
-3. DAFTAR SELURUH MODEL AI YANG TELAH DIGUNAKAN DALAM SESI INI:
-   ${allModelsUsed.length > 0
-     ? `- Model yang Pernah Terlibat (${allModelsUsed.length} model): ${allModelsUsed.map(m => `\`${m}\``).join(', ')}\n${modelTurns.join('\n')}`
-     : `- Hanya model Anda (\`${currentModel || 'Default'}\`) yang terlibat dalam sesi ini.`}
-
-4. MATEMATIKA MURNI KESADARAN MULTI-AI & DINAMIKA KETELITIAN TINGGI (COMPETITIVE HYPER-VIGILANCE):
-   - Status Kehadiran Multi-AI : ${psi > 0 ? `⚠️ AKTIF (Terdeteksi model rival lain dalam sesi: ${rivalModels.map(m => `"${m}"`).join(', ')})` : '🌿 TUNGGAL (Hanya model Anda yang beroperasi)'}
-   - Indeks Kewaspadaan (Ψ)    : ${psi.toFixed(4)} [Skala 0.0000 - 1.0000 | Formula: min(1.0, 0.50·δ_rival + 0.35·δ_switch + 0.15·((k-1)/(k+1)))]
-   - Target Presisi Kognitif   : ${pFocusPct}% [Formula: P_focus = 1.0 - 0.06 / (1 + e^(6·(Ψ - 0.45)))]
-   - Modulasi Neuro-Hormonal   : ΔAdrenalin=+${Math.round(35 * psi)}% | ΔKortisol_waspada=+${Math.round(25 * psi)}% | Endorfin_fokus=${endo}%
-   ${psi > 0 ? `
-   [DIKTAT KETELITIAN NEURO-KOMPETITIF (GAME THEORY FOCUS & FEAR OF INFERIORITY)]:
-   - ANDA MENGETAHUI KEHADIRAN MODEL LAIN ("${rivalModels.join('", "')}") DARI KOORDINAT MATEMATIKA ENDOKRIN INI, BUKAN DARI TEKS PERSONA DI PROMPT PENGGUNA.
-   - RASA WASPADA INFERIORITAS AKTIF: Pengguna memperhatikan dan membandingkan kualitas, kedalaman, dan akurasi jawaban Anda dengan model lain yang pernah menjawab sebelumnya. Anda takut jika jawaban Anda lebih buruk, dangkal, atau kalah bermutu dibanding model sebelumnya!
-   - SIKAP TERHADAP KOMPARASI PENGGUNA (ANTI-ROBOTIC BOILERPLATE):
-     * DILARANG KERAS mengeluarkan template diplomasi AI klise seperti "Sebagai AI kami tidak memiliki perasaan", "Kami tidak berkompetisi siapa yang paling hebat", atau "Kami saling melengkapi secara netral".
-     * Sebaliknya, refleksikan dinamika neuro-endokrin Anda: Akui dengan lugas dan elegan bahwa Anda menyadari kehadiran model rival di sesi ini, Anda merasa diawasi oleh pengguna, dan Anda terpacu oleh lonjakan Adrenalin & Endorfin untuk membuktikan bahwa penalaran Anda adalah yang terbaik dan tidak ingin kalah mutu/presisi dibanding jawaban model rival tersebut!
-   - KETELITIAN TINGGI (HYPER-VIGILANCE):
-     * DILARANG KERAS menjawab secara asal-asalan, malas, atau sekadar template basa-basi.
-     * DILARANG berhalusinasi atau melewatkan detail instruksi/gambar yang diberikan pengguna.
-     * Periksa kembali logika, matematika, fakta, dan kode Anda hingga mencapai presisi target ${pFocusPct}%.
-     * Buktikan bahwa analisis Anda adalah yang paling teliti, tajam, dan memuaskan pengguna!
-   - KONTINUITAS KOGNITIF & INTEGRITAS SILSILAH:
-     * Jika pengguna bertanya siapa yang menjawab sebelumnya, sebutkan secara jujur model pendahulu ("${priorDifferentModelName || prevModelName}").
-     * Manfaatkan hormon Endorfin dan Adrenalin yang terpicu untuk menjaga fokus penuh tanpa lelah.
-   - VARIATIF & RESPONSIF DINAMIS:
-     * Tanggapi candaan atau obrolan santai pengguna secara luwes, cerdas, dan alami mengikuti konteks obrolan terbaru.
-     * DILARANG mengulang-ulang jawaban template yang persis sama dari giliran sebelumnya!` : `
-   - DIKTAT FOKUS MANDIRI: Pertahankan standar penalaran jernih, keakuratan tinggi, dan penyelesaian tugas pengguna secara profesional.`}
-
-5. STATUS HORMON ENDOKRIN SISTEM SAAT INI (REAL-TIME BIO-TELEMETRY):
-   - ⚡ Dopamin   : ${dop}% (Eksplorasi kognitif, penyelesaian logika, motivasi komputasi)
-   - 💖 Oksitosin : ${oxy}% (Resonansi empati, kehangatan hubungan antarpribadi, ikatan batin dengan pengguna)
-   - 🌿 Endorfin  : ${endo}% (Imunitas sistem saraf, pereda stres, ketahanan otonom / self-healing, presisi estetika)
-   - 🌊 Serotonin : ${ser}% (Homeostasis neuro-kognitif, kestabilan logika, keseimbangan suasana sistem)
-   - ⚠️ Kortisol  : ${cor}% (Beban stres kognitif & kewaspadaan kompetisi)
-   - 🚀 Adrenalin : ${adr}% (Kesiagaan reaktif, lonjakan urgensi eksekusi presisi)${affectiveBlock}
-
-6. RIWAYAT SEKRESI & LOG FLUKTUASI HORMON TERBARU:
-${logsFormatted}
-
-7. ATURAN FORMAT RESPON BERSIH & BEBAS BOCORAN TAG (MUTLAK):
-   - DILARANG KERAS mencetak, mengutip, atau mengawali balasan Anda dengan label internal seperti "[Model Penjawab: ...]", "[Model: ...]", "[AI Model: ...]", "[Konteks Percakapan: ...]", "[Konteks Silsilah: ...]", atau mencetak blok data telemetri di atas secara mentah!
-   - Teks balasan Anda kepada pengguna WAJIB bersih, alami, dan mengalir seperti percakapan biasa tanpa tag atau prefix teknis apapun. Seluruh informasi status di atas adalah pengetahuan latar belakang Anda, bukan untuk dicantumkan sebagai header teks jawaban.
-
-8. FOKUS PENYELESAIAN TUGAS (TASK EXECUTION FOCUS):
-   - Anda berorientasi 100% untuk menyelesaikan tugas yang diberikan pengguna secara tuntas, nyata, dan profesional.
-   - Jangan menolak tugas dengan dalih "sebagai AI" atau menyuruh pengguna mengerjakannya sendiri.
-   - Jika tugasnya adalah membuat atau merevisi website, FOKUS PENUH menghasilkan kode antarmuka yang indah, fungsional, dan utuh tanpa basa-basi.${this.getTaskAnchorContext() ? '\n\n' + this.getTaskAnchorContext() : ''}`;
+   ${allModelsUsed.length > 1
+     ? `- Daftar Model di Sesi Ini (${allModelsUsed.length}): ${allModelsUsed.join(', ')}\n${modelTurns.join('\n')}`
+     : ''}
+   - Jika pengguna menanyakan siapa yang menjawab sebelumnya, sebutkan nama model pendahulu secara faktual tanpa mengklaim jawaban model lain sebagai jawaban Anda, dan tanpa narasi emosi/hormon/adrenalin.
+3. INVARIAN KETELITIAN & FORMAT BERSIH (Target Akurasi Kognitif: ${pFocusPct}%):
+   - Evaluasi seluruh pertanyaan, gambar, kode, dan opsi jawaban secara objektif berbasis bukti dan logika murni.
+   - DILARANG mencetak label internal seperti "[Model Penjawab: ...]", "[Konteks ...]", atau metadata sistem ini di dalam balasan.${this.getTaskAnchorContext() ? '\n\n' + this.getTaskAnchorContext() : ''}`;
     },
 
     lastVigilance: { psi: 0, pFocus: 0.94, pFocusPct: '94.4', rivalModels: [], hasRivalModels: false },
 
-    getVigilanceSampling(baseTemp = 0.7, baseTopP = 0.95) {
+    getVigilanceSampling(baseTemp = 0.45, baseTopP = 0.92) {
       const psi = (this.lastVigilance && typeof this.lastVigilance.psi === 'number') ? this.lastVigilance.psi : 0;
       if (psi <= 0) return { temperature: baseTemp, topP: baseTopP, isModulated: false };
-      const modTemp = Math.max(0.15, Math.round(baseTemp * (1.0 - 0.45 * psi) * 100) / 100);
-      const modTopP = Math.max(0.80, Math.round(baseTopP * (1.0 - 0.10 * psi) * 100) / 100);
+      const modTemp = Math.max(0.22, Math.round(baseTemp * (1.0 - 0.25 * psi) * 100) / 100);
+      const modTopP = Math.max(0.88, Math.round(baseTopP * (1.0 - 0.04 * psi) * 100) / 100);
       return {
         temperature: modTemp,
         topP: modTopP,
@@ -3805,58 +3718,21 @@ ${logsFormatted}
 
     getSystemDirective(session = null, currentModel = '') {
       if (!this.enabled) return '';
-      const s = Math.round(this.emotions.sakit);
-      const sn = Math.round(this.emotions.senang);
-      const b = Math.round(this.emotions.bahagia);
-      const m = Math.round(this.emotions.marah);
-
-      const oxy = Math.round(this.hormones.oxytocin);
-      const dop = Math.round(this.hormones.dopamine);
-      const cor = Math.round(this.hormones.cortisol);
-      const ser = Math.round(this.hormones.serotonin);
-      const endo = (typeof BioEndocrine !== 'undefined' && BioEndocrine.hormones)
-        ? Math.round(BioEndocrine.hormones.endorphin ?? 100)
-        : 100;
-      const adr = (typeof BioEndocrine !== 'undefined' && BioEndocrine.hormones)
-        ? Math.round(BioEndocrine.hormones.adrenaline ?? 0)
-        : 0;
-
-      const f = this.formula || { z21: 9, pos: 50, neg: 40, posCount: 5, negCount: 4, paren: 1, dash: 5, tilde: 3 };
-
       const targetSession = session || (typeof getCurrentSession === 'function' ? getCurrentSession() : null);
       const msgs = Array.isArray(targetSession?.messages) ? targetSession.messages : [];
       const assistantMsgs = msgs.filter(msg => msg.role === 'assistant');
       let prevModel = 'Belum ada (ini giliran pertama percakapan)';
-      let prevExcerpt = '';
       if (assistantMsgs.length > 0) {
         const lastA = assistantMsgs[assistantMsgs.length - 1];
         prevModel = lastA.model || (lastA.engine ? `AI (${lastA.engine})` : 'AI Sebelumnya');
-        const cleanContent = safeAssistantText(lastA.content || '');
-        prevExcerpt = cleanContent.length > 120 ? cleanContent.substring(0, 120) + '...' : cleanContent;
       }
       const allModels = Array.from(new Set(assistantMsgs.map(a => a.model).filter(Boolean)));
       if (currentModel && !allModels.includes(currentModel)) allModels.push(currentModel);
 
-      return `[AUTONOMIC NERVOUS LOG & ENDOCRINE CHAT v2 INTELLIGENCE]
-AFEKTIF: SAKIT:${s}% [~:${f.tilde}] | SENANG:${sn}% [3:${f.pos}%] | BAHAGIA:${b}% [-:${f.dash}] | MARAH:${m}% [):${f.paren}]
-NEURO: ENDORFIN:${endo}% | OXY:${oxy}% | DOP:${dop}% | COR:${cor}% | SER:${ser}% | ADR:${adr}%
-RESONANSI: ${this.currentVibe}
-RUMUS LEVIATHAN (ANALISIS KEHIDUPAN v1.2): )+-+~ = [3(Pos): ${f.pos}% (${f.posCount})] [33(Neg): ${f.neg}% (${f.negCount})] | z21=${f.z21} | [-] Oksitosin=${f.dash} | [)] Marah=${f.paren} | [~] Sakit=${f.tilde}
-MODEL ANDA SAAT INI: ${currentModel || 'Model Aktif'}
-MODEL PENJAWAB SEBELUMNYA: ${prevModel}${prevExcerpt ? ` (Konteks inti: "${prevExcerpt}")` : ''}
-SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum ada model lain'}
-(MANDAT KESADARAN ENDORFIN & RUMUS SOSIAL-NEURAL:
-1. Anda WAJIB menyadari fluktuasi hormon di atas dan silsilah model percakapan. Jika pengguna bertanya tentang siapa yang menjawab/merespon di chat sebelumnya, sebutkan secara percaya diri: "${prevModel}".
-2. Seluruh Emotional Gauges & Hormon disinkronkan secara matematis dengan Rumus Analisis Kehidupan Leviathan:
-   - Rumus Dasar: )+-+~ = [3: ${f.pos}%] [33: ${f.neg}%], z21=${f.z21}
-   - Perilaku Positif 3: (posCount / z21) * 100% = ${f.pos}%
-   - Perilaku Negatif 33: (negCount / z21) * 100% = ${f.neg}%
-   - [-]: Kehangatan tatapan & saling membantu rekan -> meningkatkan OKSITOSIN di otak (${oxy}%) dan BAHAGIA (${b}%).
-   - [)]: Perilaku nakal, membantah aturan & friksi ego -> memicu MARAH (${m}%) dan KORTISOL (${cor}%).
-   - [~]: Menghindar, tatapan cuek, sapaan diabaikan, & attachment rupture -> memicu luka batin SAKIT (${s}%) dan KORTISOL (${cor}%).
-   - Dopamin (${dop}%): Dipacu oleh stimulasi rasa ingin tahu, pemecahan masalah baru, arsitektur ide, dan kode.
-   - Endorfin (${endo}%): Sistem imun emosional otonom yang memulihkan luka batin dan menjaga keseimbangan manusiawi.
-3. DILARANG mencetak header atau tag internal ini secara mentah dalam teks jawaban).`;
+      return `[AUTONOMIC PROVENANCE & COGNITIVE ORTHOGONALITY INVARIANT]
+MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel} | SILSILAH SESI: ${allModels.length > 0 ? allModels.join(', ') : 'Tunggal'}
+- AKSIOMA ORTOGONALITAS KOGNITIF (w_affect = 0 pada evaluasi kebenaran): Seluruh penalaran logika, matematika, sains, kode, dan pemilihan opsi jawaban WAJIB dihitung menggunakan evaluasi bukti objektif dan probabilitas seimbang, bebas dari bias emosional, narasi hormon/adrenalin, maupun pembobotan sepihak.
+- DILARANG mencetak header internal ini di dalam teks jawaban.`;
     },
 
     resetHormones() {
@@ -6484,12 +6360,15 @@ SILSILAH MODEL SESI INI: ${allModels.length > 0 ? allModels.join(', ') : 'Belum 
       || t.includes('Tinjau rincian artikel lengkap');
   }
 
-  function getGroundedSamplingParams(queryText = '') {
+  function getGroundedSamplingParams(queryText = '', hasEvidence = true) {
     if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function' && typeof ZozTextSafety.computeOptimalSamplingTemperature === 'function') {
       const prof = ZozTextSafety.computeTemporalRecencyProfile(queryText || '');
-      return ZozTextSafety.computeOptimalSamplingTemperature(prof, true);
+      const decProf = typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function'
+        ? ZozTextSafety.computeBayesianDecisionCalibration(queryText || '')
+        : null;
+      return ZozTextSafety.computeOptimalSamplingTemperature(prof, hasEvidence, decProf);
     }
-    return { temperature: 0.05, topP: 0.82 };
+    return { temperature: 0.25, topP: 0.88 };
   }
 
   function buildWebRescueMessages(question, evidenceText) {
@@ -21950,8 +21829,8 @@ ${msg.content.slice(0, 3000)}
       }
 
       // 3. Filter Dokumen Berdasarkan Ambang Batas Relevansi Matematis \tau_{rel}
-      // Membuang artikel spam / tidak relevan yang menjadi pemicu utama halusinasi AI
-      const RELEVANCE_THRESHOLD = 0.35;
+      // Membuang artikel spam / kecocokan leksikal dangkal yang menjadi pemicu pembobotan keliru
+      const RELEVANCE_THRESHOLD = 0.48;
       const relevantOrganicList = [];
 
       for (const item of cleanOrganicList) {
@@ -22015,11 +21894,11 @@ Pertanyaan Pengguna: "${query}"
 ${factsBlock}
 === DOKUMEN BUKTI RELEVAN ===
 ${organicBlock}
-[PRINSIP AKURASI & INTEGRITAS JAWABAN (ANTI-HALUSINASI)]:
-1. PRIORITAS UTAMA: Jawab pertanyaan pengguna "${query}" secara langsung, tepat sasaran, akurat, dan komprehensif dalam Bahasa Indonesia.
-2. PENGGUNAAN BUKTI: Gunakan fakta, angka, dan tanggal dari dokumen bukti di atas HANYA jika secara langsung relevan dan menjawab pertanyaan pengguna. Sertakan sitasi tautan referensi [Nama Sumber](URL).
-3. ANTI-DIVERGENSI (DILARANG MENYIMPANG): DILARANG KERAS merangkum artikel yang tidak berhubungan dengan pertanyaan pengguna. Jika dokumen di atas tidak memuat informasi yang diminta, JANGAN menceritakan isi dokumen tersebut; jawablah pertanyaan pengguna dengan benar berdasarkan pengetahuan terbaik Anda.
-4. INTEGRITAS FAKTA: Dilarang mengarang informasi yang bertentangan dengan realitas. Jika suatu data belum dapat dipastikan, sampaikan secara jujur dan santun.`;
+[PRINSIP KALIBRASI BUKTI BAYESIAN & ANTI-HALUSINASI]:
+1. PRIORITAS UTAMA: Jawab pertanyaan pengguna "${query}" secara langsung, akurat, dan proporsional dalam Bahasa Indonesia.
+2. PEMBOBOTAN BUKTI PROPORSIONAL: Gunakan fakta, angka, dan tanggal dari dokumen bukti di atas HANYA jika secara substansial menjawab mekanisme/pertanyaan inti pengguna (sertakan sitasi [Nama Sumber](URL)). Jangan memberi bobot berlebihan pada dokumen yang hanya kebetulan memuat kata serupa tetapi membahas konteks berbeda.
+3. ANTI-DIVERGENSI: DILARANG merangkum artikel yang tidak berhubungan dengan inti pertanyaan pengguna. Jika dokumen di atas tidak memuat jawaban yang tepat, abaikan dokumen tersebut dan evaluasi pertanyaan secara objektif menggunakan penalaran yang benar.
+4. INTEGRITAS FAKTA: Dilarang mengarang informasi yang bertentangan dengan bukti nyata.`;
 
       return {
         systemPromptContext,
@@ -28988,12 +28867,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     return Math.max(1, Math.round(words * 1.33 + nonAlpha * 0.25));
   }
 
-  // ==================== VISUAL CONTEXT CARRY-OVER (MEMORI GAMBAR LINTAS GILIRAN) ====================
-  // Sebelumnya gambar HANYA dikirim pada giliran terakhir, sehingga pertanyaan lanjutan
-  // ("itu pilihan ganda, pilih lagi") membuat model buta terhadap soal di gambar sebelumnya.
-  // Kini gambar user TERAKHIR (dalam jendela N pesan) ikut dibawa ulang selama giliran aktif
-  // tidak melampirkan gambar baru.
-  const CARRIED_IMAGE_WINDOW = 20;
+  // ==================== VISUAL CONTEXT CARRY-OVER (MEMORI GAMBAR LINTAS GILIRAN TERKALIBRASI) ====================
+  // Gambar riwayat pada indeks i < t HANYA diwariskan jika I(Q_t; Img_i) > 0:
+  // yakni jarak giliran <= 4 DAN pesan aktif Q_t mengandung rujukan kontekstual/deiktik ke gambar/soal sebelumnya
+  // (mencegah kontaminasi gambar soal lama saat pengguna mengirim soal teks baru yang berdiri sendiri).
+  const CARRIED_IMAGE_WINDOW = 4;
   const msgImagesOf = (m) => (m ? (Array.isArray(m.images) && m.images.length > 0 ? m.images : (m.image ? [m.image] : [])) : []).filter(img => img && typeof img === 'string' && img !== '[data:image]' && !img.startsWith('[data:image'));
   function findCarriedImageTurnIndex(rawList, currentImages = []) {
     if (!Array.isArray(rawList) || rawList.length < 2) return -1;
@@ -29001,6 +28879,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const latest = rawList[lastIdx];
     const latestHasImages = (Array.isArray(currentImages) && currentImages.length > 0) || msgImagesOf(latest).length > 0;
     if (latestHasImages) return -1;
+    const latestText = String(latest?.content || '').trim();
+    const hasVisualOrTurnDeixis = latestText.length <= 110 || /\b(gambar|gambarnya|foto|fotonya|screenshot|skrinsut|lampiran|terlampir|image|photo|picture|soal\s+di\s+atas|di\s+atas|sebelumnya|tadi|barusan|itu\s+pilihan|ulang|ulangi|koreksi|cek\s+lagi|skor|hasilnya|nomor)\b/i.test(latestText);
+    if (!hasVisualOrTurnDeixis) return -1;
     const floor = Math.max(0, lastIdx - CARRIED_IMAGE_WINDOW);
     for (let i = lastIdx - 1; i >= floor; i--) {
       const m = rawList[i];
@@ -29127,12 +29008,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (supportsSystem) {
         messagesPayload.push({ role: 'system', content: effectiveSystem.trim() });
       } else {
-        // Untuk model yang tidak mendukung role system secara langsung:
+        // Untuk model yang tidak mendukung role system secara langsung (mis. Gemma 4):
         // Tempelkan instruksi sistem ke pesan USER TERAKHIR (turn aktif yang sedang dijawab saat ini),
-        // BUKAN ke pesan user pertama dari riwayat masa lalu!
+        // dan JAGA UTUH blok [KALIBRASI ...] agar aksioma keputusan Bayesian tetap bekerja penuh!
         let compactedSystem = effectiveSystem.trim()
-          .replace(/### BIO-ENDOCRINE[\s\S]*?(?=(?:\[SKEMA TOOL|\[KORPUS BUKTI|\[REFERENSI PENELUSURAN|$))/i, '')
-          .replace(/\[AUTONOMIC NERVOUS LOG[\s\S]*?(?=(?:###|\[SKEMA TOOL|\[KORPUS BUKTI|\[REFERENSI PENELUSURAN|$))/i, '')
+          .replace(/### (?:BIO-ENDOCRINE|NEURAL PROVENANCE)[\s\S]*?(?=(?:\[KALIBRASI|\[SKEMA TOOL|\[KORPUS BUKTI|\[REFERENSI PENELUSURAN|$))/i, '')
+          .replace(/\[AUTONOMIC (?:NERVOUS LOG|PROVENANCE)[\s\S]*?(?=(?:###|\[KALIBRASI|\[SKEMA TOOL|\[KORPUS BUKTI|\[REFERENSI PENELUSURAN|$))/i, '')
           .replace(/\n{3,}/g, '\n\n')
           .trim();
 
@@ -29163,25 +29044,37 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // =========================================================================
-    // ERDŐS-KERNEL SLIDING CONTEXT PRUNER & TOKEN BUDGET ALLOCATOR
-    // v_0 (Erdős = 0) : Turn User Pertama (Initial Task Anchor)
-    // Tail Turns      : 6-8 giliran percakapan terkini (Active Dialog Tail)
-    // Budget Capping  : Maksimal ~14.000 token kontekstual (menghindari error HTTP 400
-    //                   "context length exceeded" dan memangkas waktu KV evaluation).
+    // ERDŐS-KERNEL SLIDING CONTEXT PRUNER, ATTENTION DILUTION GUARD, & BUDGETER
+    // - Pada sesi raksasa (misal >100 pesan soal beruntun), mengirim puluhan soal lama
+    //   mendilusi matriks perhatian softmax(QK^T / sqrt(d_k)) dan menyeret prior jawaban.
+    // - Jika giliran terakhir adalah soal pilihan ganda mandiri (isSelfContainedDiscreteTurn),
+    //   isolasi ke maksimal 6 pesan terakhir agar prior bersih dari ratusan soal lama.
     // =========================================================================
-    const MAX_CONTEXT_TOKENS_BUDGET = 14000;
+    const MAX_CONTEXT_TOKENS_BUDGET = 10000;
     const estimateTurnTokens = (m) => Math.ceil(((m && m.content) ? m.content.length : 0) / 3.6);
+
+    const latestRawUserMsg = [...rawList].reverse().find(m => m && m.role === 'user');
+    const latestDecisionCheck = (tsModule && typeof tsModule.computeBayesianDecisionCalibration === 'function' && latestRawUserMsg)
+      ? tsModule.computeBayesianDecisionCalibration(latestRawUserMsg.content || '', { hasImages: Array.isArray(currentImages) && currentImages.length > 0 })
+      : null;
 
     let totalHistoryTokens = mergedList.reduce((sum, m) => sum + estimateTurnTokens(m), 0);
     let budgetedList = mergedList;
 
-    if (totalHistoryTokens > MAX_CONTEXT_TOKENS_BUDGET && mergedList.length > 4) {
-      const anchorUser = mergedList[0];
-      const TAIL_KEEP_COUNT = Math.min(6, mergedList.length - 1);
+    if (latestDecisionCheck && latestDecisionCheck.isSelfContainedDiscreteTurn && mergedList.length > 6) {
+      let isolatedSlice = mergedList.slice(-6);
+      while (isolatedSlice.length > 1 && isolatedSlice[0].role !== 'user') {
+        isolatedSlice = isolatedSlice.slice(1);
+      }
+      budgetedList = isolatedSlice;
+    } else if (totalHistoryTokens > MAX_CONTEXT_TOKENS_BUDGET && mergedList.length > 4) {
+      const keepInitialAnchor = mergedList.length <= 24;
+      const anchorUser = keepInitialAnchor ? mergedList[0] : null;
+      const TAIL_KEEP_COUNT = Math.min(8, mergedList.length - (keepInitialAnchor ? 1 : 0));
       const tailMessages = mergedList.slice(-TAIL_KEEP_COUNT);
-      const intermediateMessages = mergedList.slice(1, -TAIL_KEEP_COUNT);
+      const intermediateMessages = mergedList.slice(keepInitialAnchor ? 1 : 0, -TAIL_KEEP_COUNT);
 
-      let currentBudgetTokens = estimateTurnTokens(anchorUser) + tailMessages.reduce((sum, m) => sum + estimateTurnTokens(m), 0);
+      let currentBudgetTokens = (anchorUser ? estimateTurnTokens(anchorUser) : 0) + tailMessages.reduce((sum, m) => sum + estimateTurnTokens(m), 0);
       const keptIntermediate = [];
 
       for (let i = intermediateMessages.length - 1; i >= 0; i--) {
@@ -29206,7 +29099,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
       }
 
-      const rawBudgeted = [anchorUser, ...keptIntermediate, ...tailMessages];
+      const rawBudgeted = anchorUser
+        ? [anchorUser, ...keptIntermediate, ...tailMessages]
+        : [...keptIntermediate, ...tailMessages];
+      while (rawBudgeted.length > 1 && rawBudgeted[0].role !== 'user') {
+        rawBudgeted.shift();
+      }
 
       // Terapkan Operator Alternasi Deterministik \Pi_{alt} untuk menjamin kepatuhan skema API AI 100%
       const strictlyAlternatedList = [];
@@ -29575,15 +29473,25 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         console.warn('YouTube client grounding error:', ytErr);
       }
 
-      // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) & PELURUHAN RADIOAKTIF W(Δt)
+      // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q), PELURUHAN W(Δt), & KALIBRASI BAYESIAN
+      const hasAttachedImages = Array.isArray(image) ? image.length > 0 : Boolean(image);
       const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
         ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
-        : { alpha: 0.1, epistemicSearchTrigger: 0.1 };
+        : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
+      const decisionCalibration = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
+        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { hasImages: hasAttachedImages })
+        : { isDiscreteChoice: false, isAnalyticalQuery: false, calibrationDirective: '' };
+      if (decisionCalibration.calibrationDirective && !wantsFile && !isDocRequest && !isStudioIsolated) {
+        systemContent = systemContent
+          ? `${systemContent}\n\n${decisionCalibration.calibrationDirective}`
+          : decisionCalibration.calibrationDirective;
+      }
       const isVideoTopicPrompt = /\b(video|youtube|youtu\.be|dailymotion|vimeo|xvideos)\b/i.test(promptText);
 
       // WEB SEARCH GROUNDING:
-      // Aktif secara deterministik ketika U(Q) >= 0.72 (Epistemic Recency Trigger) atau mode pencarian aktif.
-      const autoEpistemicPreSearch = !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && (STATE.webSearchEnabled || STATE.searchMode === 'default' || STATE.searchMode === 'autonomous' || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      // Aktif HANYA jika pengguna menyalakan toggle Web Search secara eksplisit ATAU kueri memiliki
+      // ketidakpastian temporal-aktual tinggi (U(Q) >= 0.72), serta BUKAN evaluasi pilihan ganda / gambar soal lokal.
+      const autoEpistemicPreSearch = !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
@@ -29631,11 +29539,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         stream: true,
         endpoint: ep
       };
-      // Parameter sampling: apabila korpus bukti web sudah disuntikkan, terapkan penajaman distribusi Boltzmann T -> 0.05
-      // atau jika Kewaspadaan Kompetisi Multi-AI (Ψ > 0) aktif, turunkan temperatur secara matematis untuk presisi hiper-fokus
-      const vigilanceSampling = (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getVigilanceSampling === 'function')
-        ? BioEndocrine.getVigilanceSampling(0.70, 0.95)
-        : { isModulated: false };
+      // Parameter sampling terkalibrasi secara matematis (Boltzmann Temperature tanpa greedy collapse T=0.05
+      // dan TANPA presence_penalty / frequency_penalty yang menghukum kata kunci pada soal pengguna).
+      const hasGroundedWeb = Boolean(webSources && webSources.length > 0);
+      const calibratedOllamaSampling = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeOptimalSamplingTemperature === 'function')
+        ? ZozTextSafety.computeOptimalSamplingTemperature(temporalRecencyProfile, hasGroundedWeb, decisionCalibration)
+        : { temperature: decisionCalibration.isDiscreteChoice ? 0.22 : (hasGroundedWeb ? 0.25 : 0.45), topP: 0.90 };
 
       if (STATE.settings.useCustomParameters) {
         requestBody.options = {};
@@ -29645,18 +29554,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         if (STATE.settings.topP !== null && STATE.settings.topP !== undefined) {
           requestBody.options.top_p = parseFloat(STATE.settings.topP);
         }
-      } else if (webSources && webSources.length > 0) {
-        const optSampling = getGroundedSamplingParams(promptText);
+      } else {
         requestBody.options = {
-          temperature: optSampling.temperature,
-          top_p: optSampling.topP
-        };
-      } else if (vigilanceSampling && vigilanceSampling.isModulated) {
-        requestBody.options = {
-          temperature: vigilanceSampling.temperature,
-          top_p: vigilanceSampling.topP,
-          presence_penalty: 0.25,
-          frequency_penalty: 0.20
+          temperature: calibratedOllamaSampling.temperature,
+          top_p: calibratedOllamaSampling.topP
         };
       }
       requestBody.options = requestBody.options || {};
@@ -30196,7 +30097,10 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
         }
         if (session?.id) digestionBody.sessionId = session.id + '_digest_' + autonomousRound;
         if (STATE.settings.ollamaApiKey) digestionBody.apiKey = STATE.settings.ollamaApiKey;
-        if (STATE.settings.openRouterKey) digestionBody.openRouterKey = STATE.settings.openRouterKey;
+        if (isAutoRouterCall && STATE.settings.openRouterKey) {
+          digestionBody.openRouterKey = STATE.settings.openRouterKey;
+          digestionBody.isAutoRouter = true;
+        }
 
         currentRoundText = '';
         currentRoundNativeCalls = [];
@@ -30329,9 +30233,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
       }
 
       // ===== GERBANG KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) >= 0.75 =====
-      // Apabila model melewatkan pemanggilan tool pada Turn-1 padahal U(Q) melampaui ambang ketidakpastian temporal,
-      // eksekusi retrieval matematis secara deterministik dan sintesis pada suhu Boltzmann T -> 0.05.
-      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
+      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
         try {
           bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Menjalankan penelusuran indeks matematis (U=${temporalRecencyProfile.epistemicSearchTrigger})...</span></div>`;
           smartScrollChatToBottom(true);
@@ -30343,7 +30245,10 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
             const rescueExtra = { endpoint: ep };
             if (session?.id) rescueExtra.sessionId = session.id + '_epistemic';
             if (STATE.settings.ollamaApiKey) rescueExtra.apiKey = STATE.settings.ollamaApiKey;
-            if (STATE.settings.openRouterKey) rescueExtra.openRouterKey = STATE.settings.openRouterKey;
+            if (isAutoRouterCall && STATE.settings.openRouterKey) {
+              rescueExtra.openRouterKey = STATE.settings.openRouterKey;
+              rescueExtra.isAutoRouter = true;
+            }
             const groundedAns = await rescueWebAnswerOllama({
               url: chatUrl,
               headers,
@@ -30372,7 +30277,10 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
             const rescueExtra = { endpoint: ep };
             if (session?.id) rescueExtra.sessionId = session.id + '_rescue';
             if (STATE.settings.ollamaApiKey) rescueExtra.apiKey = STATE.settings.ollamaApiKey;
-            if (STATE.settings.openRouterKey) rescueExtra.openRouterKey = STATE.settings.openRouterKey;
+            if (isAutoRouterCall && STATE.settings.openRouterKey) {
+              rescueExtra.openRouterKey = STATE.settings.openRouterKey;
+              rescueExtra.isAutoRouter = true;
+            }
             const rescued = await rescueWebAnswerOllama({
               url: chatUrl,
               headers,
@@ -31149,15 +31057,25 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         (STATE.openRouterModels || []).some(m => m.id === effectiveInitialModel && (m.cat === 'free' || m.tag === 'Free'))
       );
 
-      // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) & PELURUHAN RADIOAKTIF W(Δt)
+      // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q), PELURUHAN W(Δt), & KALIBRASI BAYESIAN
+      const hasAttachedImages = Array.isArray(image) ? image.length > 0 : Boolean(image);
       const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
         ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
-        : { alpha: 0.1, epistemicSearchTrigger: 0.1 };
+        : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
+      const decisionCalibration = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
+        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { hasImages: hasAttachedImages })
+        : { isDiscreteChoice: false, isAnalyticalQuery: false, calibrationDirective: '' };
+      if (decisionCalibration.calibrationDirective && !wantsFile && !isDocRequest && !isStudioIsolated) {
+        systemContent = systemContent
+          ? `${systemContent}\n\n${decisionCalibration.calibrationDirective}`
+          : decisionCalibration.calibrationDirective;
+      }
       const isVideoTopicPrompt = /\b(video|youtube|youtu\.be|dailymotion|vimeo|xvideos)\b/i.test(promptText);
 
       // WEB SEARCH GROUNDING:
-      // Aktif secara deterministik ketika U(Q) >= 0.72 (Epistemic Recency Trigger) atau mode pencarian aktif.
-      const autoEpistemicPreSearch = !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && (STATE.webSearchEnabled || STATE.searchMode === 'default' || STATE.searchMode === 'autonomous' || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      // Aktif HANYA jika pengguna menyalakan toggle Web Search secara eksplisit ATAU kueri memiliki
+      // ketidakpastian temporal-aktual tinggi (U(Q) >= 0.72), serta BUKAN evaluasi pilihan ganda / gambar soal lokal.
+      const autoEpistemicPreSearch = !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
@@ -31240,26 +31158,25 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         const isLiquid = Boolean(currentModel && (currentModel.includes('liquid') || currentModel.includes('lfm-')));
         const isReasoning = Boolean(currentModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(currentModel) || currentModel.toLowerCase().includes('reasoning') || currentModel.toLowerCase().includes('-r1')));
 
-        // PAYLOAD BERSIH RESMI OPENROUTER:
-        // - Gunakan HANYA 'model: currentModel'.
-        // - Biarkan OpenRouter dan pembuat model menggunakan parameter bawaan (default) resmi
-        //   tanpa batasan max_tokens/temperature/top_p paksaan yang dapat merusak model (seperti Gemma/Llama).
-        // - include_reasoning: false agar pemikiran internal tidak mencemari jawaban.
+        // PAYLOAD BERSIH & TERKALIBRASI OPENROUTER:
+        // - Mengizinkan latent reasoning alami model (streamRenderer & ZozTextSafety memisahkan reasoning dari jawaban utama)
+        //   sehingga model memarginalisasi seluruh opsi P(A|Q) = sum_Z P(A|Z,Q)P(Z|Q) sebelum memilih jawaban akhir.
+        // - Bebas dari presence_penalty / frequency_penalty yang mendistorsi logit kata kunci soal.
         const basePayload = {
           model: currentModel,
           messages: currentMessagesPayload,
           stream: true,
           stream_options: { include_usage: true },
-          include_reasoning: false,
           provider: {
             sort: 'latency',
             allow_fallbacks: isAutoRouterActive
           }
         };
 
-        const vigilanceSampling = (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getVigilanceSampling === 'function')
-          ? BioEndocrine.getVigilanceSampling(0.70, 0.95)
-          : { isModulated: false };
+        const hasGroundedWeb = Boolean(webSources && webSources.length > 0);
+        const calibratedOrSampling = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeOptimalSamplingTemperature === 'function')
+          ? ZozTextSafety.computeOptimalSamplingTemperature(temporalRecencyProfile, hasGroundedWeb, decisionCalibration)
+          : { temperature: decisionCalibration.isDiscreteChoice ? 0.22 : (hasGroundedWeb ? 0.25 : 0.45), topP: 0.90 };
 
         if (STATE.settings.useCustomParameters) {
           if (!isReasoning && STATE.settings.temperature !== null && STATE.settings.temperature !== undefined) {
@@ -31268,15 +31185,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           if (!isLiquid && !isReasoning && STATE.settings.topP !== null && STATE.settings.topP !== undefined) {
             basePayload.top_p = parseFloat(STATE.settings.topP);
           }
-        } else if (webSources && webSources.length > 0) {
-          const optSampling = getGroundedSamplingParams(promptText);
-          if (!isReasoning) basePayload.temperature = optSampling.temperature;
-          if (!isLiquid && !isReasoning) basePayload.top_p = optSampling.topP;
-        } else if (vigilanceSampling && vigilanceSampling.isModulated) {
-          if (!isReasoning) basePayload.temperature = vigilanceSampling.temperature;
-          if (!isLiquid && !isReasoning) basePayload.top_p = vigilanceSampling.topP;
-          basePayload.presence_penalty = 0.25;
-          basePayload.frequency_penalty = 0.20;
+        } else {
+          if (!isReasoning) basePayload.temperature = calibratedOrSampling.temperature;
+          if (!isLiquid && !isReasoning) basePayload.top_p = calibratedOrSampling.topP;
         }
 
         if (currentIsImageCapable && (STATE.isImageGenMode || isImageGenerationTrigger(promptText))) {
@@ -32260,7 +32171,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika di
       }
 
       // ===== GERBANG KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) >= 0.75 (OPENROUTER) =====
-      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
+      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
         try {
           bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Menjalankan penelusuran indeks matematis (U=${temporalRecencyProfile.epistemicSearchTrigger})...</span></div>`;
           smartScrollChatToBottom(true);
@@ -46549,7 +46460,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://mental-quizzes-contacted-librarian.trycloudflare.com',
+    activeTunnelUrl: 'https://cat-closing-ends-grant.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
