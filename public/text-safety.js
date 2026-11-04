@@ -2134,20 +2134,21 @@
     const hasQuizCue = /\b(pilihan\s+ganda|multiple\s+choice|which\s+(?:of\s+the\s+following|type|evaluation|response|approach|scenario|situation|technique|opening|statement)|what(?:'s|\s+is)\s+the\s+(?:best|most\s+effective|primary|correct|main)\b|manakah\s+(?:dari|pernyataan|opsi|pilihan|kata\s+kunci|berikut)|berikut\s+adalah\s+.*kecuali|pilih\s+satu|jawaban\s+yang\s+(?:benar|tepat)|true\s+or\s+false|benar\s+atau\s+salah)\b/i.test(lower);
     const hasImageQuizCue = hasImages && (raw.length === 0 || /\b(analisis\s+gambar|jawab|soal|pilihan|opsi|benar|tepat|quiz|ujian|nomor|pertanyaan|singkat)\b/i.test(lower));
 
+    // Bedakan tegas: Kuis Pilihan Ganda (memilih 1 jawaban benar) vs Taksonomi Konsep Murni (mendekonstruksi relasi antar-istilah)
+    const isConceptualTaxonomy = pureListOptionCount >= 2 && !hasQuizCue && !hasImageQuizCue && questionLineIdx === -1;
+
     let optionCount = 0;
     if (labeledOptionLines.length >= 2) {
       optionCount = labeledOptionLines.length;
     } else if (unlabeledOptionCount >= 2) {
       optionCount = unlabeledOptionCount;
-    } else if (pureListOptionCount >= 2) {
-      optionCount = pureListOptionCount;
     } else if (inlineOptionsMatch) {
       optionCount = 4;
     } else if (hasQuizCue || hasImageQuizCue) {
       optionCount = 4;
     }
 
-    const isDiscreteChoice = !isPureMediaGen && (optionCount >= 2 || hasQuizCue || hasImageQuizCue);
+    const isDiscreteChoice = !isPureMediaGen && !isConceptualTaxonomy && (optionCount >= 2 || hasQuizCue || hasImageQuizCue);
 
     // 4. Deteksi rujukan balik percakapan (anaphoric back-reference ke giliran sebelumnya):
     //    Jika TIDAK ada rujukan balik, giliran soal diskrit (baik teks maupun gambar baru!)
@@ -2162,6 +2163,7 @@
     // 5. Deteksi persoalan analitis / logika / matematika / sains / kausalitas umum
     const isAnalyticalQuery = !isTrivialGreeting && !isPureMediaGen && (
       isDiscreteChoice ||
+      isConceptualTaxonomy ||
       hasImages ||
       /\?/.test(raw) ||
       raw.split(/\s+/).length >= 6 ||
@@ -2169,20 +2171,27 @@
     );
 
     // 6. Parameter Matematis Prior Entropi Maksimum & Suhu Boltzmann Terkalibrasi
-    const effectiveK = Math.max(2, optionCount || 4);
+    const effectiveK = Math.max(2, optionCount || (pureListOptionCount || 4));
     const uniformPrior = Number((1 / effectiveK).toFixed(4));
     const maxEntropyBits = Number(Math.log2(effectiveK).toFixed(4));
 
-    // T = 0.15 pada evaluasi diskrit memaksimalkan konsistensi deduksi logis setelah <think> selesai
-    const calibratedTemp = isDiscreteChoice ? 0.15 : (isAnalyticalQuery ? 0.25 : 0.50);
-    const calibratedTopP = isDiscreteChoice ? 0.90 : 0.92;
+    // T = 0.15 pada kuis pilihan ganda, T = 0.20 pada taksonomi konsep relasional, T = 0.25 analitis umum
+    const calibratedTemp = isDiscreteChoice ? 0.15 : (isConceptualTaxonomy ? 0.20 : (isAnalyticalQuery ? 0.25 : 0.50));
+    const calibratedTopP = (isDiscreteChoice || isConceptualTaxonomy) ? 0.90 : 0.92;
 
     const multiImageNote = imageCount > 1
       ? ` Terdapat ${imageCount} gambar terlampir; evaluasi setiap gambar secara berurutan (1 s/d ${imageCount}) tanpa mencampur opsi antar-gambar, lalu tuliskan jawaban akhir bernomor 1 s/d ${imageCount}.`
       : '';
 
     let calibrationDirective = '';
-    if (isDiscreteChoice) {
+    if (isConceptualTaxonomy) {
+      calibrationDirective = `[PROTOKOL TAKSONOMI RELASIONAL & DEKONSTRUKSI ALJABAR MURNI — STATE SPACE H_0 = ${maxEntropyBits} bit]:
+Pengguna memberikan himpunan konsep formal terstruktur (${lines.join(', ')}).
+Awali generasi dengan penalaran matematis/ontologis di dalam blok <think>...</think> (disembunyikan otomatis oleh sistem):
+1. DEKOMPOSISI RUANG KEADAAN (STATE SPACE DECOMPOSITION): Petakan konsep-konsep tersebut ke dalam parameter ortogonal atau matriks interdependensi formal (mis. Social Interdependence Theory Morton Deutsch, Game Theory payoff space, atau relasi aljabar himpunan).
+2. DEFINISI ESENSIAL & BATASAN SYARAT: Definisikan relasi matematis eksplisit (misal: Independent: dU_A/dU_B = 0; Competitive: dU_A * dU_B < 0 / Zero-sum; Cooperative: dU_A * dU_B > 0 / Non-zero-sum Pareto-optimal; Interdependent: U_i = f(s_1, ..., s_n)).
+3. STRUKTURISASI AKHIR: Tutup </think>, lalu sajikan analisis dekonstruksi yang tajam, elegan, dan mendalam dengan matriks atau tabel Markdown komparatif dan poin-poin terstruktur tanpa kalimat filler atau kata-kata keraguan.`;
+    } else if (isDiscreteChoice) {
       calibrationDirective = `[PROTOKOL DEDUKSI PROPOSISIONAL & KALIBRASI BAYESIAN WAJIB — H_0 = ${maxEntropyBits} bit, P_0(H_i) = ${uniformPrior}]:
 Sebelum menulis satu kata pun jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan blok <think>...</think> (meskipun pesan sebelumnya di riwayat tidak menampilkan <think> dan meskipun pengguna meminta jawaban singkat; isi <think> disembunyikan otomatis oleh sistem).${multiImageNote} Di dalam <think>, hitung secara berurutan:
 1. TRANSKRIPSI & POLARITAS OPERATOR LOGIKA: Baca teliti setiap kata pada soal/gambar. Tetapkan polaritas operator:
@@ -2209,6 +2218,7 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
 
     return {
       isDiscreteChoice,
+      isConceptualTaxonomy,
       isSelfContainedDiscreteTurn,
       isAnalyticalQuery,
       imageCount,
@@ -2225,6 +2235,9 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
   }
 
   function computeOptimalSamplingTemperature(recencyProfile, hasGroundedEvidence = false, decisionProfile = null) {
+    if (decisionProfile && decisionProfile.isConceptualTaxonomy) {
+      return { temperature: 0.20, top_p: 0.90, topP: 0.90 };
+    }
     if (decisionProfile && decisionProfile.isDiscreteChoice) {
       return { temperature: 0.15, top_p: 0.90, topP: 0.90 };
     }

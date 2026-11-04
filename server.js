@@ -3966,7 +3966,7 @@ function applyServerSideDecisionCalibration(body, provider = 'ollama') {
     hasImages: imageCount > 0,
     imageCount
   });
-  if (!calib || (!calib.isDiscreteChoice && !calib.isAnalyticalQuery)) return;
+  if (!calib || (!calib.isDiscreteChoice && !calib.isAnalyticalQuery && !calib.isConceptualTaxonomy)) return;
 
   // 1. Kalibrasi suhu Boltzmann & parameter router
   if (provider === 'openrouter') {
@@ -12130,9 +12130,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       }
 
 
-      // Defense-in-depth: Hapus tool jika model gratis, atau filter tool agar hanya fungsi bertipe 'function'
+      // Defense-in-depth: Hapus tool jika model gratis, atau kueri konsep aljabar murni
+      const isPureAlgebraQuery = typeof textSafety.isPureAlgebraOrConceptualQuery === 'function' && textSafety.isPureAlgebraOrConceptualQuery(userPrompt);
       const isFree = body.model && (body.model.includes(':free') || body.model.endsWith('/free') || body.model === 'openrouter/free');
-      if (isFree && Array.isArray(body.tools)) {
+      if ((isFree || isPureAlgebraQuery) && Array.isArray(body.tools)) {
         delete body.tools;
         delete body.tool_choice;
       } else if (Array.isArray(body.tools)) {
