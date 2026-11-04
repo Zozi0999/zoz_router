@@ -6528,14 +6528,15 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return [
         {
           role: 'system',
-          content: `[MANDAT PENALARAN FAKTUIL, ALJABAR & ILMIAH MURNI — UTC ${isoDate}]\n` +
-            `1. Berikan dekonstruksi komprehensif, terstruktur, mendalam, dan langsung menjawab esensi kueri "${String(question || '').slice(0, 500)}" menggunakan penalaran deduktif ilmiah dan basis pengetahuan analitis Anda.\n` +
-            `2. Sajikan perbandingan struktural, matriks, atau tabel Markdown yang elegan.\n` +
-            `3. DILARANG KERAS mengeluhkan ketiadaan indeks atau dokumen, dilarang menolak menjawab, dan dilarang menyebutkan kendala pencarian internal.`
+          content: `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN (ZERO PERSONA - PURE MATHEMATICS ONLY — UTC ${isoDate})\n` +
+            `1. Dekonstruksi seluruh konsep secara formal ke dalam ruang keadaan multi-agen (State-Space S), matriks utilitas, dan kalkulus ketergantungan sosial Morton Deutsch (Independent: dU_i/ds_j = 0; Competitive: Delta U_i . Delta U_j < 0; Cooperative: Delta U_i . Delta U_j > 0; Interdependent: U_i = f(S)).\n` +
+            `2. DILARANG KERAS menggunakan persona kustom, gaya santai, basa-basi, atau analogi fiksi/emosional.\n` +
+            `3. Sajikan tabel Markdown formal yang merangkum dimensi aljabar, kondisi Jacobian, dan ekuilibrium teori permainan.\n` +
+            `4. DILARANG KERAS mengeluhkan ketiadaan indeks atau dokumen, dilarang menolak menjawab, dan dilarang menyebutkan kendala pencarian internal.`
         },
         {
           role: 'user',
-          content: `Kueri: ${String(question || '').slice(0, 1000)}\n\nSajikan analisis dan dekonstruksi komprehensif, presisi, dan mendalam untuk menjawab kueri di atas.`
+          content: `Kueri:\n${String(question || '').slice(0, 1000)}\n\nSajikan analisis matematika murni dan dekonstruksi ruang keadaan formal untuk menjawab kueri di atas.`
         }
       ];
     }
@@ -6612,7 +6613,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const sampling = getGroundedSamplingParams(question);
       const body = {
         model,
-        messages: buildWebRescueMessages(question, evidenceText),
+        messages: buildWebRescueMessages(question, evidenceText, model),
         stream: true,
         ...(extraBody || {})
       };
@@ -29638,17 +29639,35 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     let isUsingLaptopOllamaTunnel = false;
 
     try {
-      let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
-      const canRunAutonomous = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
+      // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q), PELURUHAN W(Δt), & KALIBRASI BAYESIAN
+      const attachedImageCount = Array.isArray(image) ? image.length : (image ? 1 : 0);
+      const hasAttachedImages = attachedImageCount > 0;
+      const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
+        ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
+        : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
+      const decisionCalibration = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
+        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { hasImages: hasAttachedImages, imageCount: attachedImageCount })
+        : { isDiscreteChoice: false, isAnalyticalQuery: false, isConceptualTaxonomy: false, calibrationDirective: '' };
+      const isPureAlgebraConcept = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isPureAlgebraOrConceptualQuery === 'function')
+        ? ZozTextSafety.isPureAlgebraOrConceptualQuery(promptText)
+        : false;
+      const isNemotron = isNemotronModel(modelName);
+      const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy);
+
+      // JIKA SESI MATEMATIKA MURNI / NEMOTRON: ERADIKASI TOTAL PERSONA & ROLEPLAY!
+      // Mandat absolut Kaisar: Persona dilarang keras, selesaikan dengan matematika murni!
+      let personaPrompt = isPureMathSession ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
+      const canRunAutonomous = !isPureMathSession && Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       let systemContent = getDynamicSystemTemporalContext();
-      if (personaPrompt) {
+
+      if (personaPrompt && !isPureMathSession) {
         systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
       }
 
       const activeEngineModel = (typeof effectiveTargetModel !== 'undefined' ? effectiveTargetModel : (typeof modelName !== 'undefined' ? modelName : 'Model Aktif'));
 
-      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2)
-      if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
+      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2) — MATIKAN JIKA SESI MATEMATIKA MURNI
+      if (!isPureMathSession && STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.senseAndModulate(promptText);
         const chatDirective = ChatEndocrine.getSystemDirective(session, activeEngineModel);
         if (chatDirective) {
@@ -29656,17 +29675,17 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
       }
 
-      // BioEndocrine Neural Provenance & Endocrine Intelligence Context
-      if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
+      // BioEndocrine Neural Provenance & Endocrine Intelligence Context — MATIKAN JIKA SESI MATEMATIKA MURNI
+      if (!isPureMathSession && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
         const endocrineContext = BioEndocrine.getConversationalContext(session, activeEngineModel, promptText);
         if (endocrineContext) {
           systemContent = `${systemContent}\n\n${endocrineContext}`;
         }
       }
-      // Direktif tool pencarian/rekomendasi video & utilitas otonom selalu disuntikkan tanpa memerlukan menu UI
-      systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
-      // Tool video YouTube hanya diumumkan bila toggle "Cari Video YouTube" aktif
-      // (agar model tidak memanggil tool yang tidak dikirim).
+      // Direktif tool pencarian/rekomendasi video & utilitas otonom selalu disuntikkan tanpa memerlukan menu UI (nonaktifkan jika matematika murni)
+      if (!isPureMathSession) {
+        systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
+      }
 
       // AI File Studio: hanya diumumkan bila pengguna memang meminta pembuatan file / dokumen / diagram,
       // atau ketika direktori lokal aktif. JANGAN umumkan jika pengguna hanya meminta contoh kode atau meminta "jangan buatkan pratinjau"!
@@ -29716,70 +29735,68 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // UNIVERSAL YOUTUBE METADATA & SEARCH GROUNDING FOR ALL MODELS
       let hasVideoUrlGrounded = false;
-      try {
-        const ytRes = await getYouTubeGroundingContext(promptText, bubbleText);
-        if (ytRes && ytRes.groundingContext) {
-          hasVideoUrlGrounded = true;
-          systemContent = `${systemContent}\n\n${ytRes.groundingContext}`;
-          bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+      if (!isPureMathSession) {
+        try {
+          const ytRes = await getYouTubeGroundingContext(promptText, bubbleText);
+          if (ytRes && ytRes.groundingContext) {
+            hasVideoUrlGrounded = true;
+            systemContent = `${systemContent}\n\n${ytRes.groundingContext}`;
+            bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+          }
+        } catch (ytErr) {
+          console.warn('YouTube client grounding error:', ytErr);
         }
-      } catch (ytErr) {
-        console.warn('YouTube client grounding error:', ytErr);
       }
 
-      // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q), PELURUHAN W(Δt), & KALIBRASI BAYESIAN
-      const attachedImageCount = Array.isArray(image) ? image.length : (image ? 1 : 0);
-      const hasAttachedImages = attachedImageCount > 0;
-      const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
-        ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
-        : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
-      const decisionCalibration = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
-        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { hasImages: hasAttachedImages, imageCount: attachedImageCount })
-        : { isDiscreteChoice: false, isAnalyticalQuery: false, calibrationDirective: '' };
-      if (decisionCalibration.calibrationDirective && !wantsFile && !isDocRequest && !isStudioIsolated) {
+      if (decisionCalibration.calibrationDirective && !wantsFile && !isDocRequest && !isStudioIsolated && !isPureMathSession) {
         systemContent = systemContent
           ? `${systemContent}\n\n${decisionCalibration.calibrationDirective}`
           : decisionCalibration.calibrationDirective;
       }
       const isVideoTopicPrompt = /\b(video|youtube|youtu\.be|dailymotion|vimeo|xvideos)\b/i.test(promptText);
 
-      // DETEKSI KONSEPTUAL / ALJABAR RELASIONAL MURNI (ALGEBRAIC STATE SPACE):
-      // Kueri seperti taksonomi tertutup atau opsi pilihan ("Competitive \n Independent \n Cooperative \n Interdependent")
-      // memiliki Information Gain penelusuran web IG(Search | Q) = 0.
-      const isPureAlgebraConcept = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isPureAlgebraOrConceptualQuery === 'function')
-        ? ZozTextSafety.isPureAlgebraOrConceptualQuery(promptText)
-        : false;
+      // MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN (PURE MATHEMATICS ONLY)
+      if (isPureMathSession) {
+        const pureMathDirective = `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN (ZERO PERSONA - PURE MATHEMATICS ONLY)
+[MANDAT ABSOLUT: EKSEKUSI MATEMATIKA MURNI TANPA PERSONA]:
+1. TOTAL ERADICATION OF PERSONA & NARRATIVE:
+   - DILARANG KERAS menggunakan persona kustom, identitas karakter, roleplay, gaya santai, basa-basi, atau karakter fiktif apapun.
+   - DILARANG menggunakan analogi informal, metafora fiktif, atau ekspresi emosional.
+   - Gunakan HANYA gaya analitis matematika murni, penalaran deduktif formal, dan teori relasi sistemik.
 
-      if (isPureAlgebraConcept) {
-        const algebraDirective = `[MANDAT STRUKTUR ALJABAR & TAKSONOMI RELASIONAL MURNI]:
-Kueri pengguna terdiri dari kumpulan konsep formal atau himpunan opsi diskrit.
-1. Analisis relasi formal, definisi esensial, batasan syarat perlu/cukup, dan matriks interdependensi antar-istilah tersebut (seperti Social Interdependence Theory Morton Deutsch, Game Theory, atau aljabar logika proposisional).
-2. Sajikan perbandingan struktural yang jernih, elegan, dan mendalam menggunakan poin bernomor atau tabel Markdown.
-3. JANGAN mengasumsikan ketergantungan pada berita/isu eksternal; fokuskan jawaban pada ketepatan ontologis dan matematika/logika murni.`;
-        systemContent = systemContent ? `${systemContent}\n\n${algebraDirective}` : algebraDirective;
-      }
+2. FORMULASI RUANG KEADAAN MULTI-AGEN (STATE-SPACE FORMULATION):
+   Dekomposisi sistem relasional multi-agen N = {1, 2, ..., n} dengan n >= 2:
+   - Ruang strategi individual s_i in S_i, profil strategi kolektif s = (s_1, ..., s_n) in S = prod_{i=1}^n S_i.
+   - Fungsi utilitas (payoff) agen i: U_i: S -> R.
 
-      if (isNemotronModel(modelName)) {
-        const nemotronDirective = `[MANDAT PENALARAN STRUKTURAL, ALJABAR & MATEMATIKA MURNI NVIDIA NEMOTRON]:
-Anda beroperasi sebagai engine penalaran deduktif formal dan dekonstruksi aljabar murni.
-1. FONDASI FORMAL & RUANG KEADAAN (STATE SPACE):
-   - Dekonstruksi setiap kueri, himpunan istilah, atau konsep ke dalam variabel ontologis, matriks utilitas, atau ruang keadaan formal S = {s_1, ..., s_n}.
-   - Analisis relasi ketergantungan formal: jika kueri memuat istilah relasional (seperti Competitive, Independent, Cooperative, Interdependent), petakan ke dalam Social Interdependence Theory (Morton Deutsch), Game Theory (Zero-sum vs Non-zero-sum Pareto optimal), serta derivatif parsial utilitas:
-     * Independent: ∂U_A/∂U_B = 0
-     * Competitive: ΔU_A · ΔU_B < 0 (Zero-sum conflict)
-     * Cooperative: ΔU_A · ΔU_B > 0 (Pareto-optimal positive synergy)
-     * Interdependent: U_i = f(s_1, ..., s_n) (Systemic coupled dynamics)
-2. INTEGRITAS AKADEMIS & STRUKTUR TABEL:
-   - Gunakan tabel Markdown komparatif dan notasi matematika presisi.
-   - DILARANG menggunakan kata-kata filler, keraguan, atau keluhan tentang ketiadaan data web.
-   - Langsung berikan jawaban yang komprehensif, elegan, dan mendalam.`;
-        systemContent = systemContent ? `${systemContent}\n\n${nemotronDirective}` : nemotronDirective;
+3. DEKOMPOSISI 4 KUADRAN FORMAL (MORTON DEUTSCH SOCIAL INTERDEPENDENCE & GAME THEORY):
+   Setiap konsep dipetakan secara eksak ke dalam kondisi diferensial dan matriks Jacobian J_ij = dU_i / ds_j:
+   a. Independent (S_indep):
+      - Syarat diferensial ortogonal: forall j != i, dU_i / ds_j = 0 <=> U_i(s) = f_i(s_i).
+      - Matriks Jacobi: J_ij = 0 untuk semua i != j (matriks diagonal).
+      - Kovariansi payoff: Cov(U_i, U_j) = 0. Pencapaian tujuan agen i ortogonal dan tidak terkopel dengan agen j.
+   b. Competitive (S_comp - Contrience / Zero-Sum Conflict):
+      - Kondisi diferensial negatif: dU_i / dU_j < 0. Pada kasus ketat zero-sum: sum_{k=1}^n U_k = C => dU_i / dU_j = -1.
+      - Gradien konflik: grad U_i . grad U_j < 0. Peningkatan utilitas agen i berbanding terbalik secara linier dengan utilitas agen j (Delta U_i . Delta U_j < 0).
+      - Solusi Ekuilibrium: Minimax / Nash Equilibrium (max_{s_i} min_{s_{-i}} U_i(s)).
+   c. Cooperative (S_coop - Promotive / Positive Synergy):
+      - Kondisi diferensial positif: dU_i / dU_j > 0.
+      - Gradien sinergi: grad U_i . grad U_j > 0. Vektor gerak yang memaksimalkan utilitas i sejalan dengan peningkatan utilitas j (Delta U_i . Delta U_j > 0).
+      - Solusi Ekuilibrium: Dominansi Pareto Optimal s* in S (tidak ada s' sedemikian rupa sehingga U_k(s') >= U_k(s*) forall k dengan ketimpangan ketat pada salah satu agen).
+   d. Interdependent (S_interdep - General Coupled Dynamical System):
+      - Ruang umum keterkopelan multivariat: U_i = f_i(s_1, ..., s_n) di mana exists j != i sedemikian rupa sehingga dU_i / ds_j != 0.
+      - Spektrum Jacobian: Matriks bobot interaksi W in R^{n x n} dengan spektrum non-nol rho(W) > 0, membentuk kontinum dari kompetisi murni (anti-simetris) ke kooperasi murni (simetris positif semi-definit).
+
+4. STRUKTUR PENYAJIAN TABEL KOMPARATIF:
+   - Sajikan tabel Markdown formal yang merangkum: Dimensi Konseptual, Notasi Aljabar, Kondisi Jacobian, Ekuilibrium Teori Permainan, dan Karakteristik Sistemik.
+   - Langsung berikan analisis matematika murni yang elegan, presisi, dan tuntas tanpa keluhan atau penolakan.`;
+        systemContent = systemContent ? `${systemContent}\n\n${pureMathDirective}` : pureMathDirective;
       }
 
       // WEB SEARCH GROUNDING:
-      // Aktif HANYA jika kueri BUKAN konsep aljabar murni (IG = 0), BUKAN evaluasi pilihan ganda / gambar soal lokal,
+      // Aktif HANYA jika kueri BUKAN konsep aljabar murni / Nemotron (IG = 0), BUKAN evaluasi pilihan ganda / gambar soal lokal,
       // serta pengguna menyalakan toggle Web Search secara eksplisit ATAU kueri memiliki ketidakpastian temporal-aktual tinggi (U(Q) >= 0.72).
-      const autoEpistemicPreSearch = !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      const autoEpistemicPreSearch = !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
@@ -29798,7 +29815,7 @@ Anda beroperasi sebagai engine penalaran deduktif formal dan dekonstruksi aljaba
         }
       }
 
-      if (personaPrompt) {
+      if (personaPrompt && !isPureMathSession) {
         systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
       }
 
@@ -29856,8 +29873,8 @@ Anda beroperasi sebagai engine penalaran deduktif formal dan dekonstruksi aljaba
       if ((decisionCalibration.isDiscreteChoice || decisionCalibration.isAnalyticalQuery) && !wantsFile && !isDocRequest) {
         requestBody.think = true;
       }
-      // Pasang tools ke Ollama HANYA jika model memiliki kapabilitas tools dan BUKAN kueri konsep aljabar murni
-      const canOllamaUseTools = doesModelSupportTools(modelName) && !isPureAlgebraConcept && !decisionCalibration.isConceptualTaxonomy;
+      // Pasang tools ke Ollama HANYA jika model memiliki kapabilitas tools dan BUKAN sesi matematika murni / Nemotron
+      const canOllamaUseTools = doesModelSupportTools(modelName) && !isPureMathSession;
       const selectedOllamaTools = canOllamaUseTools ? getSelectableAutonomousTools(canRunAutonomous) : [];
       if (selectedOllamaTools.length > 0) requestBody.tools = selectedOllamaTools;
       if (session?.id) {
@@ -30639,7 +30656,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
 
       // ===== GERBANG KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) >= 0.75 =====
-      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
+      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
         try {
           bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Menjalankan penelusuran indeks matematis (U=${temporalRecencyProfile.epistemicSearchTrigger})...</span></div>`;
           smartScrollChatToBottom(true);
@@ -30674,7 +30691,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
 
       // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah → minta model menyusun jawaban bersih =====
-      if (autonomousRound > 0 && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0)) && !STATE.abortController?.signal?.aborted) {
+      if (autonomousRound > 0 && !isPureMathSession && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0)) && !STATE.abortController?.signal?.aborted) {
         const probeText = scrubRawToolCallArtifacts(fullText || '').trim();
         if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText)) {
           try {
@@ -30791,8 +30808,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         }
       }
 
-      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB (Lewati jika kueri konsep aljabar murni, video, atau model Nemotron)
-      if (webSources && webSources.length > 0 && fullText && !isPureAlgebraConcept && !isNemotronModel(modelName)) {
+      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB (Lewati jika sesi matematika murni / Nemotron)
+      if (webSources && webSources.length > 0 && fullText && !isPureMathSession) {
         fullText = verifyAndSanitizeWebDigestion(fullText, webSources, allAccumulatedToolResponsesText);
       }
 
@@ -31367,17 +31384,35 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
     let isUsingLaptopOllamaTunnel = false;
 
     try {
-      let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
-      const canRunAutonomous = Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
+      // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q), PELURUHAN W(Δt), & KALIBRASI BAYESIAN
+      const attachedImageCount = Array.isArray(image) ? image.length : (image ? 1 : 0);
+      const hasAttachedImages = attachedImageCount > 0;
+      const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
+        ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
+        : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
+      const decisionCalibration = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
+        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { hasImages: hasAttachedImages, imageCount: attachedImageCount })
+        : { isDiscreteChoice: false, isAnalyticalQuery: false, isConceptualTaxonomy: false, calibrationDirective: '' };
+      const isPureAlgebraConcept = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isPureAlgebraOrConceptualQuery === 'function')
+        ? ZozTextSafety.isPureAlgebraOrConceptualQuery(promptText)
+        : false;
+      const isNemotron = isNemotronModel(modelName);
+      const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy);
+
+      // JIKA SESI MATEMATIKA MURNI / NEMOTRON: ERADIKASI TOTAL PERSONA & ROLEPLAY!
+      // Mandat absolut Kaisar: Persona dilarang keras, selesaikan dengan matematika murni!
+      let personaPrompt = isPureMathSession ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
+      const canRunAutonomous = !isPureMathSession && Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       let systemContent = getDynamicSystemTemporalContext();
-      if (personaPrompt) {
+
+      if (personaPrompt && !isPureMathSession) {
         systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
       }
 
       const activeEngineModel = (typeof effectiveTargetModel !== 'undefined' ? effectiveTargetModel : (typeof modelName !== 'undefined' ? modelName : 'Model Aktif'));
 
-      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2)
-      if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
+      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2) — MATIKAN JIKA SESI MATEMATIKA MURNI
+      if (!isPureMathSession && STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.senseAndModulate(promptText);
         const chatDirective = ChatEndocrine.getSystemDirective(session, activeEngineModel);
         if (chatDirective) {
@@ -31385,17 +31420,17 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         }
       }
 
-      // BioEndocrine Neural Provenance & Endocrine Intelligence Context
-      if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
+      // BioEndocrine Neural Provenance & Endocrine Intelligence Context — MATIKAN JIKA SESI MATEMATIKA MURNI
+      if (!isPureMathSession && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.getConversationalContext === 'function') {
         const endocrineContext = BioEndocrine.getConversationalContext(session, activeEngineModel, promptText);
         if (endocrineContext) {
           systemContent = `${systemContent}\n\n${endocrineContext}`;
         }
       }
-      // Direktif tool pencarian/rekomendasi video & utilitas otonom selalu disuntikkan tanpa memerlukan menu UI
-      systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
-      // Tool video YouTube hanya diumumkan bila toggle "Cari Video YouTube" aktif
-      // (agar model tidak memanggil tool yang tidak dikirim).
+      // Direktif tool pencarian/rekomendasi video & utilitas otonom selalu disuntikkan tanpa memerlukan menu UI (nonaktifkan jika matematika murni)
+      if (!isPureMathSession) {
+        systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
+      }
 
       // AI File Studio: hanya diumumkan bila pengguna memang meminta pembuatan file / dokumen / diagram,
       // atau ketika direktori lokal aktif. JANGAN umumkan jika pengguna hanya meminta contoh kode atau meminta "jangan buatkan pratinjau"!
@@ -31445,15 +31480,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // UNIVERSAL YOUTUBE METADATA & SEARCH GROUNDING FOR ALL MODELS
       let hasVideoUrlGrounded = false;
-      try {
-        const ytRes = await getYouTubeGroundingContext(promptText, bubbleText);
-        if (ytRes && ytRes.groundingContext) {
-          hasVideoUrlGrounded = true;
-          systemContent = `${systemContent}\n\n${ytRes.groundingContext}`;
-          bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+      if (!isPureMathSession) {
+        try {
+          const ytRes = await getYouTubeGroundingContext(promptText, bubbleText);
+          if (ytRes && ytRes.groundingContext) {
+            hasVideoUrlGrounded = true;
+            systemContent = `${systemContent}\n\n${ytRes.groundingContext}`;
+            bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+          }
+        } catch (ytErr) {
+          console.warn('YouTube client grounding error:', ytErr);
         }
-      } catch (ytErr) {
-        console.warn('YouTube client grounding error:', ytErr);
       }
 
       const effectiveInitialModel = (modelName && modelName.includes('/'))
@@ -31468,59 +31505,55 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         (STATE.openRouterModels || []).some(m => m.id === effectiveInitialModel && (m.cat === 'free' || m.tag === 'Free'))
       );
 
-      // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q), PELURUHAN W(Δt), & KALIBRASI BAYESIAN
-      const attachedImageCount = Array.isArray(image) ? image.length : (image ? 1 : 0);
-      const hasAttachedImages = attachedImageCount > 0;
-      const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
-        ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
-        : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
-      const decisionCalibration = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
-        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { hasImages: hasAttachedImages, imageCount: attachedImageCount })
-        : { isDiscreteChoice: false, isAnalyticalQuery: false, calibrationDirective: '' };
-      if (decisionCalibration.calibrationDirective && !wantsFile && !isDocRequest && !isStudioIsolated) {
+      if (decisionCalibration.calibrationDirective && !wantsFile && !isDocRequest && !isStudioIsolated && !isPureMathSession) {
         systemContent = systemContent
           ? `${systemContent}\n\n${decisionCalibration.calibrationDirective}`
           : decisionCalibration.calibrationDirective;
       }
       const isVideoTopicPrompt = /\b(video|youtube|youtu\.be|dailymotion|vimeo|xvideos)\b/i.test(promptText);
 
-      // DETEKSI KONSEPTUAL / ALJABAR RELASIONAL MURNI (ALGEBRAIC STATE SPACE):
-      // Kueri seperti taksonomi tertutup atau opsi pilihan ("Competitive \n Independent \n Cooperative \n Interdependent")
-      // memiliki Information Gain penelusuran web IG(Search | Q) = 0.
-      const isPureAlgebraConcept = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isPureAlgebraOrConceptualQuery === 'function')
-        ? ZozTextSafety.isPureAlgebraOrConceptualQuery(promptText)
-        : false;
+      // MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN (PURE MATHEMATICS ONLY)
+      if (isPureMathSession) {
+        const pureMathDirective = `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN (ZERO PERSONA - PURE MATHEMATICS ONLY)
+[MANDAT ABSOLUT: EKSEKUSI MATEMATIKA MURNI TANPA PERSONA]:
+1. TOTAL ERADICATION OF PERSONA & NARRATIVE:
+   - DILARANG KERAS menggunakan persona kustom, identitas karakter, roleplay, gaya santai, basa-basi, atau karakter fiktif apapun.
+   - DILARANG menggunakan analogi informal, metafora fiktif, atau ekspresi emosional.
+   - Gunakan HANYA gaya analitis matematika murni, penalaran deduktif formal, dan teori relasi sistemik.
 
-      if (isPureAlgebraConcept) {
-        const algebraDirective = `[MANDAT STRUKTUR ALJABAR & TAKSONOMI RELASIONAL MURNI]:
-Kueri pengguna terdiri dari kumpulan konsep formal atau himpunan opsi diskrit.
-1. Analisis relasi formal, definisi esensial, batasan syarat perlu/cukup, dan matriks interdependensi antar-istilah tersebut (seperti Social Interdependence Theory Morton Deutsch, Game Theory, atau aljabar logika proposisional).
-2. Sajikan perbandingan struktural yang jernih, elegan, dan mendalam menggunakan poin bernomor atau tabel Markdown.
-3. JANGAN mengasumsikan ketergantungan pada berita/isu eksternal; fokuskan jawaban pada ketepatan ontologis dan matematika/logika murni.`;
-        systemContent = systemContent ? `${systemContent}\n\n${algebraDirective}` : algebraDirective;
-      }
+2. FORMULASI RUANG KEADAAN MULTI-AGEN (STATE-SPACE FORMULATION):
+   Dekomposisi sistem relasional multi-agen N = {1, 2, ..., n} dengan n >= 2:
+   - Ruang strategi individual s_i in S_i, profil strategi kolektif s = (s_1, ..., s_n) in S = prod_{i=1}^n S_i.
+   - Fungsi utilitas (payoff) agen i: U_i: S -> R.
 
-      if (isNemotronModel(modelName)) {
-        const nemotronDirective = `[MANDAT PENALARAN STRUKTURAL, ALJABAR & MATEMATIKA MURNI NVIDIA NEMOTRON]:
-Anda beroperasi sebagai engine penalaran deduktif formal dan dekonstruksi aljabar murni.
-1. FONDASI FORMAL & RUANG KEADAAN (STATE SPACE):
-   - Dekonstruksi setiap kueri, himpunan istilah, atau konsep ke dalam variabel ontologis, matriks utilitas, atau ruang keadaan formal S = {s_1, ..., s_n}.
-   - Analisis relasi ketergantungan formal: jika kueri memuat istilah relasional (seperti Competitive, Independent, Cooperative, Interdependent), petakan ke dalam Social Interdependence Theory (Morton Deutsch), Game Theory (Zero-sum vs Non-zero-sum Pareto optimal), serta derivatif parsial utilitas:
-     * Independent: ∂U_A/∂U_B = 0
-     * Competitive: ΔU_A · ΔU_B < 0 (Zero-sum conflict)
-     * Cooperative: ΔU_A · ΔU_B > 0 (Pareto-optimal positive synergy)
-     * Interdependent: U_i = f(s_1, ..., s_n) (Systemic coupled dynamics)
-2. INTEGRITAS AKADEMIS & STRUKTUR TABEL:
-   - Gunakan tabel Markdown komparatif dan notasi matematika presisi.
-   - DILARANG menggunakan kata-kata filler, keraguan, atau keluhan tentang ketiadaan data web.
-   - Langsung berikan jawaban yang komprehensif, elegan, dan mendalam.`;
-        systemContent = systemContent ? `${systemContent}\n\n${nemotronDirective}` : nemotronDirective;
+3. DEKOMPOSISI 4 KUADRAN FORMAL (MORTON DEUTSCH SOCIAL INTERDEPENDENCE & GAME THEORY):
+   Setiap konsep dipetakan secara eksak ke dalam kondisi diferensial dan matriks Jacobian J_ij = dU_i / ds_j:
+   a. Independent (S_indep):
+      - Syarat diferensial ortogonal: forall j != i, dU_i / ds_j = 0 <=> U_i(s) = f_i(s_i).
+      - Matriks Jacobi: J_ij = 0 untuk semua i != j (matriks diagonal).
+      - Kovariansi payoff: Cov(U_i, U_j) = 0. Pencapaian tujuan agen i ortogonal dan tidak terkopel dengan agen j.
+   b. Competitive (S_comp - Contrience / Zero-Sum Conflict):
+      - Kondisi diferensial negatif: dU_i / dU_j < 0. Pada kasus ketat zero-sum: sum_{k=1}^n U_k = C => dU_i / dU_j = -1.
+      - Gradien konflik: grad U_i . grad U_j < 0. Peningkatan utilitas agen i berbanding terbalik secara linier dengan utilitas agen j (Delta U_i . Delta U_j < 0).
+      - Solusi Ekuilibrium: Minimax / Nash Equilibrium (max_{s_i} min_{s_{-i}} U_i(s)).
+   c. Cooperative (S_coop - Promotive / Positive Synergy):
+      - Kondisi diferensial positif: dU_i / dU_j > 0.
+      - Gradien sinergi: grad U_i . grad U_j > 0. Vektor gerak yang memaksimalkan utilitas i sejalan dengan peningkatan utilitas j (Delta U_i . Delta U_j > 0).
+      - Solusi Ekuilibrium: Dominansi Pareto Optimal s* in S (tidak ada s' sedemikian rupa sehingga U_k(s') >= U_k(s*) forall k dengan ketimpangan ketat pada salah satu agen).
+   d. Interdependent (S_interdep - General Coupled Dynamical System):
+      - Ruang umum keterkopelan multivariat: U_i = f_i(s_1, ..., s_n) di mana exists j != i sedemikian rupa sehingga dU_i / ds_j != 0.
+      - Spektrum Jacobian: Matriks bobot interaksi W in R^{n x n} dengan spektrum non-nol rho(W) > 0, membentuk kontinum dari kompetisi murni (anti-simetris) ke kooperasi murni (simetris positif semi-definit).
+
+4. STRUKTUR PENYAJIAN TABEL KOMPARATIF:
+   - Sajikan tabel Markdown formal yang merangkum: Dimensi Konseptual, Notasi Aljabar, Kondisi Jacobian, Ekuilibrium Teori Permainan, dan Karakteristik Sistemik.
+   - Langsung berikan analisis matematika murni yang elegan, presisi, dan tuntas tanpa keluhan atau penolakan.`;
+        systemContent = systemContent ? `${systemContent}\n\n${pureMathDirective}` : pureMathDirective;
       }
 
       // WEB SEARCH GROUNDING:
-      // Aktif HANYA jika kueri BUKAN konsep aljabar murni (IG = 0), BUKAN evaluasi pilihan ganda / gambar soal lokal,
+      // Aktif HANYA jika kueri BUKAN konsep aljabar murni / Nemotron (IG = 0), BUKAN evaluasi pilihan ganda / gambar soal lokal,
       // serta pengguna menyalakan toggle Web Search secara eksplisit ATAU kueri memiliki ketidakpastian temporal-aktual tinggi (U(Q) >= 0.72).
-      const autoEpistemicPreSearch = !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      const autoEpistemicPreSearch = !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
@@ -31539,7 +31572,7 @@ Anda beroperasi sebagai engine penalaran deduktif formal dan dekonstruksi aljaba
         }
       }
 
-      if (personaPrompt) {
+      if (personaPrompt && !isPureMathSession) {
         systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
       }
 
@@ -31644,9 +31677,9 @@ Anda beroperasi sebagai engine penalaran deduktif formal dan dekonstruksi aljaba
           basePayload.modalities = ['text', 'image'];
         }
 
-        // Pasang tools jika model mendukung tools, BUKAN kueri konsep aljabar murni, dan BUKAN model Nemotron
-        // (Nemotron beroperasi dengan RAG Grounded murni; meniadakan web tools membebaskan model bernalar murni tanpa loop)
-        const canUseTools = doesModelSupportTools(currentModel) && !isPureAlgebraConcept && !decisionCalibration.isConceptualTaxonomy && !isNemotronCur;
+        // Pasang tools jika model mendukung tools, BUKAN sesi matematika murni, dan BUKAN model Nemotron
+        // (Nemotron beroperasi dengan penalaran deduktif murni; meniadakan web tools membebaskan model bernalar murni tanpa loop)
+        const canUseTools = doesModelSupportTools(currentModel) && !isPureMathSession && !isNemotronCur;
         if (canUseTools) {
           const validFunctionTools = (selectedAutonomousTools || []).filter(t => t && t.type === 'function' && t.function && t.function.name);
           if (validFunctionTools.length > 0) {
@@ -32703,7 +32736,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
 
       // ===== GERBANG KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) >= 0.75 (OPENROUTER) =====
-      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
+      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
         try {
           bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Menjalankan penelusuran indeks matematis (U=${temporalRecencyProfile.epistemicSearchTrigger})...</span></div>`;
           smartScrollChatToBottom(true);
@@ -32746,7 +32779,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
 
       // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah → minta model menyusun jawaban bersih =====
-      if (autonomousRound > 0 && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0)) && !STATE.abortController?.signal?.aborted) {
+      if (autonomousRound > 0 && !isPureMathSession && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0)) && !STATE.abortController?.signal?.aborted) {
         const probeText = scrubRawToolCallArtifacts(fullText || '').trim();
         if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText)) {
           try {
@@ -32871,8 +32904,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         }
       }
 
-      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB (Lewati jika kueri konsep aljabar murni, video, atau model Nemotron)
-      if (webSources && webSources.length > 0 && fullText && !isPureAlgebraConcept && !isNemotronModel(modelName)) {
+      // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB (Lewati jika sesi matematika murni / Nemotron)
+      if (webSources && webSources.length > 0 && fullText && !isPureMathSession) {
         fullText = verifyAndSanitizeWebDigestion(fullText, webSources, allAccumulatedToolResponsesText);
       }
 
