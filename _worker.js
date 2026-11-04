@@ -1313,15 +1313,22 @@ export default {
       });
     }
 
-    // Universal WhatsApp, AI & Daemon Tunnel Proxy (Edge Bridge)
+    // Dedicated Laptop Hardware & Daemon Bridge:
+    // HANYA Terminal, WhatsApp Gateway lokal, kontrol daemon/tunnel lokal, dan aset fisik disk laptop
+    // yang diteruskan ke TUNNEL_GATEWAY_URL (server laptop).
+    // Pemanggilan AI & API Key (OpenRouter, Ollama Cloud, Search Web, Models, Sessions)
+    // BERJALAN 100% MANDIRI DI CLOUDFLARE EDGE TANPA PERNAH BERGANTUNG PADA LAPTOP!
     const TUNNEL_GATEWAY_URL = 'https://fonts-celebs-soon-validation.trycloudflare.com';
     let reqBodyBytes = null;
-    const isEdgeNativeRoute = url.pathname === '/api/ping' ||
-      url.pathname === '/api/health' ||
-      url.pathname === '/api/storage-mode' ||
-      url.pathname.startsWith('/api/tools/image-asset/');
 
-    if ((url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) && !isEdgeNativeRoute) {
+    const isLaptopOnlyRoute = url.pathname.startsWith('/api/terminal') ||
+      url.pathname.startsWith('/api/wa/') ||
+      url.pathname.startsWith('/api/tunnel/') ||
+      url.pathname.startsWith('/api/daemon/') ||
+      url.pathname === '/api/ollama/start' ||
+      url.pathname.startsWith('/uploads/');
+
+    if (isLaptopOnlyRoute) {
       const targetUrl = TUNNEL_GATEWAY_URL + url.pathname + url.search;
       const fwdHeaders = new Headers(request.headers);
       fwdHeaders.set('Host', new URL(TUNNEL_GATEWAY_URL).host);
@@ -1347,38 +1354,29 @@ export default {
 
       try {
         const upstream = await fetch(targetUrl, fetchInit);
-        const isWaOrTerm = url.pathname.startsWith('/api/wa/') || url.pathname.startsWith('/api/terminal/') || url.pathname.startsWith('/api/tunnel/') || url.pathname.startsWith('/api/daemon/');
-        if (!isWaOrTerm && (upstream.status === 502 || upstream.status === 504 || upstream.status === 503)) {
-          // Lanjut ke handler worker di bawah jika tunnel mengembalikan 502/504
-        } else {
-          const resHeaders = new Headers(upstream.headers);
-          resHeaders.set('Access-Control-Allow-Origin', '*');
-          resHeaders.set('Access-Control-Allow-Private-Network', 'true');
-          resHeaders.set('X-Accel-Buffering', 'no');
-          resHeaders.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+        const resHeaders = new Headers(upstream.headers);
+        resHeaders.set('Access-Control-Allow-Origin', '*');
+        resHeaders.set('Access-Control-Allow-Private-Network', 'true');
+        resHeaders.set('X-Accel-Buffering', 'no');
+        resHeaders.set('Cache-Control', 'no-store, no-cache, must-revalidate');
 
-          return new Response(upstream.body, {
-            status: upstream.status,
-            statusText: upstream.statusText,
-            headers: resHeaders
-          });
-        }
+        return new Response(upstream.body, {
+          status: upstream.status,
+          statusText: upstream.statusText,
+          headers: resHeaders
+        });
       } catch (proxyErr) {
-        const isWaOrTerm = url.pathname.startsWith('/api/wa/') || url.pathname.startsWith('/api/terminal/') || url.pathname.startsWith('/api/tunnel/') || url.pathname.startsWith('/api/daemon/');
-        if (isWaOrTerm) {
-          return new Response(JSON.stringify({
-            success: false,
-            error: 'Gagal menghubungi tunnel WhatsApp/Daemon backend lokal: ' + proxyErr.message,
-            tunnelUrl: TUNNEL_GATEWAY_URL
-          }), {
-            status: 502,
-            headers: {
-              'Content-Type': 'application/json; charset=utf-8',
-              'Access-Control-Allow-Origin': '*'
-            }
-          });
-        }
-        // Endpoint AI/lainnya lanjut ke fallback worker di bawah jika tunnel offline
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Layanan lokal laptop sedang tidak terhubung via tunnel: ' + proxyErr.message,
+          tunnelUrl: TUNNEL_GATEWAY_URL
+        }), {
+          status: 502,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Access-Control-Allow-Origin': '*'
+          }
+        });
       }
     }
 

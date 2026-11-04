@@ -77,13 +77,36 @@
     }
   } catch (_) {}
 
+  function isLaptopHardwarePath(cleanPath) {
+    if (!cleanPath || typeof cleanPath !== 'string') return false;
+    return cleanPath.startsWith('/api/terminal') ||
+           cleanPath.startsWith('/api/wa/') ||
+           cleanPath.startsWith('/api/daemon/') ||
+           cleanPath.startsWith('/api/tunnel/') ||
+           cleanPath === '/api/ollama/start';
+  }
+
   function getUniversalApiUrl(path) {
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
     const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
     const isLocal = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
     if (isLocal) return cleanPath;
-    const tunnelBase = getActiveTunnelUrl();
-    return (tunnelBase || VERCEL_BACKEND_GATEWAY) + cleanPath;
+
+    // Bedakan tegas: Terminal, WhatsApp, dan kontrol daemon hardware laptop WAJIB melalui tunnel laptop
+    if (isLaptopHardwarePath(cleanPath)) {
+      const tunnelBase = getActiveTunnelUrl();
+      return (tunnelBase || '') + cleanPath;
+    }
+
+    // Aset file gambar upload lokal laptop (jika tunnel laptop tersedia)
+    if (cleanPath.startsWith('/uploads/')) {
+      const tunnelBase = getActiveTunnelUrl();
+      return tunnelBase ? (tunnelBase + cleanPath) : cleanPath;
+    }
+
+    // Pemanggilan AI & API Key (OpenRouter, Ollama Cloud, Search Web, Models, Sessions, dll):
+    // Bebas 100% dari ketergantungan laptop — gunakan rute same-origin hosting aktif!
+    return cleanPath;
   }
 
   // Universal Chat Image Resolver: Memastikan path /uploads/ dan API gambar proxy selalu dapat dijangkau
@@ -11470,8 +11493,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     }
 
     const hasUserKey = Boolean(STATE.settings.openRouterKey && String(STATE.settings.openRouterKey).trim());
-    const tryDirectFirst = Boolean(hasUserKey && IS_GITHUB_PAGES);
-    const routesToTry = tryDirectFirst ? ['direct', 'proxy'] : ['proxy', 'direct'];
+    const routesToTry = hasUserKey ? ['direct', 'proxy'] : ['proxy'];
 
     let res = null;
     let lastErrDetail = '';
@@ -12776,9 +12798,8 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       }
 
       // OpenRouter Cloud (dengan failover antar-model free jika model utama sibuk)
-      const routes = (IS_GITHUB_PAGES && !DeviceStorage.isDeviceBackendAvailable) ? ['direct', 'proxy'] : ['proxy', 'direct'];
-      const errors = [];
       const key = STATE.settings.openRouterKey || '';
+      const routes = (key && key.trim()) ? ['direct', 'proxy'] : ['proxy'];
       const initialModel = model && model.includes('/') ? model : (mapOllamaModelToOpenRouter(model) || 'openrouter/free');
       const candidateModels = [initialModel];
       if (initialModel !== 'openrouter/free') {
@@ -24235,7 +24256,10 @@ ${blocks}
     }
 
     try {
-      const isDirect = IS_GITHUB_PAGES;
+      const hasKey = Boolean(key && String(key).trim());
+      // JALUR LANGSUNG API KEY: Jika pengguna memasukkan API Key, langsung hubungi OpenRouter API
+      // bebas 100% dari ketergantungan atau penantian tunnel laptop!
+      const isDirect = hasKey || IS_GITHUB_PAGES;
       const endpoint = isDirect ? 'https://openrouter.ai/api/v1/credits' : getUniversalApiUrl('/api/openrouter/credits');
       const headers = {
         'Authorization': `Bearer ${key}`,
@@ -24245,8 +24269,9 @@ ${blocks}
 
       let res = await fetch(endpoint, { headers, cache: 'no-store' }).catch(() => null);
       if (!res || !res.ok) {
-        // Fallback langsung via CORS OpenRouter jika tunnel lokal sedang berotasi/offline
-        res = await fetch('https://openrouter.ai/api/v1/credits', { headers, cache: 'no-store' }).catch(() => null);
+        // Fallback langsung via CORS OpenRouter atau proxy jika endpoint pertama gagal
+        const altEndpoint = isDirect ? getUniversalApiUrl('/api/openrouter/credits') : 'https://openrouter.ai/api/v1/credits';
+        res = await fetch(altEndpoint, { headers, cache: 'no-store' }).catch(() => null);
       }
       let creditsData = null;
       if (res && res.ok) {
@@ -24254,13 +24279,14 @@ ${blocks}
         creditsData = json.data || json;
       }
 
-      // Ambil metadata key & tier via auth/key
+      // Ambil metadata key & tier via auth/key langsung ke penyedia
       let keyData = null;
       try {
         const authEndpoint = isDirect ? 'https://openrouter.ai/api/v1/auth/key' : getUniversalApiUrl('/api/openrouter/auth-check');
         let authRes = await fetch(authEndpoint, { headers, cache: 'no-store' }).catch(() => null);
         if (!authRes || !authRes.ok) {
-          authRes = await fetch('https://openrouter.ai/api/v1/auth/key', { headers, cache: 'no-store' }).catch(() => null);
+          const altAuth = isDirect ? getUniversalApiUrl('/api/openrouter/auth-check') : 'https://openrouter.ai/api/v1/auth/key';
+          authRes = await fetch(altAuth, { headers, cache: 'no-store' }).catch(() => null);
         }
         if (authRes && authRes.ok) {
           const authJson = await authRes.json();
@@ -24482,14 +24508,15 @@ ${blocks}
 
   async function fetchOpenRouterModelsList() {
     try {
-      const url = getUniversalApiUrl('/api/openrouter/models');
+      const hasKey = Boolean(STATE.settings.openRouterKey && String(STATE.settings.openRouterKey).trim());
       const headers = {};
-      if (STATE.settings.openRouterKey) {
+      if (hasKey) {
         headers['Authorization'] = `Bearer ${STATE.settings.openRouterKey}`;
       }
-      let res = await fetch(url, { headers }).catch(() => null);
+      // Langsung hubungi OpenRouter API resmi tanpa menunggu tunnel laptop!
+      let res = await fetch('https://openrouter.ai/api/v1/models', { headers }).catch(() => null);
       if (!res || !res.ok) {
-        res = await fetch('https://openrouter.ai/api/v1/models', { headers }).catch(() => null);
+        res = await fetch(getUniversalApiUrl('/api/openrouter/models'), { headers }).catch(() => null);
       }
 
       const dynamicImgMap = new Map();
@@ -29698,13 +29725,21 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           modelName = resolvedModel;
         }
       }
-      if (IS_GITHUB_PAGES && !STATE.settings.ollamaApiKey) {
-        if (location.protocol === 'https:' && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
-          throw new Error('mixed_content: Browser HTTPS memblokir koneksi ke Ollama localhost HTTP di GitHub Pages.');
+      if (isLoopbackEp && !cleanOllamaKey) {
+        // Pengguna sengaja memilih Ollama lokal di laptop tanpa API Key
+        const isLocalHost = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]');
+        if (isLocalHost) {
+          chatUrl = '/api/ollama/chat';
+        } else if (IS_GITHUB_PAGES) {
+          chatUrl = resolveEndpointUrl(ep, 'api/chat');
+        } else {
+          // Dari ponsel ke Ollama laptop: gunakan jalur tunnel laptop
+          const tunnelBase = getActiveTunnelUrl();
+          chatUrl = (tunnelBase ? tunnelBase : '') + '/api/ollama/chat';
         }
-        chatUrl = resolveEndpointUrl(ep, 'api/chat');
       } else {
-        chatUrl = getUniversalApiUrl('/api/ollama/chat');
+        // Ollama Cloud / API Key / Remote: jalurnya mandiri same-origin edge tanpa menunggu laptop!
+        chatUrl = '/api/ollama/chat';
       }
 
       let response = await fetch(chatUrl, {
@@ -31290,12 +31325,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           }
         }
 
-        // DUAL-PATH RESILIENCE: Coba rute primer, jika terhambat CORS/network/401/404, otomatis coba rute sekunder.
-        // Pada perangkat seluler atau domain publik seperti z21.zozdocs.com, proxy backend selalu menjadi rute paling andal
-        // karena bebas dari blokir CORS, VPN seluler, dan kuota direct-origin browser.
+        // JALUR LANGSUNG API KEY: Jika pengguna memasukkan API Key di pengaturan perangkat,
+        // utamakan jalur langsung ke server penyedia OpenRouter (direct: https://openrouter.ai/api/v1/chat/completions).
+        // Jalur ini beroperasi 100% mandiri tanpa menunggu tunnel atau server laptop!
         const hasUserKey = Boolean(STATE.settings.openRouterKey && String(STATE.settings.openRouterKey).trim());
-        const isPublicDomain = Boolean(IS_CLOUD_HOSTED || location.hostname.includes('zozdocs.com') || location.hostname.includes('trycloudflare.com'));
-        const routesToTry = (hasUserKey && !isPublicDomain) ? ['direct', 'proxy'] : (hasUserKey ? ['proxy', 'direct'] : ['proxy']);
+        const routesToTry = hasUserKey ? ['direct', 'proxy'] : ['proxy'];
 
         let routeErrDetail = '';
 
@@ -31311,7 +31345,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             targetHeaders = {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`,
-              'HTTP-Referer': location.origin || 'https://zozi0999.github.io/zoz_router',
+              'HTTP-Referer': location.origin || 'https://z21.zozdocs.com',
               'X-Title': 'ZOZ Router'
             };
             targetBody = { ...basePayload };
@@ -31346,10 +31380,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
           let ttftTimer = setTimeout(() => {
             if (tokenCount === 0) {
-              console.warn(`[OpenRouter TTFT Watchdog] Model ${currentModel} (${routeType}) tidak merespons dalam 45 detik (stalled). Membatalkan...`);
+              console.warn(`[OpenRouter TTFT Watchdog] Model ${currentModel} (${routeType}) tidak merespons dalam 18 detik (stalled). Membatalkan...`);
               try { attemptController.abort('TTFT_TIMEOUT'); } catch (_) {}
             }
-          }, 45000);
+          }, 18000);
 
           try {
             let attemptRes = await fetch(targetUrl, {
