@@ -86,6 +86,7 @@ function mapOllamaModelToOpenRouter(modelId) {
   if (lower.startsWith('deepseek-v3') || lower.startsWith('deepseek-v4')) return 'deepseek/deepseek-chat';
   if (lower.startsWith('qwen')) return 'qwen/qwen-2.5-72b-instruct';
   if (lower.startsWith('llama3')) return 'meta-llama/llama-3.3-70b-instruct:free';
+  if (lower.startsWith('nemotron')) return 'nvidia/nemotron-3-ultra-550b-a55b:free';
   return 'openrouter/free';
 }
 
@@ -1325,7 +1326,7 @@ export default {
     // yang diteruskan ke TUNNEL_GATEWAY_URL (server laptop).
     // Pemanggilan AI & API Key (OpenRouter, Ollama Cloud, Search Web, Models, Sessions)
     // BERJALAN 100% MANDIRI DI CLOUDFLARE EDGE TANPA PERNAH BERGANTUNG PADA LAPTOP!
-    const TUNNEL_GATEWAY_URL = 'https://dense-carrier-higher-elder.trycloudflare.com';
+    const TUNNEL_GATEWAY_URL = 'https://tiny-mortgage-deliver-band.trycloudflare.com';
     let reqBodyBytes = null;
 
     const isLaptopOnlyRoute = url.pathname.startsWith('/api/terminal') ||

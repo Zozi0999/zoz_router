@@ -43,7 +43,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://dense-carrier-higher-elder.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://tiny-mortgage-deliver-band.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -283,6 +283,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     if (lower.startsWith('deepseek-v3') || lower.startsWith('deepseek-v4')) return 'deepseek/deepseek-chat';
     if (lower.startsWith('qwen')) return 'qwen/qwen-2.5-72b-instruct';
     if (lower.startsWith('llama3')) return 'meta-llama/llama-3.3-70b-instruct:free';
+    if (lower.startsWith('nemotron')) return 'nvidia/nemotron-3-ultra-550b-a55b:free';
     return 'openrouter/free';
   }
 
@@ -46982,7 +46983,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://dense-carrier-higher-elder.trycloudflare.com',
+    activeTunnelUrl: 'https://tiny-mortgage-deliver-band.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
