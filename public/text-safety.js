@@ -2175,8 +2175,8 @@
     const uniformPrior = Number((1 / effectiveK).toFixed(4));
     const maxEntropyBits = Number(Math.log2(effectiveK).toFixed(4));
 
-    // T = 0.15 pada kuis pilihan ganda, T = 0.18 pada penalaran analitis/sains, T = 0.20 pada taksonomi relasional
-    const calibratedTemp = isDiscreteChoice ? 0.15 : (isAnalyticalQuery ? 0.18 : (isConceptualTaxonomy ? 0.20 : 0.45));
+    // T = 0.15 pada kuis pilihan ganda, T = 0.18 pada penalaran analitis/sains/taksonomi relasional formal
+    const calibratedTemp = isDiscreteChoice ? 0.15 : ((isConceptualTaxonomy || isAnalyticalQuery) ? 0.18 : 0.45);
     const calibratedTopP = (isDiscreteChoice || isConceptualTaxonomy || isAnalyticalQuery) ? 0.90 : 0.92;
 
     const multiImageNote = imageCount > 1
@@ -2245,7 +2245,7 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
 
   function computeOptimalSamplingTemperature(recencyProfile, hasGroundedEvidence = false, decisionProfile = null) {
     if (decisionProfile && decisionProfile.isConceptualTaxonomy) {
-      return { temperature: 0.20, top_p: 0.90, topP: 0.90 };
+      return { temperature: 0.18, top_p: 0.90, topP: 0.90 };
     }
     if (decisionProfile && decisionProfile.isDiscreteChoice) {
       return { temperature: 0.15, top_p: 0.90, topP: 0.90 };

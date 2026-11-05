@@ -11649,15 +11649,32 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     let res = null;
     let lastErrDetail = '';
 
+    const historyMessages = Array.isArray(session?.messages) ? [...session.messages] : [];
+    const lastUserTurn = [...historyMessages].reverse().find(m => m.role === 'user');
+    const lastTurnPrompt = lastUserTurn?.content || promptInstruction || '';
+    const isNemotronCont = isNemotronModel(effectiveModel);
+    const isPureMathCont = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isPureAlgebraOrConceptualQuery === 'function')
+      ? ZozTextSafety.isPureAlgebraOrConceptualQuery(lastTurnPrompt)
+      : false;
+    const decCheckCont = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
+      ? ZozTextSafety.computeBayesianDecisionCalibration(lastTurnPrompt)
+      : null;
+    const isAnalyticalCont = Boolean(
+      decCheckCont?.isAnalyticalQuery ||
+      decCheckCont?.isDiscreteChoice ||
+      decCheckCont?.isConceptualTaxonomy ||
+      isPureMathCont ||
+      isNemotronCont
+    );
+
     for (let c = 0; c < candidateModels.length; c++) {
       const curModel = candidateModels[c];
       const supportsSystem = doesModelSupportSystemRole(curModel);
       const messagesPayload = [];
-      if (STATE.settings.systemPrompt && supportsSystem) {
-        messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
+      const contPersona = (isPureMathCont || isAnalyticalCont || isNemotronCont) ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
+      if (contPersona && supportsSystem) {
+        messagesPayload.push({ role: 'system', content: contPersona });
       }
-
-      const historyMessages = Array.isArray(session?.messages) ? [...session.messages] : [];
       let hasAssistantTail = false;
       if (historyMessages.length > 0 && historyMessages[historyMessages.length - 1].role === 'assistant') {
         hasAssistantTail = true;
@@ -11938,12 +11955,29 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       headers['x-openrouter-key'] = STATE.settings.openRouterKey;
     }
 
-    const messagesPayload = [];
-    if (STATE.settings.systemPrompt) {
-      messagesPayload.push({ role: 'system', content: STATE.settings.systemPrompt });
-    }
-
     const historyMessages = Array.isArray(session?.messages) ? [...session.messages] : [];
+    const lastUserTurn = [...historyMessages].reverse().find(m => m.role === 'user');
+    const lastTurnPrompt = lastUserTurn?.content || promptInstruction || '';
+    const isNemotronCont = isNemotronModel(modelName);
+    const isPureMathCont = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isPureAlgebraOrConceptualQuery === 'function')
+      ? ZozTextSafety.isPureAlgebraOrConceptualQuery(lastTurnPrompt)
+      : false;
+    const decCheckCont = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
+      ? ZozTextSafety.computeBayesianDecisionCalibration(lastTurnPrompt)
+      : null;
+    const isAnalyticalCont = Boolean(
+      decCheckCont?.isAnalyticalQuery ||
+      decCheckCont?.isDiscreteChoice ||
+      decCheckCont?.isConceptualTaxonomy ||
+      isPureMathCont ||
+      isNemotronCont
+    );
+
+    const messagesPayload = [];
+    const contPersona = (isPureMathCont || isAnalyticalCont || isNemotronCont) ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
+    if (contPersona) {
+      messagesPayload.push({ role: 'system', content: contPersona });
+    }
     let hasAssistantTail = false;
     if (historyMessages.length > 0 && historyMessages[historyMessages.length - 1].role === 'assistant') {
       hasAssistantTail = true;
@@ -30946,6 +30980,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       metaBox.innerHTML = `
         <strong>${escapeHtml(modelName)}</strong>
         <span class="meta-model-badge">Ollama</span>
+        ${(isPureMathSession || isQuestionOrAnalytical) ? '<span class="meta-model-badge" style="background:rgba(0,255,150,0.12); border-color:#00e676; color:#00e676;"><i class="fa-solid fa-square-root-variable"></i> Pure Math (Zero Persona)</span>' : ''}
         <span>⏱️ ${totalTime}s</span>
         <span title="${promptTokens ? `${promptTokens} prompt + ${evalTokens} completion token` : `${evalTokens} completion token`}">⚡ ${tps} tps (${evalTokens} tok)</span>
       `;
@@ -33066,6 +33101,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       metaBox.innerHTML = `
         <strong title="${actualModelUsed ? escapeHtml('Model dialihkan ke ' + actualModelUsed) : escapeHtml(displayModel)}">${escapeHtml(effectiveDisplay)}</strong>
         <span class="meta-model-badge" style="${engineLabel === 'Ollama Cloud' ? 'background:rgba(0,242,254,0.15); color:var(--neon-cyan);' : 'background:rgba(255,82,0,0.15); color:var(--neon-amber);'}">${engineLabel}</span>
+        ${(isPureMathSession || isQuestionOrAnalytical) ? '<span class="meta-model-badge" style="background:rgba(0,255,150,0.12); border-color:#00e676; color:#00e676;"><i class="fa-solid fa-square-root-variable"></i> Pure Math (Zero Persona)</span>' : ''}
         ${collectedImages.length > 0 ? '<span class="meta-model-badge" style="background:rgba(255,0,127,0.18); border-color:#FF007F; color:#FF66B2;"><i class="fa-solid fa-wand-magic-sparkles"></i> Gambar Dibuat</span>' : ''}
         <span>⏱️ ${totalTime}s</span>
         <span title="${promptTokens ? `${promptTokens} prompt + ${evalTokens} completion token` : `${evalTokens} completion token`}">⚡ ${tps} tps (${evalTokens} tok)</span>
