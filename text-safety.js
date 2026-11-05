@@ -2100,7 +2100,13 @@
     // 2. Deteksi pilihan ganda tanpa huruf (format kuis Coursera / Skilljar / IBM / Dicoding / Google):
     //    Terdapat baris kalimat tanya ('?' atau ':' atau '...') diikuti >= 2 baris opsi kandidat pendek-menengah
     let unlabeledOptionCount = 0;
-    const questionLineIdx = lines.findIndex(l => /[?:]\s*$|\.{3}\s*$/.test(l) || /\b(what|which|how|why|when|where|who|manakah|apakah|bagaimana|mengapa|pilih|select|choose|true or false|benar atau salah|kecuali)\b/i.test(l));
+    const questionLineIdx = lines.findIndex(l => {
+      const trimmedLine = l.trim();
+      if (/\?+\s*$/.test(trimmedLine) || /:\s*$/.test(trimmedLine)) return true;
+      if (/^\s*(?:what|which|how|why|when|where|who|whom|whose|manakah|apakah|bagaimana|mengapa|pilih(?:lah)?|select|choose)\b/i.test(trimmedLine)) return true;
+      if (/\b(?:true or false|benar atau salah|kecuali|except)\b/i.test(trimmedLine)) return true;
+      return false;
+    });
     if (questionLineIdx !== -1 && lines.length >= questionLineIdx + 3) {
       const tailLines = lines.slice(questionLineIdx + 1).filter(l => {
         if (/^(?:jawab|berikan|pilih|tuliskan)\s+(?:singkat|langsung|hanya|saja|jawaban)/i.test(l)) return false;
@@ -2116,17 +2122,31 @@
       }
     }
 
-    // 2b. Deteksi himpunan opsi/istilah diskrit murni (Aljabar Taksonomi Diskrit):
-    //     Pengguna mengirimkan 2 s/d 8 baris istilah konsep terpisah tanpa teks pengantar panjang
-    //     (contoh: "Competitive \n Independent \n Cooperative \n Interdependent")
+    // 2b. Deteksi himpunan opsi/istilah diskrit murni (Aljabar Taksonomi vs Pilihan Ganda Tanpa Label):
+    //     Pengguna mengirimkan 2 s/d 8 baris terpisah tanpa teks sapaan/perintah fiktif.
+    //     (1) Taksonomi Konsep Murni: istilah abstrak pendek (<= 6 kata per baris, mis. "Competitive \n Independent...")
+    //     (2) Himpunan Opsi Kuis: klausa pernyataan atau tindakan (2 s/d 40 kata per baris, mis. opsi kuis DBMS/LMS)
     let pureListOptionCount = 0;
+    let unlabeledCandidateSetCount = 0;
     if (lines.length >= 2 && lines.length <= 8 && !hasImages && unlabeledOptionCount === 0 && labeledOptionLines.length === 0) {
-      const allLinesShort = lines.every(l => {
-        const wc = l.split(/\s+/).filter(Boolean).length;
-        return wc >= 1 && wc <= 12 && !/^(?:buatkan|tolong|halo|hai|jelaskan|analisis|terima kasih|thanks)\b/i.test(l);
+      const isAllNonConversational = lines.every(l => {
+        return !/^(?:buatkan|tolong|halo|hai|jelaskan|analisis|terima kasih|thanks|selamat)\b/i.test(l);
       });
-      if (allLinesShort) {
-        pureListOptionCount = lines.length;
+      if (isAllNonConversational) {
+        const isAllVeryShortTerms = lines.every(l => {
+          const wc = l.split(/\s+/).filter(Boolean).length;
+          return wc >= 1 && wc <= 6;
+        });
+        const isAllOptionSentences = lines.every(l => {
+          const wc = l.split(/\s+/).filter(Boolean).length;
+          return wc >= 2 && wc <= 40;
+        });
+
+        if (isAllVeryShortTerms) {
+          pureListOptionCount = lines.length;
+        } else if (isAllOptionSentences) {
+          unlabeledCandidateSetCount = lines.length;
+        }
       }
     }
 
@@ -2142,6 +2162,8 @@
       optionCount = labeledOptionLines.length;
     } else if (unlabeledOptionCount >= 2) {
       optionCount = unlabeledOptionCount;
+    } else if (unlabeledCandidateSetCount >= 2) {
+      optionCount = unlabeledCandidateSetCount;
     } else if (inlineOptionsMatch) {
       optionCount = 4;
     } else if (hasQuizCue || hasImageQuizCue) {
@@ -2157,7 +2179,7 @@
     const isSelfContainedDiscreteTurn = Boolean(
       isDiscreteChoice &&
       !hasAnaphoricBackRef &&
-      (hasImages || (raw.length >= 60 && (labeledOptionLines.length >= 2 || unlabeledOptionCount >= 2 || inlineOptionsMatch || hasQuizCue)))
+      (hasImages || (raw.length >= 40 && (labeledOptionLines.length >= 2 || unlabeledOptionCount >= 2 || unlabeledCandidateSetCount >= 2 || inlineOptionsMatch || hasQuizCue)))
     );
 
     // 5. Deteksi persoalan analitis / logika / matematika / sains / kausalitas umum
@@ -2208,6 +2230,15 @@ Sebelum menulis satu kata pun jawaban kepada pengguna, Anda WAJIB mengawali gene
    - Jika tersedia "Semua salah" pada soal definisi positif (+1): apabila seluruh opsi substantif merupakan definisi konsep tetangga Y != X atau meleset syarat spesifiknya (semua v=0), maka "Semua salah" WAJIB dipilih!
    - Pada soal pengecualian "kecuali..." (-1): jika seluruh opsi substantif ternyata BENAR/BISA digunakan sesuai klaim soal, maka tidak ada pengecualian di antara ketiganya sehingga "semua salah" WAJIB dipilih; sebaliknya jika ada tepat 1 opsi substantif yang salah/bukan kesalahan, pilih opsi tersebut.
 5. Tutup </think>, lalu tuliskan jawaban akhir yang bersih, akurat, dan sesuai format yang diminta pengguna.`;
+      if (questionLineIdx === -1 && (unlabeledCandidateSetCount >= 2 || labeledOptionLines.length >= 2)) {
+        calibrationDirective += `\n\n6. INFERENSI ABDUKTIF SOAL TANPA PERTANYAAN EKSPLISIT (INVERSE PROBLEM):
+   Pengguna HANYA menyalin opsi pilihan kuis (${lines.length} opsi) tanpa menyertakan teks pertanyaan.
+   Di dalam <think>, petakan relasi fungsional dan semantik opsi-opsi tersebut:
+   - Identifikasi domain (misal: Aljabar Kueri Relasional DBMS, SQL Lifecycle, ETL, dsb).
+   - Bedakan secara tegas hierarki keadaan: TUJUAN UTAMA / HASIL KELUARAN (Goal/Output: "Retrieve/Display the list of students who meet criteria") vs MEKANISME INSTRUMEN INTERNAL (Transition/Filter: "Filter the database rows where enrollment date matches") vs PRA-KONDISI VALIDASI (Precondition: "Validate query syntax & required data") vs PASCA-KONDISI (Postcondition: "Store query for future reference").
+   - Jika kuis menguji tujuan eksekusi kueri secara utuh, TUJUAN UTAMA (Goal/Output) adalah jawaban fundamental yang paling tepat!
+   - Tuliskan OPSI REKOMENDASI UTAMA yang paling tepat secara tegas di awal, lalu berikan 1-2 baris penjelasan pemetaan logisnya agar pengguna 100% tepat menjawab kuisnya.`;
+      }
     } else if (isAnalyticalQuery) {
       calibrationDirective = `[PROTOKOL REGULASI MEKANISME PERHATIAN & INFERENSI DEDUKTIF MATEMATIKA MURNI — ZERO PERSONA]:
 Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan blok penalaran deduktif formal <think>...</think> (disembunyikan otomatis oleh sistem):${multiImageNote}

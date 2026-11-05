@@ -29747,7 +29747,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         ? ZozTextSafety.isPureAlgebraOrConceptualQuery(promptText)
         : false;
       const isNemotron = isNemotronModel(modelName);
-      const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy);
+      const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice);
       const isQuestionOrAnalytical = Boolean(
         decisionCalibration.isAnalyticalQuery ||
         decisionCalibration.isDiscreteChoice ||
@@ -31509,7 +31509,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         ? ZozTextSafety.isPureAlgebraOrConceptualQuery(promptText)
         : false;
       const isNemotron = isNemotronModel(modelName);
-      const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy);
+      const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice);
       const isQuestionOrAnalytical = Boolean(
         decisionCalibration.isAnalyticalQuery ||
         decisionCalibration.isDiscreteChoice ||
