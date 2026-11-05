@@ -132,6 +132,15 @@
       return tunnelBase ? (tunnelBase + cleanPath) : cleanPath;
     }
 
+    // Jozz Memory: Bila tunnel laptop aktif, utamakan database lokal laptop agar data tersinkronisasi.
+    // Bila tunnel laptop tidak aktif / offline, otomatis dialirkan ke Cloud Serverless Gateway (VERCEL_BACKEND_GATEWAY).
+    if (cleanPath.startsWith('/api/memories')) {
+      const tunnelBase = getActiveTunnelUrl();
+      if (tunnelBase) {
+        return tunnelBase + cleanPath;
+      }
+    }
+
     // Jika sedang berjalan langsung di domain Vercel Serverless, gunakan same-origin
     if (IS_VERCEL) return cleanPath;
 
@@ -1174,9 +1183,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnExecuteExportChat: $('#btnExecuteExportChat'),
     terminalToggleBtn: $('#terminalToggleBtn'),
     terminalModal: $('#terminalModal'),
-    sessionModeIndicatorBadge: $('#sessionModeIndicatorBadge'),
-    sessionModeBadgeIcon: $('#sessionModeBadgeIcon'),
-    sessionModeBadgeText: $('#sessionModeBadgeText'),
     newChatModeModal: $('#newChatModeModal'),
     btnSelectNormalChat: $('#btnSelectNormalChat'),
     btnSelectIncognitoChat: $('#btnSelectIncognitoChat'),
@@ -1443,11 +1449,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         els.jozzMemoryGlobalToggle.checked = STATE.settings.enableJozzMemory !== false;
       }
 
-      els.sessionModeIndicatorBadge?.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.openSettings();
-      });
-
       document.querySelector('[data-target="tabJozzMemory"]')?.addEventListener('click', () => {
         this.refresh();
       });
@@ -1559,27 +1560,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
     updateIncognitoStateUI(isIncognito) {
       STATE.isIncognito = Boolean(isIncognito);
-      if (els.sessionModeIndicatorBadge) {
-        if (STATE.isIncognito) {
-          els.sessionModeIndicatorBadge.classList.add('incognito');
-          if (els.sessionModeBadgeIcon) {
-            els.sessionModeBadgeIcon.className = 'fa-solid fa-user-secret text-[11px] text-purple-400';
-          }
-          if (els.sessionModeBadgeText) {
-            els.sessionModeBadgeText.textContent = 'Incognito';
-          }
-          els.sessionModeIndicatorBadge.setAttribute('title', 'Mode Incognito Aktif (Sesi privat tanpa memori)');
-        } else {
-          els.sessionModeIndicatorBadge.classList.remove('incognito');
-          if (els.sessionModeBadgeIcon) {
-            els.sessionModeBadgeIcon.className = 'fa-solid fa-brain text-[11px] text-teal-400';
-          }
-          if (els.sessionModeBadgeText) {
-            els.sessionModeBadgeText.textContent = 'Jozz Memory';
-          }
-          els.sessionModeIndicatorBadge.setAttribute('title', 'Jozz Memory Aktif • Klik untuk membuka pengelola memori');
-        }
-      }
     },
 
     toggleIncognito() {
@@ -1609,7 +1589,20 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         if (this.searchQuery) params.set('q', this.searchQuery);
         params.set('limit', '80');
 
-        const res = await fetch(getUniversalApiUrl(`/api/memories?${params.toString()}`));
+        let targetUrl = getUniversalApiUrl(`/api/memories?${params.toString()}`);
+        let res = null;
+        try {
+          res = await fetch(targetUrl, { signal: AbortSignal.timeout(6000) });
+        } catch (fetchErr) {
+          // Fallback: Jika pemanggilan via tunnel laptop gagal / timeout, coba via Cloud Serverless Gateway
+          if (targetUrl.includes('trycloudflare.com') && VERCEL_BACKEND_GATEWAY) {
+            targetUrl = `${VERCEL_BACKEND_GATEWAY}/api/memories?${params.toString()}`;
+            res = await fetch(targetUrl, { signal: AbortSignal.timeout(6000) });
+          } else {
+            throw fetchErr;
+          }
+        }
+
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         this.cachedMemories = Array.isArray(data.memories) ? data.memories : [];
@@ -1621,6 +1614,9 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           <div style="text-align: center; padding: 26px; color: #f87171;">
             <i class="fa-solid fa-triangle-exclamation" style="font-size: 1.3rem;"></i>
             <p style="margin-top: 6px; font-size: 0.8rem;">Gagal memuat memori: ${escapeHtml(err.message)}</p>
+            <button type="button" class="btn btn-secondary btn-sm" style="margin-top: 10px; font-size: 0.75rem;" onclick="JozzMemoryUI.refresh()">
+              <i class="fa-solid fa-arrows-rotate"></i> Coba Lagi
+            </button>
           </div>
         `;
       }

@@ -7033,8 +7033,11 @@ async function requestHandler(req, res) {
       const handled = await memoryRoutes.handleMemoryRoutes(req, res, reqUrl);
       if (handled) return;
     } catch (memErr) {
-      console.error('[Jozz Memory Route Error]:', memErr);
-      return sendJSON(res, 500, { success: false, error: memErr.message });
+      console.warn('[Jozz Memory Route Warning]:', memErr);
+      if (method === 'GET') {
+        return sendJSON(res, 200, { success: true, count: 0, memories: [], warning: memErr.message });
+      }
+      return sendJSON(res, 400, { success: false, error: memErr.message });
     }
   }
 
