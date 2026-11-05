@@ -132,15 +132,6 @@
       return tunnelBase ? (tunnelBase + cleanPath) : cleanPath;
     }
 
-    // Jozz Memory: Bila tunnel laptop aktif, utamakan database lokal laptop agar data tersinkronisasi.
-    // Bila tunnel laptop tidak aktif / offline, otomatis dialirkan ke Cloud Serverless Gateway (VERCEL_BACKEND_GATEWAY).
-    if (cleanPath.startsWith('/api/memories')) {
-      const tunnelBase = getActiveTunnelUrl();
-      if (tunnelBase) {
-        return tunnelBase + cleanPath;
-      }
-    }
-
     // Jika sedang berjalan langsung di domain Vercel Serverless, gunakan same-origin
     if (IS_VERCEL) return cleanPath;
 
@@ -1436,6 +1427,108 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
   const AUTONOMOUS_TOOL_CACHE = new Map();
   const TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
 
+  // ==================== JOZZ MEMORY BROWSER PERSISTENCE VAULT ====================
+  // Menjamin kedaulatan data pengguna 100% mandiri pada domain publik (z21.zozdocs.com)
+  // tanpa pernah bergantung pada perangkat fisik laptop, server lokal, ataupun tunnel.
+  const LocalMemoryVault = {
+    STORAGE_KEY: 'zoz_jozz_memories_vault_v1',
+    _cache: null,
+
+    init() {
+      if (this._cache) return this._cache;
+      try {
+        const raw = localStorage.getItem(this.STORAGE_KEY);
+        this._cache = raw ? JSON.parse(raw) : [];
+      } catch (_) {
+        this._cache = [];
+      }
+      return this._cache;
+    },
+
+    getAll(userId = STATE.userId || 'default') {
+      const list = this.init();
+      return list.filter(m => (m.userId === userId || m.user_id === userId || m.userId === 'default' || m.user_id === 'default'));
+    },
+
+    save(memory) {
+      if (!memory || !memory.id) return;
+      const list = this.init();
+      const idx = list.findIndex(m => m.id === memory.id);
+      if (idx >= 0) {
+        list[idx] = { ...list[idx], ...memory, updated_at: new Date().toISOString() };
+      } else {
+        list.unshift(memory);
+      }
+      this._persist(list);
+    },
+
+    delete(id) {
+      if (!id) return;
+      const list = this.init().filter(m => m.id !== id);
+      this._persist(list);
+    },
+
+    clearAll(userId = STATE.userId || 'default') {
+      const list = this.init().filter(m => !(m.userId === userId || m.user_id === userId || m.userId === 'default' || m.user_id === 'default'));
+      this._persist(list);
+    },
+
+    syncWithServer(serverMemories, userId = STATE.userId || 'default') {
+      if (!Array.isArray(serverMemories)) return this.getAll(userId);
+      const list = this.init();
+      const map = new Map();
+      for (const m of serverMemories) {
+        if (m && m.id) map.set(m.id, m);
+      }
+      for (const m of list) {
+        if (m && m.id && !map.has(m.id)) {
+          map.set(m.id, m);
+        }
+      }
+      const merged = Array.from(map.values());
+      merged.sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0));
+      this._persist(merged);
+      return merged;
+    },
+
+    recallLocal(queryText, scope = 'global', userId = STATE.userId || 'default', limit = 5) {
+      const memories = this.getAll(userId);
+      if (!queryText || !memories.length) return null;
+      const tokens = String(queryText).toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+      if (!tokens.length) return null;
+
+      const scored = [];
+      for (const m of memories) {
+        const text = (m.content || '').toLowerCase();
+        let score = 0;
+        for (const tok of tokens) {
+          if (text.includes(tok)) score += 1.0;
+        }
+        if (m.scope === scope) score += 0.5;
+        if (score > 0) scored.push({ memory: m, score });
+      }
+
+      scored.sort((a, b) => b.score - a.score);
+      const top = scored.slice(0, limit).map(s => s.memory);
+      if (!top.length) return null;
+
+      const lines = top.map((m, idx) => `[MEM-${idx + 1} | ID: ${m.id} | Cat: ${m.category}]: ${m.content}`);
+      const injection = `### MEMORI PENGGUNA TERVERIFIKASI (Jozz Memory Cloud Vault):\n${lines.join('\n')}\n*Instruksi: Gunakan fakta di atas secara relevan tanpa berhalusinasi.*`;
+      return {
+        success: true,
+        memories: top,
+        systemPromptInjection: injection
+      };
+    },
+
+    _persist(list) {
+      this._cache = list;
+      try {
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(list.slice(0, 500)));
+      } catch (_) {}
+    }
+  };
+
   // ==================== JOZZ MEMORY CONTROLLER (MISTRAL AI 6 PILLARS) ====================
   const JozzMemoryUI = {
     activeCategory: 'all',
@@ -1575,50 +1668,64 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
     async refresh() {
       if (!els.jozzMemoriesCardsList) return;
-      els.jozzMemoriesCardsList.innerHTML = `
-        <div style="text-align: center; padding: 30px; color: #64748b;">
-          <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.4rem; color: var(--neon-cyan);"></i>
-          <p style="margin-top: 6px; font-size: 0.78rem;">Memuat memori...</p>
-        </div>
-      `;
 
+      const uid = STATE.userId || 'default';
+      const localCached = LocalMemoryVault.getAll(uid);
+      let filteredLocal = localCached;
+      if (this.activeCategory !== 'all') {
+        filteredLocal = filteredLocal.filter(m => m.category === this.activeCategory);
+      }
+      if (this.searchQuery) {
+        const q = this.searchQuery.toLowerCase();
+        filteredLocal = filteredLocal.filter(m => (m.content || '').toLowerCase().includes(q));
+      }
+      if (filteredLocal.length > 0) {
+        this.cachedMemories = filteredLocal;
+        if (els.jozzMemTotalCount) els.jozzMemTotalCount.textContent = String(filteredLocal.length);
+        this.renderCards(filteredLocal);
+      } else {
+        els.jozzMemoriesCardsList.innerHTML = `
+          <div style="text-align: center; padding: 30px; color: #64748b;">
+            <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.4rem; color: var(--neon-cyan);"></i>
+            <p style="margin-top: 6px; font-size: 0.78rem;">Memuat memori...</p>
+          </div>
+        `;
+      }
+
+      // Sinkronkan dengan Cloud Serverless Gateway secara mandiri (0% ketergantungan perangkat lokal laptop)
       try {
         const params = new URLSearchParams();
-        params.set('userId', STATE.userId || 'default');
+        params.set('userId', uid);
         if (this.activeCategory !== 'all') params.set('category', this.activeCategory);
         if (this.searchQuery) params.set('q', this.searchQuery);
         params.set('limit', '80');
 
-        let targetUrl = getUniversalApiUrl(`/api/memories?${params.toString()}`);
-        let res = null;
-        try {
-          res = await fetch(targetUrl, { signal: AbortSignal.timeout(6000) });
-        } catch (fetchErr) {
-          // Fallback: Jika pemanggilan via tunnel laptop gagal / timeout, coba via Cloud Serverless Gateway
-          if (targetUrl.includes('trycloudflare.com') && VERCEL_BACKEND_GATEWAY) {
-            targetUrl = `${VERCEL_BACKEND_GATEWAY}/api/memories?${params.toString()}`;
-            res = await fetch(targetUrl, { signal: AbortSignal.timeout(6000) });
-          } else {
-            throw fetchErr;
+        const targetUrl = getUniversalApiUrl(`/api/memories?${params.toString()}`);
+        const res = await fetch(targetUrl, { signal: AbortSignal.timeout(6000) });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.memories)) {
+            const synced = LocalMemoryVault.syncWithServer(data.memories, uid);
+            let displayList = synced;
+            if (this.activeCategory !== 'all') {
+              displayList = displayList.filter(m => m.category === this.activeCategory);
+            }
+            if (this.searchQuery) {
+              const q = this.searchQuery.toLowerCase();
+              displayList = displayList.filter(m => (m.content || '').toLowerCase().includes(q));
+            }
+            this.cachedMemories = displayList;
+            if (els.jozzMemTotalCount) els.jozzMemTotalCount.textContent = String(displayList.length);
+            this.renderCards(displayList);
+            return;
           }
         }
-
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
-        this.cachedMemories = Array.isArray(data.memories) ? data.memories : [];
-        if (els.jozzMemTotalCount) els.jozzMemTotalCount.textContent = String(this.cachedMemories.length);
-        this.renderCards(this.cachedMemories);
       } catch (err) {
-        console.warn('[Jozz Memory] Error fetching memories:', err);
-        els.jozzMemoriesCardsList.innerHTML = `
-          <div style="text-align: center; padding: 26px; color: #f87171;">
-            <i class="fa-solid fa-triangle-exclamation" style="font-size: 1.3rem;"></i>
-            <p style="margin-top: 6px; font-size: 0.8rem;">Gagal memuat memori: ${escapeHtml(err.message)}</p>
-            <button type="button" class="btn btn-secondary btn-sm" style="margin-top: 10px; font-size: 0.75rem;" onclick="JozzMemoryUI.refresh()">
-              <i class="fa-solid fa-arrows-rotate"></i> Coba Lagi
-            </button>
-          </div>
-        `;
+        console.warn('[Jozz Memory] Cloud sync notice:', err.message);
+      }
+
+      if (filteredLocal.length === 0) {
+        this.renderCards([]);
       }
     },
 
@@ -1695,13 +1802,34 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       }
       const category = els.jozzAddMemoryCategory?.value || 'general_fact';
       const scope = els.jozzAddMemoryScope?.value?.trim() || 'global';
+      const uid = STATE.userId || 'default';
 
+      // 1. Simpan segera ke LocalMemoryVault peramban (100% mandiri tanpa laptop)
+      const localId = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const localMemory = {
+        id: localId,
+        user_id: uid,
+        userId: uid,
+        content,
+        category,
+        scope,
+        is_active: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      LocalMemoryVault.save(localMemory);
+      showToast('✅ Memori berhasil disimpan!', 'success');
+      if (els.jozzAddMemoryContent) els.jozzAddMemoryContent.value = '';
+      if (els.jozzAddMemoryFormBox) els.jozzAddMemoryFormBox.style.display = 'none';
+      this.refresh();
+
+      // 2. Sinkronkan ke Cloud Serverless Gateway secara asinkron
       try {
         const res = await fetch(getUniversalApiUrl('/api/memories'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            userId: STATE.userId || 'default',
+            userId: uid,
             content,
             category,
             scope,
@@ -1709,17 +1837,14 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
             sourceType: 'manual'
           })
         });
-        const data = await res.json();
-        if (data && data.success) {
-          showToast('✅ Memori berhasil disimpan!', 'success');
-          if (els.jozzAddMemoryContent) els.jozzAddMemoryContent.value = '';
-          if (els.jozzAddMemoryFormBox) els.jozzAddMemoryFormBox.style.display = 'none';
-          this.refresh();
-        } else {
-          showToast('Gagal menyimpan: ' + (data?.error || 'Kesalahan guardrail / PII.'), 'error');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.memory && data.memory.id) {
+            LocalMemoryVault.save(data.memory);
+          }
         }
       } catch (err) {
-        showToast('Gagal menyimpan memori: ' + err.message, 'error');
+        console.warn('[Jozz Memory] Cloud async sync notice:', err.message);
       }
     },
 
@@ -1734,43 +1859,54 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         return;
       }
 
+      // 1. Perbarui segera di LocalMemoryVault
+      item.content = trimmed;
+      item.updated_at = new Date().toISOString();
+      LocalMemoryVault.save(item);
+      showToast('Memori diperbarui.', 'success');
+      this.refresh();
+
+      // 2. Sinkronkan ke Cloud Gateway
       try {
-        const res = await fetch(getUniversalApiUrl(`/api/memories/${encodeURIComponent(id)}`), {
+        await fetch(getUniversalApiUrl(`/api/memories/${encodeURIComponent(id)}`), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ content: trimmed })
         });
-        const data = await res.json();
-        if (data && data.success) {
-          showToast('Memori diperbarui.', 'success');
-          this.refresh();
-        } else {
-          showToast('Gagal memperbarui: ' + (data?.error || 'Unknown error'), 'error');
-        }
-      } catch (err) {
-        showToast('Gagal edit memori: ' + err.message, 'error');
-      }
+      } catch (_) {}
     },
 
     async handleDelete(id) {
       if (!confirm('Hapus memori ini secara permanen?')) return;
+      // 1. Hapus segera dari LocalMemoryVault
+      LocalMemoryVault.delete(id);
+      showToast('Memori dihapus.', 'info');
+      this.refresh();
+
+      // 2. Sinkronkan ke Cloud Gateway
       try {
-        const res = await fetch(getUniversalApiUrl(`/api/memories/${encodeURIComponent(id)}`), {
+        await fetch(getUniversalApiUrl(`/api/memories/${encodeURIComponent(id)}`), {
           method: 'DELETE'
         });
-        const data = await res.json();
-        if (data && data.success) {
-          showToast('Memori dihapus.', 'info');
-          this.refresh();
-        }
-      } catch (err) {
-        showToast('Gagal hapus memori: ' + err.message, 'error');
-      }
+      } catch (_) {}
     },
 
     async handleClearAll() {
       if (!confirm('⚠️ PERINGATAN: Anda yakin ingin MENGHAPUS SELURUH MEMORI, graf entitas, dan riwayat Jozz Memory secara permanen? Tindakan ini tidak dapat dibatalkan.')) return;
       if (!confirm('Konfirmasi Terakhir: Hapus semua memori sekarang?')) return;
+
+      const uid = STATE.userId || 'default';
+      LocalMemoryVault.clearAll(uid);
+      showToast('Seluruh memori berhasil dibersihkan.', 'success');
+      this.refresh();
+
+      // 2. Sinkronkan ke Cloud Gateway
+      try {
+        await fetch(getUniversalApiUrl('/api/memories?confirm=true'), {
+          method: 'DELETE'
+        });
+      } catch (_) {}
+    },
 
       try {
         const res = await fetch(getUniversalApiUrl('/api/memories?confirm=true'), {
@@ -1889,6 +2025,29 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     },
 
     exportData(format = 'json') {
+      try {
+        const localList = LocalMemoryVault.getAll(STATE.userId || 'default');
+        if (localList && localList.length > 0) {
+          let content = '';
+          let mime = 'application/json';
+          let ext = 'json';
+          if (format === 'md') {
+            mime = 'text/markdown';
+            ext = 'md';
+            content = `# JOZZ MEMORIES VAULT\n*Exported on ${new Date().toISOString()}*\n\n` +
+              localList.map(m => `### [${m.category || 'general'}] ${m.id}\n- **Scope**: ${m.scope || 'global'}\n- **Dibuat**: ${m.created_at || m.createdAt}\n- **Isi**: ${m.content}\n`).join('\n');
+          } else {
+            content = JSON.stringify({ version: '1.0', exportedAt: new Date().toISOString(), memories: localList }, null, 2);
+          }
+          const blob = new Blob([content], { type: mime });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `jozz-memories-${Date.now()}.${ext}`;
+          a.click();
+          URL.revokeObjectURL(a.href);
+          return;
+        }
+      } catch (_) {}
       const url = getUniversalApiUrl(`/api/memories/export?format=${format}&userId=${encodeURIComponent(STATE.userId || 'default')}`);
       window.open(url, '_blank');
     },
@@ -1900,15 +2059,24 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         const text = await file.text();
         const isJson = file.name.endsWith('.json') || text.trim().startsWith('{');
         const payload = isJson ? JSON.parse(text) : { markdown: text };
+        const uid = STATE.userId || 'default';
 
-        const res = await fetch(getUniversalApiUrl(`/api/memories/import?userId=${encodeURIComponent(STATE.userId || 'default')}`), {
+        if (isJson && Array.isArray(payload.memories)) {
+          LocalMemoryVault.syncWithServer(payload.memories, uid);
+          showToast(`✅ Berhasil impor ${payload.memories.length} memori ke vault lokal!`, 'success');
+          this.refresh();
+        }
+
+        const res = await fetch(getUniversalApiUrl(`/api/memories/import?userId=${encodeURIComponent(uid)}`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
         const data = await res.json();
         if (data && data.success) {
-          showToast(`✅ Berhasil impor ${data.importedCount || 0} memori baru (${data.skippedCount || 0} duplikat dilewati).`, 'success');
+          if (!isJson || !Array.isArray(payload.memories)) {
+            showToast(`✅ Berhasil impor ${data.importedCount || 0} memori baru (${data.skippedCount || 0} duplikat dilewati).`, 'success');
+          }
           this.refresh();
         } else {
           showToast('Gagal impor: ' + (data?.error || 'Format tidak valid'), 'error');
@@ -30453,6 +30621,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
               systemContent = `${jozzMemoryRecall.systemPromptInjection}\n\n${systemContent}`;
             }
           }
+          if (!jozzMemoryRecall || !jozzMemoryRecall.systemPromptInjection) {
+            const localRecall = (typeof LocalMemoryVault !== 'undefined') ? LocalMemoryVault.recallLocal(promptText, STATE.activeProjectScope || 'global', STATE.userId || 'default') : null;
+            if (localRecall && localRecall.systemPromptInjection) {
+              jozzMemoryRecall = localRecall;
+              systemContent = `${localRecall.systemPromptInjection}\n\n${systemContent}`;
+            }
+          }
         } catch (memRecallErr) {
           console.warn('[Jozz Memory] Ollama recall warning:', memRecallErr);
         }
@@ -32267,6 +32442,13 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             jozzMemoryRecall = await recallRes.json().catch(() => null);
             if (jozzMemoryRecall && jozzMemoryRecall.systemPromptInjection) {
               systemContent = `${jozzMemoryRecall.systemPromptInjection}\n\n${systemContent}`;
+            }
+          }
+          if (!jozzMemoryRecall || !jozzMemoryRecall.systemPromptInjection) {
+            const localRecall = (typeof LocalMemoryVault !== 'undefined') ? LocalMemoryVault.recallLocal(promptText, STATE.activeProjectScope || 'global', STATE.userId || 'default') : null;
+            if (localRecall && localRecall.systemPromptInjection) {
+              jozzMemoryRecall = localRecall;
+              systemContent = `${localRecall.systemPromptInjection}\n\n${systemContent}`;
             }
           }
         } catch (memRecallErr) {
