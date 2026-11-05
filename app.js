@@ -43,7 +43,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://method-luxury-winds-leonard.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://amenities-wear-phantom-decreased.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -47147,7 +47147,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://method-luxury-winds-leonard.trycloudflare.com',
+    activeTunnelUrl: 'https://amenities-wear-phantom-decreased.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
