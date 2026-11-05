@@ -1908,20 +1908,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       } catch (_) {}
     },
 
-      try {
-        const res = await fetch(getUniversalApiUrl('/api/memories?confirm=true'), {
-          method: 'DELETE'
-        });
-        const data = await res.json();
-        if (data && data.success) {
-          showToast('Seluruh memori berhasil dibersihkan.', 'success');
-          this.refresh();
-        }
-      } catch (err) {
-        showToast('Gagal menghapus seluruh memori: ' + err.message, 'error');
-      }
-    },
-
     async loadInsights() {
       if (!els.jozzMemoryInsightsContent) return;
       els.jozzMemoryInsightsContent.innerHTML = `
