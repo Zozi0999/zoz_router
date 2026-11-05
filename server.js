@@ -3968,6 +3968,32 @@ function applyServerSideDecisionCalibration(body, provider = 'ollama') {
     imageCount,
     sessionOrMessages: body.messages.slice(0, lastUserIdx)
   });
+  // Injeksi Resolusi Entitas Fonetik & Batasan Format Negatif (Matematika Murni)
+  const entityRes = (typeof textSafety.resolveEntityPhoneticallyMathematically === 'function')
+    ? textSafety.resolveEntityPhoneticallyMathematically(rawUserText)
+    : null;
+  const formatConstraints = (typeof textSafety.extractNegativeFormattingConstraints === 'function')
+    ? textSafety.extractNegativeFormattingConstraints(rawUserText)
+    : null;
+
+  if (entityRes && entityRes.directive && !serializedAll.includes('RESOLUSI IDENTITAS ENTITAS MATEMATIKA MURNI')) {
+    const sysMsg = body.messages.find(m => m && m.role === 'system');
+    if (sysMsg && typeof sysMsg.content === 'string') {
+      sysMsg.content = `${entityRes.directive}\n\n${sysMsg.content}`;
+    } else {
+      body.messages.unshift({ role: 'system', content: entityRes.directive });
+    }
+  }
+
+  if (formatConstraints && formatConstraints.directive && !serializedAll.includes('BATASAN FORMAT WAJIB')) {
+    const sysMsg = body.messages.find(m => m && m.role === 'system');
+    if (sysMsg && typeof sysMsg.content === 'string') {
+      sysMsg.content = `${formatConstraints.directive}\n\n${sysMsg.content}`;
+    } else {
+      body.messages.unshift({ role: 'system', content: formatConstraints.directive });
+    }
+  }
+
   if (!calib || (!calib.isDiscreteChoice && !calib.isAnalyticalQuery && !calib.isConceptualTaxonomy)) return;
 
   // 1. Kalibrasi suhu Boltzmann & parameter router

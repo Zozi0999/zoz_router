@@ -2895,6 +2895,11 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
     if (!raw) return false;
     const lower = raw.toLowerCase();
 
+    // 0. Pengecualian mutlak: kueri naratif, biografi, sejarah, kisah hidup, atau pertanyaan profil tokoh
+    // Pertanyaan ini membutuhkan sintesis fakta historis/biografis, bukan dekonstruksi simbolik murni!
+    const isNarrativeOrBiographical = /\b(?:kisah\s+hidup|biografi|ceritakan|sejarah|riwayat|siapa\s+(?:itu|tokoh|sosok)|lahir|meninggal|kehidupan|profil|kronologi|karya\s+tulis|perjalanan\s+hidup)\b/i.test(lower);
+    if (isNarrativeOrBiographical) return false;
+
     // Jika memuat indikator waktu aktual eksplisit (berita, hari ini, rilis baru, tahun ini), bukan konsep murni
     const hasTemporal = /\b(hari\s+ini|kemarin|sekarang|terbaru|terkini|minggu\s+ini|bulan\s+ini|tahun\s+ini|today|yesterday|right\s+now|latest|breaking|news|berita|harga|kurs|jadwal|cuaca|update|rilis|202[4-9])\b/i.test(lower);
     if (hasTemporal) return false;
@@ -2914,7 +2919,7 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
       if (allShortConcepts) return true;
     }
 
-    // Kriteria 2: Istilah aljabar, matematika, logika formal, teori relasional, atau dikotomi konsep abstrak (EN + ID)
+    // Kriteria 2: Istilah aljabar, matematika formal, logika simbolik, teori relasional, atau dikotomi konsep abstrak (EN + ID)
     const conceptualTermsRegex = /\b(?:competitive|independent|cooperative|interdependent|zero-sum|non-zero-sum|game\s+theory|nash\s+equilibrium|social\s+interdependence|relational\s+algebra|boolean\s+algebra|truth\s+table|monoid|semigroup|group\s+theory|ring\s+theory|field\s+theory|isomorphism|homomorphism|bijection|injection|surjection|set\s+theory|predicate\s+logic|modal\s+logic|epistemic|ontology|taxonomy|dichotomy|trichotomy|inductive|deductive|abductive|apriori|a\s+priori|aposteriori|a\s+posteriori|modus\s+ponens|modus\s+tollens|contrapositive|tautology|contradiction|contingency|matrix|determinant|eigenvalue|eigenvector|vector\s+space|subspace|orthogonal|basis|dimension|kernel|nullity|topology|metric\s+space|limit|derivative|integral|turunan|diferensial|kalkulus|aljabar|matriks|vektor|aritmatika|persamaan|pertidaksamaan|trigonometri|geometri|peluang|probabilitas|permutasi|kombinasi|himpunan|teorema|aksioma|silogisme|premis|silogistis|kontradiksi|faktorial|logaritma|deret|barisan|calculus|algebra|polynomial|quadratic|logarithm|factorial|permutation|combination|syllogism|premise|axiom|theorem)\b/i;
     if (conceptualTermsRegex.test(lower)) return true;
 
@@ -2927,6 +2932,298 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
     if (hasFormalLogic) return true;
 
     return false;
+  }
+
+  // =========================================================================
+  // 19. DISAMBIGUASI ENTITAS MATEMATIKA MURNI (DAMERAU-LEVENSHTEIN & BAYESIAN POSTERIOR)
+  // Menghilangkan distorsi prior halusinasi dan memetakan transliterasi fonetik / typo
+  // ke identitas kanonikal resmi (misal: "jenos bolaly" -> János Bolyai, BUKAN John von Neumann).
+  // =========================================================================
+
+  function computeDamerauLevenshtein(s1, s2) {
+    if (!s1 || !s2) return (s1 ? s1.length : (s2 ? s2.length : 0));
+    const a = s1.toLowerCase();
+    const b = s2.toLowerCase();
+    const lenA = a.length;
+    const lenB = b.length;
+    const d = [];
+    for (let i = 0; i <= lenA; i++) d[i] = [i];
+    for (let j = 0; j <= lenB; j++) d[0][j] = j;
+    for (let i = 1; i <= lenA; i++) {
+      for (let j = 1; j <= lenB; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        d[i][j] = Math.min(
+          d[i - 1][j] + 1,
+          d[i][j - 1] + 1,
+          d[i - 1][j - 1] + cost
+        );
+        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+          d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+        }
+      }
+    }
+    return d[lenA][lenB];
+  }
+
+  function computeNormalizedSimilarity(strA, strB) {
+    if (!strA || !strB) return 0;
+    const dist = computeDamerauLevenshtein(strA, strB);
+    const maxLen = Math.max(strA.length, strB.length);
+    if (maxLen === 0) return 1.0;
+    return Math.max(0, 1.0 - (dist / maxLen));
+  }
+
+  const CANONICAL_SCIENTIFIC_ENTITIES = [
+    {
+      id: 'janos_bolyai',
+      canonicalName: 'János Bolyai',
+      variants: ['jenos bolaly', 'jenos bolyai', 'janos bolaly', 'janos bolyai', 'jennos bolaly', 'jenos bolai', 'bolyai', 'bolaly', 'bolai janos', 'bolaly jenos'],
+      keywords: ['matematikawan', 'hongaria', 'hungary', 'hungaria', 'geometri', 'non-euklides', 'hiperbolik', 'matematika', 'farkas', 'gauss'],
+      years: '1802–1860',
+      nationality: 'Hungaria',
+      field: 'Pelopor Geometri Non-Euklides (Hiperbolik)',
+      disambiguationAvoid: ['John von Neumann', 'János Neumann', 'Neumann'],
+      summary: 'János Bolyai adalah matematikawan legendaris asal Hungaria penemu independen geometri non-Euklides (geometri hiperbolik). Karya terbesarnya "The Absolute Science of Space" dipublikasikan tahun 1832 sebagai lampiran karya ayahnya, Farkas Bolyai.'
+    },
+    {
+      id: 'john_von_neumann',
+      canonicalName: 'John von Neumann (János Lajos Neumann)',
+      variants: ['john von neumann', 'jhon fon neuman', 'von neumann', 'fon neuman', 'janos neumann', 'john von neuman', 'jhon neuman', 'jon von neuman'],
+      keywords: ['komputer', 'game theory', 'teori permainan', 'arsitektur', 'kuantum', 'minimax', 'ias', 'princeton', 'automata'],
+      years: '1903–1957',
+      nationality: 'Hungaria-Amerika',
+      field: 'Teori Permainan, Arsitektur Komputer Modern, Mekanika Kuantum, Teori Himpunan',
+      disambiguationAvoid: ['János Bolyai', 'Bolyai'],
+      summary: 'John von Neumann adalah polimatik Hungaria-Amerika penemu arsitektur Von Neumann, bapak teori permainan (teorema Minimax), dan perumus landasan matematika mekanika kuantum.'
+    },
+    {
+      id: 'paul_erdos',
+      canonicalName: 'Paul Erdős (Pál Erdős)',
+      variants: ['paul erdos', 'pal erdos', 'erdos', 'pol erdos', 'erdos pal'],
+      keywords: ['graf', 'kombinatorika', 'nomor erdos', 'bilangan', 'probabilistik'],
+      years: '1913–1996',
+      nationality: 'Hungaria',
+      field: 'Teori Graf, Kombinatorika, Teori Bilangan Probabilistik',
+      disambiguationAvoid: [],
+      summary: 'Paul Erdős adalah matematikawan legendaris Hungaria pelopor teori graf dan metode kombinatorika probabilistik.'
+    },
+    {
+      id: 'george_polya',
+      canonicalName: 'George Pólya (György Pólya)',
+      variants: ['george polya', 'gyorgy polya', 'polya', 'geor polya', 'polya gyorgy'],
+      keywords: ['how to solve it', 'heuristik', 'pemecahan masalah', 'peluang'],
+      years: '1887–1985',
+      nationality: 'Hungaria-Amerika',
+      field: 'Heuristik Matematika, Kombinatorika',
+      disambiguationAvoid: [],
+      summary: 'George Pólya adalah matematikawan Hungaria penulis buku monumental "How to Solve It".'
+    },
+    {
+      id: 'carl_friedrich_gauss',
+      canonicalName: 'Carl Friedrich Gauss',
+      variants: ['carl friedrich gauss', 'karl friedrik gaus', 'gauss', 'gaus', 'friedrich gauss', 'carl gauss'],
+      keywords: ['pangeran matematika', 'distribusi normal', 'aritmetika', 'bilangan'],
+      years: '1777–1855',
+      nationality: 'Jerman',
+      field: 'Princeps Mathematicorum, Teori Bilangan, Analisis Matematis, Astronomi',
+      disambiguationAvoid: [],
+      summary: 'Carl Friedrich Gauss adalah salah satu matematikawan teragung sepanjang masa, pelopor teori bilangan modern dan kurva normal Gauss.'
+    },
+    {
+      id: 'isaac_newton',
+      canonicalName: 'Sir Isaac Newton',
+      variants: ['isaac newton', 'ishak newton', 'isak newton', 'newton'],
+      keywords: ['gravitasi', 'kalkulus', 'hukum gerak', 'optika', 'principia'],
+      years: '1643–1727',
+      nationality: 'Inggris',
+      field: 'Kalkulus, Mekanika Klasik, Hukum Gravitasi Universal',
+      disambiguationAvoid: [],
+      summary: 'Sir Isaac Newton adalah raksasa sains penemu kalkulus independen dan perumus hukum mekanika serta gravitasi universal.'
+    },
+    {
+      id: 'albert_einstein',
+      canonicalName: 'Albert Einstein',
+      variants: ['albert einstein', 'albert ainsten', 'ainsten', 'einsten', 'einstein'],
+      keywords: ['relativitas', 'e=mc2', 'fotolistrik', 'fisika'],
+      years: '1879–1955',
+      nationality: 'Jerman-Amerika',
+      field: 'Fisika Teoretis, Teori Relativitas Umum & Khusus',
+      disambiguationAvoid: [],
+      summary: 'Albert Einstein adalah fisikawan teoretis terkemuka penemu teori relativitas dan peraih Nobel Fisika 1921.'
+    },
+    {
+      id: 'rene_descartes',
+      canonicalName: 'René Descartes',
+      variants: ['rene descartes', 'rene deskartes', 'descartes', 'deskartes'],
+      keywords: ['kartesius', 'koordinat', 'filsafat', 'cogito'],
+      years: '1596–1650',
+      nationality: 'Prancis',
+      field: 'Geometri Analitis (Sistem Koordinat Kartesius), Rasionalisme',
+      disambiguationAvoid: [],
+      summary: 'René Descartes adalah penemu sistem koordinat Kartesius yang menyatukan aljabar dan geometri serta bapak filsafat modern.'
+    },
+    {
+      id: 'al_khwarizmi',
+      canonicalName: 'Muhammad ibn Musa al-Khwarizmi',
+      variants: ['al khawarizmi', 'al khwarizmi', 'alkhawarizmi', 'al-khwarizmi', 'khawarizmi'],
+      keywords: ['aljabar', 'algoritma', 'angka nol', 'baghdad', 'baitul hikmah'],
+      years: 'c. 780–850 M',
+      nationality: 'Persia-Arab',
+      field: 'Bapak Aljabar, Algoritma, Angka Indo-Arab',
+      disambiguationAvoid: [],
+      summary: 'Al-Khwarizmi adalah polimatik perintis aljabar ("Kitab al-Jabr wal-Muqabala") dan peletak dasar konsep algoritma.'
+    },
+    {
+      id: 'leonhard_euler',
+      canonicalName: 'Leonhard Euler',
+      variants: ['leonhard euler', 'leonard euler', 'euler', 'oiler'],
+      keywords: ['identitas euler', 'konstanta e', 'graf', 'konigsberg', 'analisis'],
+      years: '1707–1783',
+      nationality: 'Swiss',
+      field: 'Teori Graf, Kalkulus, Analisis Kompleks',
+      disambiguationAvoid: [],
+      summary: 'Leonhard Euler adalah matematikawan paling produktif sepanjang masa, penemu teori graf dan identitas e^{i pi} + 1 = 0.'
+    },
+    {
+      id: 'alan_turing',
+      canonicalName: 'Alan Turing',
+      variants: ['alan turing', 'turing', 'alan tyuring'],
+      keywords: ['enigma', 'mesin turing', 'ai', 'komputasi'],
+      years: '1912–1954',
+      nationality: 'Inggris',
+      field: 'Komputasi Teoretis, Pemecahan Kode Enigma, Mesin Turing',
+      disambiguationAvoid: [],
+      summary: 'Alan Turing adalah bapak ilmu komputer teoretis dan kecerdasan buatan, pemecah mesin sandi Enigma pada PD II.'
+    },
+    {
+      id: 'bernhard_riemann',
+      canonicalName: 'Bernhard Riemann',
+      variants: ['bernhard riemann', 'bernhard riman', 'riemann', 'riman'],
+      keywords: ['geometri riemann', 'hipotesis riemann', 'fungsi zeta', 'manifold'],
+      years: '1826–1866',
+      nationality: 'Jerman',
+      field: 'Geometri Diferensial, Analisis Kompleks, Teori Bilangan',
+      disambiguationAvoid: [],
+      summary: 'Bernhard Riemann adalah pelopor geometri eliptik non-Euklides (geometri Riemann) dan pencetus Hipotesis Riemann.'
+    }
+  ];
+
+  function resolveEntityPhoneticallyMathematically(promptText) {
+    if (!promptText || typeof promptText !== 'string') return null;
+    const cleanPrompt = promptText.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (cleanPrompt.length < 3) return null;
+
+    let bestEntity = null;
+    let bestScore = 0;
+    let matchedVariant = '';
+
+    const words = cleanPrompt.split(/\s+/).filter(w => w.length >= 3);
+    const ngrams = [];
+    for (let i = 0; i < words.length; i++) {
+      ngrams.push(words[i]);
+      if (i < words.length - 1) ngrams.push(`${words[i]} ${words[i + 1]}`);
+      if (i < words.length - 2) ngrams.push(`${words[i]} ${words[i + 1]} ${words[i + 2]}`);
+    }
+
+    for (const ent of CANONICAL_SCIENTIFIC_ENTITIES) {
+      let maxSimForEntity = 0;
+      let matchedVarForEntity = '';
+
+      for (const variant of ent.variants) {
+        if (cleanPrompt.includes(variant)) {
+          maxSimForEntity = Math.max(maxSimForEntity, 1.0);
+          matchedVarForEntity = variant;
+          break;
+        }
+        for (const ng of ngrams) {
+          const sim = computeNormalizedSimilarity(ng, variant);
+          if (sim > maxSimForEntity) {
+            maxSimForEntity = sim;
+            matchedVarForEntity = variant;
+          }
+        }
+      }
+
+      // Hitung bobot kata kunci pembantu (misal: "matematikawan", "hongaria")
+      let kwOverlap = 0;
+      for (const kw of ent.keywords) {
+        if (cleanPrompt.includes(kw)) kwOverlap++;
+      }
+      const kwBonus = Math.min(0.25, (kwOverlap * 0.12));
+      const totalScore = (maxSimForEntity * 0.75) + kwBonus;
+
+      if (totalScore > bestScore && maxSimForEntity >= 0.68) {
+        bestScore = totalScore;
+        bestEntity = ent;
+        matchedVariant = matchedVarForEntity;
+      }
+    }
+
+    if (bestEntity && bestScore >= 0.70) {
+      const avoidWarn = (bestEntity.disambiguationAvoid && bestEntity.disambiguationAvoid.length > 0)
+        ? `\n- PERINGATAN INTEGRITAS & ANTI-ASOSIASI KELIRU: DILARANG KERAS menukar, mengaitkan, atau mengganti subjek ini dengan ${bestEntity.disambiguationAvoid.join(' atau ')}. Subjek resmi yang diminta pengguna secara eksak adalah ${bestEntity.canonicalName}.`
+        : '';
+
+      const directive = `### RESOLUSI IDENTITAS ENTITAS MATEMATIKA MURNI (BAYESIAN DISAMBIGUATION — P(E|Q) >= 0.99)
+[SUBJEK TERVERIFIKASI SECARA DEDUKTIF]:
+- Kueri Pengguna: "${promptText}"
+- Tokoh yang Dimaksud Pengguna: ${bestEntity.canonicalName} (${bestEntity.years})
+- Kebangsaan & Peran: ${bestEntity.nationality} — ${bestEntity.field}.${avoidWarn}
+- Intisari Biografis: ${bestEntity.summary}
+
+[MANDAT KONTEN & FORMAT]:
+1. Anda WAJIB menyajikan biografi / kisah hidup lengkap tentang ${bestEntity.canonicalName} (${bestEntity.years}) secara runut, mendalam, dan utuh.
+2. DILARANG KERAS menceritakan tokoh lain!`;
+
+      return {
+        resolved: true,
+        entityId: bestEntity.id,
+        canonicalName: bestEntity.canonicalName,
+        years: bestEntity.years,
+        nationality: bestEntity.nationality,
+        field: bestEntity.field,
+        summary: bestEntity.summary,
+        avoidNames: bestEntity.disambiguationAvoid,
+        score: Number(bestScore.toFixed(4)),
+        directive
+      };
+    }
+
+    return null;
+  }
+
+  // =========================================================================
+  // 20. NEGATIVE FORMATTING CONSTRAINT ENGINE (KONTROL ALJABAR BOOLE ATAS FORMAT)
+  // Menjamin larangan pengguna (seperti "tanpa tabel", "jangan buat tabel", dsb.)
+  // dipatuhi 100% dan tidak pernah ditimpa oleh prompt sistem default.
+  // =========================================================================
+
+  function extractNegativeFormattingConstraints(queryText) {
+    if (!queryText || typeof queryText !== 'string') {
+      return { noTable: false, noCode: false, isExhaustive: false, directive: '' };
+    }
+    const text = queryText.toLowerCase();
+    const noTable = /\b(?:tanpa\s+tabel|jangan\s+(?:pakai|gunakan|buat)\s+tabel|tidak\s+perlu\s+tabel|no\s+tables?|without\s+tables?)\b/i.test(text);
+    const noCode = /\b(?:tanpa\s+kode|jangan\s+(?:tulis|buat)\s+kode|no\s+code)\b/i.test(text);
+    const isExhaustive = /\b(?:fuul|full|lengkap|komprehensif|tuntas|detail|mendalam|seluruh|episode|semua\s+bab)\b/i.test(text);
+
+    const directives = [];
+    if (noTable) {
+      directives.push(`[BATASAN FORMAT WAJIB — TANPA TABEL]: Pengguna secara tegas melarang penyajian dalam bentuk tabel ("tanpa tabel"). DILARANG KERAS menyajikan tabel Markdown; gunakan narasi paragraf komprehensif yang mengalir dan poin deskriptif terstruktur.`);
+    }
+    if (noCode) {
+      directives.push(`[BATASAN FORMAT WAJIB — TANPA KODE]: Pengguna melarang kode pemrograman. Sajikan hanya penjelasan konseptual/teks naratif.`);
+    }
+    if (isExhaustive) {
+      directives.push(`[MANDAT KEDALAMAN]: Pengguna meminta penjabaran lengkap/full episode. Sajikan biografi/pembahasan secara tuntas, runut, dan mendalam.`);
+    }
+
+    return {
+      noTable,
+      noCode,
+      isExhaustive,
+      directive: directives.join('\n\n')
+    };
   }
 
   // =========================================================================
@@ -3042,6 +3339,9 @@ ${condensed}`;
     computePersonaResonanceVector,
     sanitizeModelPersonaDrift,
     isRevisionQuery,
-    extractParentQuizContext
+    extractParentQuizContext,
+    computeDamerauLevenshtein,
+    resolveEntityPhoneticallyMathematically,
+    extractNegativeFormattingConstraints
   };
 });

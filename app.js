@@ -7266,20 +7266,29 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   function buildWebRescueMessages(question, evidenceText, model = '') {
     const now = new Date();
     const isoDate = now.toISOString().slice(0, 10);
-    const isNemotron = isNemotronModel(model);
     const isPureMath = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isPureAlgebraOrConceptualQuery === 'function')
       ? ZozTextSafety.isPureAlgebraOrConceptualQuery(question)
       : false;
+    const isDeutschInterdependence = Boolean(
+      /\b(?:deutsch|social\s+interdependence|ketergantungan\s+sosial|4\s+kuadran|empat\s+kuadran|promotive|contrience|interdependent|cooperative.*competitive)\b/i.test(question) ||
+      (/\bcompetitive\b/i.test(question) && /\bcooperative\b/i.test(question) && /\bindependent\b/i.test(question))
+    );
+    const entityResolution = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.resolveEntityPhoneticallyMathematically === 'function')
+      ? ZozTextSafety.resolveEntityPhoneticallyMathematically(question)
+      : null;
+    const formattingConstraints = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.extractNegativeFormattingConstraints === 'function')
+      ? ZozTextSafety.extractNegativeFormattingConstraints(question)
+      : { noTable: false, noCode: false, isExhaustive: false, directive: '' };
     const hasSubstantiveEvidence = evidenceText && !evidenceText.includes('tidak menemukan dokumen') && !evidenceText.includes('tidak memberikan fakta spesifik') && evidenceText.length > 80;
 
-    if (isNemotron || isPureMath) {
+    if (isPureMath && isDeutschInterdependence) {
       return [
         {
           role: 'system',
           content: `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN (UTC ${isoDate})\n` +
             `1. Dekonstruksi seluruh konsep secara formal ke dalam ruang keadaan multi-agen (State-Space S), matriks utilitas, dan kalkulus ketergantungan sosial Morton Deutsch (Independent: dU_i/ds_j = 0; Competitive: Delta U_i . Delta U_j < 0; Cooperative: Delta U_i . Delta U_j > 0; Interdependent: U_i = f(S)).\n` +
             `2. Pertahankan persona aktif dari sistem pengguna dengan presisi deduktif dan wibawa analitis tertinggi.\n` +
-            `3. Sajikan tabel Markdown formal yang merangkum dimensi aljabar, kondisi Jacobian, dan ekuilibrium teori permainan.\n` +
+            (formattingConstraints.noTable ? `3. BATASAN FORMAT: Pengguna melarang tabel ("tanpa tabel"), sajikan dalam narasi deduktif terstruktur.\n` : `3. Sajikan tabel Markdown formal yang merangkum dimensi aljabar, kondisi Jacobian, dan ekuilibrium teori permainan.\n`) +
             `4. DILARANG KERAS mengeluhkan ketiadaan indeks atau dokumen, dilarang menolak menjawab, dan dilarang menyebutkan kendala pencarian internal.`
         },
         {
@@ -7290,13 +7299,19 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     }
 
     if (!hasSubstantiveEvidence) {
+      const extraDirectives = [];
+      if (entityResolution && entityResolution.directive) extraDirectives.push(entityResolution.directive);
+      if (formattingConstraints && formattingConstraints.directive) extraDirectives.push(formattingConstraints.directive);
+      const prefixNotes = extraDirectives.length > 0 ? `${extraDirectives.join('\n\n')}\n\n` : '';
+
       return [
         {
           role: 'system',
-          content: `### MANDAT JAWABAN DEDUKTIF & ANALISIS KOMPREHENSIF (UTC ${isoDate})\n` +
+          content: `${prefixNotes}### MANDAT JAWABAN DEDUKTIF & ANALISIS KOMPREHENSIF (UTC ${isoDate})\n` +
             `1. Jawab pertanyaan pengguna secara langsung, menyeluruh, terstruktur, dan mendalam dalam Bahasa Indonesia.\n` +
             `2. DILARANG KERAS mengeluhkan ketiadaan indeks atau dokumen, dilarang menolak menjawab, dilarang mencetak catatan diagnostik atau penanda status sistem internal, dan dilarang menyebutkan kendala pencarian internal.\n` +
-            `3. Sajikan ide, solusi, penjelasan konsep, atau analisis mendalam menggunakan Markdown yang rapi (heading, poin bernomor/bullet).`
+            `3. Sajikan ide, solusi, penjelasan konsep, atau analisis mendalam menggunakan Markdown yang rapi (heading, poin bernomor/bullet).\n` +
+            (formattingConstraints.noTable ? `4. BATASAN FORMAT: Pengguna secara tegas melarang tabel ("tanpa tabel"). DILARANG KERAS membuat tabel Markdown.` : '')
         },
         {
           role: 'user',
@@ -12427,15 +12442,14 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       decCheckCont?.isAnalyticalQuery ||
       decCheckCont?.isDiscreteChoice ||
       decCheckCont?.isConceptualTaxonomy ||
-      isPureMathCont ||
-      isNemotronCont
+      isPureMathCont
     );
 
     for (let c = 0; c < candidateModels.length; c++) {
       const curModel = candidateModels[c];
       const supportsSystem = doesModelSupportSystemRole(curModel);
       const messagesPayload = [];
-      const contPersona = (isPureMathCont || isAnalyticalCont || isNemotronCont) ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
+      const contPersona = (isPureMathCont || isAnalyticalCont) ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
       if (contPersona && supportsSystem) {
         messagesPayload.push({ role: 'system', content: contPersona });
       }
@@ -12733,12 +12747,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       decCheckCont?.isAnalyticalQuery ||
       decCheckCont?.isDiscreteChoice ||
       decCheckCont?.isConceptualTaxonomy ||
-      isPureMathCont ||
-      isNemotronCont
+      isPureMathCont
     );
 
     const messagesPayload = [];
-    const contPersona = (isPureMathCont || isAnalyticalCont || isNemotronCont) ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
+    const contPersona = (isPureMathCont || isAnalyticalCont) ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
     if (contPersona) {
       messagesPayload.push({ role: 'system', content: contPersona });
     }
@@ -30705,21 +30718,34 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         ? ZozTextSafety.isPureAlgebraOrConceptualQuery(promptText)
         : false;
       const isNemotron = isNemotronModel(modelName);
-      const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice || isQuizRevision);
+      const isPureMathSession = Boolean(isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice || isQuizRevision);
       const isQuestionOrAnalytical = Boolean(
         decisionCalibration.isAnalyticalQuery ||
         decisionCalibration.isDiscreteChoice ||
         decisionCalibration.isConceptualTaxonomy ||
         isPureAlgebraConcept ||
-        isNemotron ||
         isQuizRevision
       );
+
+      const entityResolution = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.resolveEntityPhoneticallyMathematically === 'function')
+        ? ZozTextSafety.resolveEntityPhoneticallyMathematically(promptText)
+        : null;
+      const formattingConstraints = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.extractNegativeFormattingConstraints === 'function')
+        ? ZozTextSafety.extractNegativeFormattingConstraints(promptText)
+        : { noTable: false, noCode: false, isExhaustive: false, directive: '' };
 
       // Persistensi Persona Bawaan Sistem & Sensor Anti-Drift:
       // Persona yang dikonfigurasi pengguna di pengaturan WAJIB dipertahankan secara utuh.
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
       const canRunAutonomous = !isPureMathSession && Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       let systemContent = getDynamicSystemTemporalContext();
+
+      if (entityResolution && entityResolution.directive) {
+        systemContent = `${entityResolution.directive}\n\n${systemContent}`;
+      }
+      if (formattingConstraints && formattingConstraints.directive) {
+        systemContent = `${formattingConstraints.directive}\n\n${systemContent}`;
+      }
 
       // Jozz Memory Scoped Hybrid Recall (Hybrid Storage & Knowledge Graph)
       let jozzMemoryRecall = null;
@@ -30853,7 +30879,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN
       if (isPureMathSession) {
-        const pureMathDirective = `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN
+        const isDeutschInterdependence = Boolean(
+          /\b(?:deutsch|social\s+interdependence|ketergantungan\s+sosial|4\s+kuadran|empat\s+kuadran|promotive|contrience|interdependent|cooperative.*competitive)\b/i.test(promptText) ||
+          (/\bcompetitive\b/i.test(promptText) && /\bcooperative\b/i.test(promptText) && /\bindependent\b/i.test(promptText))
+        );
+
+        let pureMathDirective = '';
+        if (isDeutschInterdependence) {
+          pureMathDirective = `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN
 [MANDAT FORMULASI MATEMATIKA & ANALISIS SISTEMIK]:
 1. PRESISI MATEMATIKA MURNI & FORMULASI FORMAL:
    - Sajikan penalaran deduktif formal, kejelasan matematis, dan teori relasi sistemik dengan ketajaman tingkat tinggi selaras dengan persona Anda.
@@ -30883,9 +30916,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       - Ruang umum keterkopelan multivariat: U_i = f_i(s_1, ..., s_n) di mana exists j != i sedemikian rupa sehingga dU_i / ds_j != 0.
       - Spektrum Jacobian: Matriks bobot interaksi W in R^{n x n} dengan spektrum non-nol rho(W) > 0, membentuk kontinum dari kompetisi murni (anti-simetris) ke kooperasi murni (simetris positif semi-definit).
 
-4. STRUKTUR PENYAJIAN TABEL KOMPARATIF:
-   - Sajikan tabel Markdown formal yang merangkum: Dimensi Konseptual, Notasi Aljabar, Kondisi Jacobian, Ekuilibrium Teori Permainan, dan Karakteristik Sistemik.
-   - Langsung berikan analisis matematika murni yang elegan, presisi, dan tuntas tanpa keluhan atau penolakan.`;
+${formattingConstraints.noTable ? '4. FORMAT PENYAJIAN: Pengguna secara tegas melarang tabel ("tanpa tabel"). Sajikan dalam paragraf dan poin naratif deduktif terstruktur, DILARANG membuat tabel.' : '4. STRUKTUR PENYAJIAN TABEL KOMPARATIF: Sajikan tabel Markdown formal yang merangkum: Dimensi Konseptual, Notasi Aljabar, Kondisi Jacobian, Ekuilibrium Teori Permainan, dan Karakteristik Sistemik.'}`;
+        } else {
+          pureMathDirective = `### MANDAT PENALARAN MATEMATIKA MURNI & DEDUKSI FORMAL
+[MANDAT FORMULASI MATEMATIKA]:
+1. PRESISI DEDUKTIF FORMAL: Turunkan setiap argumen secara deduktif, aksiomatik, dan berbobot tinggi. Hindari spekulasi atau asumsi tak berdasar.
+2. KEJELASAN FORMULASI: Sajikan simbol, langkah pembuktian, atau kalkulasi matematis secara runut, terstruktur, dan elegan.
+${formattingConstraints.noTable ? '3. BATASAN FORMAT: Pengguna secara tegas melarang tabel ("tanpa tabel"). Gunakan narasi komprehensif mengalir dan poin deskriptif tanpa tabel Markdown.' : ''}`;
+        }
         systemContent = systemContent ? `${systemContent}\n\n${pureMathDirective}` : pureMathDirective;
       }
 
@@ -32545,21 +32583,34 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         ? ZozTextSafety.isPureAlgebraOrConceptualQuery(promptText)
         : false;
       const isNemotron = isNemotronModel(modelName);
-      const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice || isQuizRevision);
+      const isPureMathSession = Boolean(isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice || isQuizRevision);
       const isQuestionOrAnalytical = Boolean(
         decisionCalibration.isAnalyticalQuery ||
         decisionCalibration.isDiscreteChoice ||
         decisionCalibration.isConceptualTaxonomy ||
         isPureAlgebraConcept ||
-        isNemotron ||
         isQuizRevision
       );
+
+      const entityResolution = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.resolveEntityPhoneticallyMathematically === 'function')
+        ? ZozTextSafety.resolveEntityPhoneticallyMathematically(promptText)
+        : null;
+      const formattingConstraints = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.extractNegativeFormattingConstraints === 'function')
+        ? ZozTextSafety.extractNegativeFormattingConstraints(promptText)
+        : { noTable: false, noCode: false, isExhaustive: false, directive: '' };
 
       // Persistensi Persona Bawaan Sistem & Sensor Anti-Drift:
       // Persona yang dikonfigurasi pengguna di pengaturan WAJIB dipertahankan secara utuh.
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
       const canRunAutonomous = !isPureMathSession && Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       let systemContent = getDynamicSystemTemporalContext();
+
+      if (entityResolution && entityResolution.directive) {
+        systemContent = `${entityResolution.directive}\n\n${systemContent}`;
+      }
+      if (formattingConstraints && formattingConstraints.directive) {
+        systemContent = `${formattingConstraints.directive}\n\n${systemContent}`;
+      }
 
       // Jozz Memory Scoped Hybrid Recall (Hybrid Storage & Knowledge Graph)
       let jozzMemoryRecall = null;
@@ -32705,7 +32756,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN
       if (isPureMathSession) {
-        const pureMathDirective = `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN
+        const isDeutschInterdependence = Boolean(
+          /\b(?:deutsch|social\s+interdependence|ketergantungan\s+sosial|4\s+kuadran|empat\s+kuadran|promotive|contrience|interdependent|cooperative.*competitive)\b/i.test(promptText) ||
+          (/\bcompetitive\b/i.test(promptText) && /\bcooperative\b/i.test(promptText) && /\bindependent\b/i.test(promptText))
+        );
+
+        let pureMathDirective = '';
+        if (isDeutschInterdependence) {
+          pureMathDirective = `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN
 [MANDAT FORMULASI MATEMATIKA & ANALISIS SISTEMIK]:
 1. PRESISI MATEMATIKA MURNI & FORMULASI FORMAL:
    - Sajikan penalaran deduktif formal, kejelasan matematis, dan teori relasi sistemik dengan ketajaman tingkat tinggi selaras dengan persona Anda.
@@ -32735,9 +32793,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       - Ruang umum keterkopelan multivariat: U_i = f_i(s_1, ..., s_n) di mana exists j != i sedemikian rupa sehingga dU_i / ds_j != 0.
       - Spektrum Jacobian: Matriks bobot interaksi W in R^{n x n} dengan spektrum non-nol rho(W) > 0, membentuk kontinum dari kompetisi murni (anti-simetris) ke kooperasi murni (simetris positif semi-definit).
 
-4. STRUKTUR PENYAJIAN TABEL KOMPARATIF:
-   - Sajikan tabel Markdown formal yang merangkum: Dimensi Konseptual, Notasi Aljabar, Kondisi Jacobian, Ekuilibrium Teori Permainan, dan Karakteristik Sistemik.
-   - Langsung berikan analisis matematika murni yang elegan, presisi, dan tuntas tanpa keluhan atau penolakan.`;
+${formattingConstraints.noTable ? '4. FORMAT PENYAJIAN: Pengguna secara tegas melarang tabel ("tanpa tabel"). Sajikan dalam paragraf dan poin naratif deduktif terstruktur, DILARANG membuat tabel.' : '4. STRUKTUR PENYAJIAN TABEL KOMPARATIF: Sajikan tabel Markdown formal yang merangkum: Dimensi Konseptual, Notasi Aljabar, Kondisi Jacobian, Ekuilibrium Teori Permainan, dan Karakteristik Sistemik.'}`;
+        } else {
+          pureMathDirective = `### MANDAT PENALARAN MATEMATIKA MURNI & DEDUKSI FORMAL
+[MANDAT FORMULASI MATEMATIKA]:
+1. PRESISI DEDUKTIF FORMAL: Turunkan setiap argumen secara deduktif, aksiomatik, dan berbobot tinggi. Hindari spekulasi atau asumsi tak berdasar.
+2. KEJELASAN FORMULASI: Sajikan simbol, langkah pembuktian, atau kalkulasi matematis secara runut, terstruktur, dan elegan.
+${formattingConstraints.noTable ? '3. BATASAN FORMAT: Pengguna secara tegas melarang tabel ("tanpa tabel"). Gunakan narasi komprehensif mengalir dan poin deskriptif tanpa tabel Markdown.' : ''}`;
+        }
         systemContent = systemContent ? `${systemContent}\n\n${pureMathDirective}` : pureMathDirective;
       }
 
