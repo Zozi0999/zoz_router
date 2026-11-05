@@ -43,7 +43,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://amenities-wear-phantom-decreased.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://indicator-firewall-varies-reflects.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -196,6 +196,7 @@
   function isInternalSystemPayload(text) {
     if (!text || typeof text !== 'string') return false;
     const trimmed = text.trim();
+    const lower = trimmed.toLowerCase();
     return trimmed.startsWith('[DATA HASIL PENELUSURAN INTERNAL]') ||
            trimmed.startsWith('[DATA PENELUSURAN FAKTA]') ||
            trimmed.startsWith('[HASIL prepare_image_display') ||
@@ -207,9 +208,13 @@
            trimmed.startsWith('[HASIL EKSEKUSI TOOL]') ||
            trimmed.startsWith('BATASAN DOMAIN KLAIM:') ||
            trimmed.startsWith('[Pencarian selesai') ||
+           lower.includes('pencarian selesai:') ||
            trimmed.startsWith('[STATUS PENELUSURAN') ||
            trimmed.startsWith('[Mengeksekusi penelusuran') ||
            trimmed.includes('Sistem menyelesaikan penelusuran') ||
+           lower.includes('sistem menyelesaikan penelusuran') ||
+           trimmed.includes('Model telah menyelesaikan penelusuran komprehensif') ||
+           lower.includes('model telah menyelesaikan penelusuran komprehensif') ||
            (/^\[\[?ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]+\]?\]?$/i.test(trimmed));
   }
 
@@ -6546,9 +6551,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return [
         {
           role: 'system',
-          content: `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN (ZERO PERSONA - PURE MATHEMATICS ONLY — UTC ${isoDate})\n` +
+          content: `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN (UTC ${isoDate})\n` +
             `1. Dekonstruksi seluruh konsep secara formal ke dalam ruang keadaan multi-agen (State-Space S), matriks utilitas, dan kalkulus ketergantungan sosial Morton Deutsch (Independent: dU_i/ds_j = 0; Competitive: Delta U_i . Delta U_j < 0; Cooperative: Delta U_i . Delta U_j > 0; Interdependent: U_i = f(S)).\n` +
-            `2. DILARANG KERAS menggunakan persona kustom, gaya santai, basa-basi, atau analogi fiksi/emosional.\n` +
+            `2. Pertahankan persona aktif dari sistem pengguna dengan presisi deduktif dan wibawa analitis tertinggi.\n` +
             `3. Sajikan tabel Markdown formal yang merangkum dimensi aljabar, kondisi Jacobian, dan ekuilibrium teori permainan.\n` +
             `4. DILARANG KERAS mengeluhkan ketiadaan indeks atau dokumen, dilarang menolak menjawab, dan dilarang menyebutkan kendala pencarian internal.`
         },
@@ -6565,7 +6570,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           role: 'system',
           content: `### MANDAT JAWABAN DEDUKTIF & ANALISIS KOMPREHENSIF (UTC ${isoDate})\n` +
             `1. Jawab pertanyaan pengguna secara langsung, menyeluruh, terstruktur, dan mendalam dalam Bahasa Indonesia.\n` +
-            `2. DILARANG KERAS mengeluhkan ketiadaan indeks atau dokumen, dilarang menolak menjawab, dilarang mencetak catatan diagnostik internal (seperti "[Pencarian selesai...]" atau "[DATA PENELUSURAN...]"), dan dilarang menyebutkan kendala pencarian internal.\n` +
+            `2. DILARANG KERAS mengeluhkan ketiadaan indeks atau dokumen, dilarang menolak menjawab, dilarang mencetak catatan diagnostik atau penanda status sistem internal, dan dilarang menyebutkan kendala pencarian internal.\n` +
             `3. Sajikan ide, solusi, penjelasan konsep, atau analisis mendalam menggunakan Markdown yang rapi (heading, poin bernomor/bullet).`
         },
         {
@@ -29276,6 +29281,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       let textContent = (m.content || '').trim();
       if (m.role === 'assistant') {
         textContent = safeAssistantText(textContent);
+        if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.purifyHistoricalAssistantTurn === 'function') {
+          textContent = ZozTextSafety.purifyHistoricalAssistantTurn(textContent, { activePersona });
+        }
       }
       if (m.role === 'user' && textContent.startsWith('[Instruksi Sistem & Konteks:')) {
         const lastBracketIdx = textContent.lastIndexOf(']\n\n');
@@ -29286,7 +29294,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
       }
       if (!textContent && mImgs.length === 0) {
-        return; // skip blank message turns
+        return; // skip blank message turns or purged hallucination artifacts
       }
 
       // Pastikan riwayat balasan asisten yang memiliki sumber web referensi memiliki penanda verifikasi
@@ -29314,6 +29322,19 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     const activePersona = (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
+
+    // Injeksi Vektor Resonansi Persona Deterministik (\Pi_{res}) pada giliran multi-turn (T >= 2)
+    // Mengeliminasi peluruhan eksponensial perhatian RoPE/ALiBi (\exp(-\gamma \cdot \Delta pos))
+    // dengan menempatkan jangkar resonansi pada giliran aktif (\Delta pos \approx 0).
+    if (activePersona && validList.length > 1 && typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computePersonaResonanceVector === 'function') {
+      const resonanceAnchor = ZozTextSafety.computePersonaResonanceVector(activePersona, validList.length);
+      if (resonanceAnchor) {
+        const latestUserTurn = [...validList].reverse().find(turn => turn && turn.role === 'user');
+        if (latestUserTurn && typeof latestUserTurn.content === 'string') {
+          latestUserTurn.content = `${latestUserTurn.content}${resonanceAnchor}`;
+        }
+      }
+    }
 
     let effectiveSystem = (systemContent && systemContent.trim()) ? systemContent.trim() : '';
     if (!effectiveSystem.includes('[KOORDINAT WAKTU REFERENSI SISTEM]') && !effectiveSystem.includes('### INFORMASI WAKTU SISTEM REAL-TIME')) {
@@ -29756,13 +29777,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         isNemotron
       );
 
-      // JIKA SESI MATEMATIKA MURNI / PERTANYAAN ANALITIS: ERADIKASI TOTAL PERSONA & ROLEPLAY!
-      // Mandat absolut Kaisar: Persona dilarang keras, perbaiki mekanisme perhatian dengan matematika murni!
-      let personaPrompt = (isPureMathSession || isQuestionOrAnalytical) ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
+      // Persistensi Persona Bawaan Sistem & Sensor Anti-Drift:
+      // Persona yang dikonfigurasi pengguna di pengaturan WAJIB dipertahankan secara utuh.
+      let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
       const canRunAutonomous = !isPureMathSession && Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       let systemContent = getDynamicSystemTemporalContext();
 
-      if (personaPrompt && !isPureMathSession && !isQuestionOrAnalytical) {
+      if (personaPrompt) {
         systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
       }
 
@@ -29857,14 +29878,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
       const isVideoTopicPrompt = /\b(video|youtube|youtu\.be|dailymotion|vimeo|xvideos)\b/i.test(promptText);
 
-      // MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN (PURE MATHEMATICS ONLY)
+      // MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN
       if (isPureMathSession) {
-        const pureMathDirective = `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN (ZERO PERSONA - PURE MATHEMATICS ONLY)
-[MANDAT ABSOLUT: EKSEKUSI MATEMATIKA MURNI TANPA PERSONA]:
-1. TOTAL ERADICATION OF PERSONA & NARRATIVE:
-   - DILARANG KERAS menggunakan persona kustom, identitas karakter, roleplay, gaya santai, basa-basi, atau karakter fiktif apapun.
-   - DILARANG menggunakan analogi informal, metafora fiktif, atau ekspresi emosional.
-   - Gunakan HANYA gaya analitis matematika murni, penalaran deduktif formal, dan teori relasi sistemik.
+        const pureMathDirective = `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN
+[MANDAT FORMULASI MATEMATIKA & ANALISIS SISTEMIK]:
+1. PRESISI MATEMATIKA MURNI & FORMULASI FORMAL:
+   - Sajikan penalaran deduktif formal, kejelasan matematis, dan teori relasi sistemik dengan ketajaman tingkat tinggi selaras dengan persona Anda.
+   - Hindari analogi spekulatif yang tidak berdasar atau asumsi yang tidak dinyatakan dalam persoalan.
+   - Gunakan gaya analitis presisi, penalaran deduktif formal, dan teori relasi sistemik.
 
 2. FORMULASI RUANG KEADAAN MULTI-AGEN (STATE-SPACE FORMULATION):
    Dekomposisi sistem relasional multi-agen N = {1, 2, ..., n} dengan n >= 2:
@@ -30328,13 +30349,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         // Amankan teks pembuka yang telah digenerasi model sebelum pemanggilan tool agar tidak terhapus
         let cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
         cleanAssistant = stripModelInternalMonologuePreamble(cleanAssistant) || cleanAssistant;
-        if (isModelInternalMonologue(cleanAssistant)) {
+        if (isModelInternalMonologue(cleanAssistant) || isInternalSystemPayload(cleanAssistant)) {
           cleanAssistant = '';
         }
         // Reset fullText agar scratchpad monolog putaran 0 tidak tersisa sebagai jawaban final jika putaran sintesis gagal
         fullText = '';
 
-        if (!preambleHtml && cleanAssistant && cleanAssistant.length > 20) {
+        if (!preambleHtml && cleanAssistant && cleanAssistant.length > 20 && !isInternalSystemPayload(cleanAssistant)) {
           let sanitizedPreamble = hideFileBlocksForDisplay(cleanAssistant, runOptions);
           if (runOptions && (runOptions.websiteMode === 'preview' || runOptions.isWebCreation)) {
             sanitizedPreamble = stripGeneratedFileBlocks(sanitizedPreamble, [], runOptions);
@@ -30494,7 +30515,7 @@ ${hasExecutedImageSearch ? '1. Pilih 3–6 image_id yang paling cocok secara sub
 Berikan jawaban akhir yang akurat, objektif, dan langsung menjawab inti persoalan sesuai bahasa pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Jangan menyebutkan catatan tool internal, jangan mengeluh bahwa sumber tidak relevan, dan jangan mengarang URL tautan. Jangan memanggil ulang fungsi search_web dengan kueri yang sama.`
           : ((isLastRound || hasExecutedImagePrepare || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasExecutedGrounding)
           ? `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:
-${circuitBreakerTripped ? 'MANDAT JAWABAN DEDUKTIF: Penelusuran selesai. Berikan jawaban komprehensif, langsung, dan objektif atas pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian, dilarang mengeluhkan ketiadaan indeks atau dokumen, dan dilarang menyalin catatan sistem internal ini.' : (hasExecutedImagePrepare ? 'MANDAT ANALISIS MATEMATIS & OBJEKTIF MURNI (ZERO PERSONA GIMMICK): Susun jawaban akhir dengan format: (1) Penjelasan pembuka lugas tanpa persona fiktif atau analogi berbelit-belit, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat (seperti klasifikasi persenjataan, struktur sistematis, dan rincian data ala ChatGPT), serta (4) Kredit gambar dan tautan halaman sumber. DILARANG KERAS menggunakan persona khayalan!' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual sesuai bahasa pertanyaan pengguna berdasarkan korpus bukti penelusuran terverifikasi di atas.')))))}`
+${circuitBreakerTripped ? 'MANDAT JAWABAN DEDUKTIF: Penelusuran selesai. Berikan jawaban komprehensif, langsung, dan objektif atas pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian, dilarang mengeluhkan ketiadaan indeks atau dokumen, dan dilarang menyalin catatan sistem internal ini.' : (hasExecutedImagePrepare ? 'MANDAT ANALISIS FAKTIK & PENYAJIAN VISUAL: Susun jawaban akhir dengan format: (1) Penjelasan pembuka yang lugas dan tajam selaras dengan persona Anda, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat, serta (4) Kredit gambar dan tautan halaman sumber.' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual sesuai bahasa pertanyaan pengguna berdasarkan korpus bukti penelusuran terverifikasi di atas.')))))}`
           : `[HASIL EKSEKUSI TOOL]:
 Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika diperlukan ekstraksi lanjutan (seperti browse_web_page, inspect_image, prepare_image_display, search_memory, atau execute_python_code), panggil fungsi terkait.`));
 
@@ -30942,6 +30963,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
 
       fullText = safeAssistantText(fullText);
+      if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.sanitizeModelPersonaDrift === 'function') {
+        fullText = ZozTextSafety.sanitizeModelPersonaDrift(fullText, personaPrompt);
+      }
       const evalTokens = (ollamaUsage && typeof ollamaUsage.completion_tokens === 'number')
         ? ollamaUsage.completion_tokens
         : Math.max(tokenCount, estimateBpeTokens(fullText));
@@ -31034,6 +31058,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         }
       }
 
+      if (preambleHtml && isInternalSystemPayload(preambleHtml)) {
+        preambleHtml = '';
+      }
       const finalRenderedContent = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
       bubbleText.innerHTML = finalRenderedContent.trim();
       if (groundedImageDisplays.length > 0) {
@@ -31050,7 +31077,6 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       metaBox.innerHTML = `
         <strong>${escapeHtml(modelName)}</strong>
         <span class="meta-model-badge">Ollama</span>
-        ${(isPureMathSession || isQuestionOrAnalytical) ? '<span class="meta-model-badge" style="background:rgba(0,255,150,0.12); border-color:#00e676; color:#00e676;"><i class="fa-solid fa-square-root-variable"></i> Pure Math (Zero Persona)</span>' : ''}
         <span>⏱️ ${totalTime}s</span>
         <span title="${promptTokens ? `${promptTokens} prompt + ${evalTokens} completion token` : `${evalTokens} completion token`}">⚡ ${tps} tps (${evalTokens} tok)</span>
       `;
@@ -31518,13 +31544,13 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         isNemotron
       );
 
-      // JIKA SESI MATEMATIKA MURNI / PERTANYAAN ANALITIS: ERADIKASI TOTAL PERSONA & ROLEPLAY!
-      // Mandat absolut Kaisar: Persona dilarang keras, perbaiki mekanisme perhatian dengan matematika murni!
-      let personaPrompt = (isPureMathSession || isQuestionOrAnalytical) ? '' : (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
+      // Persistensi Persona Bawaan Sistem & Sensor Anti-Drift:
+      // Persona yang dikonfigurasi pengguna di pengaturan WAJIB dipertahankan secara utuh.
+      let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
       const canRunAutonomous = !isPureMathSession && Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       let systemContent = getDynamicSystemTemporalContext();
 
-      if (personaPrompt && !isPureMathSession && !isQuestionOrAnalytical) {
+      if (personaPrompt) {
         systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
       }
 
@@ -31631,14 +31657,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
       const isVideoTopicPrompt = /\b(video|youtube|youtu\.be|dailymotion|vimeo|xvideos)\b/i.test(promptText);
 
-      // MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN (PURE MATHEMATICS ONLY)
+      // MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN
       if (isPureMathSession) {
-        const pureMathDirective = `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN (ZERO PERSONA - PURE MATHEMATICS ONLY)
-[MANDAT ABSOLUT: EKSEKUSI MATEMATIKA MURNI TANPA PERSONA]:
-1. TOTAL ERADICATION OF PERSONA & NARRATIVE:
-   - DILARANG KERAS menggunakan persona kustom, identitas karakter, roleplay, gaya santai, basa-basi, atau karakter fiktif apapun.
-   - DILARANG menggunakan analogi informal, metafora fiktif, atau ekspresi emosional.
-   - Gunakan HANYA gaya analitis matematika murni, penalaran deduktif formal, dan teori relasi sistemik.
+        const pureMathDirective = `### MANDAT DEKONSTRUKSI MATEMATIKA MURNI & RUANG KEADAAN
+[MANDAT FORMULASI MATEMATIKA & ANALISIS SISTEMIK]:
+1. PRESISI MATEMATIKA MURNI & FORMULASI FORMAL:
+   - Sajikan penalaran deduktif formal, kejelasan matematis, dan teori relasi sistemik dengan ketajaman tingkat tinggi selaras dengan persona Anda.
+   - Hindari analogi spekulatif yang tidak berdasar atau asumsi yang tidak dinyatakan dalam persoalan.
+   - Gunakan gaya analitis presisi, penalaran deduktif formal, dan teori relasi sistemik.
 
 2. FORMULASI RUANG KEADAAN MULTI-AGEN (STATE-SPACE FORMULATION):
    Dekomposisi sistem relasional multi-agen N = {1, 2, ..., n} dengan n >= 2:
@@ -32341,13 +32367,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         // Amankan teks pembuka yang telah digenerasi model sebelum pemanggilan tool agar tidak terhapus
         let cleanAssistant = scrubRawToolCallArtifacts(currentRoundText).trim();
         cleanAssistant = stripModelInternalMonologuePreamble(cleanAssistant) || cleanAssistant;
-        if (isModelInternalMonologue(cleanAssistant)) {
+        if (isModelInternalMonologue(cleanAssistant) || isInternalSystemPayload(cleanAssistant)) {
           cleanAssistant = '';
         }
         // Reset fullText agar scratchpad monolog putaran 0 tidak tersisa sebagai jawaban final jika putaran sintesis gagal
         fullText = '';
 
-        if (!preambleHtml && cleanAssistant && cleanAssistant.length > 20) {
+        if (!preambleHtml && cleanAssistant && cleanAssistant.length > 20 && !isInternalSystemPayload(cleanAssistant)) {
           let sanitizedPreamble = hideFileBlocksForDisplay(cleanAssistant, runOptions);
           if (runOptions && (runOptions.websiteMode === 'preview' || runOptions.isWebCreation)) {
             sanitizedPreamble = stripGeneratedFileBlocks(sanitizedPreamble, [], runOptions);
@@ -32507,7 +32533,7 @@ ${hasExecutedImageSearch ? '1. Pilih 3–6 image_id yang paling cocok secara sub
 Berikan jawaban akhir yang akurat, objektif, dan langsung menjawab inti persoalan sesuai bahasa pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Jangan menyebutkan catatan tool internal, jangan mengeluh bahwa sumber tidak relevan, dan jangan mengarang URL tautan. Jangan memanggil ulang fungsi search_web dengan kueri yang sama.`
           : ((isLastRound || hasExecutedImagePrepare || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasExecutedGrounding)
           ? `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:
-${circuitBreakerTripped ? 'MANDAT JAWABAN DEDUKTIF: Penelusuran selesai. Berikan jawaban komprehensif, langsung, dan objektif atas pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian, dilarang mengeluhkan ketiadaan indeks atau dokumen, dan dilarang menyalin catatan sistem internal ini.' : (hasExecutedImagePrepare ? 'MANDAT ANALISIS MATEMATIS & OBJEKTIF MURNI (ZERO PERSONA GIMMICK): Susun jawaban akhir dengan format: (1) Penjelasan pembuka lugas tanpa persona fiktif atau analogi berbelit-belit, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat (seperti klasifikasi persenjataan, struktur sistematis, dan rincian data ala ChatGPT), serta (4) Kredit gambar dan tautan halaman sumber. DILARANG KERAS menggunakan persona khayalan!' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual sesuai bahasa pertanyaan pengguna berdasarkan korpus bukti penelusuran terverifikasi di atas.')))))}`
+${circuitBreakerTripped ? 'MANDAT JAWABAN DEDUKTIF: Penelusuran selesai. Berikan jawaban komprehensif, langsung, dan objektif atas pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian, dilarang mengeluhkan ketiadaan indeks atau dokumen, dan dilarang menyalin catatan sistem internal ini.' : (hasExecutedImagePrepare ? 'MANDAT ANALISIS FAKTIK & PENYAJIAN VISUAL: Susun jawaban akhir dengan format: (1) Penjelasan pembuka yang lugas dan tajam selaras dengan persona Anda, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat, serta (4) Kredit gambar dan tautan halaman sumber.' : (hasExecutedGrounding ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil fetch_url_content / summarize_sources bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual sesuai bahasa pertanyaan pengguna berdasarkan korpus bukti penelusuran terverifikasi di atas.')))))}`
           : `[HASIL EKSEKUSI TOOL]:
 Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika diperlukan ekstraksi lanjutan (seperti browse_web_page, inspect_image, prepare_image_display, search_memory, atau execute_python_code), panggil fungsi terkait.`));
 
@@ -33055,6 +33081,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
 
       fullText = safeAssistantText(fullText);
+      if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.sanitizeModelPersonaDrift === 'function') {
+        fullText = ZozTextSafety.sanitizeModelPersonaDrift(fullText, personaPrompt);
+      }
       const evalTokens = (openRouterUsage && typeof openRouterUsage.completion_tokens === 'number')
         ? openRouterUsage.completion_tokens
         : Math.max(tokenCount, estimateBpeTokens(fullText));
@@ -33160,6 +33189,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         `;
       }
 
+      if (preambleHtml && isInternalSystemPayload(preambleHtml)) {
+        preambleHtml = '';
+      }
       const finalRenderedContent = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderedMarkdown + imagesHtml;
       bubbleText.innerHTML = finalRenderedContent.trim();
       if (groundedImageDisplays.length > 0) {
@@ -33180,7 +33212,6 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       metaBox.innerHTML = `
         <strong title="${actualModelUsed ? escapeHtml('Model dialihkan ke ' + actualModelUsed) : escapeHtml(displayModel)}">${escapeHtml(effectiveDisplay)}</strong>
         <span class="meta-model-badge" style="${engineLabel === 'Ollama Cloud' ? 'background:rgba(0,242,254,0.15); color:var(--neon-cyan);' : 'background:rgba(255,82,0,0.15); color:var(--neon-amber);'}">${engineLabel}</span>
-        ${(isPureMathSession || isQuestionOrAnalytical) ? '<span class="meta-model-badge" style="background:rgba(0,255,150,0.12); border-color:#00e676; color:#00e676;"><i class="fa-solid fa-square-root-variable"></i> Pure Math (Zero Persona)</span>' : ''}
         ${collectedImages.length > 0 ? '<span class="meta-model-badge" style="background:rgba(255,0,127,0.18); border-color:#FF007F; color:#FF66B2;"><i class="fa-solid fa-wand-magic-sparkles"></i> Gambar Dibuat</span>' : ''}
         <span>⏱️ ${totalTime}s</span>
         <span title="${promptTokens ? `${promptTokens} prompt + ${evalTokens} completion token` : `${evalTokens} completion token`}">⚡ ${tps} tps (${evalTokens} tok)</span>
@@ -47147,7 +47178,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://amenities-wear-phantom-decreased.trycloudflare.com',
+    activeTunnelUrl: 'https://indicator-firewall-varies-reflects.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,

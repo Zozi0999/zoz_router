@@ -1326,7 +1326,7 @@ export default {
     // yang diteruskan ke TUNNEL_GATEWAY_URL (server laptop).
     // Pemanggilan AI & API Key (OpenRouter, Ollama Cloud, Search Web, Models, Sessions)
     // BERJALAN 100% MANDIRI DI CLOUDFLARE EDGE TANPA PERNAH BERGANTUNG PADA LAPTOP!
-    const TUNNEL_GATEWAY_URL = 'https://amenities-wear-phantom-decreased.trycloudflare.com';
+    const TUNNEL_GATEWAY_URL = 'https://indicator-firewall-varies-reflects.trycloudflare.com';
     let reqBodyBytes = null;
 
     const isLaptopOnlyRoute = url.pathname.startsWith('/api/terminal') ||
