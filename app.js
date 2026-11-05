@@ -29255,6 +29255,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const rawList = Array.isArray(sessionOrMessages?.messages) ? sessionOrMessages.messages : (Array.isArray(sessionOrMessages) ? sessionOrMessages : []);
     const validList = [];
     const carriedImageIdx = findCarriedImageTurnIndex(rawList, currentImages);
+    const activePersona = (STATE.settings && STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
 
     rawList.forEach((m, idx) => {
       const isLatestTurn = (idx === rawList.length - 1);
@@ -29320,8 +29321,6 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (validList.length === 0) {
       validList.push({ role: 'user', content: 'Halo', images: [] });
     }
-
-    const activePersona = (STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '');
 
     // Injeksi Vektor Resonansi Persona Deterministik (\Pi_{res}) pada giliran multi-turn (T >= 2)
     // Mengeliminasi peluruhan eksponensial perhatian RoPE/ALiBi (\exp(-\gamma \cdot \Delta pos))
@@ -29938,7 +29937,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       }
 
-      if (personaPrompt && !isPureMathSession && !isQuestionOrAnalytical) {
+      if (personaPrompt) {
         systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
       }
 
@@ -31717,7 +31716,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       }
 
-      if (personaPrompt && !isPureMathSession && !isQuestionOrAnalytical) {
+      if (personaPrompt) {
         systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
       }
 
