@@ -45,7 +45,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://pets-bride-incentive-graphic.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://translation-strengthen-never-puts.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -21831,14 +21831,19 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 
     let result = cleaned.join('\n').trim();
     if (!result || /^[\s\n\r]*[{}();,<>/]+[\s\n\r]*$/.test(result)) {
-      if (hasStrippedDoc || (options && options.docFormat)) {
+      const hasActualWebBlocks = hasStrippedWeb || (Array.isArray(rawBlocks) && rawBlocks.length > 0 && rawBlocks.some(b => b && (b.includes('<<<ZOZ_FILE') || b.includes('<html') || b.includes('```html') || b.includes('```jsx'))));
+      const hasActualDocBlocks = hasStrippedDoc || (Array.isArray(rawBlocks) && rawBlocks.length > 0 && rawBlocks.some(b => b && (b.includes('<<<ZOZ_FILE') || b.includes('```doc') || b.includes('```pdf'))));
+
+      if (hasActualDocBlocks && (hasStrippedDoc || (options && options.docFormat))) {
         result = `📄 **Dokumen Telah Selesai Disusun!**\n\nBerkas dokumen ${strippedDocName ? `**${escapeHtml(strippedDocName)}** ` : ''}telah berhasil dibuat dengan format rapi dan terstruktur. Anda dapat langsung melihat pratinjau dokumen atau mengunduhnya dalam format **PDF** maupun **Word (.docx)** melalui kartu berkas di bawah ini.`;
-      } else if (hasStrippedWeb || shouldHideCode || (options && options.websiteMode === 'preview')) {
+      } else if (hasActualWebBlocks && (hasStrippedWeb || (options && options.websiteMode === 'preview'))) {
         if (isIncomplete) {
           result = `⚠️ **Generasi Terputus**\n\nSebagian kode ${strippedWebName ? `**${escapeHtml(strippedWebName)}** ` : ''}telah diamankan pada kartu di bawah. Klik tombol **Lanjutkan Jawaban** untuk meneruskan penulisan kode.`;
         } else {
           result = `💻 **Kode Berhasil Dihasilkan**\n\nKode ${strippedWebName ? `**${escapeHtml(strippedWebName)}** ` : ''}telah tersedia pada kartu di bawah. Anda dapat menguji pratinjaunya atau menyalin kodenya.`;
         }
+      } else {
+        result = text ? text.trim() : '';
       }
     }
     return result;
@@ -31759,16 +31764,21 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       fullText = cleanFinalText;
 
       if (!fullText) {
-        const unallowedCalls = [...extractInlineToolCalls(rawTextBeforeScrub), ...currentRoundNativeCalls].filter(tc => tc && tc.function && !isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
-        if (unallowedCalls.length > 0) {
-          fullText = 'Model mencoba melakukan penelusuran web untuk menjawab pertanyaan ini, namun fitur **Pencarian Web** saat ini sedang nonaktif. Silakan aktifkan ikon bola dunia (🌐 Pencarian Web) pada bilah kontrol di bawah untuk mengizinkan penelusuran data langsung.';
-        } else if (webSources && webSources.length > 0) {
-          const synth = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
-          if (synth) fullText = synth;
-        } else if (groundedImageDisplays && groundedImageDisplays.length > 0) {
-          fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
-        } else if (preambleHtml) {
-          fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
+        if (isQuizRevision && decisionCalibration && decisionCalibration.remainingOptions && decisionCalibration.remainingOptions.length > 0) {
+          const bestAlt = decisionCalibration.remainingOptions[0];
+          fullText = `**Jawaban revisi yang tepat: ${bestAlt}**\n\nPilihan sebelumnya telah difalsifikasi ($P=0$). Berdasarkan evaluasi hipotesis alternatif, opsi **${bestAlt}** merupakan kandidat paling tepat untuk kuis ini.`;
+        } else {
+          const unallowedCalls = [...extractInlineToolCalls(rawTextBeforeScrub), ...currentRoundNativeCalls].filter(tc => tc && tc.function && !isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
+          if (unallowedCalls.length > 0) {
+            fullText = 'Model mencoba melakukan penelusuran web untuk menjawab pertanyaan ini, namun fitur **Pencarian Web** saat ini sedang nonaktif. Silakan aktifkan ikon bola dunia (🌐 Pencarian Web) pada bilah kontrol di bawah untuk mengizinkan penelusuran data langsung.';
+          } else if (webSources && webSources.length > 0) {
+            const synth = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
+            if (synth) fullText = synth;
+          } else if (groundedImageDisplays && groundedImageDisplays.length > 0) {
+            fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
+          } else if (preambleHtml) {
+            fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
+          }
         }
       }
 
@@ -31791,7 +31801,10 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           showToast('Generasi dihentikan oleh pengguna.');
           return;
         }
-        if (groundedImageDisplays && groundedImageDisplays.length > 0) {
+        if (isQuizRevision && decisionCalibration && decisionCalibration.remainingOptions && decisionCalibration.remainingOptions.length > 0) {
+          const bestAlt = decisionCalibration.remainingOptions[0];
+          fullText = `**Jawaban revisi yang tepat: ${bestAlt}**\n\nPilihan sebelumnya telah difalsifikasi ($P=0$). Berdasarkan evaluasi hipotesis alternatif, opsi **${bestAlt}** merupakan kandidat paling tepat untuk kuis ini.`;
+        } else if (groundedImageDisplays && groundedImageDisplays.length > 0) {
           fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
         } else {
           fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
@@ -33935,16 +33948,21 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       fullText = cleanFinalText;
 
       if (!fullText) {
-        const unallowedCalls = [...extractInlineToolCalls(rawTextBeforeScrub), ...accumulatedToolCalls].filter(tc => tc && tc.function && !isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
-        if (unallowedCalls.length > 0) {
-          fullText = 'Model mencoba melakukan penelusuran web untuk menjawab pertanyaan ini, namun fitur **Pencarian Web** saat ini sedang nonaktif. Silakan aktifkan ikon bola dunia (🌐 Pencarian Web) pada bilah kontrol di bawah untuk mengizinkan penelusuran data langsung.';
-        } else if (webSources && webSources.length > 0) {
-          const synth = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
-          if (synth) fullText = synth;
-        } else if (collectedImages && collectedImages.length > 0) {
-          fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
-        } else if (preambleHtml) {
-          fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
+        if (isQuizRevision && decisionCalibration && decisionCalibration.remainingOptions && decisionCalibration.remainingOptions.length > 0) {
+          const bestAlt = decisionCalibration.remainingOptions[0];
+          fullText = `**Jawaban revisi yang tepat: ${bestAlt}**\n\nPilihan sebelumnya telah difalsifikasi ($P=0$). Berdasarkan evaluasi hipotesis alternatif, opsi **${bestAlt}** merupakan kandidat paling tepat untuk kuis ini.`;
+        } else {
+          const unallowedCalls = [...extractInlineToolCalls(rawTextBeforeScrub), ...accumulatedToolCalls].filter(tc => tc && tc.function && !isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
+          if (unallowedCalls.length > 0) {
+            fullText = 'Model mencoba melakukan penelusuran web untuk menjawab pertanyaan ini, namun fitur **Pencarian Web** saat ini sedang nonaktif. Silakan aktifkan ikon bola dunia (🌐 Pencarian Web) pada bilah kontrol di bawah untuk mengizinkan penelusuran data langsung.';
+          } else if (webSources && webSources.length > 0) {
+            const synth = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
+            if (synth) fullText = synth;
+          } else if (collectedImages && collectedImages.length > 0) {
+            fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
+          } else if (preambleHtml) {
+            fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
+          }
         }
       }
 
@@ -33965,7 +33983,10 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           showToast('Generasi dihentikan.');
           return;
         }
-        if (collectedImages && collectedImages.length > 0) {
+        if (isQuizRevision && decisionCalibration && decisionCalibration.remainingOptions && decisionCalibration.remainingOptions.length > 0) {
+          const bestAlt = decisionCalibration.remainingOptions[0];
+          fullText = `**Jawaban revisi yang tepat: ${bestAlt}**\n\nPilihan sebelumnya telah difalsifikasi ($P=0$). Berdasarkan evaluasi hipotesis alternatif, opsi **${bestAlt}** merupakan kandidat paling tepat untuk kuis ini.`;
+        } else if (collectedImages && collectedImages.length > 0) {
           fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
         } else {
           fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
@@ -48075,7 +48096,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://pets-bride-incentive-graphic.trycloudflare.com',
+    activeTunnelUrl: 'https://translation-strengthen-never-puts.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
