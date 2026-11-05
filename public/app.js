@@ -952,7 +952,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     sidebar: $('#sidebar'),
     sidebarBackdrop: $('#sidebarBackdrop'),
     mainContent: $('#mainContent'),
-    appContainer: $('.app-container'),
+    appContainer: $('#appContainer'),
     sidebarTerminalBtn: $('#sidebarTerminalBtn'),
     sidebarWhatsAppBtn: $('#sidebarWhatsAppBtn'),
     modalWaLocalhostOnly: $('#modalWaLocalhostOnly'),
@@ -1180,9 +1180,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     newChatModeModal: $('#newChatModeModal'),
     btnSelectNormalChat: $('#btnSelectNormalChat'),
     btnSelectIncognitoChat: $('#btnSelectIncognitoChat'),
-    openJozzMemoryBtn: $('#openJozzMemoryBtn'),
-    incognitoToggleBtn: $('#incognitoToggleBtn'),
-    jozzMemoryModal: $('#jozzMemoryModal'),
     jozzMemoryGlobalToggle: $('#jozzMemoryGlobalToggle'),
     jozzMemorySearchInput: $('#jozzMemorySearchInput'),
     btnToggleAddMemoryForm: $('#btnToggleAddMemoryForm'),
@@ -1230,11 +1227,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnAddOpenRouterCredits: $('#btnAddOpenRouterCredits'),
     settingAutoPolicy: $('#settingAutoPolicy'),
     settingMusicModel: $('#settingMusicModel'),
-    paramUseModelDefaults: $('#paramUseModelDefaults'),
-    paramTemperature: $('#paramTemperature'),
-    valTemperature: $('#valTemperature'),
-    paramTopP: $('#paramTopP'),
-    valTopP: $('#valTopP'),
     settingSystemPrompt: $('#settingSystemPrompt'),
     saveSettingsBtn: $('#saveSettingsBtn'),
 
@@ -1456,11 +1448,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         this.openSettings();
       });
 
-      els.openJozzMemoryBtn?.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.openSettings();
-      });
-
       document.querySelector('[data-target="tabJozzMemory"]')?.addEventListener('click', () => {
         this.refresh();
       });
@@ -1478,11 +1465,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         createNewSession('Obrolan Privat', STATE.mode, { isIncognito: true });
         showToast('🕵️ Mode Incognito Aktif: Sesi privat tanpa jejak memori.', 'info');
         setTimeout(() => els.promptInput?.focus(), 150);
-      });
-
-      els.incognitoToggleBtn?.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.toggleIncognito();
       });
 
       els.jozzMemoryGlobalToggle?.addEventListener('change', (e) => {
@@ -41605,19 +41587,6 @@ Aturan:
           if (target) target.classList.add('active');
         }
       });
-    });
-
-    // Sliders & Model Defaults Toggle
-    els.paramUseModelDefaults?.addEventListener('change', (e) => {
-      const disableSliders = e.target.checked;
-      if (els.paramTemperature) els.paramTemperature.disabled = disableSliders;
-      if (els.paramTopP) els.paramTopP.disabled = disableSliders;
-    });
-    els.paramTemperature?.addEventListener('input', (e) => {
-      if (els.valTemperature) els.valTemperature.innerText = e.target.value;
-    });
-    els.paramTopP?.addEventListener('input', (e) => {
-      if (els.valTopP) els.valTopP.innerText = e.target.value;
     });
 
     // Presets in settings
