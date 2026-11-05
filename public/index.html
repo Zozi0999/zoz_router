@@ -108,8 +108,8 @@
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261105_v702">
-  <link rel="stylesheet" href="style.css?v=20261105_v702">
+  <link rel="preload" as="style" href="style.css?v=20261105_v703">
+  <link rel="stylesheet" href="style.css?v=20261105_v703">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -574,15 +574,11 @@
         <svg class="lucide lucide-heart w-3.5 h-3.5 fill-emerald-400 text-emerald-400" data-lucide="heart" fill="currentColor" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg" id="endocrineHeartIcon"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"></path></svg>
       </button>
 
-      <!-- Action Button 4: Jozz Memory (Mistral AI 6-Pillars Long-Term Memory) -->
-      <button class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-teal-300 hover:bg-white/[0.06] transition-colors top-action-btn" id="openJozzMemoryBtn" title="Jozz Memory: Buka Pengelola Memori Jangka Panjang (Mistral AI 6 Pillars)" aria-label="Jozz Memory" type="button">
-        <i class="fa-solid fa-brain text-[12px] text-teal-400"></i>
-      </button>
-
-      <!-- Action Button 5: Incognito Mode Per-Session Toggle -->
-      <button class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-purple-300 hover:bg-white/[0.06] transition-colors top-action-btn" id="incognitoToggleBtn" title="Mode Incognito: Klik untuk mengaktifkan sesi tanpa memori" aria-label="Mode Incognito" type="button">
-        <i class="fa-solid fa-user-secret text-[12px]" id="incognitoIcon"></i>
-      </button>
+      <!-- Session Mode Badge (Standar Jozz Memory vs Incognito) -->
+      <div id="sessionModeIndicatorBadge" class="session-mode-badge" style="display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 9999px; font-size: 0.68rem; font-weight: 600; cursor: pointer; transition: all 0.2s; background: rgba(0, 240, 255, 0.08); border: 1px solid rgba(0, 240, 255, 0.25);" title="Klik untuk membuka pengaturan Jozz Memory">
+        <i class="fa-solid fa-brain text-[11px] text-teal-400" id="sessionModeBadgeIcon"></i>
+        <span id="sessionModeBadgeText" style="color: #cbd5e1;">Jozz Memory</span>
+      </div>
     </div>
   </header>
   <!-- END: ApplicationWindowHeader -->
@@ -1126,9 +1122,59 @@
 
 <!-- ==================== MODALS ==================== -->
 
+  <!-- 0. NEW CHAT MODE MODAL (STANDAR JOZZ MEMORY VS INCOGNITO) -->
+  <div class="modal-backdrop" id="newChatModeModal">
+    <div class="modal-card new-chat-mode-modal-card" style="max-width: 480px; padding: 0; overflow: hidden; border-radius: 16px; border: 1px solid rgba(0, 240, 255, 0.25); background: #0b0f19;">
+      <div class="modal-header" style="border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding: 16px 20px; display: flex; align-items: center; justify-content: space-between;">
+        <div class="modal-title" style="display: flex; align-items: center; gap: 10px; font-weight: 700; color: #f1f5f9; font-size: 1.05rem;">
+          <i class="fa-solid fa-comments" style="color: var(--neon-cyan);"></i> Mulai Percakapan Baru
+        </div>
+        <button class="modal-close-btn" data-close="newChatModeModal" aria-label="Tutup" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body" style="padding: 20px; display: flex; flex-direction: column; gap: 14px;">
+        <p style="font-size: 0.85rem; color: #94a3b8; margin: 0 0 4px 0;">Pilih mode percakapan yang ingin Anda gunakan untuk sesi obrolan ini:</p>
+
+        <!-- Option 1: Chat Standar (Jozz Memory) -->
+        <button type="button" class="new-chat-mode-card" id="btnSelectNormalChat" style="text-align: left; display: flex; gap: 14px; align-items: flex-start; padding: 16px; border-radius: 12px; background: rgba(0, 240, 255, 0.04); border: 1px solid rgba(0, 240, 255, 0.25); cursor: pointer; transition: all 0.2s; position: relative; width: 100%;">
+          <div style="width: 42px; height: 42px; border-radius: 10px; background: rgba(0, 240, 255, 0.15); border: 1px solid var(--neon-cyan); display: flex; align-items: center; justify-content: center; color: var(--neon-cyan); font-size: 1.25rem; flex-shrink: 0;">
+            <i class="fa-solid fa-brain"></i>
+          </div>
+          <div style="flex: 1;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+              <span style="font-weight: 700; color: #f1f5f9; font-size: 0.95rem;">Chat Biasa (Standar)</span>
+              <span style="font-size: 0.68rem; padding: 2px 7px; border-radius: 9999px; background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-weight: 600;">Rekomendasi</span>
+            </div>
+            <p style="font-size: 0.8rem; color: #94a3b8; margin: 0; line-height: 1.4;">
+              AI menggunakan <strong>Jozz Memory</strong> untuk mengingat preferensi, fakta penting, dan riwayat proyek Anda di seluruh percakapan.
+            </p>
+          </div>
+        </button>
+
+        <!-- Option 2: Mode Incognito (Privat Tanpa Memori) -->
+        <button type="button" class="new-chat-mode-card" id="btnSelectIncognitoChat" style="text-align: left; display: flex; gap: 14px; align-items: flex-start; padding: 16px; border-radius: 12px; background: rgba(168, 85, 247, 0.04); border: 1px solid rgba(168, 85, 247, 0.25); cursor: pointer; transition: all 0.2s; position: relative; width: 100%;">
+          <div style="width: 42px; height: 42px; border-radius: 10px; background: rgba(168, 85, 247, 0.15); border: 1px solid #c084fc; display: flex; align-items: center; justify-content: center; color: #c084fc; font-size: 1.25rem; flex-shrink: 0;">
+            <i class="fa-solid fa-user-secret"></i>
+          </div>
+          <div style="flex: 1;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+              <span style="font-weight: 700; color: #f1f5f9; font-size: 0.95rem;">Mode Incognito</span>
+              <span style="font-size: 0.68rem; padding: 2px 7px; border-radius: 9999px; background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); font-weight: 600;">Privat &amp; Nol Memori</span>
+            </div>
+            <p style="font-size: 0.8rem; color: #94a3b8; margin: 0; line-height: 1.4;">
+              Sesi sementara tanpa jejak. AI <strong>tidak membaca memori</strong> dan <strong>tidak menyimpan fakta</strong> apa pun ke database.
+            </p>
+          </div>
+        </button>
+      </div>
+      <div class="modal-footer" style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding: 12px 20px; display: flex; justify-content: flex-end; background: rgba(6, 9, 16, 0.9);">
+        <button type="button" class="btn btn-sm btn-secondary" data-close="newChatModeModal">Batal</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 1. SETTINGS MODAL -->
   <div class="modal-backdrop" id="settingsModal">
-    <div class="modal-card">
+    <div class="modal-card" style="max-width: 680px;">
       <div class="modal-header">
         <div class="modal-title"><i class="fa-solid fa-gear"></i> Konfigurasi Zoz Router</div>
         <button class="modal-close-btn" data-close="settingsModal" aria-label="Tutup pengaturan" title="Tutup pengaturan"><i class="fa-solid fa-xmark"></i></button>
@@ -1136,8 +1182,8 @@
       <div class="modal-body">
         <!-- Tab Navigation -->
         <div class="settings-tabs">
-          <button class="settings-tab-btn active" data-target="tabProviders">Providers & API</button>
-          <button class="settings-tab-btn" data-target="tabParameters">Parameter LLM</button>
+          <button class="settings-tab-btn active" data-target="tabProviders">Providers &amp; API</button>
+          <button class="settings-tab-btn" data-target="tabJozzMemory"><i class="fa-solid fa-brain"></i> Jozz Memory</button>
           <button class="settings-tab-btn" data-target="tabSystem">System Persona</button>
           <button class="settings-tab-btn" data-target="tabDeveloper" id="tabBtnDeveloper">
             <i class="fa-solid fa-code"></i> About Developer
@@ -1233,31 +1279,115 @@
           </div>
         </div>
 
-        <!-- Tab 2: Parameters -->
-        <div class="settings-tab-pane" id="tabParameters">
-          <div class="form-group mb-4">
-            <label class="flex items-center gap-2 cursor-pointer" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-              <input type="checkbox" id="paramUseModelDefaults" checked style="width:16px; height:16px; accent-color:var(--neon-cyan);">
-              <span style="font-weight:600; color:var(--neon-cyan);">Gunakan Parameter Bawaan Model (Rekomendasi Resmi)</span>
+        <!-- Tab 2: Jozz Memory (Pengaturan Memori Jangka Panjang) -->
+        <div class="settings-tab-pane" id="tabJozzMemory">
+          <!-- Header Bar: Status & Global Toggle -->
+          <div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+            <div>
+              <div style="font-weight: 700; color: #f1f5f9; font-size: 0.95rem; display: flex; align-items: center; gap: 8px;">
+                <i class="fa-solid fa-brain" style="color: var(--neon-cyan);"></i> Jozz Memory
+                <span style="font-size: 0.68rem; padding: 2px 7px; border-radius: 9999px; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 600;">Mistral 6-Pillars</span>
+              </div>
+              <small class="form-hint" style="margin: 2px 0 0 0;">Parameter sampling otomatis menggunakan konfigurasi bawaan resmi model.</small>
+            </div>
+            <!-- Global Memory Toggle Switch -->
+            <label class="switch-toggle" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.78rem; color: #94a3b8; font-weight: 600;" title="Aktifkan atau nonaktifkan Jozz Memory secara global">
+              <span>Aktifkan Memori</span>
+              <input type="checkbox" id="jozzMemoryGlobalToggle" checked>
+              <span class="slider-round" style="width: 34px; height: 18px;"></span>
             </label>
-            <small class="form-hint">Biarkan OpenRouter & Ollama menerapkan parameter sampling asli dari penyedia model (mencegah kerusakan token atau keanehan bahasa pada model seperti Gemma, Claude, dan Llama).</small>
           </div>
 
-          <div class="form-group">
-            <div class="range-header">
-              <label for="paramTemperature">Temperature (Kreativitas):</label>
-              <span class="range-val" id="valTemperature">0.7</span>
+          <!-- Toolbar: Search, + Tambah Memori -->
+          <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 10px;">
+            <div style="position: relative; flex: 1;">
+              <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); font-size: 0.75rem; color: #64748b;"></i>
+              <input type="text" id="jozzMemorySearchInput" placeholder="Cari memori, fakta, atau entitas pengetahuan..." style="width: 100%; padding: 7px 10px 7px 32px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: #f1f5f9; font-size: 0.8rem; outline: none;">
             </div>
-            <input type="range" id="paramTemperature" min="0" max="2.0" step="0.05" value="0.7">
-            <small class="form-hint">Nilai rendah (0.1 - 0.3) untuk coding/akurasi; nilai tinggi (0.7 - 1.0) untuk kreatif.</small>
+            <button type="button" class="btn btn-xs btn-primary-neon" id="btnToggleAddMemoryForm" style="padding: 7px 12px; font-weight: 600; white-space: nowrap;">
+              <i class="fa-solid fa-plus"></i> Tambah Memori
+            </button>
           </div>
 
-          <div class="form-group">
-            <div class="range-header">
-              <label for="paramTopP">Top P (Nucleus Sampling):</label>
-              <span class="range-val" id="valTopP">0.9</span>
+          <!-- Category Pills & Subtabs -->
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
+            <div class="jozz-mem-cat-pills" id="jozzMemCategoryPills" style="display: flex; gap: 5px; flex-wrap: wrap;">
+              <button type="button" class="jozz-cat-pill active" data-cat="all">Semua</button>
+              <button type="button" class="jozz-cat-pill" data-cat="preference">Preferensi</button>
+              <button type="button" class="jozz-cat-pill" data-cat="technical_stack">Tech Stack</button>
+              <button type="button" class="jozz-cat-pill" data-cat="project_context">Proyek</button>
+              <button type="button" class="jozz-cat-pill" data-cat="general_fact">Fakta</button>
             </div>
-            <input type="range" id="paramTopP" min="0" max="1.0" step="0.05" value="0.9">
+
+            <div class="jozz-mem-tab-switcher" style="display: flex; background: rgba(0,0,0,0.4); border-radius: 8px; padding: 2px; border: 1px solid rgba(255,255,255,0.08);">
+              <button type="button" class="jozz-tab-btn active" id="tabBtnMemoriesList" style="padding: 4px 10px; font-size: 0.73rem; border-radius: 6px; border: none; background: transparent; color: #94a3b8; font-weight: 600; cursor: pointer;">
+                <i class="fa-solid fa-list-ul"></i> Daftar (<span id="jozzMemTotalCount">0</span>)
+              </button>
+              <button type="button" class="jozz-tab-btn" id="tabBtnMemoryInsights" style="padding: 4px 10px; font-size: 0.73rem; border-radius: 6px; border: none; background: transparent; color: #94a3b8; font-weight: 600; cursor: pointer;">
+                <i class="fa-solid fa-chart-line"></i> Insights &amp; Tren
+              </button>
+            </div>
+          </div>
+
+          <!-- Add Manual Memory Inline Box (Collapsible) -->
+          <div id="jozzAddMemoryFormBox" style="display: none; padding: 12px; margin-bottom: 10px; background: rgba(0, 240, 255, 0.03); border: 1px dashed rgba(0, 240, 255, 0.25); border-radius: 8px;">
+            <div style="font-size: 0.8rem; font-weight: 700; color: var(--neon-cyan); margin-bottom: 6px;">
+              <i class="fa-solid fa-pen"></i> Simpan Memori Eksplisit Baru
+            </div>
+            <textarea id="jozzAddMemoryContent" rows="2" placeholder="Tulis fakta eksplisit pengguna (misal: 'Saya menggunakan framework Next.js 15 dengan Tailwind CSS')..." style="width: 100%; padding: 7px 10px; background: rgba(10, 15, 29, 0.85); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 8px; color: #f1f5f9; font-size: 0.8rem; resize: vertical; outline: none;"></textarea>
+            <div style="display: flex; gap: 8px; margin-top: 6px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <select id="jozzAddMemoryCategory" style="padding: 4px 8px; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; color: #e2e8f0; font-size: 0.75rem;">
+                  <option value="preference">Preferensi Pengguna</option>
+                  <option value="technical_stack">Teknologi / Stack</option>
+                  <option value="project_context">Konteks Proyek</option>
+                  <option value="general_fact">Fakta Umum</option>
+                </select>
+                <input type="text" id="jozzAddMemoryScope" placeholder="Scope (global)" value="global" style="width: 110px; padding: 4px 8px; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; color: #e2e8f0; font-size: 0.75rem;">
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <button type="button" class="btn btn-xs btn-outline" id="btnCancelAddMemory" style="padding: 4px 10px;">Batal</button>
+                <button type="button" class="btn btn-xs btn-primary-neon" id="btnSubmitAddMemory" style="padding: 4px 12px; font-weight: 700;">Simpan</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Content List or Insights -->
+          <div style="max-height: 280px; overflow-y: auto; padding-right: 4px; margin-bottom: 12px;">
+            <!-- PANE 1: MEMORIES LIST -->
+            <div id="jozzPaneMemoriesList">
+              <div id="jozzMemoriesCardsList" style="display: flex; flex-direction: column; gap: 8px;">
+                <div style="text-align: center; padding: 30px 10px; color: #64748b;">
+                  <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.25rem; color: var(--neon-cyan);"></i>
+                  <p style="margin-top: 6px; font-size: 0.78rem;">Memuat data memori...</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- PANE 2: MEMORY INSIGHTS & TREN -->
+            <div id="jozzPaneMemoryInsights" style="display: none;">
+              <div id="jozzMemoryInsightsContent" style="display: flex; flex-direction: column; gap: 10px;"></div>
+            </div>
+          </div>
+
+          <!-- Sovereignty Bar -->
+          <div style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+            <div style="display: flex; gap: 6px; align-items: center;">
+              <span style="font-size: 0.68rem; color: #64748b; font-weight: 600; text-transform: uppercase;">Kedaulatan:</span>
+              <button type="button" class="btn btn-xs btn-outline" id="btnExportMemoryJson" title="Unduh format JSON" style="font-size: 0.7rem; padding: 3px 7px;">
+                <i class="fa-solid fa-file-code"></i> JSON
+              </button>
+              <button type="button" class="btn btn-xs btn-outline" id="btnExportMemoryMd" title="Unduh format Markdown" style="font-size: 0.7rem; padding: 3px 7px;">
+                <i class="fa-solid fa-file-lines"></i> MD
+              </button>
+              <label class="btn btn-xs btn-outline" style="font-size: 0.7rem; padding: 3px 7px; cursor: pointer; margin: 0;" title="Impor JSON atau MD">
+                <i class="fa-solid fa-file-import"></i> Impor
+                <input type="file" id="jozzMemoryImportInput" accept=".json,.md" style="display: none;">
+              </label>
+            </div>
+            <button type="button" class="btn btn-xs" id="btnClearAllMemoriesBtn" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; font-size: 0.7rem; padding: 3px 8px;" title="Hapus seluruh memori">
+              <i class="fa-solid fa-trash-can"></i> Hapus Semua
+            </button>
           </div>
         </div>
 
@@ -3188,133 +3318,6 @@
     </div>
   </div>
 
-  <!-- ==================== 22. JOZZ MEMORY MODAL (MISTRAL AI 6 PILLARS) ==================== -->
-  <div class="modal-backdrop" id="jozzMemoryModal">
-    <div class="modal-card jozz-memory-modal-card" style="max-width: 760px; max-height: 88vh; display: flex; flex-direction: column;">
-      <div class="modal-header" style="border-bottom: 1px solid rgba(0, 240, 255, 0.2); padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;">
-        <div class="modal-title" style="display: flex; align-items: center; gap: 9px; font-weight: 700; color: #f1f5f9;">
-          <div class="jozz-mem-icon-badge" style="width: 28px; height: 28px; border-radius: 8px; background: rgba(0, 240, 255, 0.15); border: 1px solid var(--neon-cyan); display: flex; align-items: center; justify-content: center; color: var(--neon-cyan);">
-            <i class="fa-solid fa-brain"></i>
-          </div>
-          <div>
-            <span style="font-size: 1rem; letter-spacing: 0.5px;">JOZZ MEMORY</span>
-            <span style="font-size: 0.68rem; margin-left: 6px; padding: 2px 7px; border-radius: 9999px; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 600;">Mistral 6-Pillars</span>
-          </div>
-        </div>
-        <div style="display: flex; align-items: center; gap: 14px;">
-          <!-- Global Memory Toggle Switch -->
-          <label class="switch-toggle" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.76rem; color: #94a3b8; font-weight: 500;" title="Aktifkan atau nonaktifkan Jozz Memory secara global">
-            <span>Memori Aktif</span>
-            <input type="checkbox" id="jozzMemoryGlobalToggle" checked>
-            <span class="slider-round" style="width: 34px; height: 18px;"></span>
-          </label>
-          <button class="modal-close-btn" data-close="jozzMemoryModal" aria-label="Tutup Jozz Memory" title="Tutup Jozz Memory"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-      </div>
-
-      <!-- Toolbar: Search, Category Filters & Subtabs -->
-      <div style="padding: 12px 18px 8px 18px; background: rgba(10, 15, 29, 0.6); border-bottom: 1px solid rgba(255, 255, 255, 0.06); display: flex; flex-direction: column; gap: 10px;">
-        <div style="display: flex; gap: 8px; align-items: center;">
-          <div style="position: relative; flex: 1;">
-            <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); font-size: 0.75rem; color: #64748b;"></i>
-            <input type="text" id="jozzMemorySearchInput" placeholder="Cari memori, fakta, atau entitas pengetahuan..." style="width: 100%; padding: 7px 10px 7px 32px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: #f1f5f9; font-size: 0.8rem; outline: none;">
-          </div>
-          <button type="button" class="btn btn-xs btn-primary-neon" id="btnToggleAddMemoryForm" style="padding: 7px 12px; font-weight: 600; white-space: nowrap;">
-            <i class="fa-solid fa-plus"></i> Tambah Memori
-          </button>
-        </div>
-
-        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-          <!-- Category Pills -->
-          <div class="jozz-mem-cat-pills" id="jozzMemCategoryPills" style="display: flex; gap: 5px; flex-wrap: wrap;">
-            <button type="button" class="jozz-cat-pill active" data-cat="all">Semua</button>
-            <button type="button" class="jozz-cat-pill" data-cat="preference">Preferensi</button>
-            <button type="button" class="jozz-cat-pill" data-cat="technical_stack">Tech Stack</button>
-            <button type="button" class="jozz-cat-pill" data-cat="project_context">Proyek</button>
-            <button type="button" class="jozz-cat-pill" data-cat="general_fact">Fakta</button>
-          </div>
-
-          <!-- Subtab Switcher: Daftar Memori vs Insights -->
-          <div class="jozz-mem-tab-switcher" style="display: flex; background: rgba(0,0,0,0.4); border-radius: 8px; padding: 2px; border: 1px solid rgba(255,255,255,0.08);">
-            <button type="button" class="jozz-tab-btn active" id="tabBtnMemoriesList" style="padding: 4px 10px; font-size: 0.73rem; border-radius: 6px; border: none; background: transparent; color: #94a3b8; font-weight: 600; cursor: pointer;">
-              <i class="fa-solid fa-list-ul"></i> Daftar (<span id="jozzMemTotalCount">0</span>)
-            </button>
-            <button type="button" class="jozz-tab-btn" id="tabBtnMemoryInsights" style="padding: 4px 10px; font-size: 0.73rem; border-radius: 6px; border: none; background: transparent; color: #94a3b8; font-weight: 600; cursor: pointer;">
-              <i class="fa-solid fa-chart-line"></i> Insights & Tren
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Add Manual Memory Inline Box (Collapsible) -->
-      <div id="jozzAddMemoryFormBox" style="display: none; padding: 14px 18px; background: rgba(0, 240, 255, 0.03); border-bottom: 1px dashed rgba(0, 240, 255, 0.25);">
-        <div style="font-size: 0.8rem; font-weight: 700; color: var(--neon-cyan); margin-bottom: 8px;">
-          <i class="fa-solid fa-pen"></i> Simpan Memori Eksplisit Baru
-        </div>
-        <textarea id="jozzAddMemoryContent" rows="2" placeholder="Tulis fakta eksplisit pengguna (misal: 'Saya menggunakan framework Next.js 15 dengan Tailwind CSS')..." style="width: 100%; padding: 8px 10px; background: rgba(10, 15, 29, 0.85); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 8px; color: #f1f5f9; font-size: 0.82rem; resize: vertical; outline: none;"></textarea>
-        <div style="display: flex; gap: 8px; margin-top: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <select id="jozzAddMemoryCategory" style="padding: 5px 8px; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; color: #e2e8f0; font-size: 0.75rem;">
-              <option value="preference">Preferensi Pengguna</option>
-              <option value="technical_stack">Teknologi / Stack</option>
-              <option value="project_context">Konteks Proyek</option>
-              <option value="general_fact">Fakta Umum</option>
-            </select>
-            <input type="text" id="jozzAddMemoryScope" placeholder="Scope (default: global)" value="global" style="width: 130px; padding: 5px 8px; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; color: #e2e8f0; font-size: 0.75rem;">
-          </div>
-          <div style="display: flex; gap: 6px;">
-            <button type="button" class="btn btn-xs btn-outline" id="btnCancelAddMemory" style="padding: 5px 12px;">Batal</button>
-            <button type="button" class="btn btn-xs btn-primary-neon" id="btnSubmitAddMemory" style="padding: 5px 14px; font-weight: 700;">Simpan</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Main Body Container: Scrollable Cards or Insights View -->
-      <div class="modal-body" style="flex: 1; overflow-y: auto; padding: 14px 18px; min-height: 280px;">
-        <!-- PANE 1: MEMORIES LIST -->
-        <div id="jozzPaneMemoriesList">
-          <div id="jozzMemoriesCardsList" style="display: flex; flex-direction: column; gap: 8px;">
-            <!-- Populated dynamically via JS -->
-            <div style="text-align: center; padding: 40px 20px; color: #64748b;">
-              <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.5rem; color: var(--neon-cyan);"></i>
-              <p style="margin-top: 8px; font-size: 0.8rem;">Memuat data memori...</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- PANE 2: MEMORY INSIGHTS & KNOWLEDGE GRAPH TREN -->
-        <div id="jozzPaneMemoryInsights" style="display: none;">
-          <div id="jozzMemoryInsightsContent" style="display: flex; flex-direction: column; gap: 14px;">
-            <!-- Populated dynamically via JS -->
-          </div>
-        </div>
-      </div>
-
-      <!-- Footer Sovereignty Bar (Mistral Vibe Standard) -->
-      <div class="modal-footer" style="border-top: 1px solid rgba(255, 255, 255, 0.08); padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; background: rgba(6, 9, 16, 0.9); flex-wrap: wrap; gap: 8px;">
-        <div style="display: flex; gap: 6px; align-items: center;">
-          <span style="font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 2px;">Sovereignty:</span>
-          <button type="button" class="btn btn-xs btn-outline" id="btnExportMemoryJson" title="Unduh graf memori lengkap format JSON" style="font-size: 0.72rem; padding: 4px 8px;">
-            <i class="fa-solid fa-file-code"></i> Export JSON
-          </button>
-          <button type="button" class="btn btn-xs btn-outline" id="btnExportMemoryMd" title="Unduh catatan memori rapi format Markdown" style="font-size: 0.72rem; padding: 4px 8px;">
-            <i class="fa-solid fa-file-lines"></i> Export MD
-          </button>
-          <label class="btn btn-xs btn-outline" style="font-size: 0.72rem; padding: 4px 8px; cursor: pointer; margin: 0;" title="Impor berkas JSON atau MD dengan deduplikasi otomatis">
-            <i class="fa-solid fa-file-import"></i> Import
-            <input type="file" id="jozzMemoryImportInput" accept=".json,.md" style="display: none;">
-          </label>
-        </div>
-
-        <div>
-          <button type="button" class="btn btn-xs" id="btnClearAllMemoriesBtn" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; font-size: 0.72rem; padding: 4px 10px;" title="Hapus seluruh memori secara permanen (Dua kali konfirmasi)">
-            <i class="fa-solid fa-trash-can"></i> Hapus Semua Memori
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- ==================== 23. CLICKABLE MEMORY RECEIPTS MODAL ==================== -->
   <div class="modal-backdrop" id="memoryReceiptDetailsModal">
     <div class="modal-card" style="max-width: 600px; max-height: 85vh; display: flex; flex-direction: column;">
@@ -3356,8 +3359,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression & Bayesian calibration engine (must load before app.js) -->
-  <script src="text-safety.js?v=v20261105_v702" defer></script>
+  <script src="text-safety.js?v=v20261105_v703" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=v20261105_tmw3hq3d3" defer></script>
+  <script src="app.js?v=v20261105_v703" defer></script>
 </body>
 </html>

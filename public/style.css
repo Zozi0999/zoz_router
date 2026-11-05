@@ -18082,4 +18082,51 @@ body.mermaid-has-fullscreen {
   letter-spacing: 0.4px;
 }
 
+/* ==================== NEW CHAT MODE POPUP & SESSION INDICATOR ==================== */
+.new-chat-mode-card {
+  outline: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.new-chat-mode-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+
+#btnSelectNormalChat:hover {
+  background: rgba(0, 240, 255, 0.08) !important;
+  border-color: var(--neon-cyan) !important;
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.25) !important;
+}
+
+#btnSelectIncognitoChat:hover {
+  background: rgba(168, 85, 247, 0.08) !important;
+  border-color: #c084fc !important;
+  box-shadow: 0 0 20px rgba(168, 85, 247, 0.25) !important;
+}
+
+.session-mode-badge {
+  user-select: none;
+}
+
+.session-mode-badge:hover {
+  filter: brightness(1.2);
+}
+
+.session-mode-badge.incognito {
+  background: rgba(168, 85, 247, 0.16) !important;
+  border-color: rgba(168, 85, 247, 0.45) !important;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.3) !important;
+}
+
+.session-mode-badge.incognito i {
+  color: #c084fc !important;
+}
+
+.session-mode-badge.incognito span {
+  color: #e9d5ff !important;
+}
+
+
 

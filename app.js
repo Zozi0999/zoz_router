@@ -1174,6 +1174,12 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnExecuteExportChat: $('#btnExecuteExportChat'),
     terminalToggleBtn: $('#terminalToggleBtn'),
     terminalModal: $('#terminalModal'),
+    sessionModeIndicatorBadge: $('#sessionModeIndicatorBadge'),
+    sessionModeBadgeIcon: $('#sessionModeBadgeIcon'),
+    sessionModeBadgeText: $('#sessionModeBadgeText'),
+    newChatModeModal: $('#newChatModeModal'),
+    btnSelectNormalChat: $('#btnSelectNormalChat'),
+    btnSelectIncognitoChat: $('#btnSelectIncognitoChat'),
     openJozzMemoryBtn: $('#openJozzMemoryBtn'),
     incognitoToggleBtn: $('#incognitoToggleBtn'),
     jozzMemoryModal: $('#jozzMemoryModal'),
@@ -1445,10 +1451,33 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         els.jozzMemoryGlobalToggle.checked = STATE.settings.enableJozzMemory !== false;
       }
 
+      els.sessionModeIndicatorBadge?.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.openSettings();
+      });
+
       els.openJozzMemoryBtn?.addEventListener('click', (e) => {
         e.preventDefault();
-        openModal('jozzMemoryModal');
+        this.openSettings();
+      });
+
+      document.querySelector('[data-target="tabJozzMemory"]')?.addEventListener('click', () => {
         this.refresh();
+      });
+
+      // New Chat Mode selection handlers
+      els.btnSelectNormalChat?.addEventListener('click', () => {
+        closeModal('newChatModeModal');
+        createNewSession('Obrolan Baru', STATE.mode, { isIncognito: false });
+        showToast('💬 Mode Standar Aktif: Jozz Memory siap membantu.', 'info');
+        setTimeout(() => els.promptInput?.focus(), 150);
+      });
+
+      els.btnSelectIncognitoChat?.addEventListener('click', () => {
+        closeModal('newChatModeModal');
+        createNewSession('Obrolan Privat', STATE.mode, { isIncognito: true });
+        showToast('🕵️ Mode Incognito Aktif: Sesi privat tanpa jejak memori.', 'info');
+        setTimeout(() => els.promptInput?.focus(), 150);
       });
 
       els.incognitoToggleBtn?.addEventListener('click', (e) => {
@@ -1527,18 +1556,56 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
       // Clear all memories
       els.btnClearAllMemoriesBtn?.addEventListener('click', () => this.handleClearAll());
+
+      this.updateIncognitoStateUI(STATE.isIncognito);
+    },
+
+    openSettings() {
+      const modal = els.settingsModal || $('#settingsModal');
+      if (modal) {
+        modal.querySelectorAll('.settings-tab-btn').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.target === 'tabJozzMemory');
+        });
+        modal.querySelectorAll('.settings-tab-pane').forEach(pane => {
+          pane.classList.toggle('active', pane.id === 'tabJozzMemory');
+        });
+      }
+      openModal('settingsModal');
+      this.refresh();
+      AudioEngine.click();
+    },
+
+    updateIncognitoStateUI(isIncognito) {
+      STATE.isIncognito = Boolean(isIncognito);
+      if (els.sessionModeIndicatorBadge) {
+        if (STATE.isIncognito) {
+          els.sessionModeIndicatorBadge.classList.add('incognito');
+          if (els.sessionModeBadgeIcon) {
+            els.sessionModeBadgeIcon.className = 'fa-solid fa-user-secret text-[11px] text-purple-400';
+          }
+          if (els.sessionModeBadgeText) {
+            els.sessionModeBadgeText.textContent = 'Incognito';
+          }
+          els.sessionModeIndicatorBadge.setAttribute('title', 'Mode Incognito Aktif (Sesi privat tanpa memori)');
+        } else {
+          els.sessionModeIndicatorBadge.classList.remove('incognito');
+          if (els.sessionModeBadgeIcon) {
+            els.sessionModeBadgeIcon.className = 'fa-solid fa-brain text-[11px] text-teal-400';
+          }
+          if (els.sessionModeBadgeText) {
+            els.sessionModeBadgeText.textContent = 'Jozz Memory';
+          }
+          els.sessionModeIndicatorBadge.setAttribute('title', 'Jozz Memory Aktif • Klik untuk membuka pengelola memori');
+        }
+      }
     },
 
     toggleIncognito() {
       STATE.isIncognito = !STATE.isIncognito;
-      const btn = els.incognitoToggleBtn;
+      this.updateIncognitoStateUI(STATE.isIncognito);
       if (STATE.isIncognito) {
-        btn?.classList.add('incognito-active');
-        btn?.setAttribute('title', 'Mode Incognito Aktif (Memori Dimatikan)');
         showToast('🕵️ Mode Incognito Aktif: Percakapan ini tidak membaca dan tidak menyimpan memori.', 'info');
       } else {
-        btn?.classList.remove('incognito-active');
-        btn?.setAttribute('title', 'Mode Incognito: Klik untuk mengaktifkan sesi tanpa memori');
         showToast('🧠 Mode Normal: Jozz Memory aktif untuk mengingat preferensi & fakta penting.', 'success');
       }
       AudioEngine.click();
@@ -11011,7 +11078,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // Pull-up New Chat button click handler
     els.pullUpNewChatBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
-      createNewSession();
+      promptNewChatMode();
       hidePullWrapper(true, false);
       AudioEngine.click();
     });
@@ -14285,7 +14352,16 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
   };
 
   // ==================== SESSIONS & CHAT MANAGEMENT ====================
-  function createNewSession(initialTitle = 'Obrolan Baru', targetMode = STATE.mode) {
+  function promptNewChatMode() {
+    if (STATE.isGenerating || STATE.isSending) {
+      showToast('Harap tunggu atau hentikan generasi respons saat ini.', 'error');
+      return;
+    }
+    openModal('newChatModeModal');
+    AudioEngine.click();
+  }
+
+  function createNewSession(initialTitle = 'Obrolan Baru', targetMode = STATE.mode, sessionOptions = {}) {
     if (activeChatPollTimer) {
       clearInterval(activeChatPollTimer);
       activeChatPollTimer = null;
@@ -14309,6 +14385,13 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     if (els.docFileInput) els.docFileInput.value = '';
     // v404: Bersihkan state pelipatan tanpa mencemari daftar penolakan & sinkronkan tombol pill dengan input aktif
     if (typeof resetPromptFoldState === 'function') resetPromptFoldState(true);
+
+    // Konfigurasi Mode Incognito / Standar per-sesi
+    STATE.isIncognito = Boolean(sessionOptions.isIncognito);
+    if (typeof JozzMemoryUI !== 'undefined') {
+      JozzMemoryUI.updateIncognitoStateUI(STATE.isIncognito);
+    }
+
     renderAttachmentPreviews();
     renderChatHistory();
     renderCurrentSession();
@@ -14338,11 +14421,13 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     }
 
     // Return or create active working session
+    const isIncog = Boolean(STATE.isIncognito);
     const newSession = {
       id: generateId(),
       userId: STATE.userId,
-      title: 'Obrolan Baru',
+      title: isIncog ? 'Obrolan Privat' : 'Obrolan Baru',
       mode: targetMode,
+      isIncognito: isIncog,
       messages: [],
       createdAt: new Date().toISOString()
     };
@@ -14434,6 +14519,10 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     }
 
     STATE.currentSessionId = sessionId;
+    STATE.isIncognito = Boolean(targetSession.isIncognito);
+    if (typeof JozzMemoryUI !== 'undefined') {
+      JozzMemoryUI.updateIncognitoStateUI(STATE.isIncognito);
+    }
     if (STATE.chatMode === 'whatsapp') {
       WhatsAppController.setChatMode('ai', false);
     }
@@ -14910,6 +14999,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
             ${session.isPinned ? '<i class="fa-solid fa-thumbtack history-pin-icon" title="Disematkan di Atas"></i>' : ''}
             <i class="fa-solid ${modeIcon}" style="color:${modeColor}; font-size:0.8rem;" title="Engine: ${modeTag}"></i>
             <span class="history-title" title="${escapeHtml(session.title)}">${escapeHtml(session.title)}</span>
+            ${session.isIncognito ? '<i class="fa-solid fa-user-secret" style="color:#c084fc; font-size:0.72rem; margin-left:4px;" title="Mode Incognito (Privat)"></i>' : ''}
           </div>
           ${!inSelect ? `
             <div class="history-item-actions">
@@ -39271,16 +39361,11 @@ Aturan:
     if (els.settingOllamaApiKey) els.settingOllamaApiKey.value = STATE.settings.ollamaApiKey || '';
     if (els.settingOpenRouterKey) els.settingOpenRouterKey.value = STATE.settings.openRouterKey || '';
     if (els.settingMusicModel) els.settingMusicModel.value = STATE.settings.musicModel || 'google/lyria-3-clip-preview';
-    if (els.paramUseModelDefaults) {
-      els.paramUseModelDefaults.checked = !STATE.settings.useCustomParameters;
-      const disableSliders = els.paramUseModelDefaults.checked;
-      if (els.paramTemperature) els.paramTemperature.disabled = disableSliders;
-      if (els.paramTopP) els.paramTopP.disabled = disableSliders;
+    // Parameter LLM selalu bawaan resmi model (Mandat Kaisar Zozi)
+    STATE.settings.useCustomParameters = false;
+    if (els.jozzMemoryGlobalToggle) {
+      els.jozzMemoryGlobalToggle.checked = STATE.settings.enableJozzMemory !== false;
     }
-    if (els.paramTemperature) els.paramTemperature.value = STATE.settings.temperature ?? 0.7;
-    if (els.valTemperature) els.valTemperature.innerText = STATE.settings.temperature ?? 0.7;
-    if (els.paramTopP) els.paramTopP.value = STATE.settings.topP ?? 0.9;
-    if (els.valTopP) els.valTopP.innerText = STATE.settings.topP ?? 0.9;
     if (els.settingSystemPrompt) {
       if (STATE.settings.activePreset === 'default' || !STATE.settings.systemPrompt) {
         els.settingSystemPrompt.value = '';
@@ -40137,7 +40222,7 @@ Aturan:
       if (STATE.chatMode === 'whatsapp') {
         WhatsAppController.openContactDropdown();
       } else {
-        createNewSession();
+        promptNewChatMode();
       }
     });
     // Debounce 150ms: renderChatHistory membongkar & menyusun ulang seluruh daftar
@@ -41775,11 +41860,11 @@ Aturan:
         normalizeMusicModelSetting();
       }
 
-      if (els.paramUseModelDefaults) {
-        STATE.settings.useCustomParameters = !els.paramUseModelDefaults.checked;
+      // Parameter sampling selalu bawaan alami model (Mandat Kaisar Zozi)
+      STATE.settings.useCustomParameters = false;
+      if (els.jozzMemoryGlobalToggle) {
+        STATE.settings.enableJozzMemory = Boolean(els.jozzMemoryGlobalToggle.checked);
       }
-      if (els.paramTemperature) STATE.settings.temperature = parseFloat(els.paramTemperature.value);
-      if (els.paramTopP) STATE.settings.topP = parseFloat(els.paramTopP.value);
       if (els.settingSystemPrompt) {
         const rawVal = els.settingSystemPrompt.value;
         const pVal = rawVal.trim();
