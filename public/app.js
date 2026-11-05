@@ -43,7 +43,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://indicator-firewall-varies-reflects.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://methodology-surgeons-beam-transformation.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -47177,7 +47177,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://indicator-firewall-varies-reflects.trycloudflare.com',
+    activeTunnelUrl: 'https://methodology-surgeons-beam-transformation.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
