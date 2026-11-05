@@ -1713,13 +1713,22 @@
   // DIBLOKIR TOTAL dan model diperintahkan memfalsifikasi jawaban lama (P(h_prev) = 0)
   // serta mengevaluasi sisa opsi alternatif.
   // ============================================================================
-  const QUIZ_REVISION_REGEX = /^(?:\s*(?:ganti|ubah|tukar|pilihkan\s+(?:yang\s+)?lain|coba\s+(?:yang\s+)?lain|bukan\s+(?:itu|yang\s+ini|yang\s+tadi)|salah\b|opsi\s+lain|jawaban\s+lain|alternatif\s+lain|jawaban\s+kedua|nomor\s+lain|ganti\s+(?:opsi|jawaban|pilihan)|bukan\s+[A-Fa-f]|change\s+(?:the\s+)?answer|try\s+another|pick\s+another|switch\s+(?:to|answer)|not\s+that|wrong|incorrect)\s*[!?.~,]*)+$/i;
+  const QUIZ_REVISION_EXACT_REGEX = /^(?:\s*(?:ganti|ubah|tukar|pilihkan\s+(?:yang\s+)?lain|coba\s+(?:yang\s+)?lain|bukan\s+(?:itu|yang\s+ini|yang\s+tadi)|salah\b|opsi\s+lain|jawaban\s+lain|alternatif\s+lain|jawaban\s+kedua|nomor\s+lain|ganti\s+(?:opsi|jawaban|pilihan)|bukan\s+[A-Fa-f]|change\s+(?:the\s+)?answer|try\s+another|pick\s+another|switch\s+(?:to|answer)|not\s+that|wrong|incorrect)\s*[!?.~,"'`]*)+$/i;
+
+  const QUIZ_FAILURE_FEEDBACK_REGEX = /\b(?:anda\s+)?(?:tidak|belum)\s+lulus\b|\b(?:gagal|failed|fail|not\s+passing|re-?take|retake)\b|\b(?:your\s+score|skor(?:\s+anda)?|score|nilai(?:\s+saya)?|passing(?:\s+grade|\s+score)?)\s*(?:is|:|=|adalah)?\s*"?\s*\d{1,3}\s*%/i;
+
+  const QUIZ_REVISION_PHRASE_REGEX = /\b(?:ganti\s+(?:jawabannya|jawaban|opsi|pilihan)|coba\s+ganti|salah\s+ganti|bukan\s+itu|jawaban\s+(?:lain|kedua|baru|yang\s+benar|berikutnya)|pilih\s+(?:yang\s+)?lain|opsi\s+lain|alternatif\s+lain|jawaban\s+salah|salah\s+(?:jawabannya|opsinya|pilihannya)|koreksi\s+(?:jawabannya|pilihan)|revisi\s+jawaban|change\s+(?:the\s+)?answer|switch\s+(?:the\s+)?option|try\s+another\s+option|wrong\s+answer)\b/i;
 
   function isRevisionQuery(text) {
     if (!text || typeof text !== 'string') return false;
     const clean = text.trim();
-    if (clean.length > 90) return false;
-    return QUIZ_REVISION_REGEX.test(clean) || /\b(?:ganti|coba\s+ganti|ganti\s+jawabannya|ganti\s+opsi|salah\s+ganti|bukan\s+itu|jawaban\s+lain|pilih\s+yang\s+lain)\b/i.test(clean);
+    if (clean.length > 320) return false;
+    if (QUIZ_REVISION_EXACT_REGEX.test(clean)) return true;
+    if (QUIZ_FAILURE_FEEDBACK_REGEX.test(clean)) return true;
+    if (QUIZ_REVISION_PHRASE_REGEX.test(clean)) return true;
+    if (/\b(?:ganti|ubah|bukan|salah|keliru)\b/i.test(clean) && /\b(?:jawaban|opsi|pilihan|pilih|coba|soal|kuis)\b/i.test(clean)) return true;
+    if (/\b(?:skor|score|nilai)\b/i.test(clean) && /\b\d{1,2}%\b/.test(clean)) return true;
+    return false;
   }
 
   function extractParentQuizContext(sessionOrMessages) {
@@ -1738,24 +1747,41 @@
     if (lastAsstIdx === -1 || !lastAsstMsg) return null;
 
     let parentUserMsg = null;
+    let candidateOptions = [];
     for (let i = lastAsstIdx - 1; i >= 0; i--) {
       if (rawList[i] && rawList[i].role === 'user' && rawList[i].content) {
-        parentUserMsg = rawList[i];
-        break;
+        const uText = String(rawList[i].content || '').trim();
+        const lines = uText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        const opts = lines.filter(l => {
+          if (/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+\S)/.test(l)) return true;
+          const wc = l.split(/\s+/).filter(Boolean).length;
+          return wc >= 1 && wc <= 25 && !/\?\s*$/.test(l) && !/^[-*#>`]/.test(l);
+        });
+        if (opts.length >= 2) {
+          parentUserMsg = rawList[i];
+          candidateOptions = opts;
+          break;
+        }
+        if (!parentUserMsg) {
+          parentUserMsg = rawList[i];
+          candidateOptions = opts;
+        }
       }
     }
-    if (!parentUserMsg) return null;
 
-    const userText = String(parentUserMsg.content || '').trim();
-    const lines = userText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    const candidateOptions = lines.filter(l => {
-      if (/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+\S)/.test(l)) return true;
-      const wc = l.split(/\s+/).filter(Boolean).length;
-      return wc >= 1 && wc <= 25 && !/\?\s*$/.test(l) && !/^[-*#>`]/.test(l);
-    });
+    if (candidateOptions.length < 2 && lastAsstMsg) {
+      const asstLines = lastAsstMsg.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      const asstOpts = asstLines.filter(l => /^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+\S)/.test(l));
+      if (asstOpts.length >= 2) {
+        candidateOptions = asstOpts;
+      }
+    }
+
+    if (!parentUserMsg || candidateOptions.length < 2) return null;
 
     let prevChosenLabel = '';
-    const matchLabel = lastAsstMsg.match(/^(?:(?:\*\*|\*|\[)?[A-Da-d](?:[.)\]]|\*\*)?)\s+([^\n\r]+)/);
+    const matchLabel = lastAsstMsg.match(/^(?:(?:\*\*|\*|\[)?[A-Da-d](?:[.)\]]|\*\*)?)\s+([^\n\r]+)/m) ||
+                       lastAsstMsg.match(/(?:jawaban|pilihan|opsi)(?:\s+(?:yang\s+)?(?:tepat|benar|sesuai|adalah))?[\s:*]+(?:(?:\*\*|\*|\[)?([A-Da-d])(?:[.)\]]|\*\*)?)\s*([^\n\r.]+)?/i);
     if (matchLabel) {
       prevChosenLabel = matchLabel[0].replace(/[*\[\]]/g, '').trim();
     } else {
@@ -1763,7 +1789,7 @@
     }
 
     return {
-      userText,
+      userText: String(parentUserMsg.content || '').trim(),
       candidateOptions,
       previousAnswer: prevChosenLabel
     };
@@ -2179,19 +2205,21 @@
       const calibratedTemp = 0.12;
       const calibratedTopP = 0.90;
       const calibrationDirective = `[PROTOKOL REVISI BAYESIAN & ELIMINASI HIPOTESIS TERFALSIFIKASI — H_0 = ${maxEntropyBits} bit]:
-Pengguna secara tegas meminta MENGGANTI JAWABAN / MENOLAK PILIHAN SEBELUMNYA ("${raw}").
-Jawaban asisten sebelumnya yang difalsifikasi: "${parentQuiz.previousAnswer}".
+Pengguna memberikan umpan balik penolakan / revisi / kegagalan atas jawaban sebelumnya: "${raw}".
+Jawaban asisten sebelumnya yang difalsifikasi dan SALAH: "${parentQuiz.previousAnswer}".
 Himpunan opsi awal dari soal kuis:
 ${parentQuiz.candidateOptions.map((o, idx) => `   ${idx + 1}. ${o}`).join('\n')}
 
-Di dalam blok penalaran deduktif <think>...</think> (disembunyikan otomatis):
+INSTRUKSI MATEMATIKA MURNI & REVISI PRESISI:
 1. FALSIFIKASI MUTLAK: Tetapkan P("${parentQuiz.previousAnswer}") = 0. DILARANG KERAS memilih atau merekomendasikan kembali jawaban "${parentQuiz.previousAnswer}"!
 2. EVALUASI HIPOTESIS ALTERNATIF:
    - Evaluasi seluruh opsi alternatif yang tersisa: ${effectiveOpts.join(', ')}.
    - Reset prior peluang setara P_0 = 1/${effectiveOpts.length} pada setiap sisa opsi.
-   - Evaluasi konteks modul/topik kuis (misal RAG, Database, Cloud) dan cari opsi yang paling tepat menggantikan jawaban yang salah.
-3. JAWABAN REVISI PRESISI & AKURAT:
-   - Tutup </think>, tuliskan OPSI BARU YANG TEPAT secara tegas dan jelas di baris pertama (misal: "Jawaban revisi yang tepat: [Opsi Alternatif]").
+   - Evaluasi konteks modul/topik kuis (misal RAG, Database, Indexing, Vector Search, AI) dan pilih satu opsi alternatif yang paling tepat.
+3. FORMAT JAWABAN TEGAS & LANGSUNG:
+   - DILARANG menghasilkan kode program, file HTML, atau blok <<<ZOZ_FILE! Ini adalah revisi kuis teks, bukan tugas pembuatan web.
+   - DILARANG mencari definisi kata "ganti" atau mencari kamus di web.
+   - Tuliskan jawaban revisi yang benar secara langsung di baris pertama (misal: "**Jawaban revisi yang tepat: [Pilihan Opsi]**").
    - Berikan 1-2 kalimat alasan konseptual ringkas mengapa opsi ini benar menggantikan jawaban sebelumnya.`;
 
       return {
@@ -2209,6 +2237,9 @@ Di dalam blok penalaran deduktif <think>...</think> (disembunyikan otomatis):
         top_p: calibratedTopP,
         presencePenalty: 0,
         frequencyPenalty: 0,
+        candidateOptions: parentQuiz.candidateOptions,
+        remainingOptions: effectiveOpts,
+        falsifiedAnswer: parentQuiz.previousAnswer,
         calibrationDirective
       };
     }

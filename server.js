@@ -3965,7 +3965,8 @@ function applyServerSideDecisionCalibration(body, provider = 'ollama') {
 
   const calib = textSafety.computeBayesianDecisionCalibration(rawUserText, {
     hasImages: imageCount > 0,
-    imageCount
+    imageCount,
+    sessionOrMessages: body.messages.slice(0, lastUserIdx)
   });
   if (!calib || (!calib.isDiscreteChoice && !calib.isAnalyticalQuery && !calib.isConceptualTaxonomy)) return;
 
@@ -4008,7 +4009,7 @@ function applyServerSideDecisionCalibration(body, provider = 'ollama') {
   }
 
   // 3. Suntikkan direktif deduksi proposisional v680 jika belum ada di payload
-  const hasV680Protocol = serializedAll.includes('[PROTOKOL DEDUKSI PROPOSISIONAL') || serializedAll.includes('[PROTOKOL VERIFIKASI DEDUKTIF');
+  const hasV680Protocol = serializedAll.includes('[PROTOKOL DEDUKSI PROPOSISIONAL') || serializedAll.includes('[PROTOKOL VERIFIKASI DEDUKTIF') || serializedAll.includes('[PROTOKOL REVISI BAYESIAN');
   if (!hasV680Protocol && calib.calibrationDirective) {
     // Bersihkan blok v679 lama (tanpa <think>) jika dikirim oleh tab browser belum di-refresh
     for (const m of body.messages) {
