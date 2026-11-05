@@ -6558,7 +6558,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
   // Ronde penyelamat OpenRouter: distribusi Boltzmann T -> 0.05 untuk meminimumkan entropi halusinasi parametrik.
   async function rescueWebAnswerOpenRouter({ url, headers, model, question, evidenceText, extraBody, signal }) {
-    const isReasoning = Boolean(model && (/\/o[1-9]|\b(r1|reasoning|deepseek-r|nemotron)\b/i.test(model) || model.toLowerCase().includes('nemotron')));
+    const isStrictReasoning = Boolean(model && (/\/o[1-3]|\b(r1|deepseek-r1)\b/i.test(model) || model.toLowerCase().includes('deepseek-r1') || model.toLowerCase().includes('-r1')));
     const isLiquid = Boolean(model && (model.includes('liquid') || model.includes('lfm-')));
     const sampling = getGroundedSamplingParams(question);
     const baseBody = {
@@ -6569,8 +6569,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       ...(extraBody || {})
     };
     if (!STATE.settings.useCustomParameters) {
-      if (!isReasoning) baseBody.temperature = sampling.temperature;
-      if (!isReasoning && !isLiquid) baseBody.top_p = sampling.topP;
+      if (!isStrictReasoning) baseBody.temperature = sampling.temperature;
+      if (!isStrictReasoning && !isLiquid) baseBody.top_p = sampling.topP;
     }
     const attempts = [baseBody];
     for (const body of attempts) {
@@ -31649,7 +31649,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         const isNemotronCur = isNemotronModel(currentModel);
         const isLiquid = Boolean(currentModel && (currentModel.includes('liquid') || currentModel.includes('lfm-')));
-        const isReasoning = Boolean(currentModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r|nemotron)\b/i.test(currentModel) || currentModel.toLowerCase().includes('reasoning') || currentModel.toLowerCase().includes('-r1') || isNemotronCur));
+        // Hanya model penalaran eksklusif (o1/o3/DeepSeek-R1) yang menolak temperature kustom di OpenRouter.
+        // Nemotron 3 Ultra dan LFM sepenuhnya mendukung sampling temperatur deterministik (T=0.18).
+        const isStrictReasoning = Boolean(currentModel && (/\/o[1-3]|\b(r1|deepseek-r1)\b/i.test(currentModel) || currentModel.toLowerCase().includes('deepseek-r1') || currentModel.toLowerCase().includes('-r1')));
 
         // PAYLOAD BERSIH & TERKALIBRASI OPENROUTER:
         // - Mengizinkan latent reasoning alami model (streamRenderer & ZozTextSafety memisahkan reasoning dari jawaban utama)
@@ -31676,15 +31678,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           : { temperature: decisionCalibration.isDiscreteChoice ? 0.22 : (hasGroundedWeb ? 0.25 : 0.45), topP: 0.90 };
 
         if (STATE.settings.useCustomParameters) {
-          if (!isReasoning && STATE.settings.temperature !== null && STATE.settings.temperature !== undefined) {
+          if (!isStrictReasoning && STATE.settings.temperature !== null && STATE.settings.temperature !== undefined) {
             basePayload.temperature = parseFloat(STATE.settings.temperature);
           }
-          if (!isLiquid && !isReasoning && STATE.settings.topP !== null && STATE.settings.topP !== undefined) {
+          if (!isLiquid && !isStrictReasoning && STATE.settings.topP !== null && STATE.settings.topP !== undefined) {
             basePayload.top_p = parseFloat(STATE.settings.topP);
           }
         } else {
-          if (!isReasoning) basePayload.temperature = calibratedOrSampling.temperature;
-          if (!isLiquid && !isReasoning) basePayload.top_p = calibratedOrSampling.topP;
+          if (!isStrictReasoning) basePayload.temperature = calibratedOrSampling.temperature;
+          if (!isLiquid && !isStrictReasoning) basePayload.top_p = calibratedOrSampling.topP;
         }
 
         if (currentIsImageCapable && (STATE.isImageGenMode || isImageGenerationTrigger(promptText))) {
@@ -31805,7 +31807,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 delete basePayload.max_completion_tokens;
                 shouldRetry = true;
               }
-              if (targetBody.temperature && isReasoning) {
+              if (targetBody.temperature && isStrictReasoning) {
                 delete targetBody.temperature;
                 delete basePayload.temperature;
                 shouldRetry = true;
