@@ -6886,6 +6886,7 @@ async function requestHandler(req, res) {
                                  pathname === '/api/youtube-info' ||
                                  pathname === '/api/video-probe' ||
                                  pathname.startsWith('/api/tools/') ||
+                                 pathname.startsWith('/api/memories') ||
                                  pathname === '/api/extract-web' ||
                                  pathname === '/api/read-url' ||
                                  pathname === '/api/scrape-url' ||
@@ -7023,6 +7024,18 @@ async function requestHandler(req, res) {
       lastUncaught: lastUncaughtInfo, // F19: exception di luar request terlihat di sini
       timestamp: new Date().toISOString()
     });
+  }
+
+  // Jozz Memory API Endpoints (Mistral AI 6-Pillars Standard: Scoped Recall, Receipts, Insights, Sovereignty)
+  if (pathname.startsWith('/api/memories')) {
+    try {
+      const memoryRoutes = require('./src/memory/routes/memoryRoutes');
+      const handled = await memoryRoutes.handleMemoryRoutes(req, res, reqUrl);
+      if (handled) return;
+    } catch (memErr) {
+      console.error('[Jozz Memory Route Error]:', memErr);
+      return sendJSON(res, 500, { success: false, error: memErr.message });
+    }
   }
 
   if (pathname === '/api/ping' && method === 'GET') {
