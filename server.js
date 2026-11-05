@@ -7027,7 +7027,7 @@ async function requestHandler(req, res) {
     });
   }
 
-  // Jozz Memory API Endpoints (Mistral AI 6-Pillars Standard: Scoped Recall, Receipts, Insights, Sovereignty)
+  // Jozz Memory API Endpoints (Hybrid Storage: Scoped Recall, Receipts, Insights, Sovereignty)
   if (pathname.startsWith('/api/memories')) {
     try {
       const memoryRoutes = require('./src/memory/routes/memoryRoutes');

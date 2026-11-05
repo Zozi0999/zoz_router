@@ -1,6 +1,6 @@
 /**
  * Jozz Memory - Privacy & Anti-Inference Guardrails
- * Mistral AI Vibe Standard: Strict PII/Secret Redaction & Explicit Fact Enforcer
+ * Strict PII/Secret Redaction & Explicit Fact Enforcer
  */
 
 const PII_PATTERNS = [

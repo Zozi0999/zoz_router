@@ -1,6 +1,6 @@
 /**
  * Jozz Memory - Architecture Configuration
- * Mistral AI 6-Pillars Standard
+ * Hybrid Architecture Standard (Vector + BM25 + Knowledge Graph)
  */
 
 const path = require('path');

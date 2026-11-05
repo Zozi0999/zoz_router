@@ -72,7 +72,7 @@ function exportMemories(userId, format = 'json') {
   // JSON export
   const exportPayload = {
     schemaVersion: '1.0',
-    exportEngine: 'Jozz Memory (Mistral AI Standard)',
+    exportEngine: 'Jozz Memory Sovereign Engine',
     exportedAt: new Date().toISOString(),
     userId: uid,
     data: {

@@ -1,6 +1,6 @@
 /**
  * Jozz Memory - Type Definitions & Structural Validators
- * Zero-dependency robust schema validator matching Mistral standard
+ * Zero-dependency robust schema validator for Jozz Memory
  */
 
 function validateString(val, fallback = '', maxLen = 10000) {

@@ -1,42 +1,82 @@
 /**
  * Jozz Memory - Hybrid Extractor (Explicit Commands + Async Non-Blocking Background Worker)
- * Enforces Mistral AI standard: Strict fact extraction, PII redaction & temporal relation updates
+ * Enforces Jozz Memory Architecture: Strict fact extraction, PII redaction & temporal relation updates
  */
 
 const config = require('../config');
 const dbStorage = require('../storage/db');
 const { sanitizeFactCandidate } = require('./guardrails');
 
+const ANAPHORIC_MEMORY_COMMAND_REGEX = /^(?:tolong\s+)?(?:catat(?:kan)?|simpan|ingat(?:kan)?|masukkan|rekam|tambahkan)\s*(?:itu|ini|hal\s+(?:itu|ini)|tadi|hal\s+tadi|informasi\s+(?:itu|ini|tadi)|poin\s+(?:itu|ini|tadi)|percakapan\s+ini|diskusi\s+ini)?\s*(?:ke\s+(?:dalam\s+)?memori|di\s+memori|ke\s+ingatan|ke\s+database)?[\s.!?]*$/i;
+const INLINE_EXPLICIT_MEMORY_REGEX = /^(?:tolong\s+)?(?:ingat\s+bahwa|catat\s+bahwa|simpan\s+bahwa|perlu\s+diingat\s+bahwa|ingat(?:kan)?\s*:\s*|catat(?:kan)?\s*:\s*|simpan\s*:\s*|fakta\s*:\s*|preferensi\s*:\s*|catat\s+(?:itu|ini|hal\s+ini|hal\s+itu)?\s*ke\s+memori\s*(?:bahwa|yaitu|\:)?\s*|simpan\s+(?:itu|ini|hal\s+ini|hal\s+itu)?\s*ke\s+memori\s*(?:bahwa|yaitu|\:)?\s*|\/(?:remember|memori|ingat)\s+)(.+)$/i;
 const EXPLICIT_MEMORY_REGEX = /^(?:tolong\s+)?(?:ingat(?:kan)?|simpan(?:\s+ke\s+memori)?|catat(?:kan)?|ingat\s+bahwa|perlu\s+diingat|preferensi\s+saya|catatan\s+penting|fakta\s+saya)[\s:,-]+(.+)$/i;
 const SLASH_MEMORY_REGEX = /^\/(?:remember|memori|ingat)\s+(.+)$/i;
 
 /**
  * Check if user message is an explicit memory command
  */
-function parseExplicitMemoryDirective(userPrompt) {
+function parseExplicitMemoryDirective(userPrompt, previousContext = '') {
   if (!userPrompt || typeof userPrompt !== 'string') return null;
   const trimmed = userPrompt.trim();
 
-  let matchedContent = null;
-  const m1 = trimmed.match(SLASH_MEMORY_REGEX);
-  if (m1) {
-    matchedContent = m1[1].trim();
-  } else {
-    const m2 = trimmed.match(EXPLICIT_MEMORY_REGEX);
-    if (m2) {
-      matchedContent = m2[1].trim();
-    }
+  // 1. Cek anaphoric memory command ("Catat itu ke memori", "Simpan itu", dll.)
+  if (ANAPHORIC_MEMORY_COMMAND_REGEX.test(trimmed)) {
+    const prevText = typeof previousContext === 'string' ? previousContext.trim() : '';
+    const hasContext = prevText.length >= 10;
+    const content = hasContext ? prevText : '';
+    return {
+      isAnaphoric: true,
+      content,
+      hasContext,
+      toString() { return this.content; }
+    };
   }
 
-  if (!matchedContent || matchedContent.length < 4) return null;
-  return matchedContent;
+  // 2. Cek inline memory command ("Ingat bahwa X", "Catat ke memori: X", "/remember X", dll.)
+  const mInline = trimmed.match(INLINE_EXPLICIT_MEMORY_REGEX);
+  if (mInline && mInline[1] && mInline[1].trim().length >= 3) {
+    const content = mInline[1].trim();
+    return {
+      isAnaphoric: false,
+      content,
+      hasContext: true,
+      toString() { return this.content; }
+    };
+  }
+
+  // 3. Fallback pola slash command
+  const mSlash = trimmed.match(SLASH_MEMORY_REGEX);
+  if (mSlash && mSlash[1] && mSlash[1].trim().length >= 3) {
+    const content = mSlash[1].trim();
+    return {
+      isAnaphoric: false,
+      content,
+      hasContext: true,
+      toString() { return this.content; }
+    };
+  }
+
+  // 4. Fallback pola teks reguler lama
+  const mOld = trimmed.match(EXPLICIT_MEMORY_REGEX);
+  if (mOld && mOld[1] && mOld[1].trim().length >= 4) {
+    const content = mOld[1].trim();
+    return {
+      isAnaphoric: false,
+      content,
+      hasContext: true,
+      toString() { return this.content; }
+    };
+  }
+
+  return null;
 }
 
 /**
  * Process explicit memory capture
  */
 function captureExplicitMemory(userId, factText, scope = 'global', metadata = {}) {
-  const sanitized = sanitizeFactCandidate(factText);
+  const actualText = (factText && typeof factText === 'object' && factText.content) ? factText.content : String(factText || '');
+  const sanitized = sanitizeFactCandidate(actualText);
   if (!sanitized.accepted) {
     return { success: false, reason: sanitized.reason };
   }
@@ -49,7 +89,7 @@ function captureExplicitMemory(userId, factText, scope = 'global', metadata = {}
     sourceType: metadata.sourceType || 'manual',
     sourceTitle: metadata.sourceTitle || 'Instruksi Pengguna Langsung',
     sourceUri: metadata.sourceUri || '',
-    rawSnippet: factText
+    rawSnippet: actualText
   });
 
   // Categorize
@@ -121,7 +161,19 @@ function triggerAsyncBackgroundExtraction({
 }) {
   setImmediate(async () => {
     try {
-      if (!userMessage || userMessage.length < 15) return;
+      if (!userMessage || userMessage.trim().length < 3) return;
+
+      // 1. Cek apakah ini perintah memori eksplisit / anaphora ("Catat itu ke memori", "Simpan ini", dsb.)
+      const explicitDirective = parseExplicitMemoryDirective(userMessage, assistantResponse);
+      if (explicitDirective && explicitDirective.hasContext && explicitDirective.content) {
+        captureExplicitMemory(userId, explicitDirective.content.slice(0, 1500), scope, {
+          sessionId,
+          turnIndex,
+          sourceType: 'chat',
+          sourceTitle: `Instruksi Eksplisit Chat: ${userMessage.slice(0, 36)}`
+        });
+        return;
+      }
 
       // Filter out greetings, short questions, and code pastes
       if (/^(?:halo|hai|pagi|siang|sore|malam|ok|oke|makasih|thanks|ping|tes)[\s!.?]*$/i.test(userMessage.trim())) {
