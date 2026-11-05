@@ -45,7 +45,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://translation-strengthen-never-puts.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://stopped-christine-external-analysts.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -737,7 +737,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     openRouterMusicModels: [],
     availableImageModels: [...DEFAULT_IMAGE_MODELS],
     settings: {
-      enableJozzMemory: true, // Sakelar Jozz Memory global (Mistral AI 6-Pillars Standard)
+      enableJozzMemory: true, // Sakelar Jozz Memory global (Hybrid Storage & Knowledge Graph)
       ollamaEndpoint: (typeof location !== 'undefined' && location.hostname && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) && !location.hostname.includes('trycloudflare.com')) ? 'https://ollama.com' : 'http://127.0.0.1:11434',
       ollamaApiKey: '',
       openRouterKey: '',
@@ -1529,7 +1529,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     }
   };
 
-  // ==================== JOZZ MEMORY CONTROLLER (MISTRAL AI 6 PILLARS) ====================
+  // ==================== JOZZ MEMORY CONTROLLER (HYBRID STORAGE & KNOWLEDGE GRAPH) ====================
   const JozzMemoryUI = {
     activeCategory: 'all',
     activeScope: 'global',
@@ -26322,6 +26322,9 @@ ${blocks}
     const image = images.length > 0 ? images[0] : null;
     const docs = [...(STATE.attachedDocs || [])];
 
+    let explicitMemoryReceipt = null;
+    let explicitMemoryContextNote = '';
+
     if (!rawText && images.length === 0 && docs.length === 0) return;
     if ((STATE.isGenerating || STATE.isSending) && !options._isReflexTurn) return;
     if (options._isReflexTurn) {
@@ -26483,28 +26486,151 @@ ${blocks}
       return;
     }
 
-    // Jalur Eksplisit Jozz Memory: "Ingat bahwa...", "Simpan ke memori...", atau "/remember"
-    const explicitMemPrefixMatch = rawText.match(/^(?:\/?(?:remember|ingat|simpan\s+ke\s+memori|catat\s+ke\s+memori|memorize)\b|ingat\s+bahwa\b)\s*[:,\s]?\s*(.+)$/i);
-    if (explicitMemPrefixMatch && !STATE.isIncognito && STATE.settings.enableJozzMemory !== false) {
-      const memFact = explicitMemPrefixMatch[1].trim();
-      if (memFact.length > 3) {
-        fetch(getUniversalApiUrl('/api/memories'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: STATE.userId || 'default',
-            content: memFact,
-            category: 'general_fact',
-            scope: STATE.activeProjectScope || 'global',
-            sourceTitle: 'Instruksi Chat Langsung',
-            sourceType: 'manual',
-            sourceSnippet: rawText
-          })
-        }).then(r => r.json()).then(d => {
-          if (d && d.success) {
-            showToast('🧠 Jozz Memory: Fakta berhasil dicatat ke memori jangka panjang!', 'success');
+    // ==================== EKSTRAKSI EKSPLISIT & ANAFORIK JOZZ MEMORY ====================
+    // Deteksi perintah memori eksplisit ("Ingat bahwa...", "Catat: ...") atau anaforik ("Catat itu ke memori", "Simpan itu")
+    const ANAPHORIC_MEM_REGEX = /^(?:tolong\s+)?(?:catat(?:kan)?|simpan|ingat(?:kan)?|masukkan|rekam|tambahkan)\s*(?:itu|ini|hal\s+(?:itu|ini)|tadi|hal\s+tadi|informasi\s+(?:itu|ini|tadi)|poin\s+(?:itu|ini|tadi)|percakapan\s+ini|diskusi\s+ini)?\s*(?:ke\s+(?:dalam\s+)?memori|di\s+memori|ke\s+ingatan|ke\s+database)?[\s.!?]*$/i;
+    const INLINE_EXPLICIT_MEM_REGEX = /^(?:tolong\s+)?(?:ingat\s+bahwa|catat\s+bahwa|simpan\s+bahwa|perlu\s+diingat\s+bahwa|ingat(?:kan)?\s*:\s*|catat(?:kan)?\s*:\s*|simpan\s*:\s*|fakta\s*:\s*|preferensi\s*:\s*|catat\s+(?:itu|ini|hal\s+ini|hal\s+itu)?\s*ke\s+memori\s*(?:bahwa|yaitu|\:)?\s*|simpan\s+(?:itu|ini|hal\s+ini|hal\s+itu)?\s*ke\s+memori\s*(?:bahwa|yaitu|\:)?\s*|\/(?:remember|memori|ingat)\s+)(.+)$/i;
+
+    const isAnaphoricMemCmd = ANAPHORIC_MEM_REGEX.test(rawText.trim()) && !rawText.trim().includes('\n');
+    const inlineMemMatch = rawText.trim().match(INLINE_EXPLICIT_MEM_REGEX);
+
+    if (isAnaphoricMemCmd || inlineMemMatch) {
+      if (STATE.isIncognito || STATE.settings.enableJozzMemory === false) {
+        explicitMemoryContextNote = `### [SISTEM JOZZ MEMORY — STATUS VERIFIKASI PENYIMPANAN DATABASE: DITOLAK]
+STATUS OPERASI: PENYIMPANAN MEMORI DITOLAK KARENA SIKAP PRIVASI / PENGATURAN.
+- Alasan: ${STATE.isIncognito ? 'Sesi chat sedang berada dalam Mode Incognito (tanpa jejak).' : 'Fitur Jozz Memory dinonaktifkan di Pengaturan.'}
+
+[MANDAT MUTLAK]:
+1. Nyatakan secara jujur kepada pengguna bahwa Anda TIDAK mencatat informasi ini ke memori jangka panjang karena ${STATE.isIncognito ? 'Mode Incognito sedang aktif' : 'fitur Jozz Memory sedang dimatikan di Pengaturan'}.
+2. Beritahukan cara mengaktifkannya (matikan incognito atau aktifkan toggle di Pengaturan).`;
+      } else {
+        let factToStore = '';
+        let isAnaphoric = false;
+
+        if (inlineMemMatch && inlineMemMatch[1] && inlineMemMatch[1].trim().length >= 3) {
+          factToStore = inlineMemMatch[1].trim();
+        } else if (isAnaphoricMemCmd) {
+          isAnaphoric = true;
+          const activeSesForMem = getActiveSession();
+          if (activeSesForMem && Array.isArray(activeSesForMem.messages) && activeSesForMem.messages.length > 0) {
+            for (let i = activeSesForMem.messages.length - 1; i >= 0; i--) {
+              const prevMsg = activeSesForMem.messages[i];
+              if (prevMsg && prevMsg.role === 'assistant' && (prevMsg.content || prevMsg.displayContent)) {
+                const rawSnippet = (prevMsg.content || prevMsg.displayContent || '')
+                  .replace(/<<<ZOZ_FILE[\s\S]*?<<<END_ZOZ_FILE>>>/g, '')
+                  .replace(/```[\s\S]*?```/g, '')
+                  .trim();
+                if (rawSnippet.length >= 10) {
+                  factToStore = rawSnippet.slice(0, 1500);
+                  break;
+                }
+              }
+            }
           }
-        }).catch(() => {});
+        }
+
+        if (factToStore && factToStore.length >= 5) {
+          const generatedMemId = 'mem_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+          const generatedEpId = 'ep_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+          let assignedCat = 'general_fact';
+          const lowText = factToStore.toLowerCase();
+          if (/\b(?:menggunakan|stack|teknologi|bahasa|framework|database|tool|lib|library|runtime|sqlite|node|python|express)\b/i.test(lowText)) {
+            assignedCat = 'technical_stack';
+          } else if (/\b(?:proyek|project|fitur|target|roadmap|tujuan|aplikasi)\b/i.test(lowText)) {
+            assignedCat = 'project_context';
+          } else if (/\b(?:instruksi|aturan|mandat|format|jangan|selalu|harus)\b/i.test(lowText)) {
+            assignedCat = 'instruction';
+          } else if (/\b(?:suka|preferensi|hobi|nama|panggil|saya\s+adalah)\b/i.test(lowText)) {
+            assignedCat = 'preference';
+          }
+
+          const localMemoryObj = {
+            id: generatedMemId,
+            userId: STATE.userId || 'default',
+            content: factToStore,
+            category: assignedCat,
+            scope: STATE.activeProjectScope || 'global',
+            confidence: 1.0,
+            episodeId: generatedEpId,
+            is_active: 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+
+          // Simpan segera ke local browser vault
+          if (typeof LocalMemoryVault !== 'undefined') {
+            LocalMemoryVault.save(localMemoryObj);
+          }
+
+          // Simpan ke database server SQLite secara sinkron (await)
+          let finalId = generatedMemId;
+          try {
+            const memRes = await fetch(getUniversalApiUrl('/api/memories'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userId: STATE.userId || 'default',
+                content: factToStore,
+                category: assignedCat,
+                scope: STATE.activeProjectScope || 'global',
+                sourceTitle: isAnaphoric ? 'Konteks Respon Asisten' : 'Instruksi Chat Langsung',
+                sourceType: isAnaphoric ? 'chat' : 'manual',
+                sourceSnippet: rawText
+              })
+            }).catch(() => null);
+
+            if (memRes && memRes.ok) {
+              const memData = await memRes.json().catch(() => null);
+              if (memData && memData.memory && memData.memory.id) {
+                finalId = memData.memory.id;
+                localMemoryObj.id = finalId;
+                if (typeof LocalMemoryVault !== 'undefined') {
+                  LocalMemoryVault.save(memData.memory);
+                }
+              }
+            }
+          } catch (netErr) {
+            console.warn('[Jozz Memory] Sync persistence warning:', netErr);
+          }
+
+          showToast(`🧠 Jozz Memory: Fakta berhasil dicatat ke database (#${finalId})`, 'success');
+          if (typeof JozzMemoryUI !== 'undefined') {
+            try { JozzMemoryUI.refresh(); } catch (_) {}
+          }
+
+          explicitMemoryReceipt = {
+            memoryId: finalId,
+            category: assignedCat,
+            content: factToStore,
+            sourceTitle: isAnaphoric ? 'Konteks Percakapan Sebelumnya' : 'Instruksi Chat Langsung',
+            episodeId: generatedEpId,
+            relevanceScore: 1.0,
+            reason: isAnaphoric ? 'Instruksi pencatatan dari respon sebelumnya' : 'Instruksi pencatatan eksplisit pengguna'
+          };
+
+          explicitMemoryContextNote = `### [SISTEM JOZZ MEMORY — STATUS VERIFIKASI PENYIMPANAN DATABASE: SUKSES RIIL]
+STATUS OPERASI: FAKTA TELAH BERHASIL DICATAT DAN TERSIMPAN SECARA PERMANEN KE DALAM DATABASE JOZZ MEMORY.
+- ID Memori Resmi: ${finalId}
+- Kategori: ${assignedCat}
+- Scope: ${STATE.activeProjectScope || 'global'}
+- Fakta Terverifikasi: "${factToStore.slice(0, 400)}"
+- Waktu Tercatat: ${new Date().toISOString()}
+
+[MANDAT MUTLAK INTEGRITAS & KEJUJURAN SISTEM]:
+1. Anda WAJIB mengonfirmasi keberhasilan penyimpanan fakta ini kepada pengguna dengan MENYEBUTKAN ID Memori Resmi (#${finalId}).
+2. Jelaskan poin inti fakta apa yang telah tersimpan secara ringkas.
+3. DILARANG BERBOHONG ATAU MENGARANG FITUR DATABASE FIKTIF.`;
+        } else {
+          showToast('⚠️ Jozz Memory: Tidak ada konteks percakapan sebelumnya untuk dicatat.', 'warning');
+          explicitMemoryContextNote = `### [SISTEM JOZZ MEMORY — STATUS VERIFIKASI PENYIMPANAN DATABASE: GAGAL / TIDAK ADA KONTEKS]
+STATUS OPERASI: PENCATATAN MEMORI GAGAL KARENA TIDAK ADA KONTEKS.
+- Alasan: Tidak ditemukan pesan atau respons sebelumnya dalam sesi ini untuk dijadikan rujukan fakta.
+
+[MANDAT MUTLAK ANTI-HALUSINASI]:
+1. DILARANG KERAS MENGKLAIM ATAU MEMBUAT KONFIRMASI PALSU BAHWA ANDA TELAH MENYIMPAN MEMORI!
+2. Nyatakan secara jujur dan transparan kepada pengguna bahwa memori gagal disimpan karena belum ada pesan atau respon sebelumnya dalam obrolan ini.
+3. Sarankan pengguna untuk menuliskan fakta secara spesifik (contoh: "Ingat bahwa [fakta Anda]").`;
+        }
       }
     }
 
@@ -26887,7 +27013,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         studioHistoryKey: studioHistoryKey,
         displayPrompt: displayPrompt,
         isExplicitCleanCode: false,
-        promptTitle: sanitizeTitle(text).substring(0, 36) || 'Dokumen_Resmi'
+        promptTitle: sanitizeTitle(text).substring(0, 36) || 'Dokumen_Resmi',
+        explicitMemoryContextNote: explicitMemoryContextNote || '',
+        explicitMemoryReceipt: explicitMemoryReceipt || null
       };
       if (STATE.mode === 'auto') {
         await runAutoRouterStreaming(effectiveSession, text, effectiveImages, streamRunOptions);
@@ -30593,7 +30721,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const canRunAutonomous = !isPureMathSession && Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       let systemContent = getDynamicSystemTemporalContext();
 
-      // Jozz Memory Scoped Hybrid Recall (Mistral AI 6-Pillars Standard)
+      // Jozz Memory Scoped Hybrid Recall (Hybrid Storage & Knowledge Graph)
       let jozzMemoryRecall = null;
       if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false) {
         try {
@@ -30622,6 +30750,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         } catch (memRecallErr) {
           console.warn('[Jozz Memory] Ollama recall warning:', memRecallErr);
         }
+      }
+
+      if (runOptions && runOptions.explicitMemoryContextNote) {
+        systemContent = `${runOptions.explicitMemoryContextNote}\n\n${systemContent}`;
       }
 
       if (personaPrompt) {
@@ -31923,6 +32055,11 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
       renderYouTubeCardsForMessage(assistantRow, fullText);
       renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview);
+      if (runOptions && runOptions.explicitMemoryReceipt) {
+        if (!jozzMemoryRecall) jozzMemoryRecall = { receipts: [] };
+        if (!Array.isArray(jozzMemoryRecall.receipts)) jozzMemoryRecall.receipts = [];
+        jozzMemoryRecall.receipts.unshift(runOptions.explicitMemoryReceipt);
+      }
       if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
         JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
       }
@@ -32424,7 +32561,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       const canRunAutonomous = !isPureMathSession && Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       let systemContent = getDynamicSystemTemporalContext();
 
-      // Jozz Memory Scoped Hybrid Recall (Mistral AI 6-Pillars Standard)
+      // Jozz Memory Scoped Hybrid Recall (Hybrid Storage & Knowledge Graph)
       let jozzMemoryRecall = null;
       if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false) {
         try {
@@ -32453,6 +32590,10 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         } catch (memRecallErr) {
           console.warn('[Jozz Memory] Ollama recall warning:', memRecallErr);
         }
+      }
+
+      if (runOptions && runOptions.explicitMemoryContextNote) {
+        systemContent = `${runOptions.explicitMemoryContextNote}\n\n${systemContent}`;
       }
 
       if (personaPrompt) {
@@ -34121,6 +34262,11 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
       renderYouTubeCardsForMessage(assistantRow, fullText);
       renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview);
+      if (runOptions && runOptions.explicitMemoryReceipt) {
+        if (!jozzMemoryRecall) jozzMemoryRecall = { receipts: [] };
+        if (!Array.isArray(jozzMemoryRecall.receipts)) jozzMemoryRecall.receipts = [];
+        jozzMemoryRecall.receipts.unshift(runOptions.explicitMemoryReceipt);
+      }
       if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
         JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
       }
@@ -48096,7 +48242,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://translation-strengthen-never-puts.trycloudflare.com',
+    activeTunnelUrl: 'https://stopped-christine-external-analysts.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
