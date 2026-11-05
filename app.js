@@ -30940,7 +30940,6 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
         }
       }
-      }
 
       fullText = safeAssistantText(fullText);
       const evalTokens = (ollamaUsage && typeof ollamaUsage.completion_tokens === 'number')
@@ -33053,7 +33052,6 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         } else {
           fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
         }
-      }
       }
 
       fullText = safeAssistantText(fullText);
