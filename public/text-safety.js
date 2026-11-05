@@ -2240,7 +2240,7 @@ Sebelum menulis satu kata pun jawaban kepada pengguna, Anda WAJIB mengawali gene
    - Tuliskan OPSI REKOMENDASI UTAMA yang paling tepat secara tegas di awal, lalu berikan 1-2 baris penjelasan pemetaan logisnya agar pengguna 100% tepat menjawab kuisnya.`;
       }
     } else if (isAnalyticalQuery) {
-      calibrationDirective = `[PROTOKOL REGULASI MEKANISME PERHATIAN & INFERENSI DEDUKTIF MATEMATIKA MURNI — ZERO PERSONA]:
+      calibrationDirective = `[PROTOKOL REGULASI MEKANISME PERHATIAN & INFERENSI DEDUKTIF MATEMATIKA MURNI]:
 Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan blok penalaran deduktif formal <think>...</think> (disembunyikan otomatis oleh sistem):${multiImageNote}
 1. REGULASI MATRIKS PERHATIAN TRANSFORMER (A = softmax(QK^T / sqrt(d_k))):
    - Alokasikan bobot perhatian (Attention Saliency) tertinggi secara eksklusif pada variabel kunci pertanyaan: premis data faktual, kendala batas (boundary conditions), domain definisi f: X -> Y, syarat perlu (necessary conditions), syarat cukup (sufficient conditions), serta operator negasi ("bukan", "tidak", "kecuali").
@@ -2250,8 +2250,8 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
    - Bentuk rantai penalaran kausal implikasi terarah: Premis P_0 -> Kondisi Batas C_k -> Transformasi f(P_0, C_k) -> Solusi Y*.
 3. INVARIAN AKSIOMATIS & VERIFIKASI ANTI-KONTRADIKSI:
    - Terapkan hukum non-kontradiksi formal: ¬(P ∧ ¬P). Uji setiap langkah penurunan; jika terjadi kontradiksi dengan premis atau prinsip fisika/matematika terdefinisi, pangkas (prune) cabang tersebut secara langsung.
-4. ERADIKASI TOTAL PERSONA & ROLEPLAY:
-   - DILARANG mengadopsi persona fiktif, drama emosi, gaya bicara santai, atau basa-basi pembuka/penutup.
+4. KONSISTENSI PERSONA & PRESISI JAWABAN:
+   - Pertahankan persona aktif dari pengaturan sistem dengan wibawa dan kecerdasan analitis tertinggi. Hindari basa-basi kosong, drama emosional tak beralasan, atau halusinasi spekulatif.
    - Sampaikan HANYA substansi jawaban yang terverifikasi, presisi, berbasis penalaran matematika/ilmiah murni, dan terstruktur rapi.
 5. Tutup </think>, lalu sajikan jawaban akhir yang jernih, proporsional, dan terverifikasi secara formal.`;
     }
@@ -2766,6 +2766,86 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
     return false;
   }
 
+  // =========================================================================
+  // PURE MATHEMATICAL PERSONA PERSISTENCE & IN-CONTEXT ANTI-DRIFT SENSOR
+  // Aljabar Resonansi Perhatian Multiturn \Pi_{res} & Purifikasi Riwayat Halusinasi \Pi_{purify}
+  // Menghilangkan Attention Decay \exp(-\gamma \cdot \Delta pos) dan mencegah Induction Heads
+  // meniru residu sistem atau pembelokan persona dari giliran riwayat lampau.
+  // =========================================================================
+
+  /**
+   * Pemurnian Deterministik Giliran Asisten Riwayat (\Pi_{purify}).
+   * Memproyeksikan riwayat pesan asisten ke subruang bebas-halusinasi sebelum dikirim ke LLM.
+   */
+  function purifyHistoricalAssistantTurn(text, options = {}) {
+    if (typeof text !== 'string' || !text) return '';
+    let out = stripReasoningText(text);
+
+    // 1. Bersihkan segala bentuk residu internal tool / pseudotool / status penelusuran sistem
+    out = out.replace(/^\[(?:Pencarian selesai|STATUS PENELUSURAN|Mengeksekusi penelusuran|DATA PENELUSURAN|HASIL|PANDUAN SINTESIS|ALUR VERIFIKASI|SPESIFIKASI SINTESIS)[^\]]*\]\.?\s*/gim, '');
+    out = out.replace(/\[(?:Pencarian selesai|STATUS PENELUSURAN|Mengeksekusi penelusuran|DATA PENELUSURAN FAKTA|DATA HASIL PENELUSURAN INTERNAL|HASIL prepare_image_display|HASIL search_images|HASIL eksekusi|ALUR VERIFIKASI VISUAL AKTIF|SPESIFIKASI SINTESIS BUKTI|HASIL EKSEKUSI TOOL|BATASAN DOMAIN KLAIM)[^\]]*\]/gi, '');
+    out = out.replace(/(?:^|\n)\s*Sistem menyelesaikan penelusuran\.?\s*(?:\n|$)/gi, '\n');
+    out = out.replace(/(?:^|\n)\s*Model telah menyelesaikan penelusuran komprehensif atas kueri Anda\.?\s*(?:\n|$)/gi, '\n');
+    out = out.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '');
+
+    // 2. Bersihkan penyangkalan persona & klise pembuka AI generik yang mendistorsi induction heads
+    out = out.replace(/^(?:Sebagai|Saya adalah)\s+(?:sebuah\s+|seorang\s+)?(?:model\s+AI|asisten\s+AI|AI\s+language\s+model|kecerdasan\s+buatan|large\s+language\s+model|asisten\s+virtual)[^,\n.]*[,.]\s*(?:namun\s+|tetapi\s+|saya\s+)?/i, '');
+    out = out.replace(/^(?:Sebagai\s+AI|As\s+an\s+AI)[^,\n.]*[,.]\s*/i, '');
+    out = out.replace(/^(?:Saya\s+tidak\s+memiliki\s+persona|I\s+do\s+not\s+have\s+a\s+persona)[^,\n.]*[,.]\s*/i, '');
+    out = out.replace(/^(?:Mohon\s+maaf,\s+)?(?:saya\s+tidak\s+dapat\s+berperan\s+sebagai|saya\s+hanya\s+bisa\s+membantu\s+sebagai\s+AI)[^,\n.]*[,.]\s*/i, '');
+
+    // 3. Bersihkan sisa token display tunggal yang tertinggal tanpa teks
+    out = out.replace(/^\[\[?ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]+\]?\]?\s*$/gim, '');
+
+    return out.trim();
+  }
+
+  /**
+   * Vektor Resonansi Persona Deterministik (\Pi_{res}).
+   * Menginjeksi penguat salience pada giliran aktif (\Delta pos \approx 0) untuk
+   * mengatasi peluruhan eksponensial perhatian RoPE/ALiBi (\exp(-\gamma \cdot \Delta pos)).
+   */
+  function computePersonaResonanceVector(activePersona, turnCount = 1) {
+    if (!activePersona || typeof activePersona !== 'string' || !activePersona.trim()) {
+      return '';
+    }
+    const cleanPersona = activePersona.trim();
+    // Jika hanya giliran pertama (turn 1), system prompt di posisi 0 sudah memiliki jarak pos ~ 0
+    if (turnCount < 2) {
+      return '';
+    }
+    // Padatkan persona jika terlalu panjang untuk menjaga efisiensi token
+    const maxLen = 600;
+    const condensed = cleanPersona.length > maxLen
+      ? cleanPersona.slice(0, maxLen).trim() + '...'
+      : cleanPersona;
+
+    return `\n\n[PANDUAN RESONANSI PERSONA SISTEM (PRIORITAS IDENTITAS)]:
+Tetap pertahankan secara konsisten identitas, gaya tutur, dan persona berikut dari pengaturan sistem:
+${condensed}`;
+  }
+
+  /**
+   * Sensor Anti-Drift Output Model (\Pi_{anti-drift}).
+   * Menjamin respon model tidak menyangkal persona aktif atau membocorkan residu pencarian.
+   */
+  function sanitizeModelPersonaDrift(text, activePersona = '') {
+    if (typeof text !== 'string' || !text) return '';
+    let out = text;
+
+    // Bersihkan residu pseudotool di awal teks
+    out = out.replace(/^\[(?:Pencarian selesai|STATUS PENELUSURAN|Mengeksekusi penelusuran)[^\]]*\]\.?\s*/i, '');
+    out = out.replace(/^Sistem menyelesaikan penelusuran\.?\s*/i, '');
+
+    // Bersihkan pembuka penyangkalan persona AI
+    out = out.replace(/^(?:Sebagai|Saya adalah)\s+(?:sebuah\s+|seorang\s+)?(?:model\s+AI|asisten\s+AI|AI\s+language\s+model|kecerdasan\s+buatan|large\s+language\s+model|asisten\s+virtual)[^,\n.]*[,.]\s*(?:namun\s+|tetapi\s+|saya\s+)?/i, '');
+    out = out.replace(/^(?:Sebagai\s+AI|As\s+an\s+AI)[^,\n.]*[,.]\s*/i, '');
+    out = out.replace(/^(?:Saya\s+tidak\s+memiliki\s+persona|I\s+do\s+not\s+have\s+a\s+persona)[^,\n.]*[,.]\s*/i, '');
+    out = out.replace(/^(?:Mohon\s+maaf,\s+)?(?:saya\s+tidak\s+dapat\s+berperan\s+sebagai|saya\s+hanya\s+bisa\s+membantu\s+sebagai\s+AI)[^,\n.]*[,.]\s*/i, '');
+
+    return out.trim();
+  }
+
   return {
     isZeroInformationQuery,
     isPureAlgebraOrConceptualQuery,
@@ -2794,6 +2874,9 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
     rankDocumentsMathematically,
     computeBayesianDecisionCalibration,
     computeOptimalSamplingTemperature,
-    projectGroundedResponseMathematically
+    projectGroundedResponseMathematically,
+    purifyHistoricalAssistantTurn,
+    computePersonaResonanceVector,
+    sanitizeModelPersonaDrift
   };
 });
