@@ -1326,7 +1326,7 @@ export default {
     // yang diteruskan ke TUNNEL_GATEWAY_URL (server laptop).
     // Pemanggilan AI & API Key (OpenRouter, Ollama Cloud, Search Web, Models, Sessions)
     // BERJALAN 100% MANDIRI DI CLOUDFLARE EDGE TANPA PERNAH BERGANTUNG PADA LAPTOP!
-    const TUNNEL_GATEWAY_URL = 'https://const-orleans-twin-limitation.trycloudflare.com';
+    const TUNNEL_GATEWAY_URL = 'https://prerequisite-cork-advise-upgrade.trycloudflare.com';
     let reqBodyBytes = null;
 
     const isLaptopOnlyRoute = url.pathname.startsWith('/api/terminal') ||
@@ -1499,10 +1499,28 @@ export default {
 
           const targetModel = mapOllamaModelToOpenRouter(body.model || 'qwen2.5:1.5b');
           const isStream = body.stream !== false;
+          const isNemotronModel = targetModel.toLowerCase().includes('nemotron');
+          const isFreeModel = targetModel.includes(':free') || targetModel.endsWith('/free') || targetModel === 'openrouter/free';
+          const isNonToolModel = isFreeModel || isNemotronModel || targetModel.includes('beam') || targetModel.includes('reflection');
 
-          // Multimodal Translation: Konversi skema images Ollama ke OpenRouter multimodal content parts
+          // Multimodal Translation & Tool Normalization:
+          // 1. Konversi skema images Ollama ke OpenRouter multimodal content parts.
+          // 2. Normalisasi pesan role: 'tool' dan assistant tool_calls untuk model yang tidak mendukung native function calling.
           const normalizedOrMessages = (body.messages || []).map(m => {
             if (!m) return m;
+
+            // Jika model tidak mendukung native tools, terjemahkan pesan tool menjadi user turn agar tidak memicu HTTP 400
+            if (isNonToolModel) {
+              if (m.role === 'tool') {
+                const toolText = (typeof m.content === 'string') ? m.content : JSON.stringify(m.content || '');
+                return { role: 'user', content: `[DATA HASIL PENELUSURAN ALAT / TOOL]:\n${toolText}` };
+              }
+              if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+                const textContent = m.content || `[Mengeksekusi alat penelusuran otonom]`;
+                return { role: 'assistant', content: textContent };
+              }
+            }
+
             const imgs = Array.isArray(m.images) ? m.images : (m.image ? [m.image] : []);
             if (imgs.length > 0 && m.role === 'user') {
               const rawContent = (typeof m.content === 'string') ? m.content : '';
@@ -1530,9 +1548,7 @@ export default {
           if (body.options?.temperature !== undefined) openRouterPayload.temperature = body.options.temperature;
           if (body.options?.top_p !== undefined) openRouterPayload.top_p = body.options.top_p;
 
-          const isNemotronModel = targetModel.toLowerCase().includes('nemotron');
-          const isFreeModel = targetModel.includes(':free') || targetModel.endsWith('/free') || targetModel === 'openrouter/free';
-          if (!isFreeModel && !isNemotronModel && Array.isArray(body.tools) && body.tools.length > 0) {
+          if (!isNonToolModel && Array.isArray(body.tools) && body.tools.length > 0) {
             const clean = body.tools.filter(t => t && t.type === 'function' && t.function && t.function.name);
             if (clean.length > 0) {
               openRouterPayload.tools = clean;

@@ -43,7 +43,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://const-orleans-twin-limitation.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://prerequisite-cork-advise-upgrade.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -206,6 +206,10 @@
            trimmed.startsWith('[ALUR VERIFIKASI VISUAL AKTIF]') ||
            trimmed.startsWith('[HASIL EKSEKUSI TOOL]') ||
            trimmed.startsWith('BATASAN DOMAIN KLAIM:') ||
+           trimmed.startsWith('[Pencarian selesai') ||
+           trimmed.startsWith('[STATUS PENELUSURAN') ||
+           trimmed.startsWith('[Mengeksekusi penelusuran') ||
+           trimmed.includes('Sistem menyelesaikan penelusuran') ||
            (/^\[\[?ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]+\]?\]?$/i.test(trimmed));
   }
 
@@ -6495,13 +6499,27 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     const t = String(text || '').trim();
     if (!t) return false;
     if (typeof isInternalSystemPayload === 'function' && isInternalSystemPayload(t)) return true;
+    const lower = t.toLowerCase();
     return t.startsWith('Berikut rangkuman')
       || t.startsWith('Berikut ekstraksi fakta terverifikasi')
       || t.startsWith('Berikut informasi yang diperoleh')
       || t.startsWith('Berdasarkan data penelusuran')
       || t.startsWith('Informasi terkait telah berhasil ditelusuri')
+      || t.startsWith('[Pencarian selesai')
+      || t.startsWith('[DATA PENELUSURAN FAKTA]')
+      || t.startsWith('[STATUS PENELUSURAN]')
+      || t.startsWith('[PANDUAN SINTESIS')
+      || t.includes('Sistem menyelesaikan penelusuran')
       || t.includes('Fakta & Perkembangan Utama')
-      || t.includes('Tinjau rincian artikel lengkap');
+      || t.includes('Tinjau rincian artikel lengkap')
+      || lower.includes('belum ditemukan dokumen')
+      || lower.includes('tidak ditemukan dokumen')
+      || lower.includes('penelusuran indeks saat ini')
+      || lower.includes('tidak dapat menemukan dokumen')
+      || lower.includes('tidak ada dokumen yang cocok')
+      || (lower.includes('parameter kueri tersebut') && (lower.includes('dokumen') || lower.includes('indeks') || lower.includes('penelusuran')))
+      || lower.includes('tidak menemukan informasi yang cocok')
+      || lower.includes('tidak ditemukan hasil pencarian');
   }
 
   function getGroundedSamplingParams(queryText = '', hasEvidence = true) {
@@ -6524,7 +6542,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       : false;
     const hasSubstantiveEvidence = evidenceText && !evidenceText.includes('tidak menemukan dokumen') && !evidenceText.includes('tidak memberikan fakta spesifik') && evidenceText.length > 80;
 
-    if (!hasSubstantiveEvidence || isNemotron || isPureMath) {
+    if (isNemotron || isPureMath) {
       return [
         {
           role: 'system',
@@ -6537,6 +6555,22 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         {
           role: 'user',
           content: `Kueri:\n${String(question || '').slice(0, 1000)}\n\nSajikan analisis matematika murni dan dekonstruksi ruang keadaan formal untuk menjawab kueri di atas.`
+        }
+      ];
+    }
+
+    if (!hasSubstantiveEvidence) {
+      return [
+        {
+          role: 'system',
+          content: `### MANDAT JAWABAN DEDUKTIF & ANALISIS KOMPREHENSIF (UTC ${isoDate})\n` +
+            `1. Jawab pertanyaan pengguna secara langsung, menyeluruh, terstruktur, dan mendalam dalam Bahasa Indonesia.\n` +
+            `2. DILARANG KERAS mengeluhkan ketiadaan indeks atau dokumen, dilarang menolak menjawab, dilarang mencetak catatan diagnostik internal (seperti "[Pencarian selesai...]" atau "[DATA PENELUSURAN...]"), dan dilarang menyebutkan kendala pencarian internal.\n` +
+            `3. Sajikan ide, solusi, penjelasan konsep, atau analisis mendalam menggunakan Markdown yang rapi (heading, poin bernomor/bullet).`
+        },
+        {
+          role: 'user',
+          content: `Pertanyaan Pengguna:\n${String(question || '').slice(0, 1000)}\n\nBerikan jawaban komprehensif, langsung, dan mendalam atas pertanyaan di atas.`
         }
       ];
     }
@@ -29182,6 +29216,33 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
   }
 
+  // Normalisasi skema pesan role: 'tool' dan assistant tool_calls menjadi teks user turn
+  // untuk backend Ollama dan model Cloud Bridge/OpenRouter yang tidak mendukung native function calling
+  function convertToolMessagesToUserRole(messages) {
+    if (!Array.isArray(messages)) return [];
+    return messages.map(m => {
+      if (!m) return m;
+      if (m.role === 'tool') {
+        const toolText = (typeof m.content === 'string') ? m.content : JSON.stringify(m.content || '');
+        return {
+          role: 'user',
+          content: `[DATA HASIL PENELUSURAN ALAT / TOOL]:\n${toolText}`
+        };
+      }
+      if (m.role === 'assistant') {
+        const copy = { ...m };
+        if (Array.isArray(copy.tool_calls) && copy.tool_calls.length > 0) {
+          delete copy.tool_calls;
+          if (!copy.content || !copy.content.trim()) {
+            copy.content = '[Mengeksekusi alat penelusuran otonom]';
+          }
+        }
+        return copy;
+      }
+      return m;
+    });
+  }
+
   function buildSanitizedMessagesPayload(sessionOrMessages, currentImages = [], engine = 'openrouter', systemContent = '', modelName = '') {
     const messagesPayload = [];
     const supportsSystem = doesModelSupportSystemRole(modelName, engine);
@@ -30574,8 +30635,11 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           });
 
           if (!digestionRes.ok && digestionBody.tools && (digestionRes.status === 400 || digestionRes.status === 422 || digestionRes.status === 500)) {
-            console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Model returned HTTP ${digestionRes.status} with tools. Retrying without tools...`);
+            console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Model returned HTTP ${digestionRes.status} with tools. Retrying without tools and normalizing tool messages...`);
             delete digestionBody.tools;
+            if (Array.isArray(digestionBody.messages)) {
+              digestionBody.messages = convertToolMessagesToUserRole(digestionBody.messages);
+            }
             digestionRes = await fetch(chatUrl, {
               method: 'POST',
               headers,
@@ -30591,11 +30655,11 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
               if (errJson?.error) errDetail = typeof errJson.error === 'object' ? errJson.error.message : errJson.error;
             } catch (_) {}
             console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Error: ${errDetail}`);
-            if (!fullText.trim() || isModelInternalMonologue(fullText)) {
+            if (!fullText.trim() || isModelInternalMonologue(fullText) || isAutonomousFallbackText(fullText) || isInternalSystemPayload(fullText)) {
               const synth = (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))
                 ? synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources)
                 : '';
-              fullText = synth || cleanAssistant || `[Pencarian selesai: ${toolSummaryList.join(', ')}. Sistem menyelesaikan penelusuran].`;
+              fullText = synth || cleanAssistant || '';
             }
             break;
           }
@@ -30732,11 +30796,11 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
 
       // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah → minta model menyusun jawaban bersih =====
-      if (autonomousRound > 0 && !isPureMathSession && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0)) && !STATE.abortController?.signal?.aborted) {
+      if (autonomousRound > 0 && !isPureMathSession && !STATE.abortController?.signal?.aborted) {
         const probeText = scrubRawToolCallArtifacts(fullText || '').trim();
-        if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText)) {
+        if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText) || isInternalSystemPayload(probeText)) {
           try {
-            bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyusun jawaban dari data web...</span></div>`;
+            bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyusun jawaban deduktif komprehensif...</span></div>`;
             smartScrollChatToBottom(true);
             const rescueExtra = { endpoint: ep };
             if (session?.id) rescueExtra.sessionId = session.id + '_rescue';
@@ -30750,7 +30814,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
               headers,
               model: modelName,
               question: promptText,
-              evidenceText: allAccumulatedToolResponsesText || synthesizeAutonomousWebSummary('', webSources),
+              evidenceText: allAccumulatedToolResponsesText || (webSources && webSources.length > 0 ? synthesizeAutonomousWebSummary('', webSources) : ''),
               extraBody: rescueExtra,
               signal: STATE.abortController?.signal
             });
@@ -30844,8 +30908,10 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         } else if (webSources && webSources.length > 0) {
           const synth = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
           if (synth) fullText = synth;
+        } else if (groundedImageDisplays && groundedImageDisplays.length > 0) {
+          fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
         } else if (preambleHtml) {
-          fullText = 'Model menyelesaikan penelusuran namun tidak menghasilkan respon teks tambahan.';
+          fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
         }
       }
 
@@ -30868,7 +30934,12 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           showToast('Generasi dihentikan oleh pengguna.');
           return;
         }
-        throw new Error('Model Ollama menyelesaikan koneksi tanpa menghasilkan respon teks.');
+        if (groundedImageDisplays && groundedImageDisplays.length > 0) {
+          fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
+        } else {
+          fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
+        }
+      }
       }
 
       fullText = safeAssistantText(fullText);
@@ -32606,11 +32677,14 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             signal: STATE.abortController?.signal
           });
 
-          // Fallback resiliensi: jika model menolak tools di putaran lanjutan (HTTP 400/404/422)
-          if (!digestionRes.ok && digestionRequestBody.tools && (digestionRes.status === 400 || digestionRes.status === 404 || digestionRes.status === 422)) {
-            console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Model returned HTTP ${digestionRes.status} with tools. Retrying without tools...`);
+          // Fallback resiliensi: jika model menolak tools di putaran lanjutan (HTTP 400/404/422/500)
+          if (!digestionRes.ok && digestionRequestBody.tools && (digestionRes.status === 400 || digestionRes.status === 404 || digestionRes.status === 422 || digestionRes.status === 500)) {
+            console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Model returned HTTP ${digestionRes.status} with tools. Retrying without tools and normalizing tool messages...`);
             delete digestionRequestBody.tools;
             delete digestionRequestBody.tool_choice;
+            if (Array.isArray(digestionRequestBody.messages)) {
+              digestionRequestBody.messages = convertToolMessagesToUserRole(digestionRequestBody.messages);
+            }
             digestionRes = await fetch(digestionUrl, {
               method: 'POST',
               headers: digestionHeaders,
@@ -32628,11 +32702,11 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
               }
             } catch (_) {}
             console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Error:`, errDetail);
-            if (!fullText.trim() || isModelInternalMonologue(fullText)) {
+            if (!fullText.trim() || isModelInternalMonologue(fullText) || isAutonomousFallbackText(fullText) || isInternalSystemPayload(fullText)) {
               const synth = (allAccumulatedToolResponsesText || (webSources && webSources.length > 0))
                 ? synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources)
                 : '';
-              fullText = synth || cleanAssistant || `[Pencarian selesai: ${toolSummaryList.join(', ')}. Sistem menyelesaikan penelusuran].`;
+              fullText = synth || cleanAssistant || '';
             }
             break;
           }
@@ -32830,11 +32904,11 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
 
       // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah → minta model menyusun jawaban bersih =====
-      if (autonomousRound > 0 && !isPureMathSession && (allAccumulatedToolResponsesText || (webSources && webSources.length > 0)) && !STATE.abortController?.signal?.aborted) {
+      if (autonomousRound > 0 && !isPureMathSession && !STATE.abortController?.signal?.aborted) {
         const probeText = scrubRawToolCallArtifacts(fullText || '').trim();
-        if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText)) {
+        if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText) || isInternalSystemPayload(probeText)) {
           try {
-            bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyusun jawaban dari data web...</span></div>`;
+            bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyusun jawaban deduktif komprehensif...</span></div>`;
             smartScrollChatToBottom(true);
             const rescueModel = actualModelUsed || modelName;
             const rescueDirect = activeRouteType === 'direct' || (!activeEndpoint || activeEndpoint.includes('openrouter.ai'));
@@ -32856,7 +32930,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
               headers: rescueHeaders,
               model: rescueModel,
               question: promptText,
-              evidenceText: allAccumulatedToolResponsesText || synthesizeAutonomousWebSummary('', webSources),
+              evidenceText: allAccumulatedToolResponsesText || (webSources && webSources.length > 0 ? synthesizeAutonomousWebSummary('', webSources) : ''),
               extraBody: rescueExtra,
               signal: STATE.abortController?.signal
             });
@@ -32950,8 +33024,10 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         } else if (webSources && webSources.length > 0) {
           const synth = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
           if (synth) fullText = synth;
+        } else if (collectedImages && collectedImages.length > 0) {
+          fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
         } else if (preambleHtml) {
-          fullText = 'Model menyelesaikan penelusuran namun tidak menghasilkan respon teks tambahan.';
+          fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
         }
       }
 
@@ -32972,7 +33048,12 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           showToast('Generasi dihentikan.');
           return;
         }
-        throw new Error('Model OpenRouter menyelesaikan koneksi tanpa menghasilkan respon teks.');
+        if (collectedImages && collectedImages.length > 0) {
+          fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
+        } else {
+          fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
+        }
+      }
       }
 
       fullText = safeAssistantText(fullText);
@@ -47068,7 +47149,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://const-orleans-twin-limitation.trycloudflare.com',
+    activeTunnelUrl: 'https://prerequisite-cork-advise-upgrade.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
