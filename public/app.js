@@ -43,7 +43,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://methodology-surgeons-beam-transformation.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://plans-edward-reader-turns.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -21767,6 +21767,9 @@ ${msg.content.slice(0, 3000)}
 
   function synthesizeAutonomousSearchQuery(session, rawPrompt) {
     if (!rawPrompt) return '';
+    if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isRevisionQuery === 'function' && ZozTextSafety.isRevisionQuery(rawPrompt)) {
+      return '';
+    }
     const cleanPrompt = rawPrompt.trim();
 
     const words = cleanPrompt.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
@@ -21998,6 +22001,9 @@ ${msg.content.slice(0, 3000)}
 
   async function getWebSearchContext(query, session = null, hudElement = null, forceRun = false) {
     if (!query || !query.trim()) return null;
+    if (!forceRun && typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isRevisionQuery === 'function' && ZozTextSafety.isRevisionQuery(query)) {
+      return null;
+    }
     if (STATE.searchMode === 'autonomous' && !forceRun) {
       // Mode Autonomous Web Explorer menggunakan eksekusi tool dinamis on-demand oleh AI
       return null;
@@ -29419,6 +29425,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       : (latestRawUserMsg ? msgImagesOf(latestRawUserMsg).length : 0);
     const latestDecisionCheck = (tsModule && typeof tsModule.computeBayesianDecisionCalibration === 'function' && latestRawUserMsg)
       ? tsModule.computeBayesianDecisionCalibration(latestRawUserMsg.content || '', {
+          session: sessionOrMessages,
           hasImages: activeTurnImageCount > 0,
           imageCount: activeTurnImageCount
         })
@@ -29761,19 +29768,21 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
         : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
       const decisionCalibration = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
-        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { hasImages: hasAttachedImages, imageCount: attachedImageCount })
-        : { isDiscreteChoice: false, isAnalyticalQuery: false, isConceptualTaxonomy: false, calibrationDirective: '' };
+        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { session, hasImages: hasAttachedImages, imageCount: attachedImageCount })
+        : { isDiscreteChoice: false, isAnalyticalQuery: false, isConceptualTaxonomy: false, isQuizRevision: false, calibrationDirective: '' };
+      const isQuizRevision = Boolean(decisionCalibration.isQuizRevision || (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isRevisionQuery === 'function' && ZozTextSafety.isRevisionQuery(promptText)));
       const isPureAlgebraConcept = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isPureAlgebraOrConceptualQuery === 'function')
         ? ZozTextSafety.isPureAlgebraOrConceptualQuery(promptText)
         : false;
       const isNemotron = isNemotronModel(modelName);
-      const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice);
+      const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice || isQuizRevision);
       const isQuestionOrAnalytical = Boolean(
         decisionCalibration.isAnalyticalQuery ||
         decisionCalibration.isDiscreteChoice ||
         decisionCalibration.isConceptualTaxonomy ||
         isPureAlgebraConcept ||
-        isNemotron
+        isNemotron ||
+        isQuizRevision
       );
 
       // Persistensi Persona Bawaan Sistem & Sensor Anti-Drift:
@@ -29918,7 +29927,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // WEB SEARCH GROUNDING:
       // Aktif HANYA jika kueri BUKAN konsep aljabar murni / Nemotron (IG = 0), BUKAN evaluasi pilihan ganda / gambar soal lokal,
       // serta pengguna menyalakan toggle Web Search secara eksplisit ATAU kueri memiliki ketidakpastian temporal-aktual tinggi (U(Q) >= 0.72).
-      const autoEpistemicPreSearch = !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      const autoEpistemicPreSearch = !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
@@ -31528,19 +31537,21 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
         : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
       const decisionCalibration = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
-        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { hasImages: hasAttachedImages, imageCount: attachedImageCount })
-        : { isDiscreteChoice: false, isAnalyticalQuery: false, isConceptualTaxonomy: false, calibrationDirective: '' };
+        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { session, hasImages: hasAttachedImages, imageCount: attachedImageCount })
+        : { isDiscreteChoice: false, isAnalyticalQuery: false, isConceptualTaxonomy: false, isQuizRevision: false, calibrationDirective: '' };
+      const isQuizRevision = Boolean(decisionCalibration.isQuizRevision || (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isRevisionQuery === 'function' && ZozTextSafety.isRevisionQuery(promptText)));
       const isPureAlgebraConcept = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isPureAlgebraOrConceptualQuery === 'function')
         ? ZozTextSafety.isPureAlgebraOrConceptualQuery(promptText)
         : false;
       const isNemotron = isNemotronModel(modelName);
-      const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice);
+      const isPureMathSession = Boolean(isNemotron || isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice || isQuizRevision);
       const isQuestionOrAnalytical = Boolean(
         decisionCalibration.isAnalyticalQuery ||
         decisionCalibration.isDiscreteChoice ||
         decisionCalibration.isConceptualTaxonomy ||
         isPureAlgebraConcept ||
-        isNemotron
+        isNemotron ||
+        isQuizRevision
       );
 
       // Persistensi Persona Bawaan Sistem & Sensor Anti-Drift:
@@ -31697,7 +31708,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // WEB SEARCH GROUNDING:
       // Aktif HANYA jika kueri BUKAN konsep aljabar murni / Nemotron (IG = 0), BUKAN evaluasi pilihan ganda / gambar soal lokal,
       // serta pengguna menyalakan toggle Web Search secara eksplisit ATAU kueri memiliki ketidakpastian temporal-aktual tinggi (U(Q) >= 0.72).
-      const autoEpistemicPreSearch = !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      const autoEpistemicPreSearch = !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
@@ -47177,7 +47188,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://methodology-surgeons-beam-transformation.trycloudflare.com',
+    activeTunnelUrl: 'https://plans-edward-reader-turns.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
