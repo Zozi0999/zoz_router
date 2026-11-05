@@ -1705,8 +1705,82 @@
     return [...anchors];
   }
 
+  // ============================================================================
+  // 15B. OPERATOR REVISI ANAPHORA KUIS & PENGHAPUSAN HIPOTESIS SALAH (BAYESIAN HYPOTHESIS PRUNER)
+  // Mendeteksi kueri pengguna yang meminta penggantian/koreksi jawaban kuis
+  // (misal "ganti", "ganti jawabannya", "bukan itu", "salah, coba yang lain").
+  // Information Gain pencarian web adalah nol (IG(Search|Q) = 0) sehingga pencarian web
+  // DIBLOKIR TOTAL dan model diperintahkan memfalsifikasi jawaban lama (P(h_prev) = 0)
+  // serta mengevaluasi sisa opsi alternatif.
+  // ============================================================================
+  const QUIZ_REVISION_REGEX = /^(?:\s*(?:ganti|ubah|tukar|pilihkan\s+(?:yang\s+)?lain|coba\s+(?:yang\s+)?lain|bukan\s+(?:itu|yang\s+ini|yang\s+tadi)|salah\b|opsi\s+lain|jawaban\s+lain|alternatif\s+lain|jawaban\s+kedua|nomor\s+lain|ganti\s+(?:opsi|jawaban|pilihan)|bukan\s+[A-Fa-f]|change\s+(?:the\s+)?answer|try\s+another|pick\s+another|switch\s+(?:to|answer)|not\s+that|wrong|incorrect)\s*[!?.~,]*)+$/i;
+
+  function isRevisionQuery(text) {
+    if (!text || typeof text !== 'string') return false;
+    const clean = text.trim();
+    if (clean.length > 90) return false;
+    return QUIZ_REVISION_REGEX.test(clean) || /\b(?:ganti|coba\s+ganti|ganti\s+jawabannya|ganti\s+opsi|salah\s+ganti|bukan\s+itu|jawaban\s+lain|pilih\s+yang\s+lain)\b/i.test(clean);
+  }
+
+  function extractParentQuizContext(sessionOrMessages) {
+    const rawList = Array.isArray(sessionOrMessages?.messages) ? sessionOrMessages.messages : (Array.isArray(sessionOrMessages) ? sessionOrMessages : []);
+    if (!rawList || rawList.length < 2) return null;
+
+    let lastAsstMsg = '';
+    let lastAsstIdx = -1;
+    for (let i = rawList.length - 1; i >= 0; i--) {
+      if (rawList[i] && rawList[i].role === 'assistant' && rawList[i].content) {
+        lastAsstIdx = i;
+        lastAsstMsg = String(rawList[i].content).trim();
+        break;
+      }
+    }
+    if (lastAsstIdx === -1 || !lastAsstMsg) return null;
+
+    let parentUserMsg = null;
+    for (let i = lastAsstIdx - 1; i >= 0; i--) {
+      if (rawList[i] && rawList[i].role === 'user' && rawList[i].content) {
+        parentUserMsg = rawList[i];
+        break;
+      }
+    }
+    if (!parentUserMsg) return null;
+
+    const userText = String(parentUserMsg.content || '').trim();
+    const lines = userText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const candidateOptions = lines.filter(l => {
+      if (/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+\S)/.test(l)) return true;
+      const wc = l.split(/\s+/).filter(Boolean).length;
+      return wc >= 1 && wc <= 25 && !/\?\s*$/.test(l) && !/^[-*#>`]/.test(l);
+    });
+
+    let prevChosenLabel = '';
+    const matchLabel = lastAsstMsg.match(/^(?:(?:\*\*|\*|\[)?[A-Da-d](?:[.)\]]|\*\*)?)\s+([^\n\r]+)/);
+    if (matchLabel) {
+      prevChosenLabel = matchLabel[0].replace(/[*\[\]]/g, '').trim();
+    } else {
+      prevChosenLabel = lastAsstMsg.slice(0, 60).replace(/\n.*/s, '').trim();
+    }
+
+    return {
+      userText,
+      candidateOptions,
+      previousAnswer: prevChosenLabel
+    };
+  }
+
   function computeTemporalRecencyProfile(query, contextText = '', nowMs = Date.now()) {
     const q = String(query || '').trim();
+    if (isRevisionQuery(q)) {
+      return {
+        recencyAlpha: 0.0,
+        halfLifeDays: 365,
+        lambda: 0.0,
+        epistemicSearchTrigger: 0.0,
+        targetHistoricalYear: null,
+        targetDates: []
+      };
+    }
     const combined = `${q} ${String(contextText || '')}`.trim();
     const curYear = new Date(nowMs).getUTCFullYear();
 
@@ -2087,6 +2161,58 @@
     const hasImages = Boolean((options && options.hasImages) || imageCount > 0);
     const lower = raw.toLowerCase();
 
+    // 0. Deteksi Revisi Jawaban Kuis / Anaphora Penggantian Hipotesis
+    const isRevision = isRevisionQuery(raw);
+    const sessionObj = options && (options.session || options.history || options.sessionOrMessages);
+    const parentQuiz = isRevision ? extractParentQuizContext(sessionObj) : null;
+
+    if (isRevision && parentQuiz && parentQuiz.candidateOptions.length >= 2) {
+      const cleanPrev = (parentQuiz.previousAnswer || '').replace(/^[A-Da-d][.)\s-]+/, '').toLowerCase().trim();
+      const remainingOptions = parentQuiz.candidateOptions.filter(opt => {
+        const cleanOpt = opt.replace(/^[A-Da-d][.)\s-]+/, '').toLowerCase().trim();
+        return cleanOpt !== cleanPrev && !cleanOpt.includes(cleanPrev) && !cleanPrev.includes(cleanOpt);
+      });
+      const effectiveOpts = remainingOptions.length > 0 ? remainingOptions : parentQuiz.candidateOptions;
+      const effectiveK = Math.max(2, effectiveOpts.length);
+      const uniformPrior = Number((1 / effectiveK).toFixed(4));
+      const maxEntropyBits = Number(Math.log2(effectiveK).toFixed(4));
+      const calibratedTemp = 0.12;
+      const calibratedTopP = 0.90;
+      const calibrationDirective = `[PROTOKOL REVISI BAYESIAN & ELIMINASI HIPOTESIS TERFALSIFIKASI — H_0 = ${maxEntropyBits} bit]:
+Pengguna secara tegas meminta MENGGANTI JAWABAN / MENOLAK PILIHAN SEBELUMNYA ("${raw}").
+Jawaban asisten sebelumnya yang difalsifikasi: "${parentQuiz.previousAnswer}".
+Himpunan opsi awal dari soal kuis:
+${parentQuiz.candidateOptions.map((o, idx) => `   ${idx + 1}. ${o}`).join('\n')}
+
+Di dalam blok penalaran deduktif <think>...</think> (disembunyikan otomatis):
+1. FALSIFIKASI MUTLAK: Tetapkan P("${parentQuiz.previousAnswer}") = 0. DILARANG KERAS memilih atau merekomendasikan kembali jawaban "${parentQuiz.previousAnswer}"!
+2. EVALUASI HIPOTESIS ALTERNATIF:
+   - Evaluasi seluruh opsi alternatif yang tersisa: ${effectiveOpts.join(', ')}.
+   - Reset prior peluang setara P_0 = 1/${effectiveOpts.length} pada setiap sisa opsi.
+   - Evaluasi konteks modul/topik kuis (misal RAG, Database, Cloud) dan cari opsi yang paling tepat menggantikan jawaban yang salah.
+3. JAWABAN REVISI PRESISI & AKURAT:
+   - Tutup </think>, tuliskan OPSI BARU YANG TEPAT secara tegas dan jelas di baris pertama (misal: "Jawaban revisi yang tepat: [Opsi Alternatif]").
+   - Berikan 1-2 kalimat alasan konseptual ringkas mengapa opsi ini benar menggantikan jawaban sebelumnya.`;
+
+      return {
+        isDiscreteChoice: true,
+        isQuizRevision: true,
+        isConceptualTaxonomy: false,
+        isSelfContainedDiscreteTurn: false,
+        isAnalyticalQuery: true,
+        imageCount,
+        optionCount: effectiveK,
+        uniformPrior,
+        maxEntropyBits,
+        temperature: calibratedTemp,
+        topP: calibratedTopP,
+        top_p: calibratedTopP,
+        presencePenalty: 0,
+        frequencyPenalty: 0,
+        calibrationDirective
+      };
+    }
+
     // Abaikan sapaan murni sangat pendek atau perintah pembuatan berkas/visual murni
     const isTrivialGreeting = !hasImages && raw.length < 18 && /^(halo|hai|hi|hello|pagi|siang|sore|malam|tes|test|ping|ok|oke|makasih|terima kasih|thanks)[\s!.,?]*$/i.test(raw);
     const isPureMediaGen = !hasImages && /\b(buatkan\s+(gambar|foto|ilustrasi|logo|website|landing\s*page|aplikasi|dokumen|pdf|word|makalah)|carikan\s+(foto|gambar|video))\b/i.test(lower);
@@ -2124,8 +2250,8 @@
 
     // 2b. Deteksi himpunan opsi/istilah diskrit murni (Aljabar Taksonomi vs Pilihan Ganda Tanpa Label):
     //     Pengguna mengirimkan 2 s/d 8 baris terpisah tanpa teks sapaan/perintah fiktif.
-    //     (1) Taksonomi Konsep Murni: istilah abstrak pendek (<= 6 kata per baris, mis. "Competitive \n Independent...")
-    //     (2) Himpunan Opsi Kuis: klausa pernyataan atau tindakan (2 s/d 40 kata per baris, mis. opsi kuis DBMS/LMS)
+    //     (1) Taksonomi Konsep Murni Relasional: istilah teori interdependensi (mis. "Competitive \n Independent...")
+    //     (2) Himpunan Opsi Kuis: klausa pernyataan, tindakan, atau istilah pilihan kuis (mis. opsi kuis RAG, DBMS, LMS)
     let pureListOptionCount = 0;
     let unlabeledCandidateSetCount = 0;
     if (lines.length >= 2 && lines.length <= 8 && !hasImages && unlabeledOptionCount === 0 && labeledOptionLines.length === 0) {
@@ -2133,6 +2259,7 @@
         return !/^(?:buatkan|tolong|halo|hai|jelaskan|analisis|terima kasih|thanks|selamat)\b/i.test(l);
       });
       if (isAllNonConversational) {
+        const isRelationalTheoryTerms = lines.some(l => /\b(independent|competitive|cooperative|interdependent|contrience|promotive)\b/i.test(l));
         const isAllVeryShortTerms = lines.every(l => {
           const wc = l.split(/\s+/).filter(Boolean).length;
           return wc >= 1 && wc <= 6;
@@ -2142,9 +2269,9 @@
           return wc >= 2 && wc <= 40;
         });
 
-        if (isAllVeryShortTerms) {
+        if (isAllVeryShortTerms && isRelationalTheoryTerms) {
           pureListOptionCount = lines.length;
-        } else if (isAllOptionSentences) {
+        } else if (isAllVeryShortTerms || isAllOptionSentences) {
           unlabeledCandidateSetCount = lines.length;
         }
       }
@@ -2231,13 +2358,17 @@ Sebelum menulis satu kata pun jawaban kepada pengguna, Anda WAJIB mengawali gene
    - Pada soal pengecualian "kecuali..." (-1): jika seluruh opsi substantif ternyata BENAR/BISA digunakan sesuai klaim soal, maka tidak ada pengecualian di antara ketiganya sehingga "semua salah" WAJIB dipilih; sebaliknya jika ada tepat 1 opsi substantif yang salah/bukan kesalahan, pilih opsi tersebut.
 5. Tutup </think>, lalu tuliskan jawaban akhir yang bersih, akurat, dan sesuai format yang diminta pengguna.`;
       if (questionLineIdx === -1 && (unlabeledCandidateSetCount >= 2 || labeledOptionLines.length >= 2)) {
-        calibrationDirective += `\n\n6. INFERENSI ABDUKTIF SOAL TANPA PERTANYAAN EKSPLISIT (INVERSE PROBLEM):
+        calibrationDirective += `\n\n6. INFERENSI ABDUKTIF SOAL TANPA PERTANYAAN EKSPLISIT (INVERSE PROBLEM & KALIBRASI OVERCONFIDENCE):
    Pengguna HANYA menyalin opsi pilihan kuis (${lines.length} opsi) tanpa menyertakan teks pertanyaan.
-   Di dalam <think>, petakan relasi fungsional dan semantik opsi-opsi tersebut:
-   - Identifikasi domain (misal: Aljabar Kueri Relasional DBMS, SQL Lifecycle, ETL, dsb).
-   - Bedakan secara tegas hierarki keadaan: TUJUAN UTAMA / HASIL KELUARAN (Goal/Output: "Retrieve/Display the list of students who meet criteria") vs MEKANISME INSTRUMEN INTERNAL (Transition/Filter: "Filter the database rows where enrollment date matches") vs PRA-KONDISI VALIDASI (Precondition: "Validate query syntax & required data") vs PASCA-KONDISI (Postcondition: "Store query for future reference").
-   - Jika kuis menguji tujuan eksekusi kueri secara utuh, TUJUAN UTAMA (Goal/Output) adalah jawaban fundamental yang paling tepat!
-   - Tuliskan OPSI REKOMENDASI UTAMA yang paling tepat secara tegas di awal, lalu berikan 1-2 baris penjelasan pemetaan logisnya agar pengguna 100% tepat menjawab kuisnya.`;
+   Untuk mencegah salah pilih akibat overconfidence, lakukan di dalam <think>:
+   - Identifikasi domain keilmuan opsi-opsi tersebut (misal: Retrieval-Augmented Generation / RAG, DBMS Relasional, Machine Learning, Cloud Architecture, dsb).
+   - Uji pemetaan peran spesifik masing-masing opsi (Falsifikasi & Lingkup Kausalis):
+     ${lines.map((l, i) => `* Opsi ${i + 1} ("${l}"): petakan kapan opsi ini tepat dan fungsi utamanya dalam domain.`).join('\n     ')}
+   - Tentukan OPSI REKOMENDASI UTAMA dengan prior probabilitas tertinggi.
+   - Setelah </think>, sajikan:
+     1. Rekomendasi Utama: Tuliskan opsi rekomendasi utama paling kuat di awal secara tegas.
+     2. Peta Pencocokan Cepat (Conditional Decision Map): Berikan 1 baris pemetaan untuk setiap opsi (misal: "Jika soal menanyakan X -> Opsi A; Jika soal menanyakan Y -> Opsi B; Jika soal menanyakan Z -> Opsi C") agar pengguna dapat 100% tepat mencocokkan dengan kalimat pertanyaan sebenarnya di layar kuis mereka!
+     3. Dukungan Revisi: Nyatakan bahwa jika pengguna ingin mengganti opsi atau jika fokus soal berbeda, cukup ketik "ganti" atau sebutkan opsi alternatif.`;
       }
     } else if (isAnalyticalQuery) {
       calibrationDirective = `[PROTOKOL REGULASI MEKANISME PERHATIAN & INFERENSI DEDUKTIF MATEMATIKA MURNI]:
@@ -2258,6 +2389,7 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
 
     return {
       isDiscreteChoice,
+      isQuizRevision: false,
       isConceptualTaxonomy,
       isSelfContainedDiscreteTurn,
       isAnalyticalQuery,
@@ -2877,6 +3009,8 @@ ${condensed}`;
     projectGroundedResponseMathematically,
     purifyHistoricalAssistantTurn,
     computePersonaResonanceVector,
-    sanitizeModelPersonaDrift
+    sanitizeModelPersonaDrift,
+    isRevisionQuery,
+    extractParentQuizContext
   };
 });
