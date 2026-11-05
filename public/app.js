@@ -23,10 +23,12 @@
       .replace(/<\/?(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
       .replace(/\[\/?(?:THOUGHT|REASONING)\]/gi, '');
     out = stripModelTags(out);
+    out = out.replace(/^\[(?:Pencarian selesai|STATUS PENELUSURAN|Mengeksekusi penelusuran)[^\]]*\]\.?\s*/i, '');
+    out = out.replace(/(?:^|\n)\s*(?:\[Pencarian selesai[^\]]*\]|Sistem menyelesaikan penelusuran\.?|Model telah menyelesaikan penelusuran komprehensif[^\n]*)\s*(?:\n|$)/gi, '\n');
     if (typeof isInternalSystemPayload === 'function' && isInternalSystemPayload(out)) {
       return '';
     }
-    return out;
+    return out.trim();
   };
 
   const IS_VERCEL = Boolean(location.hostname && location.hostname.endsWith('vercel.app'));
@@ -43,7 +45,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://plans-edward-reader-turns.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://association-turtle-tunnel-deaths.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -725,6 +727,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     photoEditAwaitingModel: false, // true = pengguna sedang memilih model untuk edit foto (popup dulu, file picker sesudahnya)
     isGenerating: false,
     isSending: false, // Guard anti pengiriman ganda (Enter berulang saat masih ada await)
+    isIncognito: false, // Mode Incognito per-sesi (Jozz Memory dinonaktifkan saat aktif)
+    activeProjectScope: 'global', // Lingkup proyek aktif untuk Scoped Hybrid Recall
     abortController: null,
     soundEnabled: false,
     ollamaModels: getInitialOllamaModels(),
@@ -733,6 +737,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     openRouterMusicModels: [],
     availableImageModels: [...DEFAULT_IMAGE_MODELS],
     settings: {
+      enableJozzMemory: true, // Sakelar Jozz Memory global (Mistral AI 6-Pillars Standard)
       ollamaEndpoint: (typeof location !== 'undefined' && location.hostname && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) && !location.hostname.includes('trycloudflare.com')) ? 'https://ollama.com' : 'http://127.0.0.1:11434',
       ollamaApiKey: '',
       openRouterKey: '',
@@ -1169,6 +1174,31 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnExecuteExportChat: $('#btnExecuteExportChat'),
     terminalToggleBtn: $('#terminalToggleBtn'),
     terminalModal: $('#terminalModal'),
+    openJozzMemoryBtn: $('#openJozzMemoryBtn'),
+    incognitoToggleBtn: $('#incognitoToggleBtn'),
+    jozzMemoryModal: $('#jozzMemoryModal'),
+    jozzMemoryGlobalToggle: $('#jozzMemoryGlobalToggle'),
+    jozzMemorySearchInput: $('#jozzMemorySearchInput'),
+    btnToggleAddMemoryForm: $('#btnToggleAddMemoryForm'),
+    jozzAddMemoryFormBox: $('#jozzAddMemoryFormBox'),
+    btnCancelAddMemory: $('#btnCancelAddMemory'),
+    btnSubmitAddMemory: $('#btnSubmitAddMemory'),
+    jozzAddMemoryContent: $('#jozzAddMemoryContent'),
+    jozzAddMemoryCategory: $('#jozzAddMemoryCategory'),
+    jozzAddMemoryScope: $('#jozzAddMemoryScope'),
+    tabBtnMemoriesList: $('#tabBtnMemoriesList'),
+    tabBtnMemoryInsights: $('#tabBtnMemoryInsights'),
+    jozzPaneMemoriesList: $('#jozzPaneMemoriesList'),
+    jozzPaneMemoryInsights: $('#jozzPaneMemoryInsights'),
+    jozzMemoriesCardsList: $('#jozzMemoriesCardsList'),
+    jozzMemoryInsightsContent: $('#jozzMemoryInsightsContent'),
+    jozzMemTotalCount: $('#jozzMemTotalCount'),
+    btnExportMemoryJson: $('#btnExportMemoryJson'),
+    btnExportMemoryMd: $('#btnExportMemoryMd'),
+    jozzMemoryImportInput: $('#jozzMemoryImportInput'),
+    btnClearAllMemoriesBtn: $('#btnClearAllMemoriesBtn'),
+    memoryReceiptDetailsModal: $('#memoryReceiptDetailsModal'),
+    memoryReceiptDetailsList: $('#memoryReceiptDetailsList'),
     toastContainer: $('#toastContainer'),
     
     // Settings fields
@@ -1401,6 +1431,502 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
   // pada query pencarian atau URL ekstraksi yang sama, menghemat kuota dan memangkas latensi ke 0ms.
   const AUTONOMOUS_TOOL_CACHE = new Map();
   const TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
+
+  // ==================== JOZZ MEMORY CONTROLLER (MISTRAL AI 6 PILLARS) ====================
+  const JozzMemoryUI = {
+    activeCategory: 'all',
+    activeScope: 'global',
+    searchQuery: '',
+    cachedMemories: [],
+
+    init() {
+      // Sync global toggle initial state
+      if (els.jozzMemoryGlobalToggle) {
+        els.jozzMemoryGlobalToggle.checked = STATE.settings.enableJozzMemory !== false;
+      }
+
+      els.openJozzMemoryBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        openModal('jozzMemoryModal');
+        this.refresh();
+      });
+
+      els.incognitoToggleBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.toggleIncognito();
+      });
+
+      els.jozzMemoryGlobalToggle?.addEventListener('change', (e) => {
+        STATE.settings.enableJozzMemory = Boolean(e.target.checked);
+        savePersistedState();
+        showToast(STATE.settings.enableJozzMemory ? '🧠 Jozz Memory diaktifkan secara global.' : '⏸️ Jozz Memory dinonaktifkan.', 'info');
+      });
+
+      // Category filter pills
+      document.querySelectorAll('#jozzMemCategoryPills .jozz-cat-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+          document.querySelectorAll('#jozzMemCategoryPills .jozz-cat-pill').forEach(p => p.classList.remove('active'));
+          pill.classList.add('active');
+          this.activeCategory = pill.dataset.cat || 'all';
+          this.refresh();
+        });
+      });
+
+      // Search input with debounce
+      let searchTimer = null;
+      els.jozzMemorySearchInput?.addEventListener('input', (e) => {
+        if (searchTimer) clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+          this.searchQuery = (e.target.value || '').trim();
+          this.refresh();
+        }, 250);
+      });
+
+      // Subtab switching (Daftar vs Insights)
+      els.tabBtnMemoriesList?.addEventListener('click', () => {
+        els.tabBtnMemoriesList.classList.add('active');
+        els.tabBtnMemoryInsights?.classList.remove('active');
+        if (els.jozzPaneMemoriesList) els.jozzPaneMemoriesList.style.display = 'block';
+        if (els.jozzPaneMemoryInsights) els.jozzPaneMemoryInsights.style.display = 'none';
+      });
+
+      els.tabBtnMemoryInsights?.addEventListener('click', () => {
+        els.tabBtnMemoryInsights.classList.add('active');
+        els.tabBtnMemoriesList?.classList.remove('active');
+        if (els.jozzPaneMemoriesList) els.jozzPaneMemoriesList.style.display = 'none';
+        if (els.jozzPaneMemoryInsights) els.jozzPaneMemoryInsights.style.display = 'block';
+        this.loadInsights();
+      });
+
+      // Add memory toggle box
+      els.btnToggleAddMemoryForm?.addEventListener('click', () => {
+        if (!els.jozzAddMemoryFormBox) return;
+        const isHidden = els.jozzAddMemoryFormBox.style.display === 'none';
+        els.jozzAddMemoryFormBox.style.display = isHidden ? 'block' : 'none';
+        if (isHidden && els.jozzAddMemoryContent) els.jozzAddMemoryContent.focus();
+      });
+
+      els.btnCancelAddMemory?.addEventListener('click', () => {
+        if (els.jozzAddMemoryFormBox) els.jozzAddMemoryFormBox.style.display = 'none';
+        if (els.jozzAddMemoryContent) els.jozzAddMemoryContent.value = '';
+      });
+
+      els.btnSubmitAddMemory?.addEventListener('click', () => {
+        this.handleManualSubmit();
+      });
+
+      // Sovereignty: Export JSON & MD
+      els.btnExportMemoryJson?.addEventListener('click', () => this.exportData('json'));
+      els.btnExportMemoryMd?.addEventListener('click', () => this.exportData('md'));
+
+      // Sovereignty: Import File
+      els.jozzMemoryImportInput?.addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        if (file) this.importData(file);
+      });
+
+      // Clear all memories
+      els.btnClearAllMemoriesBtn?.addEventListener('click', () => this.handleClearAll());
+    },
+
+    toggleIncognito() {
+      STATE.isIncognito = !STATE.isIncognito;
+      const btn = els.incognitoToggleBtn;
+      if (STATE.isIncognito) {
+        btn?.classList.add('incognito-active');
+        btn?.setAttribute('title', 'Mode Incognito Aktif (Memori Dimatikan)');
+        showToast('🕵️ Mode Incognito Aktif: Percakapan ini tidak membaca dan tidak menyimpan memori.', 'info');
+      } else {
+        btn?.classList.remove('incognito-active');
+        btn?.setAttribute('title', 'Mode Incognito: Klik untuk mengaktifkan sesi tanpa memori');
+        showToast('🧠 Mode Normal: Jozz Memory aktif untuk mengingat preferensi & fakta penting.', 'success');
+      }
+      AudioEngine.click();
+    },
+
+    async refresh() {
+      if (!els.jozzMemoriesCardsList) return;
+      els.jozzMemoriesCardsList.innerHTML = `
+        <div style="text-align: center; padding: 30px; color: #64748b;">
+          <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.4rem; color: var(--neon-cyan);"></i>
+          <p style="margin-top: 6px; font-size: 0.78rem;">Memuat memori...</p>
+        </div>
+      `;
+
+      try {
+        const params = new URLSearchParams();
+        params.set('userId', STATE.userId || 'default');
+        if (this.activeCategory !== 'all') params.set('category', this.activeCategory);
+        if (this.searchQuery) params.set('q', this.searchQuery);
+        params.set('limit', '80');
+
+        const res = await fetch(getUniversalApiUrl(`/api/memories?${params.toString()}`));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        this.cachedMemories = Array.isArray(data.memories) ? data.memories : [];
+        if (els.jozzMemTotalCount) els.jozzMemTotalCount.textContent = String(this.cachedMemories.length);
+        this.renderCards(this.cachedMemories);
+      } catch (err) {
+        console.warn('[Jozz Memory] Error fetching memories:', err);
+        els.jozzMemoriesCardsList.innerHTML = `
+          <div style="text-align: center; padding: 26px; color: #f87171;">
+            <i class="fa-solid fa-triangle-exclamation" style="font-size: 1.3rem;"></i>
+            <p style="margin-top: 6px; font-size: 0.8rem;">Gagal memuat memori: ${escapeHtml(err.message)}</p>
+          </div>
+        `;
+      }
+    },
+
+    renderCards(memories) {
+      if (!els.jozzMemoriesCardsList) return;
+      if (!memories || memories.length === 0) {
+        els.jozzMemoriesCardsList.innerHTML = `
+          <div style="text-align: center; padding: 45px 20px; color: #64748b;">
+            <i class="fa-solid fa-brain" style="font-size: 2rem; opacity: 0.35; margin-bottom: 8px;"></i>
+            <p style="font-size: 0.85rem; font-weight: 500; color: #94a3b8;">Belum ada memori yang tersimpan.</p>
+            <p style="font-size: 0.74rem; color: #64748b; margin-top: 4px;">AI akan mengingat fakta secara otomatis di latar belakang, atau klik "+ Tambah Memori" di atas.</p>
+          </div>
+        `;
+        return;
+      }
+
+      els.jozzMemoriesCardsList.innerHTML = memories.map(m => {
+        const catClass = ['preference', 'technical_stack', 'project_context', 'general_fact'].includes(m.category) ? m.category : 'general_fact';
+        const catLabels = {
+          preference: 'Preferensi',
+          technical_stack: 'Tech Stack',
+          project_context: 'Proyek',
+          general_fact: 'Fakta'
+        };
+        const catName = catLabels[m.category] || m.category;
+        const dateStr = m.created_at ? new Date(m.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+        const scopeBadge = m.scope && m.scope !== 'global' ? `<span style="font-size:0.65rem; padding:1px 5px; border-radius:4px; background:rgba(255,255,255,0.06); color:#94a3b8;">#${escapeHtml(m.scope)}</span>` : '';
+
+        return `
+          <div class="jozz-memory-item-card" data-id="${escapeHtml(m.id)}">
+            <div class="jozz-mem-header">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span class="jozz-mem-tag ${catClass}">${escapeHtml(catName)}</span>
+                ${scopeBadge}
+              </div>
+              <div class="jozz-mem-actions">
+                <button type="button" class="jozz-mem-action-btn edit" data-action="edit" data-id="${escapeHtml(m.id)}" title="Edit Memori">
+                  <i class="fa-solid fa-pencil"></i>
+                </button>
+                <button type="button" class="jozz-mem-action-btn delete" data-action="delete" data-id="${escapeHtml(m.id)}" title="Hapus Memori">
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
+            </div>
+            <div class="jozz-mem-content">${escapeHtml(m.content)}</div>
+            <div class="jozz-mem-meta-footer">
+              <span style="display:flex; align-items:center; gap:5px;">
+                <i class="fa-regular fa-clock"></i> ${dateStr}
+                ${m.episode_id ? `<span style="opacity:0.6;">&bull; Ref: ${escapeHtml(m.episode_id.slice(0, 10))}</span>` : ''}
+              </span>
+              <span style="font-family:monospace; font-size:0.65rem; color:#475569;">${escapeHtml(m.id)}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Attach card action listeners
+      els.jozzMemoriesCardsList.querySelectorAll('.jozz-mem-action-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const action = btn.dataset.action;
+          const id = btn.dataset.id;
+          if (action === 'edit') this.handleEdit(id);
+          else if (action === 'delete') this.handleDelete(id);
+        });
+      });
+    },
+
+    async handleManualSubmit() {
+      const content = els.jozzAddMemoryContent?.value?.trim();
+      if (!content) {
+        showToast('Isi memori tidak boleh kosong.', 'error');
+        return;
+      }
+      const category = els.jozzAddMemoryCategory?.value || 'general_fact';
+      const scope = els.jozzAddMemoryScope?.value?.trim() || 'global';
+
+      try {
+        const res = await fetch(getUniversalApiUrl('/api/memories'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: STATE.userId || 'default',
+            content,
+            category,
+            scope,
+            sourceTitle: 'Manual Input',
+            sourceType: 'manual'
+          })
+        });
+        const data = await res.json();
+        if (data && data.success) {
+          showToast('✅ Memori berhasil disimpan!', 'success');
+          if (els.jozzAddMemoryContent) els.jozzAddMemoryContent.value = '';
+          if (els.jozzAddMemoryFormBox) els.jozzAddMemoryFormBox.style.display = 'none';
+          this.refresh();
+        } else {
+          showToast('Gagal menyimpan: ' + (data?.error || 'Kesalahan guardrail / PII.'), 'error');
+        }
+      } catch (err) {
+        showToast('Gagal menyimpan memori: ' + err.message, 'error');
+      }
+    },
+
+    async handleEdit(id) {
+      const item = this.cachedMemories.find(m => m.id === id);
+      if (!item) return;
+      const newText = prompt('Ubah teks memori:', item.content);
+      if (newText === null) return;
+      const trimmed = newText.trim();
+      if (!trimmed) {
+        showToast('Isi memori tidak boleh kosong.', 'error');
+        return;
+      }
+
+      try {
+        const res = await fetch(getUniversalApiUrl(`/api/memories/${encodeURIComponent(id)}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: trimmed })
+        });
+        const data = await res.json();
+        if (data && data.success) {
+          showToast('Memori diperbarui.', 'success');
+          this.refresh();
+        } else {
+          showToast('Gagal memperbarui: ' + (data?.error || 'Unknown error'), 'error');
+        }
+      } catch (err) {
+        showToast('Gagal edit memori: ' + err.message, 'error');
+      }
+    },
+
+    async handleDelete(id) {
+      if (!confirm('Hapus memori ini secara permanen?')) return;
+      try {
+        const res = await fetch(getUniversalApiUrl(`/api/memories/${encodeURIComponent(id)}`), {
+          method: 'DELETE'
+        });
+        const data = await res.json();
+        if (data && data.success) {
+          showToast('Memori dihapus.', 'info');
+          this.refresh();
+        }
+      } catch (err) {
+        showToast('Gagal hapus memori: ' + err.message, 'error');
+      }
+    },
+
+    async handleClearAll() {
+      if (!confirm('⚠️ PERINGATAN: Anda yakin ingin MENGHAPUS SELURUH MEMORI, graf entitas, dan riwayat Jozz Memory secara permanen? Tindakan ini tidak dapat dibatalkan.')) return;
+      if (!confirm('Konfirmasi Terakhir: Hapus semua memori sekarang?')) return;
+
+      try {
+        const res = await fetch(getUniversalApiUrl('/api/memories?confirm=true'), {
+          method: 'DELETE'
+        });
+        const data = await res.json();
+        if (data && data.success) {
+          showToast('Seluruh memori berhasil dibersihkan.', 'success');
+          this.refresh();
+        }
+      } catch (err) {
+        showToast('Gagal menghapus seluruh memori: ' + err.message, 'error');
+      }
+    },
+
+    async loadInsights() {
+      if (!els.jozzMemoryInsightsContent) return;
+      els.jozzMemoryInsightsContent.innerHTML = `
+        <div style="text-align: center; padding: 35px; color: #64748b;">
+          <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.4rem; color: var(--neon-cyan);"></i>
+          <p style="margin-top: 6px; font-size: 0.78rem;">Menganalisis pola kerja & Knowledge Graph...</p>
+        </div>
+      `;
+
+      try {
+        const res = await fetch(getUniversalApiUrl(`/api/memories/insights?userId=${encodeURIComponent(STATE.userId || 'default')}`));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const ins = data.insights || {};
+
+        const catRows = Object.entries(ins.categories || {}).map(([cat, count]) => `
+          <div style="display:flex; justify-content:space-between; font-size:0.78rem; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.04);">
+            <span style="color:#94a3b8; text-transform:capitalize;">${escapeHtml(cat.replace('_', ' '))}</span>
+            <strong style="color:var(--neon-cyan);">${count}</strong>
+          </div>
+        `).join('') || '<div style="color:#64748b; font-size:0.75rem;">Belum ada kategori data.</div>';
+
+        const entRows = (ins.topEntities || []).map(ent => `
+          <span style="display:inline-block; padding:3px 9px; font-size:0.72rem; border-radius:6px; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); color:#7dd3fc; margin:2px;">
+            ${escapeHtml(ent.name)} <small style="opacity:0.6;">(${escapeHtml(ent.entity_type)})</small>
+          </span>
+        `).join('') || '<span style="color:#64748b; font-size:0.75rem;">Belum ada entitas Knowledge Graph.</span>';
+
+        const relRows = (ins.activeRelations || []).map(rel => `
+          <div style="font-size:0.76rem; padding:5px 8px; border-radius:6px; background:rgba(255,255,255,0.03); border-left:2px solid #34d399; margin-bottom:4px; color:#cbd5e1;">
+            <strong style="color:#34d399;">${escapeHtml(rel.source_name || 'Entitas')}</strong>
+            <span style="color:#94a3b8; margin:0 4px;">&rarr; ${escapeHtml(rel.relation_type)} &rarr;</span>
+            <strong style="color:#7dd3fc;">${escapeHtml(rel.target_name || '')}</strong>:
+            <span style="margin-left:4px;">"${escapeHtml(rel.fact || '')}"</span>
+          </div>
+        `).join('') || '<div style="color:#64748b; font-size:0.75rem;">Belum ada relasi temporal aktif.</div>';
+
+        const recRows = (ins.reviewRecommendations || []).map(rec => `
+          <li style="font-size:0.78rem; color:#cbd5e1; margin-bottom:4px;">
+            <strong>${escapeHtml(rec.title)}</strong> &mdash; <span style="color:#94a3b8;">${escapeHtml(rec.reason)}</span>
+          </li>
+        `).join('') || '<li style="color:#64748b; font-size:0.75rem;">Belum ada rekomendasi tinjauan topik.</li>';
+
+        els.jozzMemoryInsightsContent.innerHTML = `
+          <!-- Metric Cards -->
+          <div class="jozz-insight-metric-grid">
+            <div class="jozz-insight-metric-box">
+              <span class="jozz-insight-metric-val">${ins.totalMemories || 0}</span>
+              <span class="jozz-insight-metric-lbl">Total Memori</span>
+            </div>
+            <div class="jozz-insight-metric-box">
+              <span class="jozz-insight-metric-val">${(ins.topEntities || []).length}</span>
+              <span class="jozz-insight-metric-lbl">Simpul Entitas</span>
+            </div>
+            <div class="jozz-insight-metric-box">
+              <span class="jozz-insight-metric-val">${(ins.activeRelations || []).length}</span>
+              <span class="jozz-insight-metric-lbl">Relasi Aktif</span>
+            </div>
+          </div>
+
+          <!-- Category Breakdown & Top Entities -->
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:12px;">
+            <div style="background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px;">
+              <div style="font-size:0.78rem; font-weight:700; color:#f1f5f9; margin-bottom:8px;">
+                <i class="fa-solid fa-folder-tree" style="color:var(--neon-cyan);"></i> Distribusi Kategori
+              </div>
+              ${catRows}
+            </div>
+
+            <div style="background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px;">
+              <div style="font-size:0.78rem; font-weight:700; color:#f1f5f9; margin-bottom:8px;">
+                <i class="fa-solid fa-circle-nodes" style="color:#38bdf8;"></i> Top Knowledge Graph Nodes
+              </div>
+              <div style="display:flex; flex-wrap:wrap;">${entRows}</div>
+            </div>
+          </div>
+
+          <!-- Active Temporal Knowledge Graph -->
+          <div style="background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px;">
+            <div style="font-size:0.78rem; font-weight:700; color:#f1f5f9; margin-bottom:8px;">
+              <i class="fa-solid fa-timeline" style="color:#34d399;"></i> Relasi Temporal Aktif (valid_until = NULL)
+            </div>
+            ${relRows}
+          </div>
+
+          <!-- Recommendations -->
+          <div style="background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px;">
+            <div style="font-size:0.78rem; font-weight:700; color:#f1f5f9; margin-bottom:8px;">
+              <i class="fa-solid fa-lightbulb" style="color:#fbbf24;"></i> Rekomendasi Tinjauan Topik
+            </div>
+            <ul style="padding-left:16px; margin:0;">${recRows}</ul>
+          </div>
+        `;
+      } catch (err) {
+        els.jozzMemoryInsightsContent.innerHTML = `
+          <div style="text-align: center; padding: 25px; color: #f87171;">
+            <p style="font-size: 0.8rem;">Gagal memuat insights: ${escapeHtml(err.message)}</p>
+          </div>
+        `;
+      }
+    },
+
+    exportData(format = 'json') {
+      const url = getUniversalApiUrl(`/api/memories/export?format=${format}&userId=${encodeURIComponent(STATE.userId || 'default')}`);
+      window.open(url, '_blank');
+    },
+
+    async importData(file) {
+      if (!file) return;
+      showToast('Mengunggah dan mendeduplikasi memori...', 'info');
+      try {
+        const text = await file.text();
+        const isJson = file.name.endsWith('.json') || text.trim().startsWith('{');
+        const payload = isJson ? JSON.parse(text) : { markdown: text };
+
+        const res = await fetch(getUniversalApiUrl(`/api/memories/import?userId=${encodeURIComponent(STATE.userId || 'default')}`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data && data.success) {
+          showToast(`✅ Berhasil impor ${data.importedCount || 0} memori baru (${data.skippedCount || 0} duplikat dilewati).`, 'success');
+          this.refresh();
+        } else {
+          showToast('Gagal impor: ' + (data?.error || 'Format tidak valid'), 'error');
+        }
+      } catch (err) {
+        showToast('Error impor berkas: ' + err.message, 'error');
+      }
+      if (els.jozzMemoryImportInput) els.jozzMemoryImportInput.value = '';
+    },
+
+    renderMemoryReceiptsBadge(row, receipts) {
+      if (!row || !Array.isArray(receipts) || receipts.length === 0) return;
+      if (row.querySelector('.memory-receipts-badge-wrap')) return;
+
+      const bubble = row.querySelector('.message-bubble');
+      if (!bubble) return;
+
+      const wrap = document.createElement('div');
+      wrap.className = 'memory-receipts-badge-wrap';
+      wrap.innerHTML = `
+        <button type="button" class="memory-receipts-badge" title="Klik untuk melihat rincian sumber memori yang digunakan model">
+          <i class="fa-solid fa-brain"></i>
+          <span>Menggunakan ${receipts.length} memori</span>
+          <span style="opacity:0.5;">&bull;</span>
+          <span style="text-decoration: underline;">Lihat sumber</span>
+        </button>
+      `;
+
+      wrap.querySelector('.memory-receipts-badge')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.openReceiptsModal(receipts);
+      });
+
+      bubble.appendChild(wrap);
+    },
+
+    openReceiptsModal(receipts) {
+      if (!els.memoryReceiptDetailsList) return;
+      els.memoryReceiptDetailsList.innerHTML = receipts.map(r => {
+        const signals = Array.isArray(r.signals) ? r.signals.join(' + ') : (r.signals || 'hybrid');
+        const score = typeof r.score === 'number' ? (r.score * 100).toFixed(1) + '%' : '100%';
+        return `
+          <div style="background:rgba(15,23,42,0.85); border:1px solid rgba(0,240,255,0.25); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-family:monospace; font-size:0.7rem; color:var(--neon-cyan); font-weight:700;">${escapeHtml(r.memoryId || 'MEM')}</span>
+              <span style="font-size:0.68rem; padding:2px 7px; border-radius:4px; background:rgba(0,240,255,0.12); color:var(--neon-cyan); border:1px solid rgba(0,240,255,0.3);">
+                Relevansi RRF: ${score} (${escapeHtml(signals)})
+              </span>
+            </div>
+            <div style="font-size:0.82rem; color:#f1f5f9; line-height:1.5;">
+              "${escapeHtml(r.content || '')}"
+            </div>
+            <div style="font-size:0.72rem; color:#94a3b8; display:flex; justify-content:space-between; padding-top:4px; border-top:1px solid rgba(255,255,255,0.06);">
+              <span>Sumber: <strong>${escapeHtml(r.sourceTitle || 'Percakapan Langsung')}</strong> (${escapeHtml(r.sourceType || 'chat')})</span>
+              ${r.episodeId ? `<span style="font-family:monospace; opacity:0.7;">Ref: ${escapeHtml(r.episodeId.slice(0, 10))}</span>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      openModal('memoryReceiptDetailsModal');
+    }
+  };
 
   // ==================== BIO-ENDOCRINE HORMONE & CONNECTOME SYSTEM (JALUR 1: CODE-ENDOCRINE v3.0) ====================
   // Mengadaptasi sistem hormon & imun mahluk hidup: Dopamin, Kortisol, Serotonin, Adrenalin, dan Endorfin Otonom!
@@ -15048,6 +15574,11 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       } catch (mediaListenerErr) {
         console.warn('Media player listener init notice:', mediaListenerErr);
       }
+      if (extraMeta && Array.isArray(extraMeta.memoryReceipts) && extraMeta.memoryReceipts.length > 0) {
+        if (typeof JozzMemoryUI !== 'undefined' && typeof JozzMemoryUI.renderMemoryReceiptsBadge === 'function') {
+          JozzMemoryUI.renderMemoryReceiptsBadge(row, extraMeta.memoryReceipts);
+        }
+      }
     }
 
     // Attach Lightbox click triggers to images in user attachment bubble
@@ -25706,6 +26237,50 @@ ${blocks}
       return;
     }
 
+    // Intersepsi Slash Command Jozz Memory & Incognito
+    if (trimmedLow === '/memory' || trimmedLow === '/memories' || trimmedLow === '/jozz-memory') {
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+      }
+      openModal('jozzMemoryModal');
+      JozzMemoryUI.refresh();
+      return;
+    }
+    if (trimmedLow === '/incognito' || trimmedLow === '/privat' || trimmedLow === '/private') {
+      if (els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+      }
+      JozzMemoryUI.toggleIncognito();
+      return;
+    }
+
+    // Jalur Eksplisit Jozz Memory: "Ingat bahwa...", "Simpan ke memori...", atau "/remember"
+    const explicitMemPrefixMatch = rawText.match(/^(?:\/?(?:remember|ingat|simpan\s+ke\s+memori|catat\s+ke\s+memori|memorize)\b|ingat\s+bahwa\b)\s*[:,\s]?\s*(.+)$/i);
+    if (explicitMemPrefixMatch && !STATE.isIncognito && STATE.settings.enableJozzMemory !== false) {
+      const memFact = explicitMemPrefixMatch[1].trim();
+      if (memFact.length > 3) {
+        fetch(getUniversalApiUrl('/api/memories'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: STATE.userId || 'default',
+            content: memFact,
+            category: 'general_fact',
+            scope: STATE.activeProjectScope || 'global',
+            sourceTitle: 'Instruksi Chat Langsung',
+            sourceType: 'manual',
+            sourceSnippet: rawText
+          })
+        }).then(r => r.json()).then(d => {
+          if (d && d.success) {
+            showToast('🧠 Jozz Memory: Fakta berhasil dicatat ke memori jangka panjang!', 'success');
+          }
+        }).catch(() => {});
+      }
+    }
+
 
     // Simpan prompt teks asli pengguna untuk tampilan gelembung obrolan (displayContent)
     let originalUserPrompt = rawText;
@@ -29791,6 +30366,30 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const canRunAutonomous = !isPureMathSession && Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       let systemContent = getDynamicSystemTemporalContext();
 
+      // Jozz Memory Scoped Hybrid Recall (Mistral AI 6-Pillars Standard)
+      let jozzMemoryRecall = null;
+      if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false) {
+        try {
+          const recallRes = await fetch(getUniversalApiUrl('/api/memories/recall'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: STATE.userId || 'default',
+              query: promptText,
+              scope: STATE.activeProjectScope || 'global'
+            })
+          }).catch(() => null);
+          if (recallRes && recallRes.ok) {
+            jozzMemoryRecall = await recallRes.json().catch(() => null);
+            if (jozzMemoryRecall && jozzMemoryRecall.systemPromptInjection) {
+              systemContent = `${jozzMemoryRecall.systemPromptInjection}\n\n${systemContent}`;
+            }
+          }
+        } catch (memRecallErr) {
+          console.warn('[Jozz Memory] Ollama recall warning:', memRecallErr);
+        }
+      }
+
       if (personaPrompt) {
         systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
       }
@@ -31082,6 +31681,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
       renderYouTubeCardsForMessage(assistantRow, fullText);
       renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview);
+      if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
+        JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
+      }
       metaBox.innerHTML = `
         <strong>${escapeHtml(modelName)}</strong>
         <span class="meta-model-badge">Ollama</span>
@@ -31107,6 +31709,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           websiteMode: runOptions.websiteMode,
           docFormat: runOptions.docFormat,
           sources: webSources,
+          memoryReceipts: (jozzMemoryRecall?.receipts?.length > 0) ? jozzMemoryRecall.receipts : undefined,
           imageDisplays: groundedImageDisplays.length > 0 ? groundedImageDisplays : undefined,
           files: (generatedFiles.length > 0 && !hasNegativePreview) ? generatedFiles : undefined,
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
@@ -31115,6 +31718,22 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         session.updatedAt = new Date().toISOString();
         savePersistedState();
         renderChatHistory(els.searchHistoryInput?.value || '');
+
+        // Pillar 1: Hybrid Memory Capture (Background Non-Blocking Distillation)
+        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && fullText && fullText.length > 10) {
+          fetch(getUniversalApiUrl('/api/memories/extract-background'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: STATE.userId || 'default',
+              sessionId: session.id,
+              userMessage: promptText,
+              assistantResponse: fullText,
+              scope: STATE.activeProjectScope || 'global',
+              turnIndex: session.messages.length
+            })
+          }).catch(() => {});
+        }
       }
 
       // SEAMLESS AUTO-CONTINUATION: Jika output terpotong, sambung otomatis tanpa putus
@@ -31410,6 +32029,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         return false;
       }
     } finally {
+      if (typeof bubbleText !== 'undefined' && bubbleText) {
+        bubbleText.querySelector('.autonomous-search-status, .typing-cursor')?.remove();
+      }
       setGeneratingState(false);
     }
   }
@@ -31559,6 +32181,30 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       let personaPrompt = STATE.settings.systemPrompt ? STATE.settings.systemPrompt.trim() : '';
       const canRunAutonomous = !isPureMathSession && Boolean(STATE.webSearchEnabled || STATE.searchMode === 'autonomous');
       let systemContent = getDynamicSystemTemporalContext();
+
+      // Jozz Memory Scoped Hybrid Recall (Mistral AI 6-Pillars Standard)
+      let jozzMemoryRecall = null;
+      if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false) {
+        try {
+          const recallRes = await fetch(getUniversalApiUrl('/api/memories/recall'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: STATE.userId || 'default',
+              query: promptText,
+              scope: STATE.activeProjectScope || 'global'
+            })
+          }).catch(() => null);
+          if (recallRes && recallRes.ok) {
+            jozzMemoryRecall = await recallRes.json().catch(() => null);
+            if (jozzMemoryRecall && jozzMemoryRecall.systemPromptInjection) {
+              systemContent = `${jozzMemoryRecall.systemPromptInjection}\n\n${systemContent}`;
+            }
+          }
+        } catch (memRecallErr) {
+          console.warn('[Jozz Memory] Ollama recall warning:', memRecallErr);
+        }
+      }
 
       if (personaPrompt) {
         systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
@@ -33218,6 +33864,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
       renderYouTubeCardsForMessage(assistantRow, fullText);
       renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview);
+      if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
+        JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
+      }
       const effectiveDisplay = (actualModelUsed && actualModelUsed !== displayModel && actualModelUsed !== modelName) ? `${displayModel} → ${actualModelUsed} (Failover)` : displayModel;
       metaBox.innerHTML = `
         <strong title="${actualModelUsed ? escapeHtml('Model dialihkan ke ' + actualModelUsed) : escapeHtml(displayModel)}">${escapeHtml(effectiveDisplay)}</strong>
@@ -33274,12 +33923,29 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           files: (generatedFiles.length > 0 && !hasNegativePreview) ? generatedFiles : undefined,
           imageUrl: collectedImages[0] || undefined,
           sources: webSources,
+          memoryReceipts: (jozzMemoryRecall?.receipts?.length > 0) ? jozzMemoryRecall.receipts : undefined,
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
           timestamp: new Date().toISOString()
         });
         session.updatedAt = new Date().toISOString();
         savePersistedState();
         renderChatHistory(els.searchHistoryInput?.value || '');
+
+        // Pillar 1: Hybrid Memory Capture (Background Non-Blocking Distillation)
+        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && fullText && fullText.length > 10) {
+          fetch(getUniversalApiUrl('/api/memories/extract-background'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: STATE.userId || 'default',
+              sessionId: session.id,
+              userMessage: promptText,
+              assistantResponse: fullText,
+              scope: STATE.activeProjectScope || 'global',
+              turnIndex: session.messages.length
+            })
+          }).catch(() => {});
+        }
       }
 
       // SEAMLESS AUTO-CONTINUATION: Hanya picu auto-continuation jika output benar-benar terpotong/tidak tuntas secara matematis
@@ -33528,6 +34194,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         return false;
       }
     } finally {
+      if (typeof bubbleText !== 'undefined' && bubbleText) {
+        bubbleText.querySelector('.autonomous-search-status, .typing-cursor')?.remove();
+      }
       setGeneratingState(false);
     }
   }
@@ -47188,7 +47857,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://plans-edward-reader-turns.trycloudflare.com',
+    activeTunnelUrl: 'https://association-turtle-tunnel-deaths.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -51075,6 +51744,7 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     StudioEndocrineDiagnostics.init();
     StudioAutonomousAgent.init();
     WhatsAppController.init();
+    JozzMemoryUI.init();
     
     // Initialize Neural Terminal Engine
     if (typeof TerminalManager !== 'undefined') {
