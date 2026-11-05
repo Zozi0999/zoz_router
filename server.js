@@ -11016,9 +11016,27 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
         const openRouterKey = `Bearer ${rawOrKey}`;
 
-        // Multimodal Translation: Konversi skema images Ollama ke OpenRouter multimodal content parts
+        const isNemotronModel = targetCloudModel.toLowerCase().includes('nemotron');
+        const isFreeModel = targetCloudModel.includes(':free') || targetCloudModel.endsWith('/free') || targetCloudModel === 'openrouter/free';
+        const isNonToolModel = isFreeModel || isNemotronModel || targetCloudModel.includes('beam') || targetCloudModel.includes('reflection');
+
+        // Multimodal Translation & Tool Normalization:
+        // 1. Konversi skema images Ollama ke OpenRouter multimodal content parts.
+        // 2. Normalisasi pesan role: 'tool' dan assistant tool_calls untuk model yang tidak mendukung native function calling.
         const normalizedOrMessages = (body.messages || []).map(m => {
           if (!m) return m;
+
+          if (isNonToolModel) {
+            if (m.role === 'tool') {
+              const toolText = (typeof m.content === 'string') ? m.content : JSON.stringify(m.content || '');
+              return { role: 'user', content: `[DATA HASIL PENELUSURAN ALAT / TOOL]:\n${toolText}` };
+            }
+            if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+              const textContent = m.content || `[Mengeksekusi alat penelusuran otonom]`;
+              return { role: 'assistant', content: textContent };
+            }
+          }
+
           const imgs = Array.isArray(m.images) ? m.images : (m.image ? [m.image] : []);
           if (imgs.length > 0 && m.role === 'user') {
             const rawContent = (typeof m.content === 'string') ? m.content : '';
@@ -11047,8 +11065,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         if (body.options?.temperature !== undefined) orPayload.temperature = body.options.temperature;
         if (body.options?.top_p !== undefined) orPayload.top_p = body.options.top_p;
 
-        const isFreeModel = targetCloudModel.includes(':free') || targetCloudModel.endsWith('/free') || targetCloudModel === 'openrouter/free';
-        if (!isFreeModel && Array.isArray(body.tools) && body.tools.length > 0) {
+        if (!isNonToolModel && Array.isArray(body.tools) && body.tools.length > 0) {
           const cleanTools = body.tools.filter(t => t && t.type === 'function' && t.function && t.function.name);
           if (cleanTools.length > 0) {
             orPayload.tools = cleanTools;
