@@ -305,10 +305,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     return false;
   }
 
-  // Model Resolver: Pertahankan nama model asli yang dipilih pengguna
+  // Model Resolver: Pertahankan nama model resmi Ollama Cloud tanpa residu suffix :cloud
   function resolveOllamaCloudModel(modelId) {
     if (!modelId || typeof modelId !== 'string') return '';
-    return modelId.trim();
+    return modelId.replace(/(?:[:-]cloud)$/i, '').trim();
   }
 
   // Universal Model Mapper: Memetakan model Ollama/Cloud ke ekuivalen OpenRouter Cloud resmi
@@ -13219,8 +13219,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     }
 
     const effectiveModel = ep.includes('ollama.com') ? resolveOllamaCloudModel(modelName) : modelName;
-    const chatUrl = (!isTargetingCloud && isLoopbackEp && !cleanKey && !isLocalOrigin)
-      ? ((getActiveTunnelUrl() || '') + '/api/ollama/chat')
+    const chatUrl = (!isTargetingCloud && isLoopbackEp && !cleanKey && isLocalOrigin)
+      ? '/api/ollama/chat'
       : getUniversalApiUrl('/api/ollama/chat');
     const isolatedOllamaSessionId = session?.id ? `${session.id}_cont_${Date.now()}` : undefined;
     const res = await fetch(chatUrl, {
@@ -14176,8 +14176,8 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           headers['x-ollama-key'] = cleanKey;
         }
         if (STATE.settings.openRouterKey) headers['x-openrouter-key'] = STATE.settings.openRouterKey;
-        const url = (!isTargetingCloud && isLoopbackEp && !cleanKey && !isLocalOrigin)
-          ? ((getActiveTunnelUrl() || '') + '/api/ollama/chat')
+        const url = (!isTargetingCloud && isLoopbackEp && !cleanKey && isLocalOrigin)
+          ? '/api/ollama/chat'
           : getUniversalApiUrl('/api/ollama/chat');
         const res = await fetch(url, {
           method: 'POST',
@@ -31538,7 +31538,8 @@ ${formattingConstraints.noTable ? '3. BATASAN FORMAT: Pengguna secara tegas mela
       const isLoopbackEp = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(ep);
       const isTargetingOllamaCloud = Boolean(
         (ep || '').includes('ollama.com') ||
-        (cleanOllamaKey && isLoopbackEp)
+        (cleanOllamaKey && isLoopbackEp) ||
+        (!isLocalOrigin && (cleanOllamaKey || isKnownOllamaCloudModel(requestBody.model) || isLoopbackEp))
       );
       if (isTargetingOllamaCloud) {
         // Normalisasi ep secara mutlak agar Putaran 1, Putaran 2 (digestionBody), dan Rescue Round
@@ -31567,19 +31568,12 @@ ${formattingConstraints.noTable ? '3. BATASAN FORMAT: Pengguna secara tegas mela
         // Ollama Cloud / API Key: jalurnya langsung via Cloud Serverless Gateway ke ollama.com tanpa menyentuh laptop!
         chatUrl = getUniversalApiUrl('/api/ollama/chat');
         isUsingLaptopOllamaTunnel = false;
-      } else if (isLoopbackEp && !cleanOllamaKey) {
-        // Pengguna sengaja memilih model lokal murni di laptop tanpa API Key
-        if (isLocalOrigin) {
-          chatUrl = '/api/ollama/chat';
-          isUsingLaptopOllamaTunnel = isTunnelOrigin;
-        } else {
-          // Dari ponsel ke Ollama lokal laptop: gunakan jalur tunnel laptop
-          const tunnelBase = getActiveTunnelUrl();
-          chatUrl = (tunnelBase ? tunnelBase : '') + '/api/ollama/chat';
-          isUsingLaptopOllamaTunnel = true;
-        }
+      } else if (isLoopbackEp && !cleanOllamaKey && isLocalOrigin) {
+        // Pengguna sengaja memilih model lokal murni di laptop saat membuka localhost
+        chatUrl = '/api/ollama/chat';
+        isUsingLaptopOllamaTunnel = isTunnelOrigin;
       } else {
-        // Endpoint Ollama Remote / Custom HTTPS: jalankan mandiri via Cloud Serverless Gateway
+        // Semua pemanggilan dari domain publik / remote: jalankan 100% via Cloud Serverless Gateway tanpa laptop
         chatUrl = getUniversalApiUrl('/api/ollama/chat');
         isUsingLaptopOllamaTunnel = false;
       }
@@ -31606,8 +31600,8 @@ ${formattingConstraints.noTable ? '3. BATASAN FORMAT: Pengguna secara tegas mela
 
       // Auto-retry fallback: jika model Ollama Cloud mengembalikan 404 (deprecated/not found) atau 500 (decision model / engine outage)
       if (!response.ok && isTargetingOllamaCloud && (response.status === 404 || response.status === 500)) {
-        const fallbackCandidates = ['llama3.2:3b', 'qwen2.5:1.5b', 'granite4.2:3b'];
-        const nextModel = fallbackCandidates.find(m => m !== requestBody.model) || 'llama3.2:3b';
+        const fallbackCandidates = ['glm-5.3-flash', 'deepseek-v4.1-flash', 'minimax-m3.1-flash', 'nemotron-3-nano:30b'];
+        const nextModel = fallbackCandidates.find(m => m !== requestBody.model) || 'glm-5.3-flash';
         console.warn(`[Ollama Cloud] Model ${requestBody.model} returned HTTP ${response.status}. Auto-healing to ${nextModel}...`);
         requestBody.model = nextModel;
         modelName = nextModel;

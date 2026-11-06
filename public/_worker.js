@@ -1483,33 +1483,6 @@ export default {
         let orKey = body.openRouterKey || (body.apiKey && String(body.apiKey).startsWith('sk-or-') ? body.apiKey : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (request.headers.get('Authorization') && request.headers.get('Authorization').includes('sk-or-') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
         if (orKey) orKey = String(orKey).replace(/^Bearer\s+/i, '').trim();
 
-        // Jika tidak ada Ollama Cloud API Key dan terdapat Tunnel aktif ke laptop pengguna,
-        // teruskan permintaan ke Ollama daemon laptop via tunnel agar model lokal/cloud relay lokal berjalan mulus!
-        if (!rawOllamaKey && TUNNEL_GATEWAY_URL) {
-          try {
-            const targetTunnelUrl = TUNNEL_GATEWAY_URL + '/api/ollama/chat';
-            const fwdHeaders = new Headers(request.headers);
-            fwdHeaders.set('Host', new URL(TUNNEL_GATEWAY_URL).host);
-            fwdHeaders.set('X-Forwarded-Host', url.host);
-            fwdHeaders.set('X-Forwarded-Proto', 'https');
-            const tunnelRes = await fetch(targetTunnelUrl, {
-              method: 'POST',
-              headers: fwdHeaders,
-              body: JSON.stringify(body),
-              signal: request.signal
-            });
-            if (tunnelRes.ok || tunnelRes.status === 200) {
-              const resHeaders = new Headers(tunnelRes.headers);
-              resHeaders.set('Access-Control-Allow-Origin', '*');
-              resHeaders.set('Access-Control-Allow-Private-Network', 'true');
-              resHeaders.set('X-Accel-Buffering', 'no');
-              return new Response(tunnelRes.body, { status: tunnelRes.status, headers: resHeaders });
-            }
-          } catch (tunnelErr) {
-            console.warn('[Worker Ollama Tunnel Fallback]:', tunnelErr.message);
-          }
-        }
-
         // DILARANG KERAS memindahkan chat Ollama ke OpenRouter jika Auto-Router tidak diaktifkan secara eksplisit kecuali fallback model cloud dengan key OpenRouter!
         const isAutoRouterExplicit = Boolean(request.headers.get('x-auto-router') === 'true' || body.isAutoRouter);
         const shouldUseCloudBridge = Boolean((isAutoRouterExplicit || (isCloudModel && !rawOllamaKey && orKey)) && !rawOllamaKey && (isLoopback || cleanEndpoint.includes('ollama.com')));
