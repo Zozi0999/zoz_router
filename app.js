@@ -15,6 +15,33 @@
     res = res.replace(/\[INSTRUKSI PENYAJIAN JAWABAN AKHIR\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '');
     return res.trim();
   };
+  const cleanPseudoCotJsonFallback = (text) => {
+    if (!text || typeof text !== 'string') return '';
+    let out = text.replace(/(?:^|\n)\s*(?:```(?:json)?\s*)?\{\s*"(?:image_\d+|transcription|polarity|options_analysis|reasoning|cot|step_\d+)"[\s\S]*?\}(?:\s*```)?\s*(?=(?:\n\s*|\b)(?:Jawaban|Solusi|Answer|Kesimpulan|Rekapitulasi|Hasil|Rekomendasi|\*\*Jawaban|\$[a-zA-Z]|\b[1-9]\.))/i, '').trim();
+    if (/(?:^|\n)\s*(?:```(?:json)?\s*)?\{\s*"(?:image_\d+|transcription|polarity|options_analysis|correct_option|step_\d+)"[\s\S]*?\}(?:\s*```)?\s*$/i.test(out || text)) {
+      try {
+        const jsonMatch = (out || text).match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const obj = JSON.parse(jsonMatch[0]);
+          const keys = Object.keys(obj);
+          const parts = [];
+          for (const k of keys) {
+            const item = obj[k];
+            if (item && typeof item === 'object') {
+              const ans = item.correct_option_text || item.correct_option || item.answer;
+              const explanation = (item.options_analysis && ans && item.options_analysis[ans]) || '';
+              if (ans) {
+                parts.push(`**Jawaban yang tepat (${k}):** $${ans.replace(/^\$+|\$+$/g, '')}$` + (explanation ? `\n\n${explanation}` : ''));
+              }
+            }
+          }
+          if (parts.length > 0) return parts.join('\n\n');
+        }
+      } catch (_) {}
+    }
+    return out;
+  };
+
   const safeAssistantText = (text) => {
     if (typeof text !== 'string' || !text) return '';
     let out = TEXT_SAFETY ? TEXT_SAFETY.stripReasoningText(text) : text
@@ -23,6 +50,7 @@
       .replace(/<\/?(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
       .replace(/\[\/?(?:THOUGHT|REASONING)\]/gi, '');
     out = stripModelTags(out);
+    out = cleanPseudoCotJsonFallback(out);
     out = out.replace(/^\[(?:Pencarian selesai|STATUS PENELUSURAN|Mengeksekusi penelusuran)[^\]]*\]\.?\s*/i, '');
     out = out.replace(/(?:^|\n)\s*(?:\[Pencarian selesai[^\]]*\]|Sistem menyelesaikan penelusuran\.?|Model telah menyelesaikan penelusuran komprehensif[^\n]*)\s*(?:\n|$)/gi, '\n');
     if (typeof isInternalSystemPayload === 'function' && isInternalSystemPayload(out)) {
@@ -6932,8 +6960,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     if (!dirtyHtml || typeof dirtyHtml !== 'string') return '';
     if (window.DOMPurify) {
       return DOMPurify.sanitize(dirtyHtml, {
-        ADD_TAGS: ['details', 'summary'],
-        ADD_ATTR: ['target', 'rel', 'open'],
+        ADD_TAGS: [
+          'details', 'summary',
+          // KaTeX & MathML tags
+          'annotation', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub',
+          'mfrac', 'mover', 'munder', 'msubsup', 'mtable', 'mtr', 'mtd', 'math'
+        ],
+        ADD_ATTR: ['target', 'rel', 'open', 'xmlns', 'display', 'data-latex', 'aria-hidden'],
         FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'nav', 'header', 'footer', 'section', 'main', 'aside', 'html', 'head', 'body', 'title', 'meta', 'link'],
         FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover']
       });
@@ -7701,6 +7734,150 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     return parts.join('');
   }
 
+  // ==================== KATEX MATHEMATICAL FORMULA RENDERING ENGINE ====================
+  function extractAndProtectMath(text) {
+    if (!text || typeof text !== 'string') return { text: '', mathBlocks: [] };
+
+    const mathBlocks = [];
+    let placeholderCounter = 0;
+
+    // 1. Lindungi blok kode berpagar (``` ... ```) dan kode inline (` ... `)
+    const codeBlocks = [];
+    let clean = text.replace(/```[\s\S]*?```|`[^`\n]+`/g, (match) => {
+      const token = `%%ZOZ_CODE_SAFE_${codeBlocks.length}%%`;
+      codeBlocks.push({ token, content: match });
+      return token;
+    });
+
+    // 2. Lindungi escape dollar: \$
+    clean = clean.replace(/\\(\$)/g, '%%ZOZ_ESCAPED_DOLLAR%%');
+
+    // 3. Ekstrak Display Math: $$ ... $$ dan \[ ... \]
+    clean = clean.replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g, (match, p1, p2) => {
+      const formula = (p1 || p2 || '').trim();
+      if (!formula) return match;
+      const token = `%%ZOZ_MATH_DISPLAY_${placeholderCounter++}%%`;
+      mathBlocks.push({ token, formula, displayMode: true });
+      return `\n\n${token}\n\n`;
+    });
+
+    // 4. Ekstrak Inline Math: $ ... $ dan \( ... \)
+    clean = clean.replace(/\\\(([\s\S]+?)\\\)|\$([^\s$](?:[^$\n]*?[^\s$])?)\$(?!\d)/g, (match, p1, p2) => {
+      const formula = (p1 || p2 || '').trim();
+      if (!formula) return match;
+      // Jangan salah tangkap format mata uang biasa ($100 atau $5.50)
+      if (/^\d+(?:[.,]\d+)?$/.test(formula)) {
+        return match;
+      }
+      const token = `%%ZOZ_MATH_INLINE_${placeholderCounter++}%%`;
+      mathBlocks.push({ token, formula, displayMode: false });
+      return token;
+    });
+
+    // 5. Kembalikan blok kode
+    for (const cb of codeBlocks) {
+      clean = clean.replace(cb.token, cb.content);
+    }
+
+    // 6. Kembalikan escaped dollar
+    clean = clean.replace(/%%ZOZ_ESCAPED_DOLLAR%%/g, '\\$');
+
+    return { text: clean, mathBlocks };
+  }
+
+  function hydrateMath(renderedHtml, mathBlocks) {
+    if (!renderedHtml || !mathBlocks || mathBlocks.length === 0) return renderedHtml;
+    let result = renderedHtml;
+    const hasKatex = typeof window !== 'undefined' && window.katex && typeof window.katex.renderToString === 'function';
+
+    for (const item of mathBlocks) {
+      let rendered = '';
+      try {
+        if (hasKatex) {
+          rendered = window.katex.renderToString(item.formula, {
+            displayMode: item.displayMode,
+            throwOnError: false
+          });
+        } else {
+          const tag = item.displayMode ? 'div' : 'span';
+          rendered = `<${tag} class="zoz-math-formula ${item.displayMode ? 'display-math' : 'inline-math'}" data-latex="${escapeHtml(item.formula)}">${escapeHtml(item.formula)}</${tag}>`;
+        }
+      } catch (_) {
+        rendered = `<code>${escapeHtml(item.formula)}</code>`;
+      }
+
+      if (item.displayMode) {
+        const pWrapped = new RegExp(`<p>\\s*${item.token}\\s*<\\/p>`, 'g');
+        if (pWrapped.test(result)) {
+          result = result.replace(pWrapped, rendered);
+        } else {
+          result = result.replace(item.token, rendered);
+        }
+      } else {
+        result = result.replace(item.token, rendered);
+      }
+    }
+    return result;
+  }
+
+  function normalizeMathematicalTextForInput(text) {
+    if (!text || typeof text !== 'string') return '';
+
+    let out = text;
+
+    // 1. Tangkal duplikasi teks formula yang disebabkan oleh copy-paste elemen MathML + visual text bersamaan
+    out = out.replace(/(\b[a-zA-Z]_{[^}]+}\([a-zA-Z0-9]+\)\s*=\s*[a-zA-Z0-9\s+*-]+)\s+\1\b/g, '$1');
+
+    // 2. Normalisasi Unicode Subscripts & Superscripts ke notasi standar ASCII / LaTeX sebelum NFKD
+    const superscriptMap = {
+      '⁰': '^0', '¹': '^1', '²': '^2', '³': '^3', '⁴': '^4',
+      '⁵': '^5', '⁶': '^6', '⁷': '^7', '⁸': '^8', '⁹': '^9',
+      '⁺': '^+', '⁻': '^-', '⁼': '^=', '⁽': '^(', '⁾': '^)',
+      'ⁿ': '^n', 'ⁱ': '^i'
+    };
+    const subscriptMap = {
+      '₀': '_0', '₁': '_1', '₂': '_2', '₃': '_3', '₄': '_4',
+      '₅': '_5', '₆': '_6', '₇': '_7', '₈': '_8', '₉': '_9',
+      '₊': '_+', '₋': '_-', '₌': '_=', '₍': '_(', '₎': '_)',
+      'ₐ': '_a', 'ₑ': '_e', 'ₕ': '_h', 'ᵢ': '_i', 'ⱼ': '_j',
+      'ₖ': '_k', 'ₗ': '_l', 'ₘ': '_m', 'ₙ': '_n', 'ₒ': '_o',
+      'ₚ': '_p', 'ᵣ': '_r', 'ₛ': '_s', 'ₜ': '_t', 'ᵤ': '_u',
+      'ᵥ': '_v', 'ₓ': '_x'
+    };
+    out = out.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ]/g, m => superscriptMap[m] || m);
+    out = out.replace(/[₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ]/g, m => subscriptMap[m] || m);
+
+    // 3. Dekomposisi Unicode Mathematical Alphanumeric Symbols (U+1D400 - U+1D7FF) ke huruf standar (𝑓->f, 𝑥->x, 𝑤->w, 𝑏->b, dll.)
+    try {
+      out = out.normalize('NFKD');
+    } catch (_) {}
+
+    // 4. Normalisasi simbol operator matematika umum ke bentuk standar ASCII/LaTeX
+    out = out
+      .replace(/[−–—]/g, '-')
+      .replace(/[·⋅]/g, ' * ')
+      .replace(/×/g, ' * ')
+      .replace(/÷/g, ' / ')
+      .replace(/≠/g, ' != ')
+      .replace(/≤/g, ' <= ')
+      .replace(/≥/g, ' >= ')
+      .replace(/≈/g, ' ≈ ')
+      .replace(/√/g, '\\sqrt ')
+      .replace(/∑/g, '\\sum ');
+
+    // 5. Perbaiki spasi rusak akibat copy-paste MathJax / KaTeX (misal: "f _ { w , b } ( x ) = w x + b")
+    out = out.replace(/([a-zA-Z0-9])\s*_\s*\{\s*([^}]+)\s*\}/g, (match, base, sub) => {
+      const cleanSub = sub.replace(/\s+/g, '');
+      return `${base}_{${cleanSub}}`;
+    });
+    out = out.replace(/([a-zA-Z])_{([^}]+)}\s*\(\s*([a-zA-Z0-9]+)\s*\)/g, '$1_{$2}($3)');
+
+    // 6. Bersihkan spasi nol-lebar (zero-width spaces) dan non-breaking spaces
+    out = out.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\u00A0/g, ' ');
+
+    return out;
+  }
+
   function renderMarkdown(rawText, isStreaming = false) {
     if (!rawText) return '';
     
@@ -7715,16 +7892,23 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const safeContent = normalizeHtmlCodeBlocksInMarkdown(tableFixedContent);
       // Selama streaming, lewati reflowShreddedProse agar CPU hemat daya
       const displayContent = isStreaming ? safeContent : reflowShreddedProse(safeContent);
+
+      // Ekstrak dan lindungi formula matematika KaTeX sebelum diproses oleh Marked.js
+      const { text: textForMarked, mathBlocks } = extractAndProtectMath(displayContent);
+
       if (window.marked) {
         try {
-          contentHtml = marked.parse(displayContent);
+          contentHtml = marked.parse(textForMarked);
         } catch (err) {
           console.warn('[renderMarkdown] Error parsing markdown, fallback to escaped text:', err);
-          contentHtml = escapeHtml(displayContent).replace(/\n/g, '<br>');
+          contentHtml = escapeHtml(textForMarked).replace(/\n/g, '<br>');
         }
       } else {
-        contentHtml = escapeHtml(displayContent).replace(/\n/g, '<br>');
+        contentHtml = escapeHtml(textForMarked).replace(/\n/g, '<br>');
       }
+
+      // Hidrasi formula matematika KaTeX menjadi visual tipografi persamaan ilmiah yang presisi
+      contentHtml = hydrateMath(contentHtml, mathBlocks);
     }
 
     // Selama streaming berjalan cepat, gunakan fast regex sanitizer untuk mencegah beban 100% CPU.
@@ -16396,6 +16580,11 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     const lineCount = lines.length;
     const charCount = trimmed.length;
     const wordCount = countPromptWords(trimmed);
+
+    // Hindari melipat teks rumus matematika atau soal kuis pendek (< 25 baris) menjadi dokumen lampiran
+    if (/\b(?:f_\{[a-zA-Z0-9,]+\}|\\frac|\\sum|\\sqrt|\\alpha|\\beta|linear regression|loss function|cost function)\b/i.test(trimmed) && lineCount < 25) {
+      return false;
+    }
 
     // a. Blok kode markdown berpagar masif (>= 20 baris atau >= 1200 karakter)
     if (/```[a-zA-Z0-9_-]*\s*\n[\s\S]{300,}?\n```/.test(trimmed) && (lineCount >= 20 || charCount >= 1200)) {
@@ -40392,12 +40581,17 @@ Aturan:
         }
       } catch (_) {}
 
-      if (pastedText && shouldAutoConvertAsDocument(pastedText)) {
+      // Normalisasi formula dan ekspresi matematika agar tidak berantakan saat dicopy-paste
+      const normalizedMathText = normalizeMathematicalTextForInput(pastedText);
+      const isMathNormalized = Boolean(normalizedMathText && normalizedMathText !== pastedText);
+      const textToProcess = isMathNormalized ? normalizedMathText : pastedText;
+
+      if (textToProcess && shouldAutoConvertAsDocument(textToProcess)) {
         e.preventDefault();
         const currentInputText = (els.promptInput ? els.promptInput.value.trim() : '');
         const alwaysAuto = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
         if (alwaysAuto) {
-          const converted = tryAutoConvertInputToDoc(pastedText, currentInputText);
+          const converted = tryAutoConvertInputToDoc(textToProcess, currentInputText);
           if (converted && els.promptInput) {
             autoResizeTextarea(els.promptInput);
             els.promptInput?.focus();
@@ -40406,7 +40600,19 @@ Aturan:
         }
 
         // Tampilkan pop-up modal & floating card konfirmasi interaktif
-        checkAndShowPromptFoldPrompt(pastedText, true, true, currentInputText);
+        checkAndShowPromptFoldPrompt(textToProcess, true, true, currentInputText);
+        return;
+      }
+
+      // Jika teks matematika dinormalisasi (menghilangkan duplikasi MathML, memperbaiki karakter italic, dsb.)
+      if (isMathNormalized && els.promptInput) {
+        e.preventDefault();
+        const start = els.promptInput.selectionStart || 0;
+        const end = els.promptInput.selectionEnd || 0;
+        const curVal = els.promptInput.value;
+        els.promptInput.value = curVal.substring(0, start) + normalizedMathText + curVal.substring(end);
+        els.promptInput.selectionStart = els.promptInput.selectionEnd = start + normalizedMathText.length;
+        autoResizeTextarea(els.promptInput);
         return;
       }
     });
@@ -40417,12 +40623,16 @@ Aturan:
       try {
         droppedText = e.dataTransfer ? e.dataTransfer.getData('text/plain') : '';
       } catch (_) {}
-      if (droppedText && shouldAutoConvertAsDocument(droppedText)) {
+      const normalizedDropText = normalizeMathematicalTextForInput(droppedText);
+      const isDropNormalized = Boolean(normalizedDropText && normalizedDropText !== droppedText);
+      const textToProcess = isDropNormalized ? normalizedDropText : droppedText;
+
+      if (textToProcess && shouldAutoConvertAsDocument(textToProcess)) {
         e.preventDefault();
         const currentInputText = (els.promptInput ? els.promptInput.value.trim() : '');
         const alwaysAuto = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
         if (alwaysAuto) {
-          const converted = tryAutoConvertInputToDoc(droppedText, currentInputText);
+          const converted = tryAutoConvertInputToDoc(textToProcess, currentInputText);
           if (converted && els.promptInput) {
             autoResizeTextarea(els.promptInput);
             els.promptInput?.focus();
@@ -40430,7 +40640,19 @@ Aturan:
           return;
         }
 
-        checkAndShowPromptFoldPrompt(droppedText, true, false, currentInputText, true);
+        checkAndShowPromptFoldPrompt(textToProcess, true, false, currentInputText, true);
+        return;
+      }
+
+      if (isDropNormalized && els.promptInput) {
+        e.preventDefault();
+        const start = els.promptInput.selectionStart || 0;
+        const end = els.promptInput.selectionEnd || 0;
+        const curVal = els.promptInput.value;
+        els.promptInput.value = curVal.substring(0, start) + normalizedDropText + curVal.substring(end);
+        els.promptInput.selectionStart = els.promptInput.selectionEnd = start + normalizedDropText.length;
+        autoResizeTextarea(els.promptInput);
+        return;
       }
     });
 

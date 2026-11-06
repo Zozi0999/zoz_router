@@ -1088,9 +1088,39 @@
     return lines.length > 0 ? lines[lines.length - 1] : '';
   }
 
+  function cleanPseudoCotJson(text) {
+    if (!text || typeof text !== 'string') return '';
+    // 1. Jika ada JSON reasoning yang mendahului teks kesimpulan / jawaban pengguna:
+    let out = text.replace(/(?:^|\n)\s*(?:```(?:json)?\s*)?\{\s*"(?:image_\d+|transcription|polarity|options_analysis|reasoning|cot|step_\d+)"[\s\S]*?\}(?:\s*```)?\s*(?=(?:\n\s*|\b)(?:Jawaban|Solusi|Answer|Kesimpulan|Rekapitulasi|Hasil|Rekomendasi|\*\*Jawaban|\$[a-zA-Z]|\b[1-9]\.))/i, '').trim();
+
+    // 2. Jika seluruh respons adalah blok JSON reasoning tanpa teks penutup, pulihkan jawaban yang bersih:
+    if (/(?:^|\n)\s*(?:```(?:json)?\s*)?\{\s*"(?:image_\d+|transcription|polarity|options_analysis|correct_option|step_\d+)"[\s\S]*?\}(?:\s*```)?\s*$/i.test(out || text)) {
+      try {
+        const jsonMatch = (out || text).match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const obj = JSON.parse(jsonMatch[0]);
+          const keys = Object.keys(obj);
+          const parts = [];
+          for (const k of keys) {
+            const item = obj[k];
+            if (item && typeof item === 'object') {
+              const ans = item.correct_option_text || item.correct_option || item.answer;
+              const explanation = (item.options_analysis && ans && item.options_analysis[ans]) || '';
+              if (ans) {
+                parts.push(`**Jawaban yang tepat (${k}):** $${ans.replace(/^\$+|\$+$/g, '')}$` + (explanation ? `\n\n${explanation}` : ''));
+              }
+            }
+          }
+          if (parts.length > 0) return parts.join('\n\n');
+        }
+      } catch (_) {}
+    }
+    return out;
+  }
+
   function stripReasoningText(rawText) {
     if (typeof rawText !== 'string' || !rawText) return '';
-    const cleaned = rawText
+    let cleaned = rawText
       .replace(THINKING_TAG_REGEX, '')
       .replace(BRACKET_THINK_REGEX, '')
       .replace(/<\/?(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
@@ -1101,6 +1131,8 @@
       const inner = rawText.replace(/^[\s\S]*?<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/i, '');
       return extractFallbackConclusionFromUnclosedThought(inner);
     }
+    // Bersihkan residu pseudo-cot JSON yang lolos keluar dari tag <think>
+    cleaned = cleanPseudoCotJson(cleaned);
     return cleaned;
   }
 
@@ -2387,7 +2419,11 @@ Sebelum menulis satu kata pun jawaban kepada pengguna, Anda WAJIB mengawali gene
    - Jika tersedia "Semua benar" pada soal positif (+1): apabila >=2 opsi substantif sama-sama merupakan contoh/pernyataan yang valid sesuai kategori yang ditanyakan (v=1), maka "Semua benar" WAJIB dipilih (jangan memaksakan memilih 1 contoh saja).
    - Jika tersedia "Semua salah" pada soal definisi positif (+1): apabila seluruh opsi substantif merupakan definisi konsep tetangga Y != X atau meleset syarat spesifiknya (semua v=0), maka "Semua salah" WAJIB dipilih!
    - Pada soal pengecualian "kecuali..." (-1): jika seluruh opsi substantif ternyata BENAR/BISA digunakan sesuai klaim soal, maka tidak ada pengecualian di antara ketiganya sehingga "semua salah" WAJIB dipilih; sebaliknya jika ada tepat 1 opsi substantif yang salah/bukan kesalahan, pilih opsi tersebut.
-5. Tutup </think>, lalu tuliskan jawaban akhir yang bersih, akurat, dan sesuai format yang diminta pengguna.`;
+5. FORMAT JAWABAN AKHIR MURNI & ELEGAN:
+   - Tutup </think>, lalu tuliskan jawaban akhir secara elegan, bersih, dan langsung kepada pengguna.
+   - DILARANG KERAS menghasilkan blok kode JSON (seperti \`\`\`json {...}\`\`\`), kamus data, atau residu kode program untuk penalaran internal!
+   - FORMULA & PERSAMAAN MATEMATIKA: Tuliskan seluruh rumus, variabel, parameter, dan ekspresi matematika dalam notasi standar LaTeX KaTeX ($...$ untuk formula sebaris seperti $f_{w,b}(x) = wx + b$, $x$, $w$, $b$, dan $$...$$ untuk persamaan display mandiri) agar tertampil indah, presisi, dan mudah dibaca serta disalin oleh pengguna.
+   - Sertakan 1-2 baris penjelasan konseptual/matematis yang ringkas, percaya diri, dan solutif.`;
       if (questionLineIdx === -1 && (unlabeledCandidateSetCount >= 2 || labeledOptionLines.length >= 2)) {
         calibrationDirective += `\n\n6. INFERENSI ABDUKTIF SOAL TANPA PERTANYAAN EKSPLISIT (INVERSE PROBLEM & KALIBRASI OVERCONFIDENCE):
    Pengguna HANYA menyalin opsi pilihan kuis (${lines.length} opsi) tanpa menyertakan teks pertanyaan.
@@ -3307,6 +3343,7 @@ ${condensed}`;
   }
 
   return {
+    cleanPseudoCotJson,
     isZeroInformationQuery,
     isPureAlgebraOrConceptualQuery,
     splitReasoningAndContent,
