@@ -16231,7 +16231,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           </div>
         ` : ''}
         <div class="message-actions-bar">
-          ${(role === 'user' && hasText) ? '<button class="msg-action-btn edit-msg-btn" title="Edit & Kirim Ulang Prompt"><i class="fa-solid fa-pen-to-square"></i> Edit</button>' : ''}
+          ${role === 'user' ? `<button class="msg-action-btn edit-msg-btn" title="${hasText ? 'Edit & Kirim Ulang Prompt' : 'Masukkan Prompt untuk Foto/File'}"><i class="fa-solid fa-pen-to-square"></i> ${hasText ? 'Edit' : 'Masukkan Prompt'}</button>` : ''}
           <button class="msg-action-btn copy-msg-btn" title="Salin Pesan"><i class="fa-solid fa-copy"></i> Salin</button>
         </div>
       </div>
@@ -16323,8 +16323,23 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           showToast('Harap tunggu atau hentikan generasi AI saat ini sebelum mengedit.', 'error');
           return;
         }
-        if (!bubble || !textContainer) return;
-        if (bubble.querySelector('.inline-edit-box')) return;
+
+        let targetBubble = bubble;
+        let createdNewBubble = false;
+        if (!targetBubble) {
+          targetBubble = document.createElement('div');
+          targetBubble.className = 'message-bubble inline-prompt-bubble';
+          targetBubble.style.cssText = 'width:100%; max-width:100%; margin-top:6px;';
+          const contentBox = row.querySelector('.message-content-box');
+          if (actionsBar && actionsBar.parentNode === contentBox) {
+            contentBox.insertBefore(targetBubble, actionsBar);
+          } else if (contentBox) {
+            contentBox.appendChild(targetBubble);
+          }
+          createdNewBubble = true;
+        }
+
+        if (targetBubble.querySelector('.inline-edit-box')) return;
 
         // Create inline editor
         let originalContent = content;
@@ -16345,21 +16360,21 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
             originalContent = originalContent.replace(/\s*\[File:\s*[^\]]+\]/gi, '').trim();
           }
         }
-        textContainer.style.display = 'none';
+        if (textContainer) textContainer.style.display = 'none';
         if (actionsBar) actionsBar.style.display = 'none';
 
         const editorBox = document.createElement('div');
         editorBox.className = 'inline-edit-box';
         editorBox.style.cssText = 'display:flex; flex-direction:column; gap:8px; width:100%; min-width:280px; margin-top:4px;';
         editorBox.innerHTML = `
-          <textarea class="inline-edit-textarea" style="width:100%; min-height:75px; background:var(--bg-core); border:1px solid var(--neon-cyan); border-radius:6px; color:var(--text-main); padding:8px 10px; font-family:var(--font-main); font-size:0.9rem; line-height:1.5; resize:vertical; outline:none; box-shadow:0 0 12px rgba(0,240,255,0.25);">${escapeHtml(originalContent)}</textarea>
+          <textarea class="inline-edit-textarea" placeholder="${hasText ? 'Edit prompt Anda...' : 'Ketik prompt atau pertanyaan untuk foto ini...'}" style="width:100%; min-height:75px; background:var(--bg-core); border:1px solid var(--neon-cyan); border-radius:6px; color:var(--text-main); padding:8px 10px; font-family:var(--font-main); font-size:0.9rem; line-height:1.5; resize:vertical; outline:none; box-shadow:0 0 12px rgba(0,240,255,0.25);">${escapeHtml(originalContent)}</textarea>
           <div style="display:flex; justify-content:flex-end; gap:8px;">
             <button class="btn btn-sm btn-secondary cancel-edit-btn" style="padding:4px 10px; font-size:0.75rem;">Batal</button>
-            <button class="btn btn-sm btn-primary save-edit-btn" style="padding:4px 12px; font-size:0.75rem;"><i class="fa-solid fa-paper-plane"></i> Simpan & Kirim Ulang</button>
+            <button class="btn btn-sm btn-primary save-edit-btn" style="padding:4px 12px; font-size:0.75rem;"><i class="fa-solid fa-paper-plane"></i> ${hasText ? 'Simpan & Kirim Ulang' : 'Kirim Prompt'}</button>
           </div>
         `;
 
-        bubble.appendChild(editorBox);
+        targetBubble.appendChild(editorBox);
         const textarea = editorBox.querySelector('.inline-edit-textarea');
         if (textarea) {
           textarea.focus();
@@ -16369,7 +16384,11 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         // Cancel
         editorBox.querySelector('.cancel-edit-btn')?.addEventListener('click', () => {
           editorBox.remove();
-          if (textContainer) textContainer.style.display = hasText ? 'block' : 'none';
+          if (createdNewBubble) {
+            targetBubble.remove();
+          } else if (textContainer) {
+            textContainer.style.display = hasText ? 'block' : 'none';
+          }
           if (actionsBar) actionsBar.style.display = 'flex';
           AudioEngine.click();
         });
@@ -17566,7 +17585,7 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 
     els.attachmentPreviewBar.style.display = 'flex';
     if (hasImages && els.promptInput && !els.promptInput.value) {
-      els.promptInput.placeholder = '';
+      els.promptInput.placeholder = 'Ketik prompt atau pertanyaan untuk foto ini...';
     }
     setTimeout(() => {
       if (els.promptInput) {
@@ -17576,7 +17595,7 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
     }, 60);
 
     // Clear existing dynamic preview cards & chips (preserve Connectome template #imagePreviewCard)
-    els.attachmentPreviewBar.querySelectorAll('.dynamic-preview-card, .deepseek-img-cards-row, .doc-preview-chip, .deepseek-doc-chips-row').forEach(c => c.remove());
+    els.attachmentPreviewBar.querySelectorAll('.dynamic-preview-card, .deepseek-img-cards-row, .doc-preview-chip, .deepseek-doc-chips-row, .attachment-prompt-action-row').forEach(c => c.remove());
 
     // Append Image Preview Cards (DeepSeek Style)
     if (hasImages) {
@@ -17602,6 +17621,23 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
         imgRow.appendChild(card);
       });
       els.attachmentPreviewBar.appendChild(imgRow);
+
+      const promptBtnRow = document.createElement('div');
+      promptBtnRow.className = 'attachment-prompt-action-row';
+      promptBtnRow.innerHTML = `
+        <button class="btn-attach-prompt-trigger" type="button" title="Ketik prompt atau pertanyaan untuk foto ini">
+          <i class="fa-solid fa-pen-to-square"></i> <span>Ketik Prompt Foto...</span>
+        </button>
+      `;
+      promptBtnRow.querySelector('button')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (els.promptInput) {
+          els.promptInput.placeholder = 'Ketik prompt atau pertanyaan untuk foto ini...';
+          els.promptInput.focus();
+          els.promptInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      });
+      els.attachmentPreviewBar.appendChild(promptBtnRow);
     }
 
     // Append Doc Chips
@@ -31502,8 +31538,7 @@ ${formattingConstraints.noTable ? '3. BATASAN FORMAT: Pengguna secara tegas mela
       const isLoopbackEp = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(ep);
       const isTargetingOllamaCloud = Boolean(
         (ep || '').includes('ollama.com') ||
-        (cleanOllamaKey && isLoopbackEp) ||
-        (!isLocalOrigin && (isKnownOllamaCloudModel(requestBody.model) || cleanOllamaKey || isLoopbackEp))
+        (cleanOllamaKey && isLoopbackEp)
       );
       if (isTargetingOllamaCloud) {
         // Normalisasi ep secara mutlak agar Putaran 1, Putaran 2 (digestionBody), dan Rescue Round

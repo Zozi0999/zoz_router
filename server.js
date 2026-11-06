@@ -11028,9 +11028,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       let isLoopbackTarget = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?/i.test(customEndpoint);
       const isCloudModelRequested = isKnownOllamaCloudModel(body.model) || Boolean(body.model && body.model.includes(':cloud'));
       // Jika pengguna menyertakan Ollama Cloud API Key pada endpoint default/loopback,
-      // atau jika target model adalah model Ollama Cloud resmi (seperti beam),
-      // arahkan ke https://ollama.com resmi (selaras dengan /api/ollama/models & callLLMBackend).
-      if ((isServerlessChat || rawOllamaKey || isCloudModelRequested) && isLoopbackTarget) {
+      // atau jika sedang berjalan di cloud serverless, arahkan ke https://ollama.com resmi.
+      // Jika TIDAK ada Ollama API Key di laptop, pertahankan target loopback (127.0.0.1:11434)
+      // agar model lokal/cloud relay lokal dapat dieksekusi tanpa tertolak HTTP 401.
+      if ((isServerlessChat || rawOllamaKey) && isLoopbackTarget) {
         customEndpoint = 'https://ollama.com';
         isLoopbackTarget = false;
       }
@@ -11777,8 +11778,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         proxyReq.end();
       };
 
-      const isCloudTarget = Boolean(rawOllamaKey || isCloudModelRequested || (body.model && body.model.includes(':cloud')) || customEndpoint.includes('ollama.com'));
-      const allowLocalFallback = !isServerlessChat && !isCloudTarget;
+      const isCloudTarget = Boolean(rawOllamaKey || (customEndpoint && customEndpoint.includes('ollama.com')));
+      const allowLocalFallback = !isServerlessChat;
       dispatchOllamaUpstream(customEndpoint, body.model, rawOllamaKey, allowLocalFallback, true);
     } catch (err) {
       // Pembersihan aman jika terjadi throw sinkron (ERR_INVALID_CHAR, payload error, socket write error)
