@@ -7825,6 +7825,73 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
     let out = text;
 
+    // 0. Bersihkan artefak platform Coursera, Khan Academy, & LMS (Speech tokens, serpihan karakter vertikal, & stutter)
+    // a. Hapus filler platform
+    out = out.replace(/(?:^|\n)\s*Question\s+\d+\s*(?:\n|$)/gi, '\n');
+    out = out.replace(/(?:^|\n)\s*\d+\s+points?\s*(?:\n|$)/gi, '\n');
+    out = out.replace(/(?:^|\n)\s*Do you understand\?\.?\s*(?:\n|$)/gi, '\n');
+
+    // b. Hapus narasi pembaca layar (Screen-Reader Speech Text MathJax / Khan Academy / Coursera)
+    // Contoh: "f, start subscript, w, comma, b, end subscript, left parenthesis, x, right parenthesis, equals, w, x, plus, b."
+    const speechTokenRegex = /(?:[a-zA-Z0-9]\s*,\s*)?(?:(?:start\s+(?:subscript|superscript|fraction)|left\s+parenthesis)\b)(?:[ \t,]+(?:[a-zA-Z0-9]|start\s+(?:subscript|superscript|fraction)|end\s+(?:subscript|superscript|fraction)|left\s+parenthesis|right\s+parenthesis|comma|equals|plus|minus|times|divided\s+by|over)\b)+[.]?/gi;
+    out = out.replace(speechTokenRegex, '');
+
+    // c. Hilangkan kegagapan duplikasi huruf MathJax (stutter: "w\nww" -> "w", "b\nbb" -> "b", "m\nmm" -> "m", "x\nxx" -> "x")
+    out = out.replace(/\b([a-zA-Z])\s*\n\s*\1\1\b/g, '$1');
+    out = out.replace(/\b([a-zA-Z])\s+(\1\1)\b/g, '$1');
+
+    // d. Rekonstruksi baris-baris serpihan satu huruf/simbol matematika vertikal (Vertical single-character formula shatter)
+    // Misal: f \n w \n , \n b \n ( \n x \n ) \n = \n w \n x \n + \n b -> f_{w,b}(x) = wx + b
+    const rawLines = out.split('\n');
+    const consolidated = [];
+    let chunk = [];
+
+    function isSingleMathChar(line) {
+      const t = line.trim();
+      return t.length === 1 && /^[a-zA-Z0-9_(),=+\-*/^.]$/.test(t);
+    }
+
+    for (let i = 0; i < rawLines.length; i++) {
+      const l = rawLines[i];
+      if (isSingleMathChar(l)) {
+        chunk.push(l.trim());
+      } else {
+        if (chunk.length >= 3) {
+          let fStr = chunk.join('');
+          fStr = fStr.replace(/([a-zA-Z])([a-zA-Z0-9,]+)\(/, '$1_{$2}(');
+          fStr = fStr.replace(/([=+*/-])/g, ' $1 ');
+          fStr = fStr.replace(/\s+/g, ' ').trim();
+          consolidated.push(fStr);
+          chunk = [];
+        } else if (chunk.length > 0) {
+          consolidated.push(...chunk);
+          chunk = [];
+        }
+        consolidated.push(l);
+      }
+    }
+    if (chunk.length >= 3) {
+      let fStr = chunk.join('');
+      fStr = fStr.replace(/([a-zA-Z])([a-zA-Z0-9,]+)\(/, '$1_{$2}(');
+      fStr = fStr.replace(/([=+*/-])/g, ' $1 ');
+      fStr = fStr.replace(/\s+/g, ' ').trim();
+      consolidated.push(fStr);
+    } else if (chunk.length > 0) {
+      consolidated.push(...chunk);
+    }
+    out = consolidated.join('\n');
+
+    // e. Bersihkan duplikasi formula berdekatan akibat elemen visual + hidden MathML
+    out = out.replace(/f_{w,b}\(x\)\s*=\s*wx\s*\+\s*b\s*f\s*w,b\s*\(x\)=wx\+b/gi, 'f_{w,b}(x) = wx + b');
+    out = out.replace(/J\s*\(\s*w\s*,\s*b\s*\)\s*J\s*\(\s*w\s*,\s*b\s*\)/gi, 'J(w,b)');
+    out = out.replace(/\(\s*x\s*,\s*y\s*\)\s*\(\s*x\s*,\s*y\s*\)/gi, '(x, y)');
+
+    // f. Sambungkan kata hubung / variabel yang terputus baris akibat struktur tag MathJax
+    out = out.replace(/([a-zA-Z0-9,])\s*\n\s*(and|or|so that)\s*\n\s*([a-zA-Z0-9])/gi, '$1 $2 $3');
+    out = out.replace(/\b(and|or|so that|find|parameters|model is)\s*\n+\s*([a-zA-Z0-9_{}()=+\-*/]+)/gi, '$1 $2');
+    out = out.replace(/([a-zA-Z0-9])\s*\n\s*(and|or)\b/gi, '$1 $2');
+    out = out.replace(/\b(and|or)\s*\n\s*([a-zA-Z0-9])/gi, '$1 $2');
+
     // 1. Tangkal duplikasi teks formula yang disebabkan oleh copy-paste elemen MathML + visual text bersamaan
     out = out.replace(/(\b[a-zA-Z]_{[^}]+}\([a-zA-Z0-9]+\)\s*=\s*[a-zA-Z0-9\s+*-]+)\s+\1\b/g, '$1');
 
@@ -7875,7 +7942,15 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // 6. Bersihkan spasi nol-lebar (zero-width spaces) dan non-breaking spaces
     out = out.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\u00A0/g, ' ');
 
-    return out;
+    // 7. Rapikan baris kosong berulang dan spasi horizontal
+    out = out.replace(/[ \t]+/g, ' ');
+    out = out.replace(/\n\s+\n/g, '\n\n');
+    out = out.replace(/\n{3,}/g, '\n\n');
+
+    // 8. Normalisasi nomor soal (misal: "1.\n\nFor linear..." -> "1. For linear...")
+    out = out.replace(/(\b\d+\.)\s*\n+/g, '$1 ');
+
+    return out.trim();
   }
 
   function renderMarkdown(rawText, isStreaming = false) {
