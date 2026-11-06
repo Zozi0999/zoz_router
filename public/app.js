@@ -7821,6 +7821,122 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     return result;
   }
 
+  function cleanMathJaxSpeechTokens(text) {
+    if (!text || typeof text !== 'string') return '';
+    let out = text;
+
+    // 1. Ubah speech reader MathJax (contoh: "b, equals, b, minus, alph, su...") menjadi formula nyata
+    out = out.replace(/(?:^|\n)\s*([a-zA-Z0-9])\s*,\s*equals\s*,\s*([a-zA-Z0-9])\s*,\s*(?:minus|plus)[^\n]*/gi, (match) => {
+      let expr = match
+        .replace(/,\s*/g, ' ')
+        .replace(/\bequals\b/gi, '=')
+        .replace(/\bminus\b/gi, '-')
+        .replace(/\bplus\b/gi, '+')
+        .replace(/\btimes\b/gi, '*')
+        .replace(/\b(?:divided\s+by|over)\b/gi, '/')
+        .replace(/\b(?:alpha|alph)\b/gi, 'α')
+        .replace(/\b(?:beta|bet)\b/gi, 'β')
+        .replace(/\b(?:theta|thet)\b/gi, 'θ')
+        .replace(/\b(?:lambda|lamb)\b/gi, 'λ')
+        .replace(/\b(?:sigma|sigm)\b/gi, 'σ')
+        .replace(/\b(?:left\s+parenthesis|start\s+parenthesis)\b/gi, '(')
+        .replace(/\b(?:right\s+parenthesis|end\s+parenthesis)\b/gi, ')')
+        .replace(/\b(?:start\s+subscript|subscript|su|sub)\b/gi, '_')
+        .replace(/\b(?:end\s+subscript)\b/gi, '')
+        .replace(/\b(?:start\s+superscript|superscript|sup)\b/gi, '^')
+        .replace(/\b(?:end\s+superscript)\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      expr = expr.replace(/[_\^=+\-*/\s]+$/, '');
+      return '\n' + expr;
+    });
+
+    // 2. Bersihkan narasi speech pembaca layar umum
+    const generalSpeechRegex = /(?:[a-zA-Z0-9]\s*,\s*)?(?:(?:start\s+(?:subscript|superscript|fraction)|left\s+parenthesis)\b)(?:[ \t,]+(?:[a-zA-Z0-9]|start\s+(?:subscript|superscript|fraction)|end\s+(?:subscript|superscript|fraction)|left\s+parenthesis|right\s+parenthesis|comma|equals|plus|minus|times|divided\s+by|over)\b)+[.]?/gi;
+    out = out.replace(generalSpeechRegex, '');
+
+    return out;
+  }
+
+  function assembleShatteredMathLines(text) {
+    if (!text || typeof text !== 'string') return '';
+    const lines = text.split('\n');
+    const result = [];
+    let chunk = [];
+
+    function isUnbalancedOrOperatorFragment(line) {
+      const t = line.trim();
+      if (!t) return false;
+      if (t.length > 12) return false;
+
+      // Hitung kurung: jika kurung buka & tutup tidak seimbang -> serpihan formula
+      const openParen = (t.match(/\(/g) || []).length;
+      const closeParen = (t.match(/\)/g) || []).length;
+      if (openParen !== closeParen) return true;
+
+      // Awalan atau akhiran operator matematika (+, -, =, *, /, ^, koma)
+      if (/^[=+\-*/^,.]/.test(t) || /[=+\-*/^,.]$/.test(t)) return true;
+
+      // Pola subskrip (w,b) atau superskrip ((i))
+      if (/^[a-zA-Z0-9],[a-zA-Z0-9]$/.test(t) || /^\([a-zA-Z0-9]\)$/.test(t)) return true;
+
+      // Pola serpihan satu karakter
+      if (t.length === 1 && /^[a-zA-Z0-9_(),=+\-*/^.]$/.test(t)) return true;
+
+      return false;
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (isUnbalancedOrOperatorFragment(trimmed)) {
+        chunk.push(trimmed);
+      } else if (!trimmed && chunk.length > 0) {
+        if (i + 1 < lines.length && isUnbalancedOrOperatorFragment(lines[i + 1])) {
+          continue;
+        } else {
+          result.push(reconstructMathFragmentChunk(chunk));
+          chunk = [];
+        }
+      } else {
+        if (chunk.length > 0) {
+          result.push(reconstructMathFragmentChunk(chunk));
+          chunk = [];
+        }
+        if (trimmed) {
+          result.push(line);
+        }
+      }
+    }
+
+    if (chunk.length > 0) {
+      result.push(reconstructMathFragmentChunk(chunk));
+    }
+
+    return result.join('\n');
+  }
+
+  function reconstructMathFragmentChunk(tokens) {
+    if (!tokens || tokens.length === 0) return '';
+    if (tokens.length === 1) return tokens[0];
+
+    let str = tokens.join(' ');
+    str = str.replace(/([a-zA-Z])\s*,\s*([a-zA-Z])/g, '$1,$2');
+    str = str.replace(/\(\s*f\s+([a-zA-Z0-9,]+)/g, '(f_{$1}');
+    str = str.replace(/\bf\s+([a-zA-Z0-9,]+)\s*\(/g, 'f_{$1}(');
+    str = str.replace(/\bf\s+([a-zA-Z0-9,]+)\b/g, 'f_{$1}');
+    str = str.replace(/([a-zA-Z0-9])\s*\(\s*([a-zA-Z0-9]+)\s*\)/g, '$1^{($2)}');
+    str = str.replace(/\)\s*-\s*([a-zA-Z0-9])/g, ') - $1');
+    str = str.replace(/\)\s*([a-zA-Z0-9])/g, ') $1');
+    str = str.replace(/\(\s+/g, '(');
+    str = str.replace(/\s+\)/g, ')');
+    str = str.replace(/(f_{[^}]+})\s+\(/g, '$1(');
+    str = str.replace(/\s*([=+\-*/])\s*/g, ' $1 ');
+    str = str.replace(/\s+/g, ' ').trim();
+    return str;
+  }
+
   function normalizeMathematicalTextForInput(text) {
     if (!text || typeof text !== 'string') return '';
 
@@ -7833,56 +7949,17 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     out = out.replace(/(?:^|\n)\s*Do you understand\s*\?\s*\.?\s*(?:\n|$)/gi, '\n');
 
     // b. Hapus narasi pembaca layar (Screen-Reader Speech Text MathJax / Khan Academy / Coursera)
-    // Contoh: "f, start subscript, w, comma, b, end subscript, left parenthesis, x, right parenthesis, equals, w, x, plus, b."
-    const speechTokenRegex = /(?:[a-zA-Z0-9]\s*,\s*)?(?:(?:start\s+(?:subscript|superscript|fraction)|left\s+parenthesis)\b)(?:[ \t,]+(?:[a-zA-Z0-9]|start\s+(?:subscript|superscript|fraction)|end\s+(?:subscript|superscript|fraction)|left\s+parenthesis|right\s+parenthesis|comma|equals|plus|minus|times|divided\s+by|over)\b)+[.]?/gi;
-    out = out.replace(speechTokenRegex, '');
+    out = cleanMathJaxSpeechTokens(out);
 
     // c. Hilangkan kegagapan duplikasi huruf MathJax (stutter: "w\nww" -> "w", "b\nbb" -> "b", "m\nmm" -> "m", "x\nxx" -> "x")
     out = out.replace(/\b([a-zA-Z])\s*\n\s*\1\1\b/g, '$1');
     out = out.replace(/\b([a-zA-Z])\s+(\1\1)\b/g, '$1');
 
-    // d. Rekonstruksi baris-baris serpihan satu huruf/simbol matematika vertikal (Vertical single-character formula shatter)
-    // Misal: f \n w \n , \n b \n ( \n x \n ) \n = \n w \n x \n + \n b -> f_{w,b}(x) = wx + b
-    const rawLines = out.split('\n');
-    const consolidated = [];
-    let chunk = [];
-
-    function isSingleMathChar(line) {
-      const t = line.trim();
-      return t.length === 1 && /^[a-zA-Z0-9_(),=+\-*/^.]$/.test(t);
-    }
-
-    for (let i = 0; i < rawLines.length; i++) {
-      const l = rawLines[i];
-      if (isSingleMathChar(l)) {
-        chunk.push(l.trim());
-      } else {
-        if (chunk.length >= 3) {
-          let fStr = chunk.join('');
-          fStr = fStr.replace(/([a-zA-Z])([a-zA-Z0-9,]+)\(/, '$1_{$2}(');
-          fStr = fStr.replace(/([=+*/-])/g, ' $1 ');
-          fStr = fStr.replace(/\s+/g, ' ').trim();
-          consolidated.push(fStr);
-          chunk = [];
-        } else if (chunk.length > 0) {
-          consolidated.push(...chunk);
-          chunk = [];
-        }
-        consolidated.push(l);
-      }
-    }
-    if (chunk.length >= 3) {
-      let fStr = chunk.join('');
-      fStr = fStr.replace(/([a-zA-Z])([a-zA-Z0-9,]+)\(/, '$1_{$2}(');
-      fStr = fStr.replace(/([=+*/-])/g, ' $1 ');
-      fStr = fStr.replace(/\s+/g, ' ').trim();
-      consolidated.push(fStr);
-    } else if (chunk.length > 0) {
-      consolidated.push(...chunk);
-    }
-    out = consolidated.join('\n');
+    // d. Rekonstruksi baris-baris serpihan karakter/simbol matematika vertikal (Unbalanced & multi-token MathJax shatter)
+    out = assembleShatteredMathLines(out);
 
     // e. Bersihkan duplikasi formula berdekatan akibat elemen visual + hidden MathML
+    out = out.replace(/f_{w,b}\(x\)\s*=\s*w\s*x\s*\+\s*b[\s\S]*?\(x\s*\)\s*=\s*wx\s*\+\s*b/gi, 'f_{w,b}(x) = wx + b');
     out = out.replace(/f_{w,b}\(x\)\s*=\s*wx\s*\+\s*b\s*f\s*w,b\s*\(\s*x\s*\)\s*=\s*wx\s*\+\s*b/gi, 'f_{w,b}(x) = wx + b');
     out = out.replace(/\bf\s*w,b\s*\(\s*x\s*\)\s*=\s*wx\s*\+\s*b\b/gi, '');
     out = out.replace(/J\s*\(\s*w\s*,\s*b\s*\)\s*J\s*\(\s*w\s*,\s*b\s*\)/gi, 'J(w,b)');
