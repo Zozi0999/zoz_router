@@ -2793,34 +2793,6 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   z-index: 5;
 }
 
-.attachment-prompt-action-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  width: 100%;
-}
-
-.btn-attach-prompt-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  background: rgba(0, 240, 255, 0.08);
-  border: 1px solid rgba(0, 240, 255, 0.3);
-  border-radius: 8px;
-  color: var(--neon-cyan);
-  font-size: 0.78rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.18s ease;
-}
-
-.btn-attach-prompt-trigger:hover {
-  background: rgba(0, 240, 255, 0.18);
-  border-color: var(--neon-cyan);
-  transform: translateY(-1px);
-}
 
 .remove-attachment-btn:hover {
   background: rgba(239, 68, 68, 0.9);
