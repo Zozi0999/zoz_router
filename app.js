@@ -16212,6 +16212,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     }
 
     const metaContent = `<strong>${roleLabel}</strong> ${statsHtml}`;
+    const shouldRenderBubble = (role === 'assistant') || (role === 'user' && hasText);
 
     row.innerHTML = `
       <div class="message-avatar">${avatarIcon}</div>
@@ -16219,16 +16220,18 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         <div class="message-meta">
           ${metaContent}
         </div>
-        <div class="message-bubble">
-          ${role === 'user' ? imageGalleryHtml : ''}
-          ${docsHtml}
-          <div class="msg-text-content" ${textDisplayStyle}>${renderedBody}</div>
-          ${role === 'assistant' ? assistantGeneratedImagesHtml : ''}
-          ${role === 'assistant' ? assistantMediaHtml : ''}
-          ${sourcesHtml}
-        </div>
+        ${role === 'user' && imageGalleryHtml ? imageGalleryHtml : ''}
+        ${role === 'user' && docsHtml ? docsHtml : ''}
+        ${shouldRenderBubble ? `
+          <div class="message-bubble">
+            <div class="msg-text-content" ${textDisplayStyle}>${renderedBody}</div>
+            ${role === 'assistant' ? assistantGeneratedImagesHtml : ''}
+            ${role === 'assistant' ? assistantMediaHtml : ''}
+            ${sourcesHtml}
+          </div>
+        ` : ''}
         <div class="message-actions-bar">
-          ${role === 'user' ? '<button class="msg-action-btn edit-msg-btn" title="Edit & Kirim Ulang Prompt"><i class="fa-solid fa-pen-to-square"></i> Edit</button>' : ''}
+          ${(role === 'user' && hasText) ? '<button class="msg-action-btn edit-msg-btn" title="Edit & Kirim Ulang Prompt"><i class="fa-solid fa-pen-to-square"></i> Edit</button>' : ''}
           <button class="msg-action-btn copy-msg-btn" title="Salin Pesan"><i class="fa-solid fa-copy"></i> Salin</button>
         </div>
       </div>
@@ -16503,6 +16506,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       }
       if (role === 'user' && !rawText && docs && docs.length > 0) {
         rawText = docs.map(d => `[Dokumen: ${d.name || 'lampiran'}]`).join('\n');
+      }
+      if (role === 'user' && !rawText && imgList.length > 0) {
+        rawText = '[Foto Lampiran]';
       }
       const textToCopy = (role === 'assistant' ? safeAssistantText(rawText) : rawText)
         .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')

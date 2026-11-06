@@ -2428,10 +2428,10 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   max-width: 88px;
   max-height: 88px;
   object-fit: cover;
-  border-radius: 13px;
+  border-radius: 14px;
   margin-bottom: 8px;
-  border: 1px solid rgba(0, 240, 255, 0.35);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
 }
 
 /* Markdown typography inside assistant bubble (Meta AI grade readability) */
@@ -6274,24 +6274,23 @@ div.msg-sources-section button.msg-sources-title span {
 }
 
 .message-row.user .attached-images-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: flex-end;
   margin-left: auto;
   width: fit-content;
+  margin-bottom: 4px;
 }
 
-.attached-images-gallery:last-child {
-  margin-bottom: 0;
-}
-
-.message-bubble:has(.msg-text-content[style*="display:none"]) .attached-images-gallery {
-  margin-bottom: 0;
-}
-
-.message-row.user .message-bubble:has(.msg-text-content[style*="display:none"]) {
-  padding: 6px;
-  background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(0, 240, 255, 0.35);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+.message-row.user .attached-docs-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-left: auto;
+  width: fit-content;
+  margin-bottom: 4px;
 }
 
 .attached-images-gallery.grid-1 .chat-img-thumb-wrap {
@@ -6323,21 +6322,21 @@ div.msg-sources-section button.msg-sources-title span {
 
 .chat-img-thumb-wrap {
   position: relative;
-  border-radius: 13px;
+  border-radius: 14px;
   overflow: hidden;
-  border: 1px solid rgba(0, 240, 255, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   cursor: pointer;
   background: #0f172a;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   aspect-ratio: 1 / 1;
   flex-shrink: 0;
 }
 
 .chat-img-thumb-wrap:hover {
-  transform: scale(1.03);
-  border-color: var(--neon-cyan);
-  box-shadow: 0 4px 18px rgba(0, 240, 255, 0.35);
+  transform: translateY(-1px) scale(1.02);
+  border-color: rgba(0, 240, 255, 0.5);
+  box-shadow: 0 6px 18px rgba(0, 240, 255, 0.28);
 }
 
 .chat-img-thumb-wrap img {
