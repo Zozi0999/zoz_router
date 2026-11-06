@@ -1223,7 +1223,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     btnRefreshOpenRouterBalance: $('#btnRefreshOpenRouterBalance'),
     btnAddOpenRouterCredits: $('#btnAddOpenRouterCredits'),
     settingAutoPolicy: $('#settingAutoPolicy'),
-    settingMusicModel: $('#settingMusicModel'),
     settingSystemPrompt: $('#settingSystemPrompt'),
     saveSettingsBtn: $('#saveSettingsBtn'),
 
@@ -1353,6 +1352,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     waUnreadBadgeDot: $('#waUnreadBadgeDot'),
     singleWaContactPickerWrap: $('#singleWaContactPickerWrap'),
     waContactPickerChip: $('#waContactPickerChip'),
+    btnWaTopContactOptions: $('#btnWaTopContactOptions'),
     currentWaContactLabel: $('#currentWaContactLabel'),
     waContactDropdownMenu: $('#waContactDropdownMenu'),
     waContactSearchInput: $('#waContactSearchInput'),
@@ -1418,7 +1418,13 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     waDocPreviewBody: $('#waDocPreviewBody'),
     waDocPreviewMeta: $('#waDocPreviewMeta'),
     btnWaDocOpenNewTab: $('#btnWaDocOpenNewTab'),
-    btnWaDocDownloadModal: $('#btnWaDocDownloadModal')
+    btnWaDocDownloadModal: $('#btnWaDocDownloadModal'),
+    modalWaEditContactName: $('#modalWaEditContactName'),
+    btnCloseWaEditContactNameModal: $('#btnCloseWaEditContactNameModal'),
+    waEditContactTargetInfo: $('#waEditContactTargetInfo'),
+    inputWaCustomContactName: $('#inputWaCustomContactName'),
+    btnCancelWaCustomName: $('#btnCancelWaCustomName'),
+    btnSaveWaCustomName: $('#btnSaveWaCustomName')
   };
 
   // ==================== AUTONOMOUS TOOL RESPONSE CACHE ====================
@@ -48330,7 +48336,52 @@ Aturan:
       return `+${digits}`;
     },
 
+    getCustomAlias(phoneOrJid) {
+      if (!phoneOrJid) return '';
+      const key = String(phoneOrJid).trim();
+      const rawDigits = key.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+      try {
+        const raw = localStorage.getItem('zoz_wa_custom_names_v1');
+        if (!raw) return '';
+        const map = JSON.parse(raw);
+        if (map[key]) return map[key];
+        if (rawDigits && map[rawDigits]) return map[rawDigits];
+        if (rawDigits && map[`${rawDigits}@s.whatsapp.net`]) return map[`${rawDigits}@s.whatsapp.net`];
+        if (rawDigits && map[`${rawDigits}@c.us`]) return map[`${rawDigits}@c.us`];
+      } catch (_) {}
+      return '';
+    },
+
+    setCustomAlias(phoneOrJid, alias) {
+      if (!phoneOrJid) return;
+      const key = String(phoneOrJid).trim();
+      const rawDigits = key.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+      try {
+        const raw = localStorage.getItem('zoz_wa_custom_names_v1');
+        const map = raw ? JSON.parse(raw) : {};
+        const cleanAlias = (alias || '').trim();
+        if (cleanAlias) {
+          map[key] = cleanAlias;
+          if (rawDigits) {
+            map[rawDigits] = cleanAlias;
+            map[`${rawDigits}@s.whatsapp.net`] = cleanAlias;
+          }
+        } else {
+          delete map[key];
+          if (rawDigits) {
+            delete map[rawDigits];
+            delete map[`${rawDigits}@s.whatsapp.net`];
+            delete map[`${rawDigits}@c.us`];
+          }
+        }
+        localStorage.setItem('zoz_wa_custom_names_v1', JSON.stringify(map));
+      } catch (_) {}
+    },
+
     cleanDisplayName(rawName, phoneOrJid) {
+      const customAlias = this.getCustomAlias(phoneOrJid);
+      if (customAlias) return customAlias;
+
       const raw = (rawName || '').trim();
       const rawDigits = (phoneOrJid || '').split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
       const formattedPhone = this.formatPhoneNumber(rawDigits);
@@ -49115,6 +49166,47 @@ Aturan:
       els.waContactPickerChip?.addEventListener('click', (e) => {
         e.stopPropagation();
         this.toggleContactDropdown();
+      });
+
+      // Top bar WhatsApp 3-dots kebab menu button
+      els.btnWaTopContactOptions?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        AudioEngine.click();
+        if (this.activeContact) {
+          this.openContactDotsMenu(this.activeContact, els.btnWaTopContactOptions, e);
+        } else {
+          showToast('Pilih kontak WhatsApp terlebih dahulu.', 'info');
+          this.openContactDropdown();
+        }
+      });
+
+      // Ubah Nama / Custom Nama WhatsApp Modal Listeners
+      els.btnCloseWaEditContactNameModal?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.closeEditContactNameModal();
+      });
+      els.btnCancelWaCustomName?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.closeEditContactNameModal();
+      });
+      els.btnSaveWaCustomName?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.saveCustomContactName();
+      });
+      els.inputWaCustomContactName?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.saveCustomContactName();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          this.closeEditContactNameModal();
+        }
+      });
+      els.modalWaEditContactName?.addEventListener('click', (e) => {
+        if (e.target.id === 'modalWaEditContactName') {
+          this.closeEditContactNameModal();
+        }
       });
 
       // Search in Contact Dropdown
@@ -50023,7 +50115,10 @@ Aturan:
       let list = this.contacts;
       if (filter) {
         const q = filter.toLowerCase();
-        list = list.filter(c => (c.name || '').toLowerCase().includes(q) || (c.phone || '').includes(q));
+        list = list.filter(c => {
+          const custom = (this.getCustomAlias(c.phone || c.id) || '').toLowerCase();
+          return (c.name || '').toLowerCase().includes(q) || (c.phone || '').includes(q) || custom.includes(q);
+        });
       }
 
       if (list.length === 0) {
@@ -51355,6 +51450,10 @@ Aturan:
         <div class="wa-dots-menu-header" title="${escapeHtml(cleanName)}">
           <i class="fa-brands fa-whatsapp text-emerald-400"></i> ${escapeHtml(cleanName)}
         </div>
+        <button type="button" class="wa-dots-menu-item" data-action="rename">
+          <i class="fa-solid fa-user-pen" style="color: #38bdf8; width: 16px; text-align: center;"></i>
+          <span>Ubah Nama / Custom Nama</span>
+        </button>
         <button type="button" class="wa-dots-menu-item" data-action="summarize">
           <i class="fa-solid fa-wand-magic-sparkles" style="color: #34d399; width: 16px; text-align: center;"></i>
           <span>Rangkum Chat (AI)</span>
@@ -51385,6 +51484,14 @@ Aturan:
       menu.style.top = `${top}px`;
       menu.style.left = `${left}px`;
 
+      menu.querySelector('[data-action="rename"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        AudioEngine.click();
+        this.closeContactDotsMenu();
+        this.closeContactDropdown();
+        this.openEditContactNameModal(contact);
+      });
+
       menu.querySelector('[data-action="summarize"]')?.addEventListener('click', (e) => {
         e.stopPropagation();
         AudioEngine.click();
@@ -51400,6 +51507,96 @@ Aturan:
         this.closeContactDotsMenu();
         await this.clearContactHistory(contact);
       });
+    },
+
+    editingContactForCustomName: null,
+
+    openEditContactNameModal(contact) {
+      if (!contact || !contact.id) return;
+      this.editingContactForCustomName = contact;
+
+      const isGroup = contact.id.endsWith('@g.us');
+      const originalName = (contact.name || '').trim();
+      const rawDigits = (contact.phone || contact.id || '').split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+      const formattedPhone = isGroup ? 'Grup WhatsApp' : (this.formatPhoneNumber(rawDigits) || rawDigits);
+      const existingCustom = this.getCustomAlias(contact.id || contact.phone);
+
+      if (els.waEditContactTargetInfo) {
+        els.waEditContactTargetInfo.textContent = `${formattedPhone} ${originalName ? '— ' + originalName : ''}`;
+      }
+      if (els.inputWaCustomContactName) {
+        els.inputWaCustomContactName.value = existingCustom || '';
+      }
+      if (els.modalWaEditContactName) {
+        els.modalWaEditContactName.style.display = 'flex';
+        setTimeout(() => els.inputWaCustomContactName?.focus(), 120);
+      }
+    },
+
+    closeEditContactNameModal() {
+      if (els.modalWaEditContactName) {
+        els.modalWaEditContactName.style.display = 'none';
+      }
+      this.editingContactForCustomName = null;
+    },
+
+    async saveCustomContactName() {
+      const contact = this.editingContactForCustomName;
+      if (!contact || !contact.id) {
+        this.closeEditContactNameModal();
+        return;
+      }
+      const newAlias = (els.inputWaCustomContactName?.value || '').trim();
+      this.setCustomAlias(contact.id || contact.phone, newAlias);
+
+      if (newAlias) {
+        contact.customName = newAlias;
+      } else {
+        delete contact.customName;
+      }
+
+      // Sync ke backend jika terkoneksi (Best-effort non-blocking)
+      const rawDigits = (contact.phone || contact.id || '').split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+      if (rawDigits && this.isAllowedAccess()) {
+        try {
+          this.waFetch('/api/wa/contacts', {
+            method: 'POST',
+            headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+              phone: rawDigits,
+              name: newAlias || contact.name || rawDigits,
+              userId: this.getUserId(),
+              pin: this.getPin()
+            })
+          }, 1).catch(() => {});
+        } catch (_) {}
+      }
+
+      this.closeEditContactNameModal();
+
+      if (newAlias) {
+        showToast(`✏️ Nama kontak berhasil diubah menjadi: "${newAlias}"`, 'success');
+      } else {
+        showToast('🔄 Nama kontak dikembalikan ke nama bawaan WhatsApp.', 'info');
+      }
+
+      // Re-render seluruh komponen WhatsApp
+      this.updateContactChipUI();
+      this.renderContactDropdownList();
+      this.renderSidebarWaChats();
+      if (this.activeContact && this.activeContact.id === contact.id) {
+        const headerNameEl = document.querySelector('.wa-chat-header-name');
+        if (headerNameEl) {
+          const isGroup = contact.id.endsWith('@g.us');
+          let clean = (contact.name || '').trim();
+          if (isGroup) {
+            clean = clean.startsWith('👥') ? clean : `👥 ${clean || 'Grup WhatsApp'}`;
+          } else {
+            clean = this.cleanDisplayName(clean, contact.phone || contact.id);
+          }
+          headerNameEl.textContent = clean;
+        }
+      }
     },
 
     async clearContactHistory(contact) {
