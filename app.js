@@ -1352,7 +1352,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     waUnreadBadgeDot: $('#waUnreadBadgeDot'),
     singleWaContactPickerWrap: $('#singleWaContactPickerWrap'),
     waContactPickerChip: $('#waContactPickerChip'),
-    btnWaTopContactOptions: $('#btnWaTopContactOptions'),
     currentWaContactLabel: $('#currentWaContactLabel'),
     waContactDropdownMenu: $('#waContactDropdownMenu'),
     waContactSearchInput: $('#waContactSearchInput'),
@@ -49166,19 +49165,6 @@ Aturan:
       els.waContactPickerChip?.addEventListener('click', (e) => {
         e.stopPropagation();
         this.toggleContactDropdown();
-      });
-
-      // Top bar WhatsApp 3-dots kebab menu button
-      els.btnWaTopContactOptions?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        AudioEngine.click();
-        if (this.activeContact) {
-          this.openContactDotsMenu(this.activeContact, els.btnWaTopContactOptions, e);
-        } else {
-          showToast('Pilih kontak WhatsApp terlebih dahulu.', 'info');
-          this.openContactDropdown();
-        }
       });
 
       // Ubah Nama / Custom Nama WhatsApp Modal Listeners
