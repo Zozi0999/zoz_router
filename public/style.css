@@ -2423,10 +2423,15 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 }
 
 .message-bubble img.attached-vision-img {
-  max-width: 260px;
-  border-radius: var(--radius-sm);
+  width: 88px;
+  height: 88px;
+  max-width: 88px;
+  max-height: 88px;
+  object-fit: cover;
+  border-radius: 13px;
   margin-bottom: 8px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 
 /* Markdown typography inside assistant bubble (Meta AI grade readability) */
@@ -6259,7 +6264,7 @@ div.msg-sources-section button.msg-sources-title span {
   flex-shrink: 0;
 }
 
-/* ==================== MULTI-IMAGE GALLERY IN CHAT BUBBLES ==================== */
+/* ==================== GEOMETRIC PROPORTIONAL COMPACT THUMBNAIL MATRIX ==================== */
 .attached-images-gallery {
   display: flex;
   flex-wrap: wrap;
@@ -6268,33 +6273,65 @@ div.msg-sources-section button.msg-sources-title span {
   max-width: 100%;
 }
 
+.message-row.user .attached-images-gallery {
+  justify-content: flex-end;
+  margin-left: auto;
+  width: fit-content;
+}
+
+.attached-images-gallery:last-child {
+  margin-bottom: 0;
+}
+
+.message-bubble:has(.msg-text-content[style*="display:none"]) .attached-images-gallery {
+  margin-bottom: 0;
+}
+
+.message-row.user .message-bubble:has(.msg-text-content[style*="display:none"]) {
+  padding: 6px;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
 .attached-images-gallery.grid-1 .chat-img-thumb-wrap {
-  width: 100%;
-  max-width: 280px;
-  max-height: 280px;
+  width: 88px;
+  height: 88px;
+  max-width: 88px;
+  max-height: 88px;
+  aspect-ratio: 1 / 1;
+  border-radius: 13px;
 }
 
 .attached-images-gallery.grid-2 .chat-img-thumb-wrap {
-  width: calc(50% - 4px);
-  max-width: 200px;
-  max-height: 180px;
+  width: 80px;
+  height: 80px;
+  max-width: 80px;
+  max-height: 80px;
+  aspect-ratio: 1 / 1;
+  border-radius: 11px;
 }
 
 .attached-images-gallery.grid-multi .chat-img-thumb-wrap {
-  width: calc(33.333% - 6px);
-  max-width: 140px;
-  max-height: 130px;
+  width: 68px;
+  height: 68px;
+  max-width: 68px;
+  max-height: 68px;
+  aspect-ratio: 1 / 1;
+  border-radius: 9px;
 }
 
 .chat-img-thumb-wrap {
   position: relative;
-  border-radius: var(--radius-sm);
+  border-radius: 13px;
   overflow: hidden;
-  border: 1px solid rgba(0, 240, 255, 0.25);
+  border: 1px solid rgba(0, 240, 255, 0.35);
   cursor: pointer;
-  background: #000;
+  background: #0f172a;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   aspect-ratio: 1 / 1;
+  flex-shrink: 0;
 }
 
 .chat-img-thumb-wrap:hover {
@@ -6502,10 +6539,26 @@ div.msg-sources-section button.msg-sources-title span {
 }
 
 @media (max-width: 768px) {
+  .attached-images-gallery.grid-1 .chat-img-thumb-wrap {
+    width: 82px;
+    height: 82px;
+    max-width: 82px;
+    max-height: 82px;
+    border-radius: 12px;
+  }
+  .attached-images-gallery.grid-2 .chat-img-thumb-wrap {
+    width: 74px;
+    height: 74px;
+    max-width: 74px;
+    max-height: 74px;
+    border-radius: 10px;
+  }
   .attached-images-gallery.grid-multi .chat-img-thumb-wrap {
-    width: calc(50% - 4px);
-    max-width: 160px;
-    max-height: 140px;
+    width: 62px;
+    height: 62px;
+    max-width: 62px;
+    max-height: 62px;
+    border-radius: 8px;
   }
   .lightbox-nav-btn {
     width: 38px;
