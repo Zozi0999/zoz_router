@@ -2812,6 +2812,44 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         if (!btnText && !hasIconOrGraphic && rect.width <= 0 && rect.height <= 0) continue;
 
         const btnLabel = btnText ? `"${btnText}" (${btnId})` : btnId;
+        const cx = rect.left + (rect.width / 2);
+        const cy = rect.top + (rect.height / 2);
+
+        // Periksa apakah tombol berada di dalam scrollable container (chat viewport, feed pesan, modal body, dropdown, dsb.)
+        let isClippedByScrollParent = false;
+        let hasScrollableAncestor = false;
+        let parent = btn.parentElement;
+        while (parent && parent !== document.body && parent !== document.documentElement) {
+          const pStyle = window.getComputedStyle ? window.getComputedStyle(parent) : null;
+          if (pStyle) {
+            const overflowY = pStyle.overflowY;
+            const overflowX = pStyle.overflowX;
+            const isScrollContainer = overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden' ||
+                              overflowX === 'auto' || overflowX === 'scroll' || overflowX === 'hidden' ||
+                              parent.classList?.contains('chat-viewport') || parent.classList?.contains('messages-list') ||
+                              parent.id === 'chatViewport' || parent.id === 'messagesList';
+            if (isScrollContainer) {
+              hasScrollableAncestor = true;
+              if (typeof parent.getBoundingClientRect === 'function') {
+                const pRect = parent.getBoundingClientRect();
+                // Jika tombol atau titik tengahnya berada di luar batas pandang tampak kontainer scroll-nya
+                // (misal tombol pesan obrolan masa lalu yang ter-scroll ke atas atau ke bawah)
+                if (rect.bottom <= pRect.top || rect.top >= pRect.bottom || 
+                    rect.right <= pRect.left || rect.left >= pRect.right ||
+                    cy <= pRect.top || cy >= pRect.bottom || 
+                    cx <= pRect.left || cx >= pRect.right) {
+                  isClippedByScrollParent = true;
+                  break;
+                }
+              }
+            }
+          }
+          parent = parent.parentElement;
+        }
+
+        // 1. Jika tombol berada dalam scroll container dan sedang ter-scroll keluar dari batas pandang kontainer:
+        // Ini adalah perilaku normal scrolling dokumen/chat! Lewati seluruh audit tombol ini.
+        if (isClippedByScrollParent) continue;
 
         // a. Tombol kerdil / ukuran kolaps (< 6px lebar atau tinggi saat dirender)
         if ((rect.width > 0 && rect.width < 6) || (rect.height > 0 && rect.height < 6)) {
@@ -2828,7 +2866,9 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         }
 
         // b. Tombol berada di luar koordinat pandang ekstrim / hilang akibat CSS styling error
-        if (rect.right < -1000 || rect.left < -1000 || rect.left > (winW + 2000) || rect.top > (winH * 50)) {
+        // Catatan: Tombol di dalam scroll container mengikuti aliran dokumen alami sehingga
+        // posisi vertikal yang besar (misal riwayat obrolan panjang) BUKANLAH kesalahan offscreen.
+        if (!hasScrollableAncestor && (rect.right < -1000 || rect.left < -1000 || rect.left > (winW + 2000) || rect.top > (winH * 50))) {
           issues.push({
             id: 'btn_off_' + (btn.id || Math.random().toString(36).substr(2, 4)),
             type: 'misplaced_offscreen',
@@ -2855,33 +2895,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         }
 
         // d. Deteksi Tombol Terhalang Fisik (Obstruction Check via document.elementFromPoint)
-        // Cek apakah tombol berada di dalam kontainer yang memiliki scroll/overflow
-        // Jika tombol atau titik tengah kliknya telah ter-scroll keluar dari batas pandang kontainer (scrolled out of view), abaikan!
-        const cx = rect.left + (rect.width / 2);
-        const cy = rect.top + (rect.height / 2);
-
-        let isClippedByScrollParent = false;
-        let parent = btn.parentElement;
-        while (parent && parent !== document.body && parent !== document.documentElement) {
-          const pStyle = window.getComputedStyle ? window.getComputedStyle(parent) : null;
-          if (pStyle) {
-            const overflowY = pStyle.overflowY;
-            const overflowX = pStyle.overflowX;
-            const hasScroll = overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden' ||
-                              overflowX === 'auto' || overflowX === 'scroll' || overflowX === 'hidden';
-            if (hasScroll && typeof parent.getBoundingClientRect === 'function') {
-              const pRect = parent.getBoundingClientRect();
-              if (rect.bottom <= pRect.top || rect.top >= pRect.bottom || rect.right <= pRect.left || rect.left >= pRect.right ||
-                  cy <= pRect.top || cy >= pRect.bottom || cx <= pRect.left || cx >= pRect.right) {
-                isClippedByScrollParent = true;
-                break;
-              }
-            }
-          }
-          parent = parent.parentElement;
-        }
-        if (isClippedByScrollParent) continue;
-
+        // Hanya cek jika titik tengah tombol berada dalam batas pandang viewport window
         if (cx >= 0 && cx <= winW && cy >= 0 && cy <= winH && typeof document.elementFromPoint === 'function') {
           const topEl = document.elementFromPoint(cx, cy);
           if (topEl && topEl !== btn && !btn.contains(topEl) && !topEl.contains(btn)) {
@@ -2901,7 +2915,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
             if (topStyle && topStyle.pointerEvents === 'none') continue;
 
             // Abaikan jika topEl adalah modal backdrop, dialog, drawer, atau sticky chrome UI sementara tombol berada di luar overlay tersebut
-            const topOverlay = topEl.closest ? topEl.closest('.modal-backdrop, .modal, .sidebar-backdrop, .lightbox-backdrop, [role="dialog"], .composer-area, #composerContainer, .top-nav, #topNav, #studioAssistantPanel, .toast-container, .sidebar, #sidebar, .model-picker-popover, .dropdown-menu, #aiFileStudioModal') : null;
+            const topOverlay = topEl.closest ? topEl.closest('.modal-backdrop, .modal, .sidebar-backdrop, .lightbox-backdrop, [role="dialog"], .composer-area, #composerContainer, .composer-container, #composerArea, .top-nav, #topNav, #studioAssistantPanel, .toast-container, .sidebar, #sidebar, .model-picker-popover, .dropdown-menu, #aiFileStudioModal') : null;
             if (topOverlay && !topOverlay.contains(btn)) continue;
 
             const blockerTag = (topEl.tagName || 'div').toLowerCase();
