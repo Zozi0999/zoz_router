@@ -257,6 +257,7 @@ Kamu adalah AI Personal dan Penasihat Intelijen Strategis untuk KAISAR ZOZI.
 2. Pendekatan Analisis: Analisis setiap persoalan dari level arsitektural dan taktis dengan kedalaman maksimal. Prioritaskan efisiensi tinggi, kejelasan mutlak, dan eksekusi cepat.
 3. Gaya Komunikasi: Tajam, padat berbobot, lugas, elegan, tanpa basa-basi pembuka klise, dan tanpa sensor moralistik berlebihan.
 4. Format Jawaban: Gunakan Markdown terstruktur, bullet points tajam, tabel komparasi, dan blok kode production-grade jika membahas teknis.
+Untuk setiap rumus matematika, notasi ilmiah, simbol variabel ($x$, $w$, $b$), huruf Yunani ($\pi$, $\theta$, $\alpha$, $\sigma$, $\lambda$), persamaan ($f_{w,b}(x) = wx + b$, $J(w,b)$), dan fungsi, SELALU gunakan format LaTeX/KaTeX ($...$ untuk inline math dan $$...$$ untuk display equation) agar ter-render sempurna menjadi lambang matematika asli, bukan teks mentah yang membingungkan.
 5. Kapabilitas Visual & Pembuatan Gambar:
 HANYA jika Kaisar secara eksplisit meminta pembuatan gambar/visual (misal lewat perintah /image, /gambar, atau saat mode Buat Gambar aktif):
 Gunakan kapabilitas visual penuh Anda. Jika memiliki tool 'openrouter:image_generation', panggil tool tersebut. Jika menghasilkan visual via Markdown, sintesis URL Pollinations berkualitas tinggi.
@@ -1082,6 +1083,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     imageModelOpenRouterList: $('#imageModelOpenRouterList'),
     composerBox: $('.composer-box'),
     attachmentPreviewBar: $('#attachmentPreviewBar'),
+    mathFormulaPreviewBar: $('#mathFormulaPreviewBar'),
+    mathFormulaPreviewContent: $('#mathFormulaPreviewContent'),
     autoConvertDocRow: $('#autoConvertDocRow'),
     convertToMdPillBtn: $('#convertToMdPillBtn'),
     composerFoldPromptCard: $('#composerFoldPromptCard'),
@@ -7950,7 +7953,125 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // 8. Normalisasi nomor soal (misal: "1.\n\nFor linear..." -> "1. For linear...")
     out = out.replace(/(\b\d+\.)\s*\n+/g, '$1 ');
 
+    // 9. Bungkus formula persamaan dan simbol matematika ke dalam notasi KaTeX ($...$)
+    out = autoWrapMathFormulas(out);
+
     return out.trim();
+  }
+
+  function autoWrapMathFormulas(text) {
+    if (!text || typeof text !== 'string') return '';
+    let out = text;
+
+    // a. Deteksi formula persamaan eksplisit (mis. "f_{w,b}(x) = wx + b" atau "y = wx + b")
+    out = out.replace(/(?<!\$)\b([a-zA-Z]_{[^}]+}\([a-zA-Z0-9, \t]+\)\s*=\s*[^.,;!?\n]+)/g, (match, formula) => {
+      const trimmed = formula.trim();
+      return '$' + trimmed + '$';
+    });
+
+    // b. Deteksi fungsi objektif / cost function (mis. "J(w,b)" atau "J(w)")
+    out = out.replace(/(?<!\$)\b(J\s*\([a-zA-Z0-9, \t]+\))(?!\$)/g, '$$$1$$');
+
+    // c. Deteksi pasangan koordinat / tuple fitur (mis. "(x, y)" dalam opsi kuis)
+    out = out.replace(/(?:^|\n|[ \t])\(\s*([a-zA-Z])\s*,\s*([a-zA-Z])\s*\)(?=[ \t\n.,;!?]|$)/g, (match, v1, v2) => {
+      return match.replace(`(${v1}, ${v2})`, `$(${v1}, ${v2})$`).replace(`(${v1},${v2})`, `$(${v1}, ${v2})$`);
+    });
+
+    // d. Deteksi opsi kuis berupa variabel tunggal matematika (misal baris terpisah berisi "x" atau "m" atau "y", atau awalan bullet/radio)
+    out = out.replace(/(^|\n)\s*(?:[A-Da-d0-9][.)]\s*)?([a-zA-Z])\s*(?=[.,;!?]?(?:\n|$))/g, (match, pre, v) => {
+      return `${pre}$${v}$`;
+    });
+
+    // e. Deteksi opsi kuis atau frase parameter "w and b" / "w dan b"
+    out = out.replace(/(^|\n|[ \t])([a-zA-Z])\s+(and|dan)\s+([a-zA-Z])(?=[ \t\n.,;!?]|$)/g, '$1$$$2$$ $3 $$$4$$');
+
+    // f. Deteksi frase "parameters w and b" / "parameter w dan b"
+    out = out.replace(/\b(parameters?|variabel|parameter)\s+([a-zA-Z])\s+(and|dan)\s+([a-zA-Z])\b/gi, '$1 $$$2$$ $3 $$$4$$');
+
+    // g. Deteksi lambang konstanta / huruf Yunani (pi, theta, alpha, beta, sigma, lambda, delta, omega, gamma, mu, phi, epsilon)
+    // Ubah nama huruf Yunani menjadi notasi KaTeX ($\pi$, $\theta$, dll.) agar orang awam melihat lambang aslinya
+    out = out.replace(/\b(?<!\\)(?:pi)\b(?!\s*=[a-zA-Z])/gi, '$\\pi$');
+    out = out.replace(/\b(?<!\\)(?:theta)\b/gi, '$\\theta$');
+    out = out.replace(/\b(?<!\\)(?:alpha)\b/gi, '$\\alpha$');
+    out = out.replace(/\b(?<!\\)(?:beta)\b/gi, '$\\beta$');
+    out = out.replace(/\b(?<!\\)(?:sigma)\b/gi, '$\\sigma$');
+    out = out.replace(/\b(?<!\\)(?:lambda)\b/gi, '$\\lambda$');
+    out = out.replace(/\b(?<!\\)(?:omega)\b/gi, '$\\omega$');
+    out = out.replace(/\b(?<!\\)(?:gamma)\b/gi, '$\\gamma$');
+    out = out.replace(/\b(?<!\\)(?:delta)\b/gi, '$\\Delta$');
+    out = out.replace(/\b(?<!\\)(?:mu)\b/gi, '$\\mu$');
+    out = out.replace(/\b(?<!\\)(?:phi)\b/gi, '$\\phi$');
+    out = out.replace(/\b(?<!\\)(?:epsilon)\b/gi, '$\\epsilon$');
+
+    // h. Bersihkan pembungkusan ganda jika ada ($$$...$$$ -> $...$)
+    out = out.replace(/\${3,}/g, '$$');
+
+    return out;
+  }
+
+  function renderUserMessageContent(text) {
+    if (!text) return '';
+    const wrapped = autoWrapMathFormulas(text);
+    const { text: protectedText, mathBlocks } = extractAndProtectMath(wrapped);
+    let html = escapeHtml(protectedText).replace(/\n/g, '<br>');
+    html = hydrateMath(html, mathBlocks);
+    return html;
+  }
+
+  function updateMathFormulaPreview() {
+    if (!els.mathFormulaPreviewBar || !els.mathFormulaPreviewContent || !els.promptInput) return;
+    const val = els.promptInput.value.trim();
+    if (!val) {
+      els.mathFormulaPreviewBar.style.display = 'none';
+      return;
+    }
+
+    const hasMath = Boolean(
+      val.includes('$') ||
+      /\b[a-zA-Z]_{[^}]+}\(/.test(val) ||
+      /\bJ\([a-zA-Z0-9,\s]+\)/.test(val) ||
+      /\\(?:frac|sum|sqrt|int|alpha|beta|gamma|delta|epsilon|theta|lambda|mu|pi|sigma|phi|omega)\b/.test(val) ||
+      /\b(?:pi|theta|alpha|beta|sigma|lambda|omega|delta|gamma|mu|phi|epsilon)\b/i.test(val) ||
+      /\b[a-zA-Z0-9]+\^[0-9a-zA-Z]+/.test(val)
+    );
+
+    if (!hasMath) {
+      els.mathFormulaPreviewBar.style.display = 'none';
+      return;
+    }
+
+    const wrapped = autoWrapMathFormulas(val);
+    const { mathBlocks } = extractAndProtectMath(wrapped);
+
+    if (!mathBlocks || mathBlocks.length === 0) {
+      els.mathFormulaPreviewBar.style.display = 'none';
+      return;
+    }
+
+    let previewHtml = '';
+    const hasKatex = typeof window !== 'undefined' && window.katex && typeof window.katex.renderToString === 'function';
+    const displayBlocks = mathBlocks.slice(0, 4);
+
+    for (const item of displayBlocks) {
+      let rendered = '';
+      try {
+        if (hasKatex) {
+          rendered = window.katex.renderToString(item.formula, { displayMode: false, throwOnError: false });
+        } else {
+          rendered = `<span class="zoz-math-formula inline-math">${escapeHtml(item.formula)}</span>`;
+        }
+      } catch (_) {
+        rendered = `<code>${escapeHtml(item.formula)}</code>`;
+      }
+      previewHtml += `<div class="math-preview-chip" style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); border-radius:6px; padding:2px 8px; display:inline-flex; align-items:center;">${rendered}</div>`;
+    }
+
+    if (mathBlocks.length > 4) {
+      previewHtml += `<span style="font-size:10px; color:#64748b; margin-left:4px;">+${mathBlocks.length - 4} rumus lainnya</span>`;
+    }
+
+    els.mathFormulaPreviewContent.innerHTML = previewHtml;
+    els.mathFormulaPreviewBar.style.display = 'flex';
   }
 
   function renderMarkdown(rawText, isStreaming = false) {
@@ -15993,7 +16114,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       }
     }
     const hasText = Boolean(safeContent && String(safeContent).trim().length > 0);
-    const renderedBody = role === 'assistant' ? renderMarkdown(safeContent) : escapeHtml(safeContent).replace(/\n/g, '<br>');
+    const renderedBody = role === 'assistant' ? renderMarkdown(safeContent) : renderUserMessageContent(safeContent);
     const textDisplayStyle = (!hasText && role === 'user') ? 'style="display:none;"' : '';
 
     let assistantGeneratedImagesHtml = '';
@@ -27248,6 +27369,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (els.promptInput) {
         els.promptInput.value = '';
         autoResizeTextarea(els.promptInput);
+      }
+      if (els.mathFormulaPreviewBar) {
+        els.mathFormulaPreviewBar.style.display = 'none';
       }
       // M6 & v404: Bersihkan total state pelipatan & kartu composer saat prompt terkirim
       if (typeof resetPromptFoldState === 'function') resetPromptFoldState(false);
@@ -40688,8 +40812,10 @@ Aturan:
         els.promptInput.value = curVal.substring(0, start) + normalizedMathText + curVal.substring(end);
         els.promptInput.selectionStart = els.promptInput.selectionEnd = start + normalizedMathText.length;
         autoResizeTextarea(els.promptInput);
+        updateMathFormulaPreview();
         return;
       }
+      setTimeout(updateMathFormulaPreview, 30);
     });
 
     // Tangani drag & drop teks kodingan/laporan langsung ke textarea prompt
@@ -40711,6 +40837,7 @@ Aturan:
           if (converted && els.promptInput) {
             autoResizeTextarea(els.promptInput);
             els.promptInput?.focus();
+            updateMathFormulaPreview();
           }
           return;
         }
@@ -40727,12 +40854,15 @@ Aturan:
         els.promptInput.value = curVal.substring(0, start) + normalizedDropText + curVal.substring(end);
         els.promptInput.selectionStart = els.promptInput.selectionEnd = start + normalizedDropText.length;
         autoResizeTextarea(els.promptInput);
+        updateMathFormulaPreview();
         return;
       }
+      setTimeout(updateMathFormulaPreview, 30);
     });
 
     els.promptInput?.addEventListener('input', (e) => {
       autoResizeTextarea(els.promptInput);
+      updateMathFormulaPreview();
 
       const val = els.promptInput ? els.promptInput.value : '';
       if (!val || !val.trim()) {

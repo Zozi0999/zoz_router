@@ -18178,6 +18178,66 @@ body.mermaid-has-fullscreen {
   font-size: 0.98em;
 }
 
+/* Live Mathematical Formula Visualizer HUD */
+.math-formula-preview-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 12px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.35);
+  animation: fadeInMathHud 0.2s ease-out;
+}
+
+@keyframes fadeInMathHud {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.math-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #94a3b8;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 4px;
+  user-select: none;
+}
+
+.math-preview-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #34d399;
+}
+
+.math-preview-hint {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.math-preview-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+  scrollbar-width: thin;
+}
+
+.math-preview-content .katex {
+  font-size: 1.15em;
+  color: #38bdf8;
+}
+
+
 
 
 
