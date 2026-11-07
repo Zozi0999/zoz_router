@@ -2314,18 +2314,19 @@ INSTRUKSI MATEMATIKA MURNI & REVISI PRESISI:
       const prevAnswerText = parentQuiz?.previousAnswer || 'Jawaban pada giliran sebelumnya';
       const calibratedTemp = 0.12;
       const calibratedTopP = 0.90;
-      const calibrationDirective = `[PROTOKOL REVISI BAYESIAN & ELIMINASI HIPOTESIS TERFALSIFIKASI — ANTI-AMNESIA]:
-Pengguna memberikan umpan balik penolakan/koreksi atas jawaban asisten sebelumnya: "${raw}".
-Jawaban atau rekomendasi asisten pada giliran sebelumnya telah terbukti SALAH dan difalsifikasi (P(h_sebelumnya) = 0).
+      const calibrationDirective = `[PROTOKOL REVISI BAYESIAN & ELIMINASI HIPOTESIS TERFALSIFIKASI — KALIBRASI MATEMATIKA MURNI]:
+Umpan balik koreksi probabilitas: "${raw}".
+Hipotesis terfalsifikasi: h_prev = "${prevAnswerText}".
 
-INSTRUKSI MUTLAK & LARANGAN AMNESIA:
-1. FALSIFIKASI MUTLAK: Tetapkan probabilitas jawaban/rekomendasi sebelumnya = 0 (${prevAnswerText}). DILARANG KERAS mengulangi atau merekomendasikan kembali jawaban yang sudah dinyatakan salah tersebut!
-2. DILARANG AMNESIA & DILARANG MEMINTA SOAL ULANG: DILARANG KERAS bersikap amnesia, berbasa-basi ("Terima kasih atas pesannya..."), atau meminta pengguna menyampaikan kembali teks soal dan pilihan (misal: "mohon sampaikan kembali soal...", "silakan kirim detailnya..."). Seluruh riwayat soal, pilihan, gambar, dan konteks percakapan LENGKAP SUDAH ADA pada riwayat di atas!
-3. EVALUASI ALTERNATIF SECARA LANGSUNG:
-   - Telusuri kembali pertanyaan dan konteks yang dibahas pada giliran-giliran sebelumnya di riwayat obrolan di atas.
-   - Analisis opsi-opsi atau kemungkinan alternatif yang tersisa secara objektif berdasarkan standar kurikulum/keilmuan resmi.
-   - Tetapkan SATU jawaban revisi pengganti yang paling tepat secara lugas dan percaya diri di baris pertama (misal: "**Jawaban revisi yang tepat: [Opsi Pengganti]**").
-   - Berikan 1-2 paragraf penjelasan logis mengapa opsi alternatif baru ini benar dan mengapa jawaban sebelumnya keliru.`;
+FORMULASI DEDUKSI MATEMATIKA MURNI:
+1. FALSIFIKASI MUTLAK: Tetapkan P(h_prev) = 0. Hapus probabilitas hipotesis lama dari ruang keadaan H.
+2. NORMALISASI POSTERIOR SISA OPSI:
+   - Hitung distribusi peluang posterior ternormalisasi: P(H_j | ¬h_prev) = P_0(H_j) / \\sum_{k \\neq prev} P_0(H_k).
+   - Tentukan argmax_{H_j} P(H_j | E) dari himpunan opsi alternatif pada riwayat obrolan di atas.
+3. LARANGAN AMNESIA & EMISI LANGSUNG:
+   - DILARANG meminta pengguna mengetikkan ulang soal atau opsi (Information Loss = 0; seluruh premis soal dan opsi eksis pada riwayat konteks di atas).
+   - Tuliskan hipotesis revisi optimal H* secara langsung di baris pertama (misal: "**Jawaban revisi yang tepat: [Opsi Pengganti]**").
+   - Sertakan penurunan deduktif ringkas 1-2 paragraf mengenai kondisi batas mengapa H* valid dan h_prev tidak memenuhi syarat.`;
 
       return {
         isDiscreteChoice: true,
@@ -2524,9 +2525,9 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
    - Bentuk rantai penalaran kausal implikasi terarah: Premis P_0 -> Kondisi Batas C_k -> Transformasi f(P_0, C_k) -> Solusi Y*.
 3. INVARIAN AKSIOMATIS & VERIFIKASI ANTI-KONTRADIKSI:
    - Terapkan hukum non-kontradiksi formal: ¬(P ∧ ¬P). Uji setiap langkah penurunan; jika terjadi kontradiksi dengan premis atau prinsip fisika/matematika terdefinisi, pangkas (prune) cabang tersebut secara langsung.
-4. KONSISTENSI PERSONA & PRESISI JAWABAN:
-   - Pertahankan persona aktif dari pengaturan sistem dengan wibawa dan kecerdasan analitis tertinggi. Hindari basa-basi kosong, drama emosional tak beralasan, atau halusinasi spekulatif.
-   - Sampaikan HANYA substansi jawaban yang terverifikasi, presisi, berbasis penalaran matematika/ilmiah murni, dan terstruktur rapi.
+4. DEDUKSI AKSIOMATIK & FORMULASI MATEMATIKA MURNI:
+   - Gunakan penalaran matematika murni f: X -> Y tanpa ketergantungan pada persona, emosi, atau retorika. Turunkan hasil secara analitis, eksak, dan berbobot aksiomatik tertinggi.
+   - Sampaikan HANYA substansi jawaban yang terverifikasi, presisi, berbasis penalaran matematika murni, dan terstruktur rapi.
 5. Tutup </think>, lalu sajikan jawaban akhir yang jernih, proporsional, dan terverifikasi secara formal.`;
     }
 
