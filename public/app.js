@@ -528,6 +528,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       localStorage.removeItem('zoz_auto_start_model_v1');
       localStorage.removeItem('zoz_auto_start_model');
       STATE.autoStartModel = null;
+      showToast(`⚡ Auto-Start dinonaktifkan untuk ${modelId}.`, 'info');
     } else {
       const cfg = {
         modelId,
@@ -538,6 +539,24 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       localStorage.setItem('zoz_auto_start_model_v1', JSON.stringify(cfg));
       localStorage.setItem('zoz_auto_start_model', JSON.stringify(cfg));
       STATE.autoStartModel = cfg;
+
+      // Sinkronkan langsung ke model aktif & mode aktif seketika
+      selectModel(modelId, cleanProvider, true);
+      if (cleanProvider === 'openrouter') {
+        STATE.settings.openRouterModel = modelId;
+      } else {
+        STATE.settings.ollamaModel = modelId;
+      }
+      STATE.mode = cleanProvider;
+      if (STATE.currentSessionId) {
+        const curSess = STATE.sessions.find(s => s.id === STATE.currentSessionId);
+        if (curSess) {
+          curSess.mode = cleanProvider;
+          curSess.model = modelId;
+        }
+      }
+      savePersistedState({ immediate: true });
+      showToast(`⚡ Model ${modelId} aktif & disetel sebagai Auto-Start saat masuk.`, 'success');
     }
 
     updateModelOptionsMenuUI();
@@ -6003,13 +6022,14 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           const parsedAutoStart = JSON.parse(rawAutoStart);
           if (parsedAutoStart && parsedAutoStart.modelId && parsedAutoStart.enabled !== false) {
             STATE.autoStartModel = parsedAutoStart;
-            // Terapkan model auto-start saat startup
-            if (parsedAutoStart.provider === 'openrouter' || parsedAutoStart.modelId.includes('/')) {
+            // Terapkan model auto-start saat startup secara mutlak (bebas terkunci ke auto)
+            const isOR = parsedAutoStart.provider === 'openrouter' || parsedAutoStart.modelId.includes('/');
+            const targetProvider = isOR ? 'openrouter' : 'ollama';
+            STATE.mode = targetProvider;
+            if (isOR) {
               STATE.settings.openRouterModel = parsedAutoStart.modelId;
-              STATE.mode = 'openrouter';
             } else {
               STATE.settings.ollamaModel = parsedAutoStart.modelId;
-              if (STATE.mode !== 'auto') STATE.mode = 'ollama';
             }
           }
         }
@@ -15091,8 +15111,10 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     // M9: pengguna sudah memilih sesi LAIN selama await di atas → batalkan hasil basi ini
     if (switchToken !== sessionSwitchToken) return;
 
-    // If session has different mode, switch tab
-    if (targetSession.mode && targetSession.mode !== STATE.mode) {
+    // If session has different mode, switch tab HANYA bila Auto-Start tidak aktif
+    const autoCfg = STATE.autoStartModel || getAutoStartModelConfig();
+    const hasActiveAutoStart = Boolean(autoCfg && autoCfg.enabled && autoCfg.modelId);
+    if (!hasActiveAutoStart && targetSession.mode && targetSession.mode !== STATE.mode) {
       const safeMode = ['ollama', 'openrouter', 'auto'].includes(targetSession.mode) ? targetSession.mode : 'ollama';
       STATE.mode = safeMode;
       els.modeTabs.forEach(tab => {
@@ -26066,13 +26088,13 @@ ${blocks}
               let tag = 'OpenRouter • Image';
               if (idLow.includes('qwen')) tag = 'Qwen • Image';
               else if (idLow.includes('flux')) tag = 'FLUX • Image';
-              else if (idLow.includes('gemini') || idLow.includes('banana')) tag = 'Google • Image';
-              else if (idLow.includes('gpt') || idLow.includes('openai')) tag = 'OpenAI • Image';
-              else if (idLow.includes('seedream')) tag = 'ByteDance • Image';
+              else if (idLow.includes('gemini') || idLow.includes('banana')) tag = 'Tensor Matrix • Image';
+              else if (idLow.includes('gpt') || idLow.includes('openai')) tag = 'Neural Vector • Image';
+              else if (idLow.includes('seedream')) tag = 'ByteVector • Image';
               else if (idLow.includes('recraft')) tag = 'Recraft • Image';
               else if (idLow.includes('grok')) tag = 'xAI • Image';
               else if (idLow.includes('krea')) tag = 'Krea • Image';
-              else if (idLow.includes('mai')) tag = 'Microsoft • Image';
+              else if (idLow.includes('mai')) tag = 'Hyperplane • Image';
               dynamicImgMap.set(im.id, {
                 id: im.id,
                 name: im.name || im.id,
@@ -27439,6 +27461,23 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       STATE.attachedDocs = [];
       clearAttachedImages();
       renderAttachmentPreviews();
+    }
+
+    // Integritas Auto-Start Model: Jika pengguna mengonfigurasi model auto-start,
+    // pastikan model dan provider tidak ter-shadow oleh sisa mode 'auto' atau sesi lama
+    const autoCfg = STATE.autoStartModel || getAutoStartModelConfig();
+    if (autoCfg && autoCfg.enabled && autoCfg.modelId) {
+      const isOR = autoCfg.provider === 'openrouter' || autoCfg.modelId.includes('/');
+      const targetProvider = isOR ? 'openrouter' : 'ollama';
+      if (STATE.mode === 'auto') {
+        STATE.mode = targetProvider;
+        if (isOR) {
+          STATE.settings.openRouterModel = autoCfg.modelId;
+        } else {
+          STATE.settings.ollamaModel = autoCfg.modelId;
+        }
+        updateModelUI();
+      }
     }
 
     let targetModel = '';
@@ -52906,6 +52945,14 @@ Gunakan format Markdown lengkap dengan struktur berikut:
         STATE.settings.ollamaModel = autoCfg.modelId;
       }
       STATE.mode = targetProvider;
+      if (STATE.currentSessionId) {
+        const curSess = STATE.sessions.find(s => s.id === STATE.currentSessionId);
+        if (curSess) {
+          curSess.mode = targetProvider;
+          curSess.model = autoCfg.modelId;
+        }
+      }
+      savePersistedState({ immediate: true });
     }
 
     // 3. RENDER ALL UI CONTROLS INSTANTLY (Synchronous, 0ms, Zero Lag)
