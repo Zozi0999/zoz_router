@@ -3504,6 +3504,7 @@
     extractParentQuizContext,
     computeDamerauLevenshtein,
     resolveEntityPhoneticallyMathematically,
-    extractNegativeFormattingConstraints
+    extractNegativeFormattingConstraints,
+    extractFallbackConclusionFromUnclosedThought
   };
 });

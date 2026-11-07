@@ -11261,6 +11261,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
     appendReasoning(reasoningDelta) {
       if (this.isLoopTerminated || this.isDone) return;
+      if (reasoningDelta) {
+        this.accumulatedReasoning = (this.accumulatedReasoning || '') + String(reasoningDelta);
+      }
       // Jangan pernah masukkan pemikiran AI ke teks jawaban.
       // Hanya tampilkan status berpikir jika teks jawaban utama belum mengalir.
       if (!this.text) {
@@ -11434,6 +11437,16 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       if (this.transportGate) {
         const tail = this.transportGate.flush();
         if (tail) this.text += tail;
+      }
+      // Failsafe matematis: jika teks jawaban kosong tetapi model menghasilkan token penalaran (mis. model Beam/Reflection), ekstrak kesimpulan analitis fallback:
+      if (!this.text.trim() && this.accumulatedReasoning && this.accumulatedReasoning.trim()) {
+        const tsMod = (typeof ZozTextSafety !== 'undefined') ? ZozTextSafety : ((typeof textSafety !== 'undefined') ? textSafety : null);
+        const fallback = (tsMod && typeof tsMod.extractFallbackConclusionFromUnclosedThought === 'function')
+          ? tsMod.extractFallbackConclusionFromUnclosedThought(this.accumulatedReasoning)
+          : this.accumulatedReasoning.slice(-800).trim();
+        if (fallback) {
+          this.text = fallback;
+        }
       }
       // Bersihkan segala tag pemikiran internal — pengguna HANYA menerima output jawaban murni
       this.text = safeAssistantText(this.text || '');
@@ -27581,10 +27594,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
   function doesModelSupportTools(modelName) {
     if (!modelName || typeof modelName !== 'string') return false;
-    // NVIDIA Nemotron adalah frontier reasoning & mathematical MoE (agentic_index: 20.1).
-    // Native function calling tools pada Nemotron memicu tool loops dan kegagalan circuit breaker.
-    // Nemotron wajib menggunakan Direct Grounded Context (RAG murni) tanpa skema tools.
-    if (/nemotron/i.test(modelName)) return false;
+    // NVIDIA Nemotron & Beam/Reflection adalah frontier reasoning & mathematical MoE (agentic_index: 20.1).
+    // Native function calling tools pada Nemotron/Beam memicu tool loops dan kegagalan circuit breaker.
+    // Nemotron/Beam wajib menggunakan Direct Grounded Context (RAG murni) tanpa skema tools.
+    if (/nemotron|beam|reflection/i.test(modelName)) return false;
     const liveModel = (STATE.openRouterModels || []).find(m => m.id === modelName);
     if (liveModel && typeof liveModel.supportsTools === 'boolean') {
       return liveModel.supportsTools;
@@ -30987,6 +31000,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
       if (engine === 'ollama') {
         const item = { role: m.role, content: contentText };
+        if (m.role === 'assistant' && (m.reasoning_content || m.reasoning)) {
+          item.reasoning_content = m.reasoning_content || m.reasoning;
+        }
         if (imgs.length > 0 && shouldSendImages) {
           const rawImages = [];
           imgs.forEach(img => {
@@ -31052,6 +31068,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           if (m.role === 'assistant') {
             const pName = sanitizeParticipantName(m.model || m.engine);
             if (pName) item.name = pName;
+            if (m.reasoning_content || m.reasoning) {
+              item.reasoning_content = m.reasoning_content || m.reasoning;
+            }
           }
           messagesPayload.push(item);
         }
@@ -31475,7 +31494,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         modelName.includes('675b')
       ));
       if (isDenseModelOllama) {
-        requestBody.options.num_predict = Math.min(requestBody.options.num_predict || 4096, 4096);
+        requestBody.options.num_predict = Math.min(requestBody.options.num_predict || 2048, 2048);
       }
       if (!requestBody.options.num_ctx) requestBody.options.num_ctx = 16384;
       if (wantsFile || isWebRequest) {
@@ -32591,6 +32610,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         session.messages.push({
           role: 'assistant',
           content: contentToSave,
+          reasoning: streamRenderer.accumulatedReasoning || undefined,
+          reasoning_content: streamRenderer.accumulatedReasoning || undefined,
           model: modelName,
           engine: 'ollama',
           websiteMode: runOptions.websiteMode,
@@ -33329,8 +33350,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           currentModel.includes('671b') ||
           currentModel.includes('675b')
         ));
-        const numPredictReqOr = (runOptions.maxTokens && Number.isFinite(runOptions.maxTokens)) ? runOptions.maxTokens : 4096;
-        const initialMaxTokensOr = isDenseModelOpenRouter ? Math.min(numPredictReqOr, 4096) : Math.min(numPredictReqOr || 16384, 16384);
+        const numPredictReqOr = (runOptions.maxTokens && Number.isFinite(runOptions.maxTokens)) ? runOptions.maxTokens : 2048;
+        const initialMaxTokensOr = isDenseModelOpenRouter ? Math.min(numPredictReqOr, 2048) : Math.min(numPredictReqOr || 16384, 16384);
 
         const basePayload = {
           model: currentModel,
@@ -33346,6 +33367,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         if (isNemotronCur) {
           basePayload.reasoning = { effort: 'high' };
           basePayload.include_reasoning = true;
+        } else if (currentModel.includes('beam') || currentModel.includes('reflection')) {
+          basePayload.reasoning = { effort: 'medium' };
         }
 
         const hasGroundedWeb = Boolean(webSources && webSources.length > 0);
@@ -34829,6 +34852,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         session.messages.push({
           role: 'assistant',
           content: contentToSave,
+          reasoning: streamRenderer.accumulatedReasoning || undefined,
+          reasoning_content: streamRenderer.accumulatedReasoning || undefined,
           model: actualModelUsed || displayModel,
           engine: engineMode,
           websiteMode: runOptions.websiteMode,

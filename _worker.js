@@ -75,6 +75,19 @@ function resolveOllamaCloudModel(modelId) {
   return modelId.trim();
 }
 
+function extractFallbackConclusionFromUnclosedThought(thoughtBody) {
+  const raw = String(thoughtBody || '').replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan):[^\]]*\]\s*/gi, '').trim();
+  if (!raw) return '';
+  const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i];
+    if (/^(?:langkah|step|transkripsi|polaritas|uji\s+opsi|opsi\s+\d|evaluasi)\b/i.test(l)) continue;
+    const m = l.match(/(?:kesimpulan|jawaban(?:\s+akhir|\s+yang\s+benar)?|final\s+answer|therefore|jadi\s+jawabannya)\s*[:=-]\s*(.+)$/i);
+    if (m && m[1].trim()) return m[1].trim();
+  }
+  return lines.length > 0 ? lines[lines.length - 1] : '';
+}
+
 function mapOllamaModelToOpenRouter(modelId) {
   if (!modelId || typeof modelId !== 'string') return 'openrouter/free';
   const id = modelId.trim();
@@ -1502,10 +1515,16 @@ export default {
           const isNemotronModel = targetModel.toLowerCase().includes('nemotron');
           const isFreeModel = targetModel.includes(':free') || targetModel.endsWith('/free') || targetModel === 'openrouter/free';
           const isNonToolModel = isFreeModel || isNemotronModel || targetModel.includes('beam') || targetModel.includes('reflection');
+          const isBeamOrReasoning = Boolean(targetModel && (
+            targetModel.includes('beam') ||
+            targetModel.includes('reflection') ||
+            targetModel.includes('r1')
+          ));
 
-          // Multimodal Translation & Tool Normalization:
+          // Multimodal Translation & Tool Normalization & Latent Reasoning Preservation:
           // 1. Konversi skema images Ollama ke OpenRouter multimodal content parts.
           // 2. Normalisasi pesan role: 'tool' dan assistant tool_calls untuk model yang tidak mendukung native function calling.
+          // 3. Rekonstruksi ruang keadaan laten (reasoning_content) pada pesan asisten untuk model Beam/Reflection agar template Jinja tidak gagal (HTTP 400).
           const normalizedOrMessages = (body.messages || []).map(m => {
             if (!m) return m;
 
@@ -1517,8 +1536,18 @@ export default {
               }
               if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
                 const textContent = m.content || `[Mengeksekusi alat penelusuran otonom]`;
-                return { role: 'assistant', content: textContent };
+                const baseM = { role: 'assistant', content: textContent };
+                if (isBeamOrReasoning) {
+                  baseM.reasoning_content = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${textContent.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+                }
+                return baseM;
               }
+            }
+
+            if (m.role === 'assistant' && isBeamOrReasoning) {
+              const rawContent = (typeof m.content === 'string') ? m.content : '';
+              const latentPrior = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${rawContent.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+              return { ...m, reasoning_content: latentPrior };
             }
 
             const imgs = Array.isArray(m.images) ? m.images : (m.image ? [m.image] : []);
@@ -1546,8 +1575,8 @@ export default {
             targetModel.includes('671b') ||
             targetModel.includes('675b')
           ));
-          const numPredictReq = (body.options?.num_predict && Number.isFinite(body.options.num_predict)) ? body.options.num_predict : 4096;
-          const initialMaxTokens = isDenseModel ? Math.min(numPredictReq, 4096) : Math.min(numPredictReq || 16384, 16384);
+          const numPredictReq = (body.options?.num_predict && Number.isFinite(body.options.num_predict)) ? body.options.num_predict : 2048;
+          const initialMaxTokens = isDenseModel ? Math.min(numPredictReq, 2048) : Math.min(numPredictReq || 16384, 16384);
 
           const openRouterPayload = {
             model: targetModel,
@@ -1556,6 +1585,9 @@ export default {
             max_tokens: initialMaxTokens,
             provider: { allow_fallbacks: true }
           };
+          if (targetModel.includes('beam') || targetModel.includes('reflection')) {
+            openRouterPayload.reasoning = { effort: 'medium' };
+          }
           if (body.options?.temperature !== undefined) openRouterPayload.temperature = body.options.temperature;
           if (body.options?.top_p !== undefined) openRouterPayload.top_p = body.options.top_p;
 
@@ -1581,14 +1613,29 @@ export default {
             signal: request.signal
           });
 
-          // Auto-Recovery HTTP 402 & Upstream Provider Error
+          // Auto-Recovery HTTP 400 (Jinja template missing reasoning) & HTTP 402 & Upstream Provider Error
           if (!orRes.ok) {
             const errClone = await orRes.clone().json().catch(() => ({}));
             const errMsg = errClone?.error?.message || errClone?.error || '';
-            if (orRes.status === 402 || /can only afford/i.test(errMsg)) {
+            if (orRes.status === 400 && /missing its reasoning|allow_missing_thinking/i.test(errMsg)) {
+              openRouterPayload.messages = (openRouterPayload.messages || []).map(m => {
+                if (m && m.role === 'assistant') {
+                  const raw = (typeof m.content === 'string') ? m.content : '';
+                  const latent = m.reasoning || m.reasoning_content || `Evaluasi penalaran analitis konseptual: ${raw.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+                  return { ...m, reasoning_content: latent };
+                }
+                return m;
+              });
+              orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: orHeaders,
+                body: JSON.stringify(openRouterPayload),
+                signal: request.signal
+              });
+            } else if (orRes.status === 402 || /can only afford/i.test(errMsg)) {
               const affordMatch = errMsg.match(/can only afford\s+(\d+)/i);
               const affordVal = affordMatch ? parseInt(affordMatch[1], 10) : 0;
-              const safeTokens = affordVal > 256 ? Math.max(512, Math.min(4096, affordVal - 128)) : 2048;
+              const safeTokens = affordVal > 256 ? Math.max(512, Math.min(2048, affordVal - 128)) : 1024;
               openRouterPayload.max_tokens = safeTokens;
               orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
@@ -1620,8 +1667,13 @@ export default {
 
           if (!isStream) {
             const data = await orRes.json().catch(() => ({}));
-            const textContent = data.choices?.[0]?.message?.content || '';
+            let textContent = data.choices?.[0]?.message?.content || '';
+            const reasoningContent = data.choices?.[0]?.message?.reasoning || data.choices?.[0]?.message?.reasoning_content || '';
+            if (!textContent.trim() && reasoningContent.trim()) {
+              textContent = extractFallbackConclusionFromUnclosedThought(reasoningContent);
+            }
             const msgPayload = { role: 'assistant', content: textContent };
+            if (reasoningContent) msgPayload.reasoning = reasoningContent;
             if (data.choices?.[0]?.message?.tool_calls) {
               msgPayload.tool_calls = data.choices[0].message.tool_calls;
             }
@@ -1644,6 +1696,8 @@ export default {
 
           (async () => {
             let buffer = '';
+            let accumulatedContent = '';
+            let accumulatedReasoning = '';
             try {
               while (true) {
                 const { done, value } = await reader.read();
@@ -1656,6 +1710,17 @@ export default {
                   if (!trimmed.startsWith('data:')) continue;
                   const dataStr = trimmed.slice(5).trim();
                   if (dataStr === '[DONE]') {
+                    if (!accumulatedContent.trim() && accumulatedReasoning.trim()) {
+                      const fallback = extractFallbackConclusionFromUnclosedThought(accumulatedReasoning);
+                      if (fallback) {
+                        await writer.write(encoder.encode(JSON.stringify({
+                          model: body.model || 'qwen2.5:1.5b',
+                          created_at: new Date().toISOString(),
+                          message: { role: 'assistant', content: fallback },
+                          done: false
+                        }) + '\n'));
+                      }
+                    }
                     await writer.write(encoder.encode(JSON.stringify({
                       model: body.model || 'qwen2.5:1.5b',
                       created_at: new Date().toISOString(),
@@ -1669,6 +1734,8 @@ export default {
                     const deltaContent = parsed.choices?.[0]?.delta?.content || '';
                     const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
                     const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
+                    if (deltaContent) accumulatedContent += deltaContent;
+                    if (deltaReasoning) accumulatedReasoning += deltaReasoning;
                     if (deltaContent || deltaReasoning || deltaToolCalls) {
                       const msgPayload = { role: 'assistant', content: deltaContent };
                       if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
@@ -1695,6 +1762,8 @@ export default {
             headers: {
               'Content-Type': 'application/x-ndjson',
               'Access-Control-Allow-Origin': '*'
+            }
+          });
             }
           });
         }
@@ -2007,15 +2076,44 @@ export default {
             const isLiquid = reqModel.includes('liquid') || reqModel.includes('lfm-');
             // Hanya model OpenAI o-series dan DeepSeek R1 ketat yang menolak kustomisasi temperature di OpenRouter
             const isStrictReasoning = Boolean(reqModel && (/\/o[1-9]|\b(r1|deepseek-r)\b/i.test(reqModel) || reqModel.toLowerCase().includes('-r1')));
+            const isBeamOrReasoningReq = Boolean(reqModel && (
+              reqModel.includes('beam') ||
+              reqModel.includes('reflection') ||
+              reqModel.includes('r1')
+            ));
+
+            let messagesReq = body.messages || [];
+            if (isBeamOrReasoningReq && Array.isArray(messagesReq)) {
+              messagesReq = messagesReq.map(m => {
+                if (m && m.role === 'assistant') {
+                  const rawTxt = (typeof m.content === 'string') ? m.content : '';
+                  const latentPrior = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${rawTxt.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+                  return { ...m, reasoning_content: latentPrior };
+                }
+                return m;
+              });
+            }
+
+            const isDenseModelOr = Boolean(reqModel && (
+              reqModel.includes('beam') ||
+              reqModel.includes('reflection') ||
+              reqModel.includes('501b') ||
+              reqModel.includes('671b') ||
+              reqModel.includes('675b')
+            ));
+            const calculatedMaxTokens = isDenseModelOr
+              ? Math.min(body.max_tokens || 2048, 2048)
+              : (body.max_tokens || 16384);
+
             const out = {
               model: reqModel,
-              messages: body.messages || [],
+              messages: messagesReq,
               stream: body.stream !== false,
               ...(body.provider ? { provider: body.provider } : { provider: { allow_fallbacks: true } }),
               ...(body.plugins ? { plugins: body.plugins } : {}),
               ...(body.modalities ? { modalities: body.modalities } : {}),
-              ...(isNemotronReq ? { reasoning: { effort: 'high' }, include_reasoning: true } : (body.reasoning ? { reasoning: body.reasoning } : {})),
-              ...(body.max_tokens ? { max_tokens: body.max_tokens } : {})
+              ...(isNemotronReq ? { reasoning: { effort: 'high' }, include_reasoning: true } : (body.reasoning ? { reasoning: body.reasoning } : ((reqModel.includes('beam') || reqModel.includes('reflection')) ? { reasoning: { effort: 'medium' } } : {}))),
+              max_tokens: calculatedMaxTokens
             };
             if (!isStrictReasoning) {
               out.temperature = body.temperature ?? 0.7;

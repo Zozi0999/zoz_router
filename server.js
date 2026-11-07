@@ -11102,10 +11102,16 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         const isNemotronModel = targetCloudModel.toLowerCase().includes('nemotron');
         const isFreeModel = targetCloudModel.includes(':free') || targetCloudModel.endsWith('/free') || targetCloudModel === 'openrouter/free';
         const isNonToolModel = isFreeModel || isNemotronModel || targetCloudModel.includes('beam') || targetCloudModel.includes('reflection');
+        const isBeamOrReasoning = Boolean(targetCloudModel && (
+          targetCloudModel.includes('beam') ||
+          targetCloudModel.includes('reflection') ||
+          targetCloudModel.includes('r1')
+        ));
 
-        // Multimodal Translation & Tool Normalization:
+        // Multimodal Translation & Tool Normalization & Latent Reasoning Preservation:
         // 1. Konversi skema images Ollama ke OpenRouter multimodal content parts.
         // 2. Normalisasi pesan role: 'tool' dan assistant tool_calls untuk model yang tidak mendukung native function calling.
+        // 3. Rekonstruksi ruang keadaan laten (reasoning_content) pada pesan asisten untuk model Beam/Reflection agar template Jinja tidak gagal (HTTP 400).
         const normalizedOrMessages = (body.messages || []).map(m => {
           if (!m) return m;
 
@@ -11116,8 +11122,18 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             }
             if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
               const textContent = m.content || `[Mengeksekusi alat penelusuran otonom]`;
-              return { role: 'assistant', content: textContent };
+              const baseM = { role: 'assistant', content: textContent };
+              if (isBeamOrReasoning) {
+                baseM.reasoning_content = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${textContent.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+              }
+              return baseM;
             }
+          }
+
+          if (m.role === 'assistant' && isBeamOrReasoning) {
+            const rawContent = (typeof m.content === 'string') ? m.content : '';
+            const latentPrior = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${rawContent.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+            return { ...m, reasoning_content: latentPrior };
           }
 
           const imgs = Array.isArray(m.images) ? m.images : (m.image ? [m.image] : []);
@@ -11145,8 +11161,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           targetCloudModel.includes('671b') ||
           targetCloudModel.includes('675b')
         ));
-        const numPredictReq = (body.options?.num_predict && Number.isFinite(body.options.num_predict)) ? body.options.num_predict : 4096;
-        const initialMaxTokens = isDenseModel ? Math.min(numPredictReq, 4096) : Math.min(numPredictReq || 16384, 16384);
+        const numPredictReq = (body.options?.num_predict && Number.isFinite(body.options.num_predict)) ? body.options.num_predict : 2048;
+        const initialMaxTokens = isDenseModel ? Math.min(numPredictReq, 2048) : Math.min(numPredictReq || 16384, 16384);
 
         const orPayload = {
           model: targetCloudModel,
@@ -11155,6 +11171,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           max_tokens: initialMaxTokens,
           provider: { allow_fallbacks: Boolean(req.headers['x-auto-router'] === 'true' || body.isAutoRouter) }
         };
+        if (targetCloudModel.includes('beam') || targetCloudModel.includes('reflection')) {
+          orPayload.reasoning = { effort: 'medium' };
+        }
         if (body.options?.temperature !== undefined) orPayload.temperature = body.options.temperature;
         if (body.options?.top_p !== undefined) orPayload.top_p = body.options.top_p;
 
@@ -11204,11 +11223,23 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 try {
                   const parsed = JSON.parse(errBuf);
                   const msg = parsed?.error?.message || parsed?.error || `OpenRouter bridge error: HTTP ${bStatus}`;
+                  // Auto-Recovery Missing Reasoning on Jinja Template (Beam / Reflection)
+                  if (bStatus === 400 && /missing its reasoning|allow_missing_thinking/i.test(msg) && retryCount <= 1) {
+                    console.log(`[Ollama Cloud Bridge Auto-Recovery] Model ${payload.model} template missing reasoning. Injeksi reasoning_content...`);
+                    payload.messages = payload.messages.map(m => {
+                      if (m && m.role === 'assistant') {
+                        const txt = (typeof m.content === 'string') ? m.content : '';
+                        return { ...m, reasoning_content: m.reasoning_content || m.reasoning || `Evaluasi analitis dan penalaran konseptual: ${txt.slice(0, 150).replace(/[\r\n]+/g, ' ')}` };
+                      }
+                      return m;
+                    });
+                    return executeBridgeRequest(payload, retryCount + 1);
+                  }
                   // Auto-Recovery HTTP 402: kalibrasi kapasitas token reservation
                   if ((bStatus === 402 || /can only afford/i.test(msg)) && retryCount <= 1) {
                     const affordMatch = msg.match(/can only afford\s+(\d+)/i);
                     const affordVal = affordMatch ? parseInt(affordMatch[1], 10) : 0;
-                    const safeTokens = affordVal > 256 ? Math.max(512, Math.min(4096, affordVal - 128)) : 2048;
+                    const safeTokens = affordVal > 256 ? Math.max(512, Math.min(2048, affordVal - 128)) : 2048;
                     console.log(`[Ollama Cloud Bridge Auto-Recovery] Model ${payload.model} HTTP 402 (afford: ${affordVal}). Kalibrasi max_tokens ke ${safeTokens}...`);
                     payload.max_tokens = safeTokens;
                     return executeBridgeRequest(payload, retryCount + 1);
@@ -11288,6 +11319,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             }
 
             let sseBuffer = '';
+            let accumulatedContent = '';
+            let accumulatedReasoning = '';
             bridgeRes.on('data', chunk => {
               sseBuffer += chunk.toString();
               const lines = sseBuffer.split('\n');
@@ -11297,6 +11330,19 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 if (!trimmed.startsWith('data:')) continue;
                 const dataStr = trimmed.slice(5).trim();
                 if (dataStr === '[DONE]') {
+                  if (!accumulatedContent.trim() && accumulatedReasoning.trim()) {
+                    const fallback = (typeof textSafety.extractFallbackConclusionFromUnclosedThought === 'function')
+                      ? textSafety.extractFallbackConclusionFromUnclosedThought(accumulatedReasoning)
+                      : accumulatedReasoning.slice(-800).trim();
+                    if (fallback) {
+                      res.write(JSON.stringify({
+                        model: body.model || 'qwen2.5:1.5b',
+                        created_at: new Date().toISOString(),
+                        message: { role: 'assistant', content: fallback },
+                        done: false
+                      }) + '\n');
+                    }
+                  }
                   res.write(JSON.stringify({
                     model: body.model || 'qwen2.5:1.5b',
                     created_at: new Date().toISOString(),
@@ -11310,6 +11356,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   const delta = parsed.choices?.[0]?.delta?.content || '';
                   const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
                   const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
+                  if (delta) accumulatedContent += delta;
+                  if (deltaReasoning) accumulatedReasoning += deltaReasoning;
                   if (delta || deltaToolCalls || deltaReasoning) {
                     const msgPayload = { role: 'assistant', content: delta };
                     if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
@@ -11337,6 +11385,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                       const delta = parsed.choices?.[0]?.delta?.content || '';
                       const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
                       const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
+                      if (delta) accumulatedContent += delta;
+                      if (deltaReasoning) accumulatedReasoning += deltaReasoning;
                       if (delta || deltaToolCalls || deltaReasoning) {
                         const msgPayload = { role: 'assistant', content: delta };
                         if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
@@ -11350,6 +11400,19 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                       }
                     } catch (_) {}
                   }
+                }
+              }
+              if (!accumulatedContent.trim() && accumulatedReasoning.trim()) {
+                const fallback = (typeof textSafety.extractFallbackConclusionFromUnclosedThought === 'function')
+                  ? textSafety.extractFallbackConclusionFromUnclosedThought(accumulatedReasoning)
+                  : accumulatedReasoning.slice(-800).trim();
+                if (fallback) {
+                  res.write(JSON.stringify({
+                    model: body.model || 'qwen2.5:1.5b',
+                    created_at: new Date().toISOString(),
+                    message: { role: 'assistant', content: fallback },
+                    done: false
+                  }) + '\n');
                 }
               }
               if (!res.writableEnded) {
@@ -12344,6 +12407,23 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       // Defense-in-depth: Kalibrasi Deduksi Proposisional & Bayesian di Sisi Server (OpenRouter)
       applyServerSideDecisionCalibration(body, 'openrouter');
 
+      // Rekonstruksi ruang keadaan laten (reasoning_content) pada pesan asisten untuk model Beam/Reflection
+      const isBeamOrReasoningReq = Boolean(body.model && (
+        body.model.includes('beam') ||
+        body.model.includes('reflection') ||
+        body.model.includes('r1')
+      ));
+      if (Array.isArray(body.messages) && isBeamOrReasoningReq) {
+        body.messages = body.messages.map(m => {
+          if (m && m.role === 'assistant') {
+            const rawTxt = (typeof m.content === 'string') ? m.content : '';
+            const latentPrior = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${rawTxt.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+            return { ...m, reasoning_content: latentPrior };
+          }
+          return m;
+        });
+      }
+
       // Kalibrasi matematis kapasitas token maksimum berdasarkan skala parameter model
       const isDenseModelOr = Boolean(body.model && (
         body.model.includes('beam') ||
@@ -12353,7 +12433,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         body.model.includes('675b')
       ));
       if (isDenseModelOr) {
-        body.max_tokens = Math.min(body.max_tokens || 4096, 4096);
+        body.max_tokens = Math.min(body.max_tokens || 2048, 2048);
+        if (body.model.includes('beam') || body.model.includes('reflection')) {
+          body.reasoning = body.reasoning || { effort: 'medium' };
+        }
       } else if (!body.max_tokens) {
         body.max_tokens = 16384;
       }
