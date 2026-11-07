@@ -1581,20 +1581,31 @@ export default {
             signal: request.signal
           });
 
-          // Auto-Recovery HTTP 402: kalibrasi kapasitas token reservation
-          if (orRes.status === 402) {
+          // Auto-Recovery HTTP 402 & Upstream Provider Error
+          if (!orRes.ok) {
             const errClone = await orRes.clone().json().catch(() => ({}));
-            const errMsg = errClone?.error?.message || '';
-            const affordMatch = errMsg.match(/can only afford\s+(\d+)/i);
-            const affordVal = affordMatch ? parseInt(affordMatch[1], 10) : 0;
-            const safeTokens = affordVal > 256 ? Math.max(512, Math.min(4096, affordVal - 128)) : 2048;
-            openRouterPayload.max_tokens = safeTokens;
-            orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-              method: 'POST',
-              headers: orHeaders,
-              body: JSON.stringify(openRouterPayload),
-              signal: request.signal
-            });
+            const errMsg = errClone?.error?.message || errClone?.error || '';
+            if (orRes.status === 402 || /can only afford/i.test(errMsg)) {
+              const affordMatch = errMsg.match(/can only afford\s+(\d+)/i);
+              const affordVal = affordMatch ? parseInt(affordMatch[1], 10) : 0;
+              const safeTokens = affordVal > 256 ? Math.max(512, Math.min(4096, affordVal - 128)) : 2048;
+              openRouterPayload.max_tokens = safeTokens;
+              orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: orHeaders,
+                body: JSON.stringify(openRouterPayload),
+                signal: request.signal
+              });
+            } else if ((orRes.status >= 500 || orRes.status === 429 || orRes.status === 404 || /provider returned error|temporarily unavailable|overloaded|no endpoints/i.test(errMsg)) && openRouterPayload.model !== 'deepseek/deepseek-chat') {
+              openRouterPayload.model = 'deepseek/deepseek-chat';
+              openRouterPayload.max_tokens = Math.min(openRouterPayload.max_tokens || 2048, 2048);
+              orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: orHeaders,
+                body: JSON.stringify(openRouterPayload),
+                signal: request.signal
+              });
+            }
           }
 
           if (!orRes.ok) {

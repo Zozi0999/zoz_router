@@ -1751,10 +1751,29 @@
 
   const QUIZ_REVISION_PHRASE_REGEX = /\b(?:ganti\s+(?:jawabannya|jawaban|opsi|pilihan)|coba\s+ganti|salah\s+ganti|bukan\s+itu|jawaban\s+(?:lain|kedua|baru|yang\s+benar|berikutnya)|pilih\s+(?:yang\s+)?lain|opsi\s+lain|alternatif\s+lain|jawaban\s+salah|salah\s+(?:jawabannya|opsinya|pilihannya)|koreksi\s+(?:jawabannya|pilihan)|revisi\s+jawaban|change\s+(?:the\s+)?answer|switch\s+(?:the\s+)?option|try\s+another\s+option|wrong\s+answer)\b/i;
 
+  function stripInjectedSystemTagsFromUserText(text) {
+    if (!text || typeof text !== 'string') return '';
+    let out = text.trim();
+    if (out.startsWith('[Instruksi Sistem & Konteks:')) {
+      const lastBracketIdx = out.lastIndexOf(']\n\n');
+      if (lastBracketIdx !== -1) {
+        out = out.slice(lastBracketIdx + 3).trim();
+      } else {
+        out = out.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
+      }
+    }
+    out = out
+      .replace(/\n*\[PANDUAN RESONANSI PERSONA SISTEM[\s\S]*$/i, '')
+      .replace(/\n*\[PROYEKSI RUANG KEADAAN REVISI[\s\S]*$/i, '')
+      .replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '')
+      .trim();
+    return out;
+  }
+
   function isRevisionQuery(text) {
     if (!text || typeof text !== 'string') return false;
-    const clean = text.trim();
-    if (clean.length > 350) return false;
+    const clean = stripInjectedSystemTagsFromUserText(text);
+    if (!clean || clean.length > 350) return false;
     const lower = clean.toLowerCase();
 
     // Guard: Jika ini adalah soal kuis asli yang menanyakan pernyataan yang "salah/incorrect"
@@ -1764,9 +1783,9 @@
 
     if (isOriginalQuizQuestion) return false;
 
-    const QUIZ_REVISION_EXACT_REGEX = /^(?:\s*(?:ganti|ubah|tukar|pilihkan\s+(?:yang\s+)?lain|coba\s+(?:yang\s+)?lain|bukan\s+(?:itu|yang\s+ini|yang\s+tadi)|salah\b|opsi\s+lain|jawaban\s+lain|alternatif\s+lain|jawaban\s+kedua|nomor\s+lain|ganti\s+(?:opsi|jawaban|pilihan)|bukan\s+[A-Fa-f]|change\s+(?:the\s+)?answer|try\s+another|pick\s+another|switch\s+(?:to|answer)|not\s+that|wrong|incorrect)\s*[!?.~,"'`]*)+$/i;
+    const QUIZ_REVISION_EXACT_REGEX = /^(?:\s*(?:ganti|ubah|tukar|pilihkan\s+(?:yang\s+)?lain|coba\s+(?:yang\s+)?lain|bukan\s+(?:itu|yang\s+ini|yang\s+tadi)|salah\b|masih\s+salah|opsi\s+lain|jawaban\s+lain|alternatif\s+lain|jawaban\s+kedua|nomor\s+lain|ganti\s+(?:opsi|jawaban|pilihan)|bukan\s+[A-Fa-f]|change\s+(?:the\s+)?answer|try\s+another|pick\s+another|switch\s+(?:to|answer)|not\s+that|wrong|incorrect)\s*[!?.~,"'`]*)+$/i;
     const QUIZ_FAILURE_FEEDBACK_REGEX = /\b(?:anda\s+)?(?:tidak|belum)\s+lulus\b|\b(?:gagal|failed|fail|not\s+passing|re-?take|retake)\b|\b(?:your\s+score|skor(?:\s+anda)?|score|nilai(?:\s+saya)?|passing(?:\s+grade|\s+score)?)\s*(?:is|:|=|adalah)?\s*"?\s*\d{1,3}\s*%/i;
-    const QUIZ_REVISION_PHRASE_REGEX = /\b(?:ganti\s+(?:jawabannya|jawaban|opsi|pilihan)|coba\s+ganti|salah\s+ganti|bukan\s+itu|jawaban\s+(?:lain|kedua|baru|yang\s+benar|berikutnya)|pilih\s+(?:yang\s+)?lain|opsi\s+lain|alternatif\s+lain|jawaban\s+salah|salah\s+(?:jawabannya|opsinya|pilihannya)|koreksi\s+(?:jawabannya|pilihan)|revisi\s+jawaban|change\s+(?:the\s+)?answer|switch\s+(?:the\s+)?option|try\s+another\s+option|wrong\s+answer)\b/i;
+    const QUIZ_REVISION_PHRASE_REGEX = /\b(?:ganti\s+(?:jawabannya|jawaban|opsi|pilihan)|coba\s+ganti|salah\s+ganti|masih\s+salah|bukan\s+itu|jawaban\s+(?:lain|kedua|baru|yang\s+benar|berikutnya)|pilih\s+(?:yang\s+)?lain|opsi\s+lain|alternatif\s+lain|jawaban\s+salah|salah\s+(?:jawabannya|opsinya|pilihannya)|koreksi\s+(?:jawabannya|pilihan)|revisi\s+jawaban|change\s+(?:the\s+)?answer|switch\s+(?:the\s+)?option|try\s+another\s+option|wrong\s+answer)\b/i;
 
     if (QUIZ_REVISION_EXACT_REGEX.test(clean)) return true;
     if (QUIZ_FAILURE_FEEDBACK_REGEX.test(clean)) return true;
@@ -1774,7 +1793,7 @@
 
     const hasErrorToken = /\b(?:salah+|slh|keliru|bukan|salahnya|salahk?an|wrong|incorrect|false|err|error)\b|not\s+(?:that|this|the\s+one|right|correct)/i.test(lower);
     const hasChangeToken = /\b(?:gant+i+|ubah+|tukar+|pili+h+|coba+|cari+|gnti|plh|change|switch|replace|retry|another|next|alternative|alternatif|try)\b/i.test(lower);
-    const hasPriorToken = /\b(?:tadi+|barusan|sudah+|udah+|sdh|pernah|kemarin|sebelumnya|earlier|already|prev|previous)\b/i.test(lower);
+    const hasPriorToken = /\b(?:tadi+|barusan|sudah+|udah+|sdh|pernah|kemarin|sebelumnya|earlier|already|prev|previous|lagi)\b/i.test(lower);
     const hasOptionToken = /\b(?:jawaban+|jawabannya+|jwbn+|opsi+|opsinya+|pilihan+|pilihannya+|soal+|kuis+|quiz|option|choice|answer)\b/i.test(lower);
     const hasPersonalOrDemonstrative = /\b(?:saya|aku|gua|gw|kamu|anda|mu|itu|ini|yg\s+ini|yang\s+ini|yg\s+itu|yang\s+itu|tadi)\b/i.test(lower);
 
@@ -1788,11 +1807,119 @@
     if (hasChangeToken && (hasOptionToken || hasPriorToken || /\blain\b/i.test(lower))) return true;
 
     // Kombinasi 4: Kalimat pendek (<= 60 char) yang diawali atau didominasi penolakan
-    if (clean.length <= 60 && /^(?:(?:aduh\s+)?salah\b|bukan\s+(?:itu|yang\s+ini|ini)|ternyata\s+salah|kok\s+salah|salah\s+semua)/i.test(lower)) return true;
+    if (clean.length <= 60 && /^(?:(?:aduh\s+|wah\s+|yah\s+|kok\s+|masih\s+)?salah\b|bukan\s+(?:itu|yang\s+ini|ini)|ternyata\s+salah|salah\s+semua)/i.test(lower)) return true;
 
     if (/\b(?:skor|score|nilai)\b/i.test(lower) && /\b\d{1,2}%\b/.test(lower)) return true;
 
     return false;
+  }
+
+  function extractCandidateOptionsFromTextBlock(textBlock, isAssistantText = false) {
+    if (!textBlock || typeof textBlock !== 'string') return [];
+    const lines = textBlock.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return [];
+
+    // 1. Cek opsi berlabel eksplisit (A., B., C., D. atau (A), (B), 1., 2.)
+    const labeled = [];
+    for (const l of lines) {
+      const cl = l.replace(/^[-*•]\s+/, '').trim();
+      if (/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+\S)/.test(cl)) {
+        // Hindari judul sub-bab bernomor pada teks asisten seperti "1. Inti Program" jika diikuti paragraf panjang
+        if (isAssistantText && /^[1-6]\.\s+\*\*/.test(cl)) continue;
+        labeled.push(cl.replace(/\*\*/g, '').trim());
+      }
+    }
+    if (labeled.length >= 2) return labeled;
+
+    if (!isAssistantText) {
+      // Pada teks soal pengguna tanpa label huruf: pisahkan baris kalimat tanya utama dari baris-baris opsi di bawahnya
+      const qIdx = lines.findIndex(l => /\?\s*$/.test(l) || /:\s*$/.test(l) || /\.\.\.\s*$/.test(l) || /\b(?:which|what|manakah|berikut|following|pilih|select|choose|pernyataan)\b/i.test(l));
+      const candidatePool = (qIdx !== -1 && lines.length >= qIdx + 3) ? lines.slice(qIdx + 1) : lines;
+      const unlabeled = candidatePool
+        .map(l => l.replace(/^[-*•]\s+/, '').trim())
+        .filter(l => {
+          if (/^(?:jawab|berikan|pilih|tuliskan)\s+(?:singkat|langsung|hanya|saja|jawaban)/i.test(l)) return false;
+          const wc = l.split(/\s+/).filter(Boolean).length;
+          return wc >= 1 && wc <= 32 && !/\?\s*$/.test(l);
+        });
+      if (unlabeled.length >= 2) return unlabeled;
+    } else {
+      // Pada teks analisis asisten (misal soal berasal dari gambar/screenshot):
+      // Ekstrak baris daftar aktivitas/opsi seperti "Removing redundant data -> Data Preparation" atau bullet "- Opsi"
+      const extracted = [];
+      for (const l of lines) {
+        const arrowMatch = l.match(/^[-*•]?\s*([A-Z][^:\n\r—–\->]{3,85}?)\s+(?:->|→|—|–|\s{2,})\s*(?:Data\s+|Benar|Salah|True|False|[A-Z])/);
+        if (arrowMatch && arrowMatch[1]) {
+          const cand = arrowMatch[1].replace(/[*`"']/g, '').trim();
+          if (cand.split(/\s+/).length <= 18 && !extracted.includes(cand)) {
+            extracted.push(cand);
+          }
+          continue;
+        }
+        const bulletOpt = l.match(/^[-*•]\s+\*\*([^*]{3,85})\*\*/);
+        if (bulletOpt && bulletOpt[1]) {
+          const cand = bulletOpt[1].trim();
+          if (cand.split(/\s+/).length <= 18 && !extracted.includes(cand)) {
+            extracted.push(cand);
+          }
+        }
+      }
+      // Cek juga apakah ada opsi komposit yang dikutip di teks asisten (misal "All of the above...")
+      const quotedMatches = textBlock.match(/["“]((?:All|None)\s+of\s+the\s+above[^"”\n]{0,70}|Semua\s+(?:jawaban|pernyataan|pilihan)\s+(?:di\s+atas\s+)?(?:benar|salah)[^"”\n]{0,40})["”]/gi) || [];
+      for (const qm of quotedMatches) {
+        const cleanQ = qm.replace(/^["“]|["”]$/g, '').trim();
+        if (cleanQ && !extracted.some(e => e.toLowerCase().includes(cleanQ.toLowerCase()) || cleanQ.toLowerCase().includes(e.toLowerCase()))) {
+          extracted.push(cleanQ);
+        }
+      }
+      if (extracted.length >= 2) return extracted;
+    }
+    return [];
+  }
+
+  function identifyChosenOptionInAssistantTurn(asstText, candidateOptions = []) {
+    if (!asstText || typeof asstText !== 'string') return '';
+    const cleanAsst = asstText.trim();
+
+    // 1. Cek pola rekomendasi eksplisit yang diikuti "adalah" atau ":" (dan bukan kalimat negasi "tidak memiliki jawaban")
+    const explicitRecMatch =
+      cleanAsst.match(/(?<!tidak\s+memiliki\s+)(?:jawaban\s+yang\s+(?:diharapkan|paling\s+tepat|benar|direkomendasikan|harus\s+dipilih)|pilihan\s+yang\s+(?:paling\s+)?(?:tepat|benar)|rekomendasi\s+utama)\s*(?:adalah|ialah|:)\s*["“*]*([^"”*\n\r.(]{3,100})["”*]*/i) ||
+      cleanAsst.match(/^(?:(?:\*\*|\*|\[)?(?:Jawaban|Opsi|Pilihan)?\s*[A-Da-d](?:[.)\]]|\*\*)?)\s+([^\n\r]+)/m);
+
+    if (explicitRecMatch && explicitRecMatch[1]) {
+      const recStr = explicitRecMatch[1].replace(/[*[\]"“”']/g, '').trim();
+      if (candidateOptions.length >= 2) {
+        const matchedOpt = candidateOptions.find(opt => {
+          const cOpt = opt.replace(/^[A-Fa-f][.)\s-]+/, '').toLowerCase().trim();
+          const cRec = recStr.replace(/^[A-Fa-f][.)\s-]+/, '').toLowerCase().trim();
+          return cOpt === cRec || cOpt.includes(cRec) || cRec.includes(cOpt);
+        });
+        if (matchedOpt) return matchedOpt;
+      }
+      return recStr;
+    }
+
+    // 2. Jika ada candidateOptions, cari opsi yang disebut pada 40% bagian akhir pesan asisten (kesimpulan)
+    if (candidateOptions.length >= 2) {
+      const tailSlice = cleanAsst.slice(Math.floor(cleanAsst.length * 0.60)).toLowerCase();
+      for (const opt of candidateOptions) {
+        const cOpt = opt.replace(/^[A-Fa-f][.)\s-]+/, '').toLowerCase().trim();
+        const shortAnchor = cOpt.split(/\s+/).slice(0, 4).join(' ');
+        if ((cOpt.length >= 4 && tailSlice.includes(cOpt)) || (shortAnchor.length >= 10 && tailSlice.includes(shortAnchor))) {
+          return opt;
+        }
+      }
+      // Fallback ke baris pertama jika baris pertama langsung menyebut salah satu opsi
+      const firstLine = cleanAsst.split(/\r?\n/)[0].toLowerCase();
+      for (const opt of candidateOptions) {
+        const cOpt = opt.replace(/^[A-Fa-f][.)\s-]+/, '').toLowerCase().trim();
+        if (cOpt.length >= 4 && firstLine.includes(cOpt)) {
+          return opt;
+        }
+      }
+    }
+
+    return cleanAsst.slice(0, 90).replace(/\n.*/s, '').replace(/[*[\]"']/g, '').trim();
   }
 
   function extractParentQuizContext(sessionOrMessages) {
@@ -1810,55 +1937,66 @@
     }
     if (lastAsstIdx === -1 || !lastAsstMsg) return null;
 
+    // Cari giliran pengguna induk (soal asli) dengan melewati giliran-giliran revisi ("salah ganti", dsb.)
     let parentUserMsg = null;
+    let parentUserIdx = -1;
     let candidateOptions = [];
     for (let i = lastAsstIdx - 1; i >= 0; i--) {
       if (rawList[i] && rawList[i].role === 'user' && rawList[i].content) {
-        const uText = String(rawList[i].content || '').trim();
-        const lines = uText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-        const opts = lines.map(l => l.replace(/^[-*•]\s+/, '').trim()).filter(l => {
-          if (/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+\S)/.test(l)) return true;
-          const wc = l.split(/\s+/).filter(Boolean).length;
-          return wc >= 1 && wc <= 25 && !/\?\s*$/.test(l);
-        });
+        const uText = stripInjectedSystemTagsFromUserText(String(rawList[i].content || ''));
+        if (!uText || isRevisionQuery(uText)) continue;
+        const opts = extractCandidateOptionsFromTextBlock(uText, false);
         if (opts.length >= 2) {
           parentUserMsg = rawList[i];
+          parentUserIdx = i;
           candidateOptions = opts;
           break;
         }
         if (!parentUserMsg) {
           parentUserMsg = rawList[i];
+          parentUserIdx = i;
           candidateOptions = opts;
         }
       }
     }
 
-    if (candidateOptions.length < 2 && lastAsstMsg) {
-      const asstLines = lastAsstMsg.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-      const asstOpts = asstLines.map(l => l.replace(/^[-*•]\s+/, '').trim()).filter(l => {
-        if (/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+\S)/.test(l)) return true;
-        const wc = l.split(/\s+/).filter(Boolean).length;
-        return wc >= 1 && wc <= 25 && !/\?\s*$/.test(l);
-      });
-      if (asstOpts.length >= 2) {
-        candidateOptions = asstOpts;
+    // Jika soal asli berupa gambar atau opsi belum terekstrak dari teks user, ekstrak dari pesan asisten
+    if (candidateOptions.length < 2) {
+      const startScanIdx = parentUserIdx !== -1 ? parentUserIdx + 1 : lastAsstIdx;
+      for (let j = startScanIdx; j <= lastAsstIdx; j++) {
+        if (rawList[j] && rawList[j].role === 'assistant' && rawList[j].content) {
+          const asstOpts = extractCandidateOptionsFromTextBlock(String(rawList[j].content), true);
+          if (asstOpts.length >= 2) {
+            candidateOptions = asstOpts;
+            break;
+          }
+        }
       }
     }
 
-    let prevChosenLabel = '';
-    const matchLabel = lastAsstMsg.match(/^(?:(?:\*\*|\*|\[)?[A-Da-d](?:[.)\]]|\*\*)?)\s+([^\n\r]+)/m) ||
-                       lastAsstMsg.match(/(?:jawaban|pilihan|opsi)(?:\s+(?:yang\s+)?(?:tepat|benar|sesuai|adalah))?[\s:*]+(?:(?:\*\*|\*|\[)?([A-Da-d])(?:[.)\]]|\*\*)?)\s*([^\n\r.]+)?/i) ||
-                       lastAsstMsg.match(/(?:jawaban(?:nya)?\s+(?:yang\s+diharapkan\s+)?adalah\s*["']?([^"'\n\r.]+)["']?)/i);
-    if (matchLabel) {
-      prevChosenLabel = (matchLabel[1] || matchLabel[0]).replace(/[*\[\]"']/g, '').trim();
-    } else {
-      prevChosenLabel = lastAsstMsg.slice(0, 80).replace(/\n.*/s, '').trim();
+    // Kumpulkan seluruh jawaban asisten yang telah terfalsifikasi sejak parentUserIdx
+    const falsifiedAnswers = [];
+    const startAsstIdx = parentUserIdx !== -1 ? parentUserIdx + 1 : lastAsstIdx;
+    for (let j = startAsstIdx; j <= lastAsstIdx; j++) {
+      if (rawList[j] && rawList[j].role === 'assistant' && rawList[j].content) {
+        const chosen = identifyChosenOptionInAssistantTurn(String(rawList[j].content), candidateOptions);
+        if (chosen && !falsifiedAnswers.includes(chosen)) {
+          falsifiedAnswers.push(chosen);
+        }
+      }
     }
 
+    const prevChosenLabel = falsifiedAnswers.length > 0
+      ? falsifiedAnswers[falsifiedAnswers.length - 1]
+      : identifyChosenOptionInAssistantTurn(lastAsstMsg, candidateOptions);
+
     return {
-      userText: parentUserMsg ? String(parentUserMsg.content || '').trim() : '',
+      userText: parentUserMsg ? stripInjectedSystemTagsFromUserText(String(parentUserMsg.content || '')) : '',
+      parentUserIdx,
+      lastAsstIdx,
       candidateOptions,
-      previousAnswer: prevChosenLabel
+      previousAnswer: prevChosenLabel,
+      falsifiedAnswers: falsifiedAnswers.length > 0 ? falsifiedAnswers : (prevChosenLabel ? [prevChosenLabel] : [])
     };
   }
 
@@ -2247,23 +2385,29 @@
   //   4. Aljabar Boole Eksak untuk Opsi Komposit ("Semua benar" / "Semua salah").
   // ============================================================================
   function computeBayesianDecisionCalibration(promptText, options = {}) {
-    const raw = String(promptText || '').trim();
+    const raw = stripInjectedSystemTagsFromUserText(String(promptText || ''));
     const imageCount = (options && typeof options.imageCount === 'number')
       ? options.imageCount
       : (options && options.hasImages ? 1 : 0);
     const hasImages = Boolean((options && options.hasImages) || imageCount > 0);
     const lower = raw.toLowerCase();
 
-    // 0. Deteksi Revisi Jawaban Kuis / Anaphora Penggantian Hipotesis
+    // 0. Deteksi Revisi Jawaban Kuis / Anaphora Penggantian Hipotesis (Falsifikasi P(H_prev) = 0)
     const isRevision = isRevisionQuery(raw);
     const sessionObj = options && (options.session || options.history || options.sessionOrMessages);
     const parentQuiz = isRevision ? extractParentQuizContext(sessionObj) : null;
 
     if (isRevision && parentQuiz && parentQuiz.candidateOptions.length >= 2) {
-      const cleanPrev = (parentQuiz.previousAnswer || '').replace(/^[A-Da-d][.)\s-]+/, '').toLowerCase().trim();
+      const falsifiedList = Array.isArray(parentQuiz.falsifiedAnswers) && parentQuiz.falsifiedAnswers.length > 0
+        ? parentQuiz.falsifiedAnswers
+        : (parentQuiz.previousAnswer ? [parentQuiz.previousAnswer] : []);
+      const cleanFalsifiedSet = falsifiedList
+        .map(f => String(f || '').replace(/^[A-Fa-f][.)\s-]+/, '').toLowerCase().trim())
+        .filter(Boolean);
+
       const remainingOptions = parentQuiz.candidateOptions.filter(opt => {
-        const cleanOpt = opt.replace(/^[A-Da-d][.)\s-]+/, '').toLowerCase().trim();
-        return cleanOpt !== cleanPrev && !cleanOpt.includes(cleanPrev) && !cleanPrev.includes(cleanOpt);
+        const cleanOpt = opt.replace(/^[A-Fa-f][.)\s-]+/, '').toLowerCase().trim();
+        return !cleanFalsifiedSet.some(cf => cleanOpt === cf || (cf.length >= 5 && (cleanOpt.includes(cf) || cf.includes(cleanOpt))));
       });
       const effectiveOpts = remainingOptions.length > 0 ? remainingOptions : parentQuiz.candidateOptions;
       const effectiveK = Math.max(2, effectiveOpts.length);
@@ -2271,7 +2415,15 @@
       const maxEntropyBits = Number(Math.log2(effectiveK).toFixed(4));
       const calibratedTemp = 0.12;
       const calibratedTopP = 0.90;
-      const calibrationDirective = `[KOREKSI BAYESIAN: Opsi "${parentQuiz.previousAnswer}" salah (P = 0). Evaluasi sisa opsi: ${effectiveOpts.join(', ')} (P_0 = 1/${effectiveOpts.length}). Langsung berikan satu opsi pengganti terbaik di baris pertama beserta alasan ringkas tanpa meminta pengguna mengulang soal.]`;
+      const falsifiedStr = falsifiedList.join('; ') || parentQuiz.previousAnswer;
+
+      const reconstructedUserPrompt = `${raw}\n\n[PROYEKSI RUANG KEADAAN REVISI (P(H_falsified) = 0)]:\n` +
+        (parentQuiz.userText ? `- Soal Asli: ${parentQuiz.userText.replace(/\r?\n/g, ' | ')}\n` : '') +
+        `- Opsi Terfalsifikasi (P = 0, JANGAN DIPILIH): ${falsifiedStr}\n` +
+        `- Ruang Opsi Tersisa (P_0 = 1/${effectiveOpts.length}): ${effectiveOpts.map((o, i) => `(${i + 1}) ${o}`).join(' ; ')}\n` +
+        `- Instruksi Eksak: Pilih tepat 1 opsi yang paling benar dari Ruang Opsi Tersisa di atas dan tuliskan di baris pertama beserta alasan konseptual mengapa opsi tersebut benar (batalkan klaim sebelumnya bahwa tidak ada opsi yang tepat).`;
+
+      const calibrationDirective = `[KOREKSI BAYESIAN: Opsi "${falsifiedStr}" salah (P = 0). Evaluasi sisa opsi: ${effectiveOpts.join(', ')} (P_0 = 1/${effectiveOpts.length}). Langsung berikan satu opsi pengganti terbaik di baris pertama beserta alasan ringkas tanpa meminta pengguna mengulang soal.]`;
 
       return {
         isDiscreteChoice: true,
@@ -2291,14 +2443,27 @@
         candidateOptions: parentQuiz.candidateOptions,
         remainingOptions: effectiveOpts,
         falsifiedAnswer: parentQuiz.previousAnswer,
+        falsifiedAnswers: falsifiedList,
+        parentQuestionText: parentQuiz.userText || '',
+        reconstructedUserPrompt,
         calibrationDirective
       };
     } else if (isRevision) {
-      // Resilien Fallback untuk Revisi Kuis tanpa Format Opsi Standar / Soal Konversasional
+      // Resilien Fallback untuk Revisi Kuis tanpa Format Opsi Standar / Soal Konversasional / Gambar
       const prevAnswerText = parentQuiz?.previousAnswer || 'Jawaban pada giliran sebelumnya';
+      const falsifiedList = Array.isArray(parentQuiz?.falsifiedAnswers) && parentQuiz.falsifiedAnswers.length > 0
+        ? parentQuiz.falsifiedAnswers
+        : [prevAnswerText];
+      const falsifiedStr = falsifiedList.join('; ');
       const calibratedTemp = 0.12;
       const calibratedTopP = 0.90;
-      const calibrationDirective = `[KOREKSI BAYESIAN: Jawaban sebelumnya salah (P = 0). Evaluasi riwayat obrolan di atas dan berikan satu jawaban revisi terbaik pengganti di baris pertama beserta alasan ringkas tanpa meminta pengguna mengulang soal.]`;
+
+      const reconstructedUserPrompt = `${raw}\n\n[PROYEKSI RUANG KEADAAN REVISI (P(H_falsified) = 0)]:\n` +
+        (parentQuiz?.userText ? `- Soal Asli: ${parentQuiz.userText.replace(/\r?\n/g, ' | ')}\n` : '') +
+        `- Jawaban Terfalsifikasi (P = 0, JANGAN DIPILIH): ${falsifiedStr}\n` +
+        `- Instruksi Eksak: Evaluasi kembali soal pada riwayat di atas, eliminasi jawaban yang salah tersebut, dan langsung tuliskan 1 jawaban pengganti terbaik di baris pertama beserta alasan singkat (tanpa meminta pengguna mengirim ulang soal).`;
+
+      const calibrationDirective = `[KOREKSI BAYESIAN: Jawaban sebelumnya ("${falsifiedStr}") salah (P = 0). Evaluasi soal pada riwayat obrolan di atas dan langsung berikan satu jawaban revisi pengganti terbaik di baris pertama beserta alasan ringkas tanpa meminta pengguna mengulang soal.]`;
 
       return {
         isDiscreteChoice: true,
@@ -2318,6 +2483,9 @@
         candidateOptions: parentQuiz?.candidateOptions || [],
         remainingOptions: [],
         falsifiedAnswer: prevAnswerText,
+        falsifiedAnswers: falsifiedList,
+        parentQuestionText: parentQuiz?.userText || '',
+        reconstructedUserPrompt,
         calibrationDirective
       };
     }
@@ -2333,7 +2501,7 @@
     const inlineOptionsMatch = raw.match(/(?:^|\s)(?:\([A-Da-d]\)|[A-Da-d][.)])\s+[^\n]+(?:\s+(?:\([B-Eb-e]\)|[B-Eb-e][.)])\s+[^\n]+)/);
 
     // 2. Deteksi pilihan ganda tanpa huruf (format kuis Coursera / Skilljar / IBM / Dicoding / Google):
-    //    Terdapat baris kalimat tanya ('?' atau ':' atau '...') diikuti >= 2 baris opsi kandidat pendek-menengah
+    //    WAJIB terdapat baris kalimat tanya ('?' atau ':' atau kata tanya eksplisit) diikuti >= 2 baris opsi kandidat
     let unlabeledOptionCount = 0;
     const questionLineIdx = lines.findIndex(l => {
       const trimmedLine = l.trim();
@@ -2357,32 +2525,18 @@
       }
     }
 
-    // 2b. Deteksi himpunan opsi/istilah diskrit murni (Aljabar Taksonomi vs Pilihan Ganda Tanpa Label):
-    //     Pengguna mengirimkan 2 s/d 8 baris terpisah tanpa teks sapaan/perintah fiktif.
-    //     (1) Taksonomi Konsep Murni Relasional: istilah teori interdependensi (mis. "Competitive \n Independent...")
-    //     (2) Himpunan Opsi Kuis: klausa pernyataan, tindakan, atau istilah pilihan kuis (mis. opsi kuis RAG, DBMS, LMS)
+    // 2b. Deteksi taksonomi relasional eksplisit (misal daftar istilah Morton Deutsch Social Interdependence).
+    //     DILARANG mengklasifikasikan pesan multi-baris biasa pengguna tanpa kalimat tanya sebagai kuis (mencegah pembajakan input pengguna)!
     let pureListOptionCount = 0;
-    let unlabeledCandidateSetCount = 0;
+    const unlabeledCandidateSetCount = 0;
     if (lines.length >= 2 && lines.length <= 8 && !hasImages && unlabeledOptionCount === 0 && labeledOptionLines.length === 0) {
-      const isAllNonConversational = lines.every(l => {
-        return !/^(?:buatkan|tolong|halo|hai|jelaskan|analisis|terima kasih|thanks|selamat)\b/i.test(l);
+      const isRelationalTheoryTerms = lines.some(l => /\b(independent|competitive|cooperative|interdependent|contrience|promotive)\b/i.test(l));
+      const isAllVeryShortTerms = lines.every(l => {
+        const wc = l.split(/\s+/).filter(Boolean).length;
+        return wc >= 1 && wc <= 6;
       });
-      if (isAllNonConversational) {
-        const isRelationalTheoryTerms = lines.some(l => /\b(independent|competitive|cooperative|interdependent|contrience|promotive)\b/i.test(l));
-        const isAllVeryShortTerms = lines.every(l => {
-          const wc = l.split(/\s+/).filter(Boolean).length;
-          return wc >= 1 && wc <= 6;
-        });
-        const isAllOptionSentences = lines.every(l => {
-          const wc = l.split(/\s+/).filter(Boolean).length;
-          return wc >= 2 && wc <= 40;
-        });
-
-        if (isAllVeryShortTerms && isRelationalTheoryTerms) {
-          pureListOptionCount = lines.length;
-        } else if (isAllVeryShortTerms || isAllOptionSentences) {
-          unlabeledCandidateSetCount = lines.length;
-        }
+      if (isAllVeryShortTerms && isRelationalTheoryTerms) {
+        pureListOptionCount = lines.length;
       }
     }
 
@@ -2390,7 +2544,6 @@
     const hasQuizCue = /\b(pilihan\s+ganda|multiple\s+choice|which\s+(?:of\s+the\s+following|type|evaluation|response|approach|scenario|situation|technique|opening|statement)|what(?:'s|\s+is)\s+the\s+(?:best|most\s+effective|primary|correct|main)\b|manakah\s+(?:dari|pernyataan|opsi|pilihan|kata\s+kunci|berikut)|berikut\s+adalah\s+.*kecuali|pilih\s+satu|jawaban\s+yang\s+(?:benar|tepat)|true\s+or\s+false|benar\s+atau\s+salah)\b/i.test(lower);
     const hasImageQuizCue = hasImages && (raw.length === 0 || /\b(analisis\s+gambar|jawab|soal|pilihan|opsi|benar|tepat|quiz|ujian|nomor|pertanyaan|singkat)\b/i.test(lower));
 
-    // Bedakan tegas: Kuis Pilihan Ganda (memilih 1 jawaban benar) vs Taksonomi Konsep Murni (mendekonstruksi relasi antar-istilah)
     const isConceptualTaxonomy = pureListOptionCount >= 2 && !hasQuizCue && !hasImageQuizCue && questionLineIdx === -1;
 
     let optionCount = 0;
@@ -2398,8 +2551,6 @@
       optionCount = labeledOptionLines.length;
     } else if (unlabeledOptionCount >= 2) {
       optionCount = unlabeledOptionCount;
-    } else if (unlabeledCandidateSetCount >= 2) {
-      optionCount = unlabeledCandidateSetCount;
     } else if (inlineOptionsMatch) {
       optionCount = 4;
     } else if (hasQuizCue || hasImageQuizCue) {
@@ -2408,15 +2559,9 @@
 
     const isDiscreteChoice = !isPureMediaGen && !isConceptualTaxonomy && (optionCount >= 2 || hasQuizCue || hasImageQuizCue);
 
-    // 4. Deteksi rujukan balik percakapan (anaphoric back-reference ke giliran sebelumnya):
-    //    Jika TIDAK ada rujukan balik, giliran soal diskrit (baik teks maupun gambar baru!)
-    //    diisolasi dari puluhan/ratusan riwayat soal lama agar induction heads tidak meniru jawaban tanpa <think>.
-    const hasAnaphoricBackRef = /\b(sebelumnya|di\s+atas|tadi|barusan|ulang|ulangi|koreksi|salah|itu\s+pilihan|lanjutkan|nomor\s+berikutnya|kenapa\s+jawabannya|mengapa\s+itu|jelaskan\s+jawaban|previous|above|earlier)\b/i.test(lower);
-    const isSelfContainedDiscreteTurn = Boolean(
-      isDiscreteChoice &&
-      !hasAnaphoricBackRef &&
-      (hasImages || (raw.length >= 40 && (labeledOptionLines.length >= 2 || unlabeledOptionCount >= 2 || unlabeledCandidateSetCount >= 2 || inlineOptionsMatch || hasQuizCue)))
-    );
+    // 4. JANGAN PERNAH menghapus riwayat percakapan (isSelfContainedDiscreteTurn = false secara mutlak)
+    //    agar konteks multi-giliran dan instruksi pengguna tetap utuh 100%.
+    const isSelfContainedDiscreteTurn = false;
 
     // 5. Deteksi persoalan analitis / logika / matematika / sains / kausalitas umum
     const isAnalyticalQuery = !isTrivialGreeting && !isPureMediaGen && (
@@ -2438,69 +2583,14 @@
     const calibratedTopP = (isDiscreteChoice || isConceptualTaxonomy || isAnalyticalQuery) ? 0.90 : 0.92;
 
     const multiImageNote = imageCount > 1
-      ? ` Terdapat ${imageCount} gambar terlampir; evaluasi setiap gambar secara berurutan (1 s/d ${imageCount}) tanpa mencampur opsi antar-gambar, lalu tuliskan jawaban akhir bernomor 1 s/d ${imageCount}.`
+      ? ` Evaluasi ${imageCount} gambar terlampir secara berurutan (1 s/d ${imageCount}).`
       : '';
 
+    // Bebas dari "text persona" / ceramah meta-prompt:
+    // Hanya berikan batasan ruang hipotesis ringkas pada soal pilihan ganda diskrit (isDiscreteChoice).
     let calibrationDirective = '';
-    if (isConceptualTaxonomy) {
-      calibrationDirective = `[PROTOKOL TAKSONOMI RELASIONAL & DEKONSTRUKSI ALJABAR MURNI — STATE SPACE H_0 = ${maxEntropyBits} bit]:
-Pengguna memberikan himpunan konsep formal terstruktur (${lines.join(', ')}).
-Awali generasi dengan penalaran matematis/ontologis di dalam blok <think>...</think> (disembunyikan otomatis oleh sistem):
-1. DEKOMPOSISI RUANG KEADAAN (STATE SPACE DECOMPOSITION): Petakan konsep-konsep tersebut ke dalam parameter ortogonal atau matriks interdependensi formal (mis. Social Interdependence Theory Morton Deutsch, Game Theory payoff space, atau relasi aljabar himpunan).
-2. DEFINISI ESENSIAL & BATASAN SYARAT: Definisikan relasi matematis eksplisit (misal: Independent: dU_A/dU_B = 0; Competitive: dU_A * dU_B < 0 / Zero-sum; Cooperative: dU_A * dU_B > 0 / Non-zero-sum Pareto-optimal; Interdependent: U_i = f(s_1, ..., s_n)).
-3. STRUKTURISASI AKHIR: Tutup </think>, lalu sajikan analisis dekonstruksi yang tajam, elegan, dan mendalam dengan matriks atau tabel Markdown komparatif dan poin-poin terstruktur tanpa kalimat filler atau kata-kata keraguan.`;
-    } else if (isDiscreteChoice) {
-      calibrationDirective = `[PROTOKOL DEDUKSI PROPOSISIONAL & KALIBRASI BAYESIAN WAJIB — H_0 = ${maxEntropyBits} bit, P_0(H_i) = ${uniformPrior}]:
-Sebelum menulis satu kata pun jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan blok <think>...</think> (meskipun pesan sebelumnya di riwayat tidak menampilkan <think> dan meskipun pengguna meminta jawaban singkat; isi <think> disembunyikan otomatis oleh sistem).${multiImageNote} Di dalam <think>, hitung secara berurutan:
-1. TRANSKRIPSI & POLARITAS OPERATOR LOGIKA: Baca teliti setiap kata pada soal/gambar. Tetapkan polaritas operator:
-   - Positif (+1): mencari pernyataan benar atau langkah perbaikan positif (jika ditanya "hal apakah yang perlu ditingkatkan/diperbaiki", pilih aksi perbaikan positif yang terukur, BUKAN mengulang kalimat kelemahan/penyebab gagalnya).
-   - Negasi/Pengecualian (-1) ("kecuali", "bukan", "tidak termasuk", "except", "not", "least"): mencari opsi yang SALAH terhadap klaim soal. Hati-hati negasi ganda: "kesalahan yang perlu dihindari, kecuali X" berarti mencari X yang merupakan tindakan BENAR (bukan kesalahan).
-2. PEMETAAN KENDALA SYARAT PERLU (E = E_std ∧ E_anom): Identifikasi batas desain atau situasi khusus di soal. Jika sistem otomatis/AI disebut tidak dirancang menangani anomali/kejadian mendadak tertentu (mis. dam failure, weather anomaly, irregular pattern), strategi efektif WAJIB menugaskan AI pada kondisi standar E_std DAN menugaskan manusia secara spesifik menangani anomali E_anom tersebut (bukan tugas lain yang melenceng atau menyuruh AI auto-adjust di luar desainnya).
-3. UJI BIIMPLIKASI TAKSONOMI KETAT vs CONTOH KATEGORI (TANPA BIAS KEMIRIPAN PARSIAL):
-   - Evaluasi setiap opsi secara independen dari prior setara P_0 = 1/${effectiveK} (nolkan bias panjang kalimat).
-   - Pada soal DEFINISI KONSEP/PERAN ("X adalah ..."): DILARANG memilih opsi yang sekadar mendekati/umum jika opsi tersebut sebenarnya adalah definisi konsep tetangga Y != X! (Contoh ketat: "mengelola proyek sehari-hari" = Manajer Proyek; "mengelola banyak proyek" atau "bertanggung jawab atas program satu klien" = Manajer Program, BUKAN Manajer Portofolio; Manajer Portofolio WAJIB memuat pengelolaan portofolio/kumpulan program & proyek strategis organisasi; mengeksekusi rencana yang telah disusun tim manajemen proyek = anggota pelaksana, BUKAN peran manajemen proyek).
-   - Pada soal CONTOH PENERAPAN / KATA KUNCI RESUME / KARAKTERISTIK: periksa apakah setiap opsi memuat indikator/kata kerja kunci yang sesuai kategori (mis. kata kunci resume manajer: "Berkolaborasi...", "Mengevaluasi...", "Memiliki komunikasi yang efektif saat memimpin..." semuanya adalah contoh penulisan kata kunci resume yang valid).
-4. ALJABAR BOOLE OPSI KOMPOSIT ("Semua benar" / "Semua salah" / "All/None of the above"):
-   - Jangan pernah mengabaikan opsi "Semua benar" atau "Semua salah"!
-   - Jika tersedia "Semua benar" pada soal positif (+1): apabila >=2 opsi substantif sama-sama merupakan contoh/pernyataan yang valid sesuai kategori yang ditanyakan (v=1), maka "Semua benar" WAJIB dipilih (jangan memaksakan memilih 1 contoh saja).
-   - Jika tersedia "Semua salah" pada soal definisi positif (+1): apabila seluruh opsi substantif merupakan definisi konsep tetangga Y != X atau meleset syarat spesifiknya (semua v=0), maka "Semua salah" WAJIB dipilih!
-   - Pada soal pengecualian "kecuali..." (-1): jika seluruh opsi substantif ternyata BENAR/BISA digunakan sesuai klaim soal, maka tidak ada pengecualian di antara ketiganya sehingga "semua salah" WAJIB dipilih; sebaliknya jika ada tepat 1 opsi substantif yang salah/bukan kesalahan, pilih opsi tersebut.
-5. FORMAT JAWABAN AKHIR MURNI & ELEGAN:
-   - Tutup </think>, lalu tuliskan jawaban akhir secara elegan, bersih, dan langsung kepada pengguna.
-   - DILARANG KERAS menghasilkan blok kode JSON (seperti \`\`\`json {...}\`\`\`), kamus data, atau residu kode program untuk penalaran internal!
-   - FORMULA & PERSAMAAN MATEMATIKA: Tuliskan seluruh rumus, variabel, parameter, dan ekspresi matematika dalam notasi standar LaTeX KaTeX ($...$ untuk formula sebaris seperti $f_{w,b}(x) = wx + b$, $x$, $w$, $b$, dan $$...$$ untuk persamaan display mandiri) agar tertampil indah, presisi, dan mudah dibaca serta disalin oleh pengguna.
-   - Sertakan 1-2 baris penjelasan konseptual/matematis yang ringkas, percaya diri, dan solutif.
-6. LARANGAN KERAS MENYALAHKAN SOAL & HEDGING PALSU:
-   - DILARANG KERAS berspekulasi bahwa soal ujian salah, cacat desain, atau tidak memiliki jawaban yang benar (misal: "soal ini tidak memiliki jawaban yang benar di antara opsi yang diberikan", "mungkin ada kesalahan dalam desain soal", "jika platform memaksa memilih..."). Ujian kurikulum resmi (Coursera, IBM, Google, AWS, edX, Dicoding) selalu dirancang dengan SATU kunci jawaban kanonik yang definitif!
-   - Tentukan kunci jawaban kanonik tersebut secara mantap, tepat, dan deduktif. JANGAN PERNAH menyuruh pengguna memilih suatu opsi sembari Anda sendiri menyatakan opsi tersebut salah atau tidak tepat. Rekomendasi Anda harus konsisten, meyakinkan, dan final.`;
-      if (questionLineIdx === -1 && (unlabeledCandidateSetCount >= 2 || labeledOptionLines.length >= 2)) {
-        calibrationDirective += `\n\n6. INFERENSI ABDUKTIF SOAL TANPA PERTANYAAN EKSPLISIT (INVERSE PROBLEM & KALIBRASI OVERCONFIDENCE):
-   Pengguna HANYA menyalin opsi pilihan kuis (${lines.length} opsi) tanpa menyertakan teks pertanyaan.
-   Untuk mencegah salah pilih akibat overconfidence, lakukan di dalam <think>:
-   - Identifikasi domain keilmuan opsi-opsi tersebut (misal: Retrieval-Augmented Generation / RAG, DBMS Relasional, Machine Learning, Cloud Architecture, dsb).
-   - Uji pemetaan peran spesifik masing-masing opsi (Falsifikasi & Lingkup Kausalis):
-     ${lines.map((l, i) => `* Opsi ${i + 1} ("${l}"): petakan kapan opsi ini tepat dan fungsi utamanya dalam domain.`).join('\n     ')}
-   - Tentukan OPSI REKOMENDASI UTAMA dengan prior probabilitas tertinggi.
-   - Setelah </think>, sajikan:
-     1. Rekomendasi Utama: Tuliskan opsi rekomendasi utama paling kuat di awal secara tegas.
-     2. Peta Pencocokan Cepat (Conditional Decision Map): Berikan 1 baris pemetaan untuk setiap opsi (misal: "Jika soal menanyakan X -> Opsi A; Jika soal menanyakan Y -> Opsi B; Jika soal menanyakan Z -> Opsi C") agar pengguna dapat 100% tepat mencocokkan dengan kalimat pertanyaan sebenarnya di layar kuis mereka!
-     3. Dukungan Revisi: Nyatakan bahwa jika pengguna ingin mengganti opsi atau jika fokus soal berbeda, cukup ketik "ganti" atau sebutkan opsi alternatif.`;
-      }
-    } else if (isAnalyticalQuery) {
-      calibrationDirective = `[PROTOKOL REGULASI MEKANISME PERHATIAN & INFERENSI DEDUKTIF MATEMATIKA MURNI]:
-Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan blok penalaran deduktif formal <think>...</think> (disembunyikan otomatis oleh sistem):${multiImageNote}
-1. REGULASI MATRIKS PERHATIAN TRANSFORMER (A = softmax(QK^T / sqrt(d_k))):
-   - Alokasikan bobot perhatian (Attention Saliency) tertinggi secara eksklusif pada variabel kunci pertanyaan: premis data faktual, kendala batas (boundary conditions), domain definisi f: X -> Y, syarat perlu (necessary conditions), syarat cukup (sufficient conditions), serta operator negasi ("bukan", "tidak", "kecuali").
-   - DILARANG KERAS mengalami dispersi perhatian (Attention Drift) ke token pengisi, analogi fiktif, atau asumsi spekulatif yang tidak dinyatakan dalam pertanyaan.
-2. KAUSALITAS TERARAH vs KORELASI SEMU (PEARL'S DO-CALCULUS):
-   - Dilarang menyimpulkan hubungan sebab-akibat hanya dari korelasi kata permukaan P(Y | X).
-   - Bentuk rantai penalaran kausal implikasi terarah: Premis P_0 -> Kondisi Batas C_k -> Transformasi f(P_0, C_k) -> Solusi Y*.
-3. INVARIAN AKSIOMATIS & VERIFIKASI ANTI-KONTRADIKSI:
-   - Terapkan hukum non-kontradiksi formal: ¬(P ∧ ¬P). Uji setiap langkah penurunan; jika terjadi kontradiksi dengan premis atau prinsip fisika/matematika terdefinisi, pangkas (prune) cabang tersebut secara langsung.
-4. DEDUKSI AKSIOMATIK & FORMULASI MATEMATIKA MURNI:
-   - Gunakan penalaran matematika murni f: X -> Y tanpa ketergantungan pada persona, emosi, atau retorika. Turunkan hasil secara analitis, eksak, dan berbobot aksiomatik tertinggi.
-   - Sampaikan HANYA substansi jawaban yang terverifikasi, presisi, berbasis penalaran matematika murni, dan terstruktur rapi.
-5. Tutup </think>, lalu sajikan jawaban akhir yang jernih, proporsional, dan terverifikasi secara formal.`;
+    if (isDiscreteChoice) {
+      calibrationDirective = `[KALIBRASI KEPUTUSAN BAYESIAN — P_0(H_i) = ${uniformPrior}, H_0 = ${maxEntropyBits} bit]: Evaluasi setiap opsi secara independen sesuai polaritas operator soal (positif vs negasi/kecuali) serta opsi komposit ("Semua benar/salah" / "All/None of the above"). Tetapkan tepat satu kunci jawaban kanonik yang paling akurat secara tegas tanpa meragukan desain soal.${multiImageNote}`;
     }
 
     return {
@@ -3347,27 +3437,12 @@ Sebelum menulis jawaban kepada pengguna, Anda WAJIB mengawali generasi dengan bl
 
   /**
    * Vektor Resonansi Persona Deterministik (\Pi_{res}).
-   * Menginjeksi penguat salience pada giliran aktif (\Delta pos \approx 0) untuk
-   * mengatasi peluruhan eksponensial perhatian RoPE/ALiBi (\exp(-\gamma \cdot \Delta pos)).
+   * Dinonaktifkan pada pesan user (mengembalikan string kosong) agar pesan user
+   * tidak pernah tercemar teks tambahan di ujung giliran aktif (menjaga SNR(X_t) = 1.0).
+   * Persona pengguna tetap dipertahankan secara utuh di dalam role: 'system'.
    */
-  function computePersonaResonanceVector(activePersona, turnCount = 1) {
-    if (!activePersona || typeof activePersona !== 'string' || !activePersona.trim()) {
-      return '';
-    }
-    const cleanPersona = activePersona.trim();
-    // Jika hanya giliran pertama (turn 1), system prompt di posisi 0 sudah memiliki jarak pos ~ 0
-    if (turnCount < 2) {
-      return '';
-    }
-    // Padatkan persona jika terlalu panjang untuk menjaga efisiensi token
-    const maxLen = 600;
-    const condensed = cleanPersona.length > maxLen
-      ? cleanPersona.slice(0, maxLen).trim() + '...'
-      : cleanPersona;
-
-    return `\n\n[PANDUAN RESONANSI PERSONA SISTEM (PRIORITAS IDENTITAS)]:
-Tetap pertahankan secara konsisten identitas, gaya tutur, dan persona berikut dari pengaturan sistem:
-${condensed}`;
+  function computePersonaResonanceVector(_activePersona, _turnCount = 1) {
+    return '';
   }
 
   /**
@@ -3424,6 +3499,7 @@ ${condensed}`;
     purifyHistoricalAssistantTurn,
     computePersonaResonanceVector,
     sanitizeModelPersonaDrift,
+    stripInjectedSystemTagsFromUserText,
     isRevisionQuery,
     extractParentQuizContext,
     computeDamerauLevenshtein,

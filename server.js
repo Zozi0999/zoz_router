@@ -3949,19 +3949,34 @@ function applyServerSideDecisionCalibration(body, provider = 'ollama') {
     imageCount = lastUser.content.filter(p => p && p.type === 'image_url' && p.image_url?.url).length;
   }
 
-  // Ekstrak teks murni pengguna tanpa pembungkus [Instruksi Sistem & Konteks: ...]
+  // Ekstrak teks murni pengguna tanpa pembungkus [Instruksi Sistem & Konteks: ...] atau [PANDUAN RESONANSI...]
   let rawUserText = typeof lastUser.content === 'string'
     ? lastUser.content
     : (Array.isArray(lastUser.content) ? lastUser.content.map(p => (p && typeof p.text === 'string') ? p.text : '').filter(Boolean).join('\n') : '');
-  if (rawUserText.startsWith('[Instruksi Sistem & Konteks:')) {
-    const lastBracketIdx = rawUserText.lastIndexOf(']\n\n');
-    if (lastBracketIdx !== -1) {
-      rawUserText = rawUserText.slice(lastBracketIdx + 3).trim();
-    } else {
-      rawUserText = rawUserText.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
+  if (typeof textSafety.stripInjectedSystemTagsFromUserText === 'function') {
+    rawUserText = textSafety.stripInjectedSystemTagsFromUserText(rawUserText);
+  } else {
+    if (rawUserText.startsWith('[Instruksi Sistem & Konteks:')) {
+      const lastBracketIdx = rawUserText.lastIndexOf(']\n\n');
+      if (lastBracketIdx !== -1) {
+        rawUserText = rawUserText.slice(lastBracketIdx + 3).trim();
+      } else {
+        rawUserText = rawUserText.replace(/^\[Instruksi Sistem & Konteks:[\s\S]*?\]\s*/i, '').trim();
+      }
+    }
+    rawUserText = rawUserText
+      .replace(/\n*\[PANDUAN RESONANSI PERSONA SISTEM[\s\S]*$/i, '')
+      .replace(/\n*\[PROYEKSI RUANG KEADAAN REVISI[\s\S]*$/i, '')
+      .replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '')
+      .trim();
+  }
+
+  // Bersihkan residu [PANDUAN RESONANSI PERSONA SISTEM...] pada seluruh pesan user di body.messages
+  for (const m of body.messages) {
+    if (m && m.role === 'user' && typeof m.content === 'string' && m.content.includes('[PANDUAN RESONANSI PERSONA SISTEM')) {
+      m.content = m.content.replace(/\n*\[PANDUAN RESONANSI PERSONA SISTEM[\s\S]*$/i, '').trim();
     }
   }
-  rawUserText = rawUserText.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '').trim();
 
   const calib = textSafety.computeBayesianDecisionCalibration(rawUserText, {
     hasImages: imageCount > 0,
@@ -4014,30 +4029,48 @@ function applyServerSideDecisionCalibration(body, provider = 'ollama') {
       body.options.temperature = calib.temperature;
     }
     if (!body.options.num_ctx) body.options.num_ctx = 16384;
-    // Jangan batasi num_predict ke angka kecil (mis. 4096) karena model hybrid-thinking (GLM/Gemma4/Nemotron)
-    // memakai budget tersebut untuk message.thinking sebelum mengeluarkan message.content!
-    if (body.options.num_predict && body.options.num_predict <= 4096) {
-      delete body.options.num_predict;
-    }
     // Aktifkan native latent reasoning pada Ollama (auto-retry di dispatchOllamaUpstream jika model lokal lama tidak mendukung)
     if (body.think === undefined) {
       body.think = true;
     }
   }
 
-  // 2. Isolasi konteks giliran soal diskrit mandiri (mencegah puluhan pesan kuis lama membajak induction heads)
-  if (calib.isSelfContainedDiscreteTurn) {
-    const nonSysCount = body.messages.filter(m => m && m.role !== 'system').length;
-    if (nonSysCount > 1) {
-      const sysMsgs = body.messages.filter(m => m && m.role === 'system');
-      body.messages = [...sysMsgs, lastUser];
+  // 2. Proyeksi Ruang Keadaan Revisi Matematis (P(H_falsified) = 0, Delta_pos = 0)
+  //    JANGAN PERNAH menghapus riwayat percakapan (body.messages tetap utuh).
+  if (calib.isQuizRevision && calib.reconstructedUserPrompt) {
+    if (typeof lastUser.content === 'string' && !lastUser.content.includes('[PROYEKSI RUANG KEADAAN REVISI')) {
+      lastUser.content = calib.reconstructedUserPrompt;
+    } else if (Array.isArray(lastUser.content)) {
+      const textPart = lastUser.content.find(p => p && p.type === 'text' && typeof p.text === 'string');
+      if (textPart && !textPart.text.includes('[PROYEKSI RUANG KEADAAN REVISI')) {
+        textPart.text = calib.reconstructedUserPrompt;
+      }
+    }
+    for (let j = lastUserIdx - 1; j >= 0; j--) {
+      const prevMsg = body.messages[j];
+      if (prevMsg && prevMsg.role === 'assistant' && typeof prevMsg.content === 'string' && !prevMsg.content.includes('[Status Evaluasi:') && !prevMsg.content.includes('[Rekaman Evaluasi Sebelumnya:')) {
+        const falsifiedTag = calib.falsifiedAnswer || 'Jawaban sebelumnya';
+        if (Array.isArray(calib.remainingOptions) && calib.remainingOptions.length > 0) {
+          prevMsg.content = `[Rekaman Evaluasi Sebelumnya: Opsi Tersedia = ${calib.candidateOptions.join(' | ')}. Jawaban yang dipilih sebelumnya = "${falsifiedTag}" -> Status: Terfalsifikasi oleh pengguna (P = 0). Klasifikasi sebelumnya dibatalkan; evaluasi ulang opsi tersisa dari prinsip dasar.]`;
+        } else {
+          const cleanedPrior = prevMsg.content
+            .replace(/(?:Soal\s+ini\s+tampaknya\s+tidak\s+memiliki\s+jawaban\s+yang\s+benar[^\n]*|Jika\s+platform\s+memaksa\s+memilih[^\n]*)/gi, '')
+            .trim();
+          prevMsg.content = `${cleanedPrior}\n\n[Status Evaluasi: Hipotesis "${falsifiedTag}" terfalsifikasi (P = 0).]`.trim();
+        }
+        break;
+      }
     }
   }
 
-  // 3. Suntikkan direktif deduksi proposisional v680 jika belum ada di payload
-  const hasV680Protocol = serializedAll.includes('[PROTOKOL DEDUKSI PROPOSISIONAL') || serializedAll.includes('[PROTOKOL VERIFIKASI DEDUKTIF') || serializedAll.includes('[PROTOKOL REVISI BAYESIAN');
+  // 3. Suntikkan direktif kalibrasi Bayesian jika belum ada di payload
+  const hasV680Protocol = serializedAll.includes('[PROTOKOL DEDUKSI PROPOSISIONAL') ||
+    serializedAll.includes('[PROTOKOL VERIFIKASI DEDUKTIF') ||
+    serializedAll.includes('[PROTOKOL REVISI BAYESIAN') ||
+    serializedAll.includes('[KOREKSI BAYESIAN') ||
+    serializedAll.includes('[KALIBRASI KEPUTUSAN BAYESIAN') ||
+    serializedAll.includes('[PROYEKSI RUANG KEADAAN REVISI');
   if (!hasV680Protocol && calib.calibrationDirective) {
-    // Bersihkan blok v679 lama (tanpa <think>) jika dikirim oleh tab browser belum di-refresh
     for (const m of body.messages) {
       if (m && typeof m.content === 'string' && m.content.includes('[KALIBRASI ')) {
         m.content = m.content
@@ -4200,7 +4233,11 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
   const userDir = getUserSessionsDir(sanitizeUserId(effectiveUid || 'default'));
   const sessFile = path.join(userDir, `${cleanSid}.json`);
   const cleanUserPrompt = userPrompt
-    ? String(userPrompt).replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|INSTRUKSI FORMAT WAJIB|Instruksi Sistem & Konteks|INTEGRITAS KONTEKS|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):(?:[^\[\]]|\[[^\]]*\])*\](?:\n\n|\s*)/gi, '').trim()
+    ? String(userPrompt)
+        .replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|INSTRUKSI FORMAT WAJIB|Instruksi Sistem & Konteks|INTEGRITAS KONTEKS|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):(?:[^\[\]]|\[[^\]]*\])*\](?:\n\n|\s*)/gi, '')
+        .replace(/\n*\[PANDUAN RESONANSI PERSONA SISTEM[\s\S]*$/i, '')
+        .replace(/\n*\[PROYEKSI RUANG KEADAAN REVISI[\s\S]*$/i, '')
+        .trim()
     : null;
   const savedUserImgs = persistUserImagesToUploads(userImages);
 
@@ -11047,6 +11084,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       const isAutoRouterExplicit = Boolean(req.headers['x-auto-router'] === 'true' || body.isAutoRouter);
       const shouldUseCloudBridge = Boolean((isAutoRouterExplicit || (isCloudModelRequested && !rawOllamaKey && rawOrKey)) && ((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (Boolean(rawOrKey) && !isCustomRemoteEndpoint)));
 
+      // Defense-in-depth: Kalibrasi Deduksi Proposisional & Bayesian di Sisi Server (Ollama & Cloud Bridge)
+      applyServerSideDecisionCalibration(body, 'ollama');
+
       if (shouldUseCloudBridge) {
         // Pure Cloud Architecture Bridge:
         // Ketika tidak ada daemon lokal atau key yang diberikan adalah OpenRouter key, alihkan secara transparan ke OpenRouter Cloud AI
@@ -11165,12 +11205,19 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   const parsed = JSON.parse(errBuf);
                   const msg = parsed?.error?.message || parsed?.error || `OpenRouter bridge error: HTTP ${bStatus}`;
                   // Auto-Recovery HTTP 402: kalibrasi kapasitas token reservation
-                  if ((bStatus === 402 || /can only afford/i.test(msg)) && retryCount === 0) {
+                  if ((bStatus === 402 || /can only afford/i.test(msg)) && retryCount <= 1) {
                     const affordMatch = msg.match(/can only afford\s+(\d+)/i);
                     const affordVal = affordMatch ? parseInt(affordMatch[1], 10) : 0;
                     const safeTokens = affordVal > 256 ? Math.max(512, Math.min(4096, affordVal - 128)) : 2048;
-                    console.log(`[Ollama Cloud Bridge Auto-Recovery] Model ${targetCloudModel} HTTP 402 (afford: ${affordVal}). Kalibrasi max_tokens ke ${safeTokens}...`);
+                    console.log(`[Ollama Cloud Bridge Auto-Recovery] Model ${payload.model} HTTP 402 (afford: ${affordVal}). Kalibrasi max_tokens ke ${safeTokens}...`);
                     payload.max_tokens = safeTokens;
+                    return executeBridgeRequest(payload, retryCount + 1);
+                  }
+                  // Auto-Recovery Upstream Provider Error: fallback deterministik ke deepseek/deepseek-chat
+                  if ((bStatus >= 500 || bStatus === 429 || bStatus === 404 || /provider returned error|temporarily unavailable|overloaded|no endpoints/i.test(msg)) && retryCount === 0 && payload.model !== 'deepseek/deepseek-chat') {
+                    console.log(`[Ollama Cloud Bridge Auto-Recovery] Model ${payload.model} upstream HTTP ${bStatus} (${msg}). Fallback ke deepseek/deepseek-chat...`);
+                    payload.model = 'deepseek/deepseek-chat';
+                    payload.max_tokens = Math.min(payload.max_tokens || 2048, 2048);
                     return executeBridgeRequest(payload, retryCount + 1);
                   }
                   if (isStream) {
@@ -11438,9 +11485,6 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           }
         }
       }
-
-      // Defense-in-depth: Kalibrasi Deduksi Proposisional & Bayesian di Sisi Server (Ollama)
-      applyServerSideDecisionCalibration(body, 'ollama');
 
       if (sessionId) {
         if (dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].status === 'streaming') {
