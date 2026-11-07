@@ -1539,10 +1539,21 @@ export default {
             return m;
           });
 
+          const isDenseModel = Boolean(targetModel && (
+            targetModel.includes('beam') ||
+            targetModel.includes('reflection') ||
+            targetModel.includes('501b') ||
+            targetModel.includes('671b') ||
+            targetModel.includes('675b')
+          ));
+          const numPredictReq = (body.options?.num_predict && Number.isFinite(body.options.num_predict)) ? body.options.num_predict : 4096;
+          const initialMaxTokens = isDenseModel ? Math.min(numPredictReq, 4096) : Math.min(numPredictReq || 16384, 16384);
+
           const openRouterPayload = {
             model: targetModel,
             messages: normalizedOrMessages,
             stream: isStream,
+            max_tokens: initialMaxTokens,
             provider: { allow_fallbacks: true }
           };
           if (body.options?.temperature !== undefined) openRouterPayload.temperature = body.options.temperature;
@@ -1563,12 +1574,28 @@ export default {
           };
           if (orKey) orHeaders['Authorization'] = `Bearer ${orKey}`;
 
-          const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          let orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: orHeaders,
             body: JSON.stringify(openRouterPayload),
             signal: request.signal
           });
+
+          // Auto-Recovery HTTP 402: kalibrasi kapasitas token reservation
+          if (orRes.status === 402) {
+            const errClone = await orRes.clone().json().catch(() => ({}));
+            const errMsg = errClone?.error?.message || '';
+            const affordMatch = errMsg.match(/can only afford\s+(\d+)/i);
+            const affordVal = affordMatch ? parseInt(affordMatch[1], 10) : 0;
+            const safeTokens = affordVal > 256 ? Math.max(512, Math.min(4096, affordVal - 128)) : 2048;
+            openRouterPayload.max_tokens = safeTokens;
+            orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+              method: 'POST',
+              headers: orHeaders,
+              body: JSON.stringify(openRouterPayload),
+              signal: request.signal
+            });
+          }
 
           if (!orRes.ok) {
             const errJson = await orRes.json().catch(() => ({}));
@@ -1629,9 +1656,11 @@ export default {
                   try {
                     const parsed = JSON.parse(dataStr);
                     const deltaContent = parsed.choices?.[0]?.delta?.content || '';
+                    const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
                     const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
-                    if (deltaContent || deltaToolCalls) {
+                    if (deltaContent || deltaReasoning || deltaToolCalls) {
                       const msgPayload = { role: 'assistant', content: deltaContent };
+                      if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
                       if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
                       await writer.write(encoder.encode(JSON.stringify({
                         model: body.model || 'qwen2.5:1.5b',

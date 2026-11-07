@@ -11045,7 +11045,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         (isOpenRouterKeySupplied ? rawKey : '') || process.env.OPENROUTER_API_KEY || ''
       );
       const isAutoRouterExplicit = Boolean(req.headers['x-auto-router'] === 'true' || body.isAutoRouter);
-      const shouldUseCloudBridge = Boolean((isAutoRouterExplicit || (isCloudModelRequested && !rawOllamaKey && rawOrKey)) && ((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (isOpenRouterKeySupplied && !isCustomRemoteEndpoint)));
+      const shouldUseCloudBridge = Boolean((isAutoRouterExplicit || (isCloudModelRequested && !rawOllamaKey && rawOrKey)) && ((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (Boolean(rawOrKey) && !isCustomRemoteEndpoint)));
 
       if (shouldUseCloudBridge) {
         // Pure Cloud Architecture Bridge:
@@ -11098,11 +11098,21 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           return m;
         });
 
+        const isDenseModel = Boolean(targetCloudModel && (
+          targetCloudModel.includes('beam') ||
+          targetCloudModel.includes('reflection') ||
+          targetCloudModel.includes('501b') ||
+          targetCloudModel.includes('671b') ||
+          targetCloudModel.includes('675b')
+        ));
+        const numPredictReq = (body.options?.num_predict && Number.isFinite(body.options.num_predict)) ? body.options.num_predict : 4096;
+        const initialMaxTokens = isDenseModel ? Math.min(numPredictReq, 4096) : Math.min(numPredictReq || 16384, 16384);
+
         const orPayload = {
           model: targetCloudModel,
           messages: normalizedOrMessages,
           stream: body.stream !== false,
-          max_tokens: 32768,
+          max_tokens: initialMaxTokens,
           provider: { allow_fallbacks: Boolean(req.headers['x-auto-router'] === 'true' || body.isAutoRouter) }
         };
         if (body.options?.temperature !== undefined) orPayload.temperature = body.options.temperature;
@@ -11116,186 +11126,220 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           }
         }
 
-        const orPostData = JSON.stringify(orPayload);
-        const orHeaders = {
-          'Content-Type': 'application/json',
-          'HTTP-Referer': req.headers.origin || req.headers.referer || process.env.ZOX_APP_URL || 'https://github.com/Zozi0999/zoz_router',
-          'X-Title': 'ZOZ ROUTER Ollama Cloud Bridge',
-          'Content-Length': Buffer.byteLength(orPostData)
-        };
-        if (openRouterKey) orHeaders['Authorization'] = openRouterKey;
-
-        const orReqOptions = {
-          hostname: 'openrouter.ai',
-          port: 443,
-          path: '/api/v1/chat/completions',
-          method: 'POST',
-          headers: orHeaders,
-          timeout: 120000
-        };
-
         const isStream = body.stream !== false;
-        if (isStream) {
-          res.writeHead(200, {
-            'Content-Type': 'application/x-ndjson; charset=utf-8',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'Access-Control-Allow-Origin': '*'
-          });
-        }
+        let activeBridgeReq = null;
 
-        const bridgeReq = https.request(orReqOptions, (bridgeRes) => {
-          const bStatus = bridgeRes.statusCode || 200;
-          if (bStatus >= 400) {
-            let errBuf = '';
-            bridgeRes.on('data', chunk => errBuf += chunk);
-            bridgeRes.on('end', () => {
-              if (res.writableEnded) return;
-              try {
-                const parsed = JSON.parse(errBuf);
-                const msg = parsed?.error?.message || parsed?.error || `OpenRouter bridge error: HTTP ${bStatus}`;
-                if (isStream) {
-                  res.write(JSON.stringify({ error: msg }) + '\n');
-                  res.end();
-                } else {
-                  sendJSON(res, bStatus, { error: msg });
+        req.on('close', () => {
+          if (!res.writableEnded && activeBridgeReq) {
+            try { activeBridgeReq.destroy(); } catch (_) {}
+          }
+        });
+
+        const executeBridgeRequest = (payload, retryCount = 0) => {
+          const postData = JSON.stringify(payload);
+          const hdrs = {
+            'Content-Type': 'application/json',
+            'HTTP-Referer': req.headers.origin || req.headers.referer || process.env.ZOX_APP_URL || 'https://github.com/Zozi0999/zoz_router',
+            'X-Title': 'ZOZ ROUTER Ollama Cloud Bridge',
+            'Content-Length': Buffer.byteLength(postData)
+          };
+          if (openRouterKey) hdrs['Authorization'] = openRouterKey;
+
+          const reqOptions = {
+            hostname: 'openrouter.ai',
+            port: 443,
+            path: '/api/v1/chat/completions',
+            method: 'POST',
+            headers: hdrs,
+            timeout: 120000
+          };
+
+          const bridgeReq = https.request(reqOptions, (bridgeRes) => {
+            const bStatus = bridgeRes.statusCode || 200;
+            if (bStatus >= 400) {
+              let errBuf = '';
+              bridgeRes.on('data', chunk => errBuf += chunk);
+              bridgeRes.on('end', () => {
+                if (res.writableEnded) return;
+                try {
+                  const parsed = JSON.parse(errBuf);
+                  const msg = parsed?.error?.message || parsed?.error || `OpenRouter bridge error: HTTP ${bStatus}`;
+                  // Auto-Recovery HTTP 402: kalibrasi kapasitas token reservation
+                  if ((bStatus === 402 || /can only afford/i.test(msg)) && retryCount === 0) {
+                    const affordMatch = msg.match(/can only afford\s+(\d+)/i);
+                    const affordVal = affordMatch ? parseInt(affordMatch[1], 10) : 0;
+                    const safeTokens = affordVal > 256 ? Math.max(512, Math.min(4096, affordVal - 128)) : 2048;
+                    console.log(`[Ollama Cloud Bridge Auto-Recovery] Model ${targetCloudModel} HTTP 402 (afford: ${affordVal}). Kalibrasi max_tokens ke ${safeTokens}...`);
+                    payload.max_tokens = safeTokens;
+                    return executeBridgeRequest(payload, retryCount + 1);
+                  }
+                  if (isStream) {
+                    res.writeHead(200, {
+                      'Content-Type': 'application/x-ndjson; charset=utf-8',
+                      'Cache-Control': 'no-cache',
+                      'Connection': 'keep-alive',
+                      'Access-Control-Allow-Origin': '*'
+                    });
+                    res.write(JSON.stringify({ error: msg }) + '\n');
+                    res.end();
+                  } else {
+                    sendJSON(res, bStatus, { error: msg });
+                  }
+                } catch (_) {
+                  if (isStream) {
+                    res.writeHead(200, {
+                      'Content-Type': 'application/x-ndjson; charset=utf-8',
+                      'Cache-Control': 'no-cache',
+                      'Connection': 'keep-alive',
+                      'Access-Control-Allow-Origin': '*'
+                    });
+                    res.write(JSON.stringify({ error: errBuf || `HTTP ${bStatus}` }) + '\n');
+                    res.end();
+                  } else {
+                    sendJSON(res, bStatus, { error: errBuf || `HTTP ${bStatus}` });
+                  }
                 }
-              } catch (_) {
-                if (isStream) {
-                  res.write(JSON.stringify({ error: errBuf || `HTTP ${bStatus}` }) + '\n');
-                  res.end();
-                } else {
-                  sendJSON(res, bStatus, { error: errBuf || `HTTP ${bStatus}` });
+              });
+              return;
+            }
+
+            if (isStream) {
+              res.writeHead(200, {
+                'Content-Type': 'application/x-ndjson; charset=utf-8',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Origin': '*'
+              });
+            }
+
+            if (!isStream) {
+              let rawResp = '';
+              bridgeRes.on('data', chunk => rawResp += chunk);
+              bridgeRes.on('end', () => {
+                try {
+                  const parsed = JSON.parse(rawResp);
+                  const txt = parsed.choices?.[0]?.message?.content || '';
+                  const reasoning = parsed.choices?.[0]?.message?.reasoning || parsed.choices?.[0]?.message?.reasoning_content || '';
+                  const msgPayload = { role: 'assistant', content: txt };
+                  if (reasoning) {
+                    msgPayload.reasoning = reasoning;
+                  }
+                  if (parsed.choices?.[0]?.message?.tool_calls) {
+                    msgPayload.tool_calls = parsed.choices[0].message.tool_calls;
+                  }
+                  sendJSON(res, 200, {
+                    model: body.model || 'qwen2.5:1.5b',
+                    created_at: new Date().toISOString(),
+                    message: msgPayload,
+                    done: true
+                  });
+                } catch (e) {
+                  sendJSON(res, 500, { error: 'Gagal memproses respon bridge: ' + e.message });
                 }
+              });
+              return;
+            }
+
+            let sseBuffer = '';
+            bridgeRes.on('data', chunk => {
+              sseBuffer += chunk.toString();
+              const lines = sseBuffer.split('\n');
+              sseBuffer = lines.pop() || '';
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith('data:')) continue;
+                const dataStr = trimmed.slice(5).trim();
+                if (dataStr === '[DONE]') {
+                  res.write(JSON.stringify({
+                    model: body.model || 'qwen2.5:1.5b',
+                    created_at: new Date().toISOString(),
+                    message: { role: 'assistant', content: '' },
+                    done: true
+                  }) + '\n');
+                  continue;
+                }
+                try {
+                  const parsed = JSON.parse(dataStr);
+                  const delta = parsed.choices?.[0]?.delta?.content || '';
+                  const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
+                  const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
+                  if (delta || deltaToolCalls || deltaReasoning) {
+                    const msgPayload = { role: 'assistant', content: delta };
+                    if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
+                    if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
+                    res.write(JSON.stringify({
+                      model: body.model || 'qwen2.5:1.5b',
+                      created_at: new Date().toISOString(),
+                      message: msgPayload,
+                      done: false
+                    }) + '\n');
+                  }
+                } catch (_) {}
+
               }
             });
-            return;
-          }
 
-          if (!isStream) {
-            let rawResp = '';
-            bridgeRes.on('data', chunk => rawResp += chunk);
             bridgeRes.on('end', () => {
-              try {
-                const parsed = JSON.parse(rawResp);
-                const txt = parsed.choices?.[0]?.message?.content || '';
-                const reasoning = parsed.choices?.[0]?.message?.reasoning || parsed.choices?.[0]?.message?.reasoning_content || '';
-                const msgPayload = { role: 'assistant', content: txt };
-                if (reasoning) {
-                  msgPayload.reasoning = reasoning;
+              if (sseBuffer && sseBuffer.trim()) {
+                const trimmed = sseBuffer.trim();
+                if (trimmed.startsWith('data:')) {
+                  const dataStr = trimmed.slice(5).trim();
+                  if (dataStr !== '[DONE]') {
+                    try {
+                      const parsed = JSON.parse(dataStr);
+                      const delta = parsed.choices?.[0]?.delta?.content || '';
+                      const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
+                      const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
+                      if (delta || deltaToolCalls || deltaReasoning) {
+                        const msgPayload = { role: 'assistant', content: delta };
+                        if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
+                        if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
+                        res.write(JSON.stringify({
+                          model: body.model || 'qwen2.5:1.5b',
+                          created_at: new Date().toISOString(),
+                          message: msgPayload,
+                          done: false
+                        }) + '\n');
+                      }
+                    } catch (_) {}
+                  }
                 }
-                if (parsed.choices?.[0]?.message?.tool_calls) {
-                  msgPayload.tool_calls = parsed.choices[0].message.tool_calls;
-                }
-                sendJSON(res, 200, {
-                  model: body.model || 'qwen2.5:1.5b',
-                  created_at: new Date().toISOString(),
-                  message: msgPayload,
-                  done: true
-                });
-              } catch (e) {
-                sendJSON(res, 500, { error: 'Gagal memproses respon bridge: ' + e.message });
               }
-            });
-            return;
-          }
-
-          let sseBuffer = '';
-          bridgeRes.on('data', chunk => {
-            sseBuffer += chunk.toString();
-            const lines = sseBuffer.split('\n');
-            sseBuffer = lines.pop() || '';
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed.startsWith('data:')) continue;
-              const dataStr = trimmed.slice(5).trim();
-              if (dataStr === '[DONE]') {
+              if (!res.writableEnded) {
                 res.write(JSON.stringify({
                   model: body.model || 'qwen2.5:1.5b',
                   created_at: new Date().toISOString(),
                   message: { role: 'assistant', content: '' },
                   done: true
                 }) + '\n');
-                continue;
+                res.end();
               }
-              try {
-                const parsed = JSON.parse(dataStr);
-                const delta = parsed.choices?.[0]?.delta?.content || '';
-                const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
-                const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
-                if (delta || deltaToolCalls || deltaReasoning) {
-                  const msgPayload = { role: 'assistant', content: delta };
-                  if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
-                  if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
-                  res.write(JSON.stringify({
-                    model: body.model || 'qwen2.5:1.5b',
-                    created_at: new Date().toISOString(),
-                    message: msgPayload,
-                    done: false
-                  }) + '\n');
-                }
-              } catch (_) {}
-
-            }
+            });
           });
 
-          bridgeRes.on('end', () => {
-            if (sseBuffer && sseBuffer.trim()) {
-              const trimmed = sseBuffer.trim();
-              if (trimmed.startsWith('data:')) {
-                const dataStr = trimmed.slice(5).trim();
-                if (dataStr !== '[DONE]') {
-                  try {
-                    const parsed = JSON.parse(dataStr);
-                    const delta = parsed.choices?.[0]?.delta?.content || '';
-                    const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
-                    const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
-                    if (delta || deltaToolCalls || deltaReasoning) {
-                      const msgPayload = { role: 'assistant', content: delta };
-                      if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
-                      if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
-                      res.write(JSON.stringify({
-                        model: body.model || 'qwen2.5:1.5b',
-                        created_at: new Date().toISOString(),
-                        message: msgPayload,
-                        done: false
-                      }) + '\n');
-                    }
-                  } catch (_) {}
-                }
-              }
-            }
+          bridgeReq.on('error', (err) => {
             if (!res.writableEnded) {
-              res.write(JSON.stringify({
-                model: body.model || 'qwen2.5:1.5b',
-                created_at: new Date().toISOString(),
-                message: { role: 'assistant', content: '' },
-                done: true
-              }) + '\n');
-              res.end();
+              if (isStream) {
+                res.writeHead(200, {
+                  'Content-Type': 'application/x-ndjson; charset=utf-8',
+                  'Cache-Control': 'no-cache',
+                  'Connection': 'keep-alive',
+                  'Access-Control-Allow-Origin': '*'
+                });
+                res.write(JSON.stringify({ error: 'Bridge network error: ' + err.message }) + '\n');
+                res.end();
+              } else {
+                sendJSON(res, 500, { error: 'Bridge network error: ' + err.message });
+              }
             }
           });
-        });
 
-        bridgeReq.on('error', (err) => {
-          if (!res.writableEnded) {
-            if (isStream) {
-              res.write(JSON.stringify({ error: 'Bridge network error: ' + err.message }) + '\n');
-              res.end();
-            } else {
-              sendJSON(res, 500, { error: 'Bridge network error: ' + err.message });
-            }
-          }
-        });
+          activeBridgeReq = bridgeReq;
+          bridgeReq.write(postData);
+          bridgeReq.end();
+        };
 
-        req.on('close', () => {
-          if (!res.writableEnded) {
-            try { bridgeReq.destroy(); } catch (_) {}
-          }
-        });
-
-        bridgeReq.write(orPostData);
-        bridgeReq.end();
+        executeBridgeRequest(orPayload, 0);
         return;
       }
 
@@ -12255,6 +12299,20 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
       // Defense-in-depth: Kalibrasi Deduksi Proposisional & Bayesian di Sisi Server (OpenRouter)
       applyServerSideDecisionCalibration(body, 'openrouter');
+
+      // Kalibrasi matematis kapasitas token maksimum berdasarkan skala parameter model
+      const isDenseModelOr = Boolean(body.model && (
+        body.model.includes('beam') ||
+        body.model.includes('reflection') ||
+        body.model.includes('501b') ||
+        body.model.includes('671b') ||
+        body.model.includes('675b')
+      ));
+      if (isDenseModelOr) {
+        body.max_tokens = Math.min(body.max_tokens || 4096, 4096);
+      } else if (!body.max_tokens) {
+        body.max_tokens = 16384;
+      }
 
       const isStream = body.stream !== false;
       const postData = JSON.stringify(body);

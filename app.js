@@ -31515,6 +31515,16 @@ ${formattingConstraints.noTable ? '3. BATASAN FORMAT: Pengguna secara tegas mela
         };
       }
       requestBody.options = requestBody.options || {};
+      const isDenseModelOllama = Boolean(modelName && (
+        modelName.includes('beam') ||
+        modelName.includes('reflection') ||
+        modelName.includes('501b') ||
+        modelName.includes('671b') ||
+        modelName.includes('675b')
+      ));
+      if (isDenseModelOllama) {
+        requestBody.options.num_predict = Math.min(requestBody.options.num_predict || 4096, 4096);
+      }
       if (!requestBody.options.num_ctx) requestBody.options.num_ctx = 16384;
       if (wantsFile || isWebRequest) {
         if (!requestBody.options.num_predict) requestBody.options.num_predict = 8192;
@@ -33405,11 +33415,22 @@ ${formattingConstraints.noTable ? '3. BATASAN FORMAT: Pengguna secara tegas mela
         // - Mengizinkan latent reasoning alami model (streamRenderer & ZozTextSafety memisahkan reasoning dari jawaban utama)
         //   sehingga model memarginalisasi seluruh opsi P(A|Q) = sum_Z P(A|Z,Q)P(Z|Q) sebelum memilih jawaban akhir.
         // - Bebas dari presence_penalty / frequency_penalty yang mendistorsi logit kata kunci soal.
+        const isDenseModelOpenRouter = Boolean(currentModel && (
+          currentModel.includes('beam') ||
+          currentModel.includes('reflection') ||
+          currentModel.includes('501b') ||
+          currentModel.includes('671b') ||
+          currentModel.includes('675b')
+        ));
+        const numPredictReqOr = (runOptions.maxTokens && Number.isFinite(runOptions.maxTokens)) ? runOptions.maxTokens : 4096;
+        const initialMaxTokensOr = isDenseModelOpenRouter ? Math.min(numPredictReqOr, 4096) : Math.min(numPredictReqOr || 16384, 16384);
+
         const basePayload = {
           model: currentModel,
           messages: currentMessagesPayload,
           stream: true,
           stream_options: { include_usage: true },
+          max_tokens: initialMaxTokensOr,
           provider: (decisionCalibration.isDiscreteChoice || decisionCalibration.isAnalyticalQuery || isNemotronCur)
             ? { allow_fallbacks: isAutoRouterActive }
             : { sort: 'latency', allow_fallbacks: isAutoRouterActive }
@@ -33520,9 +33541,26 @@ ${formattingConstraints.noTable ? '3. BATASAN FORMAT: Pengguna secara tegas mela
               signal: attemptController.signal
             });
 
-            // Resiliensi HTTP 400, 404 & 422: Tangani penolakan tools, top_p, modalities, dsb.
-            if (attemptRes.status === 400 || attemptRes.status === 422 || (attemptRes.status === 404 && (targetBody.modalities || targetBody.tools))) {
+            // Resiliensi HTTP 400, 402, 404 & 422: Tangani penolakan credits, tools, top_p, modalities, dsb.
+            if (attemptRes.status === 402 || attemptRes.status === 400 || attemptRes.status === 422 || (attemptRes.status === 404 && (targetBody.modalities || targetBody.tools))) {
               let shouldRetry = false;
+              if (attemptRes.status === 402) {
+                let errText = '';
+                try {
+                  const errJson = await attemptRes.clone().json();
+                  errText = errJson?.error?.message || errJson?.error || JSON.stringify(errJson);
+                } catch (_) {
+                  errText = await attemptRes.clone().text().catch(() => '');
+                }
+                const affordMatch = errText.match(/can only afford\s+(\d+)/i);
+                const affordTokens = affordMatch ? parseInt(affordMatch[1], 10) : 0;
+                const safeAfford = affordTokens > 256 ? Math.max(512, Math.min(4096, affordTokens - 128)) : 2048;
+                if (!targetBody.max_tokens || targetBody.max_tokens > safeAfford) {
+                  targetBody.max_tokens = safeAfford;
+                  basePayload.max_tokens = safeAfford;
+                  shouldRetry = true;
+                }
+              }
               if (targetBody.models) {
                 delete targetBody.models;
                 delete basePayload.models;
@@ -33560,13 +33598,13 @@ ${formattingConstraints.noTable ? '3. BATASAN FORMAT: Pengguna secara tegas mela
                 delete basePayload.temperature;
                 shouldRetry = true;
               }
-              if (targetBody.max_tokens && targetBody.max_tokens > 4096) {
+              if (targetBody.max_tokens && targetBody.max_tokens > 4096 && attemptRes.status !== 402) {
                 targetBody.max_tokens = 4096;
                 basePayload.max_tokens = 4096;
                 shouldRetry = true;
               }
               if (shouldRetry) {
-                console.warn(`[OpenRouter HTTP 400 Auto-Recovery] Membersihkan parameter ditolak pada model ${currentModel} dan mencoba ulang langsung...`);
+                console.warn(`[OpenRouter HTTP ${attemptRes.status} Auto-Recovery] Mengalibrasi parameter (max_tokens=${targetBody.max_tokens || 'default'}) pada model ${currentModel} dan mencoba ulang langsung...`);
                 const retryRes = await fetch(targetUrl, {
                   method: 'POST',
                   headers: targetHeaders,
@@ -33603,13 +33641,10 @@ ${formattingConstraints.noTable ? '3. BATASAN FORMAT: Pengguna secara tegas mela
                 } catch (_) {}
               }
               routeErrDetail = attemptErr;
-              if (attemptRes.status === 401 || attemptRes.status === 403) {
+              if (attemptRes.status === 401 || attemptRes.status === 403 || attemptRes.status === 402) {
                 // Jangan batalkan percobaan jika rute lain (direct <-> proxy) belum dicoba!
                 // Server mungkin memiliki API Key di environment atau sebaliknya pengguna memiliki key di client.
                 continue;
-              }
-              if (attemptRes.status === 402) {
-                break;
               }
               continue;
             }
