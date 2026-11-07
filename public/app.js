@@ -23262,7 +23262,7 @@ ${msg.content.slice(0, 3000)}
 
   async function getWebSearchContext(query, session = null, hudElement = null, forceRun = false) {
     if (!query || !query.trim()) return null;
-    if (!forceRun && typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isRevisionQuery === 'function' && ZozTextSafety.isRevisionQuery(query)) {
+    if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isRevisionQuery === 'function' && ZozTextSafety.isRevisionQuery(query)) {
       return null;
     }
     if (STATE.searchMode === 'autonomous' && !forceRun) {
@@ -23270,7 +23270,10 @@ ${msg.content.slice(0, 3000)}
       return null;
     }
     const smartQuery = session ? synthesizeAutonomousSearchQuery(session, query) : query.trim();
-    const searchQuery = smartQuery || query;
+    if (!smartQuery || !smartQuery.trim()) {
+      return null;
+    }
+    const searchQuery = smartQuery.trim();
 
     if (hudElement) {
       hudElement.innerHTML = `
@@ -23491,7 +23494,12 @@ ${organicBlock}
 1. PRIORITAS UTAMA: Jawab pertanyaan pengguna "${query}" secara langsung, akurat, dan proporsional dalam Bahasa Indonesia.
 2. PEMBOBOTAN BUKTI PROPORSIONAL: Gunakan fakta, angka, dan tanggal dari dokumen bukti di atas HANYA jika secara substansial menjawab mekanisme/pertanyaan inti pengguna (sertakan sitasi [Nama Sumber](URL)). Jangan memberi bobot berlebihan pada dokumen yang hanya kebetulan memuat kata serupa tetapi membahas konteks berbeda.
 3. ANTI-DIVERGENSI: DILARANG merangkum artikel yang tidak berhubungan dengan inti pertanyaan pengguna. Jika dokumen di atas tidak memuat jawaban yang tepat, abaikan dokumen tersebut dan evaluasi pertanyaan secara objektif menggunakan penalaran yang benar.
-4. INTEGRITAS FAKTA: Dilarang mengarang informasi yang bertentangan dengan bukti nyata.`;
+4. INTEGRITAS FAKTA: Dilarang mengarang informasi yang bertentangan dengan bukti nyata.
+5. ANTI-HALUSINASI EVALUASI KUIS & KURIKULUM:
+   - Jika pertanyaan pengguna adalah soal kuis, ujian, atau evaluasi konseptual (misal CRISP-DM, Machine Learning, Cloud, Database):
+     a. DILARANG KERAS menyalahkan desain soal (misal mengklaim "soal ini tidak memiliki jawaban yang benar", "ada kesalahan desain soal", atau "jika platform memaksa memilih..."). Ujian kurikulum resmi selalu memiliki 1 jawaban kanonik!
+     b. DILARANG berspekulasi atau merekomendasikan opsi yang Anda anggap "salah". Rekomendasikan SATU jawaban kunci yang paling tepat menurut kurikulum resmi dengan alasan definitif dan tegas.
+     c. Gunakan hasil penelusuran web untuk memvalidasi KUNCI JAWABAN KANONIK (canonical answer key / syllabus consensus), BUKAN untuk mencari opini atau perdebatan forum yang membingungkan.`;
 
       return {
         systemPromptContext,

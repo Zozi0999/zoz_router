@@ -1754,12 +1754,44 @@
   function isRevisionQuery(text) {
     if (!text || typeof text !== 'string') return false;
     const clean = text.trim();
-    if (clean.length > 320) return false;
+    if (clean.length > 350) return false;
+    const lower = clean.toLowerCase();
+
+    // Guard: Jika ini adalah soal kuis asli yang menanyakan pernyataan yang "salah/incorrect"
+    const isOriginalQuizQuestion = /\b(?:manakah|yang\s+mana|apakah|pernyataan\s+berikut|di\s+bawah\s+ini|which\s+(?:of\s+the\s+following|statement)|what\s+is)\b/i.test(lower) ||
+      (/\?/.test(lower) && /\b(?:salah|incorrect|false|kecuali|except|not)\b/i.test(lower) && lower.split(/\s+/).length >= 5) ||
+      (/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)]\s+)/m.test(clean) && clean.split(/\r?\n/).length >= 3);
+
+    if (isOriginalQuizQuestion) return false;
+
+    const QUIZ_REVISION_EXACT_REGEX = /^(?:\s*(?:ganti|ubah|tukar|pilihkan\s+(?:yang\s+)?lain|coba\s+(?:yang\s+)?lain|bukan\s+(?:itu|yang\s+ini|yang\s+tadi)|salah\b|opsi\s+lain|jawaban\s+lain|alternatif\s+lain|jawaban\s+kedua|nomor\s+lain|ganti\s+(?:opsi|jawaban|pilihan)|bukan\s+[A-Fa-f]|change\s+(?:the\s+)?answer|try\s+another|pick\s+another|switch\s+(?:to|answer)|not\s+that|wrong|incorrect)\s*[!?.~,"'`]*)+$/i;
+    const QUIZ_FAILURE_FEEDBACK_REGEX = /\b(?:anda\s+)?(?:tidak|belum)\s+lulus\b|\b(?:gagal|failed|fail|not\s+passing|re-?take|retake)\b|\b(?:your\s+score|skor(?:\s+anda)?|score|nilai(?:\s+saya)?|passing(?:\s+grade|\s+score)?)\s*(?:is|:|=|adalah)?\s*"?\s*\d{1,3}\s*%/i;
+    const QUIZ_REVISION_PHRASE_REGEX = /\b(?:ganti\s+(?:jawabannya|jawaban|opsi|pilihan)|coba\s+ganti|salah\s+ganti|bukan\s+itu|jawaban\s+(?:lain|kedua|baru|yang\s+benar|berikutnya)|pilih\s+(?:yang\s+)?lain|opsi\s+lain|alternatif\s+lain|jawaban\s+salah|salah\s+(?:jawabannya|opsinya|pilihannya)|koreksi\s+(?:jawabannya|pilihan)|revisi\s+jawaban|change\s+(?:the\s+)?answer|switch\s+(?:the\s+)?option|try\s+another\s+option|wrong\s+answer)\b/i;
+
     if (QUIZ_REVISION_EXACT_REGEX.test(clean)) return true;
     if (QUIZ_FAILURE_FEEDBACK_REGEX.test(clean)) return true;
     if (QUIZ_REVISION_PHRASE_REGEX.test(clean)) return true;
-    if (/\b(?:ganti|ubah|bukan|salah|keliru)\b/i.test(clean) && /\b(?:jawaban|opsi|pilihan|pilih|coba|soal|kuis)\b/i.test(clean)) return true;
-    if (/\b(?:skor|score|nilai)\b/i.test(clean) && /\b\d{1,2}%\b/.test(clean)) return true;
+
+    const hasErrorToken = /\b(?:salah+|slh|keliru|bukan|salahnya|salahk?an|wrong|incorrect|false|err|error)\b|not\s+(?:that|this|the\s+one|right|correct)/i.test(lower);
+    const hasChangeToken = /\b(?:gant+i+|ubah+|tukar+|pili+h+|coba+|cari+|gnti|plh|change|switch|replace|retry|another|next|alternative|alternatif|try)\b/i.test(lower);
+    const hasPriorToken = /\b(?:tadi+|barusan|sudah+|udah+|sdh|pernah|kemarin|sebelumnya|earlier|already|prev|previous)\b/i.test(lower);
+    const hasOptionToken = /\b(?:jawaban+|jawabannya+|jwbn+|opsi+|opsinya+|pilihan+|pilihannya+|soal+|kuis+|quiz|option|choice|answer)\b/i.test(lower);
+    const hasPersonalOrDemonstrative = /\b(?:saya|aku|gua|gw|kamu|anda|mu|itu|ini|yg\s+ini|yang\s+ini|yg\s+itu|yang\s+itu|tadi)\b/i.test(lower);
+
+    // Kombinasi 1: Error + Ganti (misal: "salah itu saya sudah piliih tadi ganti", "salah ganti", "salah coba yang lain")
+    if (hasErrorToken && hasChangeToken) return true;
+
+    // Kombinasi 2: Error + Rujukan tadi/sudah/saya (misal: "salah itu saya sudah pilih", "tadi salah", "salah yang tadi", "jawaban ini salah")
+    if (hasErrorToken && (hasPriorToken || (hasOptionToken && hasPersonalOrDemonstrative) || (hasPersonalOrDemonstrative && clean.length <= 60))) return true;
+
+    // Kombinasi 3: Ganti + Opsi / lain / tadi (misal: "ganti opsi", "coba opsi lain", "pilih yang lain", "ganti yang tadi")
+    if (hasChangeToken && (hasOptionToken || hasPriorToken || /\blain\b/i.test(lower))) return true;
+
+    // Kombinasi 4: Kalimat pendek (<= 60 char) yang diawali atau didominasi penolakan
+    if (clean.length <= 60 && /^(?:(?:aduh\s+)?salah\b|bukan\s+(?:itu|yang\s+ini|ini)|ternyata\s+salah|kok\s+salah|salah\s+semua)/i.test(lower)) return true;
+
+    if (/\b(?:skor|score|nilai)\b/i.test(lower) && /\b\d{1,2}%\b/.test(lower)) return true;
+
     return false;
   }
 
@@ -1784,10 +1816,10 @@
       if (rawList[i] && rawList[i].role === 'user' && rawList[i].content) {
         const uText = String(rawList[i].content || '').trim();
         const lines = uText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-        const opts = lines.filter(l => {
+        const opts = lines.map(l => l.replace(/^[-*•]\s+/, '').trim()).filter(l => {
           if (/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+\S)/.test(l)) return true;
           const wc = l.split(/\s+/).filter(Boolean).length;
-          return wc >= 1 && wc <= 25 && !/\?\s*$/.test(l) && !/^[-*#>`]/.test(l);
+          return wc >= 1 && wc <= 25 && !/\?\s*$/.test(l);
         });
         if (opts.length >= 2) {
           parentUserMsg = rawList[i];
@@ -1803,25 +1835,28 @@
 
     if (candidateOptions.length < 2 && lastAsstMsg) {
       const asstLines = lastAsstMsg.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-      const asstOpts = asstLines.filter(l => /^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+\S)/.test(l));
+      const asstOpts = asstLines.map(l => l.replace(/^[-*•]\s+/, '').trim()).filter(l => {
+        if (/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+\S)/.test(l)) return true;
+        const wc = l.split(/\s+/).filter(Boolean).length;
+        return wc >= 1 && wc <= 25 && !/\?\s*$/.test(l);
+      });
       if (asstOpts.length >= 2) {
         candidateOptions = asstOpts;
       }
     }
 
-    if (!parentUserMsg || candidateOptions.length < 2) return null;
-
     let prevChosenLabel = '';
     const matchLabel = lastAsstMsg.match(/^(?:(?:\*\*|\*|\[)?[A-Da-d](?:[.)\]]|\*\*)?)\s+([^\n\r]+)/m) ||
-                       lastAsstMsg.match(/(?:jawaban|pilihan|opsi)(?:\s+(?:yang\s+)?(?:tepat|benar|sesuai|adalah))?[\s:*]+(?:(?:\*\*|\*|\[)?([A-Da-d])(?:[.)\]]|\*\*)?)\s*([^\n\r.]+)?/i);
+                       lastAsstMsg.match(/(?:jawaban|pilihan|opsi)(?:\s+(?:yang\s+)?(?:tepat|benar|sesuai|adalah))?[\s:*]+(?:(?:\*\*|\*|\[)?([A-Da-d])(?:[.)\]]|\*\*)?)\s*([^\n\r.]+)?/i) ||
+                       lastAsstMsg.match(/(?:jawaban(?:nya)?\s+(?:yang\s+diharapkan\s+)?adalah\s*["']?([^"'\n\r.]+)["']?)/i);
     if (matchLabel) {
-      prevChosenLabel = matchLabel[0].replace(/[*\[\]]/g, '').trim();
+      prevChosenLabel = (matchLabel[1] || matchLabel[0]).replace(/[*\[\]"']/g, '').trim();
     } else {
-      prevChosenLabel = lastAsstMsg.slice(0, 60).replace(/\n.*/s, '').trim();
+      prevChosenLabel = lastAsstMsg.slice(0, 80).replace(/\n.*/s, '').trim();
     }
 
     return {
-      userText: String(parentUserMsg.content || '').trim(),
+      userText: parentUserMsg ? String(parentUserMsg.content || '').trim() : '',
       candidateOptions,
       previousAnswer: prevChosenLabel
     };
@@ -2274,6 +2309,44 @@ INSTRUKSI MATEMATIKA MURNI & REVISI PRESISI:
         falsifiedAnswer: parentQuiz.previousAnswer,
         calibrationDirective
       };
+    } else if (isRevision) {
+      // Resilien Fallback untuk Revisi Kuis tanpa Format Opsi Standar / Soal Konversasional
+      const prevAnswerText = parentQuiz?.previousAnswer || 'Jawaban pada giliran sebelumnya';
+      const calibratedTemp = 0.12;
+      const calibratedTopP = 0.90;
+      const calibrationDirective = `[PROTOKOL REVISI BAYESIAN & ELIMINASI HIPOTESIS TERFALSIFIKASI — ANTI-AMNESIA]:
+Pengguna memberikan umpan balik penolakan/koreksi atas jawaban asisten sebelumnya: "${raw}".
+Jawaban atau rekomendasi asisten pada giliran sebelumnya telah terbukti SALAH dan difalsifikasi (P(h_sebelumnya) = 0).
+
+INSTRUKSI MUTLAK & LARANGAN AMNESIA:
+1. FALSIFIKASI MUTLAK: Tetapkan probabilitas jawaban/rekomendasi sebelumnya = 0 (${prevAnswerText}). DILARANG KERAS mengulangi atau merekomendasikan kembali jawaban yang sudah dinyatakan salah tersebut!
+2. DILARANG AMNESIA & DILARANG MEMINTA SOAL ULANG: DILARANG KERAS bersikap amnesia, berbasa-basi ("Terima kasih atas pesannya..."), atau meminta pengguna menyampaikan kembali teks soal dan pilihan (misal: "mohon sampaikan kembali soal...", "silakan kirim detailnya..."). Seluruh riwayat soal, pilihan, gambar, dan konteks percakapan LENGKAP SUDAH ADA pada riwayat di atas!
+3. EVALUASI ALTERNATIF SECARA LANGSUNG:
+   - Telusuri kembali pertanyaan dan konteks yang dibahas pada giliran-giliran sebelumnya di riwayat obrolan di atas.
+   - Analisis opsi-opsi atau kemungkinan alternatif yang tersisa secara objektif berdasarkan standar kurikulum/keilmuan resmi.
+   - Tetapkan SATU jawaban revisi pengganti yang paling tepat secara lugas dan percaya diri di baris pertama (misal: "**Jawaban revisi yang tepat: [Opsi Pengganti]**").
+   - Berikan 1-2 paragraf penjelasan logis mengapa opsi alternatif baru ini benar dan mengapa jawaban sebelumnya keliru.`;
+
+      return {
+        isDiscreteChoice: true,
+        isQuizRevision: true,
+        isConceptualTaxonomy: false,
+        isSelfContainedDiscreteTurn: false,
+        isAnalyticalQuery: true,
+        imageCount,
+        optionCount: 4,
+        uniformPrior: 0.25,
+        maxEntropyBits: 2.0,
+        temperature: calibratedTemp,
+        topP: calibratedTopP,
+        top_p: calibratedTopP,
+        presencePenalty: 0,
+        frequencyPenalty: 0,
+        candidateOptions: parentQuiz?.candidateOptions || [],
+        remainingOptions: [],
+        falsifiedAnswer: prevAnswerText,
+        calibrationDirective
+      };
     }
 
     // Abaikan sapaan murni sangat pendek atau perintah pembuatan berkas/visual murni
@@ -2423,7 +2496,10 @@ Sebelum menulis satu kata pun jawaban kepada pengguna, Anda WAJIB mengawali gene
    - Tutup </think>, lalu tuliskan jawaban akhir secara elegan, bersih, dan langsung kepada pengguna.
    - DILARANG KERAS menghasilkan blok kode JSON (seperti \`\`\`json {...}\`\`\`), kamus data, atau residu kode program untuk penalaran internal!
    - FORMULA & PERSAMAAN MATEMATIKA: Tuliskan seluruh rumus, variabel, parameter, dan ekspresi matematika dalam notasi standar LaTeX KaTeX ($...$ untuk formula sebaris seperti $f_{w,b}(x) = wx + b$, $x$, $w$, $b$, dan $$...$$ untuk persamaan display mandiri) agar tertampil indah, presisi, dan mudah dibaca serta disalin oleh pengguna.
-   - Sertakan 1-2 baris penjelasan konseptual/matematis yang ringkas, percaya diri, dan solutif.`;
+   - Sertakan 1-2 baris penjelasan konseptual/matematis yang ringkas, percaya diri, dan solutif.
+6. LARANGAN KERAS MENYALAHKAN SOAL & HEDGING PALSU:
+   - DILARANG KERAS berspekulasi bahwa soal ujian salah, cacat desain, atau tidak memiliki jawaban yang benar (misal: "soal ini tidak memiliki jawaban yang benar di antara opsi yang diberikan", "mungkin ada kesalahan dalam desain soal", "jika platform memaksa memilih..."). Ujian kurikulum resmi (Coursera, IBM, Google, AWS, edX, Dicoding) selalu dirancang dengan SATU kunci jawaban kanonik yang definitif!
+   - Tentukan kunci jawaban kanonik tersebut secara mantap, tepat, dan deduktif. JANGAN PERNAH menyuruh pengguna memilih suatu opsi sembari Anda sendiri menyatakan opsi tersebut salah atau tidak tepat. Rekomendasi Anda harus konsisten, meyakinkan, dan final.`;
       if (questionLineIdx === -1 && (unlabeledCandidateSetCount >= 2 || labeledOptionLines.length >= 2)) {
         calibrationDirective += `\n\n6. INFERENSI ABDUKTIF SOAL TANPA PERTANYAAN EKSPLISIT (INVERSE PROBLEM & KALIBRASI OVERCONFIDENCE):
    Pengguna HANYA menyalin opsi pilihan kuis (${lines.length} opsi) tanpa menyertakan teks pertanyaan.
