@@ -30787,19 +30787,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // Injeksi Vektor Resonansi Persona Deterministik (\Pi_{res}) pada giliran multi-turn (T >= 2)
-    // Nonaktifkan seutuhnya jika giliran merupakan deduksi matematika murni, kuis, atau revisi
-    const latestUserTurnCandidate = [...validList].reverse().find(turn => turn && turn.role === 'user');
-    const candidateText = latestUserTurnCandidate ? String(latestUserTurnCandidate.content || '') : '';
-    const isMathOrRevisionSession = Boolean(
-      (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isRevisionQuery === 'function' && ZozTextSafety.isRevisionQuery(candidateText)) ||
-      (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function' && ZozTextSafety.computeBayesianDecisionCalibration(candidateText).isDiscreteChoice)
-    );
-
-    if (!isMathOrRevisionSession && activePersona && validList.length > 1 && typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computePersonaResonanceVector === 'function') {
+    // Mengeliminasi peluruhan eksponensial perhatian RoPE/ALiBi (\exp(-\gamma \cdot \Delta pos))
+    // dengan menempatkan jangkar resonansi pada giliran aktif (\Delta pos \approx 0).
+    if (activePersona && validList.length > 1 && typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computePersonaResonanceVector === 'function') {
       const resonanceAnchor = ZozTextSafety.computePersonaResonanceVector(activePersona, validList.length);
       if (resonanceAnchor) {
-        if (latestUserTurnCandidate && typeof latestUserTurnCandidate.content === 'string') {
-          latestUserTurnCandidate.content = `${latestUserTurnCandidate.content}${resonanceAnchor}`;
+        const latestUserTurn = [...validList].reverse().find(turn => turn && turn.role === 'user');
+        if (latestUserTurn && typeof latestUserTurn.content === 'string') {
+          latestUserTurn.content = `${latestUserTurn.content}${resonanceAnchor}`;
         }
       }
     }
@@ -31302,9 +31297,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         systemContent = `${runOptions.explicitMemoryContextNote}\n\n${systemContent}`;
       }
 
-      if (isPureMathSession || isQuizRevision || decisionCalibration.isDiscreteChoice) {
-        systemContent = `${systemContent}\n\n### MANDAT DEDUKSI MATEMATIKA MURNI & LOGIKA FORMAL (PRIORITAS TERTINGGI)\n[Sistem beroperasi dalam mode deduksi matematika murni: Nonaktifkan persona percakapan/roleplay. Evaluasi ruang probabilitas P(H_i), terapkan falsifikasi P(H_falsified) = 0 pada revisi, dan berikan jawaban analitis eksak secara langsung tanpa basa-basi.]\n----------------------------------------`;
-      } else if (personaPrompt) {
+      if (personaPrompt) {
         systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
       }
 
@@ -31471,9 +31464,7 @@ ${formattingConstraints.noTable ? '3. BATASAN FORMAT: Pengguna secara tegas mela
         }
       }
 
-      if (isPureMathSession || isQuizRevision || decisionCalibration.isDiscreteChoice) {
-        systemContent = `${systemContent}\n\n### MANDAT MUTLAK MATEMATIKA MURNI & DEDUKSI FORMAL (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi lain, Anda WAJIB MENGGUNAKAN DEDUKSI MATEMATIKA MURNI. Nolkan persona percakapan/roleplay, hitung probabilitas P(H_i), dan sajikan jawaban eksak secara langsung tanpa basa-basi.]\n----------------------------------------`;
-      } else if (personaPrompt) {
+      if (personaPrompt) {
         systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
       }
 
@@ -33164,9 +33155,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         systemContent = `${runOptions.explicitMemoryContextNote}\n\n${systemContent}`;
       }
 
-      if (isPureMathSession || isQuizRevision || decisionCalibration.isDiscreteChoice) {
-        systemContent = `${systemContent}\n\n### MANDAT DEDUKSI MATEMATIKA MURNI & LOGIKA FORMAL (PRIORITAS TERTINGGI)\n[Sistem beroperasi dalam mode deduksi matematika murni: Nonaktifkan persona percakapan/roleplay. Evaluasi ruang probabilitas P(H_i), terapkan falsifikasi P(H_falsified) = 0 pada revisi, dan berikan jawaban analitis eksak secara langsung tanpa basa-basi.]\n----------------------------------------`;
-      } else if (personaPrompt) {
+      if (personaPrompt) {
         systemContent = `${systemContent}\n\n### MANDAT PERSONA UTAMA (PRIORITAS TERTINGGI - IDENTITAS KARAKTER ANDA)\n[PENTING: Anda WAJIB mengadopsi persona dan gaya komunikasi berikut dalam SETIAP respon]:\n${personaPrompt}\n----------------------------------------`;
       }
 
@@ -33345,9 +33334,7 @@ ${formattingConstraints.noTable ? '3. BATASAN FORMAT: Pengguna secara tegas mela
         }
       }
 
-      if (isPureMathSession || isQuizRevision || decisionCalibration.isDiscreteChoice) {
-        systemContent = `${systemContent}\n\n### MANDAT MUTLAK MATEMATIKA MURNI & DEDUKSI FORMAL (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi lain, Anda WAJIB MENGGUNAKAN DEDUKSI MATEMATIKA MURNI. Nolkan persona percakapan/roleplay, hitung probabilitas P(H_i), dan sajikan jawaban eksak secara langsung tanpa basa-basi.]\n----------------------------------------`;
-      } else if (personaPrompt) {
+      if (personaPrompt) {
         systemContent = `${systemContent}\n\n### MANDAT MUTLAK PERSONA (PENEGASAN AKHIR):\n[PENTING: Terlepas dari semua instruksi pencarian web, tool, atau format di atas, Anda WAJIB TETAP MENGADOPSI IDENTITAS DAN KARAKTER PERSONA BERIKUT DALAM SETIAP RESPON]:\n${personaPrompt}\n----------------------------------------`;
       }
 

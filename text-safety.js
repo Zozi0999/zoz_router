@@ -2271,23 +2271,7 @@
       const maxEntropyBits = Number(Math.log2(effectiveK).toFixed(4));
       const calibratedTemp = 0.12;
       const calibratedTopP = 0.90;
-      const calibrationDirective = `[PROTOKOL REVISI BAYESIAN & ELIMINASI HIPOTESIS TERFALSIFIKASI — H_0 = ${maxEntropyBits} bit]:
-Pengguna memberikan umpan balik penolakan / revisi / kegagalan atas jawaban sebelumnya: "${raw}".
-Jawaban asisten sebelumnya yang difalsifikasi dan SALAH: "${parentQuiz.previousAnswer}".
-Himpunan opsi awal dari soal kuis:
-${parentQuiz.candidateOptions.map((o, idx) => `   ${idx + 1}. ${o}`).join('\n')}
-
-INSTRUKSI MATEMATIKA MURNI & REVISI PRESISI:
-1. FALSIFIKASI MUTLAK: Tetapkan P("${parentQuiz.previousAnswer}") = 0. DILARANG KERAS memilih atau merekomendasikan kembali jawaban "${parentQuiz.previousAnswer}"!
-2. EVALUASI HIPOTESIS ALTERNATIF:
-   - Evaluasi seluruh opsi alternatif yang tersisa: ${effectiveOpts.join(', ')}.
-   - Reset prior peluang setara P_0 = 1/${effectiveOpts.length} pada setiap sisa opsi.
-   - Evaluasi konteks modul/topik kuis (misal RAG, Database, Indexing, Vector Search, AI) dan pilih satu opsi alternatif yang paling tepat.
-3. FORMAT JAWABAN TEGAS & LANGSUNG:
-   - DILARANG menghasilkan kode program, file HTML, atau blok <<<ZOZ_FILE! Ini adalah revisi kuis teks, bukan tugas pembuatan web.
-   - DILARANG mencari definisi kata "ganti" atau mencari kamus di web.
-   - Tuliskan jawaban revisi yang benar secara langsung di baris pertama (misal: "**Jawaban revisi yang tepat: [Pilihan Opsi]**").
-   - Berikan 1-2 kalimat alasan konseptual ringkas mengapa opsi ini benar menggantikan jawaban sebelumnya.`;
+      const calibrationDirective = `[KOREKSI BAYESIAN: Opsi "${parentQuiz.previousAnswer}" salah (P = 0). Evaluasi sisa opsi: ${effectiveOpts.join(', ')} (P_0 = 1/${effectiveOpts.length}). Langsung berikan satu opsi pengganti terbaik di baris pertama beserta alasan ringkas tanpa meminta pengguna mengulang soal.]`;
 
       return {
         isDiscreteChoice: true,
@@ -2314,19 +2298,7 @@ INSTRUKSI MATEMATIKA MURNI & REVISI PRESISI:
       const prevAnswerText = parentQuiz?.previousAnswer || 'Jawaban pada giliran sebelumnya';
       const calibratedTemp = 0.12;
       const calibratedTopP = 0.90;
-      const calibrationDirective = `[PROTOKOL REVISI BAYESIAN & ELIMINASI HIPOTESIS TERFALSIFIKASI — KALIBRASI MATEMATIKA MURNI]:
-Umpan balik koreksi probabilitas: "${raw}".
-Hipotesis terfalsifikasi: h_prev = "${prevAnswerText}".
-
-FORMULASI DEDUKSI MATEMATIKA MURNI:
-1. FALSIFIKASI MUTLAK: Tetapkan P(h_prev) = 0. Hapus probabilitas hipotesis lama dari ruang keadaan H.
-2. NORMALISASI POSTERIOR SISA OPSI:
-   - Hitung distribusi peluang posterior ternormalisasi: P(H_j | ¬h_prev) = P_0(H_j) / \\sum_{k \\neq prev} P_0(H_k).
-   - Tentukan argmax_{H_j} P(H_j | E) dari himpunan opsi alternatif pada riwayat obrolan di atas.
-3. LARANGAN AMNESIA & EMISI LANGSUNG:
-   - DILARANG meminta pengguna mengetikkan ulang soal atau opsi (Information Loss = 0; seluruh premis soal dan opsi eksis pada riwayat konteks di atas).
-   - Tuliskan hipotesis revisi optimal H* secara langsung di baris pertama (misal: "**Jawaban revisi yang tepat: [Opsi Pengganti]**").
-   - Sertakan penurunan deduktif ringkas 1-2 paragraf mengenai kondisi batas mengapa H* valid dan h_prev tidak memenuhi syarat.`;
+      const calibrationDirective = `[KOREKSI BAYESIAN: Jawaban sebelumnya salah (P = 0). Evaluasi riwayat obrolan di atas dan berikan satu jawaban revisi terbaik pengganti di baris pertama beserta alasan ringkas tanpa meminta pengguna mengulang soal.]`;
 
       return {
         isDiscreteChoice: true,
