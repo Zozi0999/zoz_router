@@ -5563,7 +5563,7 @@ body.mobile-sidebar-open #sidebar.open + .sidebar-backdrop {
   }
 }
 
-/* ==================== UNIFIED ATTACHMENT MENU (CHATGPT / GEMINI STYLE) ==================== */
+/* ==================== UNIFIED ATTACHMENT MENU (GEOMETRIC COMPACT MATRIX) ==================== */
 .attachment-menu-wrapper {
   position: relative;
   display: inline-flex;
@@ -8058,7 +8058,7 @@ div.msg-sources-section button.msg-sources-title span {
   display: none;
 }
 
-/* ==================== GOOGLE GEMINI CANVAS STUDIO & INLINE CARDS ==================== */
+/* ==================== NEURAL CANVAS STUDIO & INLINE CARDS ==================== */
 /* 1. Inline Gemini Canvas Card in Chat Stream */
 .gemini-canvas-card {
   width: 100%;

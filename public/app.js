@@ -42565,9 +42565,10 @@ Aturan:
         // Gateway Proxy testing (Cloud Serverless 24/7 atau Local Backend)
         const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
         const isLocalOrigin = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
-        const targetModelsUrl = (!isLocalOrigin && !key && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep))
-          ? ((getActiveTunnelUrl() || '') + `/api/ollama/models?endpoint=${encodeURIComponent(ep)}`)
-          : getUniversalApiUrl(`/api/ollama/models?endpoint=${encodeURIComponent(ep)}`);
+        if (!isLocalOrigin && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(ep)) {
+          ep = 'https://ollama.com';
+        }
+        const targetModelsUrl = getUniversalApiUrl(`/api/ollama/models?endpoint=${encodeURIComponent(ep)}`);
         const res = await fetch(targetModelsUrl, { headers });
         const data = await res.json();
         if (res.ok && data.models && data.models.length > 0) {
