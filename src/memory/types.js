@@ -10,7 +10,7 @@ function validateString(val, fallback = '', maxLen = 10000) {
 }
 
 function validateCategory(cat) {
-  const allowed = ['preference', 'fact', 'project_context', 'technical_stack', 'instruction', 'general'];
+  const allowed = ['preference', 'fact', 'project_context', 'technical_stack', 'instruction', 'error_lesson', 'episodic_context', 'general'];
   const clean = String(cat || '').toLowerCase().trim();
   return allowed.includes(clean) ? clean : 'general';
 }

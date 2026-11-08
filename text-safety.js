@@ -1765,6 +1765,7 @@
     out = out
       .replace(/\n*\[PANDUAN RESONANSI PERSONA SISTEM[\s\S]*$/i, '')
       .replace(/\n*\[PROYEKSI RUANG KEADAAN REVISI[\s\S]*$/i, '')
+      .replace(/\n*\[PROYEKSI OPERATOR ANAPHORA[\s\S]*$/i, '')
       .replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '')
       .trim();
     return out;
@@ -1814,6 +1815,49 @@
     return false;
   }
 
+  const QUIZ_INSTRUCTION_LINE_REGEX = /^(?:select|choose|pilih(?:lah)?|mark|check|centang)\s+(?:the\s+)?(?:all|one|two|three|four|five|\d+|satu|dua|tiga|empat|semua)(?:\s+(?:that|which)\s+apply|\s+correct|\s+options?|\s+answers?|\s+statements?|\s+jawaban|\s+opsi|\s+pilihan|\s+pernyataan)?(?:\s+yang\s+(?:benar|tepat|sesuai))?[.:!]?$/i;
+
+  function isPostHocProjectionQuery(text) {
+    if (!text || typeof text !== 'string') return null;
+    const clean = stripInjectedSystemTagsFromUserText(text).trim();
+    if (!clean || clean.length > 120) return null;
+    if (isRevisionQuery(clean)) return null;
+    const lower = clean.toLowerCase();
+
+    // Guard: Abaikan sapaan murni atau soal kuis baru yang memiliki banyak baris
+    if (/^(?:halo|hai|hi|hello|pagi|siang|sore|malam|tes|test|ping|ok|oke|makasih|terima\s+kasih|thanks|lanjut|next)[\s!.,?]*$/i.test(clean)) {
+      return null;
+    }
+    if (clean.split(/\r?\n/).filter(Boolean).length >= 3) return null;
+
+    // 1. Operator Proyeksi Indeks Huruf / Nomor (\hat{P}_{index}: "abcd sja", "abcd saja", "hurufnya saja", "a b c d", "123 saja")
+    const isIndexLetter = /^(?:\s*(?:tolong|coba|mohon|pakai|gunakan|jawab(?:annya)?|tulis(?:kan)?|berikan|kasih|cukup|hanya|dalam|format|opsi|pilihan|huruf|angka|nomor)\s+)*(?:a\s*[,/.\-\s]*b\s*[,/.\-\s]*c(?:\s*[,/.\-\s]*d)?(?:\s*[,/.\-\s]*e)?|abcd(?:e)?|huruf(?:nya)?(?:\s+saja|\s+aja)?|abjad(?:nya)?(?:\s+saja|\s+aja)?|1\s*[,/.\-\s]*2\s*[,/.\-\s]*3(?:\s*[,/.\-\s]*4)?|nomor(?:nya)?\s+(?:saja|aja)|angka(?:nya)?\s+(?:saja|aja)|letter(?:s)?\s+only)(?:\s+(?:saja|aja|sja|sj|ya|dong|please|only))?[\s!.,?]*$/i.test(clean)
+      || /\b(?:abcd(?:e)?\s*(?:saja|sja|aja|sj|only)?|(?:huruf|abjad)(?:nya)?\s+(?:saja|sja|aja|sj)|jawab\s+(?:pakai\s+|dengan\s+)?abcd)\b/i.test(lower);
+    if (isIndexLetter) {
+      return { isPostHoc: true, type: 'index_letter', raw: clean };
+    }
+
+    // 2. Operator Proyeksi Kompresi / Jawaban Langsung (\hat{P}_{concise}: "singkat saja", "intinya saja", "langsung jawabannya")
+    const isConcise = /^(?:\s*(?:tolong|coba|mohon|langsung|cukup|hanya|kasih|berikan|tulis(?:kan)?|jawab(?:annya)?|ambil|pilih)\s+)*(?:singkat(?:\s+saja|\s+sja|\s+aja)?|intinya(?:\s+saja|\s+sja|\s+aja)?|poin(?:nya)?(?:\s+saja|\s+sja|\s+aja)?|kesimpulan(?:nya)?(?:\s+saja|\s+sja|\s+aja)?|jawaban(?:nya)?\s+(?:saja|sja|aja|langsung)|langsung\s+(?:jawaban(?:nya)?|intinya)|tanpa\s+penjelasan|to\s+the\s+point|short\s+answer|just\s+the\s+answer)[\s!.,?]*$/i.test(clean);
+    if (isConcise) {
+      return { isPostHoc: true, type: 'concise', raw: clean };
+    }
+
+    // 3. Operator Ekspansi Epistemik (\hat{P}_{expand}: "jelaskan", "kenapa begitu", "apa alasannya")
+    const isExpand = /^(?:\s*(?:tolong|coba|mohon|bisa)\s+)*(?:jelaskan(?:\s+lebih\s+detail|\s+kenapa|\s+mengapa|\s+itu|\s+tadi)?|kenapa(?:\s+begitu|\s+itu|\s+bisa\s+begitu|\s+jawabannya\s+itu|\s+pilih\s+itu)?|mengapa(?:\s+demikian|\s+begitu|\s+itu)?|apa\s+alasannya|alasannya(?:\s+apa)?|uraikan(?:\s+lebih\s+lengkap)?|lebih\s+(?:lengkap|detail)|explain(?:\s+why)?|why(?:\s+is\s+that)?)[\s!.,?]*$/i.test(clean);
+    if (isExpand) {
+      return { isPostHoc: true, type: 'expand', raw: clean };
+    }
+
+    // 4. Operator Translasi Bahasa (\hat{P}_{translate}: "bahasa indonesia", "terjemahkan", "indo saja")
+    const isTranslate = /^(?:\s*(?:tolong|coba|ubah|ganti|terjemahkan|translate|artikan)\s+)*(?:(?:ke\s+|dalam\s+)?bahasa\s+(?:indonesia|inggris)|indo(?:nesia)?(?:\s+saja|\s+sja|\s+aja)?|english(?:\s+only|\s+please)?|terjemahkan(?:\s+itu|\s+tadi|\s+ke\s+indonesia)?)[\s!.,?]*$/i.test(clean);
+    if (isTranslate) {
+      return { isPostHoc: true, type: 'translate', raw: clean };
+    }
+
+    return null;
+  }
+
   function extractCandidateOptionsFromTextBlock(textBlock, isAssistantText = false) {
     if (!textBlock || typeof textBlock !== 'string') return [];
     const lines = textBlock.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -1832,15 +1876,19 @@
     if (labeled.length >= 2) return labeled;
 
     if (!isAssistantText) {
-      // Pada teks soal pengguna tanpa label huruf: pisahkan baris kalimat tanya utama dari baris-baris opsi di bawahnya
-      const qIdx = lines.findIndex(l => /\?\s*$/.test(l) || /:\s*$/.test(l) || /\.\.\.\s*$/.test(l) || /\b(?:which|what|manakah|berikut|following|pilih|select|choose|pernyataan)\b/i.test(l));
+      // Pada teks soal pengguna tanpa label huruf: pisahkan baris kalimat tanya utama & sub-instruksi ("Select the three that apply.") dari baris-baris opsi di bawahnya
+      let qIdx = lines.findIndex(l => /\?\s*$/.test(l) || /:\s*$/.test(l) || /\.\.\.\s*$/.test(l) || /\b(?:which|what|manakah|berikut|following|pilih|select|choose|pernyataan)\b/i.test(l));
+      while (qIdx !== -1 && qIdx + 1 < lines.length && (QUIZ_INSTRUCTION_LINE_REGEX.test(lines[qIdx + 1]) || /\?\s*$/.test(lines[qIdx + 1]) || /:\s*$/.test(lines[qIdx + 1]))) {
+        qIdx++;
+      }
       const candidatePool = (qIdx !== -1 && lines.length >= qIdx + 3) ? lines.slice(qIdx + 1) : lines;
       const unlabeled = candidatePool
         .map(l => l.replace(/^[-*•]\s+/, '').trim())
         .filter(l => {
           if (/^(?:jawab|berikan|pilih|tuliskan)\s+(?:singkat|langsung|hanya|saja|jawaban)/i.test(l)) return false;
+          if (QUIZ_INSTRUCTION_LINE_REGEX.test(l)) return false;
           const wc = l.split(/\s+/).filter(Boolean).length;
-          return wc >= 1 && wc <= 32 && !/\?\s*$/.test(l);
+          return wc >= 1 && wc <= 36 && !/\?\s*$/.test(l);
         });
       if (unlabeled.length >= 2) return unlabeled;
     } else {
@@ -1875,6 +1923,84 @@
       if (extracted.length >= 2) return extracted;
     }
     return [];
+  }
+
+  function identifyChosenOptionsInAssistantTurn(asstText, candidateOptions = []) {
+    if (!asstText || typeof asstText !== 'string') {
+      return { chosenOptions: [], chosenLetters: [], primaryOption: '' };
+    }
+    const cleanAsst = asstText.trim();
+    const chosenOptions = [];
+    const chosenLetters = [];
+
+    if (Array.isArray(candidateOptions) && candidateOptions.length >= 2) {
+      const asstLines = cleanAsst.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      candidateOptions.forEach((opt, idx) => {
+        const letter = String.fromCharCode(65 + idx);
+        const cOpt = opt.replace(/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)\s-]+|\([1-6]\)\s+|[1-6][.)]\s+)/, '').toLowerCase().trim();
+        if (!cOpt) return;
+        const shortAnchor = cOpt.split(/\s+/).slice(0, 6).join(' ');
+
+        // Cek apakah baris asisten menyebut opsi ini secara afirmatif (bukan baris yang menyatakan opsi tersebut salah/incorrect)
+        let isAffirmed = false;
+        for (const line of asstLines) {
+          const lowerLine = line.toLowerCase().replace(/[*`"']/g, '');
+          const hasMatch = (cOpt.length >= 4 && lowerLine.includes(cOpt)) || (shortAnchor.length >= 14 && lowerLine.includes(shortAnchor));
+          if (hasMatch) {
+            const isNegatedLine = /\b(?:salah|incorrect|false|tidak\s+tepat|bukan\s+jawaban|eliminasi)\b/i.test(lowerLine) && !/\b(?:adalah\s+salah\s+satu\s+yang\s+benar|tidak\s+salah)\b/i.test(lowerLine);
+            if (!isNegatedLine) {
+              isAffirmed = true;
+              break;
+            }
+          }
+        }
+        if (isAffirmed) {
+          chosenOptions.push(opt);
+          chosenLetters.push(letter);
+        }
+      });
+
+      // Jika asisten hanya menjawab dengan huruf eksplisit (misal "A, B, D" atau "Jawaban: C")
+      if (chosenOptions.length === 0) {
+        const letterOnlyMatch = cleanAsst.match(/^(?:jawaban(?:nya)?\s*[:=-]?\s*)?([A-Fa-f](?:\s*(?:,|dan|and|&|\s)\s*[A-Fa-f])*)\s*[.!]*$/i);
+        if (letterOnlyMatch && letterOnlyMatch[1]) {
+          const letters = letterOnlyMatch[1].toUpperCase().match(/[A-F]/g) || [];
+          for (const L of letters) {
+            const idx = L.charCodeAt(0) - 65;
+            if (idx >= 0 && idx < candidateOptions.length && !chosenLetters.includes(L)) {
+              chosenLetters.push(L);
+              chosenOptions.push(candidateOptions[idx]);
+            }
+          }
+        }
+      }
+    }
+
+    if (chosenOptions.length > 0) {
+      return {
+        chosenOptions,
+        chosenLetters,
+        primaryOption: chosenOptions.join(' | ')
+      };
+    }
+
+    // Fallback tunggal
+    const single = identifyChosenOptionInAssistantTurn(cleanAsst, candidateOptions);
+    if (single && Array.isArray(candidateOptions) && candidateOptions.length >= 2) {
+      const idx = candidateOptions.findIndex(o => o === single || o.toLowerCase().includes(single.toLowerCase()));
+      if (idx !== -1) {
+        return {
+          chosenOptions: [candidateOptions[idx]],
+          chosenLetters: [String.fromCharCode(65 + idx)],
+          primaryOption: candidateOptions[idx]
+        };
+      }
+    }
+    return {
+      chosenOptions: single ? [single] : [],
+      chosenLetters: [],
+      primaryOption: single || ''
+    };
   }
 
   function identifyChosenOptionInAssistantTurn(asstText, candidateOptions = []) {
@@ -1922,8 +2048,17 @@
     return cleanAsst.slice(0, 90).replace(/\n.*/s, '').replace(/[*[\]"']/g, '').trim();
   }
 
-  function extractParentQuizContext(sessionOrMessages) {
-    const rawList = Array.isArray(sessionOrMessages?.messages) ? sessionOrMessages.messages : (Array.isArray(sessionOrMessages) ? sessionOrMessages : []);
+  function extractParentQuizContext(sessionOrMessages, fallbackSessions = null) {
+    let rawList = Array.isArray(sessionOrMessages?.messages) ? sessionOrMessages.messages : (Array.isArray(sessionOrMessages) ? sessionOrMessages : []);
+    // Cross-session bridge: jika sesi baru belum memiliki balasan asisten, ambil konteks dari sesi aktif terakhir sebelumnya
+    if ((!rawList || !rawList.some(m => m && m.role === 'assistant' && m.content)) && Array.isArray(fallbackSessions) && fallbackSessions.length > 0) {
+      for (const s of fallbackSessions) {
+        if (s && !s.isIncognito && Array.isArray(s.messages) && s.messages.some(m => m && m.role === 'assistant' && m.content)) {
+          rawList = s.messages;
+          break;
+        }
+      }
+    }
     if (!rawList || rawList.length < 2) return null;
 
     let lastAsstMsg = '';
@@ -1937,14 +2072,14 @@
     }
     if (lastAsstIdx === -1 || !lastAsstMsg) return null;
 
-    // Cari giliran pengguna induk (soal asli) dengan melewati giliran-giliran revisi ("salah ganti", dsb.)
+    // Cari giliran pengguna induk (soal asli) dengan melewati giliran-giliran revisi ("salah ganti") maupun post-hoc format ("abcd sja")
     let parentUserMsg = null;
     let parentUserIdx = -1;
     let candidateOptions = [];
     for (let i = lastAsstIdx - 1; i >= 0; i--) {
       if (rawList[i] && rawList[i].role === 'user' && rawList[i].content) {
         const uText = stripInjectedSystemTagsFromUserText(String(rawList[i].content || ''));
-        if (!uText || isRevisionQuery(uText)) continue;
+        if (!uText || isRevisionQuery(uText) || isPostHocProjectionQuery(uText)) continue;
         const opts = extractCandidateOptionsFromTextBlock(uText, false);
         if (opts.length >= 2) {
           parentUserMsg = rawList[i];
@@ -1986,15 +2121,25 @@
       }
     }
 
+    const multiSelection = identifyChosenOptionsInAssistantTurn(lastAsstMsg, candidateOptions);
     const prevChosenLabel = falsifiedAnswers.length > 0
       ? falsifiedAnswers[falsifiedAnswers.length - 1]
-      : identifyChosenOptionInAssistantTurn(lastAsstMsg, candidateOptions);
+      : (multiSelection.primaryOption || identifyChosenOptionInAssistantTurn(lastAsstMsg, candidateOptions));
+
+    const indexedOptions = candidateOptions.map((opt, idx) => {
+      const cleanOpt = opt.replace(/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)\s-]+|\([1-6]\)\s+|[1-6][.)]\s+)/, '').trim();
+      return `${String.fromCharCode(65 + idx)}. ${cleanOpt}`;
+    });
 
     return {
       userText: parentUserMsg ? stripInjectedSystemTagsFromUserText(String(parentUserMsg.content || '')) : '',
+      lastAsstMsg,
       parentUserIdx,
       lastAsstIdx,
       candidateOptions,
+      indexedOptions,
+      chosenOptions: multiSelection.chosenOptions,
+      chosenLetters: multiSelection.chosenLetters,
       previousAnswer: prevChosenLabel,
       falsifiedAnswers: falsifiedAnswers.length > 0 ? falsifiedAnswers : (prevChosenLabel ? [prevChosenLabel] : [])
     };
@@ -2002,7 +2147,7 @@
 
   function computeTemporalRecencyProfile(query, contextText = '', nowMs = Date.now()) {
     const q = String(query || '').trim();
-    if (isRevisionQuery(q)) {
+    if (isRevisionQuery(q) || isPostHocProjectionQuery(q)) {
       return {
         recencyAlpha: 0.0,
         halfLifeDays: 365,
@@ -2395,7 +2540,8 @@
     // 0. Deteksi Revisi Jawaban Kuis / Anaphora Penggantian Hipotesis (Falsifikasi P(H_prev) = 0)
     const isRevision = isRevisionQuery(raw);
     const sessionObj = options && (options.session || options.history || options.sessionOrMessages);
-    const parentQuiz = isRevision ? extractParentQuizContext(sessionObj) : null;
+    const fallbackSessions = options && options.fallbackSessions;
+    const parentQuiz = isRevision ? extractParentQuizContext(sessionObj, fallbackSessions) : null;
 
     if (isRevision && parentQuiz && parentQuiz.candidateOptions.length >= 2) {
       const falsifiedList = Array.isArray(parentQuiz.falsifiedAnswers) && parentQuiz.falsifiedAnswers.length > 0
@@ -2428,6 +2574,7 @@
       return {
         isDiscreteChoice: true,
         isQuizRevision: true,
+        isPostHocProjection: false,
         isConceptualTaxonomy: false,
         isSelfContainedDiscreteTurn: false,
         isAnalyticalQuery: true,
@@ -2468,6 +2615,7 @@
       return {
         isDiscreteChoice: true,
         isQuizRevision: true,
+        isPostHocProjection: false,
         isConceptualTaxonomy: false,
         isSelfContainedDiscreteTurn: false,
         isAnalyticalQuery: true,
@@ -2490,6 +2638,64 @@
       };
     }
 
+    // 0b. Deteksi Operator Proyeksi Anaphora Post-Hoc ("abcd sja", "hurufnya saja", "singkat saja", "jelaskan")
+    //     Mengikat operator pendek pengguna langsung ke pertanyaan & jawaban giliran sebelumnya (Delta_pos = 0)
+    //     sehingga AI tidak pernah lupa pada pertanyaan yang baru saja ditanyakan atau meminta pengguna mengirim ulang soal!
+    const postHoc = isPostHocProjectionQuery(raw);
+    if (postHoc) {
+      const postHocParent = extractParentQuizContext(sessionObj, fallbackSessions);
+      if (postHocParent && (postHocParent.userText || postHocParent.lastAsstMsg)) {
+        const hasOpts = Array.isArray(postHocParent.candidateOptions) && postHocParent.candidateOptions.length >= 2;
+        const chosenLettersStr = Array.isArray(postHocParent.chosenLetters) && postHocParent.chosenLetters.length > 0
+          ? postHocParent.chosenLetters.join(', ')
+          : '';
+        let reconstructedUserPrompt = '';
+        let calibrationDirective = '';
+
+        if (postHoc.type === 'index_letter' && hasOpts) {
+          reconstructedUserPrompt = `${raw}\n\n[PROYEKSI OPERATOR ANAPHORA PADA PERTANYAAN SEBELUMNYA (Δpos = 0)]:\n` +
+            `- Pertanyaan Acuan: ${postHocParent.userText.replace(/\r?\n/g, ' | ')}\n` +
+            `- Pemetaan Indeks Biiektif Opsi (φ: O -> {A, B, C, D}):\n${postHocParent.indexedOptions.map(o => '  ' + o).join('\n')}\n` +
+            `- Opsi Terpilih dari Evaluasi Sebelumnya: ${chosenLettersStr || postHocParent.previousAnswer}\n` +
+            `- Instruksi Eksak: Terapkan perintah format pengguna ("${raw}") LANGSUNG pada Pertanyaan Acuan di atas sekarang juga. Tuliskan HANYA huruf indeks jawaban yang benar (${chosenLettersStr || 'huruf opsi yang tepat'}) secara langsung tanpa meminta pengguna mengirimkan ulang pertanyaannya.`;
+          calibrationDirective = `[PROYEKSI INDEKS BIJEKTIF: Pertanyaan acuan memiliki ${postHocParent.candidateOptions.length} opsi (${postHocParent.indexedOptions.join(' ; ')}). Jawaban terverifikasi = ${chosenLettersStr || postHocParent.previousAnswer}. Langsung tuliskan huruf indeks jawaban tersebut sekarang tanpa meminta soal dikirim ulang.]`;
+        } else {
+          reconstructedUserPrompt = `${raw}\n\n[PROYEKSI OPERATOR ANAPHORA PADA PERTANYAAN SEBELUMNYA (Δpos = 0)]:\n` +
+            (postHocParent.userText ? `- Pertanyaan Acuan: ${postHocParent.userText.replace(/\r?\n/g, ' | ')}\n` : '') +
+            (postHocParent.lastAsstMsg ? `- Jawaban Sebelumnya: ${postHocParent.lastAsstMsg.slice(0, 650).replace(/\r?\n/g, ' | ')}\n` : '') +
+            `- Instruksi Eksak: Terapkan perintah pengguna ("${raw}") LANGSUNG pada Pertanyaan Acuan dan Jawaban Sebelumnya di atas sekarang juga tanpa meminta pengguna mengirimkan ulang pertanyaannya.`;
+          calibrationDirective = `[PROYEKSI ANAPHORA: Terapkan perintah "${raw}" langsung pada pertanyaan dan jawaban giliran sebelumnya tanpa meminta pengguna mengulang pertanyaan.]`;
+        }
+
+        const effectiveK = hasOpts ? postHocParent.candidateOptions.length : 4;
+        return {
+          isDiscreteChoice: hasOpts,
+          isQuizRevision: false,
+          isPostHocProjection: true,
+          postHocType: postHoc.type,
+          isConceptualTaxonomy: false,
+          isSelfContainedDiscreteTurn: false,
+          isAnalyticalQuery: true,
+          imageCount,
+          optionCount: effectiveK,
+          uniformPrior: Number((1 / effectiveK).toFixed(4)),
+          maxEntropyBits: Number(Math.log2(effectiveK).toFixed(4)),
+          temperature: 0.12,
+          topP: 0.90,
+          top_p: 0.90,
+          presencePenalty: 0,
+          frequencyPenalty: 0,
+          candidateOptions: postHocParent.candidateOptions || [],
+          indexedOptions: postHocParent.indexedOptions || [],
+          chosenLetters: postHocParent.chosenLetters || [],
+          chosenOptions: postHocParent.chosenOptions || [],
+          parentQuestionText: postHocParent.userText || '',
+          reconstructedUserPrompt,
+          calibrationDirective
+        };
+      }
+    }
+
     // Abaikan sapaan murni sangat pendek atau perintah pembuatan berkas/visual murni
     const isTrivialGreeting = !hasImages && raw.length < 18 && /^(halo|hai|hi|hello|pagi|siang|sore|malam|tes|test|ping|ok|oke|makasih|terima kasih|thanks)[\s!.,?]*$/i.test(raw);
     const isPureMediaGen = !hasImages && /\b(buatkan\s+(gambar|foto|ilustrasi|logo|website|landing\s*page|aplikasi|dokumen|pdf|word|makalah)|carikan\s+(foto|gambar|video))\b/i.test(lower);
@@ -2503,22 +2709,26 @@
     // 2. Deteksi pilihan ganda tanpa huruf (format kuis Coursera / Skilljar / IBM / Dicoding / Google):
     //    WAJIB terdapat baris kalimat tanya ('?' atau ':' atau kata tanya eksplisit) diikuti >= 2 baris opsi kandidat
     let unlabeledOptionCount = 0;
-    const questionLineIdx = lines.findIndex(l => {
+    let questionLineIdx = lines.findIndex(l => {
       const trimmedLine = l.trim();
       if (/\?+\s*$/.test(trimmedLine) || /:\s*$/.test(trimmedLine)) return true;
       if (/^\s*(?:what|which|how|why|when|where|who|whom|whose|manakah|apakah|bagaimana|mengapa|pilih(?:lah)?|select|choose)\b/i.test(trimmedLine)) return true;
       if (/\b(?:true or false|benar atau salah|kecuali|except)\b/i.test(trimmedLine)) return true;
       return false;
     });
+    while (questionLineIdx !== -1 && questionLineIdx + 1 < lines.length && (QUIZ_INSTRUCTION_LINE_REGEX.test(lines[questionLineIdx + 1]) || /\?\s*$/.test(lines[questionLineIdx + 1]) || /:\s*$/.test(lines[questionLineIdx + 1]))) {
+      questionLineIdx++;
+    }
     if (questionLineIdx !== -1 && lines.length >= questionLineIdx + 3) {
       const tailLines = lines.slice(questionLineIdx + 1).filter(l => {
         if (/^(?:jawab|berikan|pilih|tuliskan)\s+(?:singkat|langsung|hanya|saja|jawaban)/i.test(l)) return false;
+        if (QUIZ_INSTRUCTION_LINE_REGEX.test(l)) return false;
         if (/^(?:submit|next(?:\s+question)?|sebelumnya|selanjutnya|selesaikan)$/i.test(l)) return false;
         return true;
       });
       const candidateLines = tailLines.filter(l => {
         const wc = l.split(/\s+/).filter(Boolean).length;
-        return wc >= 1 && wc <= 32 && !/\?\s*$/.test(l) && !/^[-*#>`]/.test(l);
+        return wc >= 1 && wc <= 36 && !/\?\s*$/.test(l) && !/^[-*#>`]/.test(l);
       });
       if (candidateLines.length >= 2 && candidateLines.length <= 7 && candidateLines.length >= tailLines.length * 0.7) {
         unlabeledOptionCount = candidateLines.length;
@@ -2586,16 +2796,44 @@
       ? ` Evaluasi ${imageCount} gambar terlampir secara berurutan (1 s/d ${imageCount}).`
       : '';
 
+    const extractedOpts = isDiscreteChoice ? extractCandidateOptionsFromTextBlock(raw, false) : [];
+    const indexedOpts = extractedOpts.map((opt, idx) => {
+      const cleanOpt = opt.replace(/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)\s-]+|\([1-6]\)\s+|[1-6][.)]\s+)/, '').trim();
+      return `${String.fromCharCode(65 + idx)}. ${cleanOpt}`;
+    });
+    const isMultiSelectQuestion = /\b(?:select|choose|pilih(?:lah)?)\s+(?:the\s+)?(?:all|two|three|four|2|3|4|dua|tiga|empat|semua)\b/i.test(raw);
+
+    // Cek apakah di dalam riwayat sesi ini pengguna pernah meminta format huruf saja ("abcd sja")
+    let hasSessionLetterPreference = Boolean(options && options.preferLetterOnly);
+    if (!hasSessionLetterPreference && sessionObj) {
+      const histMsgs = Array.isArray(sessionObj?.messages) ? sessionObj.messages : (Array.isArray(sessionObj) ? sessionObj : []);
+      hasSessionLetterPreference = histMsgs.some(m => m && m.role === 'user' && isPostHocProjectionQuery(m.content || '')?.type === 'index_letter');
+    }
+
     // Bebas dari "text persona" / ceramah meta-prompt:
     // Hanya berikan batasan ruang hipotesis ringkas pada soal pilihan ganda diskrit (isDiscreteChoice).
     let calibrationDirective = '';
     if (isDiscreteChoice) {
-      calibrationDirective = `[KALIBRASI KEPUTUSAN BAYESIAN — P_0(H_i) = ${uniformPrior}, H_0 = ${maxEntropyBits} bit]: Evaluasi setiap opsi secara independen sesuai polaritas operator soal (positif vs negasi/kecuali) serta opsi komposit ("Semua benar/salah" / "All/None of the above"). Tetapkan tepat satu kunci jawaban kanonik yang paling akurat secara tegas tanpa meragukan desain soal.${multiImageNote}`;
+      const targetSelectionClause = isMultiSelectQuestion
+        ? 'Tetapkan himpunan opsi jawaban kanonik yang tepat sesuai jumlah yang diminta soal secara tegas tanpa meragukan desain soal.'
+        : 'Tetapkan tepat satu kunci jawaban kanonik yang paling akurat secara tegas tanpa meragukan desain soal.';
+      const indexMapClause = indexedOpts.length >= 2
+        ? ` Pemetaan indeks opsi: ${indexedOpts.join(' | ')}.`
+        : '';
+      const letterPrefClause = hasSessionLetterPreference
+        ? ' Sesuai preferensi format pengguna ("abcd saja"), tuliskan hanya huruf indeks jawaban yang benar (misal: A, B, D).'
+        : '';
+      calibrationDirective = `[KALIBRASI KEPUTUSAN BAYESIAN — P_0(H_i) = ${uniformPrior}, H_0 = ${maxEntropyBits} bit]: Evaluasi setiap opsi secara independen sesuai polaritas operator soal (positif vs negasi/kecuali) serta opsi komposit ("Semua benar/salah" / "All/None of the above"). ${targetSelectionClause}${indexMapClause}${letterPrefClause}${multiImageNote}`;
     }
 
     return {
       isDiscreteChoice,
       isQuizRevision: false,
+      isPostHocProjection: false,
+      isMultiSelectQuestion,
+      preferLetterOnly: hasSessionLetterPreference,
+      candidateOptions: extractedOpts,
+      indexedOptions: indexedOpts,
       isConceptualTaxonomy,
       isSelfContainedDiscreteTurn,
       isAnalyticalQuery,
@@ -3501,6 +3739,8 @@
     sanitizeModelPersonaDrift,
     stripInjectedSystemTagsFromUserText,
     isRevisionQuery,
+    isPostHocProjectionQuery,
+    identifyChosenOptionsInAssistantTurn,
     extractParentQuizContext,
     computeDamerauLevenshtein,
     resolveEntityPhoneticallyMathematically,

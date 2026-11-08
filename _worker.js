@@ -1420,6 +1420,123 @@ export default {
       });
     }
 
+    // Jozz Memory Cloud Edge Endpoints (/api/memories/*)
+    if (url.pathname.startsWith('/api/memories')) {
+      if (!globalThis.__ZOZ_EDGE_MEMORIES) {
+        globalThis.__ZOZ_EDGE_MEMORIES = new Map();
+      }
+      const memMap = globalThis.__ZOZ_EDGE_MEMORIES;
+      const jsonHeaders = {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      };
+
+      if (request.method === 'GET' && url.pathname === '/api/memories/insights') {
+        const allItems = Array.from(memMap.values());
+        return new Response(JSON.stringify({
+          success: true,
+          data: {
+            totalMemories: allItems.length,
+            activeRelations: 0,
+            categories: {},
+            recentEpisodes: []
+          }
+        }), { status: 200, headers: jsonHeaders });
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/memories/recall') {
+        let body = {};
+        try { body = await request.json(); } catch (_) {}
+        const uid = body.userId || request.headers.get('x-user-id') || 'default';
+        const q = String(body.query || body.message || '').toLowerCase();
+        const qTokens = [...new Set(q.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length >= 3))];
+        const userMemories = Array.from(memMap.values()).filter(m => m && (m.userId === uid || m.userId === 'default'));
+        const scored = [];
+        for (const m of userMemories) {
+          const text = String(m.content || '').toLowerCase();
+          let hits = 0;
+          for (const t of qTokens) {
+            if (text.includes(t)) hits++;
+          }
+          if (hits >= 2 || (m.category === 'error_lesson' && hits >= 1)) {
+            scored.push({ m, score: (m.category === 'error_lesson' ? 10 : 1) + hits });
+          }
+        }
+        scored.sort((a, b) => b.score - a.score);
+        const top = scored.slice(0, 5).map(s => s.m);
+        let systemPromptInjection = '';
+        if (top.length > 0) {
+          const lines = top.map((m, i) => `[MEM-${i + 1} | Cat: ${m.category || 'fact'}]: ${m.content}`);
+          systemPromptInjection = `### JOZZ MEMORY CONTEXT (EDGE VAULT):\n${lines.join('\n')}`;
+        }
+        return new Response(JSON.stringify({
+          success: true,
+          incognito: Boolean(body.incognito),
+          memories: top,
+          receipts: [],
+          systemPromptInjection
+        }), { status: 200, headers: jsonHeaders });
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/memories/extract-background') {
+        let body = {};
+        try { body = await request.json(); } catch (_) {}
+        const uid = body.userId || request.headers.get('x-user-id') || 'default';
+        const nowIso = new Date().toISOString();
+        if (body.errorLesson && body.errorLesson.content) {
+          const id = body.errorLesson.id || `lesson_${Date.now()}`;
+          memMap.set(id, { ...body.errorLesson, id, userId: uid, category: 'error_lesson', updated_at: nowIso });
+        }
+        if (body.episodicSummary && body.episodicSummary.content) {
+          const id = body.episodicSummary.id || `ep_${Date.now()}`;
+          memMap.set(id, { ...body.episodicSummary, id, userId: uid, category: 'episodic_context', updated_at: nowIso });
+        }
+        if (body.preferenceMemory && body.preferenceMemory.content) {
+          const id = body.preferenceMemory.id || `pref_${Date.now()}`;
+          memMap.set(id, { ...body.preferenceMemory, id, userId: uid, category: 'preference', updated_at: nowIso });
+        }
+        return new Response(JSON.stringify({ success: true, queued: true }), { status: 200, headers: jsonHeaders });
+      }
+
+      if (request.method === 'GET' && (url.pathname === '/api/memories' || url.pathname === '/api/memories/')) {
+        const uid = request.headers.get('x-user-id') || url.searchParams.get('userId') || 'default';
+        const list = Array.from(memMap.values()).filter(m => m && (m.userId === uid || m.userId === 'default'));
+        return new Response(JSON.stringify({ success: true, count: list.length, memories: list }), { status: 200, headers: jsonHeaders });
+      }
+
+      if (request.method === 'POST' && (url.pathname === '/api/memories' || url.pathname === '/api/memories/')) {
+        let body = {};
+        try { body = await request.json(); } catch (_) {}
+        const uid = body.userId || request.headers.get('x-user-id') || 'default';
+        const id = body.id || `mem_${Date.now()}`;
+        const item = {
+          id,
+          userId: uid,
+          user_id: uid,
+          content: body.content || body.fact || '',
+          category: body.category || 'preference',
+          scope: body.scope || 'global',
+          confidence: 1.0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        if (item.content) memMap.set(id, item);
+        return new Response(JSON.stringify({ success: true, memory: item }), { status: 201, headers: jsonHeaders });
+      }
+
+      if (request.method === 'DELETE') {
+        const memId = url.pathname.replace('/api/memories/', '').trim();
+        if (memId && memId !== '/api/memories') {
+          memMap.delete(memId);
+        } else {
+          memMap.clear();
+        }
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers: jsonHeaders });
+      }
+
+      return new Response(JSON.stringify({ success: true, memories: [] }), { status: 200, headers: jsonHeaders });
+    }
+
     // Fast Diagnostic Probe Ping (Zero-Dependency)
     if (url.pathname === '/api/ping' && (request.method === 'GET' || request.method === 'HEAD')) {
       return new Response(JSON.stringify({
@@ -1762,8 +1879,6 @@ export default {
             headers: {
               'Content-Type': 'application/x-ndjson',
               'Access-Control-Allow-Origin': '*'
-            }
-          });
             }
           });
         }

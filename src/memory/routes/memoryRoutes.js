@@ -109,6 +109,7 @@ async function handleMemoryRoutes(req, res, reqUrl) {
     // 5. POST /api/memories/recall (Scoped Hybrid Recall for chat query)
     if (method === 'POST' && pathname === '/api/memories/recall') {
       const body = await parseJsonBody(req);
+      const effectiveUserId = body.userId || userId || 'default';
       const query = body.query || body.message || '';
       const scope = body.scope || 'global';
       const incognito = Boolean(body.incognito);
@@ -124,7 +125,7 @@ async function handleMemoryRoutes(req, res, reqUrl) {
         return true;
       }
 
-      const recallResult = retriever.recallMemories(userId, query, scope);
+      const recallResult = retriever.recallMemories(effectiveUserId, query, scope);
       sendJson(res, 200, {
         success: true,
         incognito: false,
@@ -136,15 +137,20 @@ async function handleMemoryRoutes(req, res, reqUrl) {
     // 6. POST /api/memories/extract-background (Async worker trigger)
     if (method === 'POST' && pathname === '/api/memories/extract-background') {
       const body = await parseJsonBody(req);
+      const effectiveUserId = body.userId || userId || 'default';
       const incognito = Boolean(body.incognito);
       if (!incognito) {
         extractor.triggerAsyncBackgroundExtraction({
-          userId,
+          userId: effectiveUserId,
           sessionId: body.sessionId || 'default',
+          sessionTitle: body.sessionTitle || '',
           turnIndex: body.turnIndex || 0,
           userMessage: body.userMessage || body.message || '',
           assistantResponse: body.assistantResponse || '',
-          scope: body.scope || 'global'
+          scope: body.scope || 'global',
+          errorLesson: body.errorLesson || null,
+          episodicSummary: body.episodicSummary || null,
+          preferenceMemory: body.preferenceMemory || null
         });
       }
       sendJson(res, 200, { success: true, queued: !incognito });
@@ -166,6 +172,7 @@ async function handleMemoryRoutes(req, res, reqUrl) {
     // 8. POST /api/memories (Manual explicit memory creation)
     if (method === 'POST' && (pathname === '/api/memories' || pathname === '/api/memories/')) {
       const body = await parseJsonBody(req);
+      const effectiveUserId = body.userId || userId || 'default';
       const content = body.content || body.fact || '';
       const scope = body.scope || 'global';
 
@@ -174,10 +181,11 @@ async function handleMemoryRoutes(req, res, reqUrl) {
         return true;
       }
 
-      const resCapture = extractor.captureExplicitMemory(userId, content, scope, {
+      const resCapture = extractor.captureExplicitMemory(effectiveUserId, content, scope, {
         sessionId: body.sessionId || 'manual',
-        sourceType: 'manual',
-        sourceTitle: body.sourceTitle || 'Input Manual Pengguna'
+        sourceType: body.sourceType || 'manual',
+        sourceTitle: body.sourceTitle || 'Input Manual Pengguna',
+        category: body.category || null
       });
 
       sendJson(res, resCapture.success ? 201 : 400, resCapture);

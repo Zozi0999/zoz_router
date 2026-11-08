@@ -1487,6 +1487,18 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     STORAGE_KEY: 'zoz_jozz_memories_vault_v1',
     _cache: null,
 
+    STOPWORDS: new Set([
+      'yang', 'dan', 'di', 'ke', 'dari', 'ini', 'itu', 'adalah', 'untuk', 'pada', 'dengan', 'atau', 'dalam', 'tidak', 'bukan',
+      'saya', 'aku', 'kamu', 'anda', 'kita', 'kami', 'mereka', 'dia', 'apa', 'siapa', 'dimana', 'kapan', 'mengapa', 'kenapa',
+      'bagaimana', 'mana', 'saja', 'sja', 'aja', 'juga', 'sudah', 'telah', 'akan', 'bisa', 'dapat', 'harus', 'jika', 'kalau',
+      'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'any', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'day',
+      'get', 'has', 'him', 'his', 'how', 'man', 'new', 'now', 'old', 'see', 'two', 'way', 'who', 'boy', 'did', 'its', 'let',
+      'put', 'say', 'she', 'too', 'use', 'that', 'this', 'with', 'from', 'have', 'they', 'will', 'what', 'when', 'where',
+      'which', 'following', 'statements', 'statement', 'about', 'correct', 'select', 'apply', 'above', 'below', 'true', 'false'
+    ]),
+
+    CROSS_SESSION_RECALL_REGEX: /\b(?:percakapan\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|sesi\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir|lain)|pertanyaan\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|bahas(?:an)?\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|lanjutkan\s+(?:pembahasan|percakapan|yang)\s+(?:tadi|sebelumnya)|ingat\s+(?:percakapan|pertanyaan|pembahasan|soal)\s*(?:tadi|sebelumnya|kita)?)\b/i,
+
     init() {
       if (this._cache) return this._cache;
       try {
@@ -1496,6 +1508,183 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         this._cache = [];
       }
       return this._cache;
+    },
+
+    extractSubstantiveTokens(text) {
+      if (!text || typeof text !== 'string') return [];
+      const cleaned = text
+        .replace(/\n*\[PROYEKSI (?:RUANG KEADAAN REVISI|OPERATOR ANAPHORA)[\s\S]*$/i, '')
+        .toLowerCase()
+        .replace(/[^\w\s]/g, ' ');
+      return [...new Set(
+        cleaned.split(/\s+/).filter(w => w.length >= 3 && !this.STOPWORDS.has(w))
+      )];
+    },
+
+    computeTokenOverlap(queryTokens, docText) {
+      if (!Array.isArray(queryTokens) || queryTokens.length === 0 || !docText) {
+        return { score: 0, hitCount: 0 };
+      }
+      const docTokens = this.extractSubstantiveTokens(docText);
+      if (docTokens.length === 0) return { score: 0, hitCount: 0 };
+      const docSet = new Set(docTokens);
+      let hitCount = 0;
+      for (const tok of queryTokens) {
+        if (docSet.has(tok)) hitCount++;
+      }
+      if (hitCount === 0) return { score: 0, hitCount: 0 };
+      const dice = (2 * hitCount) / (queryTokens.length + docTokens.length);
+      const containment = hitCount / Math.min(queryTokens.length, docTokens.length);
+      return {
+        score: Math.max(dice, containment * 0.85),
+        hitCount
+      };
+    },
+
+    hashText(text) {
+      const tokens = this.extractSubstantiveTokens(text).slice(0, 24);
+      const basis = tokens.length > 0 ? tokens.join('_') : String(text || '').toLowerCase().trim().slice(0, 120);
+      let h = 2166136261;
+      for (let i = 0; i < basis.length; i++) {
+        h ^= basis.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return (h >>> 0).toString(16).padStart(8, '0');
+    },
+
+    hasLetterPreference(userId = STATE.userId || 'default') {
+      const list = this.getAll(userId);
+      return list.some(m => m && (m.id === 'pref_quiz_format_letter_only' || m.preferLetterOnly === true));
+    },
+
+    findMatchingErrorLesson(queryText, userId = STATE.userId || 'default') {
+      const qTokens = this.extractSubstantiveTokens(queryText);
+      if (qTokens.length < 2) return null;
+      const lessons = this.getAll(userId).filter(m => m && m.category === 'error_lesson');
+      let best = null;
+      let bestScore = 0;
+      for (const lesson of lessons) {
+        const probeText = lesson.questionText || lesson.content || '';
+        const { score, hitCount } = this.computeTokenOverlap(qTokens, probeText);
+        if (hitCount >= 2 && score >= 0.42 && score > bestScore) {
+          bestScore = score;
+          best = lesson;
+        }
+      }
+      return best;
+    },
+
+    captureTurnMemory({
+      userId = STATE.userId || 'default',
+      sessionId = 'default',
+      sessionTitle = '',
+      userMessage = '',
+      assistantResponse = '',
+      decisionCalibration = null,
+      scope = STATE.activeProjectScope || 'global'
+    } = {}) {
+      const rawUser = String(userMessage || '')
+        .replace(/\n*\[PROYEKSI (?:RUANG KEADAAN REVISI|OPERATOR ANAPHORA)[\s\S]*$/i, '')
+        .trim();
+      const rawAsst = String(assistantResponse || '').trim();
+      if (!rawUser || !rawAsst) return { errorLesson: null, episodicSummary: null, preferenceMemory: null };
+
+      const nowIso = new Date().toISOString();
+      let errorLesson = null;
+      let preferenceMemory = null;
+      let episodicSummary = null;
+
+      // 1. Counterfactual Error-Learning Memory (P(H_falsified) = 0)
+      if (decisionCalibration && decisionCalibration.isQuizRevision && decisionCalibration.parentQuestionText) {
+        const qText = decisionCalibration.parentQuestionText.replace(/\s+/g, ' ').trim();
+        const lessonId = `lesson_${this.hashText(qText)}`;
+        const existingLesson = this.getAll(userId).find(m => m && m.id === lessonId);
+        const prevFalsified = Array.isArray(existingLesson?.falsifiedAnswers) ? existingLesson.falsifiedAnswers : [];
+        const currFalsified = Array.isArray(decisionCalibration.falsifiedAnswers) && decisionCalibration.falsifiedAnswers.length > 0
+          ? decisionCalibration.falsifiedAnswers
+          : (decisionCalibration.falsifiedAnswer ? [decisionCalibration.falsifiedAnswer] : []);
+        const mergedFalsified = [...new Set([...prevFalsified, ...currFalsified].filter(Boolean))];
+
+        let verifiedSummary = rawAsst.replace(/\s+/g, ' ').trim().slice(0, 260);
+        if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.identifyChosenOptionsInAssistantTurn === 'function' && Array.isArray(decisionCalibration.candidateOptions) && decisionCalibration.candidateOptions.length > 0) {
+          const identified = ZozTextSafety.identifyChosenOptionsInAssistantTurn(rawAsst, decisionCalibration.candidateOptions);
+          if (identified && identified.chosenOptions && identified.chosenOptions.length > 0) {
+            const letterTag = (identified.chosenLetters && identified.chosenLetters.length > 0)
+              ? `${identified.chosenLetters.join(', ')} — `
+              : '';
+            verifiedSummary = `${letterTag}${identified.chosenOptions.join(' ; ')}`;
+          }
+        }
+
+        const falsifiedStr = mergedFalsified.length > 0
+          ? mergedFalsified.map(f => `"${f}"`).join('; ')
+          : '"Jawaban sebelumnya"';
+        const lessonContent = `[KOREKSI KESALAHAN TERVERIFIKASI] Soal: "${qText.slice(0, 260)}" | Hipotesis Salah (P = 0, JANGAN PILIH LAGI): ${falsifiedStr} | Jawaban Terverifikasi: "${verifiedSummary}"`;
+
+        errorLesson = {
+          id: lessonId,
+          userId,
+          user_id: userId,
+          category: 'error_lesson',
+          scope,
+          confidence: 0.99,
+          questionText: qText.slice(0, 600),
+          candidateOptions: decisionCalibration.candidateOptions || [],
+          falsifiedAnswers: mergedFalsified,
+          verifiedAnswer: verifiedSummary,
+          content: lessonContent,
+          created_at: existingLesson?.created_at || nowIso,
+          updated_at: nowIso
+        };
+        this.save(errorLesson);
+      }
+
+      // 2. Persistent Format Preference Memory (bila pengguna meminta selalu format huruf/singkat)
+      if (/\b(?:selalu|seterusnya|mulai\s+sekarang)\b[\s\S]*\b(?:abcd\s*s(?:a)?ja|huruf(?:nya)?\s*s(?:a)?ja|opsi(?:nya)?\s*s(?:a)?ja)\b/i.test(rawUser)) {
+        preferenceMemory = {
+          id: 'pref_quiz_format_letter_only',
+          userId,
+          user_id: userId,
+          category: 'preference',
+          scope: 'global',
+          confidence: 0.98,
+          preferLetterOnly: true,
+          content: 'Preferensi Format Kuis: Pengguna memilih jawaban pilihan ganda disajikan langsung dengan huruf indeks opsi (A, B, C, D).',
+          created_at: nowIso,
+          updated_at: nowIso
+        };
+        this.save(preferenceMemory);
+      }
+
+      // 3. Cross-Session Episodic Q&A Distillation
+      const effectiveQuestion = (decisionCalibration && decisionCalibration.parentQuestionText)
+        ? decisionCalibration.parentQuestionText
+        : rawUser;
+      const cleanQ = effectiveQuestion.replace(/\s+/g, ' ').trim();
+      const isTrivialGreeting = /^(?:halo|hai|pagi|siang|sore|malam|ok|oke|makasih|thanks|ping|tes)[\s!.?]*$/i.test(cleanQ);
+      if (cleanQ.length >= 15 && !isTrivialGreeting && rawAsst.length >= 2) {
+        const epId = `ep_${this.hashText(cleanQ)}`;
+        const cleanA = rawAsst.replace(/\s+/g, ' ').trim().slice(0, 260);
+        const sTitle = (sessionTitle && sessionTitle !== 'Percakapan Baru') ? sessionTitle : 'Percakapan Sebelumnya';
+        episodicSummary = {
+          id: epId,
+          userId,
+          user_id: userId,
+          sessionId,
+          sessionTitle: sTitle,
+          category: 'episodic_context',
+          scope,
+          confidence: 0.92,
+          questionSnippet: cleanQ.slice(0, 240),
+          answerSnippet: cleanA,
+          content: `[Episodik Sesi "${sTitle}"] Pertanyaan: ${cleanQ.slice(0, 240)} -> Jawaban/Kesimpulan: ${cleanA}`,
+          created_at: nowIso,
+          updated_at: nowIso
+        };
+        this.save(episodicSummary);
+      }
+
+      return { errorLesson, episodicSummary, preferenceMemory };
     },
 
     getAll(userId = STATE.userId || 'default') {
@@ -1544,33 +1733,128 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       return merged;
     },
 
-    recallLocal(queryText, scope = 'global', userId = STATE.userId || 'default', limit = 5) {
+    recallLocal(queryText, scope = 'global', userId = STATE.userId || 'default', limit = 5, currentSessionId = null) {
+      if (!queryText) return null;
       const memories = this.getAll(userId);
-      if (!queryText || !memories.length) return null;
-      const tokens = String(queryText).toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length > 2);
-      if (!tokens.length) return null;
+      const queryTokens = this.extractSubstantiveTokens(queryText);
+      const isExplicitCrossSessionRecall = this.CROSS_SESSION_RECALL_REGEX.test(queryText);
 
       const scored = [];
+      const seenIds = new Set();
+
+      // 1. Evaluasi item di LocalMemoryVault (error_lesson, preference, fact, episodic_context)
       for (const m of memories) {
-        const text = (m.content || '').toLowerCase();
-        let score = 0;
-        for (const tok of tokens) {
-          if (text.includes(tok)) score += 1.0;
+        if (!m || !m.content) continue;
+        const probe = m.questionText || m.content || '';
+        const { score: simScore, hitCount } = this.computeTokenOverlap(queryTokens, probe);
+        let finalScore = 0;
+
+        if (m.category === 'error_lesson') {
+          if (hitCount >= 2 && simScore >= 0.42) {
+            finalScore = 10.0 + simScore * 5.0;
+          } else if (isExplicitCrossSessionRecall) {
+            finalScore = 4.0;
+          }
+        } else if (m.category === 'episodic_context') {
+          if (isExplicitCrossSessionRecall && (!currentSessionId || m.sessionId !== currentSessionId)) {
+            finalScore = 3.5 + simScore;
+          } else if (hitCount >= 2 && simScore >= 0.35) {
+            finalScore = 2.0 + simScore * 3.0;
+          }
+        } else {
+          if (hitCount >= 1 && simScore >= 0.22) {
+            finalScore = 1.5 + simScore * 2.5 + (m.scope === scope ? 0.4 : 0);
+          } else if (m.category === 'preference' && m.preferLetterOnly) {
+            finalScore = 1.2;
+          }
         }
-        if (m.scope === scope) score += 0.5;
-        if (score > 0) scored.push({ memory: m, score });
+
+        if (finalScore > 0) {
+          seenIds.add(m.id);
+          scored.push({ memory: m, score: finalScore });
+        }
       }
 
+      // 2. Pemindaian Lintas-Sesi Langsung dari STATE.sessions (agar percakapan sesi berbeda selalu diingat meski belum masuk vault)
+      if (typeof STATE !== 'undefined' && Array.isArray(STATE.sessions)) {
+        const otherSessions = STATE.sessions
+          .filter(s => s && !s.isIncognito && s.id !== currentSessionId && Array.isArray(s.messages) && s.messages.length >= 2)
+          .slice(0, 15);
+
+        for (let sIdx = 0; sIdx < otherSessions.length; sIdx++) {
+          const sess = otherSessions[sIdx];
+          const msgs = sess.messages;
+          for (let mIdx = msgs.length - 1; mIdx >= 0; mIdx--) {
+            const msg = msgs[mIdx];
+            if (!msg || msg.role !== 'assistant' || !msg.content) continue;
+            // Cari pesan user pasangannya
+            let prevUser = null;
+            for (let uIdx = mIdx - 1; uIdx >= 0; uIdx--) {
+              if (msgs[uIdx] && msgs[uIdx].role === 'user' && msgs[uIdx].content) {
+                prevUser = msgs[uIdx];
+                break;
+              }
+            }
+            if (!prevUser) continue;
+            const rawQ = String(prevUser.content || '')
+              .replace(/\n*\[PROYEKSI (?:RUANG KEADAAN REVISI|OPERATOR ANAPHORA)[\s\S]*$/i, '')
+              .replace(/\s+/g, ' ')
+              .trim();
+            if (rawQ.length < 10) continue;
+            const epHashId = `ep_${this.hashText(rawQ)}`;
+            if (seenIds.has(epHashId)) continue;
+
+            const { score: simScore, hitCount } = this.computeTokenOverlap(queryTokens, `${rawQ} ${msg.content}`);
+            const recencyDecay = Math.exp(-0.15 * sIdx);
+            let sessionScore = 0;
+            if (isExplicitCrossSessionRecall && sIdx < 4) {
+              sessionScore = 3.2 * recencyDecay + simScore;
+            } else if (hitCount >= 2 && simScore >= 0.36) {
+              sessionScore = (2.0 + simScore * 3.0) * recencyDecay;
+            }
+
+            if (sessionScore > 0) {
+              seenIds.add(epHashId);
+              const cleanA = String(msg.content || '').replace(/\s+/g, ' ').trim().slice(0, 260);
+              const sTitle = sess.title || 'Sesi Sebelumnya';
+              scored.push({
+                score: sessionScore,
+                memory: {
+                  id: epHashId,
+                  category: 'episodic_context',
+                  scope: 'global',
+                  sessionId: sess.id,
+                  content: `[Episodik Sesi "${sTitle}"] Pertanyaan: ${rawQ.slice(0, 240)} -> Jawaban/Kesimpulan: ${cleanA}`
+                }
+              });
+            }
+          }
+        }
+      }
+
+      if (scored.length === 0) return null;
       scored.sort((a, b) => b.score - a.score);
       const top = scored.slice(0, limit).map(s => s.memory);
-      if (!top.length) return null;
 
-      const lines = top.map((m, idx) => `[MEM-${idx + 1} | ID: ${m.id} | Cat: ${m.category}]: ${m.content}`);
-      const injection = `### MEMORI PENGGUNA TERVERIFIKASI (Jozz Memory Cloud Vault):\n${lines.join('\n')}\n*Instruksi: Gunakan fakta di atas secara relevan tanpa berhalusinasi.*`;
+      const errorLessons = top.filter(m => m.category === 'error_lesson');
+      const standardMemories = top.filter(m => m.category !== 'error_lesson');
+      const blocks = [];
+
+      if (errorLessons.length > 0) {
+        const errLines = errorLessons.map(m => `- ${m.content}`);
+        blocks.push(`[MEMORI KOREKSI KESALAHAN LINTAS-SESI (P(H_falsified) = 0)]:\n${errLines.join('\n')}\n(Falsifikasi di atas bersifat mengikat secara matematis: tetapkan P(H_falsified) = 0 agar kesalahan dari sesi sebelumnya tidak pernah terulang, dan pilih jawaban terverifikasi).`);
+      }
+
+      if (standardMemories.length > 0) {
+        const lines = standardMemories.map((m, idx) => `[MEM-${idx + 1} | ID: ${m.id} | Cat: ${m.category}]: ${m.content}`);
+        blocks.push(`### MEMORI & RIWAYAT LINTAS-SESI TERVERIFIKASI (Jozz Memory Vault):\n${lines.join('\n')}\n*Instruksi: Gunakan fakta dan riwayat percakapan lintas-sesi di atas secara relevan dan akurat.*`);
+      }
+
       return {
         success: true,
         memories: top,
-        systemPromptInjection: injection
+        errorLesson: errorLessons[0] || null,
+        systemPromptInjection: blocks.join('\n\n')
       };
     },
 
@@ -30761,6 +31045,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         textContent = textContent
           .replace(/\n*\[PANDUAN RESONANSI PERSONA SISTEM[\s\S]*$/i, '')
           .replace(/\n*\[PROYEKSI RUANG KEADAAN REVISI[\s\S]*$/i, '')
+          .replace(/\n*\[PROYEKSI OPERATOR ANAPHORA[\s\S]*$/i, '')
+          .replace(/\n*\[MEMORI FALSIFIKASI LINTAS-SESI[\s\S]*$/i, '')
           .trim();
       }
       if (!textContent && mImgs.length === 0) {
@@ -30796,38 +31082,62 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const activeTurnImageCount = (Array.isArray(currentImages) && currentImages.length > 0)
       ? currentImages.length
       : (latestRawUserMsg ? msgImagesOf(latestRawUserMsg).length : 0);
+    const hasLetterPref = (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.hasLetterPreference === 'function')
+      ? LocalMemoryVault.hasLetterPreference()
+      : false;
     const latestDecisionCheck = (tsModule && typeof tsModule.computeBayesianDecisionCalibration === 'function' && latestRawUserMsg)
       ? tsModule.computeBayesianDecisionCalibration(latestRawUserMsg.content || '', {
           session: sessionOrMessages,
+          fallbackSessions: (typeof STATE !== 'undefined' && Array.isArray(STATE.sessions)) ? STATE.sessions : null,
+          preferLetterOnly: hasLetterPref,
           hasImages: activeTurnImageCount > 0,
           imageCount: activeTurnImageCount
         })
       : null;
 
-    // Proyeksi Ruang Keadaan Matematis Langsung pada Giliran Revisi (P(H_falsified) = 0, Delta_pos = 0):
-    // Menempatkan konteks soal asli, opsi yang terfalsifikasi, dan ruang opsi tersisa tepat di pesan aktif
-    // serta menetralkan klaim kontradiktif pada balasan asisten sebelumnya agar induction heads tidak membangkang.
-    if (latestDecisionCheck && latestDecisionCheck.isQuizRevision && latestDecisionCheck.reconstructedUserPrompt) {
+    // Proyeksi Ruang Keadaan Matematis Langsung pada Giliran Revisi & Operator Anaphora Post-Hoc (Delta_pos = 0):
+    // Menempatkan konteks soal asli, indeks bijektif opsi, atau opsi yang terfalsifikasi tepat di pesan aktif.
+    if (latestDecisionCheck && (latestDecisionCheck.isQuizRevision || latestDecisionCheck.isPostHocProjection) && latestDecisionCheck.reconstructedUserPrompt) {
       for (let i = validList.length - 1; i >= 0; i--) {
         if (validList[i] && validList[i].role === 'user') {
-          if (!validList[i].content.includes('[PROYEKSI RUANG KEADAAN REVISI')) {
+          if (!validList[i].content.includes('[PROYEKSI RUANG KEADAAN REVISI') && !validList[i].content.includes('[PROYEKSI OPERATOR ANAPHORA')) {
             validList[i].content = latestDecisionCheck.reconstructedUserPrompt;
           }
           break;
         }
       }
-      for (let j = validList.length - 2; j >= 0; j--) {
-        if (validList[j] && validList[j].role === 'assistant' && typeof validList[j].content === 'string') {
-          const falsifiedTag = latestDecisionCheck.falsifiedAnswer || 'Jawaban sebelumnya';
-          if (Array.isArray(latestDecisionCheck.remainingOptions) && latestDecisionCheck.remainingOptions.length > 0) {
-            validList[j].content = `[Rekaman Evaluasi Sebelumnya: Opsi Tersedia = ${latestDecisionCheck.candidateOptions.join(' | ')}. Jawaban yang dipilih sebelumnya = "${falsifiedTag}" -> Status: Terfalsifikasi oleh pengguna (P = 0). Klasifikasi sebelumnya dibatalkan; evaluasi ulang opsi tersisa dari prinsip dasar.]`;
-          } else {
-            const cleanedPrior = validList[j].content
-              .replace(/(?:Soal\s+ini\s+tampaknya\s+tidak\s+memiliki\s+jawaban\s+yang\s+benar[^\n]*|Jika\s+platform\s+memaksa\s+memilih[^\n]*)/gi, '')
-              .trim();
-            validList[j].content = `${cleanedPrior}\n\n[Status Evaluasi: Hipotesis "${falsifiedTag}" terfalsifikasi (P = 0).]`.trim();
+      if (latestDecisionCheck.isQuizRevision) {
+        for (let j = validList.length - 2; j >= 0; j--) {
+          if (validList[j] && validList[j].role === 'assistant' && typeof validList[j].content === 'string') {
+            const falsifiedTag = latestDecisionCheck.falsifiedAnswer || 'Jawaban sebelumnya';
+            if (Array.isArray(latestDecisionCheck.remainingOptions) && latestDecisionCheck.remainingOptions.length > 0) {
+              validList[j].content = `[Rekaman Evaluasi Sebelumnya: Opsi Tersedia = ${latestDecisionCheck.candidateOptions.join(' | ')}. Jawaban yang dipilih sebelumnya = "${falsifiedTag}" -> Status: Terfalsifikasi oleh pengguna (P = 0). Klasifikasi sebelumnya dibatalkan; evaluasi ulang opsi tersisa dari prinsip dasar.]`;
+            } else {
+              const cleanedPrior = validList[j].content
+                .replace(/(?:Soal\s+ini\s+tampaknya\s+tidak\s+memiliki\s+jawaban\s+yang\s+benar[^\n]*|Jika\s+platform\s+memaksa\s+memilih[^\n]*)/gi, '')
+                .trim();
+              validList[j].content = `${cleanedPrior}\n\n[Status Evaluasi: Hipotesis "${falsifiedTag}" terfalsifikasi (P = 0).]`.trim();
+            }
+            break;
           }
-          break;
+        }
+      }
+    }
+
+    // Proyeksi Memori Koreksi Kesalahan Lintas-Sesi (Error-Learning Memory: P(H_falsified) = 0 pada Delta_pos = 0)
+    if (!STATE.isIncognito && typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.findMatchingErrorLesson === 'function' && latestRawUserMsg) {
+      const lessonProbe = (latestDecisionCheck && latestDecisionCheck.parentQuestionText)
+        ? latestDecisionCheck.parentQuestionText
+        : (latestRawUserMsg.content || '');
+      const matchedErrorLesson = LocalMemoryVault.findMatchingErrorLesson(lessonProbe);
+      if (matchedErrorLesson && matchedErrorLesson.content) {
+        for (let i = validList.length - 1; i >= 0; i--) {
+          if (validList[i] && validList[i].role === 'user' && typeof validList[i].content === 'string') {
+            if (!validList[i].content.includes('[KOREKSI KESALAHAN TERVERIFIKASI]')) {
+              validList[i].content = `${validList[i].content}\n\n[MEMORI FALSIFIKASI LINTAS-SESI (P(H_falsified) = 0):\n${matchedErrorLesson.content}]`;
+            }
+            break;
+          }
         }
       }
     }
@@ -30842,7 +31152,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     // Jika turn pengguna murni berisi perintah meta tanpa subjek/pertanyaan (misal "Jawab singkat saja")
     // atau merujuk ke gambar/lampiran padahal tidak ada lampiran gambar/berkas (Dangling Media Deictic Query),
     // cegah model dari kolaps prior / mengarang pertanyaan atau mengasumsikan foto fiktif.
-    const hasPriorTurns = validList.length > 1;
+    const hasPriorTurns = validList.length > 1 || Boolean(latestDecisionCheck && (latestDecisionCheck.isQuizRevision || latestDecisionCheck.isPostHocProjection));
     const firstUserMsg = validList.find(m => m.role === 'user');
     const hasAnyImages = validList.some(m => (Array.isArray(m.images) && m.images.length > 0) || (Array.isArray(m.files) && m.files.length > 0));
     let isZeroInfo = !hasPriorTurns && !hasAnyImages && firstUserMsg && tsModule && typeof tsModule.isZeroInformationQuery === 'function' && tsModule.isZeroInformationQuery(firstUserMsg.content, hasAnyImages, hasPriorTurns);
@@ -31241,21 +31551,32 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
         ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
         : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
+      const hasLetterPrefOllama = (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.hasLetterPreference === 'function')
+        ? LocalMemoryVault.hasLetterPreference()
+        : false;
       const decisionCalibration = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
-        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { session, hasImages: hasAttachedImages, imageCount: attachedImageCount })
-        : { isDiscreteChoice: false, isAnalyticalQuery: false, isConceptualTaxonomy: false, isQuizRevision: false, calibrationDirective: '' };
+        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, {
+            session,
+            fallbackSessions: (typeof STATE !== 'undefined' && Array.isArray(STATE.sessions)) ? STATE.sessions : null,
+            preferLetterOnly: hasLetterPrefOllama,
+            hasImages: hasAttachedImages,
+            imageCount: attachedImageCount
+          })
+        : { isDiscreteChoice: false, isAnalyticalQuery: false, isConceptualTaxonomy: false, isQuizRevision: false, isPostHocProjection: false, calibrationDirective: '' };
       const isQuizRevision = Boolean(decisionCalibration.isQuizRevision || (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isRevisionQuery === 'function' && ZozTextSafety.isRevisionQuery(promptText)));
+      const isPostHocProjection = Boolean(decisionCalibration.isPostHocProjection);
       const isPureAlgebraConcept = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isPureAlgebraOrConceptualQuery === 'function')
         ? ZozTextSafety.isPureAlgebraOrConceptualQuery(promptText)
         : false;
       const isNemotron = isNemotronModel(modelName);
-      const isPureMathSession = Boolean(isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice || isQuizRevision);
+      const isPureMathSession = Boolean(isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice || isQuizRevision || isPostHocProjection);
       const isQuestionOrAnalytical = Boolean(
         decisionCalibration.isAnalyticalQuery ||
         decisionCalibration.isDiscreteChoice ||
         decisionCalibration.isConceptualTaxonomy ||
         isPureAlgebraConcept ||
-        isQuizRevision
+        isQuizRevision ||
+        isPostHocProjection
       );
 
       const entityResolution = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.resolveEntityPhoneticallyMathematically === 'function')
@@ -31278,31 +31599,42 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         systemContent = `${formattingConstraints.directive}\n\n${systemContent}`;
       }
 
-      // Jozz Memory Scoped Hybrid Recall (Hybrid Storage & Knowledge Graph)
+      // Jozz Memory Scoped Hybrid Recall (Hybrid Storage + Cross-Session Episodic & Error-Learning Vault)
       let jozzMemoryRecall = null;
       if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false) {
         try {
+          const effectiveMemoryQuery = (decisionCalibration && decisionCalibration.parentQuestionText)
+            ? `${promptText}\n${decisionCalibration.parentQuestionText}`
+            : promptText;
+          const localRecall = (typeof LocalMemoryVault !== 'undefined')
+            ? LocalMemoryVault.recallLocal(effectiveMemoryQuery, STATE.activeProjectScope || 'global', STATE.userId || 'default', 5, session?.id)
+            : null;
           const recallRes = await fetch(getUniversalApiUrl('/api/memories/recall'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               userId: STATE.userId || 'default',
-              query: promptText,
+              query: effectiveMemoryQuery,
               scope: STATE.activeProjectScope || 'global'
             })
           }).catch(() => null);
           if (recallRes && recallRes.ok) {
             jozzMemoryRecall = await recallRes.json().catch(() => null);
-            if (jozzMemoryRecall && jozzMemoryRecall.systemPromptInjection) {
-              systemContent = `${jozzMemoryRecall.systemPromptInjection}\n\n${systemContent}`;
+          }
+          const combinedInjections = [];
+          if (localRecall && localRecall.systemPromptInjection) {
+            combinedInjections.push(localRecall.systemPromptInjection);
+          }
+          if (jozzMemoryRecall && jozzMemoryRecall.systemPromptInjection) {
+            if (!combinedInjections.some(blk => blk.includes(jozzMemoryRecall.systemPromptInjection.slice(0, 60)))) {
+              combinedInjections.push(jozzMemoryRecall.systemPromptInjection);
             }
           }
-          if (!jozzMemoryRecall || !jozzMemoryRecall.systemPromptInjection) {
-            const localRecall = (typeof LocalMemoryVault !== 'undefined') ? LocalMemoryVault.recallLocal(promptText, STATE.activeProjectScope || 'global', STATE.userId || 'default') : null;
-            if (localRecall && localRecall.systemPromptInjection) {
-              jozzMemoryRecall = localRecall;
-              systemContent = `${localRecall.systemPromptInjection}\n\n${systemContent}`;
-            }
+          if (combinedInjections.length > 0) {
+            systemContent = `${combinedInjections.join('\n\n')}\n\n${systemContent}`;
+          }
+          if (!jozzMemoryRecall && localRecall) {
+            jozzMemoryRecall = localRecall;
           }
         } catch (memRecallErr) {
           console.warn('[Jozz Memory] Ollama recall warning:', memRecallErr);
@@ -32627,18 +32959,33 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         savePersistedState();
         renderChatHistory(els.searchHistoryInput?.value || '');
 
-        // Pillar 1: Hybrid Memory Capture (Background Non-Blocking Distillation)
-        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && fullText && fullText.length > 10) {
+        // Pillar 1: Hybrid Memory Capture (Counterfactual Error-Learning + Cross-Session Episodic Distillation)
+        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && fullText && fullText.trim().length >= 1) {
+          const capturedLocal = (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.captureTurnMemory === 'function')
+            ? LocalMemoryVault.captureTurnMemory({
+                userId: STATE.userId || 'default',
+                sessionId: session.id,
+                sessionTitle: session.title || '',
+                userMessage: promptText,
+                assistantResponse: fullText,
+                decisionCalibration,
+                scope: STATE.activeProjectScope || 'global'
+              })
+            : {};
           fetch(getUniversalApiUrl('/api/memories/extract-background'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               userId: STATE.userId || 'default',
               sessionId: session.id,
+              sessionTitle: session.title || '',
               userMessage: promptText,
               assistantResponse: fullText,
               scope: STATE.activeProjectScope || 'global',
-              turnIndex: session.messages.length
+              turnIndex: session.messages.length,
+              errorLesson: capturedLocal?.errorLesson || null,
+              episodicSummary: capturedLocal?.episodicSummary || null,
+              preferenceMemory: capturedLocal?.preferenceMemory || null
             })
           }).catch(() => {});
         }
@@ -33066,21 +33413,32 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
         ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
         : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
+      const hasLetterPrefOllama = (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.hasLetterPreference === 'function')
+        ? LocalMemoryVault.hasLetterPreference()
+        : false;
       const decisionCalibration = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function')
-        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, { session, hasImages: hasAttachedImages, imageCount: attachedImageCount })
-        : { isDiscreteChoice: false, isAnalyticalQuery: false, isConceptualTaxonomy: false, isQuizRevision: false, calibrationDirective: '' };
+        ? ZozTextSafety.computeBayesianDecisionCalibration(promptText, {
+            session,
+            fallbackSessions: (typeof STATE !== 'undefined' && Array.isArray(STATE.sessions)) ? STATE.sessions : null,
+            preferLetterOnly: hasLetterPrefOllama,
+            hasImages: hasAttachedImages,
+            imageCount: attachedImageCount
+          })
+        : { isDiscreteChoice: false, isAnalyticalQuery: false, isConceptualTaxonomy: false, isQuizRevision: false, isPostHocProjection: false, calibrationDirective: '' };
       const isQuizRevision = Boolean(decisionCalibration.isQuizRevision || (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isRevisionQuery === 'function' && ZozTextSafety.isRevisionQuery(promptText)));
+      const isPostHocProjection = Boolean(decisionCalibration.isPostHocProjection);
       const isPureAlgebraConcept = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isPureAlgebraOrConceptualQuery === 'function')
         ? ZozTextSafety.isPureAlgebraOrConceptualQuery(promptText)
         : false;
       const isNemotron = isNemotronModel(modelName);
-      const isPureMathSession = Boolean(isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice || isQuizRevision);
+      const isPureMathSession = Boolean(isPureAlgebraConcept || decisionCalibration.isConceptualTaxonomy || decisionCalibration.isDiscreteChoice || isQuizRevision || isPostHocProjection);
       const isQuestionOrAnalytical = Boolean(
         decisionCalibration.isAnalyticalQuery ||
         decisionCalibration.isDiscreteChoice ||
         decisionCalibration.isConceptualTaxonomy ||
         isPureAlgebraConcept ||
-        isQuizRevision
+        isQuizRevision ||
+        isPostHocProjection
       );
 
       const entityResolution = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.resolveEntityPhoneticallyMathematically === 'function')
@@ -33103,31 +33461,42 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         systemContent = `${formattingConstraints.directive}\n\n${systemContent}`;
       }
 
-      // Jozz Memory Scoped Hybrid Recall (Hybrid Storage & Knowledge Graph)
+      // Jozz Memory Scoped Hybrid Recall (Hybrid Storage + Cross-Session Episodic & Error-Learning Vault)
       let jozzMemoryRecall = null;
       if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false) {
         try {
+          const effectiveMemoryQuery = (decisionCalibration && decisionCalibration.parentQuestionText)
+            ? `${promptText}\n${decisionCalibration.parentQuestionText}`
+            : promptText;
+          const localRecall = (typeof LocalMemoryVault !== 'undefined')
+            ? LocalMemoryVault.recallLocal(effectiveMemoryQuery, STATE.activeProjectScope || 'global', STATE.userId || 'default', 5, session?.id)
+            : null;
           const recallRes = await fetch(getUniversalApiUrl('/api/memories/recall'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               userId: STATE.userId || 'default',
-              query: promptText,
+              query: effectiveMemoryQuery,
               scope: STATE.activeProjectScope || 'global'
             })
           }).catch(() => null);
           if (recallRes && recallRes.ok) {
             jozzMemoryRecall = await recallRes.json().catch(() => null);
-            if (jozzMemoryRecall && jozzMemoryRecall.systemPromptInjection) {
-              systemContent = `${jozzMemoryRecall.systemPromptInjection}\n\n${systemContent}`;
+          }
+          const combinedInjections = [];
+          if (localRecall && localRecall.systemPromptInjection) {
+            combinedInjections.push(localRecall.systemPromptInjection);
+          }
+          if (jozzMemoryRecall && jozzMemoryRecall.systemPromptInjection) {
+            if (!combinedInjections.some(blk => blk.includes(jozzMemoryRecall.systemPromptInjection.slice(0, 60)))) {
+              combinedInjections.push(jozzMemoryRecall.systemPromptInjection);
             }
           }
-          if (!jozzMemoryRecall || !jozzMemoryRecall.systemPromptInjection) {
-            const localRecall = (typeof LocalMemoryVault !== 'undefined') ? LocalMemoryVault.recallLocal(promptText, STATE.activeProjectScope || 'global', STATE.userId || 'default') : null;
-            if (localRecall && localRecall.systemPromptInjection) {
-              jozzMemoryRecall = localRecall;
-              systemContent = `${localRecall.systemPromptInjection}\n\n${systemContent}`;
-            }
+          if (combinedInjections.length > 0) {
+            systemContent = `${combinedInjections.join('\n\n')}\n\n${systemContent}`;
+          }
+          if (!jozzMemoryRecall && localRecall) {
+            jozzMemoryRecall = localRecall;
           }
         } catch (memRecallErr) {
           console.warn('[Jozz Memory] Ollama recall warning:', memRecallErr);
@@ -34871,18 +35240,33 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         savePersistedState();
         renderChatHistory(els.searchHistoryInput?.value || '');
 
-        // Pillar 1: Hybrid Memory Capture (Background Non-Blocking Distillation)
-        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && fullText && fullText.length > 10) {
+        // Pillar 1: Hybrid Memory Capture (Counterfactual Error-Learning + Cross-Session Episodic Distillation)
+        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && fullText && fullText.trim().length >= 1) {
+          const capturedLocal = (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.captureTurnMemory === 'function')
+            ? LocalMemoryVault.captureTurnMemory({
+                userId: STATE.userId || 'default',
+                sessionId: session.id,
+                sessionTitle: session.title || '',
+                userMessage: promptText,
+                assistantResponse: fullText,
+                decisionCalibration,
+                scope: STATE.activeProjectScope || 'global'
+              })
+            : {};
           fetch(getUniversalApiUrl('/api/memories/extract-background'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               userId: STATE.userId || 'default',
               sessionId: session.id,
+              sessionTitle: session.title || '',
               userMessage: promptText,
               assistantResponse: fullText,
               scope: STATE.activeProjectScope || 'global',
-              turnIndex: session.messages.length
+              turnIndex: session.messages.length,
+              errorLesson: capturedLocal?.errorLesson || null,
+              episodicSummary: capturedLocal?.episodicSummary || null,
+              preferenceMemory: capturedLocal?.preferenceMemory || null
             })
           }).catch(() => {});
         }

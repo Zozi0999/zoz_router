@@ -93,14 +93,20 @@ function captureExplicitMemory(userId, factText, scope = 'global', metadata = {}
   });
 
   // Categorize
-  let category = 'preference';
+  let category = metadata.category || 'preference';
   const lower = cleanContent.toLowerCase();
-  if (/\b(?:menggunakan|stack|teknologi|bahasa|framework|database|tool|lib|library|runtime)\b/i.test(lower)) {
-    category = 'technical_stack';
-  } else if (/\b(?:proyek|project|fitur|target|roadmap|tujuan|aplikasi)\b/i.test(lower)) {
-    category = 'project_context';
-  } else if (/\b(?:instruksi|aturan|mandat|format|jangan|selalu)\b/i.test(lower)) {
-    category = 'instruction';
+  if (!metadata.category) {
+    if (cleanContent.startsWith('[KOREKSI KESALAHAN TERVERIFIKASI]')) {
+      category = 'error_lesson';
+    } else if (cleanContent.startsWith('[Episodik Sesi')) {
+      category = 'episodic_context';
+    } else if (/\b(?:menggunakan|stack|teknologi|bahasa|framework|database|tool|lib|library|runtime)\b/i.test(lower)) {
+      category = 'technical_stack';
+    } else if (/\b(?:proyek|project|fitur|target|roadmap|tujuan|aplikasi)\b/i.test(lower)) {
+      category = 'project_context';
+    } else if (/\b(?:instruksi|aturan|mandat|format|jangan|selalu)\b/i.test(lower)) {
+      category = 'instruction';
+    }
   }
 
   const memory = dbStorage.insertMemory({
@@ -154,14 +160,138 @@ function captureExplicitMemory(userId, factText, scope = 'global', metadata = {}
 function triggerAsyncBackgroundExtraction({
   userId = 'default',
   sessionId = 'default',
+  sessionTitle = '',
   turnIndex = 0,
   userMessage = '',
   assistantResponse = '',
-  scope = 'global'
+  scope = 'global',
+  errorLesson = null,
+  episodicSummary = null,
+  preferenceMemory = null
 }) {
   setImmediate(async () => {
     try {
-      if (!userMessage || userMessage.trim().length < 3) return;
+      if (!userMessage || userMessage.trim().length < 2) return;
+
+      // 0A. Simpan Pelajaran Koreksi Kesalahan Counterfactual (Error-Learning Memory: P(H_falsified) = 0)
+      let resolvedErrorLesson = errorLesson;
+      if (!resolvedErrorLesson && userMessage.includes('[PROYEKSI RUANG KEADAAN REVISI') && assistantResponse && assistantResponse.trim().length >= 2) {
+        const qMatch = userMessage.match(/Konteks Pertanyaan Asli:\n([\s\S]*?)\n\nHipotesis yang TELAH TERFALSIFIKASI/i);
+        const fMatch = userMessage.match(/Hipotesis yang TELAH TERFALSIFIKASI[^:]*:\n([\s\S]*?)\n\n/i);
+        const qSnippet = qMatch && qMatch[1] ? qMatch[1].replace(/\s+/g, ' ').trim().slice(0, 260) : userMessage.replace(/\s+/g, ' ').trim().slice(0, 220);
+        const fSnippet = fMatch && fMatch[1] ? fMatch[1].replace(/\s+/g, ' ').trim().slice(0, 220) : 'Jawaban sebelumnya';
+        const vSnippet = assistantResponse.replace(/\s+/g, ' ').trim().slice(0, 260);
+        resolvedErrorLesson = {
+          questionText: qSnippet,
+          content: `[KOREKSI KESALAHAN TERVERIFIKASI] Soal: "${qSnippet}" | Hipotesis Salah (P = 0, JANGAN PILIH LAGI): ${fSnippet} | Jawaban Terverifikasi: "${vSnippet}"`
+        };
+      }
+      if (resolvedErrorLesson && resolvedErrorLesson.content) {
+        const sanitizedLesson = sanitizeFactCandidate(resolvedErrorLesson.content);
+        if (sanitizedLesson.accepted) {
+          const epLesson = dbStorage.insertEpisode({
+            userId,
+            sessionId,
+            turnIndex,
+            sourceType: 'chat_error_correction',
+            sourceTitle: `Koreksi Kesalahan Sesi: ${(resolvedErrorLesson.questionText || sessionTitle || sessionId).slice(0, 42)}`,
+            sourceUri: `/chat/${sessionId}`,
+            rawSnippet: resolvedErrorLesson.content.slice(0, 800)
+          });
+          const existingLessons = dbStorage.listMemories(userId, { category: 'error_lesson', limit: 40 });
+          const qProbe = (resolvedErrorLesson.questionText || '').toLowerCase().slice(0, 90);
+          const dupLesson = qProbe.length >= 15
+            ? existingLessons.find(m => (m.content || '').toLowerCase().includes(qProbe))
+            : null;
+          if (dupLesson) {
+            dbStorage.updateMemory(dupLesson.id, { content: sanitizedLesson.content, category: 'error_lesson', scope });
+          } else {
+            dbStorage.insertMemory({
+              userId,
+              content: sanitizedLesson.content,
+              category: 'error_lesson',
+              scope,
+              confidence: 0.99,
+              episodeId: epLesson.id
+            });
+          }
+        }
+      }
+
+      // 0B. Simpan Preferensi Format Jawaban bila dikirim
+      if (preferenceMemory && preferenceMemory.content) {
+        const sanitizedPref = sanitizeFactCandidate(preferenceMemory.content);
+        if (sanitizedPref.accepted) {
+          const existingPrefs = dbStorage.listMemories(userId, { category: 'preference', limit: 25 });
+          const dupPref = existingPrefs.find(m => (m.content || '').toLowerCase() === sanitizedPref.content.toLowerCase());
+          if (!dupPref) {
+            const epPref = dbStorage.insertEpisode({
+              userId,
+              sessionId,
+              turnIndex,
+              sourceType: 'chat_preference',
+              sourceTitle: `Preferensi Format Chat`,
+              sourceUri: `/chat/${sessionId}`,
+              rawSnippet: sanitizedPref.content
+            });
+            dbStorage.insertMemory({
+              userId,
+              content: sanitizedPref.content,
+              category: 'preference',
+              scope,
+              confidence: 0.95,
+              episodeId: epPref.id
+            });
+          }
+        }
+      }
+
+      // 0C. Simpan Ringkasan Episodik Lintas-Sesi (Q&A Distillation)
+      let resolvedEpisodic = episodicSummary;
+      if (!resolvedEpisodic && userMessage.trim().length >= 18 && assistantResponse && assistantResponse.trim().length >= 10) {
+        const cleanQ = userMessage
+          .replace(/\n*\[PROYEKSI (?:RUANG KEADAAN REVISI|OPERATOR ANAPHORA)[\s\S]*$/i, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (cleanQ.length >= 18 && !/^(?:halo|hai|pagi|siang|sore|malam|ok|oke|makasih|thanks|ping|tes)[\s!.?]*$/i.test(cleanQ)) {
+          const cleanA = assistantResponse.replace(/\s+/g, ' ').trim().slice(0, 260);
+          resolvedEpisodic = {
+            questionSnippet: cleanQ.slice(0, 240),
+            content: `[Episodik Sesi "${sessionTitle || 'Percakapan Sebelumnya'}"] Pertanyaan: ${cleanQ.slice(0, 240)} -> Jawaban/Kesimpulan: ${cleanA}`
+          };
+        }
+      }
+      if (resolvedEpisodic && resolvedEpisodic.content) {
+        const sanitizedEp = sanitizeFactCandidate(resolvedEpisodic.content);
+        if (sanitizedEp.accepted) {
+          const existingEps = dbStorage.listMemories(userId, { category: 'episodic_context', limit: 40 });
+          const qKey = (resolvedEpisodic.questionSnippet || '').toLowerCase().slice(0, 80);
+          const dupEp = qKey.length >= 15
+            ? existingEps.find(m => (m.content || '').toLowerCase().includes(qKey))
+            : null;
+          if (dupEp) {
+            dbStorage.updateMemory(dupEp.id, { content: sanitizedEp.content, category: 'episodic_context', scope });
+          } else {
+            const epTrace = dbStorage.insertEpisode({
+              userId,
+              sessionId,
+              turnIndex,
+              sourceType: 'chat_episodic',
+              sourceTitle: `Episodik Sesi: ${(sessionTitle || resolvedEpisodic.questionSnippet || sessionId).slice(0, 42)}`,
+              sourceUri: `/chat/${sessionId}`,
+              rawSnippet: sanitizedEp.content.slice(0, 600)
+            });
+            dbStorage.insertMemory({
+              userId,
+              content: sanitizedEp.content,
+              category: 'episodic_context',
+              scope,
+              confidence: 0.90,
+              episodeId: epTrace.id
+            });
+          }
+        }
+      }
 
       // 1. Cek apakah ini perintah memori eksplisit / anaphora ("Catat itu ke memori", "Simpan ini", dsb.)
       const explicitDirective = parseExplicitMemoryDirective(userMessage, assistantResponse);

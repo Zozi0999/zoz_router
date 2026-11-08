@@ -3967,6 +3967,7 @@ function applyServerSideDecisionCalibration(body, provider = 'ollama') {
     rawUserText = rawUserText
       .replace(/\n*\[PANDUAN RESONANSI PERSONA SISTEM[\s\S]*$/i, '')
       .replace(/\n*\[PROYEKSI RUANG KEADAAN REVISI[\s\S]*$/i, '')
+      .replace(/\n*\[PROYEKSI OPERATOR ANAPHORA[\s\S]*$/i, '')
       .replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '')
       .trim();
   }
@@ -4009,6 +4010,32 @@ function applyServerSideDecisionCalibration(body, provider = 'ollama') {
     }
   }
 
+  // Defense-in-depth: Rekoleksi Memori Koreksi Kesalahan & Episodik Lintas-Sesi di Sisi Server
+  if (!body.incognito && !serializedAll.includes('[MEMORI KOREKSI KESALAHAN LINTAS-SESI')) {
+    try {
+      const memRetriever = require('./src/memory/pipeline/retriever');
+      const memQuery = (calib && calib.parentQuestionText) ? `${rawUserText}\n${calib.parentQuestionText}` : rawUserText;
+      const recalled = memRetriever.recallMemories(body.userId || 'default', memQuery, body.scope || 'global');
+      if (recalled && recalled.systemPromptInjection) {
+        const sysMsg = body.messages.find(m => m && m.role === 'system');
+        if (sysMsg && typeof sysMsg.content === 'string') {
+          if (!sysMsg.content.includes(recalled.systemPromptInjection.slice(0, 60))) {
+            sysMsg.content = `${recalled.systemPromptInjection}\n\n${sysMsg.content}`;
+          }
+        } else {
+          body.messages.unshift({ role: 'system', content: recalled.systemPromptInjection });
+        }
+        // Proyeksi langsung pelajaran koreksi kesalahan (error_lesson) pada Delta_pos = 0 agar P(H_falsified) = 0 ditegakkan
+        const matchedErrorLesson = Array.isArray(recalled.memories)
+          ? recalled.memories.find(m => m && m.category === 'error_lesson')
+          : null;
+        if (matchedErrorLesson && matchedErrorLesson.content && typeof lastUser.content === 'string' && !lastUser.content.includes('[KOREKSI KESALAHAN TERVERIFIKASI]')) {
+          lastUser.content = `${lastUser.content}\n\n[MEMORI FALSIFIKASI LINTAS-SESI (P(H_falsified) = 0):\n${matchedErrorLesson.content}]`;
+        }
+      }
+    } catch (_) {}
+  }
+
   if (!calib || (!calib.isDiscreteChoice && !calib.isAnalyticalQuery && !calib.isConceptualTaxonomy)) return;
 
   // 1. Kalibrasi suhu Boltzmann & parameter router
@@ -4035,30 +4062,32 @@ function applyServerSideDecisionCalibration(body, provider = 'ollama') {
     }
   }
 
-  // 2. Proyeksi Ruang Keadaan Revisi Matematis (P(H_falsified) = 0, Delta_pos = 0)
+  // 2. Proyeksi Ruang Keadaan Revisi / Operator Anaphora Post-Hoc Matematis (P(H_falsified) = 0, Delta_pos = 0)
   //    JANGAN PERNAH menghapus riwayat percakapan (body.messages tetap utuh).
-  if (calib.isQuizRevision && calib.reconstructedUserPrompt) {
-    if (typeof lastUser.content === 'string' && !lastUser.content.includes('[PROYEKSI RUANG KEADAAN REVISI')) {
+  if ((calib.isQuizRevision || calib.isPostHocProjection) && calib.reconstructedUserPrompt) {
+    if (typeof lastUser.content === 'string' && !lastUser.content.includes('[PROYEKSI RUANG KEADAAN REVISI') && !lastUser.content.includes('[PROYEKSI OPERATOR ANAPHORA')) {
       lastUser.content = calib.reconstructedUserPrompt;
     } else if (Array.isArray(lastUser.content)) {
       const textPart = lastUser.content.find(p => p && p.type === 'text' && typeof p.text === 'string');
-      if (textPart && !textPart.text.includes('[PROYEKSI RUANG KEADAAN REVISI')) {
+      if (textPart && !textPart.text.includes('[PROYEKSI RUANG KEADAAN REVISI') && !textPart.text.includes('[PROYEKSI OPERATOR ANAPHORA')) {
         textPart.text = calib.reconstructedUserPrompt;
       }
     }
-    for (let j = lastUserIdx - 1; j >= 0; j--) {
-      const prevMsg = body.messages[j];
-      if (prevMsg && prevMsg.role === 'assistant' && typeof prevMsg.content === 'string' && !prevMsg.content.includes('[Status Evaluasi:') && !prevMsg.content.includes('[Rekaman Evaluasi Sebelumnya:')) {
-        const falsifiedTag = calib.falsifiedAnswer || 'Jawaban sebelumnya';
-        if (Array.isArray(calib.remainingOptions) && calib.remainingOptions.length > 0) {
-          prevMsg.content = `[Rekaman Evaluasi Sebelumnya: Opsi Tersedia = ${calib.candidateOptions.join(' | ')}. Jawaban yang dipilih sebelumnya = "${falsifiedTag}" -> Status: Terfalsifikasi oleh pengguna (P = 0). Klasifikasi sebelumnya dibatalkan; evaluasi ulang opsi tersisa dari prinsip dasar.]`;
-        } else {
-          const cleanedPrior = prevMsg.content
-            .replace(/(?:Soal\s+ini\s+tampaknya\s+tidak\s+memiliki\s+jawaban\s+yang\s+benar[^\n]*|Jika\s+platform\s+memaksa\s+memilih[^\n]*)/gi, '')
-            .trim();
-          prevMsg.content = `${cleanedPrior}\n\n[Status Evaluasi: Hipotesis "${falsifiedTag}" terfalsifikasi (P = 0).]`.trim();
+    if (calib.isQuizRevision) {
+      for (let j = lastUserIdx - 1; j >= 0; j--) {
+        const prevMsg = body.messages[j];
+        if (prevMsg && prevMsg.role === 'assistant' && typeof prevMsg.content === 'string' && !prevMsg.content.includes('[Status Evaluasi:') && !prevMsg.content.includes('[Rekaman Evaluasi Sebelumnya:')) {
+          const falsifiedTag = calib.falsifiedAnswer || 'Jawaban sebelumnya';
+          if (Array.isArray(calib.remainingOptions) && calib.remainingOptions.length > 0) {
+            prevMsg.content = `[Rekaman Evaluasi Sebelumnya: Opsi Tersedia = ${calib.candidateOptions.join(' | ')}. Jawaban yang dipilih sebelumnya = "${falsifiedTag}" -> Status: Terfalsifikasi oleh pengguna (P = 0). Klasifikasi sebelumnya dibatalkan; evaluasi ulang opsi tersisa dari prinsip dasar.]`;
+          } else {
+            const cleanedPrior = prevMsg.content
+              .replace(/(?:Soal\s+ini\s+tampaknya\s+tidak\s+memiliki\s+jawaban\s+yang\s+benar[^\n]*|Jika\s+platform\s+memaksa\s+memilih[^\n]*)/gi, '')
+              .trim();
+            prevMsg.content = `${cleanedPrior}\n\n[Status Evaluasi: Hipotesis "${falsifiedTag}" terfalsifikasi (P = 0).]`.trim();
+          }
+          break;
         }
-        break;
       }
     }
   }
@@ -4069,7 +4098,8 @@ function applyServerSideDecisionCalibration(body, provider = 'ollama') {
     serializedAll.includes('[PROTOKOL REVISI BAYESIAN') ||
     serializedAll.includes('[KOREKSI BAYESIAN') ||
     serializedAll.includes('[KALIBRASI KEPUTUSAN BAYESIAN') ||
-    serializedAll.includes('[PROYEKSI RUANG KEADAAN REVISI');
+    serializedAll.includes('[PROYEKSI RUANG KEADAAN REVISI') ||
+    serializedAll.includes('[PROYEKSI OPERATOR ANAPHORA');
   if (!hasV680Protocol && calib.calibrationDirective) {
     for (const m of body.messages) {
       if (m && typeof m.content === 'string' && m.content.includes('[KALIBRASI ')) {
