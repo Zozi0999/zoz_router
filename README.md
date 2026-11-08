@@ -220,8 +220,8 @@ C:\Users\user\zoz-router\
 │   ├── addon-fit.js               # Responsive Viewport Terminal Fit Addon
 │   ├── mermaid.min.js             # Mermaid Diagramming Engine
 │   ├── jspdf.umd.min.js           # PDF Document Generation Engine
-│   ├── favicon.svg                # Glowing Hexagonal Core Vector Logo
-│   └── zoz-logo.png               # Official ZOZ Router System Icon
+│   ├── favicon.svg                # Sakura Emblem Vector Logo (Circle-Clipped)
+│   └── zoz-logo.png               # Official ZOZ Router Sakura System Icon
 │
 └── endorfin analyst/              # Endocrine Diagnostics, Sentinel & Audit Suite
     ├── audit-runner.js            # Automated BioEndocrine Diagnostic Runner

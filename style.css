@@ -1279,6 +1279,29 @@ button.brand-logo-wrap.active .brand-logo {
   pointer-events: none;
 }
 
+/* Logo Sakura ZOZ ROUTER (sidebar): lingkaran penuh tanpa sudut gelap, glow merah muda */
+button.brand-logo-wrap.sakura-brand-logo-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  overflow: visible;
+  box-shadow: 0 0 10px rgba(251, 113, 133, 0.35);
+}
+
+button.brand-logo-wrap.sakura-brand-logo-btn .sakura-brand-logo-img {
+  display: block;
+  border-radius: 9999px;
+  filter: drop-shadow(0 0 4px rgba(251, 113, 133, 0.45));
+}
+
+button.brand-logo-wrap.sakura-brand-logo-btn:hover {
+  box-shadow: 0 0 14px rgba(251, 113, 133, 0.55);
+}
+
+button.brand-logo-wrap.sakura-brand-logo-btn.active {
+  box-shadow: 0 0 12px rgba(251, 113, 133, 0.55), 0 0 18px var(--neon-teal);
+}
+
 button.brand-logo-wrap.active .auto-router-quantum-dot {
   background: var(--neon-teal);
   border-color: #ffffff;
@@ -12350,36 +12373,37 @@ body.page-paused *::after {
 
 .developer-logo-wrap {
   position: relative;
-  width: 130px;
-  height: 100px;
+  width: 108px;
+  height: 108px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  border-radius: 18px;
+  border-radius: 50%;
   margin: 0 auto;
 }
 
 .developer-logo-img {
   width: 100%;
   height: 100%;
+  border-radius: 50%;
   object-fit: contain;
-  filter: drop-shadow(0 0 16px rgba(52, 211, 153, 0.45));
+  filter: drop-shadow(0 0 16px rgba(251, 113, 133, 0.45));
   z-index: 2;
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), filter 0.3s ease;
 }
 
 .developer-logo-wrap:hover .developer-logo-img {
   transform: scale(1.05);
-  filter: drop-shadow(0 0 24px rgba(52, 211, 153, 0.7));
+  filter: drop-shadow(0 0 24px rgba(251, 113, 133, 0.7));
 }
 
 .developer-pulse-glow {
   position: absolute;
   inset: -10px;
-  border-radius: 26px;
-  background: radial-gradient(circle, rgba(52, 211, 153, 0.3) 0%, transparent 70%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(251, 113, 133, 0.3) 0%, transparent 70%);
   animation: devPulseRing 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   z-index: 1;
   pointer-events: none;
