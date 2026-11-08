@@ -2913,24 +2913,11 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     return { success: false, error: "Parameter 'query' diperlukan untuk mencari sumber web.", results: [] };
   }
 
-  // Validasi whitelist untuk sources jika diberikan
-  if (Array.isArray(sources) && sources.length > 0) {
-    for (const s of sources) {
-      if (!isWhitelistedSourceUrl(s)) {
-        return {
-          success: false,
-          error: `Domain '${s}' tidak diizinkan. Pengambilan data hanya diizinkan untuk domain whitelist: github.com, bloomberg.com, reddit.com, x.com, edition.cnn.com, cna.al, arxiv.org.`,
-          allowed_domains: SOURCE_GROUNDING_WHITELIST,
-          results: []
-        };
-      }
-    }
-  }
-
+  // Preferensi sumber jika diberikan
   const safeLimit = Math.min(Math.max(parseInt(max_results, 10) || 5, 1), 15);
   const targets = (Array.isArray(sources) && sources.length > 0)
-    ? sources.map(s => extractWhitelistedDomain(s)).filter(Boolean)
-    : ['arxiv.org', 'github.com', 'cna.al', 'cnn.com', 'bloomberg.com', 'reddit.com'];
+    ? sources.map(s => extractDomainSafe(s)).filter(Boolean)
+    : ['web'];
 
   const nowMs = Date.now();
   const recencyProfile = textSafety.computeTemporalRecencyProfile(cleanQ, '', nowMs);
@@ -3133,6 +3120,28 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
       : (item.relevance_score || 0.5)
   }));
 
+  if (finalSourceResults.length === 0) {
+    try {
+      const zozRes = await searchZozWebIndex(cleanQ, safeLimit);
+      if (zozRes && Array.isArray(zozRes.results) && zozRes.results.length > 0) {
+        return {
+          success: true,
+          query: cleanQ,
+          sources_queried: ['web'],
+          count: zozRes.results.length,
+          results: zozRes.results.map(r => ({
+            title: r.title || 'Dokumen Web',
+            url: r.url || r.link || '',
+            snippet: r.snippet || '',
+            published_date: r.pubDate || r.published_at || '',
+            source_name: r.domain || r.sourceProvider || 'Web',
+            relevance_score: r.relevanceScore || 0.95
+          }))
+        };
+      }
+    } catch (_) {}
+  }
+
   return {
     success: finalSourceResults.length > 0,
     query: cleanQ,
@@ -3146,15 +3155,6 @@ async function fetchUrlContent({ url = '', extract_mode = 'full_text' } = {}) {
   const cleanUrl = String(url || '').trim();
   if (!cleanUrl) {
     return { success: false, error: "Parameter 'url' diperlukan." };
-  }
-
-  if (!isWhitelistedSourceUrl(cleanUrl)) {
-    const domain = extractWhitelistedDomain(cleanUrl) || cleanUrl;
-    return {
-      success: false,
-      error: `Domain '${domain}' tidak diizinkan. Pengambilan data hanya diizinkan untuk domain whitelist: github.com, bloomberg.com, reddit.com, x.com, edition.cnn.com, cna.al, arxiv.org.`,
-      allowed_domains: SOURCE_GROUNDING_WHITELIST
-    };
   }
 
   const sourceName = getSourceNameFromUrl(cleanUrl);
@@ -3279,6 +3279,23 @@ async function fetchUrlContent({ url = '', extract_mode = 'full_text' } = {}) {
     }
   } catch (_) {}
 
+  // D. Fallback ke mesin ekstraksi universal browseWebPageContent
+  try {
+    const pageData = await browseWebPageContent(cleanUrl, 8000);
+    if (pageData && (pageData.text || pageData.content) && !pageData.error) {
+      const body = pageData.text || pageData.content || '';
+      return {
+        success: true,
+        title: pageData.title || cleanUrl,
+        author: pageData.domain || sourceName || 'Web',
+        published_date: pageData.published_at || '',
+        main_content: extract_mode === 'summary' && body.length > 600 ? body.slice(0, 600) + '...' : (body.length > 8000 ? body.slice(0, 8000) + '...' : body),
+        key_points: extractKeyPointsFromText(body, 4),
+        source_url: cleanUrl
+      };
+    }
+  } catch (_) {}
+
   return {
     success: false,
     error: `Gagal mengambil konten dari URL '${cleanUrl}'. Pastikan URL dapat diakses dan responsif.`,
@@ -3293,18 +3310,6 @@ async function summarizeSources({ query = '', urls = [], summary_style = 'detail
   }
   if (!Array.isArray(urls) || urls.length === 0) {
     return { success: false, error: "Parameter 'urls' harus berupa array URL yang tidak kosong." };
-  }
-
-  // Validasi whitelist seluruh URL
-  for (const u of urls) {
-    if (!isWhitelistedSourceUrl(u)) {
-      const domain = extractWhitelistedDomain(u) || u;
-      return {
-        success: false,
-        error: `Domain '${domain}' pada URL '${u}' tidak diizinkan. Pengambilan data hanya diizinkan untuk domain whitelist: github.com, bloomberg.com, reddit.com, x.com, edition.cnn.com, cna.al, arxiv.org.`,
-        allowed_domains: SOURCE_GROUNDING_WHITELIST
-      };
-    }
   }
 
   // Ambil isi setiap URL secara paralel

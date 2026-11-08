@@ -2167,7 +2167,7 @@
     const probs = [];
     let halfLifeDays = 365;
 
-    const explicitWebOp = /\b(?:cari(?:kan)?\s+di\s+(?:web|internet|google)|search\s+(?:the\s+)?(?:web|internet|online)|telusuri(?:\s+web|\s+internet)?|cek\s+di\s+(?:web|internet)|browsing)\b/i.test(q);
+    const explicitWebOp = /\b(?:cari(?:kan)?|search|searching|pencarian|tool\s+pencarian|telusuri|browsing|googling|cek\s+di\s+(?:web|internet))\b/i.test(q);
     if (explicitWebOp) {
       probs.push(0.96);
       halfLifeDays = Math.min(halfLifeDays, 21);

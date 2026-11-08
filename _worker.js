@@ -575,19 +575,6 @@ async function searchWebSources({ query = '', sources = [], max_results = 5, lan
     return { success: false, error: "Parameter 'query' diperlukan untuk mencari sumber web.", results: [] };
   }
 
-  if (Array.isArray(sources) && sources.length > 0) {
-    for (const s of sources) {
-      if (!isWhitelistedSourceUrl(s)) {
-        return {
-          success: false,
-          error: `Domain '${s}' tidak diizinkan. Pengambilan data hanya diizinkan untuk domain whitelist: github.com, bloomberg.com, reddit.com, x.com, edition.cnn.com, cna.al, arxiv.org.`,
-          allowed_domains: SOURCE_GROUNDING_WHITELIST,
-          results: []
-        };
-      }
-    }
-  }
-
   const safeLimit = Math.min(Math.max(parseInt(max_results, 10) || 5, 1), 15);
   const targets = (Array.isArray(sources) && sources.length > 0)
     ? sources.map(s => extractWhitelistedDomain(s)).filter(Boolean)
