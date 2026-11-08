@@ -1335,6 +1335,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     cardPillarViewport: $('#cardPillarViewport'),
     cardPillarButton: $('#cardPillarButton'),
     cardPillarGateway: $('#cardPillarGateway'),
+    cardPillarSkillUtility: $('#cardPillarSkillUtility'),
     endocrineDiagnosticList: $('#endocrineDiagnosticList'),
 
     // About Developer Tab & Redirect (v376)
@@ -4348,7 +4349,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         }
         if (isolatedContent) {
           if (totalDiscoveredIssues === 0) {
-            isolatedContent.innerHTML = `Semua 6 pilar kode berjalan harmonis: Bebas kesalahan panggil model, tidak ada teks pecah/bocor, ukuran layar presisi tanpa overflow, tombol bebas halangan, serta Gateway & Tunnel WAN stabil.`;
+            isolatedContent.innerHTML = `Semua 7 pilar kode berjalan harmonis: Bebas kesalahan panggil model, tidak ada teks pecah/bocor, ukuran layar presisi tanpa overflow, tombol bebas halangan, Gateway & Tunnel WAN stabil, serta nilai guna skill agen prima.`;
           } else {
             isolatedContent.innerHTML = `Tidak ada isu pada kategori filter saat ini (<strong>${esc(this.activeSubTab)}</strong>). Pilih tab "Semua" untuk melihat isu di pilar lain.`;
           }
@@ -4387,7 +4388,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       const oxy = Math.round(this.hormones.oxytocin ?? (typeof ChatEndocrine !== 'undefined' ? (ChatEndocrine.hormones?.oxytocin ?? 75) : 75));
       text += `Status Hormon: Dopamin ${this.hormones.dopamine}% | Oksitosin ${oxy}% | Endorfin ${this.hormones.endorphin ?? 100}% | Serotonin ${this.hormones.serotonin}% | Kortisol ${this.hormones.cortisol}% | Adrenalin ${this.hormones.adrenaline}%\n\n`;
 
-      text += `--- DAFTAR ISU AKTIF (6 PILAR DIAGNOSA) ---\n`;
+      text += `--- DAFTAR ISU AKTIF (7 PILAR DIAGNOSA) ---\n`;
       let issueCount = 0;
       if (this.isolatedNodes && this.isolatedNodes.length > 0) {
         text += `[Pilar 1 - Simpul DOM Terisolasi (${this.isolatedNodes.length})]:\n`;
@@ -4431,8 +4432,16 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           issueCount++;
         });
       }
+      const lowSkillAudits = (this.agentSkillAudits || []).filter(a => a.score < 60);
+      if (lowSkillAudits.length > 0) {
+        text += `[Pilar 7 - Nilai Guna Skill & Endorfin Agen (${lowSkillAudits.length})]:\n`;
+        lowSkillAudits.forEach((sk, i) => {
+          text += `  ${i + 1}. [${sk.skill}] Skor ${sk.score}/100 (${sk.grade}): ${sk.feedback}\n`;
+          issueCount++;
+        });
+      }
       if (issueCount === 0) {
-        text += `(Tidak ada isu aktif pada 6 pilar diagnosa - Semua modul, gateway & tombol sehat sempurna)\n`;
+        text += `(Tidak ada isu aktif pada 7 pilar diagnosa - Semua modul, gateway, tombol & skill agen sehat sempurna)\n`;
       }
       text += `\n`;
 
@@ -4893,9 +4902,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     syncToggleUI() {
       const toggleCode = document.getElementById('toggleEndocrineCode');
       const toggleChat = document.getElementById('toggleEndocrineChat');
-      const cardCode = document.getElementById('cardChannelCode');
-      const cardChat = document.getElementById('cardChannelChat');
-      const dot = document.getElementById('chatEndocrineActiveDot');
+      const cardCode = document.getElementById('pipelineRowCode');
+      const cardChat = document.getElementById('pipelineRowChat');
 
       const isCodeOn = STATE.settings.endocrineCodeEnabled !== false;
       const isChatOn = Boolean(STATE.settings.endocrineChatEnabled);
@@ -4905,7 +4913,6 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
       if (toggleChat) toggleChat.checked = isChatOn;
       if (cardChat) cardChat.classList.toggle('active', isChatOn);
-      if (dot) dot.style.display = isChatOn ? 'inline-block' : 'none';
       const dotTabChat = document.getElementById('dotTabChat');
       if (dotTabChat) dotTabChat.classList.toggle('active', isChatOn);
 
@@ -14206,7 +14213,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       // Live DOM Morphing (Pilar 2): Pertahankan root node dan seluruh event listener aktif di preview
       if (morphMeta && morphMeta.targetSelector && morphMeta.newInnerHtml && typeof document !== 'undefined') {
         try {
-          const previewFrame = els.previewIframe || document.getElementById('previewIframe');
+          const previewFrame = els.aiFileStudioFrame || document.getElementById('aiFileStudioFrame');
           if (previewFrame && previewFrame.contentDocument) {
             const liveTarget = previewFrame.contentDocument.querySelector(morphMeta.targetSelector);
             if (liveTarget) {
@@ -30742,6 +30749,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const isAuthError = isMissingOllamaCloudKey || msg.includes('401') || msg.includes('unauthorized') || msg.includes('api key') || msg.includes('user not found');
     const isModelNotFound = msg.includes('404') || msg.includes('not found') || msg.includes('no endpoints') || msg.includes('does not exist');
     const isRateLimit = msg.includes('429') || msg.includes('rate limit') || msg.includes('quota') || msg.includes('credits') || msg.includes('free tier limit');
+    const isContextLength = msg.includes('context length') || msg.includes('maximum context') || msg.includes('tokens exceeds') || msg.includes('context_length_exceeded');
     const isProviderReturnedError = msg.includes('provider returned error') || 
       msg.includes('upstream error') || 
       msg.includes('provider error') || 
@@ -31518,6 +31526,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
     const isWebRequest = false;
+    const isWebTask = Boolean(isWebRequest || (runOptions && (runOptions.websiteMode || runOptions.isWebCreation)));
 
     const wantsFile = (isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
     let isUsingLaptopOllamaTunnel = false;
@@ -32130,6 +32139,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       let consecutiveFailedRounds = 0;
       let preambleHtml = '';
       const groundedImageDisplays = [];
+      const foundYouTubeIds = [];
       const conversationChain = [...messagesPayload];
       let currentRoundText = fullText;
       let currentRoundNativeCalls = accumulatedToolCalls;
@@ -32444,7 +32454,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           digestionBody.options = { ...requestBody.options };
         }
         // Penajaman Distribusi Boltzmann (T -> 0.05) untuk menekan entropi halusinasi saat menyintesis bukti web
-        if (!STATE.settings.useCustomParameters && (hasExecutedSearch || hasBrowsedWeb || hasExecutedGrounding || (webSources && webSources.length > 0))) {
+        if (!STATE.settings.useCustomParameters && (hasExecutedSearch || hasBrowsedWeb || (webSources && webSources.length > 0))) {
           const optSampling = getGroundedSamplingParams(promptText);
           digestionBody.options = {
             ...(digestionBody.options || {}),
@@ -32921,7 +32931,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         webSources = deduplicateSources(webSources);
         renderMessageSources(assistantRow, webSources, true);
       }
-      renderYouTubeCardsForMessage(assistantRow, fullText);
+      renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
       renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview);
       if (runOptions && runOptions.explicitMemoryReceipt) {
         if (!jozzMemoryRecall) jozzMemoryRecall = { receipts: [] };
@@ -32960,6 +32970,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           sources: webSources,
           memoryReceipts: (jozzMemoryRecall?.receipts?.length > 0) ? jozzMemoryRecall.receipts : undefined,
           imageDisplays: groundedImageDisplays.length > 0 ? groundedImageDisplays : undefined,
+          videoIds: foundYouTubeIds.length > 0 ? foundYouTubeIds : undefined,
           files: (generatedFiles.length > 0 && !hasNegativePreview) ? generatedFiles : undefined,
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
           timestamp: new Date().toISOString()
@@ -33411,6 +33422,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
     if (isDocRequest && !hasNegativePreview) runOptions.isDocCreation = true;
 
     const isWebRequest = false;
+    const isWebTask = Boolean(isWebRequest || (runOptions && (runOptions.websiteMode || runOptions.isWebCreation)));
 
     const wantsFile = (isDocRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
     let isUsingLaptopOllamaTunnel = false;
@@ -34297,6 +34309,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       let consecutiveFailedRounds = 0;
       let preambleHtml = '';
       const groundedImageDisplays = [];
+      const foundYouTubeIds = [];
       const conversationChain = [...(activeMessagesPayload || messagesPayload)];
       let currentRoundText = fullText;
       let currentRoundNativeCalls = accumulatedToolCalls;
@@ -34641,7 +34654,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           if (!isDigestionLiquid && !isDigestionReasoning && STATE.settings.topP !== null && STATE.settings.topP !== undefined) {
             digestionRequestBody.top_p = parseFloat(STATE.settings.topP);
           }
-        } else if (hasExecutedSearch || hasBrowsedWeb || hasExecutedGrounding || (webSources && webSources.length > 0)) {
+        } else if (hasExecutedSearch || hasBrowsedWeb || (webSources && webSources.length > 0)) {
           const optSampling = getGroundedSamplingParams(promptText);
           if (!isDigestionReasoning) digestionRequestBody.temperature = optSampling.temperature;
           if (!isDigestionLiquid && !isDigestionReasoning) digestionRequestBody.top_p = optSampling.topP;
@@ -35204,7 +35217,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         webSources = deduplicateSources(webSources);
         renderMessageSources(assistantRow, webSources, true);
       }
-      renderYouTubeCardsForMessage(assistantRow, fullText);
+      renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
       renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview);
       if (runOptions && runOptions.explicitMemoryReceipt) {
         if (!jozzMemoryRecall) jozzMemoryRecall = { receipts: [] };
@@ -35269,6 +35282,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           docFormat: runOptions.docFormat,
           images: collectedImages.length > 0 ? collectedImages : undefined,
           imageDisplays: groundedImageDisplays.length > 0 ? groundedImageDisplays : undefined,
+          videoIds: foundYouTubeIds.length > 0 ? foundYouTubeIds : undefined,
           files: (generatedFiles.length > 0 && !hasNegativePreview) ? generatedFiles : undefined,
           imageUrl: collectedImages[0] || undefined,
           sources: webSources,
@@ -41814,7 +41828,7 @@ Aturan:
     els.toggleEndocrineCode?.addEventListener('change', (e) => {
       const isChecked = e.target.checked;
       STATE.settings.endocrineCodeEnabled = isChecked;
-      const card = document.getElementById('cardChannelCode');
+      const card = document.getElementById('pipelineRowCode');
       if (card) card.classList.toggle('active', isChecked);
       savePersistedState();
       showToast(isChecked ? 'Sensor Kode (CodeEndocrine) diaktifkan.' : 'Sensor Kode (CodeEndocrine) dinonaktifkan.');
@@ -43786,8 +43800,6 @@ Aturan:
           xtermScreen.style.transformOrigin = '';
         }
       }
-
-      this.updateDimensionButtonUI(term.cols);
     },
 
     toggleTerminalDimension() {
@@ -43829,24 +43841,6 @@ Aturan:
           this.sendPtyInput(paneState.sessionId, '\x0c');
         }, 80);
       }
-    },
-
-    updateDimensionButtonUI(cols) {
-      const btn = document.getElementById('btnTermSyncDimension');
-      const label = document.getElementById('labelTermSyncDimension');
-      const icon = document.getElementById('iconTermSyncDimension');
-      if (!btn) return;
-      const isNarrow = (cols || 80) <= 65;
-      if (icon) {
-        icon.className = isNarrow ? 'fa-solid fa-mobile-screen-button' : 'fa-solid fa-laptop';
-        icon.style.color = isNarrow ? '#4ade80' : '#38bdf8';
-      }
-      if (label) {
-        label.textContent = isNarrow ? `HP ${cols || 48}c` : 'Laptop 100c';
-      }
-      btn.title = isNarrow
-        ? `Sedang Mode HP (${cols || 48} Kolom). Klik untuk beralih ke Mode Laptop (100 Kolom)`
-        : 'Sedang Mode Laptop (100 Kolom). Klik untuk beralih ke Mode HP Presisi';
     },
 
     normalizeRemoteHost(input) {
@@ -45256,8 +45250,6 @@ Aturan:
 
     setFontSize(size, persist = true) {
       this.fontSize = Math.max(10, Math.min(24, size));
-      const label = document.getElementById('termFontSizeLabel');
-      if (label) label.textContent = `${this.fontSize}px`;
       const screens = document.querySelectorAll('.terminal-screen, .term-cli-input, .term-prompt-cwd');
       screens.forEach(el => {
         el.style.fontSize = `${this.fontSize}px`;
@@ -47804,18 +47796,14 @@ Aturan:
       const conf = this.shells[pane.shell] || this.shells.powershell;
       const iconEl = document.getElementById('termCurrentShellIcon');
       const nameEl = document.getElementById('termCurrentShellName');
-      const labelEl = document.getElementById('labelTerminalShell');
       if (iconEl) iconEl.textContent = conf.icon;
       if (nameEl) nameEl.textContent = conf.name;
-      if (labelEl) labelEl.textContent = `${conf.name} ${conf.icon}`;
     },
 
     updatePaneHeaders() {
       const tab = this.getActiveTab();
       const p1 = tab.pane1;
       const conf1 = this.shells[p1.shell] || this.shells.powershell;
-      const badge1 = document.getElementById('paneShellBadge1');
-      if (badge1) badge1.textContent = conf1.name;
       const cwd1 = document.getElementById('paneCwdBadge1');
       if (cwd1) cwd1.textContent = `📁 ${p1.cwd}`;
       const prefix1 = document.getElementById('termPromptPrefix1');
@@ -47825,8 +47813,6 @@ Aturan:
 
       const p2 = tab.pane2;
       const conf2 = this.shells[p2.shell] || this.shells.powershell;
-      const badge2 = document.getElementById('paneShellBadge2');
-      if (badge2) badge2.textContent = conf2.name;
       const cwd2 = document.getElementById('paneCwdBadge2');
       if (cwd2) cwd2.textContent = `📁 ${p2.cwd}`;
       const prefix2 = document.getElementById('termPromptPrefix2');
