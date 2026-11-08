@@ -1993,12 +1993,18 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     },
 
     toggleIncognito() {
-      STATE.isIncognito = !STATE.isIncognito;
-      this.updateIncognitoStateUI(STATE.isIncognito);
-      if (STATE.isIncognito) {
-        showToast('🕵️ Mode Incognito Aktif: Percakapan ini tidak membaca dan tidak menyimpan memori.', 'info');
+      const nextIncog = !STATE.isIncognito;
+      if (!nextIncog) {
+        purgeEphemeralIncognitoSessions(null);
+        STATE.currentSessionId = null;
+        STATE.isIncognito = false;
+        this.updateIncognitoStateUI(false);
+        renderChatHistory();
+        renderCurrentSession();
+        showToast('🧠 Mode Normal: Sesi Incognito sebelumnya telah dihapus bersih tanpa jejak.', 'success');
       } else {
-        showToast('🧠 Mode Normal: Jozz Memory aktif untuk mengingat preferensi & fakta penting.', 'success');
+        createNewSession('Obrolan Privat', STATE.mode, { isIncognito: true });
+        showToast('🕵️ Mode Incognito Aktif: Percakapan ini sementara & otomatis terhapus saat keluar.', 'info');
       }
       AudioEngine.click();
     },
@@ -5427,7 +5433,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       });
     },
     async saveSession(session) {
-      if (!session || !session.id) return false;
+      if (!session || !session.id || isIncognitoSession(session)) return false;
       if (!this.db) await this.init();
       if (!this.db) return false;
       const cleanSession = sanitizeSessionForCloning(session);
@@ -5490,11 +5496,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     async saveAllSessions(sessions) {
       if (!this.db) await this.init();
       if (!this.db || !Array.isArray(sessions)) return false;
+      const nonIncognitoSessions = sessions.filter(s => s && s.id && !isIncognitoSession(s));
+      if (nonIncognitoSessions.length === 0) return true;
       return new Promise((resolve) => {
         try {
           const tx = this.db.transaction('sessions', 'readwrite');
           const store = tx.objectStore('sessions');
-          sessions.forEach(s => {
+          nonIncognitoSessions.forEach(s => {
             const clean = sanitizeSessionForCloning(s);
             if (clean && clean.id) {
               const getReq = store.get(clean.id);
@@ -6032,7 +6040,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     },
 
     async saveSession(session) {
-      if (!session || !session.id) return;
+      if (!session || !session.id || isIncognitoSession(session)) return;
       session.userId = STATE.userId;
       // Safety guard: Never overwrite disk storage with an unhydrated lazy-loaded session
       if (session._isLazyDisk) {
@@ -6078,7 +6086,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     },
 
     async updateSessionMetadata(id, patch) {
-      if (!id || !patch) return;
+      if (!id || !patch || /^incog_/i.test(String(id))) return;
+      const targetCheck = STATE.sessions.find(s => s.id === id);
+      if (targetCheck && isIncognitoSession(targetCheck)) return;
       if (this.isDeviceBackendAvailable) {
         try {
           await fetch(getUniversalApiUrl(`/api/sessions/${encodeURIComponent(id)}`), {
@@ -6104,7 +6114,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     },
 
     async renameSession(id, newTitle) {
-      if (!id || !newTitle) return;
+      if (!id || !newTitle || /^incog_/i.test(String(id))) return;
+      const targetCheck = STATE.sessions.find(s => s.id === id);
+      if (targetCheck && isIncognitoSession(targetCheck)) return;
       if (this.isDeviceBackendAvailable) {
         try {
           await fetch(getUniversalApiUrl(`/api/sessions/${encodeURIComponent(id)}`), {
@@ -6355,9 +6367,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         try {
           const parsed = JSON.parse(savedSessions);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            // KEAMANAN KETAT: Bersihkan sesi lazy disk asing dan sesi yang memiliki userId milik orang lain
+            // KEAMANAN KETAT: Bersihkan sesi lazy disk asing, sesi milik user lain, dan residu sesi Incognito
             STATE.sessions = parsed.filter(s => {
+              if (!s || !s.id) return false;
               if (s._isLazyDisk) return false;
+              if (isIncognitoSession(s)) return false;
               if (s.userId && s.userId !== STATE.userId) return false;
               return true;
             });
@@ -6406,14 +6420,31 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       // 2. Sync from IndexedDB Vault
       const dbSessions = await ChatDB.getAllSessions();
       if (Array.isArray(dbSessions) && dbSessions.length > 0) {
-        // KEAMANAN KETAT: Prune sesi yang berasal dari user lain, lazy disk asing, atau subtask/digest/rescue/studio
+        // Deteksi dan musnahkan residu sesi Incognito lama yang sempat tersimpan di IndexedDB / localStorage
+        const purgedIncogIds = new Set(
+          dbSessions.filter(s => isIncognitoSession(s)).map(s => s && s.id).filter(Boolean)
+        );
+        // KEAMANAN KETAT: Prune sesi yang berasal dari user lain, lazy disk asing, Incognito, atau subtask/digest/rescue/studio
         const validDbSessions = dbSessions.filter(s => {
           if (!s || !s.id) return false;
           if (s._isLazyDisk) return false;
+          if (isIncognitoSession(s)) return false;
           if (s.userId && s.userId !== STATE.userId) return false;
           if (/_(?:digest_\d+|rescue|epistemic|temp)\b/i.test(s.id) || /__studio_/i.test(s.id)) return false;
           return true;
         });
+        if (purgedIncogIds.size > 0) {
+          STATE.sessions = STATE.sessions.filter(s => s && !purgedIncogIds.has(s.id) && !isIncognitoSession(s));
+          if (STATE.currentSessionId && purgedIncogIds.has(STATE.currentSessionId)) {
+            STATE.currentSessionId = null;
+            STATE.isIncognito = false;
+            if (typeof JozzMemoryUI !== 'undefined') JozzMemoryUI.updateIncognitoStateUI(false);
+          }
+          for (const incogId of purgedIncogIds) {
+            await ChatDB.deleteSession(incogId);
+            DeviceStorage.deleteSession(incogId).catch(() => {});
+          }
+        }
         validDbSessions.forEach(s => {
           if (!s.userId) s.userId = STATE.userId;
           if (Array.isArray(s.messages)) {
@@ -6428,7 +6459,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           }
         });
         if (validDbSessions.length !== dbSessions.length) {
-          // saveAllSessions() tak lagi mem-clear store, jadi sesi asing/lazy yang
+          // saveAllSessions() tak lagi mem-clear store, jadi sesi asing/lazy/incognito yang
           // tersaring harus dihapus eksplisit agar tidak "bangkit" dari vault lokal.
           await ChatDB.saveAllSessions(validDbSessions);
           const validIds = new Set(validDbSessions.map(s => s.id));
@@ -6456,8 +6487,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             });
           }
         });
-        if (validDbSessions.length >= STATE.sessions.length) {
+        if (validDbSessions.length >= STATE.sessions.length || purgedIncogIds.size > 0) {
           STATE.sessions = validDbSessions;
+          if (purgedIncogIds.size > 0) {
+            savePersistedState({ immediate: true });
+          }
           renderChatHistory();
           if (STATE.currentSessionId) renderCurrentSession(false);
         } else if (didRestoreAnyImage && STATE.currentSessionId) {
@@ -6471,8 +6505,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         if (Array.isArray(diskList) && diskList.length > 0) {
           let hasNewSessions = false;
           for (const diskItem of diskList) {
-            // Defense-in-depth: Jangan impor session subtask sementara / digestion / rescue / studio
-            if (!diskItem || !diskItem.id || /_(?:digest_\d+|rescue|epistemic|temp)\b/i.test(diskItem.id) || /__studio_/i.test(diskItem.id)) {
+            // Defense-in-depth: Jangan impor session subtask sementara / digestion / rescue / studio / incognito
+            if (!diskItem || !diskItem.id || isIncognitoSession(diskItem) || /_(?:digest_\d+|rescue|epistemic|temp)\b/i.test(diskItem.id) || /__studio_/i.test(diskItem.id)) {
+              if (diskItem && diskItem.id && isIncognitoSession(diskItem)) {
+                DeviceStorage.deleteSession(diskItem.id).catch(() => {});
+              }
               continue;
             }
             const existing = STATE.sessions.find(s => s.id === diskItem.id);
@@ -7055,10 +7092,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
       saveFavoriteModels();
 
-      // Save active session to Device Disk Storage
+      // Save active session to Device Disk Storage (KECUALI sesi Incognito sementara)
       if (STATE.currentSessionId) {
         const activeSess = STATE.sessions.find(s => s.id === STATE.currentSessionId);
-        if (activeSess) {
+        if (activeSess && !isIncognitoSession(activeSess)) {
           activeSess.userId = STATE.userId;
           DeviceStorage.saveSession(activeSess);
         }
@@ -7066,23 +7103,20 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
       // Save to IndexedDB (asynchronous & practically unlimited quota)
       // Sesi AKTIF sudah tercakup oleh DeviceStorage.saveSession() di atas (yang di
-      // dalamnya memanggil ChatDB.saveSession). Di sini hanya sesi yang updatedAt-nya
-      // berubah sejak save terakhir — dulu SELURUH STATE.sessions ditulis ulang pada
-      // SETIAP save (transaksi besar berulang-ulang tanpa perlu).
-      const dirtySessions = STATE.sessions.filter(s =>
+      // dalamnya memanggil ChatDB.saveSession). Di sini hanya sesi non-Incognito yang updatedAt-nya
+      // berubah sejak save terakhir.
+      const persistableSessions = STATE.sessions.filter(s => s && !isIncognitoSession(s));
+      const dirtySessions = persistableSessions.filter(s =>
         s.id !== STATE.currentSessionId && lastPersistedSessionMeta.get(s.id) !== s.updatedAt);
       if (dirtySessions.length) {
         ChatDB.saveAllSessions(dirtySessions);
       }
-      lastPersistedSessionMeta = new Map(STATE.sessions.map(s => [s.id, s.updatedAt]));
+      lastPersistedSessionMeta = new Map(persistableSessions.map(s => [s.id, s.updatedAt]));
 
-      // Mirror lightweight summaries to localStorage.
-      // Dilewati sementara bila sebelumnya kena quota: kunci asli 'zoz_router_sessions_v1'
-      // masih berisi mirror LAMA yang utuh dan justru dipertahankan (lihat catch di bawah).
-      // Tulisan IndexedDB + server di atas TETAP jalan.
+      // Mirror lightweight summaries to localStorage (TANPA sesi Incognito).
       if (localStorageMirrorBroken) return;
       try {
-        const lightweight = STATE.sessions.map(s => ({
+        const lightweight = persistableSessions.map(s => ({
           id: s.id,
           title: s.title,
           mode: s.mode,
@@ -15244,6 +15278,46 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     AudioEngine.click();
   }
 
+  function isIncognitoSession(s) {
+    if (!s || typeof s !== 'object') return false;
+    return Boolean(
+      s.isIncognito === true ||
+      (typeof s.id === 'string' && /^incog_/i.test(s.id)) ||
+      s.title === 'Obrolan Privat'
+    );
+  }
+
+  function purgeEphemeralIncognitoSessions(keepSessionId = null) {
+    if (!Array.isArray(STATE.sessions)) return false;
+    const doomed = STATE.sessions.filter(s => isIncognitoSession(s) && s.id !== keepSessionId);
+    if (doomed.length === 0) return false;
+
+    const doomedIds = new Set(doomed.map(s => s.id).filter(Boolean));
+    doomed.forEach(s => {
+      if (Array.isArray(s.messages)) s.messages.length = 0;
+    });
+    STATE.sessions = STATE.sessions.filter(s => !doomedIds.has(s.id));
+
+    for (const sid of doomedIds) {
+      try { ChatDB.deleteSession(sid); } catch (_) {}
+      try { DeviceStorage.deleteSession(sid).catch(() => {}); } catch (_) {}
+      if (safeSessionStorage.getItem('zoz_active_session_id') === sid) {
+        safeSessionStorage.removeItem('zoz_active_session_id');
+      }
+      try {
+        if (localStorage.getItem('zoz_last_active_session_id') === sid) {
+          localStorage.removeItem('zoz_last_active_session_id');
+        }
+      } catch (_) {}
+    }
+
+    if (STATE.currentSessionId && doomedIds.has(STATE.currentSessionId)) {
+      STATE.currentSessionId = null;
+    }
+    savePersistedState({ immediate: true });
+    return true;
+  }
+
   function createNewSession(initialTitle = 'Obrolan Baru', targetMode = STATE.mode, sessionOptions = {}) {
     if (activeChatPollTimer) {
       clearInterval(activeChatPollTimer);
@@ -15252,6 +15326,8 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     if (STATE.isGenerating) {
       stopGeneration();
     }
+    // Hapus bersih sesi Incognito sebelumnya seketika saat keluar / memulai sesi baru
+    purgeEphemeralIncognitoSessions(null);
     STATE.currentSessionId = null;
     if (STATE.chatMode === 'whatsapp') {
       WhatsAppController.setChatMode('ai', false);
@@ -15306,7 +15382,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     // Return or create active working session
     const isIncog = Boolean(STATE.isIncognito);
     const newSession = {
-      id: generateId(),
+      id: isIncog ? ('incog_' + generateId()) : generateId(),
       userId: STATE.userId,
       title: isIncog ? 'Obrolan Privat' : 'Obrolan Baru',
       mode: targetMode,
@@ -15316,9 +15392,11 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     };
     STATE.sessions.unshift(newSession);
     STATE.currentSessionId = newSession.id;
-    safeSessionStorage.setItem('zoz_active_session_id', newSession.id);
-    try { localStorage.setItem('zoz_last_active_session_id', newSession.id); } catch (_) {}
-    savePersistedState();
+    if (!isIncog) {
+      safeSessionStorage.setItem('zoz_active_session_id', newSession.id);
+      try { localStorage.setItem('zoz_last_active_session_id', newSession.id); } catch (_) {}
+      savePersistedState();
+    }
     return newSession;
   }
 
@@ -15340,6 +15418,8 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     }
     const targetSession = STATE.sessions.find(s => s.id === sessionId);
     if (!targetSession) return;
+    // Musnahkan sesi Incognito sementara seketika saat pengguna berpindah ke riwayat percakapan lain
+    purgeEphemeralIncognitoSessions(sessionId);
     const switchToken = ++sessionSwitchToken;
 
     // Tutup sidebar & backdrop redup seketika saat item riwayat diklik tanpa menunggu I/O disk
@@ -15787,8 +15867,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     els.chatHistoryList.innerHTML = '';
     const q = filterQuery.toLowerCase().trim();
     
-    // Unified list of all sessions across engines (including lazy-loaded disk sessions)
+    // Unified list of all sessions across engines (excluding ephemeral Incognito sessions)
     const validSessions = STATE.sessions.filter(s => {
+      if (!s || isIncognitoSession(s)) return false;
       if (s._isLazyDisk) {
         return (typeof s.messageCount === 'number' && s.messageCount > 0) || (Array.isArray(s.messages) && s.messages.length > 0);
       }
@@ -31858,7 +31939,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       const headers = { 'Content-Type': 'application/json' };
-      if (session?.id) {
+      if (session?.id && !STATE.isIncognito && !isIncognitoSession(session)) {
         headers['X-Session-ID'] = session.id;
       }
       if (STATE.userId) {
@@ -33803,7 +33884,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             if (STATE.settings.openRouterKey) {
               targetHeaders['Authorization'] = `Bearer ${STATE.settings.openRouterKey}`;
             }
-            if (session?.id) {
+            if (session?.id && !STATE.isIncognito && !isIncognitoSession(session)) {
               targetHeaders['X-Session-ID'] = session.id;
             }
             if (STATE.userId) {
@@ -33811,7 +33892,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             }
             targetBody = {
               ...basePayload,
-              sessionId: session?.id || null,
+              sessionId: (session?.id && !STATE.isIncognito && !isIncognitoSession(session)) ? session.id : null,
               userId: STATE.userId || null,
               apiKey: STATE.settings.openRouterKey || undefined
             };
@@ -43461,7 +43542,10 @@ Aturan:
     }
 
     // Flush persistensi saat tab ditutup/navigasi atau disembunyikan di HP
-    const flushPersistenceOnHide = () => {
+    const flushPersistenceOnHide = (evt) => {
+      if (evt && (evt.type === 'pagehide' || evt.type === 'beforeunload')) {
+        purgeEphemeralIncognitoSessions(null);
+      }
       if (activeAIFile && typeof isStudioEditModeActive === 'function' && isStudioEditModeActive() && els.aiFileStudioEditor) {
         try {
           const currentVal = els.aiFileStudioEditor.value;
@@ -43475,7 +43559,7 @@ Aturan:
     window.addEventListener('pagehide', flushPersistenceOnHide);
     window.addEventListener('beforeunload', flushPersistenceOnHide);
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') flushPersistenceOnHide();
+      if (document.visibilityState === 'hidden') flushPersistenceOnHide({ type: 'visibilitychange' });
     });
   }
 
@@ -50801,6 +50885,11 @@ Aturan:
           renderCurrentSession();
         }
       } else {
+        purgeEphemeralIncognitoSessions(null);
+        if (STATE.isIncognito) {
+          STATE.isIncognito = false;
+          if (typeof JozzMemoryUI !== 'undefined') JozzMemoryUI.updateIncognitoStateUI(false);
+        }
         if (!this.isLocalHostOrTunnelOrigin()) {
           this.fetchStatus(true).catch(() => {});
           this.fetchContacts(false).catch(() => {});

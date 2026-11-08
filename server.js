@@ -4147,16 +4147,18 @@ function applyServerSideDecisionCalibration(body, provider = 'ollama') {
 
 function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extraMeta = {}, explicitUserId = null) {
   if (!sessionId || !content || !content.trim()) return Promise.resolve(false);
+  if (extraMeta && extraMeta.isIncognito) return Promise.resolve(false);
   // Fail closed for legacy/provider-tagged thought text, regardless of the caller.
   content = textSafety.stripReasoningText(content);
   if (!content.trim()) return Promise.resolve(false);
   try {
     const rawSid = String(sessionId).trim();
-    if (!/^[a-zA-Z0-9_-]+$/.test(rawSid)) return Promise.resolve(false);
+    if (!/^[a-zA-Z0-9_-]+$/.test(rawSid) || /^incog_/i.test(rawSid)) return Promise.resolve(false);
 
     // Resolusi parent session jika ini adalah tugas subtask internal (digest, rescue, epistemic)
     // agar jawaban tersimpan ke sesi utama pengguna dan tidak mencemari disk dengan berkas phantom
     const cleanSid = resolveParentSessionId(rawSid);
+    if (/^incog_/i.test(cleanSid)) return Promise.resolve(false);
 
     // Tentukan userId pemilik sesi (cek task key rawSid dan cleanSid)
     let effectiveUid = explicitUserId;
@@ -7238,6 +7240,11 @@ async function requestHandler(req, res) {
           const fullPath = path.join(userDir, file);
           const content = await fsp.readFile(fullPath, 'utf8');
           const sess = JSON.parse(content);
+          const sessIdCandidate = sess.id || path.basename(file, '.json');
+          if (sess.isIncognito === true || /^incog_/i.test(sessIdCandidate) || sess.title === 'Obrolan Privat') {
+            await fsp.unlink(fullPath).catch(() => {});
+            continue;
+          }
           const lastMsg = (sess.messages && sess.messages.length > 0) ? sess.messages[sess.messages.length - 1].content : '';
           // stat hanya saat createdAt/updatedAt tidak ada di isi file (hemat 2 syscall/file)
           let createdAt = sess.createdAt;
@@ -7289,6 +7296,9 @@ async function requestHandler(req, res) {
     if (!body) return;
     try {
       const rawId = (body && body.id) ? String(body.id).trim() : ('ses_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
+      if (body.isIncognito === true || /^incog_/i.test(rawId) || body.title === 'Obrolan Privat') {
+        return sendJSON(res, 200, { ok: true, skippedIncognito: true });
+      }
       const effectiveUid = reqUserId; // identitas HANYA dari header tervalidasi — body.userId tidak dipercaya
       const validation = validateSessionId(rawId, effectiveUid);
       if (!validation.valid) return sendJSON(res, 400, { error: validation.error });
