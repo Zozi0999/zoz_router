@@ -113,7 +113,11 @@ function importMemories(userId, rawContent, format = 'json') {
       return { success: false, imported: 0, skipped: 0, reason: `Invalid JSON: ${e.message}` };
     }
 
-    const items = Array.isArray(parsed.data?.memories) ? parsed.data.memories : (Array.isArray(parsed) ? parsed : []);
+    const items = Array.isArray(parsed.data?.memories) 
+      ? parsed.data.memories 
+      : (Array.isArray(parsed.memories) 
+        ? parsed.memories 
+        : (Array.isArray(parsed) ? parsed : []));
     for (const item of items) {
       const content = item.content || item.fact || item.text;
       if (!content) continue;

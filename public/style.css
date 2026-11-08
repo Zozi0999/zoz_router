@@ -18084,10 +18084,30 @@ body.mermaid-has-fullscreen {
   color: #86efac;
 }
 
-.jozz-mem-tag.general_fact {
+.jozz-mem-tag.general_fact,
+.jozz-mem-tag.fact,
+.jozz-mem-tag.general {
   background: rgba(245, 158, 11, 0.15);
   border: 1px solid rgba(245, 158, 11, 0.35);
   color: #fcd34d;
+}
+
+.jozz-mem-tag.instruction {
+  background: rgba(0, 240, 255, 0.15);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  color: #38bdf8;
+}
+
+.jozz-mem-tag.error_lesson {
+  background: rgba(244, 63, 94, 0.15);
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  color: #fda4af;
+}
+
+.jozz-mem-tag.episodic_context {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: #a5b4fc;
 }
 
 .jozz-mem-content {

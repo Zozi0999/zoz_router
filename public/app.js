@@ -1692,12 +1692,17 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       return list.filter(m => (m.userId === userId || m.user_id === userId || m.userId === 'default' || m.user_id === 'default'));
     },
 
-    save(memory) {
+    save(memory, tempIdToReplace = null) {
       if (!memory || !memory.id) return;
       const list = this.init();
-      const idx = list.findIndex(m => m.id === memory.id);
-      if (idx >= 0) {
-        list[idx] = { ...list[idx], ...memory, updated_at: new Date().toISOString() };
+      if (tempIdToReplace && tempIdToReplace !== memory.id) {
+        const tempIdx = list.findIndex(m => m && m.id === tempIdToReplace);
+        if (tempIdx >= 0) list.splice(tempIdx, 1);
+      }
+      const normContent = String(memory.content || '').trim().toLowerCase();
+      const existingIdx = list.findIndex(m => m && (m.id === memory.id || (normContent && String(m.content || '').trim().toLowerCase() === normContent)));
+      if (existingIdx >= 0) {
+        list[existingIdx] = { ...list[existingIdx], ...memory, updated_at: new Date().toISOString() };
       } else {
         list.unshift(memory);
       }
@@ -1850,9 +1855,22 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         blocks.push(`### MEMORI & RIWAYAT LINTAS-SESI TERVERIFIKASI (Jozz Memory Vault):\n${lines.join('\n')}\n*Instruksi: Gunakan fakta dan riwayat percakapan lintas-sesi di atas secara relevan dan akurat.*`);
       }
 
+      const receipts = top.map(m => ({
+        memoryId: m.id,
+        episodeId: m.episodeId || m.episode_id || 'local_vault',
+        sourceTitle: m.sessionTitle ? `Sesi: ${m.sessionTitle}` : (m.category === 'preference' ? 'Preferensi Pengguna' : 'Jozz Memory Vault'),
+        sourceUri: m.sessionId ? `/chat/${m.sessionId}` : '',
+        sourceType: m.category === 'episodic_context' ? 'episodic_chat' : 'vault',
+        rawSnippet: m.content,
+        content: m.content,
+        relevanceScore: 1.0,
+        matchedSignal: m.category === 'error_lesson' ? 'counterfactual_error_lesson' : 'local_vault'
+      }));
+
       return {
         success: true,
         memories: top,
+        receipts,
         errorLesson: errorLessons[0] || null,
         systemPromptInjection: blocks.join('\n\n')
       };
@@ -2013,10 +2031,18 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (!els.jozzMemoriesCardsList) return;
 
       const uid = STATE.userId || 'default';
+      const isCatMatch = (memCat, targetCat) => {
+        if (!targetCat || targetCat === 'all') return true;
+        if (targetCat === 'fact' || targetCat === 'general_fact') {
+          return memCat === 'fact' || memCat === 'general_fact' || memCat === 'general';
+        }
+        return memCat === targetCat;
+      };
+
       const localCached = LocalMemoryVault.getAll(uid);
       let filteredLocal = localCached;
       if (this.activeCategory !== 'all') {
-        filteredLocal = filteredLocal.filter(m => m.category === this.activeCategory);
+        filteredLocal = filteredLocal.filter(m => isCatMatch(m.category, this.activeCategory));
       }
       if (this.searchQuery) {
         const q = this.searchQuery.toLowerCase();
@@ -2039,7 +2065,9 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       try {
         const params = new URLSearchParams();
         params.set('userId', uid);
-        if (this.activeCategory !== 'all') params.set('category', this.activeCategory);
+        if (this.activeCategory !== 'all') {
+          params.set('category', (this.activeCategory === 'general_fact' || this.activeCategory === 'fact') ? 'fact' : this.activeCategory);
+        }
         if (this.searchQuery) params.set('q', this.searchQuery);
         params.set('limit', '80');
 
@@ -2051,7 +2079,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
             const synced = LocalMemoryVault.syncWithServer(data.memories, uid);
             let displayList = synced;
             if (this.activeCategory !== 'all') {
-              displayList = displayList.filter(m => m.category === this.activeCategory);
+              displayList = displayList.filter(m => isCatMatch(m.category, this.activeCategory));
             }
             if (this.searchQuery) {
               const q = this.searchQuery.toLowerCase();
@@ -2085,15 +2113,25 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         return;
       }
 
+      const catLabels = {
+        preference: 'Preferensi',
+        technical_stack: 'Tech Stack',
+        project_context: 'Proyek',
+        fact: 'Fakta',
+        general_fact: 'Fakta',
+        general: 'Fakta',
+        instruction: 'Instruksi',
+        error_lesson: 'Koreksi Soal',
+        episodic_context: 'Episodik'
+      };
+
       els.jozzMemoriesCardsList.innerHTML = memories.map(m => {
-        const catClass = ['preference', 'technical_stack', 'project_context', 'general_fact'].includes(m.category) ? m.category : 'general_fact';
-        const catLabels = {
-          preference: 'Preferensi',
-          technical_stack: 'Tech Stack',
-          project_context: 'Proyek',
-          general_fact: 'Fakta'
-        };
-        const catName = catLabels[m.category] || m.category;
+        const rawCat = m.category || 'fact';
+        const catKey = (rawCat === 'general_fact' || rawCat === 'general') ? 'fact' : rawCat;
+        const catClass = ['preference', 'technical_stack', 'project_context', 'fact', 'instruction', 'error_lesson', 'episodic_context'].includes(catKey)
+          ? catKey
+          : 'fact';
+        const catName = catLabels[catKey] || 'Fakta';
         const dateStr = m.created_at ? new Date(m.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
         const scopeBadge = m.scope && m.scope !== 'global' ? `<span style="font-size:0.65rem; padding:1px 5px; border-radius:4px; background:rgba(255,255,255,0.06); color:#94a3b8;">#${escapeHtml(m.scope)}</span>` : '';
 
@@ -2143,7 +2181,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         showToast('Isi memori tidak boleh kosong.', 'error');
         return;
       }
-      const category = els.jozzAddMemoryCategory?.value || 'general_fact';
+      const rawCat = els.jozzAddMemoryCategory?.value || 'fact';
+      const category = (rawCat === 'general_fact' || rawCat === 'general') ? 'fact' : rawCat;
       const scope = els.jozzAddMemoryScope?.value?.trim() || 'global';
       const uid = STATE.userId || 'default';
 
@@ -2166,7 +2205,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (els.jozzAddMemoryFormBox) els.jozzAddMemoryFormBox.style.display = 'none';
       this.refresh();
 
-      // 2. Sinkronkan ke Cloud Serverless Gateway secara asinkron
+      // 2. Sinkronkan ke Cloud Serverless Gateway secara asinkron (mengganti ID lokal tanpa duplikasi)
       try {
         const res = await fetch(getUniversalApiUrl('/api/memories'), {
           method: 'POST',
@@ -2183,7 +2222,8 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         if (res.ok) {
           const data = await res.json();
           if (data && data.memory && data.memory.id) {
-            LocalMemoryVault.save(data.memory);
+            LocalMemoryVault.save(data.memory, localId);
+            this.refresh();
           }
         }
       } catch (err) {
@@ -2264,9 +2304,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         const res = await fetch(getUniversalApiUrl(`/api/memories/insights?userId=${encodeURIComponent(STATE.userId || 'default')}`));
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
-        const ins = data.insights || {};
+        const ins = data.insights || data.data || {};
 
-        const catRows = Object.entries(ins.categories || {}).map(([cat, count]) => `
+        const catMap = ins.categoryDistribution || ins.categories || {};
+        const catRows = Object.entries(catMap).map(([cat, count]) => `
           <div style="display:flex; justify-content:space-between; font-size:0.78rem; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.04);">
             <span style="color:#94a3b8; text-transform:capitalize;">${escapeHtml(cat.replace('_', ' '))}</span>
             <strong style="color:var(--neon-cyan);">${count}</strong>
@@ -2275,7 +2316,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
         const entRows = (ins.topEntities || []).map(ent => `
           <span style="display:inline-block; padding:3px 9px; font-size:0.72rem; border-radius:6px; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); color:#7dd3fc; margin:2px;">
-            ${escapeHtml(ent.name)} <small style="opacity:0.6;">(${escapeHtml(ent.entity_type)})</small>
+            ${escapeHtml(ent.name)} <small style="opacity:0.6;">(${escapeHtml(ent.type || ent.entity_type || 'concept')})</small>
           </span>
         `).join('') || '<span style="color:#64748b; font-size:0.75rem;">Belum ada entitas Knowledge Graph.</span>';
 
@@ -2288,17 +2329,21 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           </div>
         `).join('') || '<div style="color:#64748b; font-size:0.75rem;">Belum ada relasi temporal aktif.</div>';
 
-        const recRows = (ins.reviewRecommendations || []).map(rec => `
+        const recItems = ins.recommendedReviewTopics || ins.reviewRecommendations || [];
+        const recRows = recItems.map(rec => `
           <li style="font-size:0.78rem; color:#cbd5e1; margin-bottom:4px;">
-            <strong>${escapeHtml(rec.title)}</strong> &mdash; <span style="color:#94a3b8;">${escapeHtml(rec.reason)}</span>
+            <strong>${escapeHtml(rec.title || rec.topic || 'Topik')}</strong> &mdash; <span style="color:#94a3b8;">${escapeHtml(rec.reason || rec.fact || '')}</span>
           </li>
         `).join('') || '<li style="color:#64748b; font-size:0.75rem;">Belum ada rekomendasi tinjauan topik.</li>';
+
+        const localTotal = (typeof LocalMemoryVault !== 'undefined') ? LocalMemoryVault.getAll(STATE.userId || 'default').length : 0;
+        const totalMemoriesVal = typeof ins.totalMemories === 'number' ? ins.totalMemories : localTotal;
 
         els.jozzMemoryInsightsContent.innerHTML = `
           <!-- Metric Cards -->
           <div class="jozz-insight-metric-grid">
             <div class="jozz-insight-metric-box">
-              <span class="jozz-insight-metric-val">${ins.totalMemories || 0}</span>
+              <span class="jozz-insight-metric-val">${totalMemoriesVal}</span>
               <span class="jozz-insight-metric-lbl">Total Memori</span>
             </div>
             <div class="jozz-insight-metric-box">
@@ -2390,20 +2435,24 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         const payload = isJson ? JSON.parse(text) : { markdown: text };
         const uid = STATE.userId || 'default';
 
-        if (isJson && Array.isArray(payload.memories)) {
-          LocalMemoryVault.syncWithServer(payload.memories, uid);
-          showToast(`✅ Berhasil impor ${payload.memories.length} memori ke vault lokal!`, 'success');
+        const memArray = Array.isArray(payload.data?.memories)
+          ? payload.data.memories
+          : (Array.isArray(payload.memories) ? payload.memories : (Array.isArray(payload) ? payload : null));
+
+        if (memArray && memArray.length > 0) {
+          LocalMemoryVault.syncWithServer(memArray, uid);
+          showToast(`✅ Berhasil impor ${memArray.length} memori ke vault lokal!`, 'success');
           this.refresh();
         }
 
-        const res = await fetch(getUniversalApiUrl(`/api/memories/import?userId=${encodeURIComponent(uid)}`), {
+        const res = await fetch(getUniversalApiUrl(`/api/memories/import?format=${isJson ? 'json' : 'md'}&userId=${encodeURIComponent(uid)}`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
         const data = await res.json();
         if (data && data.success) {
-          if (!isJson || !Array.isArray(payload.memories)) {
+          if (!memArray || memArray.length === 0) {
             showToast(`✅ Berhasil impor ${data.importedCount || 0} memori baru (${data.skippedCount || 0} duplikat dilewati).`, 'success');
           }
           this.refresh();
@@ -2445,8 +2494,10 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     openReceiptsModal(receipts) {
       if (!els.memoryReceiptDetailsList) return;
       els.memoryReceiptDetailsList.innerHTML = receipts.map(r => {
-        const signals = Array.isArray(r.signals) ? r.signals.join(' + ') : (r.signals || 'hybrid');
-        const score = typeof r.score === 'number' ? (r.score * 100).toFixed(1) + '%' : '100%';
+        const signals = r.matchedSignal || (Array.isArray(r.signals) ? r.signals.join(' + ') : (r.signals || 'hybrid'));
+        const rawScore = (typeof r.relevanceScore === 'number') ? r.relevanceScore : (typeof r.score === 'number' ? r.score : 1.0);
+        const score = (rawScore * 100).toFixed(1) + '%';
+        const displaySnippet = r.rawSnippet || r.content || '';
         return `
           <div style="background:rgba(15,23,42,0.85); border:1px solid rgba(0,240,255,0.25); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:6px;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -2456,7 +2507,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
               </span>
             </div>
             <div style="font-size:0.82rem; color:#f1f5f9; line-height:1.5;">
-              "${escapeHtml(r.content || '')}"
+              "${escapeHtml(displaySnippet)}"
             </div>
             <div style="font-size:0.72rem; color:#94a3b8; display:flex; justify-content:space-between; padding-top:4px; border-top:1px solid rgba(255,255,255,0.06);">
               <span>Sumber: <strong>${escapeHtml(r.sourceTitle || 'Percakapan Langsung')}</strong> (${escapeHtml(r.sourceType || 'chat')})</span>
@@ -27404,7 +27455,7 @@ STATUS OPERASI: PENYIMPANAN MEMORI DITOLAK KARENA SIKAP PRIVASI / PENGATURAN.
         if (factToStore && factToStore.length >= 5) {
           const generatedMemId = 'mem_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
           const generatedEpId = 'ep_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
-          let assignedCat = 'general_fact';
+          let assignedCat = 'fact';
           const lowText = factToStore.toLowerCase();
           if (/\b(?:menggunakan|stack|teknologi|bahasa|framework|database|tool|lib|library|runtime|sqlite|node|python|express)\b/i.test(lowText)) {
             assignedCat = 'technical_stack';
@@ -27457,7 +27508,7 @@ STATUS OPERASI: PENYIMPANAN MEMORI DITOLAK KARENA SIKAP PRIVASI / PENGATURAN.
                 finalId = memData.memory.id;
                 localMemoryObj.id = finalId;
                 if (typeof LocalMemoryVault !== 'undefined') {
-                  LocalMemoryVault.save(memData.memory);
+                  LocalMemoryVault.save(memData.memory, generatedMemId);
                 }
               }
             }
@@ -27474,9 +27525,11 @@ STATUS OPERASI: PENYIMPANAN MEMORI DITOLAK KARENA SIKAP PRIVASI / PENGATURAN.
             memoryId: finalId,
             category: assignedCat,
             content: factToStore,
+            rawSnippet: factToStore,
             sourceTitle: isAnaphoric ? 'Konteks Percakapan Sebelumnya' : 'Instruksi Chat Langsung',
             episodeId: generatedEpId,
             relevanceScore: 1.0,
+            matchedSignal: isAnaphoric ? 'anaphoric_chat' : 'explicit_command',
             reason: isAnaphoric ? 'Instruksi pencatatan dari respon sebelumnya' : 'Instruksi pencatatan eksplisit pengguna'
           };
 
@@ -29441,6 +29494,34 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
         // Simpan juga di browser storage sebagai fallback instan
         saveLocalBrowserMemory(topic, content);
+        if (typeof LocalMemoryVault !== 'undefined') {
+          LocalMemoryVault.save({
+            id: `mem_tool_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            userId: STATE.userId || 'default',
+            content: `[${topic}] ${content}`,
+            category: 'fact',
+            scope: STATE.activeProjectScope || 'global',
+            confidence: 1.0,
+            is_active: 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+          if (typeof JozzMemoryUI !== 'undefined') {
+            try { JozzMemoryUI.refresh(); } catch (_) {}
+          }
+        }
+        fetch(getUniversalApiUrl('/api/memories'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: STATE.userId || 'default',
+            content: `[${topic}] ${content}`,
+            category: 'fact',
+            scope: STATE.activeProjectScope || 'global',
+            sourceTitle: `Tool: save_memory (${topic})`,
+            sourceType: 'manual'
+          })
+        }).catch(() => {});
 
         if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
           try {
@@ -33580,7 +33661,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             jozzMemoryRecall = localRecall;
           }
         } catch (memRecallErr) {
-          console.warn('[Jozz Memory] Ollama recall warning:', memRecallErr);
+          console.warn('[Jozz Memory] OpenRouter recall warning:', memRecallErr);
         }
       }
 

@@ -68,7 +68,7 @@ async function handleMemoryRoutes(req, res, reqUrl) {
     if (method === 'GET' && pathname === '/api/memories/insights') {
       const scope = reqUrl.searchParams.get('scope') || null;
       const data = insights.generateMemoryInsights(userId, scope);
-      sendJson(res, 200, { success: true, data });
+      sendJson(res, 200, { success: true, data, insights: data });
       return true;
     }
 

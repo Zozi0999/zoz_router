@@ -674,11 +674,16 @@ function listMemories(userId, { category = null, scope = null, q = null, limit =
   const instance = initDatabase();
   const uid = userId || config.DEFAULT_USER_ID;
   const safeLimit = Math.max(1, Math.min(parseInt(limit, 10) || 50, 200));
+  const normCat = category ? (category === 'general_fact' ? 'fact' : category) : null;
 
   if (instance.mode === 'memory') {
     let list = Array.from(memStore.memories.values()).filter(m => (m.userId === uid || m.user_id === uid));
-    if (category) {
-      list = list.filter(m => m.category === category);
+    if (normCat) {
+      if (normCat === 'fact') {
+        list = list.filter(m => m.category === 'fact' || m.category === 'general_fact' || m.category === 'general');
+      } else {
+        list = list.filter(m => m.category === normCat);
+      }
     }
     if (scope) {
       list = list.filter(m => m.scope === scope || m.scope === 'global');
@@ -695,9 +700,13 @@ function listMemories(userId, { category = null, scope = null, q = null, limit =
   let sql = 'SELECT * FROM memories WHERE user_id = ?';
   const params = [uid];
 
-  if (category) {
-    sql += ' AND category = ?';
-    params.push(category);
+  if (normCat) {
+    if (normCat === 'fact') {
+      sql += " AND (category = 'fact' OR category = 'general_fact' OR category = 'general')";
+    } else {
+      sql += ' AND category = ?';
+      params.push(normCat);
+    }
   }
   if (scope) {
     sql += " AND (scope = ? OR scope = 'global')";
