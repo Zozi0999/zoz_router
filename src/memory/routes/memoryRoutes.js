@@ -125,7 +125,7 @@ async function handleMemoryRoutes(req, res, reqUrl) {
         return true;
       }
 
-      const recallResult = retriever.recallMemories(effectiveUserId, query, scope);
+      const recallResult = retriever.recallMemories(effectiveUserId, query, scope, body.options || {});
       sendJson(res, 200, {
         success: true,
         incognito: false,

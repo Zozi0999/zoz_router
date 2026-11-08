@@ -1497,7 +1497,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       'which', 'following', 'statements', 'statement', 'about', 'correct', 'select', 'apply', 'above', 'below', 'true', 'false'
     ]),
 
-    CROSS_SESSION_RECALL_REGEX: /\b(?:percakapan\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|sesi\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir|lain)|pertanyaan\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|bahas(?:an)?\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|lanjutkan\s+(?:pembahasan|percakapan|yang)\s+(?:tadi|sebelumnya)|ingat\s+(?:percakapan|pertanyaan|pembahasan|soal)\s*(?:tadi|sebelumnya|kita)?)\b/i,
+    CROSS_SESSION_RECALL_REGEX: /\b(?:percakapan\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|sesi\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir|lain)|pertanyaan\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|bahas(?:an)?\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|lanjutkan\s+(?:pembahasan|percakapan|yang)\s+(?:tadi|sebelumnya)|ingat\s*(?:percakapan|pertanyaan|pembahasan|soal|siapa|teman|tokoh|lagi)?|coba\s+ingat|ingat[- ]ingat|pikun|lupa|tokoh\s+siapa|siapa\s+tokoh|siapa\s+yang\s+(?:saya|pernah)|pernah\s+(?:saya|kita)\s+(?:bahas|cerita|bicarakan)|kemarin\s+(?:kan|kita)|sesi\s+lalu|riwayat\s+sebelumnya)\b/i,
 
     init() {
       if (this._cache) return this._cache;
@@ -1684,12 +1684,78 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         this.save(episodicSummary);
       }
 
+      // 4. Distill Factual & Relational Assertions (e.g. "X adalah Y", "nama saya Zozi", "teman saya Welin", dsb.)
+      const isQuestion = /[?？]/.test(rawUser) || /^(?:siapa|apa|dimana|kapan|mengapa|kenapa|bagaimana|mana|adakah|apakah)\b/i.test(rawUser);
+      const copulaOrRelationRegex = /\b(?:adalah|merupakan|ialah|yaitu|teman|sahabat|rekan|keluarga|saudara|kenalan|kolega|bos|atasan|bawahan|tokoh|pencipta|pembuat|nama\s+saya|pekerjaan\s+saya|tugas\s+anda)\b/i;
+      if (!isQuestion && rawUser.length >= 10 && copulaOrRelationRegex.test(rawUser)) {
+        const factId = `fact_${this.hashText(rawUser)}`;
+        const factItem = {
+          id: factId,
+          userId,
+          user_id: userId,
+          category: 'fact',
+          scope,
+          confidence: 0.98,
+          content: rawUser.slice(0, 320),
+          created_at: nowIso,
+          updated_at: nowIso
+        };
+        this.save(factItem);
+      }
+
+      // 5. Distill Session Title if it expresses a verifiable declarative fact (e.g. "Welin kusuma adalah teman zozi")
+      if (sessionTitle && sessionTitle.length >= 10 && sessionTitle !== 'Percakapan Baru' && sessionTitle !== 'Percakapan Sebelumnya') {
+        if (!/[?？]/.test(sessionTitle) && copulaOrRelationRegex.test(sessionTitle)) {
+          const sessFactId = `fact_title_${this.hashText(sessionTitle)}`;
+          const sessFactItem = {
+            id: sessFactId,
+            userId,
+            user_id: userId,
+            category: 'fact',
+            scope,
+            confidence: 0.96,
+            content: sessionTitle.trim(),
+            created_at: nowIso,
+            updated_at: nowIso
+          };
+          this.save(sessFactItem);
+        }
+      }
+
       return { errorLesson, episodicSummary, preferenceMemory };
     },
 
     getAll(userId = STATE.userId || 'default') {
       const list = this.init();
       return list.filter(m => (m.userId === userId || m.user_id === userId || m.userId === 'default' || m.user_id === 'default'));
+    },
+
+    indexPastSessions(sessions, userId = STATE.userId || 'default') {
+      if (!Array.isArray(sessions) || sessions.length === 0) return;
+      const copulaOrRelationRegex = /\b(?:adalah|merupakan|ialah|yaitu|teman|sahabat|rekan|keluarga|saudara|kenalan|kolega|bos|atasan|bawahan|tokoh|pencipta|pembuat|nama\s+saya|pekerjaan\s+saya|tugas\s+anda)\b/i;
+      for (const s of sessions) {
+        if (!s || s.isIncognito || !s.title) continue;
+        const sTitle = String(s.title).trim();
+        if (sTitle.length >= 10 && sTitle !== 'Percakapan Baru' && sTitle !== 'Percakapan Sebelumnya' && !/[?？]/.test(sTitle)) {
+          if (copulaOrRelationRegex.test(sTitle)) {
+            const sessFactId = `fact_title_${this.hashText(sTitle)}`;
+            const existing = this.getAll(userId).some(m => m && m.id === sessFactId);
+            if (!existing) {
+              this.save({
+                id: sessFactId,
+                userId,
+                user_id: userId,
+                category: 'fact',
+                scope: 'global',
+                confidence: 0.96,
+                content: sTitle,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              });
+            }
+          }
+        }
+      }
     },
 
     save(memory, tempIdToReplace = null) {
@@ -1738,7 +1804,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       return merged;
     },
 
-    recallLocal(queryText, scope = 'global', userId = STATE.userId || 'default', limit = 5, currentSessionId = null) {
+    recallLocal(queryText, scope = 'global', userId = STATE.userId || 'default', limit = 16, currentSessionId = null) {
       if (!queryText) return null;
       const memories = this.getAll(userId);
       const queryTokens = this.extractSubstantiveTokens(queryText);
@@ -1752,25 +1818,29 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         if (!m || !m.content) continue;
         const probe = m.questionText || m.content || '';
         const { score: simScore, hitCount } = this.computeTokenOverlap(queryTokens, probe);
+        const titleOverlap = m.sessionTitle ? this.computeTokenOverlap(queryTokens, m.sessionTitle) : { score: 0, hitCount: 0 };
+        const combinedHit = hitCount + titleOverlap.hitCount;
+        const maxSim = Math.max(simScore, titleOverlap.score);
         let finalScore = 0;
 
         if (m.category === 'error_lesson') {
-          if (hitCount >= 2 && simScore >= 0.42) {
-            finalScore = 10.0 + simScore * 5.0;
+          if (combinedHit >= 2 && maxSim >= 0.42) {
+            finalScore = 10.0 + maxSim * 5.0;
           } else if (isExplicitCrossSessionRecall) {
             finalScore = 4.0;
           }
         } else if (m.category === 'episodic_context') {
           if (isExplicitCrossSessionRecall && (!currentSessionId || m.sessionId !== currentSessionId)) {
-            finalScore = 3.5 + simScore;
-          } else if (hitCount >= 2 && simScore >= 0.35) {
-            finalScore = 2.0 + simScore * 3.0;
+            finalScore = 3.8 + maxSim * 2.0;
+          } else if (combinedHit >= 1 && maxSim >= 0.25) {
+            finalScore = 2.0 + maxSim * 3.0;
           }
         } else {
-          if (hitCount >= 1 && simScore >= 0.22) {
-            finalScore = 1.5 + simScore * 2.5 + (m.scope === scope ? 0.4 : 0);
-          } else if (m.category === 'preference' && m.preferLetterOnly) {
-            finalScore = 1.2;
+          // Bayesian Core Fact Invariant Prior: Fakta terverifikasi, preferensi, dan relasi selalu memiliki probabilitas prior
+          const basePrior = isExplicitCrossSessionRecall ? 2.2 : 0.8;
+          finalScore = basePrior + (combinedHit >= 1 ? (maxSim * 3.0 + 1.2) : 0) + (m.scope === scope ? 0.3 : 0);
+          if (m.category === 'preference' && m.preferLetterOnly) {
+            finalScore += 0.5;
           }
         }
 
@@ -1784,11 +1854,15 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (typeof STATE !== 'undefined' && Array.isArray(STATE.sessions)) {
         const otherSessions = STATE.sessions
           .filter(s => s && !s.isIncognito && s.id !== currentSessionId && Array.isArray(s.messages) && s.messages.length >= 2)
-          .slice(0, 15);
+          .slice(0, 30);
 
         for (let sIdx = 0; sIdx < otherSessions.length; sIdx++) {
           const sess = otherSessions[sIdx];
           const msgs = sess.messages;
+          const sTitle = sess.title || 'Sesi Sebelumnya';
+          const titleMatch = this.computeTokenOverlap(queryTokens, sTitle);
+          const recencyDecay = Math.exp(-0.04 * sIdx);
+
           for (let mIdx = msgs.length - 1; mIdx >= 0; mIdx--) {
             const msg = msgs[mIdx];
             if (!msg || msg.role !== 'assistant' || !msg.content) continue;
@@ -1809,19 +1883,20 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
             const epHashId = `ep_${this.hashText(rawQ)}`;
             if (seenIds.has(epHashId)) continue;
 
-            const { score: simScore, hitCount } = this.computeTokenOverlap(queryTokens, `${rawQ} ${msg.content}`);
-            const recencyDecay = Math.exp(-0.15 * sIdx);
+            const contentOverlap = this.computeTokenOverlap(queryTokens, `${rawQ} ${msg.content}`);
+            const bestSim = Math.max(contentOverlap.score, titleMatch.score * 1.5);
+            const totalHits = contentOverlap.hitCount + titleMatch.hitCount;
+
             let sessionScore = 0;
-            if (isExplicitCrossSessionRecall && sIdx < 4) {
-              sessionScore = 3.2 * recencyDecay + simScore;
-            } else if (hitCount >= 2 && simScore >= 0.36) {
-              sessionScore = (2.0 + simScore * 3.0) * recencyDecay;
+            if (isExplicitCrossSessionRecall) {
+              sessionScore = (3.6 + bestSim * 2.5) * recencyDecay;
+            } else if (totalHits >= 1 && bestSim >= 0.22) {
+              sessionScore = (2.0 + bestSim * 3.0) * recencyDecay;
             }
 
             if (sessionScore > 0) {
               seenIds.add(epHashId);
               const cleanA = String(msg.content || '').replace(/\s+/g, ' ').trim().slice(0, 260);
-              const sTitle = sess.title || 'Sesi Sebelumnya';
               scored.push({
                 score: sessionScore,
                 memory: {
@@ -1853,6 +1928,21 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (standardMemories.length > 0) {
         const lines = standardMemories.map((m, idx) => `[MEM-${idx + 1} | ID: ${m.id} | Cat: ${m.category}]: ${m.content}`);
         blocks.push(`### MEMORI & RIWAYAT LINTAS-SESI TERVERIFIKASI (Jozz Memory Vault):\n${lines.join('\n')}\n*Instruksi: Gunakan fakta dan riwayat percakapan lintas-sesi di atas secara relevan dan akurat.*`);
+      }
+
+      // 3. Peta Riwayat Sesi Sebelumnya jika ada query eksplisit / meta recall
+      if (isExplicitCrossSessionRecall && typeof STATE !== 'undefined' && Array.isArray(STATE.sessions)) {
+        const pastSessionMaps = STATE.sessions
+          .filter(s => s && !s.isIncognito && s.id !== currentSessionId && Array.isArray(s.messages) && s.messages.length >= 2)
+          .slice(0, 12);
+        if (pastSessionMaps.length > 0) {
+          const mapLines = pastSessionMaps.map(s => {
+            const firstUser = s.messages.find(m => m.role === 'user');
+            const firstUserText = firstUser ? String(firstUser.content || '').replace(/\s+/g, ' ').slice(0, 90) : '';
+            return `- Sesi "${s.title || 'Percakapan Sebelumnya'}": ${firstUserText || 'Diskusi umum'}`;
+          });
+          blocks.push(`[PETA SESI PERCAKAPAN SEBELUMNYA]:\n${mapLines.join('\n')}\n*Petunjuk: Gunakan peta riwayat sesi di atas jika pengguna menanyakan apa yang pernah kita bicarakan, tokoh lampau, atau topik sesi lain.*`);
+        }
       }
 
       const receipts = top.map(m => ({
@@ -6451,6 +6541,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
               }
               scrubScatteredCodeFromSession(s);
             });
+            if (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.indexPastSessions === 'function') {
+              LocalMemoryVault.indexPastSessions(STATE.sessions);
+            }
           }
         } catch (e) {}
       }
@@ -6540,6 +6633,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         });
         if (validDbSessions.length >= STATE.sessions.length || purgedIncogIds.size > 0) {
           STATE.sessions = validDbSessions;
+          if (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.indexPastSessions === 'function') {
+            LocalMemoryVault.indexPastSessions(validDbSessions);
+          }
           if (purgedIncogIds.size > 0) {
             savePersistedState({ immediate: true });
           }
@@ -31765,11 +31861,28 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       let jozzMemoryRecall = null;
       if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false) {
         try {
-          const effectiveMemoryQuery = (decisionCalibration && decisionCalibration.parentQuestionText)
-            ? `${promptText}\n${decisionCalibration.parentQuestionText}`
-            : promptText;
+          let effectiveMemoryQuery = promptText;
+          if (decisionCalibration && decisionCalibration.parentQuestionText) {
+            effectiveMemoryQuery = `${promptText}\n${decisionCalibration.parentQuestionText}`;
+          } else {
+            const isMetaQuery = (typeof LocalMemoryVault !== 'undefined' && LocalMemoryVault.CROSS_SESSION_RECALL_REGEX.test(promptText)) || promptText.trim().length <= 45;
+            if (isMetaQuery && session && Array.isArray(session.messages) && session.messages.length >= 2) {
+              const lastAssistant = session.messages.filter(m => m.role === 'assistant').slice(-1)[0];
+              const lastUser = session.messages.filter(m => m.role === 'user' && m.content !== promptText).slice(-1)[0];
+              const contextSnippets = [];
+              if (lastAssistant && lastAssistant.content) {
+                contextSnippets.push(String(lastAssistant.content).replace(/\s+/g, ' ').slice(0, 260));
+              }
+              if (lastUser && lastUser.content) {
+                contextSnippets.push(String(lastUser.content).replace(/\s+/g, ' ').slice(0, 140));
+              }
+              if (contextSnippets.length > 0) {
+                effectiveMemoryQuery = `${promptText}\nKonteks Percakapan Terakhir: ${contextSnippets.join(' ')}`;
+              }
+            }
+          }
           const localRecall = (typeof LocalMemoryVault !== 'undefined')
-            ? LocalMemoryVault.recallLocal(effectiveMemoryQuery, STATE.activeProjectScope || 'global', STATE.userId || 'default', 5, session?.id)
+            ? LocalMemoryVault.recallLocal(effectiveMemoryQuery, STATE.activeProjectScope || 'global', STATE.userId || 'default', 16, session?.id)
             : null;
           const recallRes = await fetch(getUniversalApiUrl('/api/memories/recall'), {
             method: 'POST',
@@ -31777,7 +31890,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             body: JSON.stringify({
               userId: STATE.userId || 'default',
               query: effectiveMemoryQuery,
-              scope: STATE.activeProjectScope || 'global'
+              scope: STATE.activeProjectScope || 'global',
+              options: { maxResults: 16 }
             })
           }).catch(() => null);
           if (recallRes && recallRes.ok) {
@@ -33627,11 +33741,28 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       let jozzMemoryRecall = null;
       if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false) {
         try {
-          const effectiveMemoryQuery = (decisionCalibration && decisionCalibration.parentQuestionText)
-            ? `${promptText}\n${decisionCalibration.parentQuestionText}`
-            : promptText;
+          let effectiveMemoryQuery = promptText;
+          if (decisionCalibration && decisionCalibration.parentQuestionText) {
+            effectiveMemoryQuery = `${promptText}\n${decisionCalibration.parentQuestionText}`;
+          } else {
+            const isMetaQuery = (typeof LocalMemoryVault !== 'undefined' && LocalMemoryVault.CROSS_SESSION_RECALL_REGEX.test(promptText)) || promptText.trim().length <= 45;
+            if (isMetaQuery && session && Array.isArray(session.messages) && session.messages.length >= 2) {
+              const lastAssistant = session.messages.filter(m => m.role === 'assistant').slice(-1)[0];
+              const lastUser = session.messages.filter(m => m.role === 'user' && m.content !== promptText).slice(-1)[0];
+              const contextSnippets = [];
+              if (lastAssistant && lastAssistant.content) {
+                contextSnippets.push(String(lastAssistant.content).replace(/\s+/g, ' ').slice(0, 260));
+              }
+              if (lastUser && lastUser.content) {
+                contextSnippets.push(String(lastUser.content).replace(/\s+/g, ' ').slice(0, 140));
+              }
+              if (contextSnippets.length > 0) {
+                effectiveMemoryQuery = `${promptText}\nKonteks Percakapan Terakhir: ${contextSnippets.join(' ')}`;
+              }
+            }
+          }
           const localRecall = (typeof LocalMemoryVault !== 'undefined')
-            ? LocalMemoryVault.recallLocal(effectiveMemoryQuery, STATE.activeProjectScope || 'global', STATE.userId || 'default', 5, session?.id)
+            ? LocalMemoryVault.recallLocal(effectiveMemoryQuery, STATE.activeProjectScope || 'global', STATE.userId || 'default', 16, session?.id)
             : null;
           const recallRes = await fetch(getUniversalApiUrl('/api/memories/recall'), {
             method: 'POST',
@@ -33639,7 +33770,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             body: JSON.stringify({
               userId: STATE.userId || 'default',
               query: effectiveMemoryQuery,
-              scope: STATE.activeProjectScope || 'global'
+              scope: STATE.activeProjectScope || 'global',
+              options: { maxResults: 16 }
             })
           }).catch(() => null);
           if (recallRes && recallRes.ok) {

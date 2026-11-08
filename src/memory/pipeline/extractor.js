@@ -310,8 +310,8 @@ function triggerAsyncBackgroundExtraction({
         return;
       }
 
-      // Check if user stated facts about their environment, preferences, tech stack, or rules
-      const declarativeClues = /\b(?:saya\s+(?:menggunakan|suka|ingin|sedang|memakai|beralih|pindah|buat|bekerja|punya)|kami\s+(?:menggunakan|memakai)|aplikasi\s+(?:ini|kami)|proyek\s+(?:ini|kami)|aturan\s*:|wajib\s*:|preferensi\s*:)\b/i;
+      // Check if user stated facts about their environment, preferences, tech stack, rules, or entity relations
+      const declarativeClues = /\b(?:saya\s+(?:menggunakan|suka|ingin|sedang|memakai|beralih|pindah|buat|bekerja|punya|seorang|adalah|bernama)|kami\s+(?:menggunakan|memakai)|aplikasi\s+(?:ini|kami)|proyek\s+(?:ini|kami)|aturan\s*:|wajib\s*:|preferensi\s*:|adalah|merupakan|ialah|yaitu|teman|sahabat|rekan|keluarga|saudara|kenalan|kolega|bos|atasan|bawahan|tokoh|pencipta|pembuat|nama\s+saya|pekerjaan\s+saya|tugas\s+anda)\b/i;
       const temporalReplacementClues = /\b(?:sekarang\s+menggunakan|beralih\s+ke|ganti\s+ke|tidak\s+lagi\s+memakai|pindah\s+dari\s+.*\s+ke)\b/i;
 
       if (!declarativeClues.test(userMessage) && !temporalReplacementClues.test(userMessage)) {
@@ -355,9 +355,28 @@ function triggerAsyncBackgroundExtraction({
           content: cleanSent.content,
           category,
           scope,
-          confidence: 0.92,
+          confidence: 0.95,
           episodeId: ep.id
         });
+
+        // Entity & Relational Graph Extraction (e.g. "Welin kusuma adalah teman zozi")
+        const copulaRelationMatch = sent.match(/\b([a-zA-Z0-9_\-\s]{2,32})\s+(?:adalah|merupakan|ialah)\s+([a-zA-Z0-9_\-\s]{2,64})/i);
+        if (copulaRelationMatch) {
+          const subjName = copulaRelationMatch[1].trim();
+          const objFact = copulaRelationMatch[2].trim();
+          if (subjName.length >= 3 && objFact.length >= 3) {
+            const entSubj = dbStorage.upsertEntity({ userId, name: subjName, entityType: 'person_or_subject', scope });
+            const entObj = dbStorage.upsertEntity({ userId, name: objFact.split(/\s+/).slice(-2).join(' '), entityType: 'relation_target', scope });
+            dbStorage.addRelation({
+              userId,
+              sourceEntityId: entSubj.id,
+              targetEntityId: entObj.id,
+              relationType: 'copula_definition',
+              fact: cleanSent.content,
+              episodeId: ep.id
+            }, { resolveConflict: true });
+          }
+        }
 
         // Temporal Relation Graph Resolution:
         // E.g. "Kami sekarang beralih dari REST ke GraphQL"

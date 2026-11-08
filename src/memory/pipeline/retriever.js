@@ -42,7 +42,7 @@ function computeTokenOverlapScore(queryTokens, docText) {
   return Math.max(dice, containment * 0.85);
 }
 
-const CROSS_SESSION_RECALL_QUERY_REGEX = /\b(?:percakapan\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|sesi\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir|lain)|pertanyaan\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|bahas(?:an)?\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|lanjutkan\s+(?:pembahasan|percakapan|yang)\s+(?:tadi|sebelumnya)|ingat\s+(?:percakapan|pertanyaan|pembahasan|soal)\s+(?:tadi|sebelumnya|kita))\b/i;
+const CROSS_SESSION_RECALL_QUERY_REGEX = /\b(?:percakapan\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|sesi\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir|lain)|pertanyaan\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|bahas(?:an)?\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|lanjutkan\s+(?:pembahasan|percakapan|yang)\s+(?:tadi|sebelumnya)|ingat\s*(?:percakapan|pertanyaan|pembahasan|soal|siapa|teman|tokoh|lagi)?|coba\s+ingat|ingat[- ]ingat|pikun|lupa|tokoh\s+siapa|siapa\s+tokoh|siapa\s+yang\s+(?:saya|pernah)|pernah\s+(?:saya|kita)\s+(?:bahas|cerita|bicarakan)|kemarin\s+(?:kan|kita)|sesi\s+lalu|riwayat\s+sebelumnya)\b/i;
 
 /**
  * Perform Scoped Hybrid Recall combining:
@@ -61,10 +61,10 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
 
   // 1. Vector Signal
   const queryVec = dbStorage.computeFastEmbedding(q);
-  const vectorHits = dbStorage.searchMemoriesVector(uid, queryVec, targetScope, 12);
+  const vectorHits = dbStorage.searchMemoriesVector(uid, queryVec, targetScope, 24);
 
   // 2. FTS5 BM25 Signal
-  const ftsHits = dbStorage.searchMemoriesFTS5(uid, q, targetScope, 12);
+  const ftsHits = dbStorage.searchMemoriesFTS5(uid, q, targetScope, 24);
 
   // 3. Graph Signal (Entity match -> Active Relation Traversal)
   const graphHits = [];
@@ -132,7 +132,7 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
 
   // 4B. Counterfactual Error-Lesson Matching (High-Priority P(H_falsified) = 0 Signal)
   const queryTokens = extractContentTokens(q);
-  const allRecent = dbStorage.listMemories(uid, { limit: 40 });
+  const allRecent = dbStorage.listMemories(uid, { limit: 60 });
   if (queryTokens.length >= 2) {
     const errorLessons = allRecent.filter(m => m && (m.category === 'error_lesson' || String(m.content || '').startsWith('[KOREKSI KESALAHAN TERVERIFIKASI]')));
     errorLessons.forEach((lesson) => {
@@ -148,11 +148,21 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
   const recentEpisodic = allRecent.filter(m => m && (m.category === 'episodic_context' || String(m.content || '').startsWith('[Episodik Sesi')));
   recentEpisodic.forEach((epMem, idx) => {
     const sim = computeTokenOverlapScore(queryTokens, epMem.content || '');
-    if (isExplicitCrossSessionRecall && idx < 4) {
-      addRank({ ...epMem, category: 'episodic_context' }, idx + 1, 1.8, 'episodic_recent');
-    } else if (sim >= 0.38) {
-      addRank({ ...epMem, category: 'episodic_context' }, idx + 1, 1.4 * sim, 'episodic_match');
+    if (isExplicitCrossSessionRecall && idx < 12) {
+      const recencyWeight = 2.4 * Math.exp(-0.05 * idx);
+      addRank({ ...epMem, category: 'episodic_context' }, idx + 1, recencyWeight, 'episodic_recent');
+    } else if (sim >= 0.32) {
+      addRank({ ...epMem, category: 'episodic_context' }, idx + 1, 1.6 * sim, 'episodic_match');
     }
+  });
+
+  // 4D. Bayesian Core Fact Invariant Prior (P(m_core) > 0)
+  // Fakta terverifikasi pengguna, identitas, preferensi, dan relasi adalah invariant priors
+  const coreMemories = allRecent.filter(m => m && (m.category === 'fact' || m.category === 'preference' || m.category === 'project_context'));
+  coreMemories.forEach((coreMem, idx) => {
+    const sim = computeTokenOverlapScore(queryTokens, coreMem.content || '');
+    const priorWeight = isExplicitCrossSessionRecall ? 1.8 : 0.8;
+    addRank({ ...coreMem }, idx + 1, priorWeight + sim * 1.5, 'core_fact');
   });
 
   // Sort by combined RRF score descending
