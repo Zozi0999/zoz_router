@@ -8228,6 +8228,22 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // 2. Lindungi escape dollar: \$
     clean = clean.replace(/\\(\$)/g, '%%ZOZ_ESCAPED_DOLLAR%%');
 
+    // 2b. Ekstrak Display Math dari lingkungan LaTeX eksplisit (\begin{equation}...\end{equation}, \begin{align}...\end{align}, dll.)
+    const mathEnvRegex = /\\begin\{(?:equation|align|aligned|gather|gathered|alignat|flalign|multline|pmatrix|bmatrix|vmatrix|Vmatrix|cases|matrix)\*?\}([\s\S]+?)\\end\{(?:equation|align|aligned|gather|gathered|alignat|flalign|multline|pmatrix|bmatrix|vmatrix|Vmatrix|cases|matrix)\*?\}/g;
+    clean = clean.replace(mathEnvRegex, (match) => {
+      const formula = match.trim();
+      if (!formula) return match;
+      const token = `%%ZOZ_MATH_DISPLAY_${placeholderCounter++}%%`;
+      mathBlocks.push({ token, formula, displayMode: true });
+      return `\n\n${token}\n\n`;
+    });
+
+    // 2c. Normalisasi keseimbangan delimiter $$ display math: jika jumlah ganjil (pemotongan stream/unclosed), tutup secara aman
+    const doubleDollarCount = (clean.match(/\$\$/g) || []).length;
+    if (doubleDollarCount % 2 !== 0) {
+      clean += '\n$$';
+    }
+
     // 3. Ekstrak Display Math: $$ ... $$ dan \[ ... \]
     clean = clean.replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g, (match, p1, p2) => {
       const formula = (p1 || p2 || '').trim();
@@ -8238,7 +8254,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     });
 
     // 4. Ekstrak Inline Math: $ ... $ dan \( ... \)
-    clean = clean.replace(/\\\(([\s\S]+?)\\\)|\$([^\s$](?:[^$\n]*?[^\s$])?)\$(?!\d)/g, (match, p1, p2) => {
+    clean = clean.replace(/\\\(([\s\S]+?)\\\)|(?<!\$)\$([^\s$](?:[^$\n]*?[^\s$])?)\$(?!\$|\d)/g, (match, p1, p2) => {
       const formula = (p1 || p2 || '').trim();
       if (!formula) return match;
       // Jangan salah tangkap format mata uang biasa ($100 atau $5.50)
@@ -12911,6 +12927,15 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     const backtickCount = (trimmed.match(/```/g) || []).length;
     if (backtickCount % 2 !== 0) return true;
 
+    // 2b. Check for unclosed display math ($$)
+    const displayMathCount = (trimmed.match(/\$\$/g) || []).length;
+    if (displayMathCount % 2 !== 0 && normFinish !== 'stop' && normFinish !== 'end_turn') return true;
+
+    // 2c. Check for unclosed LaTeX brackets \[ ... \]
+    const openBracketMath = (trimmed.match(/\\\[/g) || []).length;
+    const closeBracketMath = (trimmed.match(/\\\]/g) || []).length;
+    if (openBracketMath > closeBracketMath && normFinish !== 'stop' && normFinish !== 'end_turn') return true;
+
     // 3. Check for HTML document completion
     const hasClosedHtml = isWebsiteComplete(trimmed);
     if (hasClosedHtml) return false;
@@ -12956,10 +12981,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     const strippedVariation = trimmed.replace(/\uFE0F+$/, '');
     const codePoints = Array.from(strippedVariation);
     const lastCp = codePoints.length > 0 ? codePoints[codePoints.length - 1] : '';
-    const terminalChars = new Set(['.', '!', '?', '"', "'", '”', '’', ')', ']', '}', '`', ';', '>', '|', '*', '_']);
+    const terminalChars = new Set(['.', '!', '?', '"', "'", '”', '’', ')', ']', '}', '`', ';', '>', '|', '*', '_', '$']);
     if (terminalChars.has(lastCp) || /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/u.test(lastCp)) {
       return false;
     }
+    if (trimmed.endsWith('$$') && displayMathCount % 2 === 0) return false;
+    if (trimmed.endsWith('\\]') || trimmed.endsWith('\\)')) return false;
 
     return true;
   }
@@ -31586,9 +31613,23 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         systemContent = `${formattingConstraints.directive}\n\n${systemContent}`;
       }
 
+      if (isPureMathSession) {
+        const mathFormattingDirective = `[MANDAT OUTPUT MATEMATIKA MURNI (LATEX / KATEX)]:
+1. Untuk setiap rumus/persamaan matematika terpisah, SELALU gunakan blok display math dengan pembungkus ganda \`$$\` di baris tersendiri:
+$$
+[rumus]
+$$
+2. Untuk variabel, simbol tunggal, atau notasi inline dalam teks, gunakan pembungkus tunggal: \`$x$\`.
+3. Pastikan setiap blok \`$$\` memiliki penutup \`$$\` yang seimbang dan tidak terpotong di tengah jalan.
+4. Jangan menyertakan basa-basi atau pengantar panjang jika pengguna meminta sedikit teks. Tampilkan langsung keanggunan, ketepatan, dan keindahan formulasi matematika murni.`;
+        systemContent = systemContent ? `${mathFormattingDirective}\n\n${systemContent}` : mathFormattingDirective;
+      }
+
+      const hasExplicitNoMemoryDirective = /\b(?:jangan\s+(?:simpan|masuk(?:kan)?)\s*(?:ke\s+)?memor[iy]|tidak\s+perlu\s+(?:masuk(?:kan)?|simpan)\s*(?:ke\s+)?memor[iy]|tanpa\s+memor[iy]|no\s+memor[iy]|don'?t\s+save\s+(?:to\s+)?memor[iy])\b/i.test(promptText);
+
       // Jozz Memory Scoped Hybrid Recall (Hybrid Storage + Cross-Session Episodic & Error-Learning Vault)
       let jozzMemoryRecall = null;
-      if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false) {
+      if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && !hasExplicitNoMemoryDirective) {
         try {
           let effectiveMemoryQuery = promptText;
           if (decisionCalibration && decisionCalibration.parentQuestionText) {
@@ -31837,6 +31878,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (wantsFile || isWebRequest) {
         if (!requestBody.options.num_predict) requestBody.options.num_predict = 8192;
       }
+      if (!requestBody.options.num_predict) {
+        requestBody.options.num_predict = (isPureMathSession || isQuestionOrAnalytical || wantsFile || isWebRequest) ? 8192 : 4096;
+      }
       if ((decisionCalibration.isDiscreteChoice || decisionCalibration.isAnalyticalQuery) && !wantsFile && !isDocRequest) {
         requestBody.think = true;
       }
@@ -32061,6 +32105,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               throw new Error(errStr);
             }
             if (parsed.done_reason) doneReason = parsed.done_reason;
+          if (parsed.done && !doneReason) doneReason = 'stop';
+            if (parsed.done && !doneReason) doneReason = 'stop';
             if (parsed.done && (parsed.eval_count !== undefined || parsed.prompt_eval_count !== undefined)) {
               ollamaUsage = {
                 completion_tokens: parsed.eval_count,
@@ -32103,6 +32149,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             throw new Error(errStr);
           }
           if (parsed.done_reason) doneReason = parsed.done_reason;
+          if (parsed.done && !doneReason) doneReason = 'stop';
           if (parsed.done && (parsed.eval_count !== undefined || parsed.prompt_eval_count !== undefined)) {
             ollamaUsage = {
               completion_tokens: parsed.eval_count,
@@ -32980,7 +33027,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         renderChatHistory(els.searchHistoryInput?.value || '');
 
         // Pillar 1: Hybrid Memory Capture (Counterfactual Error-Learning + Cross-Session Episodic Distillation)
-        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && fullText && fullText.trim().length >= 1) {
+        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && !hasExplicitNoMemoryDirective && fullText && fullText.trim().length >= 1) {
           const capturedLocal = (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.captureTurnMemory === 'function')
             ? LocalMemoryVault.captureTurnMemory({
                 userId: STATE.userId || 'default',
@@ -33012,7 +33059,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
 
       // SEAMLESS AUTO-CONTINUATION: Jika output terpotong, sambung otomatis tanpa putus
-      const needsOllamaContinuation = !STATE.abortController?.signal?.aborted && !runOptions._isAutoContinuation && (isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, doneReason === 'length' ? 'length' : null));
+      const needsOllamaContinuation = !STATE.abortController?.signal?.aborted && !runOptions._isAutoContinuation && (isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, doneReason));
       if (needsOllamaContinuation) {
         console.log('[Ollama Auto-Recovery] Respons terpotong di tengah jalan. Menyambung otomatis...');
         try {
@@ -33039,7 +33086,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
 
       // Check if output is STILL cut in half after auto-continuation and provide fallback button
-      if (isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, doneReason === 'length' ? 'length' : null)) {
+      if (isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, doneReason)) {
         attachContinuationButton(
           assistantRow.querySelector('.message-content-box') || assistantRow,
           session,
@@ -33482,9 +33529,23 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         systemContent = `${formattingConstraints.directive}\n\n${systemContent}`;
       }
 
+      if (isPureMathSession) {
+        const mathFormattingDirective = `[MANDAT OUTPUT MATEMATIKA MURNI (LATEX / KATEX)]:
+1. Untuk setiap rumus/persamaan matematika terpisah, SELALU gunakan blok display math dengan pembungkus ganda \`$$\` di baris tersendiri:
+$$
+[rumus]
+$$
+2. Untuk variabel, simbol tunggal, atau notasi inline dalam teks, gunakan pembungkus tunggal: \`$x$\`.
+3. Pastikan setiap blok \`$$\` memiliki penutup \`$$\` yang seimbang dan tidak terpotong di tengah jalan.
+4. Jangan menyertakan basa-basi atau pengantar panjang jika pengguna meminta sedikit teks. Tampilkan langsung keanggunan, ketepatan, dan keindahan formulasi matematika murni.`;
+        systemContent = systemContent ? `${mathFormattingDirective}\n\n${systemContent}` : mathFormattingDirective;
+      }
+
+      const hasExplicitNoMemoryDirective = /\b(?:jangan\s+(?:simpan|masuk(?:kan)?)\s*(?:ke\s+)?memor[iy]|tidak\s+perlu\s+(?:masuk(?:kan)?|simpan)\s*(?:ke\s+)?memor[iy]|tanpa\s+memor[iy]|no\s+memor[iy]|don'?t\s+save\s+(?:to\s+)?memor[iy])\b/i.test(promptText);
+
       // Jozz Memory Scoped Hybrid Recall (Hybrid Storage + Cross-Session Episodic & Error-Learning Vault)
       let jozzMemoryRecall = null;
-      if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false) {
+      if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && !hasExplicitNoMemoryDirective) {
         try {
           let effectiveMemoryQuery = promptText;
           if (decisionCalibration && decisionCalibration.parentQuestionText) {
@@ -35295,7 +35356,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         renderChatHistory(els.searchHistoryInput?.value || '');
 
         // Pillar 1: Hybrid Memory Capture (Counterfactual Error-Learning + Cross-Session Episodic Distillation)
-        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && fullText && fullText.trim().length >= 1) {
+        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && !hasExplicitNoMemoryDirective && fullText && fullText.trim().length >= 1) {
           const capturedLocal = (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.captureTurnMemory === 'function')
             ? LocalMemoryVault.captureTurnMemory({
                 userId: STATE.userId || 'default',
