@@ -8428,6 +8428,235 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     return str;
   }
 
+  // ==================== PURE MATHEMATICS FORMULA PURIFICATION ENGINE ====================
+  function purifyPureMathFormula(text, options = {}) {
+    if (!text || typeof text !== 'string') return '';
+    let out = text;
+
+    // 0. Lindungi blok kode berpagar (``` ... ```) dan kode inline (` ... `) dari pembersihan rumus
+    const codeBlocks = [];
+    out = out.replace(/```[\s\S]*?```|`[^`\n]+`/g, (match) => {
+      const token = `%%ZOZ_PURE_MATH_CODE_${codeBlocks.length}%%`;
+      codeBlocks.push({ token, content: match });
+      return token;
+    });
+
+    // 1. Lepas pembungkus display math ($$ ... $$ dan \[ ... \]) pada batas baris atau blok tunggal
+    out = out.replace(/(^|\n)\s*\$\$\s*([\s\S]*?)\s*\$\$\s*(?=\n|$)/g, (m, prefix, inner) => prefix + inner.trim());
+    out = out.replace(/(^|\n)\s*\\\[\s*([\s\S]*?)\s*\\\]\s*(?=\n|$)/g, (m, prefix, inner) => prefix + inner.trim());
+
+    // Jika seluruh teks dibungkus oleh $ ... $ atau $$ ... $$ tunggal
+    if (/^\s*\${1,2}\s*([\s\S]+?)\s*\${1,2}\s*$/.test(out)) {
+      out = out.replace(/^\s*\${1,2}\s*([\s\S]+?)\s*\${1,2}\s*$/, '$1');
+    }
+
+    // 2. Dekompresi dan lepas pembungkus teks LaTeX secara rekursif: \text{...}, \mathrm{...}, dsb.
+    let prev;
+    do {
+      prev = out;
+      out = out.replace(/\\(?:text|mathrm|mathbf|mathit|mathsf|mathtt|boldsymbol|bm|textbf|textit)\s*\{([^{}]+)\}/g, '$1');
+    } while (out !== prev);
+
+    // 3. Relasi Panah & Morfisma Teori Kategori / Reaksi Kimia (Boundary (?![a-zA-Z]))
+    out = out
+      .replace(/\\(?:rightarrow|to|longrightarrow)(?![a-zA-Z])/g, '→')
+      .replace(/\\(?:leftarrow|gets|longleftarrow)(?![a-zA-Z])/g, '←')
+      .replace(/\\(?:leftrightarrow|longleftrightarrow)(?![a-zA-Z])/g, '↔')
+      .replace(/\\(?:Rightarrow|implies|Longrightarrow)(?![a-zA-Z])/g, '⇒')
+      .replace(/\\(?:Leftarrow|Longleftarrow)(?![a-zA-Z])/g, '⇐')
+      .replace(/\\(?:Leftrightarrow|iff|Longleftrightarrow)(?![a-zA-Z])/g, '⇔')
+      .replace(/\\(?:mapsto)(?![a-zA-Z])/g, '↦')
+      .replace(/\\(?:rightleftharpoons)(?![a-zA-Z])/g, '⇌')
+      .replace(/\\(?:uparrow)(?![a-zA-Z])/g, '↑')
+      .replace(/\\(?:downarrow)(?![a-zA-Z])/g, '↓')
+      .replace(/\\(?:nearrow)(?![a-zA-Z])/g, '↗')
+      .replace(/\\(?:searrow)(?![a-zA-Z])/g, '↘');
+
+    // 4. Blackboard Bold (Sistem Bilangan & Monad)
+    const bbMap = { R: 'ℝ', C: 'ℂ', N: 'ℕ', Z: 'ℤ', Q: 'ℚ', H: 'ℍ', P: 'ℙ', I: '𝕀', Y: '𝕐' };
+    out = out.replace(/\\mathbb\{([A-Z])\}/g, (m, c) => bbMap[c] || c);
+    out = out.replace(/\\mathcal\{([A-Za-z])\}/g, '$1');
+
+    // 5. Huruf Yunani Standar Matematika (Case-sensitive)
+    const greekMap = {
+      'alpha': 'α', 'beta': 'β', 'gamma': 'γ', 'delta': 'δ', 'epsilon': 'ε',
+      'varepsilon': 'ε', 'zeta': 'ζ', 'eta': 'η', 'theta': 'θ', 'vartheta': 'θ',
+      'iota': 'ι', 'kappa': 'κ', 'lambda': 'λ', 'mu': 'μ', 'nu': 'ν',
+      'xi': 'ξ', 'pi': 'π', 'rho': 'ρ', 'sigma': 'σ', 'tau': 'τ',
+      'upsilon': 'υ', 'phi': 'φ', 'varphi': 'φ', 'chi': 'χ', 'psi': 'ψ',
+      'omega': 'ω',
+      'Gamma': 'Γ', 'Delta': 'Δ', 'Theta': 'Θ', 'Lambda': 'Λ', 'Xi': 'Ξ',
+      'Pi': 'Π', 'Sigma': 'Σ', 'Upsilon': 'Υ', 'Phi': 'Φ', 'Psi': 'Ψ',
+      'Omega': 'Ω'
+    };
+    out = out.replace(/\\([a-zA-Z]+)(?![a-zA-Z])/g, (match, name) => {
+      return greekMap[name] !== undefined ? greekMap[name] : match;
+    });
+
+    // 6. Operator, Relasi, Simbol Vektor & Kalkulus Autentik
+    out = out
+      .replace(/\\times(?![a-zA-Z])/g, '×')
+      .replace(/\\cdot(?![a-zA-Z])/g, '·')
+      .replace(/\\div(?![a-zA-Z])/g, '÷')
+      .replace(/\\pm(?![a-zA-Z])/g, '±')
+      .replace(/\\mp(?![a-zA-Z])/g, '∓')
+      .replace(/\\(?:neq|ne)(?![a-zA-Z])/g, '≠')
+      .replace(/\\(?:leq|le)(?![a-zA-Z])/g, '≤')
+      .replace(/\\(?:geq|ge)(?![a-zA-Z])/g, '≥')
+      .replace(/\\approx(?![a-zA-Z])/g, '≈')
+      .replace(/\\equiv(?![a-zA-Z])/g, '≡')
+      .replace(/\\sim(?![a-zA-Z])/g, '∼')
+      .replace(/\\simeq(?![a-zA-Z])/g, '≃')
+      .replace(/\\cong(?![a-zA-Z])/g, '≅')
+      .replace(/\\propto(?![a-zA-Z])/g, '∝')
+      .replace(/\\infty(?![a-zA-Z])/g, '∞')
+      .replace(/\\nabla(?![a-zA-Z])/g, '∇')
+      .replace(/\\partial(?![a-zA-Z])/g, '∂')
+      .replace(/\\degree|\^\\circ/g, '°')
+      .replace(/\\forall(?![a-zA-Z])/g, '∀')
+      .replace(/\\exists(?![a-zA-Z])/g, '∃')
+      .replace(/\\nexists(?![a-zA-Z])/g, '∄')
+      .replace(/\\in(?![a-zA-Z])/g, '∈')
+      .replace(/\\notin(?![a-zA-Z])/g, '∉')
+      .replace(/\\subset(?![a-zA-Z])/g, '⊂')
+      .replace(/\\supset(?![a-zA-Z])/g, '⊃')
+      .replace(/\\subseteq(?![a-zA-Z])/g, '⊆')
+      .replace(/\\supseteq(?![a-zA-Z])/g, '⊇')
+      .replace(/\\cup(?![a-zA-Z])/g, '∪')
+      .replace(/\\cap(?![a-zA-Z])/g, '∩')
+      .replace(/\\emptyset|\\varnothing/g, '∅')
+      .replace(/\\oint(?![a-zA-Z])/g, '∮')
+      .replace(/\\iiint(?![a-zA-Z])/g, '∭')
+      .replace(/\\iint(?![a-zA-Z])/g, '∬')
+      .replace(/\\int(?![a-zA-Z])/g, '∫')
+      .replace(/\\sum(?![a-zA-Z])/g, '∑')
+      .replace(/\\prod(?![a-zA-Z])/g, '∏')
+      .replace(/\\sqrt\{([^{}]+)\}/g, '√($1)');
+
+    // 7. Pecahan: \frac{a}{b} -> (a)/(b)
+    out = out.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
+
+    // 8. Bersihkan pembatas \left dan \right
+    out = out.replace(/\\(?:left|right)(?![a-zA-Z])/g, '');
+
+    // 9. Spasi matematika presisi di sekitar relasi dan operator
+    out = out.replace(/\s*→\s*/g, ' → ');
+    out = out.replace(/\s*←\s*/g, ' ← ');
+    out = out.replace(/\s*⇒\s*/g, ' ⇒ ');
+    out = out.replace(/\s*⇔\s*/g, ' ⇔ ');
+    out = out.replace(/\s*=\s*/g, ' = ');
+    out = out.replace(/\s*\+\s*/g, ' + ');
+    out = out.replace(/\s*×\s*/g, ' × ');
+    out = out.replace(/\s*·\s*/g, ' · ');
+    out = out.replace(/\s*±\s*/g, ' ± ');
+    out = out.replace(/[ \t]+/g, ' ');
+
+    // 10. Rapikan baris kosong
+    out = out.split('\n').map(l => l.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+
+    // 11. Kembalikan blok kode yang dilindungi
+    for (const cb of codeBlocks) {
+      out = out.replace(cb.token, cb.content);
+    }
+
+    return out;
+  }
+
+  // ==================== PURE MATHEMATICS CLIPBOARD ENGINE ====================
+  let isPureMathClipboardInitialized = false;
+
+  function initPureMathClipboardEngine() {
+    if (typeof document === 'undefined' || isPureMathClipboardInitialized) return;
+    isPureMathClipboardInitialized = true;
+
+    function closestKatexNode(node) {
+      if (!node) return null;
+      const element = node instanceof Element ? node : node.parentElement;
+      return element ? element.closest('.katex, .katex-display, .zoz-math-formula') : null;
+    }
+
+    document.addEventListener('copy', (e) => {
+      try {
+        const selection = window.getSelection();
+        if (!selection || selection.isCollapsed || !e.clipboardData) return;
+        if (selection.rangeCount === 0) return;
+
+        const range = selection.getRangeAt(0);
+
+        // Jika titik awal atau akhir seleksi berada di dalam formula matematika, perluas cakupan
+        const startKatex = closestKatexNode(range.startContainer);
+        if (startKatex) {
+          try { range.setStartBefore(startKatex); } catch (_) {}
+        }
+        const endKatex = closestKatexNode(range.endContainer);
+        if (endKatex) {
+          try { range.setEndAfter(endKatex); } catch (_) {}
+        }
+
+        const fragment = range.cloneContents();
+        const hasMathml = Boolean(fragment.querySelector('.katex-mathml'));
+        const hasKatex = Boolean(fragment.querySelector('.katex'));
+        const hasZozFormula = Boolean(fragment.querySelector('.zoz-math-formula'));
+
+        if (!hasMathml && !hasKatex && !hasZozFormula) {
+          // Tidak ada formula matematika KaTeX/MathML dalam seleksi, biarkan penyalinan standar peramban
+          return;
+        }
+
+        // Hapus elemen visual .katex-html agar tidak menghasilkan duplikasi teks visual
+        const htmlVisualBlocks = fragment.querySelectorAll('.katex-html');
+        for (let i = 0; i < htmlVisualBlocks.length; i++) {
+          const el = htmlVisualBlocks[i];
+          if (el.remove) el.remove();
+          else if (el.parentNode) el.parentNode.removeChild(el);
+        }
+
+        // Gantikan setiap elemen .katex-mathml dengan teks formula matematika murni
+        const mathmlBlocks = fragment.querySelectorAll('.katex-mathml');
+        for (let i = 0; i < mathmlBlocks.length; i++) {
+          const el = mathmlBlocks[i];
+          const annotation = el.querySelector('annotation');
+          const rawTex = annotation ? (annotation.textContent || '') : '';
+          const isDisplay = Boolean(el.closest('.katex-display'));
+          const cleanMath = purifyPureMathFormula(rawTex, { isDisplay });
+          const textNode = document.createTextNode(isDisplay ? `\n${cleanMath}\n` : cleanMath);
+          const target = el.closest('.katex') || el;
+          if (target.replaceWith) {
+            target.replaceWith(textNode);
+          } else if (target.parentNode) {
+            target.parentNode.replaceChild(textNode, target);
+          }
+        }
+
+        // Gantikan formula fallback .zoz-math-formula
+        const zozMathBlocks = fragment.querySelectorAll('.zoz-math-formula');
+        for (let i = 0; i < zozMathBlocks.length; i++) {
+          const el = zozMathBlocks[i];
+          const rawTex = el.getAttribute('data-latex') || el.textContent || '';
+          const isDisplay = el.classList.contains('display-math');
+          const cleanMath = purifyPureMathFormula(rawTex, { isDisplay });
+          const textNode = document.createTextNode(isDisplay ? `\n${cleanMath}\n` : cleanMath);
+          if (el.replaceWith) {
+            el.replaceWith(textNode);
+          } else if (el.parentNode) {
+            el.parentNode.replaceChild(textNode, el);
+          }
+        }
+
+        // Ekstrak teks murni yang telah dibersihkan secara matematika
+        let cleanText = fragment.textContent || '';
+        cleanText = cleanText.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+
+        if (cleanText) {
+          e.clipboardData.setData('text/plain', cleanText);
+          e.preventDefault();
+        }
+      } catch (copyErr) {
+        console.warn('[ZOZ PURE MATH CLIPBOARD]: Fallback to default copy', copyErr);
+      }
+    }, true);
+  }
+
   function normalizeMathematicalTextForInput(text) {
     if (!text || typeof text !== 'string') return '';
 
@@ -8448,6 +8677,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
     // d. Rekonstruksi baris-baris serpihan karakter/simbol matematika vertikal (Unbalanced & multi-token MathJax shatter)
     out = assembleShatteredMathLines(out);
+
+    // 0e. Purifikasi formula matematika LaTeX/KaTeX mentah ($$\text{∇} + \text{∆}\rightarrow \text{🝱}$$ -> ∇ + ∆ → 🝱)
+    out = purifyPureMathFormula(out, { isInputPaste: true });
 
     // e. Bersihkan duplikasi formula berdekatan akibat elemen visual + hidden MathML
     out = out.replace(/f_{w,b}\(x\)\s*=\s*w\s*x\s*\+\s*b[\s\S]*?\(x\s*\)\s*=\s*wx\s*\+\s*b/gi, 'f_{w,b}(x) = wx + b');
@@ -17093,9 +17325,12 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       if (role === 'user' && !rawText && imgList.length > 0) {
         rawText = '[Foto Lampiran]';
       }
-      const textToCopy = (role === 'assistant' ? safeAssistantText(rawText) : rawText)
+      let textToCopy = (role === 'assistant' ? safeAssistantText(rawText) : rawText)
         .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
         .trim();
+      if (role === 'assistant' && (textToCopy.includes('\\text{') || textToCopy.includes('\\rightarrow'))) {
+        textToCopy = purifyPureMathFormula(textToCopy);
+      }
       copyTextToClipboard(textToCopy, () => {
         const origHtml = copyBtn.innerHTML;
         copyBtn.innerHTML = '<i class="fa-solid fa-check" style="color:var(--neon-teal);"></i> <span style="color:var(--neon-teal);">Disalin!</span>';
@@ -53351,6 +53586,7 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     // 2. ATTACH ALL EVENT LISTENERS IMMEDIATELY (Millisecond 0 responsiveness)
     setupEventListeners();
     setupSmartScrolling();
+    initPureMathClipboardEngine();
     ImageLightbox.init();
     BioEndocrine.init();
     ChatEndocrine.init();
@@ -53534,7 +53770,10 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     splitConcatenatedReactFiles,
     compileReactNextToStandaloneHtml,
     stripGeneratedFileBlocks,
-    hideFileBlocksForDisplay
+    hideFileBlocksForDisplay,
+    purifyPureMathFormula,
+    normalizeMathematicalTextForInput,
+    initPureMathClipboardEngine
   };
 
   // Start on DOM ready (safeguarded against post-DOMContentLoaded script execution)
