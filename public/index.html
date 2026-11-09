@@ -35,7 +35,7 @@
       }
     });
     try {
-      var currentVer = 'v20261108_v740';
+      var currentVer = 'v20261109_v741';
       var savedVer = localStorage.getItem('__zoz_ver__');
       if (savedVer !== currentVer) {
         localStorage.setItem('__zoz_ver__', currentVer);
@@ -49,15 +49,14 @@
         }
       }
     } catch (_) {}
-    window.__ZOZ_VERSION__ = 'v20261108_v740';
+    window.__ZOZ_VERSION__ = 'v20261109_v741';
   </script>
   <title>ZOZ ROUTER</title>
-  <link rel="icon" type="image/png" href="zoz-logo.png?v=20261108_v740">
-  <link rel="shortcut icon" href="zoz-logo.png?v=20261108_v740">
-  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=20261108_v740">
-  <link rel="apple-touch-icon" href="zoz-logo.png?v=20261108_v740">
-  <!-- Preload Critical LCP Image & Font Awesome Glyph -->
-  <link rel="preload" href="zoz-logo.png?v=20261108_v740" as="image" type="image/png" fetchpriority="high">
+  <link rel="icon" type="image/png" href="zoz-logo.png?v=20261109_v741">
+  <link rel="shortcut icon" href="zoz-logo.png?v=20261109_v741">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=20261109_v741">
+  <link rel="apple-touch-icon" href="zoz-logo.png?v=20261109_v741">
+  <!-- Preload Font Awesome Glyph -->
   <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/webfonts/fa-solid-900.woff2" as="font" type="font/woff2" crossorigin>
   <!-- Fonts & CDN Preconnect -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -110,8 +109,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261108_v740">
-  <link rel="stylesheet" href="style.css?v=20261108_v740">
+  <link rel="preload" as="style" href="style.css?v=20261109_v741">
+  <link rel="stylesheet" href="style.css?v=20261109_v741">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -589,7 +588,7 @@
         <div class="flex items-center justify-between px-1">
           <div class="flex items-center space-x-2">
             <button class="relative w-7 h-7 rounded-full flex items-center justify-center mode-tab brand-logo-wrap sakura-brand-logo-btn" data-mode="auto" id="sidebarBrandLogoBtn" title="Auto Router AI: Klik logo untuk beralih mode otomatis" type="button" aria-label="Toggle Auto Router via Logo">
-              <img src="zoz-logo.png?v=20261108_v735" alt="ZOZ ROUTER" class="w-full h-full rounded-full object-contain sakura-brand-logo-img" width="28" height="28" decoding="async">
+              <img src="zoz-logo.png?v=20261109_v741" alt="ZOZ ROUTER" class="w-full h-full rounded-full object-contain sakura-brand-logo-img" width="28" height="28" decoding="async">
               <span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400 auto-router-quantum-dot"></span>
             </button>
             <div>
@@ -765,25 +764,31 @@
       <div class="chat-viewport flex-1 overflow-y-auto relative w-full h-full flex flex-col" id="chatViewport">
         <!-- SINGLE MODE CHAT WRAPPER -->
         <div class="chat-messages-container flex-1 flex flex-col justify-between w-full" id="singleChatContainer">
-          <!-- WELCOME HERO (Center Logo & Pure Minimalist Title) -->
+          <!-- WELCOME HERO (Clean Minimalist Greeting & Pure Cyberpunk Title) -->
           <div class="welcome-hero flex-1 flex flex-col items-center justify-center px-4 relative z-10" id="welcomeHero">
-            <div class="flex flex-col items-center justify-center select-none font-mono tracking-tight text-center">
-              <div class="mb-4 relative group cursor-default">
-                <div class="absolute -inset-2 rounded-full bg-rose-400/20 blur-xl opacity-80 group-hover:opacity-100 transition duration-500"></div>
-                <img src="zoz-logo.png?v=20261108_v735" alt="ZOZ ROUTER" class="relative w-28 h-28 md:w-32 md:h-32 rounded-full object-contain shadow-[0_0_35px_rgba(251,113,133,0.45)] transition-transform duration-300 hover:scale-105" width="128" height="128" fetchpriority="high">
+            <div class="flex flex-col items-center justify-center select-none font-mono tracking-tight text-center relative">
+              <!-- Subtle Emerald Ambient Aura (Zero Icon, Pure Minimalist Glow) -->
+              <div class="absolute -inset-10 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none opacity-70"></div>
+
+              <!-- Welcome Greeting (Green & White) Above ZOZ ROUTER -->
+              <div class="welcome-greeting-wrap mb-2 relative z-10">
+                <p class="welcome-greeting-text text-base sm:text-lg md:text-xl font-bold tracking-[0.28em] uppercase font-mono flex items-center justify-center space-x-2">
+                  <span class="greeting-welcome text-emerald-400 drop-shadow-[0_0_12px_rgba(52,211,153,0.55)]">Welcome</span>
+                  <span class="greeting-to text-white drop-shadow-[0_0_12px_rgba(255,255,255,0.45)]">to</span>
+                </p>
               </div>
 
               <!-- Title & Restored Formula Text -->
-              <div class="space-y-1.5">
-                <h2 class="text-2xl font-bold tracking-wider font-mono text-white flex items-center justify-center space-x-2">
-                  <span class="text-emerald-400">ZOZ</span>
-                  <span class="text-slate-100">ROUTER</span>
+              <div class="space-y-1.5 relative z-10">
+                <h2 class="text-3xl sm:text-4xl font-extrabold tracking-wider font-mono text-white flex items-center justify-center space-x-2">
+                  <span class="text-emerald-400 drop-shadow-[0_0_16px_rgba(52,211,153,0.5)]">ZOZ</span>
+                  <span class="text-slate-100 drop-shadow-[0_0_16px_rgba(255,255,255,0.35)]">ROUTER</span>
                 </h2>
                 <p class="text-xs font-mono text-emerald-400/90 tracking-wider text-center select-none">3 33 ~ - ) 3 2 1</p>
               </div>
 
               <!-- Auto Router AI Trigger -->
-              <div class="mt-4 flex items-center justify-center">
+              <div class="mt-5 flex items-center justify-center relative z-10">
                 <button class="mode-tab inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] hover:bg-emerald-500/10 border border-emerald-500/30 hover:border-emerald-400/60 transition-all text-xs font-mono text-slate-300 hover:text-emerald-300 cursor-pointer shadow-glow-emerald group select-none" data-mode="auto" id="heroAutoRouterBtn" title="Klik untuk mengaktifkan / menonaktifkan Auto Router AI (Ollama + OpenRouter)" type="button">
                   <span class="w-2 h-2 rounded-full bg-emerald-400 group-hover:scale-125 transition-transform auto-router-quantum-dot"></span>
                   <span class="font-semibold tracking-wider">AUTO ROUTER</span>
@@ -1423,7 +1428,7 @@
             <!-- Brand & Logo Showcase with ZOZ Sakura Icon -->
             <div class="developer-hero-badge">
               <div class="developer-logo-wrap">
-                <img src="zoz-logo.png?v=20261108_v735" alt="ZOZ ROUTER Logo" class="developer-logo-img">
+                <img src="zoz-logo.png?v=20261109_v741" alt="ZOZ ROUTER Logo" class="developer-logo-img">
                 <span class="developer-pulse-glow"></span>
               </div>
               <div class="developer-brand-meta">

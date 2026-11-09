@@ -2080,41 +2080,32 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   position: relative;
 }
 
-.hero-triangle-container {
+.welcome-greeting-wrap {
   position: relative;
+  z-index: 10;
+  margin-bottom: 6px;
+}
+
+.welcome-greeting-text {
+  font-family: var(--font-mono, monospace);
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 22px;
+  gap: 8px;
 }
 
-.hero-triangle-glow {
-  position: absolute;
-  width: 120px;
-  height: 120px;
-  background: radial-gradient(circle, rgba(0, 240, 255, 0.3) 0%, rgba(0, 255, 194, 0.12) 50%, transparent 75%);
-  filter: blur(16px);
-  pointer-events: none;
-  z-index: 0;
+.welcome-greeting-text .greeting-welcome {
+  color: #34d399;
+  text-shadow: 0 0 16px rgba(52, 211, 153, 0.55);
 }
 
-.hero-logo-box {
-  position: relative;
-  width: 84px;
-  height: 84px;
-  filter: drop-shadow(0 0 22px rgba(0, 240, 255, 0.7));
-  z-index: 1;
-  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.hero-logo-box:hover {
-  transform: scale(1.1) rotate(4deg);
-}
-
-.hero-logo {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+.welcome-greeting-text .greeting-to {
+  color: #f8fafc;
+  text-shadow: 0 0 14px rgba(255, 255, 255, 0.45);
 }
 
 .hero-title {
@@ -5284,10 +5275,9 @@ body.mobile-sidebar-open #sidebar.open + .sidebar-backdrop {
     margin-bottom: 12px;
   }
 
-  .hero-logo-box {
-    width: 48px;
-    height: 48px;
-    margin-bottom: 8px;
+  .welcome-greeting-text {
+    font-size: 0.95rem;
+    letter-spacing: 0.22em;
   }
 
   .hero-title {
