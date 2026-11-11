@@ -8429,6 +8429,62 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   }
 
   // ==================== PURE MATHEMATICS FORMULA PURIFICATION ENGINE ====================
+  function extractBalancedGroup(str, startIndex) {
+    if (startIndex >= str.length || str[startIndex] !== '{') return null;
+    let depth = 0;
+    for (let i = startIndex; i < str.length; i++) {
+      if (str[i] === '{') depth++;
+      else if (str[i] === '}') {
+        depth--;
+        if (depth === 0) {
+          return {
+            content: str.substring(startIndex + 1, i),
+            endIndex: i
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  function transpileFractionsRecursive(text) {
+    let str = text;
+    let fracIdx;
+    while ((fracIdx = str.search(/\\(?:frac|dfrac|tfrac)(?![a-zA-Z])/)) !== -1) {
+      const fracMatch = str.match(/\\(?:frac|dfrac|tfrac)(?![a-zA-Z])/);
+      const cmdLen = fracMatch[0].length;
+      let afterCmd = fracIdx + cmdLen;
+      while (afterCmd < str.length && /\s/.test(str[afterCmd])) afterCmd++;
+
+      const numGroup = extractBalancedGroup(str, afterCmd);
+      if (!numGroup) break;
+
+      let afterNum = numGroup.endIndex + 1;
+      while (afterNum < str.length && /\s/.test(str[afterNum])) afterNum++;
+
+      const denGroup = extractBalancedGroup(str, afterNum);
+      if (!denGroup) break;
+
+      const num = transpileFractionsRecursive(numGroup.content.trim());
+      const den = transpileFractionsRecursive(denGroup.content.trim());
+
+      // Format fraction nicely with clean mathematical parenthesis
+      let formatted;
+      const isNumToken = /^[a-zA-Z0-9\u0370-\u03FF\u2100-\u214F]$/.test(num);
+      const isDenToken = /^[a-zA-Z0-9\u0370-\u03FF\u2100-\u214F]$/.test(den);
+      if (isNumToken && isDenToken) {
+        formatted = `${num}/${den}`;
+      } else if (isNumToken) {
+        formatted = `${num}/(${den})`;
+      } else {
+        formatted = `(${num})/(${den})`;
+      }
+
+      str = str.substring(0, fracIdx) + formatted + str.substring(denGroup.endIndex + 1);
+    }
+    return str;
+  }
+
   function purifyPureMathFormula(text, options = {}) {
     if (!text || typeof text !== 'string') return '';
     let out = text;
@@ -8441,50 +8497,94 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return token;
     });
 
-    // 1. Lepas pembungkus display math ($$ ... $$ dan \[ ... \]) pada batas baris atau blok tunggal
-    out = out.replace(/(^|\n)\s*\$\$\s*([\s\S]*?)\s*\$\$\s*(?=\n|$)/g, (m, prefix, inner) => prefix + inner.trim());
-    out = out.replace(/(^|\n)\s*\\\[\s*([\s\S]*?)\s*\\\]\s*(?=\n|$)/g, (m, prefix, inner) => prefix + inner.trim());
+    // 1. Lepas pembungkus display math ($$ ... $$ dan \[ ... \]) dan inline math ($ ... $ dan \( ... \))
+    out = out.replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, '$1');
+    out = out.replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, '$1');
+    out = out.replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, '$1');
+    out = out.replace(/(?<!\\)\$([^$\n]+?)(?<!\\)\$/g, (match, inner) => {
+      if (/\\\w|[\^_{}=≠≤≥+\-·×÷∫∑∏√∂∇α-ωΑ-Ω]/.test(inner)) {
+        return inner.trim();
+      }
+      return match;
+    });
 
-    // Jika seluruh teks dibungkus oleh $ ... $ atau $$ ... $$ tunggal
-    if (/^\s*\${1,2}\s*([\s\S]+?)\s*\${1,2}\s*$/.test(out)) {
-      out = out.replace(/^\s*\${1,2}\s*([\s\S]+?)\s*\${1,2}\s*$/, '$1');
-    }
+    // Pastikan perintah LaTeX terpisah dari pembungkus teks (misal: \nabla\mathbf{u} -> \nabla \mathbf{u})
+    out = out.replace(/(\\[a-zA-Z]+)(\\(?:mathbf|mathit|mathrm|boldsymbol|bm|mathcal|mathbb|text)\b)/g, '$1 $2');
+    out = out.replace(/(\\(?:text|mathrm)\{[^}]+\})(\\[a-zA-Z]+)/g, '$1 $2');
 
-    // 2. Dekompresi dan lepas pembungkus teks LaTeX secara rekursif: \text{...}, \mathrm{...}, dsb.
+    // 2. Blackboard Bold (Sistem Bilangan & Monad Matematika Murni)
+    const bbMap = { R: 'ℝ', C: 'ℂ', N: 'ℕ', Z: 'ℤ', Q: 'ℚ', H: 'ℍ', P: 'ℙ', I: '𝕀', Y: '𝕐' };
+    out = out.replace(/\\mathbb\{([A-Z])\}/g, (m, c) => bbMap[c] || c);
+
+    // 3. Script & Huruf Kaligrafi (\mathcal)
+    const calMap = {
+      M: 'ℳ', F: 'ℱ', L: 'ℒ', H: 'ℋ', E: 'ℰ', D: '𝒟', Z: '𝒵', R: 'ℛ',
+      P: '𝒫', B: 'ℬ', O: '𝒪', A: '𝒜', C: '𝒞', N: '𝒩', T: '𝒯', K: '𝒦',
+      I: 'ℐ', J: '𝒥', S: '𝒮', U: '𝒰', V: '𝒱', W: '𝒲', X: '𝒳', Y: '𝒴', G: '𝒢', Q: '𝒬'
+    };
+    out = out.replace(/\\mathcal\{([A-Z])\}/g, (m, c) => calMap[c] || c);
+
+    // 4. Dekompresi dan lepas pembungkus teks LaTeX secara rekursif: \text{...}, \mathrm{...}, \operatorname{...}, dsb.
     let prev;
     do {
       prev = out;
-      out = out.replace(/\\(?:text|mathrm|mathbf|mathit|mathsf|mathtt|boldsymbol|bm|textbf|textit)\s*\{([^{}]+)\}/g, '$1');
+      out = out.replace(/\\(?:text|mathrm|mathbf|mathit|mathsf|mathtt|boldsymbol|bm|textbf|textit|operatorname)\s*\{([^{}]+)\}/g, '$1');
     } while (out !== prev);
 
-    // 3. Relasi Panah & Morfisma Teori Kategori / Reaksi Kimia (Boundary (?![a-zA-Z]))
+    // 5. Spasi matematika & kata kondisi semantik
     out = out
-      .replace(/\\(?:rightarrow|to|longrightarrow)(?![a-zA-Z])/g, '→')
-      .replace(/\\(?:leftarrow|gets|longleftarrow)(?![a-zA-Z])/g, '←')
-      .replace(/\\(?:leftrightarrow|longleftrightarrow)(?![a-zA-Z])/g, '↔')
-      .replace(/\\(?:Rightarrow|implies|Longrightarrow)(?![a-zA-Z])/g, '⇒')
-      .replace(/\\(?:Leftarrow|Longleftarrow)(?![a-zA-Z])/g, '⇐')
-      .replace(/\\(?:Leftrightarrow|iff|Longleftrightarrow)(?![a-zA-Z])/g, '⇔')
+      .replace(/\\quad\s*(s\.t\.|such that)\s*\\quad/gi, '   s.t.   ')
+      .replace(/\\quad\s*(where)\s*\\quad/gi, '   where   ')
+      .replace(/\\quad\s*(with)\s*\\quad/gi, '   with   ')
+      .replace(/\\quad\s*(on)\s*\\quad/gi, '   on   ')
+      .replace(/\\quad\s*(for all|for each|for)\s*\\quad/gi, '   $1   ')
+      .replace(/\\qquad(?![a-zA-Z])/g, '    ')
+      .replace(/\\quad(?![a-zA-Z])/g, '   ')
+      .replace(/\\!/g, '')
+      .replace(/\\([,;: ])/g, ' ');
+
+    // 6. Pembersihan pembatas (\left, \right, null delimiters, limits)
+    out = out.replace(/\\(?:left|right)\./g, '');
+    out = out.replace(/\\(?:left|right)(?![a-zA-Z])/g, '');
+    out = out.replace(/\\(?:limits|nolimits)(?![a-zA-Z])/g, '');
+
+    // 7. Aksen Matematika: \hat, \bar, \overline, \vec, \tilde
+    const circumflexMap = {
+      H: 'Ĥ', A: 'Â', E: 'Ê', I: 'Î', O: 'Ô', U: 'Û',
+      C: 'Ĉ', G: 'Ĝ', J: 'Ĵ', S: 'Ŝ', W: 'Ŵ', Y: 'Ŷ', Z: 'Ẑ',
+      h: 'ĥ', a: 'â', e: 'ê', i: 'î', o: 'ô', u: 'û', c: 'ĉ', g: 'ĝ', s: 'ŝ', w: 'ŵ', y: 'ŷ', z: 'ẑ'
+    };
+    out = out.replace(/\\hat\{([a-zA-Z])\}/g, (m, c) => circumflexMap[c] || (c + '\u0302'));
+    out = out.replace(/\\hat\s*([a-zA-Z])/g, (m, c) => circumflexMap[c] || (c + '\u0302'));
+    out = out.replace(/\\overline\{([^}]+)\}/g, (m, inner) => inner + '\u0304');
+    out = out.replace(/\\bar\{([a-zA-Z])\}/g, (m, c) => c + '\u0304');
+    out = out.replace(/\\vec\{([a-zA-Z])\}/g, (m, c) => c + '\u20D7');
+    out = out.replace(/\\tilde\{([a-zA-Z])\}/g, (m, c) => c + '\u0303');
+
+    // Bersihkan kurung kurawal kosong: {}
+    out = out.replace(/\{\}/g, '');
+
+    // 8. Relasi Panah & Morfisma Teori Kategori / Reaksi Kimia (Boundary (?![a-zA-Z]))
+    out = out
+      .replace(/\\(?:longrightarrow|rightarrow|to)(?![a-zA-Z])/g, '→')
+      .replace(/\\(?:longleftarrow|leftarrow|gets)(?![a-zA-Z])/g, '←')
+      .replace(/\\(?:longleftrightarrow|leftrightarrow)(?![a-zA-Z])/g, '↔')
+      .replace(/\\(?:Longrightarrow|implies|Rightarrow)(?![a-zA-Z])/g, '⇒')
+      .replace(/\\(?:Longleftarrow|Leftarrow)(?![a-zA-Z])/g, '⇐')
+      .replace(/\\(?:Longleftrightarrow|iff|Leftrightarrow)(?![a-zA-Z])/g, '⇔')
       .replace(/\\(?:mapsto)(?![a-zA-Z])/g, '↦')
       .replace(/\\(?:rightleftharpoons)(?![a-zA-Z])/g, '⇌')
       .replace(/\\(?:uparrow)(?![a-zA-Z])/g, '↑')
-      .replace(/\\(?:downarrow)(?![a-zA-Z])/g, '↓')
-      .replace(/\\(?:nearrow)(?![a-zA-Z])/g, '↗')
-      .replace(/\\(?:searrow)(?![a-zA-Z])/g, '↘');
+      .replace(/\\(?:downarrow)(?![a-zA-Z])/g, '↓');
 
-    // 4. Blackboard Bold (Sistem Bilangan & Monad)
-    const bbMap = { R: 'ℝ', C: 'ℂ', N: 'ℕ', Z: 'ℤ', Q: 'ℚ', H: 'ℍ', P: 'ℙ', I: '𝕀', Y: '𝕐' };
-    out = out.replace(/\\mathbb\{([A-Z])\}/g, (m, c) => bbMap[c] || c);
-    out = out.replace(/\\mathcal\{([A-Za-z])\}/g, '$1');
-
-    // 5. Huruf Yunani Standar Matematika (Case-sensitive)
+    // 9. Huruf Yunani Standar Matematika (Case-sensitive)
     const greekMap = {
       'alpha': 'α', 'beta': 'β', 'gamma': 'γ', 'delta': 'δ', 'epsilon': 'ε',
       'varepsilon': 'ε', 'zeta': 'ζ', 'eta': 'η', 'theta': 'θ', 'vartheta': 'θ',
       'iota': 'ι', 'kappa': 'κ', 'lambda': 'λ', 'mu': 'μ', 'nu': 'ν',
-      'xi': 'ξ', 'pi': 'π', 'rho': 'ρ', 'sigma': 'σ', 'tau': 'τ',
-      'upsilon': 'υ', 'phi': 'φ', 'varphi': 'φ', 'chi': 'χ', 'psi': 'ψ',
-      'omega': 'ω',
+      'xi': 'ξ', 'pi': 'π', 'varpi': 'ϖ', 'rho': 'ρ', 'varrho': 'ϱ',
+      'sigma': 'σ', 'varsigma': 'ς', 'tau': 'τ', 'upsilon': 'υ',
+      'phi': 'φ', 'varphi': 'φ', 'chi': 'χ', 'psi': 'ψ', 'omega': 'ω',
       'Gamma': 'Γ', 'Delta': 'Δ', 'Theta': 'Θ', 'Lambda': 'Λ', 'Xi': 'Ξ',
       'Pi': 'Π', 'Sigma': 'Σ', 'Upsilon': 'Υ', 'Phi': 'Φ', 'Psi': 'Ψ',
       'Omega': 'Ω'
@@ -8493,68 +8593,139 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return greekMap[name] !== undefined ? greekMap[name] : match;
     });
 
-    // 6. Operator, Relasi, Simbol Vektor & Kalkulus Autentik
+    // 10. Operator, Relasi, Simbol Vektor, Logika & Kalkulus Autentik
     out = out
+      .replace(/\\hbar(?![a-zA-Z])/g, 'ℏ')
+      .replace(/\\wedge(?![a-zA-Z])/g, '∧')
+      .replace(/\\vee(?![a-zA-Z])/g, '∨')
+      .replace(/\\cap(?![a-zA-Z])/g, '∩')
+      .replace(/\\cup(?![a-zA-Z])/g, '∪')
+      .replace(/\\subset(?![a-zA-Z])/g, '⊂')
+      .replace(/\\supset(?![a-zA-Z])/g, '⊃')
+      .replace(/\\subseteq(?![a-zA-Z])/g, '⊆')
+      .replace(/\\supseteq(?![a-zA-Z])/g, '⊇')
+      .replace(/\\in(?![a-zA-Z])/g, '∈')
+      .replace(/\\notin(?![a-zA-Z])/g, '∉')
+      .replace(/\\exists(?![a-zA-Z])/g, '∃')
+      .replace(/\\forall(?![a-zA-Z])/g, '∀')
+      .replace(/\\nexists(?![a-zA-Z])/g, '∄')
+      .replace(/\\cong(?![a-zA-Z])/g, '≅')
+      .replace(/\\equiv(?![a-zA-Z])/g, '≡')
+      .replace(/\\sim(?![a-zA-Z])/g, '∼')
+      .replace(/\\simeq(?![a-zA-Z])/g, '≃')
+      .replace(/\\approx(?![a-zA-Z])/g, '≈')
+      .replace(/\\propto(?![a-zA-Z])/g, '∝')
+      .replace(/\\neq|\\ne(?![a-zA-Z])/g, '≠')
+      .replace(/\\leq|\\le(?![a-zA-Z])/g, '≤')
+      .replace(/\\geq|\\ge(?![a-zA-Z])/g, '≥')
       .replace(/\\times(?![a-zA-Z])/g, '×')
       .replace(/\\cdot(?![a-zA-Z])/g, '·')
       .replace(/\\div(?![a-zA-Z])/g, '÷')
       .replace(/\\pm(?![a-zA-Z])/g, '±')
       .replace(/\\mp(?![a-zA-Z])/g, '∓')
-      .replace(/\\(?:neq|ne)(?![a-zA-Z])/g, '≠')
-      .replace(/\\(?:leq|le)(?![a-zA-Z])/g, '≤')
-      .replace(/\\(?:geq|ge)(?![a-zA-Z])/g, '≥')
-      .replace(/\\approx(?![a-zA-Z])/g, '≈')
-      .replace(/\\equiv(?![a-zA-Z])/g, '≡')
-      .replace(/\\sim(?![a-zA-Z])/g, '∼')
-      .replace(/\\simeq(?![a-zA-Z])/g, '≃')
-      .replace(/\\cong(?![a-zA-Z])/g, '≅')
-      .replace(/\\propto(?![a-zA-Z])/g, '∝')
-      .replace(/\\infty(?![a-zA-Z])/g, '∞')
       .replace(/\\nabla(?![a-zA-Z])/g, '∇')
       .replace(/\\partial(?![a-zA-Z])/g, '∂')
+      .replace(/\\infty(?![a-zA-Z])/g, '∞')
       .replace(/\\degree|\^\\circ/g, '°')
-      .replace(/\\forall(?![a-zA-Z])/g, '∀')
-      .replace(/\\exists(?![a-zA-Z])/g, '∃')
-      .replace(/\\nexists(?![a-zA-Z])/g, '∄')
-      .replace(/\\in(?![a-zA-Z])/g, '∈')
-      .replace(/\\notin(?![a-zA-Z])/g, '∉')
-      .replace(/\\subset(?![a-zA-Z])/g, '⊂')
-      .replace(/\\supset(?![a-zA-Z])/g, '⊃')
-      .replace(/\\subseteq(?![a-zA-Z])/g, '⊆')
-      .replace(/\\supseteq(?![a-zA-Z])/g, '⊇')
-      .replace(/\\cup(?![a-zA-Z])/g, '∪')
-      .replace(/\\cap(?![a-zA-Z])/g, '∩')
       .replace(/\\emptyset|\\varnothing/g, '∅')
-      .replace(/\\oint(?![a-zA-Z])/g, '∮')
       .replace(/\\iiint(?![a-zA-Z])/g, '∭')
       .replace(/\\iint(?![a-zA-Z])/g, '∬')
+      .replace(/\\oint(?![a-zA-Z])/g, '∮')
       .replace(/\\int(?![a-zA-Z])/g, '∫')
-      .replace(/\\sum(?![a-zA-Z])/g, '∑')
       .replace(/\\prod(?![a-zA-Z])/g, '∏')
-      .replace(/\\sqrt\{([^{}]+)\}/g, '√($1)');
+      .replace(/\\coprod(?![a-zA-Z])/g, '∐')
+      .replace(/\\sum(?![a-zA-Z])/g, '∑')
+      .replace(/\\sqrt\{([^{}]+)\}/g, '√($1)')
+      .replace(/\\sqrt\s*([a-zA-Z0-9])/g, '√$1')
+      .replace(/\\mid(?![a-zA-Z])/g, '|')
+      .replace(/\\bullet(?![a-zA-Z])/g, '•')
+      .replace(/\\circ(?![a-zA-Z])/g, '∘')
+      .replace(/\\ast(?![a-zA-Z])/g, '*')
+      .replace(/\\star(?![a-zA-Z])/g, '⋆')
+      .replace(/\\ell(?![a-zA-Z])/g, 'ℓ')
+      .replace(/\\aleph(?![a-zA-Z])/g, 'ℵ')
+      .replace(/\\setminus(?![a-zA-Z])/g, '∖')
+      .replace(/\\\|/g, '‖');
 
-    // 7. Pecahan: \frac{a}{b} -> (a)/(b)
-    out = out.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
+    // 11. Transpilasi Pecahan Bertingkat & Bersarang (\frac, \dfrac, \tfrac)
+    out = transpileFractionsRecursive(out);
 
-    // 8. Bersihkan pembatas \left dan \right
-    out = out.replace(/\\(?:left|right)(?![a-zA-Z])/g, '');
+    // 12. Fungsi Matematika Standar (Lepas garis miring dan format spasi presisi)
+    out = out.replace(/\\(exp|sinh|cosh|tanh|sin|cos|tan|ln|log|det|dim|ker|deg|max|min|sup|inf|lim|Tr|tr|Re|Im|Hom|Aut|Rep|Gal|ch|ind|rank|Res|sinc|gcd|lcm)\s*(?=[(\[{])/g, '$1');
+    out = out.replace(/\\(exp|sinh|cosh|tanh|sin|cos|tan|ln|log|det|dim|ker|deg|max|min|sup|inf|lim|Tr|tr|Re|Im|Hom|Aut|Rep|Gal|ch|ind|rank|Res|sinc|gcd|lcm)(?![a-zA-Z])/g, '$1 ');
 
-    // 9. Spasi matematika presisi di sekitar relasi dan operator
-    out = out.replace(/\s*→\s*/g, ' → ');
-    out = out.replace(/\s*←\s*/g, ' ← ');
-    out = out.replace(/\s*⇒\s*/g, ' ⇒ ');
-    out = out.replace(/\s*⇔\s*/g, ' ⇔ ');
-    out = out.replace(/\s*=\s*/g, ' = ');
-    out = out.replace(/\s*\+\s*/g, ' + ');
-    out = out.replace(/\s*×\s*/g, ' × ');
-    out = out.replace(/\s*·\s*/g, ' · ');
-    out = out.replace(/\s*±\s*/g, ' ± ');
-    out = out.replace(/[ \t]+/g, ' ');
+    // 13. Tipografi Subskrip dan Superskrip
+    const subMap = {
+      '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
+      '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+      '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎',
+      'a': 'ₐ', 'e': 'ₑ', 'h': 'ₕ', 'i': 'ᵢ', 'j': 'ⱼ',
+      'k': 'ₖ', 'l': 'ₗ', 'm': 'ₘ', 'n': 'ₙ', 'o': 'ₒ',
+      'p': 'ₚ', 'r': 'ᵣ', 's': 'ₛ', 't': 'ₜ', 'u': 'ᵤ',
+      'v': 'ᵥ', 'x': 'ₓ'
+    };
+    const supMap = {
+      '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+      '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+      '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾',
+      'n': 'ⁿ', 'i': 'ⁱ', 's': 'ˢ'
+    };
 
-    // 10. Rapikan baris kosong
+    // Ganti {}^{(3)} atau {}^{(n)} atau ^{(3)}
+    out = out.replace(/\^\{?\((\d+)\)\}?/g, (m, d) => '(' + d.split('').map(c => supMap[c] || c).join('') + ')');
+
+    // Superskrip dengan kurung kurawal: ^{24}, ^{n/2}, ^{s-1}
+    out = out.replace(/\^\{([0-9+\-=()nis]+)\}/g, (m, inner) => {
+      return inner.split('').map(c => supMap[c] || c).join('');
+    });
+    // Superskrip karakter tunggal: ^2, ^3, ^n, ^s
+    out = out.replace(/\^([0-9nis])/g, (m, c) => supMap[c] || m);
+    out = out.replace(/\^∞/g, '^∞');
+
+    // Subskrip angka dan pengidentifikasi pendek: _{11}, _{1}, _{ij}, _{kl}
+    out = out.replace(/_\{([0-9+\-=()aehijklmnoprstuvx]+)\}/g, (m, inner) => {
+      return inner.split('').map(c => subMap[c] || c).join('');
+    });
+    // Subskrip karakter tunggal: _1, _2, _j, _k, _n
+    out = out.replace(/_([0-9aehijklmnoprstuvx])(?![a-zA-Z0-9])/g, (m, c) => subMap[c] || m);
+
+    // Subskrip pada operator besar & himpunan: hilangkan kurung kurawal: _{M_{11}} -> _{ℳ₁₁}
+    out = out.replace(/_\{([^{}]+)\}/g, '_$1');
+
+    // 14. Lepas karakter yang di-escape: \{, \}, \_, \%, \&, \#, \$
+    out = out.replace(/\\([{}%&#_$])/g, '$1');
+
+    // 15. Sisipkan spasi presisi antara bentuk diferensial dan akar: d⁴x √(-g)
+    out = out.replace(/(d\^?\{?[0-9a-z]+\}?x|d[x-z]|dt|d¹¹x|d⁴x)(√)/g, '$1 $2');
+    out = out.replace(/(∫|∬|∭|∮)([a-zA-ZℳM𝒟D])/g, '$1 $2');
+
+    // 16. Spasi matematika presisi di sekitar relasi dan operator
+    out = out
+      .replace(/\s*→\s*/g, ' → ')
+      .replace(/\s*←\s*/g, ' ← ')
+      .replace(/\s*⇒\s*/g, ' ⇒ ')
+      .replace(/\s*⇔\s*/g, ' ⇔ ')
+      .replace(/\s*=\s*/g, ' = ')
+      .replace(/\s*≅\s*/g, ' ≅ ')
+      .replace(/\s*≡\s*/g, ' ≡ ')
+      .replace(/\s*≈\s*/g, ' ≈ ')
+      .replace(/\s*≠\s*/g, ' ≠ ')
+      .replace(/\s*≤\s*/g, ' ≤ ')
+      .replace(/\s*≥\s*/g, ' ≥ ')
+      .replace(/\s*∈\s*/g, ' ∈ ')
+      .replace(/\s*∉\s*/g, ' ∉ ')
+      .replace(/\s*∩\s*/g, ' ∩ ')
+      .replace(/\s*∪\s*/g, ' ∪ ')
+      .replace(/\s*∧\s*/g, ' ∧ ')
+      .replace(/\s*∨\s*/g, ' ∨ ')
+      .replace(/\s*·\s*/g, ' · ')
+      .replace(/\s*±\s*/g, ' ± ')
+      .replace(/ {2,}/g, ' ');
+
+    // 17. Rapikan baris kosong
     out = out.split('\n').map(l => l.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 
-    // 11. Kembalikan blok kode yang dilindungi
+    // 18. Kembalikan blok kode yang dilindungi
     for (const cb of codeBlocks) {
       out = out.replace(cb.token, cb.content);
     }
@@ -17328,7 +17499,29 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       let textToCopy = (role === 'assistant' ? safeAssistantText(rawText) : rawText)
         .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
         .trim();
-      if (role === 'assistant' && (textToCopy.includes('\\text{') || textToCopy.includes('\\rightarrow'))) {
+      const hasMathMarkup = role === 'assistant' && (
+        textToCopy.includes('$$') ||
+        textToCopy.includes('\\(') ||
+        textToCopy.includes('\\[') ||
+        textToCopy.includes('\\frac') ||
+        textToCopy.includes('\\text{') ||
+        textToCopy.includes('\\rightarrow') ||
+        textToCopy.includes('\\int') ||
+        textToCopy.includes('\\sum') ||
+        textToCopy.includes('\\prod') ||
+        textToCopy.includes('\\partial') ||
+        textToCopy.includes('\\sqrt') ||
+        textToCopy.includes('\\zeta') ||
+        textToCopy.includes('\\mathbb') ||
+        textToCopy.includes('\\mathcal') ||
+        textToCopy.includes('\\hat') ||
+        textToCopy.includes('\\hbar') ||
+        textToCopy.includes('\\wedge') ||
+        /\\[a-zA-Z]{2,}/.test(textToCopy) ||
+        /\^\{[0-9+\-=()nis]+\}/.test(textToCopy) ||
+        /_\{[0-9+\-=()aehijklmnoprstuvx]+\}/.test(textToCopy)
+      );
+      if (hasMathMarkup) {
         textToCopy = purifyPureMathFormula(textToCopy);
       }
       copyTextToClipboard(textToCopy, () => {
