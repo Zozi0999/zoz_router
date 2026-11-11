@@ -28202,7 +28202,6 @@ ${blocks}
         els.promptInput.value = '';
         autoResizeTextarea(els.promptInput);
       }
-      showToast('Mode AI Image Studio aktif. Silakan ketik deskripsi visual!');
       AudioEngine.click();
       return;
     }
@@ -28216,7 +28215,6 @@ ${blocks}
         els.promptInput.value = '';
         autoResizeTextarea(els.promptInput);
       }
-      showToast('Mode AI Music Studio aktif. Silakan ketik deskripsi lagu/musik!');
       AudioEngine.click();
       return;
     }
@@ -38898,7 +38896,6 @@ Aturan:
       updateMusicGenModeUI();
       closeMusicModelDropdown();
       AudioEngine.click();
-      showToast('ℹ️ Mode AI Music Studio dinonaktifkan. Kembali ke obrolan biasa.');
       return;
     }
 
@@ -38919,8 +38916,6 @@ Aturan:
     const displayName = getMusicModelDisplayName(modelVal);
     if (modelVal.includes('/') && !STATE.settings.openRouterKey) {
       showToast(`⚠️ Model musik ${displayName} dipilih. Butuh OpenRouter Key di Pengaturan untuk memanggil cloud model.`, 'warning');
-    } else {
-      showToast(`🎵 Model Musik Aktif: ${displayName}`);
     }
   }
 
@@ -39135,7 +39130,6 @@ Aturan:
       closeImageModelDropdown();
       clearPhotoEdit();
       AudioEngine.click();
-      showToast('ℹ️ Mode Buat Gambar dinonaktifkan. Kembali ke obrolan biasa.');
       return;
     }
 
@@ -39154,14 +39148,10 @@ Aturan:
     if (STATE.photoEditImage) {
       if (modelVal.includes('/') && !STATE.settings.openRouterKey) {
         showToast(`⚠️ Model Edit Foto ${displayName} dipilih. Butuh OpenRouter Key di Pengaturan.`, 'warning');
-      } else {
-        showToast(`🎨 Model Edit Foto Aktif: ${displayName}`);
       }
     } else {
       if (modelVal.includes('/') && !STATE.settings.openRouterKey) {
         showToast(`⚠️ Model ${displayName} aktif. Butuh OpenRouter Key di Pengaturan untuk menghasilkan gambar.`, 'warning');
-      } else {
-        showToast(`🎨 Model Gambar Aktif: ${displayName}`);
       }
     }
   }
@@ -41700,7 +41690,6 @@ Aturan:
         els.promptInput.focus();
       }
       hideSlashCommandsMenu();
-      showToast('🎨 Mode AI Image Studio Aktif!');
       AudioEngine.success();
       return;
     }
@@ -41716,7 +41705,6 @@ Aturan:
         els.promptInput.focus();
       }
       hideSlashCommandsMenu();
-      showToast('🎵 Mode AI Music Studio Aktif!');
       AudioEngine.success();
       return;
     }
@@ -41975,11 +41963,9 @@ Aturan:
           try { navigator.vibrate([40, 40, 40]); } catch (_) {}
         }
         if (STATE.isImageGenMode) {
-          showToast('🎨 Quick Toggle: Mode AI Image Studio Aktif!');
           AudioEngine.success();
           els.promptInput?.focus();
         } else {
-          showToast('💬 Quick Toggle: Mode Percakapan Standar.');
           AudioEngine.click();
           els.promptInput?.focus();
         }
@@ -42208,7 +42194,6 @@ Aturan:
         if (navigator.vibrate) {
           try { navigator.vibrate(30); } catch (_) {}
         }
-        showToast('🎨 Mode AI Image Studio Aktif!');
         AudioEngine.success();
       } else if (!STATE.isMusicGenMode && /^\/(?:music|musik|audio|song|lagu)\s+/i.test(val)) {
         STATE.isMusicGenMode = true;
@@ -42220,7 +42205,6 @@ Aturan:
         if (navigator.vibrate) {
           try { navigator.vibrate(30); } catch (_) {}
         }
-        showToast('🎵 Mode AI Music Studio Aktif!');
         AudioEngine.success();
       } else if ((STATE.isImageGenMode || STATE.isMusicGenMode) && /^\/(?:chat|teks|text)\s+/i.test(val)) {
         STATE.isImageGenMode = false;
