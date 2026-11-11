@@ -9091,7 +9091,150 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     return html;
   }
 
-  function renderMarkdown(rawText, isStreaming = false) {
+  // ==================== UNIVERSAL CITATION LINKIFIER & SOURCE HYDRATOR ====================
+  function hydrateCitationLinks(html, sources = null) {
+    if (!html || typeof html !== 'string') return html;
+
+    // 1. Kumpulkan daftar sumber rujukan yang valid (dari parameter, aktifitas stream, atau riwayat pesan)
+    let sourceList = Array.isArray(sources) && sources.length > 0 ? sources : null;
+    if (!sourceList && typeof ACTIVE_CHAT_SOURCES !== 'undefined' && Array.isArray(ACTIVE_CHAT_SOURCES) && ACTIVE_CHAT_SOURCES.length > 0) {
+      sourceList = ACTIVE_CHAT_SOURCES;
+    }
+    if (!sourceList && typeof STATE !== 'undefined' && STATE?.currentSessionId) {
+      const curSess = STATE.sessions?.find(s => s.id === STATE.currentSessionId);
+      if (curSess?.messages && curSess.messages.length > 0) {
+        for (let i = curSess.messages.length - 1; i >= 0; i--) {
+          const m = curSess.messages[i];
+          if (m && Array.isArray(m.sources) && m.sources.length > 0) {
+            sourceList = m.sources;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!sourceList || sourceList.length === 0) {
+      return html;
+    }
+
+    const sourceMap = new Map();
+    sourceList.forEach((s, idx) => {
+      if (s && s.url) {
+        sourceMap.set(idx + 1, s);
+      }
+    });
+
+    // 2. Lindungi blok-blok yang DILARANG dimodifikasi:
+    // - <pre><code>...</code></pre> dan <code>...</code> (mencegah korupsi array index kode)
+    // - <a>...</a> (mencegah link bersarang / nested links)
+    // - <script>, <style>, <math>, katex blocks
+    // - Tag HTML apa pun (<[^>]+>)
+    const protectedBlocks = [];
+    const tagPattern = /(<(?:pre|code|a|script|style)[^>]*>[\s\S]*?<\/(?:pre|code|a|script|style)>|<span[^>]*class=["'][^"']*katex[^"']*[\s\S]*?<\/span>|<div[^>]*class=["'][^"']*katex[^"']*[\s\S]*?<\/div>|<[^>]+>)/gi;
+    let protectedHtml = html.replace(tagPattern, (match) => {
+      const placeholder = `<<<ZOZ_PROTECTED_BLOCK_${protectedBlocks.length}>>>`;
+      protectedBlocks.push(match);
+      return placeholder;
+    });
+
+    const getSourceForNumber = (num, contextLine = '') => {
+      const n = parseInt(num, 10);
+      if (sourceMap.has(n)) return sourceMap.get(n);
+      if (sourceList && sourceList.length > 0) {
+        if (contextLine) {
+          const normContext = contextLine.toLowerCase();
+          for (const s of sourceList) {
+            if (!s || !s.url) continue;
+            const sTitle = String(s.title || '').toLowerCase();
+            const sDomain = String(s.domain || '').toLowerCase();
+            if (sDomain && sDomain.length > 3 && normContext.includes(sDomain)) return s;
+            if (sTitle && sTitle.length > 6) {
+              const words = sTitle.split(/\s+/).filter(w => w.length > 3);
+              if (words.filter(w => normContext.includes(w)).length >= 2) return s;
+            }
+          }
+        }
+        if (n >= 1 && n <= sourceList.length) {
+          return sourceList[n - 1];
+        }
+      }
+      return null;
+    };
+
+    // 3. Transformasi Baris Sumber Referensi / Daftar Pustaka di Bagian Bawah
+    // Format: [1] Yahoo Finance - Anthropic's Claude... atau - [1] Crypto Briefing...
+    const refLineRegex = /(?:^|\n|\r|<br\s*\/?>|<<<ZOZ_PROTECTED_BLOCK_\d+>>>)\s*(?:[-*•]\s*)?\[(\d+)\]\s*([^<\n\r]+?)(?=(?:\n|\r|<br\s*\/?>|<<<ZOZ_PROTECTED_BLOCK_\d+>>>|$))/gi;
+    protectedHtml = protectedHtml.replace(refLineRegex, (fullMatch, numStr, textBody) => {
+      const cleanBody = textBody.trim();
+      const src = getSourceForNumber(numStr, cleanBody);
+      if (src && src.url) {
+        const u = src.url;
+        const t = (src.title || cleanBody).trim();
+        const blockHtml = `\n<div class="citation-source-item"><a href="${escapeHtml(u)}" target="_blank" rel="noopener noreferrer" class="citation-ref-badge citation-list-badge" title="${escapeHtml(t)}">[${numStr}]</a><a href="${escapeHtml(u)}" target="_blank" rel="noopener noreferrer" class="citation-source-link" title="Buka sumber asli: ${escapeHtml(u)}"><span class="citation-source-text">${escapeHtml(cleanBody)}</span> <i class="fa-solid fa-arrow-up-right-from-square citation-link-icon"></i></a></div>`;
+        const placeholder = `<<<ZOZ_PROTECTED_BLOCK_${protectedBlocks.length}>>>`;
+        protectedBlocks.push(blockHtml);
+        return placeholder;
+      }
+      return fullMatch;
+    });
+
+    // 4. Transformasi Sitasi Gabungan / Rentang:
+    // A. Rentang [1-3] atau [1–3]
+    protectedHtml = protectedHtml.replace(/\[(\d+)\s*[-–—]\s*(\d+)\]/g, (match, sStr, eStr) => {
+      const startN = parseInt(sStr, 10);
+      const endN = parseInt(eStr, 10);
+      if (startN < endN && (endN - startN) <= 5) {
+        const badges = [];
+        for (let i = startN; i <= endN; i++) {
+          const src = getSourceForNumber(String(i));
+          if (src && src.url) {
+            const tooltip = (src.title ? src.title + ' — ' : '') + (src.domain || src.url);
+            badges.push(`<a href="${escapeHtml(src.url)}" target="_blank" rel="noopener noreferrer" class="citation-ref-badge" title="${escapeHtml(tooltip)}">[${i}]</a>`);
+          } else {
+            badges.push(`[${i}]`);
+          }
+        }
+        return badges.join('–');
+      }
+      return match;
+    });
+
+    // B. Koma [1, 2] atau [1, 4, 5]
+    protectedHtml = protectedHtml.replace(/\[(\d+(?:\s*,\s*\d+)+)\]/g, (match, numsGroup) => {
+      const parts = numsGroup.split(/\s*,\s*/);
+      const badges = parts.map(numStr => {
+        const src = getSourceForNumber(numStr);
+        if (src && src.url) {
+          const tooltip = (src.title ? src.title + ' — ' : '') + (src.domain || src.url);
+          return `<a href="${escapeHtml(src.url)}" target="_blank" rel="noopener noreferrer" class="citation-ref-badge" title="${escapeHtml(tooltip)}">[${numStr}]</a>`;
+        }
+        return `[${numStr}]`;
+      });
+      return badges.join(', ');
+    });
+
+    // C. Sitasi Tunggal [1], [2], [4] atau beruntun [2][4]
+    protectedHtml = protectedHtml.replace(/\[(\d+)\]/g, (match, numStr) => {
+      const src = getSourceForNumber(numStr);
+      if (src && src.url) {
+        const tooltip = (src.title ? src.title + ' — ' : '') + (src.domain || src.url);
+        return `<a href="${escapeHtml(src.url)}" target="_blank" rel="noopener noreferrer" class="citation-ref-badge" title="${escapeHtml(tooltip)}">[${numStr}]</a>`;
+      }
+      return match;
+    });
+
+    // 5. Pulihkan seluruh blok yang dilindungi
+    let restoredHtml = protectedHtml.replace(/<<<ZOZ_PROTECTED_BLOCK_(\d+)>>>/g, (_, idx) => {
+      return protectedBlocks[parseInt(idx, 10)] || '';
+    });
+
+    // Rapikan tag <p> kosong yang mungkin membungkus .citation-source-item
+    restoredHtml = restoredHtml.replace(/<p>\s*(<div class="citation-source-item">[\s\S]*?<\/div>)\s*<\/p>/gi, '$1');
+
+    return restoredHtml;
+  }
+
+  function renderMarkdown(rawText, isStreaming = false, sources = null) {
     if (!rawText) return '';
     
     // Bersihkan blok pemikiran internal AI secara deterministik (pengguna hanya melihat output murni)
@@ -9152,6 +9295,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     result = result.replace(/(?:<p\b[^>]*>\s*)?(?:<code>\s*)?\[{0,2}ZOZ_IMAGE_DISPLAY:(disp_[a-zA-Z0-9_-]{4,64})\]{0,2}(?:\s*<\/code>)?(?:\s*<\/p>)?/gi, (_m, dispId) => {
       return `<div class="zoz-image-display-slot" data-display-id="${escapeHtml(dispId)}"></div>`;
     });
+
+    // Render nomor sitasi dan daftar sumber menjadi tautan aktif interaktif ke URL rujukan asli
+    result = hydrateCitationLinks(result, sources);
 
     return result;
   }
@@ -12368,7 +12514,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           displayText = scrubbed;
         }
       }
-      this.el.innerHTML = (this.prefixHtml || '') + appendInlineTypingCursor(renderMarkdown(hideFileBlocksForDisplay(displayText, this.options), true));
+      const currentStreamSources = (typeof this.options.getSources === 'function') ? this.options.getSources() : (this.options.sources || ACTIVE_CHAT_SOURCES);
+      this.el.innerHTML = (this.prefixHtml || '') + appendInlineTypingCursor(renderMarkdown(hideFileBlocksForDisplay(displayText, this.options), true, currentStreamSources));
       if (this.onScroll && !userScrolledUp) this.onScroll();
       if (els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) {
         updateStudioPreviewStreamHud(displayText);
@@ -12433,7 +12580,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         }
       }
       if (shouldRender && this.el) {
-        this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(this.text, this.options), false);
+        const currentFinishSources = (typeof this.options.getSources === 'function') ? this.options.getSources() : (this.options.sources || ACTIVE_CHAT_SOURCES);
+        this.el.innerHTML = (this.prefixHtml || '') + renderMarkdown(hideFileBlocksForDisplay(this.text, this.options), false, currentFinishSources);
         enhanceCodeBlocks(this.el);
       }
       if (this.onScroll && !userScrolledUp) this.onScroll();
@@ -17204,7 +17352,8 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       }
     }
     const hasText = Boolean(safeContent && String(safeContent).trim().length > 0);
-    const renderedBody = role === 'assistant' ? renderMarkdown(safeContent) : renderUserMessageContent(safeContent);
+    if (role === 'assistant' && sources && Array.isArray(sources)) { row._webSources = sources; }
+    const renderedBody = role === 'assistant' ? renderMarkdown(safeContent, false, sources) : renderUserMessageContent(safeContent);
     const textDisplayStyle = (!hasText && role === 'user') ? 'style="display:none;"' : '';
 
     let assistantGeneratedImagesHtml = '';
@@ -26548,6 +26697,7 @@ ${blocks}
 
   // ==================== UNIVERSAL WEB CONTENT EXTRACTOR & READER TOOL ====================
   const clientWebContentCache = new Map();
+  let ACTIVE_CHAT_SOURCES = null;
 
   // F12: cache ekstraksi web kini dibatasi64 entri (FIFO) — dulu tak berbatas,
   // setiap URL unik menahan payload ~8KB+ sepanjang usia halaman (pertumbuhan memori).
@@ -29985,7 +30135,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           });
 
           const formattedText = `[HASIL PENELUSURAN TERVERIFIKASI UNTUK "${query}"]:\n` + lines.join('\n\n') +
-            `\n\n[BATASAN BUKTI]: Sintesis jawaban secara akurat berdasarkan fakta, entitas, versi, dan informasi yang tercantum pada "Isi Artikel" dan "Ringkasan" di atas sesuai bahasa pertanyaan pengguna, serta sertakan tautan sumber sebagai sitasi pendukung.`;
+            `\n\n[PANDUAN FORMAT SITASI & SUMBER]:\n` +
+            `1. Cantumkan sitasi bernomor [1], [2], dst. pada setiap klaim data/faktual di dalam teks jawaban.\n` +
+            `2. Pada akhir jawaban, buat bagian "Sumber Referensi:" yang mencantumkan nomor [1], [2] beserta judul dan tautan URL asli dari hasil penelusuran di atas agar pengguna dapat langsung mengkliknya.`;
 
           return cacheAndReturn({
             text: formattedText,
@@ -32587,7 +32739,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       let buffer = '';
       let doneReason = null;
       const accumulatedToolCalls = [];
-      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, { ...runOptions, userPrompt: promptText });
+      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, { ...runOptions, userPrompt: promptText, getSources: () => webSources });
 
       let deadAirTimer = null;
       let ollamaUsage = null;
@@ -33525,7 +33677,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       if (preambleHtml && isInternalSystemPayload(preambleHtml)) {
         preambleHtml = '';
       }
-      const finalRenderedContent = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
+      if (webSources && webSources.length > 0) { ACTIVE_CHAT_SOURCES = webSources; assistantRow._webSources = webSources; }
+      const finalRenderedContent = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText, false, webSources).trim();
       bubbleText.innerHTML = finalRenderedContent.trim();
       if (groundedImageDisplays.length > 0) {
         renderGroundedImageDisplaysForRow(assistantRow, groundedImageDisplays);
@@ -34369,7 +34522,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const selectedAutonomousTools = hasAttachedWebDocs
         ? rawAutonomousTools.filter(t => t?.function?.name !== 'browse_web_page')
         : rawAutonomousTools;
-      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, { ...runOptions, userPrompt: promptText });
+      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, { ...runOptions, userPrompt: promptText, getSources: () => webSources });
 
       for (let i = 0; i < candidateModels.length; i++) {
         if (STATE.abortController?.signal?.aborted) break;
@@ -35831,7 +35984,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         }
       }
 
-      let renderedMarkdown = renderMarkdown(fullText);
+      if (webSources && webSources.length > 0) { ACTIVE_CHAT_SOURCES = webSources; assistantRow._webSources = webSources; }
+      let renderedMarkdown = renderMarkdown(fullText, false, webSources);
       let imagesHtml = '';
       if (collectedImages.length > 0) {
         imagesHtml = `

@@ -6327,6 +6327,100 @@ div.msg-sources-section button.msg-sources-title span {
   flex-shrink: 0;
 }
 
+/* ==================== CITATION BADGE & INTERACTIVE SOURCE LINKS ==================== */
+.citation-ref-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: baseline;
+  position: relative;
+  top: -0.22em;
+  margin: 0 2px;
+  padding: 1px 6px;
+  min-width: 18px;
+  height: 18px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: var(--font-mono, 'Fira Code', monospace);
+  line-height: 1;
+  border-radius: 4px;
+  background: rgba(0, 240, 255, 0.12);
+  color: var(--neon-cyan, #00f0ff) !important;
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  text-decoration: none !important;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 4px rgba(0, 240, 255, 0.1);
+  user-select: none;
+}
+
+.citation-ref-badge:hover {
+  background: var(--neon-cyan, #00f0ff);
+  color: #0b0f19 !important;
+  border-color: #00f0ff;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.6);
+  transform: translateY(-2px) scale(1.08);
+}
+
+.citation-source-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 6px 0;
+  padding: 8px 12px;
+  background: rgba(13, 20, 34, 0.65);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  border-radius: 8px;
+  transition: all 0.22s ease;
+}
+
+.citation-source-item:hover {
+  background: rgba(0, 240, 255, 0.08);
+  border-color: rgba(0, 240, 255, 0.5);
+  box-shadow: 0 2px 12px rgba(0, 240, 255, 0.2);
+}
+
+.citation-list-badge {
+  top: 0;
+  margin: 2px 0 0 0;
+  flex-shrink: 0;
+}
+
+.citation-source-link {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-main, #e2e8f0) !important;
+  text-decoration: none !important;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  transition: color 0.18s ease;
+  word-break: break-word;
+}
+
+.citation-source-link:hover {
+  color: var(--neon-cyan, #00f0ff) !important;
+}
+
+.citation-source-text {
+  font-weight: 500;
+}
+
+.citation-link-icon {
+  font-size: 0.72rem;
+  color: var(--neon-cyan, #00f0ff);
+  opacity: 0.8;
+  margin-left: 2px;
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
+}
+
+.citation-source-item:hover .citation-link-icon {
+  transform: translate(2px, -2px);
+  opacity: 1;
+}
+
 /* ==================== GEOMETRIC PROPORTIONAL COMPACT THUMBNAIL MATRIX ==================== */
 .attached-images-gallery {
   display: flex;
