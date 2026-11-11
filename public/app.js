@@ -8447,6 +8447,20 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     return null;
   }
 
+  function hasTopLevelAddSub(str) {
+    let depth = 0;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      if (ch === '(' || ch === '[' || ch === '{') depth++;
+      else if (ch === ')' || ch === ']' || ch === '}') depth--;
+      else if (depth === 0 && (ch === '+' || ch === '-')) {
+        if (i === 0) continue;
+        return true;
+      }
+    }
+    return false;
+  }
+
   function transpileFractionsRecursive(text) {
     let str = text;
     let fracIdx;
@@ -8465,19 +8479,35 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const denGroup = extractBalancedGroup(str, afterNum);
       if (!denGroup) break;
 
-      const num = transpileFractionsRecursive(numGroup.content.trim());
-      const den = transpileFractionsRecursive(denGroup.content.trim());
+      let num = transpileFractionsRecursive(numGroup.content.trim());
+      let den = transpileFractionsRecursive(denGroup.content.trim());
 
-      // Format fraction nicely with clean mathematical parenthesis
+      // Strip unnecessary outer parentheses if already present
+      if (num.startsWith('(') && num.endsWith(')')) {
+        const inner = num.slice(1, -1);
+        if (!inner.includes('(') && !inner.includes(')')) num = inner.trim();
+      }
+      if (den.startsWith('(') && den.endsWith(')')) {
+        const inner = den.slice(1, -1);
+        if (!inner.includes('(') && !inner.includes(')')) den = inner.trim();
+      }
+
+      const numNeedsParens = hasTopLevelAddSub(num);
+      const isDenSimpleAtom = /^[a-zA-Z0-9\u0370-\u03FF\u2100-\u214F]$/.test(den) || /^\d+$/.test(den);
+      const denNeedsParens = !isDenSimpleAtom && !den.startsWith('(');
+
+      const formattedNum = numNeedsParens ? `(${num})` : num;
+      const formattedDen = denNeedsParens ? `(${den})` : den;
+
       let formatted;
-      const isNumToken = /^[a-zA-Z0-9\u0370-\u03FF\u2100-\u214F]$/.test(num);
-      const isDenToken = /^[a-zA-Z0-9\u0370-\u03FF\u2100-\u214F]$/.test(den);
-      if (isNumToken && isDenToken) {
-        formatted = `${num}/${den}`;
-      } else if (isNumToken) {
-        formatted = `${num}/(${den})`;
+      if (/^[\d.]+[a-zA-Z]?$/.test(num) && /^\d+$/.test(den)) {
+        formatted = `${formattedNum}/${formattedDen}`;
+      } else if (/^[a-zA-Z0-9\u0370-\u03FF]$/.test(num) && /^[a-zA-Z0-9\u0370-\u03FF]$/.test(den)) {
+        formatted = `${formattedNum}/${formattedDen}`;
+      } else if (/^\d+$/.test(num) && /^[a-zA-Z0-9\u0370-\u03FF\u2100-\u214F]/.test(den)) {
+        formatted = `${formattedNum}/${formattedDen}`;
       } else {
-        formatted = `(${num})/(${den})`;
+        formatted = `${formattedNum} / ${formattedDen}`;
       }
 
       str = str.substring(0, fracIdx) + formatted + str.substring(denGroup.endIndex + 1);
@@ -8509,20 +8539,26 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     });
 
     // Pastikan perintah LaTeX terpisah dari pembungkus teks (misal: \nabla\mathbf{u} -> \nabla \mathbf{u})
-    out = out.replace(/(\\[a-zA-Z]+)(\\(?:mathbf|mathit|mathrm|boldsymbol|bm|mathcal|mathbb|text)\b)/g, '$1 $2');
+    out = out.replace(/(\\[a-zA-Z]+)(\\(?:mathbf|mathit|mathrm|boldsymbol|bm|mathcal|mathscr|mathbb|text)\b)/g, '$1 $2');
     out = out.replace(/(\\(?:text|mathrm)\{[^}]+\})(\\[a-zA-Z]+)/g, '$1 $2');
 
-    // 2. Blackboard Bold (Sistem Bilangan & Monad Matematika Murni)
-    const bbMap = { R: 'ℝ', C: 'ℂ', N: 'ℕ', Z: 'ℤ', Q: 'ℚ', H: 'ℍ', P: 'ℙ', I: '𝕀', Y: '𝕐' };
+    // 2. Blackboard Bold (\mathbb) - Lengkap 26 Huruf Besar
+    const bbMap = {
+      A: '𝔸', B: '𝔹', C: 'ℂ', D: '𝔻', E: '𝔼', F: '𝔽', G: '𝔾', H: 'ℍ', I: '𝕀',
+      J: '𝕁', K: '𝕂', L: '𝕃', M: '𝕄', N: 'ℕ', O: '𝕆', P: 'ℙ', Q: 'ℚ', R: 'ℝ',
+      S: '𝕊', T: '𝕋', U: '𝕌', V: '𝕍', W: '𝕎', X: '𝕏', Y: '𝕐', Z: 'ℤ'
+    };
     out = out.replace(/\\mathbb\{([A-Z])\}/g, (m, c) => bbMap[c] || c);
+    out = out.replace(/\\mathbb\s*([A-Z])/g, (m, c) => bbMap[c] || c);
 
-    // 3. Script & Huruf Kaligrafi (\mathcal)
+    // 3. Script & Huruf Kaligrafi (\mathcal & \mathscr) - Lengkap 26 Huruf Besar
     const calMap = {
       M: 'ℳ', F: 'ℱ', L: 'ℒ', H: 'ℋ', E: 'ℰ', D: '𝒟', Z: '𝒵', R: 'ℛ',
       P: '𝒫', B: 'ℬ', O: '𝒪', A: '𝒜', C: '𝒞', N: '𝒩', T: '𝒯', K: '𝒦',
       I: 'ℐ', J: '𝒥', S: '𝒮', U: '𝒰', V: '𝒱', W: '𝒲', X: '𝒳', Y: '𝒴', G: '𝒢', Q: '𝒬'
     };
-    out = out.replace(/\\mathcal\{([A-Z])\}/g, (m, c) => calMap[c] || c);
+    out = out.replace(/\\(?:mathcal|mathscr)\{([A-Z])\}/g, (m, c) => calMap[c] || c);
+    out = out.replace(/\\(?:mathcal|mathscr)\s*([A-Z])/g, (m, c) => calMap[c] || c);
 
     // 4. Dekompresi dan lepas pembungkus teks LaTeX secara rekursif: \text{...}, \mathrm{...}, \operatorname{...}, dsb.
     let prev;
@@ -8543,29 +8579,47 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       .replace(/\\!/g, '')
       .replace(/\\([,;: ])/g, ' ');
 
-    // 6. Pembersihan pembatas (\left, \right, null delimiters, limits)
+    // 6. Pembersihan pembatas (\left, \right, null delimiters, limits, garis evaluasi)
     out = out.replace(/\\(?:left|right)\./g, '');
     out = out.replace(/\\(?:left|right)(?![a-zA-Z])/g, '');
     out = out.replace(/\\(?:limits|nolimits)(?![a-zA-Z])/g, '');
+    out = out.replace(/\\(?:bigg|Bigg|big|Big)([|/\\()\[\]{}])/g, '$1');
+    out = out.replace(/\\(?:bigg|Bigg|big|Big)(?![a-zA-Z])/g, '');
+
+    // Bra-Ket & Tanda Kurung Sudut
+    out = out.replace(/\\langle(?![a-zA-Z])/g, '⟨');
+    out = out.replace(/\\rangle(?![a-zA-Z])/g, '⟩');
+
+    // Panah berlabel teks (\xrightarrow{...}, \xleftarrow{...})
+    out = out.replace(/\\xrightarrow\s*\{([^{}]+)\}/g, '—[$1]→');
+    out = out.replace(/\\xleftarrow\s*\{([^{}]+)\}/g, '←[$1]—');
+
+    // Limit terproyeksi
+    out = out.replace(/\\varprojlim(?![a-zA-Z])/g, 'proj lim');
+    out = out.replace(/\\varinjlim(?![a-zA-Z])/g, 'inj lim');
 
     // 7. Aksen Matematika: \hat, \bar, \overline, \vec, \tilde
     const circumflexMap = {
       H: 'Ĥ', A: 'Â', E: 'Ê', I: 'Î', O: 'Ô', U: 'Û',
       C: 'Ĉ', G: 'Ĝ', J: 'Ĵ', S: 'Ŝ', W: 'Ŵ', Y: 'Ŷ', Z: 'Ẑ',
-      h: 'ĥ', a: 'â', e: 'ê', i: 'î', o: 'ô', u: 'û', c: 'ĉ', g: 'ĝ', s: 'ŝ', w: 'ŵ', y: 'ŷ', z: 'ẑ'
+      h: 'ĥ', a: 'â', e: 'ê', i: 'î', o: 'ô', u: 'û', c: 'ĉ', g: 'ĝ', s: 'ŝ', w: 'ŵ', y: 'ŷ', z: 'ẑ',
+      'Ψ': 'Ψ̂', 'ψ': 'ψ̂', 'Φ': 'Φ̂', 'ϕ': 'ϕ̂', 'φ': 'φ̂'
     };
-    out = out.replace(/\\hat\{([a-zA-Z])\}/g, (m, c) => circumflexMap[c] || (c + '\u0302'));
-    out = out.replace(/\\hat\s*([a-zA-Z])/g, (m, c) => circumflexMap[c] || (c + '\u0302'));
+    out = out.replace(/\\hat\{([a-zA-Z\u0370-\u03FF])\}/g, (m, c) => circumflexMap[c] || (c + '\u0302'));
+    out = out.replace(/\\hat\s*([a-zA-Z\u0370-\u03FF])/g, (m, c) => circumflexMap[c] || (c + '\u0302'));
     out = out.replace(/\\overline\{([^}]+)\}/g, (m, inner) => inner + '\u0304');
-    out = out.replace(/\\bar\{([a-zA-Z])\}/g, (m, c) => c + '\u0304');
-    out = out.replace(/\\vec\{([a-zA-Z])\}/g, (m, c) => c + '\u20D7');
-    out = out.replace(/\\tilde\{([a-zA-Z])\}/g, (m, c) => c + '\u0303');
-
-    // Bersihkan kurung kurawal kosong: {}
+    out = out.replace(/\\bar\{([a-zA-Z\u0370-\u03FF])\}/g, (m, c) => c + '\u0304');
+    out = out.replace(/\\vec\{([a-zA-Z\u0370-\u03FF])\}/g, (m, c) => c + '\u20D7');
+    out = out.replace(/\\tilde\{([a-zA-Z\u0370-\u03FF])\}/g, (m, c) => c + '\u0303');
     out = out.replace(/\{\}/g, '');
 
-    // 8. Relasi Panah & Morfisma Teori Kategori / Reaksi Kimia (Boundary (?![a-zA-Z]))
+    // 8. Relasi Panah & Morfisma Teori Kategori / Reaksi Kimia
     out = out
+      .replace(/\\(?:curvearrowright)(?![a-zA-Z])/g, '↷')
+      .replace(/\\(?:curvearrowleft)(?![a-zA-Z])/g, '↶')
+      .replace(/\\(?:hookrightarrow)(?![a-zA-Z])/g, '↪')
+      .replace(/\\(?:hookleftarrow)(?![a-zA-Z])/g, '↩')
+      .replace(/\\(?:twoheadrightarrow)(?![a-zA-Z])/g, '↠')
       .replace(/\\(?:longrightarrow|rightarrow|to)(?![a-zA-Z])/g, '→')
       .replace(/\\(?:longleftarrow|leftarrow|gets)(?![a-zA-Z])/g, '←')
       .replace(/\\(?:longleftrightarrow|leftrightarrow)(?![a-zA-Z])/g, '↔')
@@ -8596,6 +8650,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // 10. Operator, Relasi, Simbol Vektor, Logika & Kalkulus Autentik
     out = out
       .replace(/\\hbar(?![a-zA-Z])/g, 'ℏ')
+      .replace(/\\bigwedge(?![a-zA-Z])/g, '⋀')
+      .replace(/\\bigvee(?![a-zA-Z])/g, '⋁')
+      .replace(/\\bigcap(?![a-zA-Z])/g, '⋂')
+      .replace(/\\bigcup(?![a-zA-Z])/g, '⋃')
       .replace(/\\wedge(?![a-zA-Z])/g, '∧')
       .replace(/\\vee(?![a-zA-Z])/g, '∨')
       .replace(/\\cap(?![a-zA-Z])/g, '∩')
@@ -8635,8 +8693,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       .replace(/\\prod(?![a-zA-Z])/g, '∏')
       .replace(/\\coprod(?![a-zA-Z])/g, '∐')
       .replace(/\\sum(?![a-zA-Z])/g, '∑')
-      .replace(/\\sqrt\{([^{}]+)\}/g, '√($1)')
-      .replace(/\\sqrt\s*([a-zA-Z0-9])/g, '√$1')
+      .replace(/\\dots|\\cdots|\\ldots|\\ddots|\\vdots/g, '…')
       .replace(/\\mid(?![a-zA-Z])/g, '|')
       .replace(/\\bullet(?![a-zA-Z])/g, '•')
       .replace(/\\circ(?![a-zA-Z])/g, '∘')
@@ -8647,14 +8704,19 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       .replace(/\\setminus(?![a-zA-Z])/g, '∖')
       .replace(/\\\|/g, '‖');
 
+    // Bentuk akar kuadrat proporsional: √atom vs √(compound)
+    out = out.replace(/\\sqrt\{([a-zA-Z0-9\u0370-\u03FF])\}/g, '√$1');
+    out = out.replace(/\\sqrt\{([^{}]+)\}/g, '√($1)');
+    out = out.replace(/\\sqrt\s*([a-zA-Z0-9\u0370-\u03FF])/g, '√$1');
+
     // 11. Transpilasi Pecahan Bertingkat & Bersarang (\frac, \dfrac, \tfrac)
     out = transpileFractionsRecursive(out);
 
     // 12. Fungsi Matematika Standar (Lepas garis miring dan format spasi presisi)
-    out = out.replace(/\\(exp|sinh|cosh|tanh|sin|cos|tan|ln|log|det|dim|ker|deg|max|min|sup|inf|lim|Tr|tr|Re|Im|Hom|Aut|Rep|Gal|ch|ind|rank|Res|sinc|gcd|lcm)\s*(?=[(\[{])/g, '$1');
-    out = out.replace(/\\(exp|sinh|cosh|tanh|sin|cos|tan|ln|log|det|dim|ker|deg|max|min|sup|inf|lim|Tr|tr|Re|Im|Hom|Aut|Rep|Gal|ch|ind|rank|Res|sinc|gcd|lcm)(?![a-zA-Z])/g, '$1 ');
+    out = out.replace(/\\(exp|sinh|cosh|tanh|sin|cos|tan|ln|log|det|dim|ker|deg|max|min|sup|inf|lim|Tr|tr|Re|Im|Hom|Aut|Rep|Gal|ch|ind|Ind|rank|Res|sinc|gcd|lcm)\s*(?=[(\[{])/g, '$1');
+    out = out.replace(/\\(exp|sinh|cosh|tanh|sin|cos|tan|ln|log|det|dim|ker|deg|max|min|sup|inf|lim|Tr|tr|Re|Im|Hom|Aut|Rep|Gal|ch|ind|Ind|rank|Res|sinc|gcd|lcm)(?![a-zA-Z])/g, '$1 ');
 
-    // 13. Tipografi Subskrip dan Superskrip
+    // 13. Tipografi Subskrip dan Superskrip Autentik
     const subMap = {
       '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
       '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
@@ -8662,42 +8724,61 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       'a': 'ₐ', 'e': 'ₑ', 'h': 'ₕ', 'i': 'ᵢ', 'j': 'ⱼ',
       'k': 'ₖ', 'l': 'ₗ', 'm': 'ₘ', 'n': 'ₙ', 'o': 'ₒ',
       'p': 'ₚ', 'r': 'ᵣ', 's': 'ₛ', 't': 'ₜ', 'u': 'ᵤ',
-      'v': 'ᵥ', 'x': 'ₓ'
+      'v': 'ᵥ', 'x': 'ₓ',
+      'β': 'ᵦ', 'γ': 'ᵧ', 'ρ': 'ᵨ', 'φ': 'ᵩ', 'χ': 'ᵪ'
     };
     const supMap = {
       '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
       '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
       '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾',
-      'n': 'ⁿ', 'i': 'ⁱ', 's': 'ˢ'
+      'a': 'ᵃ', 'b': 'ᵇ', 'c': 'ᶜ', 'd': 'ᵈ', 'e': 'ᵉ',
+      'f': 'ᶠ', 'g': 'ᵍ', 'h': 'ʰ', 'i': 'ⁱ', 'j': 'ʲ',
+      'k': 'ᵏ', 'l': 'ˡ', 'm': 'ᵐ', 'n': 'ⁿ', 'o': 'ᵒ',
+      'p': 'ᵖ', 'r': 'ʳ', 's': 'ˢ', 't': 'ᵗ', 'u': 'ᵘ',
+      'v': 'ᵛ', 'w': 'ʷ', 'x': 'ˣ', 'y': 'ʸ', 'z': 'ᶻ',
+      'A': 'ᴬ', 'B': 'ᴮ', 'D': 'ᴰ', 'E': 'ᴱ', 'G': 'ᴳ',
+      'H': 'ᴴ', 'I': 'ᴵ', 'J': 'ᴶ', 'K': 'ᴷ', 'L': 'ᴸ',
+      'M': 'ᴹ', 'N': 'ᴺ', 'O': 'ᴼ', 'P': 'ᴾ', 'R': 'ᴿ',
+      'T': 'ᵀ', 'U': 'ᵁ', 'V': 'ⱽ', 'W': 'ᵂ',
+      'α': 'ᵅ', 'β': 'ᵝ', 'γ': 'ᵞ', 'δ': 'ᵟ', 'ε': 'ᵋ',
+      'θ': 'ᶿ', 'μ': 'ᶿ', 'φ': 'ᵠ', 'χ': 'ᵡ',
+      '•': '•', '⋆': '⋆', '*': '⁺', '∞': '∞', '/': 'ᐟ'
     };
 
-    // Ganti {}^{(3)} atau {}^{(n)} atau ^{(3)}
-    out = out.replace(/\^\{?\((\d+)\)\}?/g, (m, d) => '(' + d.split('').map(c => supMap[c] || c).join('') + ')');
-
-    // Superskrip dengan kurung kurawal: ^{24}, ^{n/2}, ^{s-1}
-    out = out.replace(/\^\{([0-9+\-=()nis]+)\}/g, (m, inner) => {
-      return inner.split('').map(c => supMap[c] || c).join('');
+    // Konversi superskrip kurung kurawal: ^{...}
+    out = out.replace(/\^\{([^{}]+)\}/g, (match, inner) => {
+      const converted = inner.split('').map(c => supMap[c] || null);
+      if (!converted.includes(null)) {
+        return converted.join('');
+      }
+      return '^(' + inner + ')';
     });
-    // Superskrip karakter tunggal: ^2, ^3, ^n, ^s
-    out = out.replace(/\^([0-9nis])/g, (m, c) => supMap[c] || m);
-    out = out.replace(/\^∞/g, '^∞');
+    // Superskrip karakter tunggal: ^2, ^n, ^∞, ^x, dsb.
+    out = out.replace(/\^([0-9a-zA-Z\u0370-\u03FF∞])/g, (m, c) => supMap[c] || `^${c}`);
 
-    // Subskrip angka dan pengidentifikasi pendek: _{11}, _{1}, _{ij}, _{kl}
-    out = out.replace(/_\{([0-9+\-=()aehijklmnoprstuvx]+)\}/g, (m, inner) => {
-      return inner.split('').map(c => subMap[c] || c).join('');
+    // Konversi subskrip kurung kurawal: _{...}
+    out = out.replace(/_\{([^{}]+)\}/g, (match, inner) => {
+      const converted = inner.split('').map(c => subMap[c] || null);
+      if (!converted.includes(null)) {
+        return converted.join('');
+      }
+      return '_' + inner;
     });
-    // Subskrip karakter tunggal: _1, _2, _j, _k, _n
-    out = out.replace(/_([0-9aehijklmnoprstuvx])(?![a-zA-Z0-9])/g, (m, c) => subMap[c] || m);
-
-    // Subskrip pada operator besar & himpunan: hilangkan kurung kurawal: _{M_{11}} -> _{ℳ₁₁}
-    out = out.replace(/_\{([^{}]+)\}/g, '_$1');
+    // Subskrip karakter tunggal: _1, _2, _j, _k, _n, _γ, dsb.
+    out = out.replace(/_([0-9aehijklmnoprstuvxβγρφχ])(?![a-zA-Z0-9])/g, (m, c) => subMap[c] || m);
 
     // 14. Lepas karakter yang di-escape: \{, \}, \_, \%, \&, \#, \$
     out = out.replace(/\\([{}%&#_$])/g, '$1');
 
-    // 15. Sisipkan spasi presisi antara bentuk diferensial dan akar: d⁴x √(-g)
-    out = out.replace(/(d\^?\{?[0-9a-z]+\}?x|d[x-z]|dt|d¹¹x|d⁴x)(√)/g, '$1 $2');
+    // 15. Sisipkan spasi presisi antara bentuk diferensial dan akar
+    out = out.replace(/(d\^?\{?[0-9a-z]+\}?x|d[x-z]|dt|d¹¹x|d⁴x|dⁿx)(√)/g, '$1 $2');
     out = out.replace(/(∫|∬|∭|∮)([a-zA-ZℳM𝒟D])/g, '$1 $2');
+
+    // Spasi antara pecahan numerik dan nama variabel (misal: 4/3T_F -> 4/3 T_F)
+    out = out.replace(/(\d+\/\d+)([a-zA-Z\u0370-\u03FF\u2100-\u214F])/g, '$1 $2');
+
+    // Rapatkan operator aksen kuantum dengan fungsi gelombang: Ĥ Ψ -> ĤΨ
+    out = out.replace(/([ĤÂÊÎÔÛĈĜĴŜŴŶẐ])\s+([ΨΦ])/g, '$1$2');
 
     // 16. Spasi matematika presisi di sekitar relasi dan operator
     out = out
@@ -8722,10 +8803,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       .replace(/\s*±\s*/g, ' ± ')
       .replace(/ {2,}/g, ' ');
 
-    // 17. Rapikan baris kosong
+    // 17. Bersihkan kurung berlebih ganda: ((...)) -> (...)
+    out = out.replace(/\(\s*\(([^()]+)\)\s*\)/g, '($1)');
+
+    // 18. Rapikan baris kosong
     out = out.split('\n').map(l => l.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 
-    // 18. Kembalikan blok kode yang dilindungi
+    // 19. Kembalikan blok kode yang dilindungi
     for (const cb of codeBlocks) {
       out = out.replace(cb.token, cb.content);
     }
