@@ -27337,19 +27337,19 @@ ${blocks}
         : (isCloud ? 'background:rgba(0,240,255,0.12); color:var(--neon-cyan); border:1px solid rgba(0,240,255,0.3);' : 'background:rgba(255,183,3,0.15); color:var(--neon-amber); border:1px solid rgba(255,183,3,0.3);');
 
       item.innerHTML = `
-        <button type="button" class="model-fav-btn ${isFav ? 'active' : ''}" title="${isFav ? 'Hapus dari Model Favorit' : 'Jadikan Model Favorit'}" style="margin-right:6px;">
+        <button type="button" class="model-fav-btn ${isFav ? 'active' : ''}" title="${isFav ? 'Hapus dari Model Favorit' : 'Jadikan Model Favorit'}" style="margin-right:2px; flex-shrink:0; margin-top:2px;">
           <i class="fa-solid fa-laptop-code"></i>
         </button>
-        <div style="display:flex; flex-direction:column; overflow:hidden; flex:1; padding-right:6px;">
-          <div style="display:flex; align-items:center; gap:5px;">
-            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; font-size:0.82rem;">${escapeHtml(m.name || m.id)}</span>
+        <div class="model-item-text-wrap" style="display:flex; flex-direction:column; flex:1; min-width:0; padding-right:6px;">
+          <div class="model-item-title-row" style="display:flex; align-items:center; flex-wrap:wrap; gap:5px;">
+            <span class="model-item-name" title="${escapeHtml(m.name || m.id)}" style="font-weight:600; font-size:0.82rem; line-height:1.3; word-break:break-word; overflow-wrap:break-word; white-space:normal;">${escapeHtml(m.name || m.id)}</span>
             ${isPinned ? `<span class="model-pinned-tag" title="Model Disematkan"><i class="fa-solid fa-thumbtack text-teal-400"></i></span>` : ''}
             ${isAutoStart ? `<span class="model-autostart-tag" title="Model Auto-Start"><i class="fa-solid fa-bolt text-amber-400"></i></span>` : ''}
             ${isFav ? `<span class="model-fav-tag" title="Model Favorit"><i class="fa-solid fa-laptop-code"></i></span>` : ''}
           </div>
-          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.68rem; color:var(--text-dim); font-family:var(--font-code);">${escapeHtml(m.id)}</span>
+          <span class="model-item-id" title="${escapeHtml(m.id)}" style="font-size:0.68rem; color:var(--text-dim); font-family:var(--font-code); line-height:1.3; word-break:break-all; overflow-wrap:anywhere; white-space:normal; margin-top:2px;">${escapeHtml(m.id)}</span>
         </div>
-        <div class="model-item-actions">
+        <div class="model-item-actions" style="flex-shrink:0; margin-top:2px;">
           <button type="button" class="model-item-action-btn model-item-pin-btn ${isPinned ? 'active-pin' : ''}" title="${isPinned ? 'Lepas Sematan' : 'Sematkan Model (Prioritas Atas)'}">
             <i class="fa-solid fa-thumbtack"></i>
           </button>

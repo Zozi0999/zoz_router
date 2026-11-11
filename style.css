@@ -1619,6 +1619,7 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   gap: 4px;
   margin-left: auto;
   padding-left: 6px;
+  flex-shrink: 0;
 }
 
 .model-item-action-btn {
@@ -1694,7 +1695,8 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  width: 320px;
+  width: 440px;
+  max-width: calc(100vw - 20px);
   background: var(--bg-surface);
   border: 1px solid var(--border-glow);
   border-radius: var(--radius-md);
@@ -1737,12 +1739,12 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 }
 
 .dropdown-model-list {
-  max-height: 240px;
+  max-height: 380px;
   overflow-y: auto;
   padding: 6px 8px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .model-option-item {
@@ -1750,8 +1752,9 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   border-radius: var(--radius-sm);
   cursor: pointer;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 8px;
   font-size: 0.8rem;
   color: var(--text-muted);
   transition: background-color 0.15s, border-color 0.15s, color 0.15s;
@@ -1775,6 +1778,43 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 
 .model-option-item.is-fav:hover {
   background: rgba(255, 183, 3, 0.1);
+}
+
+/* Model item inner text helpers for intact wrapping */
+.model-item-text-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  padding-right: 6px;
+}
+
+.model-item-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.model-item-name {
+  font-weight: 600;
+  font-size: 0.82rem;
+  line-height: 1.3;
+  color: var(--text-main);
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.model-item-id {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  font-family: var(--font-code);
+  line-height: 1.3;
+  white-space: normal;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  margin-top: 2px;
 }
 
 /* ==================== MODEL FAVORITE (LAPTOP ICON) STYLES ==================== */
@@ -5251,9 +5291,18 @@ body.mobile-sidebar-open #sidebar.open + .sidebar-backdrop {
   }
 
   .model-dropdown-menu {
-    width: 290px;
-    max-width: calc(100vw - 20px);
-    right: 0;
+    position: fixed;
+    top: 48px;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: 440px;
+    margin: 0 auto;
+    z-index: 1050;
+  }
+
+  .dropdown-model-list {
+    max-height: min(420px, 55vh);
   }
 
   /* Chat Viewport & Messages */
