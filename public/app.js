@@ -24080,12 +24080,40 @@ ${msg.content.slice(0, 3000)}
     return '';
   }
 
+  function stripDocumentContextForQuery(text) {
+    if (!text || typeof text !== 'string') return '';
+    return text
+      .replace(/---\s*\[LAMPIRAN DOKUMEN:[\s\S]*?(?:---\s*\[AKHIR DOKUMEN:[^\n]*?\]\s*---|(?=\n\n)|$)/gi, '')
+      .replace(/---\s*\[KONTEN BERKAS DIREKTORI LOKAL[\s\S]*?(?:---\s*\[AKHIR BERKAS:[^\n]*?\]\s*---|(?=\n\n)|$)/gi, '')
+      .replace(/\[DIREKTORI LOKAL PENGGUNA TERHUBUNG\][\s\S]*?(?=PANDUAN MANAJEMEN|$)/gi, '')
+      .replace(/<<<ZOZ_FILE[\s\S]*?<<<END_ZOZ_FILE>>>/gi, '')
+      .replace(/<<<ZOZ_EDIT[\s\S]*?<<<END_ZOZ_EDIT>>>/gi, '')
+      .replace(/\[SKEMA TOOL EKSTERNAL AKTIF\][\s\S]*$/gi, '')
+      .replace(/### MANDAT[\s\S]*$/gi, '')
+      .trim();
+  }
+
   function synthesizeAutonomousSearchQuery(session, rawPrompt) {
     if (!rawPrompt) return '';
     if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.isRevisionQuery === 'function' && ZozTextSafety.isRevisionQuery(rawPrompt)) {
       return '';
     }
-    const cleanPrompt = rawPrompt.trim();
+    const strippedPrompt = stripDocumentContextForQuery(rawPrompt);
+    const cleanPrompt = (strippedPrompt || rawPrompt).trim();
+    if (!cleanPrompt) return '';
+
+    // Distilasi kueri leksikal murni jika teks masih terlalu panjang (> 180 karakter)
+    if (cleanPrompt.length > 180) {
+      const rawTokens = cleanPrompt
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .split(/\s+/)
+        .filter(w => !IR_QUERY_STOPWORDS.has(w) && w.length >= 2);
+      const uniqueTokens = Array.from(new Set(rawTokens)).slice(0, 8);
+      if (uniqueTokens.length > 0) {
+        return uniqueTokens.join(' ');
+      }
+    }
 
     const words = cleanPrompt.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
     const contentTokens = words.filter(w => !ANAPHORA_FILLER_WORDS.has(w) && w.length >= 2);
@@ -24323,17 +24351,30 @@ ${msg.content.slice(0, 3000)}
       // Mode Autonomous Web Explorer menggunakan eksekusi tool dinamis on-demand oleh AI
       return null;
     }
-    const smartQuery = session ? synthesizeAutonomousSearchQuery(session, query) : query.trim();
+    // Bersihkan pembungkus dokumen lampiran agar pencarian hanya mengevaluasi teks kueri asli pengguna
+    const cleanUserQuery = stripDocumentContextForQuery(query);
+    if (!cleanUserQuery && /---\s*\[(?:LAMPIRAN DOKUMEN|KONTEN BERKAS)/i.test(query)) {
+      return null;
+    }
+    const targetQuery = cleanUserQuery || query.trim();
+    const smartQuery = session ? synthesizeAutonomousSearchQuery(session, targetQuery) : targetQuery.trim();
     if (!smartQuery || !smartQuery.trim()) {
       return null;
     }
     const searchQuery = smartQuery.trim();
 
+    const resetHudOnAbort = () => {
+      if (hudElement) {
+        hudElement.innerHTML = '<span class="typing-cursor"></span>';
+      }
+    };
+
     if (hudElement) {
+      const displayShortQuery = searchQuery.length > 80 ? searchQuery.slice(0, 80) + '...' : searchQuery;
       hudElement.innerHTML = `
         <div class="web-search-hud">
           <i class="fa-solid fa-satellite-dish fa-spin" style="color:var(--neon-cyan);"></i>
-          <span><strong>AI Search Skill:</strong> Menjelajahi indeks web mandiri untuk <em>"${escapeHtml(smartQuery)}"</em>...</span>
+          <span><strong>AI Search Skill:</strong> Menjelajahi indeks web mandiri untuk <em>"${escapeHtml(displayShortQuery)}"</em>...</span>
         </div>
       `;
     }
@@ -24390,7 +24431,10 @@ ${msg.content.slice(0, 3000)}
         }
       }
 
-      if (!data) return null;
+      if (!data) {
+        resetHudOnAbort();
+        return null;
+      }
 
       const sources = [];
       let factsBlock = '';
@@ -24508,6 +24552,7 @@ ${msg.content.slice(0, 3000)}
 
       if (displayList.length === 0 && !factsBlock) {
         console.warn(`[WebSearch] Seluruh hasil penelusuran tidak memenuhi kendala token esensial atau ambang batas relevansi (< ${RELEVANCE_THRESHOLD}) terhadap kueri "${query}". Konteks digugurkan untuk mencegah halusinasi.`);
+        resetHudOnAbort();
         return null;
       }
 
@@ -24536,7 +24581,10 @@ ${msg.content.slice(0, 3000)}
         }
       });
 
-      if (!factsBlock && !organicBlock) return null;
+      if (!factsBlock && !organicBlock) {
+        resetHudOnAbort();
+        return null;
+      }
 
       const currentTime = new Date().toISOString();
       const systemPromptContext = `[REFERENSI PENELUSURAN DOKUMEN WEB TERVERIFIKASI — UTC ${currentTime}]
@@ -24562,6 +24610,7 @@ ${organicBlock}
       };
     } catch (e) {
       console.error('Zoz Web Search Engine error:', e);
+      resetHudOnAbort();
       return null;
     }
   }
@@ -28599,7 +28648,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         isExplicitCleanCode: false,
         promptTitle: sanitizeTitle(text).substring(0, 36) || 'Dokumen_Resmi',
         explicitMemoryContextNote: explicitMemoryContextNote || '',
-        explicitMemoryReceipt: explicitMemoryReceipt || null
+        explicitMemoryReceipt: explicitMemoryReceipt || null,
+        hasAttachedWebDocs: docs.some(d => d && (d.isWeb || d.url)) || Boolean(detectedWebUrls && detectedWebUrls.length > 0)
       };
       if (STATE.mode === 'auto') {
         await runAutoRouterStreaming(effectiveSession, text, effectiveImages, streamRunOptions);
@@ -29964,23 +30014,34 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         let pageTitle = '';
         let targetDomain = rawUrl.replace(/^https?:\/\//i, '').split('/')[0];
 
-        try {
-          const browseSig = makeToolSignal(10000);
-          const res = await fetch(getUniversalApiUrl('/api/tools/browse-page'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: rawUrl, maxChars }),
-            signal: browseSig
-          }).catch(() => null);
-
-          if (res && res.ok) {
-            const data = await res.json().catch(() => null);
-            if (data && (data.content || data.text)) {
-              pageContent = data.content || data.text || '';
-              pageTitle = data.title || pageTitle;
-            }
+        // 1. Cek cache memori ekstraksi web terlebih dahulu (0ms latency & anti-benturan)
+        if (typeof clientWebContentCache !== 'undefined' && clientWebContentCache.has(rawUrl)) {
+          const cached = clientWebContentCache.get(rawUrl);
+          if (cached && (cached.content || cached.text)) {
+            pageContent = cached.content || cached.text || '';
+            pageTitle = cached.title || targetDomain;
           }
-        } catch (_) {}
+        }
+
+        if (!pageContent) {
+          try {
+            const browseSig = makeToolSignal(10000);
+            const res = await fetch(getUniversalApiUrl('/api/tools/browse-page'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: rawUrl, maxChars }),
+              signal: browseSig
+            }).catch(() => null);
+
+            if (res && res.ok) {
+              const data = await res.json().catch(() => null);
+              if (data && (data.content || data.text)) {
+                pageContent = data.content || data.text || '';
+                pageTitle = data.title || pageTitle;
+              }
+            }
+          } catch (_) {}
+        }
 
         if (!pageContent) {
           try {
@@ -30003,6 +30064,16 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
 
         if (pageContent && pageContent.length > 30) {
+          if (typeof rememberWebContent === 'function') {
+            rememberWebContent(rawUrl, {
+              success: true,
+              url: rawUrl,
+              domain: targetDomain,
+              title: pageTitle || targetDomain,
+              charCount: pageContent.length,
+              content: pageContent
+            });
+          }
           const sourceObj = {
             title: pageTitle || targetDomain,
             url: rawUrl,
@@ -32225,14 +32296,30 @@ $$
           systemContent = `${systemContent}\n\n${endocrineContext}`;
         }
       }
+      // Deteksi apakah dokumen web sudah diekstrak dan tersedia di pesan/lampiran
+      const hasAttachedWebDocs = Boolean(
+        (runOptions && runOptions.hasAttachedWebDocs) ||
+        (session && Array.isArray(session.messages) && session.messages.length > 0 && session.messages[session.messages.length - 1]?.docs?.some(d => d && (d.isWeb || d.url))) ||
+        /---\s*\[LAMPIRAN DOKUMEN:\s*\[Web:/i.test(promptText) ||
+        /\[Web:[^\]]+\]/i.test(promptText)
+      );
+
       // Direktif tool pencarian/rekomendasi video & utilitas otonom disuntikkan hanya bila relevan secara matematis (I(Q; Tools) > 0)
       const hasExplicitToolTrigger = !isPureMathSession && Boolean(
         canRunAutonomous ||
         temporalRecencyProfile.epistemicSearchTrigger >= 0.72 ||
-        /\b(?:cari(?:kan)?|search|searching|telusuri|pencarian|tool\s+pencarian|browse|browsing|googling|tampilkan\s+(?:foto|gambar|visual|video)|unsplash|wikimedia|whatsapp|\bwa\b|jalankan\s+(?:kode|python)|hitung\s+dengan\s+python|simpan\s+(?:ke\s+)?memori|ingat\s+ini|https?:\/\/)/i.test(promptText)
+        /\b(?:cari(?:kan)?|search|searching|telusuri|pencarian|tool\s+pencarian|browse|browsing|googling|tampilkan\s+(?:foto|gambar|visual|video)|unsplash|wikimedia|whatsapp|\bwa\b|jalankan\s+(?:kode|python)|hitung\s+dengan\s+python|simpan\s+(?:ke\s+)?memori|ingat\s+ini)/i.test(promptText) ||
+        (!hasAttachedWebDocs && /https?:\/\//i.test(promptText))
       );
       if (hasExplicitToolTrigger) {
         systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
+      }
+
+      if (hasAttachedWebDocs) {
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `[KORPUS DOKUMEN WEB TERVERIFIKASI TERSEDIA]:
+Konten teks lengkap dari halaman web/URL yang ditanyakan pengguna sudah diekstrak secara akurat oleh sistem dan dilampirkan pada pesan obrolan di atas.
+Anda DILARANG memanggil tool browse_web_page atau search_web untuk tautan tersebut, dan DILARANG menyatakan bahwa halaman web belum diakses atau fitur web nonaktif.
+Jawab langsung pertanyaan pengguna secara komprehensif, tajam, dan objektif berdasarkan fakta dan data dalam lampiran dokumen web tersebut.`;
       }
 
       // AI File Studio: hanya diumumkan bila pengguna memang meminta pembuatan file / dokumen / diagram,
@@ -32305,8 +32392,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // WEB SEARCH GROUNDING:
       // Aktif HANYA jika kueri BUKAN konsep aljabar murni / Nemotron (IG = 0), BUKAN evaluasi pilihan ganda / gambar soal lokal,
+      // BELUM memiliki dokumen web yang diekstrak (H(Web) = 0),
       // serta pengguna menyalakan toggle Web Search secara eksplisit ATAU kueri memiliki ketidakpastian temporal-aktual tinggi (U(Q) >= 0.72).
-      const autoEpistemicPreSearch = !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      const autoEpistemicPreSearch = !hasAttachedWebDocs && !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
@@ -32318,10 +32406,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (!webSources) webSources = [];
               webSources.push(...searchRes.sources);
             }
-            bubbleText.innerHTML = '<span class="typing-cursor"></span>';
           }
         } catch (searchErr) {
           console.warn('Web search grounding error:', searchErr);
+        } finally {
+          if (bubbleText && !bubbleText.querySelector('.typing-cursor') && !bubbleText.textContent.trim()) {
+            bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+          }
         }
       }
 
@@ -32398,7 +32489,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
       // Pasang tools ke Ollama HANYA jika model memiliki kapabilitas tools, relevan secara matematis (I(Q; Tools) > 0), dan BUKAN sesi matematika murni
       const canOllamaUseTools = doesModelSupportTools(modelName) && !isPureMathSession && hasExplicitToolTrigger;
-      const selectedOllamaTools = canOllamaUseTools ? getSelectableAutonomousTools(canRunAutonomous) : [];
+      let selectedOllamaTools = canOllamaUseTools ? getSelectableAutonomousTools(canRunAutonomous) : [];
+      if (hasAttachedWebDocs && selectedOllamaTools.length > 0) {
+        selectedOllamaTools = selectedOllamaTools.filter(t => t?.function?.name !== 'browse_web_page');
+      }
       if (selectedOllamaTools.length > 0) requestBody.tools = selectedOllamaTools;
       if (session?.id) {
         requestBody.sessionId = session.id;
@@ -32434,6 +32528,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         if (STATE.settings.openRouterKey) {
           headers['x-openrouter-key'] = STATE.settings.openRouterKey;
         }
+      }
+
+      // Pastikan HUD bubbleText bersih dari residu sebelum stream fetch dimulai
+      if (bubbleText && bubbleText.querySelector('.web-search-hud')) {
+        bubbleText.innerHTML = '<span class="typing-cursor"></span>';
       }
 
       let chatUrl = getUniversalApiUrl('/api/ollama/chat');
@@ -34141,14 +34240,30 @@ $$
           systemContent = `${systemContent}\n\n${endocrineContext}`;
         }
       }
+      // Deteksi apakah dokumen web sudah diekstrak dan tersedia di pesan/lampiran
+      const hasAttachedWebDocs = Boolean(
+        (runOptions && runOptions.hasAttachedWebDocs) ||
+        (session && Array.isArray(session.messages) && session.messages.length > 0 && session.messages[session.messages.length - 1]?.docs?.some(d => d && (d.isWeb || d.url))) ||
+        /---\s*\[LAMPIRAN DOKUMEN:\s*\[Web:/i.test(promptText) ||
+        /\[Web:[^\]]+\]/i.test(promptText)
+      );
+
       // Direktif tool pencarian/rekomendasi video & utilitas otonom disuntikkan hanya bila relevan secara matematis (I(Q; Tools) > 0)
       const hasExplicitToolTrigger = !isPureMathSession && Boolean(
         canRunAutonomous ||
         temporalRecencyProfile.epistemicSearchTrigger >= 0.72 ||
-        /\b(?:cari(?:kan)?|search|searching|telusuri|pencarian|tool\s+pencarian|browse|browsing|googling|tampilkan\s+(?:foto|gambar|visual|video)|unsplash|wikimedia|whatsapp|\bwa\b|jalankan\s+(?:kode|python)|hitung\s+dengan\s+python|simpan\s+(?:ke\s+)?memori|ingat\s+ini|https?:\/\/)/i.test(promptText)
+        /\b(?:cari(?:kan)?|search|searching|telusuri|pencarian|tool\s+pencarian|browse|browsing|googling|tampilkan\s+(?:foto|gambar|visual|video)|unsplash|wikimedia|whatsapp|\bwa\b|jalankan\s+(?:kode|python)|hitung\s+dengan\s+python|simpan\s+(?:ke\s+)?memori|ingat\s+ini)/i.test(promptText) ||
+        (!hasAttachedWebDocs && /https?:\/\//i.test(promptText))
       );
       if (hasExplicitToolTrigger) {
         systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
+      }
+
+      if (hasAttachedWebDocs) {
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `[KORPUS DOKUMEN WEB TERVERIFIKASI TERSEDIA]:
+Konten teks lengkap dari halaman web/URL yang ditanyakan pengguna sudah diekstrak secara akurat oleh sistem dan dilampirkan pada pesan obrolan di atas.
+Anda DILARANG memanggil tool browse_web_page atau search_web untuk tautan tersebut, dan DILARANG menyatakan bahwa halaman web belum diakses atau fitur web nonaktif.
+Jawab langsung pertanyaan pengguna secara komprehensif, tajam, dan objektif berdasarkan fakta dan data dalam lampiran dokumen web tersebut.`;
       }
 
       // AI File Studio: hanya diumumkan bila pengguna memang meminta pembuatan file / dokumen / diagram,
@@ -34233,8 +34348,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // WEB SEARCH GROUNDING:
       // Aktif HANYA jika kueri BUKAN konsep aljabar murni / Nemotron (IG = 0), BUKAN evaluasi pilihan ganda / gambar soal lokal,
+      // BELUM memiliki dokumen web yang diekstrak (H(Web) = 0),
       // serta pengguna menyalakan toggle Web Search secara eksplisit ATAU kueri memiliki ketidakpastian temporal-aktual tinggi (U(Q) >= 0.72).
-      const autoEpistemicPreSearch = !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      const autoEpistemicPreSearch = !hasAttachedWebDocs && !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
@@ -34246,10 +34362,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (!webSources) webSources = [];
               webSources.push(...searchRes.sources);
             }
-            bubbleText.innerHTML = '<span class="typing-cursor"></span>';
           }
         } catch (searchErr) {
           console.warn('Web search grounding error:', searchErr);
+        } finally {
+          if (bubbleText && !bubbleText.querySelector('.typing-cursor') && !bubbleText.textContent.trim()) {
+            bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+          }
         }
       }
 
@@ -34299,7 +34418,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       let isStreamInterrupted = false;
       const collectedImages = [];
       const accumulatedToolCalls = [];
-      const selectedAutonomousTools = getSelectableAutonomousTools(canRunAutonomous);
+      const rawAutonomousTools = getSelectableAutonomousTools(canRunAutonomous);
+      const selectedAutonomousTools = hasAttachedWebDocs
+        ? rawAutonomousTools.filter(t => t?.function?.name !== 'browse_web_page')
+        : rawAutonomousTools;
       streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, { ...runOptions, userPrompt: promptText });
 
       for (let i = 0; i < candidateModels.length; i++) {
@@ -34444,6 +34566,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           }, 18000);
 
           try {
+            // Pastikan HUD bubbleText bersih dari residu sebelum fetch dimulai
+            if (bubbleText && bubbleText.querySelector('.web-search-hud')) {
+              bubbleText.innerHTML = '<span class="typing-cursor"></span>';
+            }
+
             let attemptRes = await fetch(targetUrl, {
               method: 'POST',
               headers: targetHeaders,

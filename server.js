@@ -4922,7 +4922,8 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
             domain: parsedUrl.hostname,
             title: pageTitle || parsedUrl.hostname,
             charCount: Math.min(clean.length, maxChars),
-            content: clean.substring(0, maxChars)
+            content: clean.substring(0, maxChars),
+            text: clean.substring(0, maxChars)
           });
         } catch (e) {
           resolve({ success: false, error: e.message });
@@ -4954,7 +4955,8 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
                   domain: parsedUrl.hostname,
                   title: jinaRes.title || parsedUrl.hostname,
                   charCount: Math.min(jinaRes.text.length, maxChars),
-                  content: jinaRes.text.substring(0, maxChars)
+                  content: jinaRes.text.substring(0, maxChars),
+                  text: jinaRes.text.substring(0, maxChars)
                 });
               }
               return resolve({ success: false, error: `HTTP ${res.statusCode}` });
@@ -8005,9 +8007,9 @@ async function requestHandler(req, res) {
       if (!targetUrl || !targetUrl.trim()) {
         return sendJSON(res, 400, { error: 'Parameter `url` diperlukan untuk membaca konten halaman.' });
       }
-      const safeMaxChars = Math.min(Math.max(isNaN(maxChars) ? 5000 : maxChars, 200), 50000);
-      const data = await browseWebPageContent(targetUrl, safeMaxChars);
-      return sendJSON(res, 200, { success: true, ...data });
+      const safeMaxChars = Math.min(Math.max(isNaN(maxChars) ? 8000 : maxChars, 200), 50000);
+      const data = await fetchPageDetails(targetUrl.trim(), safeMaxChars);
+      return sendJSON(res, 200, { success: true, ...data, text: data.content || data.text || '' });
     } catch (e) {
       return sendJSON(res, 500, { error: 'Gagal membaca halaman web: ' + e.message });
     }
