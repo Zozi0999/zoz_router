@@ -322,15 +322,23 @@ function insertEpisode(episodeData) {
   return ep;
 }
 
-function getEpisodeById(episodeId) {
+function getEpisodeById(episodeId, userId = null) {
   if (!episodeId) return null;
   const instance = initDatabase();
 
   if (instance.mode === 'memory') {
-    return memStore.episodes.get(episodeId) || null;
+    const ep = memStore.episodes.get(episodeId) || null;
+    if (ep && userId && userId !== '*' && ep.userId !== userId) {
+      return null;
+    }
+    return ep;
   }
 
   const { db } = instance;
+  if (userId && userId !== '*') {
+    const stmt = db.prepare('SELECT * FROM episodes WHERE id = ? AND user_id = ? LIMIT 1');
+    return queryGet(stmt, episodeId, userId);
+  }
   const stmt = db.prepare('SELECT * FROM episodes WHERE id = ? LIMIT 1');
   return queryGet(stmt, episodeId);
 }

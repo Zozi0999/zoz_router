@@ -1,3 +1,13 @@
+const crypto = require('crypto');
+
+function genSecureId(prefix) {
+  try {
+    return `${prefix}_${Date.now().toString(36)}_${crypto.randomBytes(12).toString('hex')}`;
+  } catch (_) {
+    return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+  }
+}
+
 /**
  * Jozz Memory - Type Definitions & Structural Validators
  * Zero-dependency robust schema validator for Jozz Memory
@@ -33,7 +43,7 @@ function createEpisode({
   createdAt = new Date().toISOString()
 }) {
   return {
-    id: id || `ep_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+    id: id || genSecureId('ep'),
     userId: validateString(userId, 'default', 64),
     sessionId: validateString(sessionId, 'default', 64),
     turnIndex: Number(turnIndex) || 0,
@@ -56,7 +66,7 @@ function createEntity({
   updatedAt = new Date().toISOString()
 }) {
   return {
-    id: id || `ent_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+    id: id || genSecureId('ent'),
     userId: validateString(userId, 'default', 64),
     name: validateString(name, '', 128),
     entityType: validateString(entityType, 'concept', 64),
@@ -79,7 +89,7 @@ function createRelation({
   episodeId = null
 }) {
   return {
-    id: id || `rel_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+    id: id || genSecureId('rel'),
     userId: validateString(userId, 'default', 64),
     sourceEntityId: validateString(sourceEntityId, '', 64),
     targetEntityId: validateString(targetEntityId, '', 64),
@@ -105,7 +115,7 @@ function createMemoryItem({
   updatedAt = new Date().toISOString()
 }) {
   return {
-    id: id || `mem_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+    id: id || genSecureId('mem'),
     userId: validateString(userId, 'default', 64),
     content: validateString(content, '', 3000),
     category: validateCategory(category),

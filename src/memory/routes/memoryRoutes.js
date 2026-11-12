@@ -53,7 +53,7 @@ function parseRawBody(req) {
 /**
  * Handle memory routes. Returns true if handled, false if path did not match.
  */
-async function handleMemoryRoutes(req, res, reqUrl) {
+async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
   const pathname = reqUrl.pathname;
   const method = req.method;
 
@@ -61,7 +61,7 @@ async function handleMemoryRoutes(req, res, reqUrl) {
     return false;
   }
 
-  const userId = req.headers['x-user-id'] || reqUrl.searchParams.get('userId') || 'default';
+  const userId = validatedUserId || req.headers['x-user-id'] || reqUrl.searchParams.get('userId') || 'default';
 
   try {
     // 1. GET /api/memories/insights
@@ -75,9 +75,9 @@ async function handleMemoryRoutes(req, res, reqUrl) {
     // 2. GET /api/memories/receipts/:episodeId
     if (method === 'GET' && pathname.startsWith('/api/memories/receipts/')) {
       const episodeId = pathname.replace('/api/memories/receipts/', '').trim();
-      const episode = dbStorage.getEpisodeById(episodeId);
+      const episode = dbStorage.getEpisodeById(episodeId, userId);
       if (!episode) {
-        sendJson(res, 404, { success: false, error: 'Episode receipt tidak ditemukan.' });
+        sendJson(res, 404, { success: false, error: 'Episode receipt tidak ditemukan atau bukan milik akun Anda.' });
       } else {
         sendJson(res, 200, { success: true, episode });
       }

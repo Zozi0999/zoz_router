@@ -1196,6 +1196,20 @@ function hashUserToken(token) {
   return crypto.createHash('sha256').update(String(token), 'utf8').digest('hex');
 }
 
+// Perbandingan waktu-konstan untuk token hash (mencegah timing attack side-channel O(1) leak)
+function timingSafeEqualHex(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (a.length !== b.length) return false;
+  try {
+    const bufA = Buffer.from(a, 'hex');
+    const bufB = Buffer.from(b, 'hex');
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+  } catch (_) {
+    return false;
+  }
+}
+
 function safeAtomicRenameSync(src, dst) {
   try {
     fs.renameSync(src, dst);
@@ -1227,8 +1241,17 @@ function resolveRequestIdentity(req, reqUrl) {
   const token = req.headers['x-user-token'] ||
     (reqUrl ? reqUrl.searchParams.get('userToken') : null);
 
-  // Tanpa identitas = klien lawas → bucket bersama 'default' (perilaku lama).
+  const isRemote = req && isRemoteTunnelRequest(req);
+
+  // Tanpa identitas = klien lawas / loopback lokal → bucket bersama 'default' (perilaku lokal aman).
+  // Akses remote WAN / Cloudflare Tunnel WAJIB membawa identitas terisolasi (mencegah pembajakan sesi host).
   if (!rawUid || rawUid === 'default') {
+    if (isRemote) {
+      return {
+        status: 401,
+        error: 'Akses remote tanpa identitas atau ke namespace default ditolak. Silakan sertakan X-User-ID dan X-User-Token.'
+      };
+    }
     return { userId: 'default', anonymous: true };
   }
 
@@ -1238,13 +1261,18 @@ function resolveRequestIdentity(req, reqUrl) {
     return { status: 400, error: 'Format X-User-ID tidak valid. Gunakan hanya alphanumeric, underscore, dan dash (maks 64 karakter).' };
   }
 
+  if (isRemote && clean === 'default') {
+    return { status: 403, error: 'Akses remote ke namespace default dilarang.' };
+  }
+
   const registry = loadIdentityRegistry();
   const hash = token ? hashUserToken(token) : null;
   const known = Object.prototype.hasOwnProperty.call(registry, clean);
 
   if (known) {
-    // Terdaftar: WAJIB membawa token yang cocok (menangkal pembajakan identitas).
-    if (!hash || hash !== registry[clean]) {
+    // Terdaftar: WAJIB membawa token yang cocok secara constant-time
+    const expectedHash = registry[clean];
+    if (!hash || !timingSafeEqualHex(hash, expectedHash)) {
       return { status: 401, error: 'X-User-Token tidak cocok untuk identitas ini. Identitas user tidak dapat dipalsukan.' };
     }
   } else {
@@ -6557,7 +6585,7 @@ async function requestHandler(req, res) {
       return sendJSON(res, identityResult.status || 400, { error: identityResult.error });
     }
   }
-  const reqUserId = identityResult.userId || 'default';
+  const reqUserId = identityResult.userId || (isRemoteTunnelRequest(req) ? 'anon_remote' : 'default');
 
   // Helper: safe parseBody wrapper that converts rejection to 400 response
   async function safeParseBody(req) {
@@ -6600,7 +6628,7 @@ async function requestHandler(req, res) {
   if (pathname.startsWith('/api/memories')) {
     try {
       const memoryRoutes = require('./src/memory/routes/memoryRoutes');
-      const handled = await memoryRoutes.handleMemoryRoutes(req, res, reqUrl);
+      const handled = await memoryRoutes.handleMemoryRoutes(req, res, reqUrl, reqUserId);
       if (handled) return;
     } catch (memErr) {
       console.warn('[Jozz Memory Route Warning]:', memErr);
@@ -6769,7 +6797,13 @@ async function requestHandler(req, res) {
     const body = await safeParseBody(req);
     if (!body) return;
     try {
-      const rawId = (body && body.id) ? String(body.id).trim() : ('ses_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
+      let randHex = '';
+      try {
+        randHex = crypto.randomBytes(12).toString('hex');
+      } catch (_) {
+        randHex = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
+      }
+      const rawId = (body && body.id) ? String(body.id).trim() : ('ses_' + Date.now().toString(36) + '_' + randHex);
       if (body.isIncognito === true || /^incog_/i.test(rawId) || body.title === 'Obrolan Privat') {
         return sendJSON(res, 200, { ok: true, skippedIncognito: true });
       }
@@ -12358,7 +12392,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           'Content-Type': 'text/html; charset=utf-8',
           'Content-Length': idxStats.size,
           'Cache-Control': 'no-cache',
-          'ETag': idxEtag
+          'ETag': idxEtag,
+          'X-Content-Type-Options': 'nosniff',
+          'X-Frame-Options': 'SAMEORIGIN',
+          'Referrer-Policy': 'strict-origin-when-cross-origin'
         });
         if (method === 'HEAD') return res.end();
         // F20: streaming langsung dari disk — tanpa memuat seluruh file ke memori

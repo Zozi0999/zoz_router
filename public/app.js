@@ -7446,7 +7446,18 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   }
 
   function generateId() {
-    return 'ses_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+    let rand = '';
+    try {
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        const bytes = new Uint8Array(12);
+        crypto.getRandomValues(bytes);
+        rand = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      }
+    } catch (_) {}
+    if (!rand) {
+      rand = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
+    }
+    return 'ses_' + Date.now().toString(36) + '_' + rand;
   }
 
   function sanitizeHtmlSafe(dirtyHtml) {
@@ -28290,8 +28301,17 @@ STATUS OPERASI: PENYIMPANAN MEMORI DITOLAK KARENA SIKAP PRIVASI / PENGATURAN.
         }
 
         if (factToStore && factToStore.length >= 5) {
-          const generatedMemId = 'mem_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
-          const generatedEpId = 'ep_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+          let secureRand = '';
+          try {
+            if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+              const b = new Uint8Array(8);
+              crypto.getRandomValues(b);
+              secureRand = Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
+            }
+          } catch (_) {}
+          if (!secureRand) secureRand = Math.random().toString(36).slice(2, 10);
+          const generatedMemId = 'mem_' + Date.now().toString(36) + '_' + secureRand;
+          const generatedEpId = 'ep_' + Date.now().toString(36) + '_' + secureRand;
           let assignedCat = 'fact';
           const lowText = factToStore.toLowerCase();
           if (/\b(?:menggunakan|stack|teknologi|bahasa|framework|database|tool|lib|library|runtime|sqlite|node|python|express)\b/i.test(lowText)) {

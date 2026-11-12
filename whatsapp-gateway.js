@@ -2226,21 +2226,27 @@ class WhatsAppGatewayManager {
     const cleanPin = pin ? String(pin).trim() : '';
     const rawUid = userId ? String(userId).trim() : '';
 
-    // 1. Sesi Master Kaisar Utama:
-    // Selalu izinkan akses ke Master Gateway jika:
-    // a) PIN Master valid ('210560' / hash terverifikasi), ATAU
-    // b) Akses dari localhost loopback, ATAU
-    // c) rawUid adalah 'usr_kaisar_master', 'usr_e465zuklwesa', 'master', 'kaisar', 'zozi', ATAU
-    // d) Tidak ada PIN yang disertakan / token anonim, dan Master Gateway memiliki sesi aktif di disk
-    const isMasterPinValid = !cleanPin || cleanPin === '210560' || (this.masterGateway && this.masterGateway.verifyPin(cleanPin));
-    const isMasterId = !rawUid || rawUid === 'usr_kaisar_master' || rawUid === 'usr_e465zuklwesa' || rawUid === 'master' || rawUid === 'kaisar' || rawUid === 'zozi';
+    const isMasterId = rawUid === 'usr_kaisar_master' || rawUid === 'usr_e465zuklwesa' || rawUid === 'master' || rawUid === 'kaisar' || rawUid === 'zozi';
 
-    if (isMasterPinValid || isLocal || isMasterId || (this.masterGateway && this.masterGateway.hasStoredSession())) {
+    // 1. Sesi Master Kaisar Utama:
+    // WAJIB memenuhi salah satu syarat otentikasi ketat:
+    // a) Permintaan dari localhost loopback mesin lokal pemilik, ATAU
+    // b) PIN Master valid ('210560' atau hash terverifikasi) yang TIDAK boleh kosong
+    const isMasterPinValid = Boolean(cleanPin && (cleanPin === '210560' || (this.masterGateway && this.masterGateway.verifyPin(cleanPin))));
+
+    if ((isMasterId && (isLocal || isMasterPinValid)) || (isLocal && (!rawUid || isMasterId))) {
       return {
         success: true,
         gateway: this.masterGateway,
         isMaster: true,
         userId: 'usr_kaisar_master'
+      };
+    }
+
+    if (isMasterId && !isLocal && !isMasterPinValid) {
+      return {
+        success: false,
+        error: 'Akses remote ke Master Kaisar ditolak: PIN Master 6-digit yang valid wajib disertakan.'
       };
     }
 
