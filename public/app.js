@@ -8257,10 +8257,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     clean = clean.replace(/\\\(([\s\S]+?)\\\)|(?<!\$)\$([^\s$](?:[^$\n]*?[^\s$])?)\$(?!\$|\d)/g, (match, p1, p2) => {
       const formula = (p1 || p2 || '').trim();
       if (!formula) return match;
-      // Jangan salah tangkap format mata uang biasa ($100 atau $5.50)
-      if (/^\d+(?:[.,]\d+)?$/.test(formula)) {
-        return match;
-      }
+      // Formula berupa angka murni ($0$, $1$, dsb.) adalah notasi matematika inline valid yang harus dihidrasi ke KaTeX
       const token = `%%ZOZ_MATH_INLINE_${placeholderCounter++}%%`;
       mathBlocks.push({ token, formula, displayMode: false });
       return token;
@@ -8532,8 +8529,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     out = out.replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, '$1');
     out = out.replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, '$1');
     out = out.replace(/(?<!\\)\$([^$\n]+?)(?<!\\)\$/g, (match, inner) => {
-      if (/\\\w|[\^_{}=≠≤≥+\-·×÷∫∑∏√∂∇α-ωΑ-Ω]/.test(inner)) {
-        return inner.trim();
+      const trimmed = inner.trim();
+      if (/^[\d.]+$|^[a-zA-Z]$|\\\w|[\^_{}=≠≤≥+\-·×÷∫∑∏√∂∇α-ωΑ-Ω]/.test(trimmed)) {
+        return trimmed;
       }
       return match;
     });
@@ -9130,7 +9128,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // - <script>, <style>, <math>, katex blocks
     // - Tag HTML apa pun (<[^>]+>)
     const protectedBlocks = [];
-    const tagPattern = /(<(?:pre|code|a|script|style)[^>]*>[\s\S]*?<\/(?:pre|code|a|script|style)>|<span[^>]*class=["'][^"']*katex[^"']*[\s\S]*?<\/span>|<div[^>]*class=["'][^"']*katex[^"']*[\s\S]*?<\/div>|<[^>]+>)/gi;
+    const tagPattern = /(<(?:pre|code|a|script|style)\b[^>]*>[\s\S]*?<\/(?:pre|code|a|script|style)>|<span\b[^>]*class=["\'][^"\']*katex[^"\']*[\\s\S]*?<\/span>|<div\b[^>]*class=["\'][^"\']*katex[^"\']*[\\s\S]*?<\/div>|<[^>]+>)/gi;
     let protectedHtml = html.replace(tagPattern, (match) => {
       const placeholder = `<<<ZOZ_PROTECTED_BLOCK_${protectedBlocks.length}>>>`;
       protectedBlocks.push(match);
