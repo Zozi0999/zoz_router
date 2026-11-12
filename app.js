@@ -40740,7 +40740,7 @@ Aturan:
       if (els.settingSystemPrompt) {
         els.settingSystemPrompt.value = '';
       }
-      showToast('Persona dinonaktifkan (Default).');
+      // Notifikasi toast dinonaktifkan agar tidak mengganggu pengalaman pengguna saat mematikan persona
     } else if (presetKey === 'custom') {
       STATE.settings.activePreset = 'custom';
       // Pulihkan prompt kustom yang tersimpan, atau ambil dari textarea
@@ -40750,7 +40750,7 @@ Aturan:
       if (els.settingSystemPrompt) {
         els.settingSystemPrompt.value = restored;
       }
-      showToast(restored ? 'Persona Kustom diaktifkan.' : 'Mode Persona Kustom aktif (silakan ketik prompt di bawah).');
+      // Notifikasi toast dinonaktifkan agar tidak mengganggu saat mengaktifkan mode persona kustom
       setTimeout(() => els.settingSystemPrompt?.focus(), 50);
     } else if (SYSTEM_PRESETS[presetKey] !== undefined) {
       // Simpan backup prompt kustom jika berpindah dari custom/teks kustom
@@ -40762,7 +40762,7 @@ Aturan:
       if (els.settingSystemPrompt) {
         els.settingSystemPrompt.value = STATE.settings.systemPrompt;
       }
-      showToast(`Persona aktif: ${presetKey.toUpperCase()}`);
+      // Notifikasi toast dinonaktifkan agar pergantian preset persona berjalan hening & mulus
     }
     updatePresetBanner();
     updatePresetPillUI();
