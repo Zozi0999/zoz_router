@@ -53,6 +53,14 @@
     out = cleanPseudoCotJsonFallback(out);
     out = out.replace(/^\[(?:Pencarian selesai|STATUS PENELUSURAN|Mengeksekusi penelusuran)[^\]]*\]\.?\s*/i, '');
     out = out.replace(/(?:^|\n)\s*(?:\[Pencarian selesai[^\]]*\]|Sistem menyelesaikan penelusuran\.?|Model telah menyelesaikan penelusuran komprehensif[^\n]*)\s*(?:\n|$)/gi, '\n');
+    // Musnahkan seluruh residu banner isolasi kode / dokumen agar tidak mencemari output model
+    out = out
+      .replace(/>\s*(?:🌐|⚡)\s*\*?Sedang (?:meracik|merancang|menyusun) kode[^*]*\*?(?:\s*\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/>\s*📄\s*\*?Sedang menyusun dan memformat dokumen[^*]*\*?(?:\s*\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/>\s*✨\s*\*?Sedang memilih & mengganti[^*]*\*?(?:\s*\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/⚡\s*\*?Sedang menyusun kode[^\n*]*\*?\s*(?:\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/📄\s*\*?Sedang menyusun dan memformat[^\n*]*\*?\s*(?:\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/\s*\(terisolasi di (?:pratinjau|Studio Dokumen|pratinjau live)\)/gi, '');
     if (typeof isInternalSystemPayload === 'function' && isInternalSystemPayload(out)) {
       return '';
     }
@@ -12077,231 +12085,51 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
   // Konversi/isolasi blok ZOZ_FILE, ZOZ_EDIT, ZOZ_MODIFY saat streaming
   // agar teks dokumen dan kode terisolasi dan tidak bocor ke obrolan chat!
+  // Konversi blok berkas protokol saat streaming agar tampil bersih sebagai kode markdown alami
+  // FITUR ISOLASI KODE & NOTIFIKASI PALSU TELAH DIMUSNAHKAN TOTAL (Mandat Pengguna):
+  // Kode ditampilkan langsung dan utuh di percakapan, tidak pernah disembunyikan atau diganti banner isolasi.
   function hideFileBlocksForDisplay(text, options = {}) {
     if (!text) return text;
-    let processed = text;
+    let processed = String(text);
     if (processed.indexOf('<<<ZOZ_TASKS') !== -1) {
       processed = hideTaskBlocksForDisplay(processed);
     }
-    const isExplicitCodeInChat = Boolean(options && options.websiteMode === 'code_in_chat');
 
-    const hasFileMarkers = processed.indexOf('<<<ZOZ_FILE') !== -1 ||
-                           processed.indexOf('<<<ZOZ_EDIT') !== -1 ||
-                           processed.indexOf('<<<ZOZ_MODIFY') !== -1 ||
-                           processed.indexOf('<<<ZOZ_DELETE') !== -1;
-    if (!hasFileMarkers && isExplicitCodeInChat) return processed;
+    // Musnahkan seluruh residu banner isolasi lama
+    processed = processed
+      .replace(/>\s*(?:🌐|⚡)\s*\*?Sedang (?:meracik|merancang|menyusun) kode[^*]*\*?(?:\s*\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/>\s*📄\s*\*?Sedang menyusun dan memformat dokumen[^*]*\*?(?:\s*\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/>\s*✨\s*\*?Sedang memilih & mengganti[^*]*\*?(?:\s*\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/⚡\s*\*?Sedang menyusun kode[^\n*]*\*?\s*(?:\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/📄\s*\*?Sedang menyusun dan memformat[^\n*]*\*?\s*(?:\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/\s*\(terisolasi di (?:pratinjau|Studio Dokumen|pratinjau live)\)/gi, '');
 
-    const out = [];
-    let insideFileBlock = false;
-    let insideHtmlBlock = false;
-    let insideRawHtmlBlock = false;
-    let rawHtmlSawClosing = false;
-    let insideDocBlock = false;
-    let insideRawDocBlock = false;
-    let insideIsolatedBlock = false;
-    let insideHunkBlock = false;
-    let fileBlockLang = 'code';
-    let currentFileName = '';
-    const isDocMode = Boolean(options && (options.isDocCreation || options.docFormat));
-
-    const isWebPreviewMode = Boolean(
-      (options && (options.websiteMode === 'preview' || options.isWebCreation || options.hideCodeInChat || options.hideAllCodeBlocks || options.isStudioIsolated)) ||
-      (typeof activeAIFile !== 'undefined' && activeAIFile) ||
-      (typeof els !== 'undefined' && els.aiFileStudioModal && els.aiFileStudioModal.classList.contains('show')) ||
-      (typeof isWebsiteCreationPrompt === 'function' && isWebsiteCreationPrompt(text || '')) ||
-      (text && (text.includes('<!DOCTYPE') || text.includes('<html') || text.includes('<<<ZOZ_FILE') || text.includes('```html') || text.includes('```jsx')))
-    );
-
-    const NAKED_HTML_START = /^<\/?(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form|template|iframe|svg|canvas|ul|ol|li|button|input|label|p|h[1-6]|span|a)\b/i;
-    const CODE_LIKE_LINE = /^(?:`{3,}|<{1,5}>{1,5}|[<>=]{2,}|<<>>|< < > >|<<<>>|window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|\/\*|\*\/|\/\/|<\/script>|<\/html>|<\/body>|<\/style>|<\/div>|<\/iframe>|<\/section>|<!--|[{}\[\];]|(?:[a-zA-Z0-9_-]+=(?:"[^"]*"|'[^']*'|[^\s>]+)|allowfullscreen|disabled|checked)|(?:[.#@:][a-zA-Z0-9_-]|[a-zA-Z0-9_-]+\s*\{|[a-zA-Z0-9_-]+\s*:\s*[^;]+;)).*$/i;
-
-    function pushWebBanner(fileName = '') {
-      if (!out.some(l => l && l.includes('Sedang menyusun kode'))) {
-        const namePart = fileName ? ` ${escapeHtml(fileName)}` : '';
-        out.push(`\n> ⚡ *Sedang menyusun kode${namePart}... (terisolasi di pratinjau)*\n`);
-      }
+    // Konversi tag berkas protokol <<<ZOZ_FILE ...>>> menjadi blok kode markdown alami
+    if (
+      processed.indexOf('<<<ZOZ_FILE') !== -1 ||
+      processed.indexOf('<<<ZOZ_EDIT') !== -1 ||
+      processed.indexOf('<<<ZOZ_MODIFY') !== -1 ||
+      processed.indexOf('<<<ZOZ_DELETE') !== -1
+    ) {
+      processed = processed.replace(
+        /<<<ZOZ_(?:FILE|EDIT|MODIFY)\s+(?:name|file|path)=["']?([^"'\s>]+)["']?(?:\s+mime=["']?[^"'\s>]+["']?)?(?:\s+lang=["']?([^"'\s>]+)["']?)?[^>]*>/gi,
+        (match, fileName, lang) => {
+          const cleanLang = (lang || (fileName ? guessLangFromName(fileName) : 'code')).toLowerCase();
+          const fileHeader = fileName ? `// Berkas: ${fileName}\n` : '';
+          return `\n\`\`\`${cleanLang}\n${fileHeader}`;
+        }
+      );
+      processed = processed.replace(/<<<END_ZOZ_(?:FILE|EDIT|MODIFY)>>>/gi, '\n```\n');
+      processed = processed.replace(/<<<ZOZ_DELETE[^>]*>>>/gi, '');
     }
 
-    function isCodeOrMarkupLine(l) {
-      const s = l.trim();
-      if (!s) return true;
-      if (/^<\/?(?:!DOCTYPE|[a-zA-Z0-9_-]+)\b/i.test(s)) return true;
-      if (/^<!--[\s\S]*?(?:-->)?$/i.test(s) || /-->$/.test(s) || s === '>' || s.endsWith('>')) return true;
-      if (/^(?:<{3,}\s*(?:SEARCH|REPLACE|END)?|={3,}|>{3,}\s*(?:REPLACE)?)/i.test(s)) return true;
-      if (/^[a-zA-Z0-9_-]+=(?:"[^"]*"|'[^']*'|[^\s>]+)/i.test(s)) return true;
-      if (/^(?:allowfullscreen|disabled|checked|required|readonly|hidden|controls|autoplay|loop|muted|defer|async)\b/i.test(s)) return true;
-      if (/(?:class|id|src|href|style|title|type|rel|name|target|alt|width|height|placeholder|value)=/i.test(s)) return true;
-      if (/(?:^|\s)(?:color|font|background|padding|margin|border|shadow|text-slate|hex-pattern|scanlines|display|position|top|left|right|bottom|z-index|gap|width|height)\s*:/i.test(s)) return true;
-      if (/^[.#@:][a-zA-Z0-9_-]/.test(s) || /[a-zA-Z0-9_-]+\s*\{/.test(s) || s === '}' || s === '{') return true;
-      if (/^\/\*|\*\/$/.test(s) || /^\/\//.test(s)) return true;
-      if (/^(?:window\.|document\.|console\.|setInterval|setTimeout|function\b|const\s+|let\s+|var\s+|import\s+|export\s+|return\b)/i.test(s)) return true;
-      if (/[{}();]$/.test(s)) return true;
-      if (s.startsWith('```')) return true;
-      return false;
-    }
-
-    processed.split('\n').forEach((line) => {
-      const t = line.trim();
-
-      // Penanganan khusus blok diff hunk (<<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE)
-      if (insideHunkBlock) {
-        if (/^(?:>{3,}\s*(?:REPLACE\b)?|>>>{1,3}\s*(?:REPLACE\b)?|<<<END_ZOZ_EDIT|<<<END_ZOZ_MODIFY)/i.test(t)) {
-          insideHunkBlock = false;
-        }
-        return;
-      }
-      if (!isExplicitCodeInChat && /^(?:<{3,}\s*SEARCH\b|<<<{1,3}\s*SEARCH\b)/i.test(t)) {
-        insideHunkBlock = true;
-        if (!out.some(l => l && l.includes('Sedang memilih & mengganti bagian kode'))) {
-          out.push('\n> ✨ *Sedang memilih & mengganti bagian kode terkait (terisolasi di pratinjau live)*\n');
-        }
-        return;
-      }
-
-      // 1. Penanganan blok berkas ZOZ_FILE / ZOZ_EDIT / ZOZ_MODIFY (PRIORITAS UTAMA)
-      if (insideFileBlock) {
-        if (t.indexOf('<<<END_ZOZ_FILE') === 0 || t.indexOf('<<<END_ZOZ_EDIT') === 0 || t.indexOf('<<<END_ZOZ_MODIFY') === 0) {
-          insideFileBlock = false;
-          const wasIsolated = insideIsolatedBlock;
-          insideIsolatedBlock = false;
-          if (!wasIsolated) {
-            out.push('```\n');
-          }
-          return;
-        }
-        if (insideIsolatedBlock && fileBlockLang !== 'mermaid' && fileBlockLang !== 'mmd') {
-          return; // Jangan cetak baris-baris kode dokumen maupun website ke gelembung chat!
-        }
-        out.push(line);
-        return;
-      }
-
-      if (t.indexOf('<<<ZOZ_FILE') === 0 || t.indexOf('<<<ZOZ_EDIT') === 0 || t.indexOf('<<<ZOZ_MODIFY') === 0) {
-        insideFileBlock = true;
-        const nameMatch = t.match(/(?:name|file|path)=["']?([^"'\s>]+)["']?/i);
-        const langMatch = t.match(/lang=["']?([^"'\s>]+)["']?/i);
-        currentFileName = nameMatch ? nameMatch[1] : '';
-        fileBlockLang = (langMatch ? langMatch[1] : (currentFileName ? guessLangFromName(currentFileName) : 'code')).toLowerCase();
-        const fnLower = currentFileName.toLowerCase();
-        const isDiagram = fileBlockLang === 'mermaid' || fileBlockLang === 'mmd' ||
-                          fnLower.endsWith('.mermaid') || fnLower.endsWith('.mmd') ||
-                          (fnLower.endsWith('.svg') && fileBlockLang !== 'xml');
-        if (isDiagram) fileBlockLang = 'mermaid';
-        const isWeb = fnLower.endsWith('.html') || fnLower.endsWith('.htm') || fnLower.endsWith('.jsx') || fnLower.endsWith('.tsx') ||
-                      fileBlockLang === 'html' || fileBlockLang === 'htm' || fileBlockLang === 'jsx' || fileBlockLang === 'tsx' || fileBlockLang === 'react';
-        const isDoc = fnLower.endsWith('.docx') || fnLower.endsWith('.pdf') || fnLower.endsWith('.doc') || fnLower.endsWith('.md') ||
-                      fileBlockLang === 'docx' || fileBlockLang === 'pdf' || 
-                      ((fileBlockLang === 'markdown' || fileBlockLang === 'md') && (!isDiagram && !isWeb && !fnLower.endsWith('.svg') || isDocMode));
-
-        const isSurgicalTag = t.indexOf('<<<ZOZ_EDIT') === 0 || t.indexOf('<<<ZOZ_MODIFY') === 0;
-        if (isDiagram) {
-          out.push('\n```mermaid');
-        } else if (isDoc) {
-          insideIsolatedBlock = true;
-          out.push(`\n> 📄 *Sedang menyusun dan memformat dokumen ${escapeHtml(currentFileName || 'Dokumen')}... (terisolasi di Studio Dokumen)*\n`);
-        } else if (isSurgicalTag && !isExplicitCodeInChat) {
-          insideIsolatedBlock = true;
-          const progressBanner = `\n> ✨ *Sedang memilih & mengganti bagian kode terkait di ${escapeHtml(currentFileName || 'index.html')} (tanpa menulis ulang seluruh kode)...*\n`;
-          if (!out.some(l => l && l.includes('Sedang memilih & mengganti bagian kode terkait'))) {
-            out.push(progressBanner);
-          }
-        } else if (isWeb && !isExplicitCodeInChat) {
-          insideIsolatedBlock = true;
-          pushWebBanner(currentFileName);
-        } else if (!isExplicitCodeInChat && (isWebPreviewMode || options.hideCodeInChat)) {
-          insideIsolatedBlock = true;
-          pushWebBanner(currentFileName);
-        } else {
-          out.push('\n```' + fileBlockLang);
-          if (currentFileName) out.push('// Berkas: ' + currentFileName);
-        }
-        return;
-      }
-
-      if (t.indexOf('<<<ZOZ_DELETE') === 0) {
-        return;
-      }
-
-      // 2. Penanganan khusus isolasi dokumen Markdown / Docx
-      if (!insideDocBlock && !insideRawDocBlock && (isDocMode || t.startsWith(TICK3 + 'docx') || t.startsWith(TICK3 + 'pdf'))) {
-        if (
-          t.startsWith(TICK3 + 'markdown') ||
-          t.startsWith(TICK3 + 'md') ||
-          t.startsWith(TICK3 + 'docx') ||
-          t.startsWith(TICK3 + 'pdf') ||
-          t.startsWith(TICK3 + 'doc') ||
-          t.startsWith(TICK3 + 'text') ||
-          (isDocMode && t === TICK3)
-        ) {
-          insideDocBlock = true;
-          out.push('\n> 📄 *Sedang menyusun dan memformat dokumen... (terisolasi di Studio Dokumen)*\n');
-          return;
-        }
-        if (
-          isDocMode &&
-          (/^#{1,3}\s+\S/.test(t) ||
-           /^(?:\*\*|__)?(?:BAB\s+[IVX0-9]+|DAFTAR\s+ISI|KATA\s+PENGANTAR|PENDAHULUAN|RINGKASAN\s+EKSEKUTIF|DOKUMENTASI\s+|LAPORAN\s+|MAKALAH\s+|PROPOSAL\s+)/i.test(t))
-        ) {
-          insideRawDocBlock = true;
-          out.push('\n> 📄 *Sedang menyusun dan memformat dokumen... (terisolasi di Studio Dokumen)*\n');
-          return;
-        }
-      } else if (insideDocBlock) {
-        if (t === TICK3) insideDocBlock = false;
-        return;
-      } else if (insideRawDocBlock) {
-        if (t.indexOf('<<<END_ZOZ_FILE') === 0) insideRawDocBlock = false;
-        return;
-      }
-
-      // 3. Penanganan blok Markdown ```html / ```jsx / ```tsx
-      if (insideHtmlBlock) {
-        if (t === TICK3 || (t.startsWith(TICK3) && t.length <= 6)) {
-          insideHtmlBlock = false;
-        }
-        return;
-      }
-      if (!isExplicitCodeInChat && (t.startsWith(TICK3 + 'html') || t.startsWith(TICK3 + 'htm') || t.startsWith(TICK3 + 'jsx') || t.startsWith(TICK3 + 'tsx') || t.startsWith(TICK3 + 'react') || ((isWebPreviewMode || options.hideAllCodeBlocks) && (t.startsWith(TICK3) || t.startsWith(TICK3 + 'css') || t.startsWith(TICK3 + 'style') || t.startsWith(TICK3 + 'js') || t.startsWith(TICK3 + 'javascript'))))) {
-        insideHtmlBlock = true;
-        pushWebBanner();
-        return;
-      }
-
-      // 4. Penanganan dokumen Naked HTML
-      if (insideRawHtmlBlock) {
-        if (t.includes('</html>')) {
-          insideRawHtmlBlock = false;
-          rawHtmlSawClosing = true;
-        }
-        return; // Telan seluruh kode di dalam dokumen HTML tanpa membocorkannya ke chat!
-      }
-      if (!isExplicitCodeInChat && isWebPreviewMode && (NAKED_HTML_START.test(t) || (!rawHtmlSawClosing && t.startsWith('<!DOCTYPE')))) {
-        insideRawHtmlBlock = true;
-        pushWebBanner();
-        return;
-      }
-
-      // 5. Telan baris kode / markup / chevron liar yang tersesat
-      if (/^(?:\s*<{2,5}>{1,5}|\s*<<>>|\s*< < > >|\s*<<<>>|\s*<{3,}\s*(?:SEARCH|REPLACE|END)?[^>\n]*>{0,5})\s*$/i.test(t) || /^<{1,5}>{1,5}\s*console\.log/i.test(t)) {
-        return;
-      }
-      if (!isExplicitCodeInChat && (isWebPreviewMode || options.hideAllCodeBlocks) && (CODE_LIKE_LINE.test(t) || isCodeOrMarkupLine(line))) {
-        return;
-      }
-
-      out.push(line);
-    });
-
-    if (insideFileBlock && !insideIsolatedBlock) {
-      out.push('```\n');
-    }
-
-    let finalCleaned = out.join('\n');
-    finalCleaned = finalCleaned
+    // Bersihkan chevron protokol bocor dan console.log liar
+    processed = processed
       .replace(/<{2,5}>{1,5}|<{1,5}>{2,5}/g, '')
       .replace(/<<>>|< < > >|<<<>>|<<>>>/g, '')
       .replace(/(?:^|\n|\s)*console\.(?:log|warn|error|info|debug)\s*\((?:[^)(]+|\((?:[^)(]+|\([^)(]*\))*\))*\);?(?:\s|$)/gi, '\n');
-    return finalCleaned;
+
+    return processed;
   }
 
 
@@ -12541,7 +12369,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             .trim();
           const displaySummary = (cleanStudioText && !cleanStudioText.startsWith('<'))
             ? cleanStudioText
-            : '*Sedang merancang konten... (terisolasi di pratinjau live)*';
+            : '*Sedang merancang konten...*';
           activeStudioAssistantBubble.innerHTML = appendInlineTypingCursor(renderMarkdown(displaySummary, true));
           activeStudioAssistantBubble.querySelectorAll('.code-block-wrapper, .code-block-card, .code-header, .code-actions-group, pre, code').forEach(el => el.remove());
           scrollStudioAssistantToBottom();
@@ -23366,202 +23194,46 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
   // Hapus blok file dari teks respons agar tampilan gelembung tetap rapi
   // Khusus diagram Mermaid: pertahankan sebagai blok ```mermaid``` agar langsung dirender visual di obrolan chat!
   // Dokumen (.docx, .pdf) & Website (.html / .jsx / .tsx): hapus seluruh kode dari gelembung chat (terisolasi di studio & pratinjau)
+  // Sanitasi akhir pesan asisten sebelum disimpan ke sesi/database
+  // MANDAT MUTLAK PENGGUNA: KODE HARUS TETAP UTUH DI PERCAKAPAN!
+  // Dilarang keras menelan kode atau menggantinya dengan kartu/notifikasi palsu!
   function stripGeneratedFileBlocks(text, rawBlocks, options = {}) {
     let out = String(text || '');
-    const isExplicitCodeInChat = Boolean(options && options.websiteMode === 'code_in_chat');
-    const shouldHideCode = !isExplicitCodeInChat;
-    const isIncomplete = Boolean(options && (options.isIncomplete || options.hasIncompleteFile));
-    let hasStrippedDoc = false;
-    let hasStrippedWeb = false;
-    let strippedDocName = '';
-    let strippedWebName = '';
 
-    if (Array.isArray(rawBlocks)) {
-      rawBlocks.forEach((b) => {
-        if (!b) return;
-        const bTrim = b.trim();
-        const isZozBlock = bTrim.startsWith('<<<ZOZ_FILE') || bTrim.startsWith('<<<ZOZ_EDIT') || bTrim.startsWith('<<<ZOZ_MODIFY');
+    // Musnahkan residu banner isolasi
+    out = out
+      .replace(/>\s*(?:🌐|⚡)\s*\*?Sedang (?:meracik|merancang|menyusun) kode[^*]*\*?(?:\s*\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/>\s*📄\s*\*?Sedang menyusun dan memformat dokumen[^*]*\*?(?:\s*\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/>\s*✨\s*\*?Sedang memilih & mengganti[^*]*\*?(?:\s*\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/⚡\s*\*?Sedang menyusun kode[^\n*]*\*?\s*(?:\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/📄\s*\*?Sedang menyusun dan memformat[^\n*]*\*?\s*(?:\(terisolasi[^\)]*\))?\n?/gi, '')
+      .replace(/\s*\(terisolasi di (?:pratinjau|Studio Dokumen|pratinjau live)\)/gi, '');
 
-        // Jika blok sudah berupa blok markdown biasa (misal ```html ... ``` hasil fallback) atau dokumen mentah:
-        if (!isZozBlock) {
-          const isFallbackMermaid = /^```(?:mermaid|mmd)\b/i.test(bTrim) || isAuthenticMermaidSyntax(bTrim);
-          if (isFallbackMermaid) {
-            const cleanDiagram = getCleanMermaidCode(bTrim);
-            out = out.split(b).join(`\n\n\`\`\`mermaid\n${cleanDiagram}\n\`\`\`\n\n`);
-            return;
-          }
-          if (options && (options.isDocCreation || options.docFormat)) {
-            out = out.split(b).join('');
-            hasStrippedDoc = true;
-            return;
-          }
-          if (shouldHideCode) {
-            out = out.split(b).join('');
-            hasStrippedWeb = true;
-          }
-          return;
+    // Jika ada protokol file ZOZ, konversikan menjadi blok markdown biasa agar kode tetap utuh dan terbaca
+    if (
+      out.indexOf('<<<ZOZ_FILE') !== -1 ||
+      out.indexOf('<<<ZOZ_EDIT') !== -1 ||
+      out.indexOf('<<<ZOZ_MODIFY') !== -1 ||
+      out.indexOf('<<<ZOZ_DELETE') !== -1
+    ) {
+      out = out.replace(
+        /<<<ZOZ_(?:FILE|EDIT|MODIFY)\s+(?:name|file|path)=["']?([^"'\s>]+)["']?(?:\s+mime=["']?[^"'\s>]+["']?)?(?:\s+lang=["']?([^"'\s>]+)["']?)?[^>]*>/gi,
+        (match, fileName, lang) => {
+          const cleanLang = (lang || (fileName ? guessLangFromName(fileName) : 'code')).toLowerCase();
+          const fileHeader = fileName ? `// Berkas: ${fileName}\n` : '';
+          return `\n\`\`\`${cleanLang}\n${fileHeader}`;
         }
-
-        // Ekstrak header blok ZOZ_FILE untuk mengetahui nama berkas dan bahasanya secara akurat
-        const nameMatch = b.match(/(?:name|file|path)=["']?([^"'\s>]+)["']?/i) ||
-                          b.match(/<<<ZOZ_(?:FILE|EDIT|MODIFY)[:\s]+["']?([^"'\s>]+)["']?/i);
-        const langMatch = b.match(/lang=["']?([^"'\s>]+)["']?/i);
-        const rawFileName = (nameMatch && nameMatch[1]) ? nameMatch[1] : '';
-        const fileName = rawFileName.toLowerCase();
-        const fileLang = (langMatch && langMatch[1]) ? langMatch[1].toLowerCase() : '';
-
-        const lines = b.split('\n');
-        const innerLines = [];
-        let started = false;
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          const t = line.trim();
-          if (!started) {
-            if (t.startsWith('<<<ZOZ_FILE') || t.startsWith('<<<ZOZ_EDIT') || t.startsWith('<<<ZOZ_MODIFY')) {
-              started = true;
-            }
-            continue;
-          }
-          if (t.startsWith('<<<END_ZOZ_FILE') || t.startsWith('<<<END_ZOZ_EDIT') || t.startsWith('<<<END_ZOZ_MODIFY')) {
-            break;
-          }
-          innerLines.push(line);
-        }
-        const innerContent = innerLines.join('\n');
-
-        // Berkas dianggap Diagram Mermaid HANYA jika secara eksplisit ditandai mermaid atau berekstensi .svg/.mermaid dengan sintaks otentik
-        const isDiagram = fileLang === 'mermaid' || fileLang === 'mmd' ||
-                          fileName.endsWith('.mermaid') || fileName.endsWith('.mmd') ||
-                          (fileName.endsWith('.svg') && isAuthenticMermaidSyntax(innerContent));
-
-        const isWeb = fileName.endsWith('.html') || fileName.endsWith('.htm') || fileName.endsWith('.jsx') || fileName.endsWith('.tsx') ||
-                      fileLang === 'html' || fileLang === 'htm' || fileLang === 'jsx' || fileLang === 'tsx' || fileLang === 'react';
-        const isDoc = fileName.endsWith('.docx') || fileName.endsWith('.pdf') || fileName.endsWith('.doc') || fileName.endsWith('.md') ||
-                      fileLang === 'docx' || fileLang === 'pdf' || 
-                      ((fileLang === 'markdown' || fileLang === 'md') && (!isDiagram && !isWeb || Boolean(options && (options.docFormat || options.isDocCreation))));
-
-        if (isDiagram) {
-          const cleanDiagram = getCleanMermaidCode(innerContent);
-          out = out.split(b).join(`\n\n\`\`\`mermaid\n${cleanDiagram}\n\`\`\`\n\n`);
-        } else if (isDoc) {
-          // DOKUMEN: Hapus seluruh teks isi dari gelembung chat agar tidak berhamburan!
-          out = out.split(b).join('');
-          hasStrippedDoc = true;
-          if (rawFileName) strippedDocName = rawFileName;
-        } else if (isWeb && shouldHideCode) {
-          // CODE (Universal): Isolasi dan hapus seluruh kode dari gelembung obrolan chat
-          out = out.split(b).join('');
-          hasStrippedWeb = true;
-          if (rawFileName) strippedWebName = rawFileName;
-        } else if (shouldHideCode) {
-          out = out.split(b).join('');
-          hasStrippedWeb = true;
-        } else {
-          // PROGRAM & BERKAS KODE UMUM: tampilkan kodenya langsung di dalam obrolan chat!
-          const codeLang = fileLang || (fileName ? guessLangFromName(fileName) : 'code');
-          out = out.split(b).join(`\n\n\`\`\`${codeLang}\n${innerContent}\n\`\`\`\n\n`);
-        }
-      });
+      );
+      out = out.replace(/<<<END_ZOZ_(?:FILE|EDIT|MODIFY)>>>/gi, '\n```\n');
+      out = out.replace(/<<<ZOZ_DELETE[^>]*>>>/gi, '');
     }
 
-    if (hasStrippedDoc || hasStrippedWeb || shouldHideCode || (options && (options.docFormat || options.isDocCreation))) {
-      // Bersihkan sisa marker jika stream sempat terputus
-      out = out.replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY)[\s\S]*?(?:<<<END_ZOZ_(?:FILE|EDIT|MODIFY)>>>|$)/gi, '');
-      // Bersihkan sisa blok kode HTML/JSX utuh atau unclosed jika mode terisolasi
-      if (shouldHideCode) {
-        out = out.replace(/```(?:html|htm|jsx|tsx|react)[\s\S]*?(?:```|$)/gi, '');
-        out = out.replace(/<!DOCTYPE\s+html[\s\S]*?(?:<\/html>|$)/gi, '');
-        out = out.replace(/<html\b[\s\S]*?(?:<\/html>|$)/gi, '');
-        out = out.replace(/```[a-z0-9_-]*\s*```/gi, '');
+    // Bersihkan residu chevron protokol yang bocor
+    out = out
+      .replace(/<{2,5}>{1,5}|<{1,5}>{2,5}/g, '')
+      .replace(/<<>>|< < > >|<<<>>|<<>>>/g, '');
 
-        // Bersihkan blok naked HTML yang tidak terbungkus markdown fence
-        const rawLines = out.split('\n');
-        const filteredLines = [];
-        let insideNakedHtml = false;
-        for (let i = 0; i < rawLines.length; i++) {
-          const line = rawLines[i];
-          const t = line.trim();
-          if (!insideNakedHtml) {
-            if (/^<(?:!DOCTYPE\s+html|html|head|body|div|section|nav|header|footer|main|aside|article|style|script|table|form)\b/i.test(t)) {
-              insideNakedHtml = true;
-              hasStrippedWeb = true;
-              continue;
-            }
-            filteredLines.push(line);
-          } else {
-            if (t.includes('</html>') || (t.startsWith('</') && (t.includes('</div>') || t.includes('</section>') || t.includes('</main>')))) {
-              insideNakedHtml = false;
-            }
-          }
-        }
-        out = filteredLines.join('\n');
-      }
-      if (hasStrippedDoc || (options && (options.docFormat || options.isDocCreation))) {
-        out = out.replace(/```(?:markdown|md|docx|doc|pdf)[\s\S]*?(?:```|$)/gi, '');
-      }
-      // Bersihkan sisa catatan sementara streaming jika ada
-      out = out.replace(/>\s*(?:🌐|⚡)\s*\*Sedang meracik dan menyiapkan berkas[^*]*\*/gi, '');
-      out = out.replace(/>\s*(?:🌐|⚡)\s*\*Sedang (?:merancang|menyusun) kode[^*]*\*/gi, '');
-      out = out.replace(/>\s*📄\s*\*Sedang menyusun dan memformat dokumen[^*]*\*/gi, '');
-
-      // Bersihkan sisa kalimat permintaan maaf teknis semu dari model tentang pembungkus berkas jika berkas berhasil diekstrak
-      out = out.replace(/(?:Mohon\s+maaf,?\s*)?tampaknya\s+ada\s+kendala\s+teknis\s+singkat\s+dengan\s+pembungkus\s+berkas[^\n.]*[\n.]*/gi, '');
-      out = out.replace(/Saya\s+akan\s+tulis\s+ulang\s+seluruh\s+website\s+lengkapnya[^\n.]*[\n.]*/gi, '');
-      out = out.replace(/<{3,}\s*SEARCH[\s\S]*?>{3,}(?:\s*REPLACE\b)?/gi, '');
-      out = out.replace(/<<{1,4}>{1,4}/g, '');
-      out = out.replace(/<<>>|< < > >|<<<>>|<<>>>/g, '');
-
-      if (shouldHideCode) {
-        // Pembersihan Total Sisa Kode JavaScript / HTML Terpotong (Naked JS & Orphan Tags)
-        out = out
-          .replace(/<script\b[\s\S]*?<\/script>/gi, '')
-          .replace(/<\/script>/gi, '')
-          .replace(/<\/html>/gi, '')
-          .replace(/<\/body>/gi, '')
-          .replace(/<!DOCTYPE\s+html>/gi, '')
-          .replace(/<!--[\s\S]*?-->/g, '')
-          .replace(/(?:^|\n)\s*(?:window\.addEventListener|document\.(?:getElementById|querySelector|addEventListener)|setInterval|setTimeout|function\s+[a-zA-Z0-9_$]+|const\s+[a-zA-Z0-9_$]+\s*=|let\s+[a-zA-Z0-9_$]+\s*=|var\s+[a-zA-Z0-9_$]+\s*=)[\s\S]*?(?=\n\n|\n[<>]|$)/gi, '')
-          .replace(/(?:^|\n)\s*\/\*[\s\S]*?\*\/\s*(?=\n|$)/g, '')
-          .replace(/(?:^|\n)\s*[a-zA-Z0-9_$]+\s*\([^)]*\);?\s*(?=\n|$)/g, '')
-          .replace(/(?:^|\n)\s*console\.log\s*\([^;]*?\);?\s*(?=\n|$)/gi, '\n');
-      }
-    }
-
-    const kept = out.split('\n').filter((line) => {
-      const t = line.trim();
-      return t.indexOf('<<<ZOZ_FILE') !== 0 && t.indexOf('<<<END_ZOZ_FILE') !== 0 &&
-             t.indexOf('<<<ZOZ_EDIT') !== 0 && t.indexOf('<<<END_ZOZ_EDIT') !== 0 &&
-             t.indexOf('<<<ZOZ_MODIFY') !== 0 && t.indexOf('<<<END_ZOZ_MODIFY') !== 0 &&
-             t.indexOf('<<<ZOZ_DELETE') !== 0 &&
-             !/^<{3,}\s*SEARCH\b/.test(t) && !/^={3,}\s*$/.test(t) && !/^>{3,}(?:\s*REPLACE\b)?/.test(t);
-    });
-    const cleaned = [];
-    let prevEmpty = false;
-    kept.forEach((line) => {
-      const isEmpty = line.trim() === '';
-      if (isEmpty && prevEmpty) return;
-      cleaned.push(line);
-      prevEmpty = isEmpty;
-    });
-
-    let result = cleaned.join('\n').trim();
-    if (!result || /^[\s\n\r]*[{}();,<>/]+[\s\n\r]*$/.test(result)) {
-      const hasActualWebBlocks = hasStrippedWeb || (Array.isArray(rawBlocks) && rawBlocks.length > 0 && rawBlocks.some(b => b && (b.includes('<<<ZOZ_FILE') || b.includes('<html') || b.includes('```html') || b.includes('```jsx'))));
-      const hasActualDocBlocks = hasStrippedDoc || (Array.isArray(rawBlocks) && rawBlocks.length > 0 && rawBlocks.some(b => b && (b.includes('<<<ZOZ_FILE') || b.includes('```doc') || b.includes('```pdf'))));
-
-      if (hasActualDocBlocks && (hasStrippedDoc || (options && options.docFormat))) {
-        result = `📄 **Dokumen Telah Selesai Disusun!**\n\nBerkas dokumen ${strippedDocName ? `**${escapeHtml(strippedDocName)}** ` : ''}telah berhasil dibuat dengan format rapi dan terstruktur. Anda dapat langsung melihat pratinjau dokumen atau mengunduhnya dalam format **PDF** maupun **Word (.docx)** melalui kartu berkas di bawah ini.`;
-      } else if (hasActualWebBlocks && (hasStrippedWeb || (options && options.websiteMode === 'preview'))) {
-        if (isIncomplete) {
-          result = `⚠️ **Generasi Terputus**\n\nSebagian kode ${strippedWebName ? `**${escapeHtml(strippedWebName)}** ` : ''}telah diamankan pada kartu di bawah. Klik tombol **Lanjutkan Jawaban** untuk meneruskan penulisan kode.`;
-        } else {
-          result = `💻 **Kode Berhasil Dihasilkan**\n\nKode ${strippedWebName ? `**${escapeHtml(strippedWebName)}** ` : ''}telah tersedia pada kartu di bawah. Anda dapat menguji pratinjaunya atau menyalin kodenya.`;
-        }
-      } else {
-        result = text ? text.trim() : '';
-      }
-    }
-    return result;
+    return out.trim();
   }
 
   // Ekstrak berkas yang diminta dihapus oleh AI (<<<ZOZ_DELETE name="..." ...>>>)
@@ -28007,13 +27679,16 @@ ${blocks}
     const firstLine = (t.split(/\r?\n/)[0] || '').trim();
     const openingClause = firstLine.slice(0, 180);
 
-    // Deteksi format dokumen eksplisit (PDF / Word / DOCX) atau objek dokumen langsung setelah kata kerja
-    const explicitDocFormatSignal = /\b(?:file\s+pdf|file\s+word|file\s+docx|file\s+doc|berkas\s+pdf|berkas\s+word|berkas\s+docx|format\s+pdf|format\s+word|format\s+docx|berbentuk\s+pdf|berbentuk\s+word|berbentuk\s+docx|bentuk\s+pdf|bentuk\s+word|bentuk\s+docx|dalam\s+format\s+(?:pdf|word|docx)|ekspor\s+ke\s+(?:pdf|word|docx)|[a-z0-9_-]+\.(?:pdf|docx))\b/i.test(t);
+    // Tolak jika pengguna meminta prompt, skenario, ekstensi, bot, script, atau coding
+    if (/\b(?:buatkan|buat|bikin)\s+(?:saya\s+)?(?:sebuah\s+)?(?:prompt|skenario|scenario|ekstensi|extension|plugin|bot|skrip|script|instruksi)\b/i.test(t) ||
+        /\b(?:prompt\s+untuk|skenario\s+untuk|extension\s+browser|ekstensi\s+browser)\b/i.test(t)) {
+      return 'none';
+    }
 
-    const docTargetAfterVerb = /\b(?:buatkan|buat|bikin|bikinkan|biatkan|buatin|tolong\s+buat(?:kan)?|tolong\s+bikin(?:kan)?|susun(?:kan)?|tulis(?:kan)?|rangkumkan|draft|generate|create)\s+(?:sebuah\s+|satu\s+|file\s+|berkas\s+|naskah\s+|draf\s+)?(?:dokumen|dokumentasi|makalah|laporan|proposal|jurnal|karya\s+tulis|paper|skripsi|tesis|disertasi|surat\s+resmi|surat\s+tugas|surat\s+lamaran|modul\s+ajar|pdf|word|docx)\b/i;
+    // Deteksi dokumen HANYA jika secara eksplisit diminta sebagai berkas dokumen terstruktur (makalah, proposal, laporan lengkap)
+    const docTargetOpening = /^(?:buatkan|buat|bikin|susun|tulis)\s+(?:sebuah\s+|satu\s+)?(?:dokumen|makalah|laporan|proposal|jurnal|karya\s+tulis|paper|skripsi|tesis)\b/i.test(openingClause);
 
-    // Jika klausa pembuka secara eksplisit meminta pembuatan dokumen/makalah/laporan/proposal/PDF/Word
-    if (docTargetAfterVerb.test(openingClause) || explicitDocFormatSignal || docTargetAfterVerb.test(t)) {
+    if (docTargetOpening) {
       return 'document';
     }
 
@@ -32453,31 +32128,9 @@ Jawab langsung pertanyaan pengguna secara komprehensif, tajam, dan objektif berd
           ? 'application/pdf'
           : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
         const cleanTitle = (sanitizeTitle(promptText).substring(0, 32) || 'Dokumen_Resmi').replace(/\s+/g, '_');
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DOKUMEN EKSEKUTIF RESMI (PDF & WORD .DOCX) - KONTEN LENGKAP & TERISOLASI
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN DOKUMEN TERTULIS (MAKALAH / PROPOSAL / LAPORAN / DOKUMENTASI / KARYA TULIS / SURAT / DOKUMEN).
-Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
-1. PEMBUNGKUS PROTOKOL WAJIB:
-<<<ZOZ_FILE name="${cleanTitle}.${targetDocExt}" mime="${targetDocMime}" lang="markdown">
-# [Judul Dokumen Lengkap & Sub-Judul Reflektif]
-...isi materi lengkap, komprehensif, bab, sub-bab, tabel data, dan pembahasan mendalam...
-<<<END_ZOZ_FILE>>>
-
-2. STANDAR STRUKTUR DOKUMEN BERBOBOT TINGGI:
-   - Bab 1: Ringkasan Eksekutif (Executive Summary) — Inti masalah, latar belakang, dan signifikansi strategis.
-   - Bab 2: Landasan Teori / Analisis Kontekstual — Pembahasan mendalam konsep inti.
-   - Bab 3: Data & Tabel Perbandingan — WAJIB sertakan tabel Markdown komparatif atau kuantitatif dengan baris baru (\\n) yang valid antar baris.
-   - Bab 4: Strategi Implementasi / Solusi Konkret — Rencana aksi bertahap, arsitektur, atau alur kerja operasional.
-   - Bab 5: Kesimpulan, Evaluasi Risiko, & Rekomendasi Masa Depan.
-   - Sisipkan blok catatan penting (\`> [!NOTE]\` atau \`> [!IMPORTANT]\`) untuk menonjolkan prinsip kunci.
-
-3. MANDAT KELENGKAPAN PENUH (ZERO TRUNCATION):
-   - Anda WAJIB menyusun seluruh materi dokumen secara mendalam, lengkap, dan tuntas tanpa batasan baris.
-   - DILARANG MEMOTONG TEKS SEPARUH JALAN atau hanya membuat kerangka kosong/ringkasan pendek! Uraikan setiap bab dengan analisis mendalam.
-
-4. ISOLASI TOTAL DOKUMEN:
-   - DILARANG KERAS mencetak, mengulang, membocorkan, atau menuliskan isi teks dokumen di luar blok ZOZ_FILE di dalam percakapan!
-   - Di luar blok ZOZ_FILE (sebelum blok ZOZ_FILE), berikan HANYA 1-2 kalimat penjelasan/konfirmasi singkat bahwa dokumen telah selesai disusun dan siap diunduh melalui kartu berkas di bawah.
-5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### PANDUAN PENYUSUNAN DOKUMEN LENGKAP & MENDALAM
+Pengguna meminta pembuatan naskah/dokumen komprehensif.
+Sajikan naskah lengkap secara langsung di dalam percakapan menggunakan struktur Markdown yang rapi (bab, sub-bab, tabel komparatif, dan poin analisis mendalam). Seluruh materi disajikan utuh dan transparan tanpa ada bagian yang disembunyikan atau diisolasi agar mudah dibaca dan disalin langsung oleh pengguna.`;
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
@@ -32549,7 +32202,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             ? 'application/pdf'
             : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
           const cleanTitle = (sanitizeTitle(promptText).substring(0, 32) || 'Dokumen_Resmi').replace(/\s+/g, '_');
-          lastMsg.content += `\n\n[INSTRUKSI FORMAT WAJIB: Tuliskan HANYA 1-2 kalimat pengantar/penjelasan singkat dari Anda di awal, lalu bungkus SELURUH isi teks dokumen secara utuh di dalam blok <<<ZOZ_FILE name="${cleanTitle}.${targetDocExt}" mime="${targetDocMime}" lang="markdown"> ... <<<END_ZOZ_FILE>>> agar teks dokumen terisolasi menjadi berkas siap unduh dan tidak memenuhi ruang chat.]`;
+          // Tanpa instruksi isolasi - seluruh output disajikan lengkap di chat
         }
       }
 
@@ -34398,31 +34051,9 @@ Jawab langsung pertanyaan pengguna secara komprehensif, tajam, dan objektif berd
           ? 'application/pdf'
           : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
         const cleanTitle = (sanitizeTitle(promptText).substring(0, 32) || 'Dokumen_Resmi').replace(/\s+/g, '_');
-        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS PEMBUATAN DOKUMEN EKSEKUTIF RESMI (PDF & WORD .DOCX) - KONTEN LENGKAP & TERISOLASI
-[PERINTAH PRIORITAS TERTINGGI]: Pengguna meminta PEMBUATAN DOKUMEN TERTULIS (MAKALAH / PROPOSAL / LAPORAN / DOKUMENTASI / KARYA TULIS / SURAT / DOKUMEN).
-Aturan Struktur & Kualitas Dokumen (McKinsey / Academic Standard):
-1. PEMBUNGKUS PROTOKOL WAJIB:
-<<<ZOZ_FILE name="${cleanTitle}.${targetDocExt}" mime="${targetDocMime}" lang="markdown">
-# [Judul Dokumen Lengkap & Sub-Judul Reflektif]
-...isi materi lengkap, komprehensif, bab, sub-bab, tabel data, dan pembahasan mendalam...
-<<<END_ZOZ_FILE>>>
-
-2. STANDAR STRUKTUR DOKUMEN BERBOBOT TINGGI:
-   - Bab 1: Ringkasan Eksekutif (Executive Summary) — Inti masalah, latar belakang, dan signifikansi strategis.
-   - Bab 2: Landasan Teori / Analisis Kontekstual — Pembahasan mendalam konsep inti.
-   - Bab 3: Data & Tabel Perbandingan — WAJIB sertakan tabel Markdown komparatif atau kuantitatif dengan baris baru (\\n) yang valid antar baris.
-   - Bab 4: Strategi Implementasi / Solusi Konkret — Rencana aksi bertahap, arsitektur, atau alur kerja operasional.
-   - Bab 5: Kesimpulan, Evaluasi Risiko, & Rekomendasi Masa Depan.
-   - Sisipkan blok catatan penting (\`> [!NOTE]\` atau \`> [!IMPORTANT]\`) untuk menonjolkan prinsip kunci.
-
-3. MANDAT KELENGKAPAN PENUH (ZERO TRUNCATION):
-   - Anda WAJIB menyusun seluruh materi dokumen secara mendalam, lengkap, dan tuntas tanpa batasan baris.
-   - DILARANG MEMOTONG TEKS SEPARUH JALAN atau hanya membuat kerangka kosong/ringkasan pendek! Uraikan setiap bab dengan analisis mendalam.
-
-4. ISOLASI TOTAL DOKUMEN:
-   - DILARANG KERAS mencetak, mengulang, membocorkan, atau menuliskan isi teks dokumen di luar blok ZOZ_FILE di dalam percakapan!
-   - Di luar blok ZOZ_FILE (sebelum blok ZOZ_FILE), berikan HANYA 1-2 kalimat penjelasan/konfirmasi singkat bahwa dokumen telah selesai disusun dan siap diunduh melalui kartu berkas di bawah.
-5. DILARANG MENYERTAKAN WATERMARK, FOOTER DECLARATION, ATAU EMBEL-EMBEL BRANDING AI APAPUN.`;
+        systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### PANDUAN PENYUSUNAN DOKUMEN LENGKAP & MENDALAM
+Pengguna meminta pembuatan naskah/dokumen komprehensif.
+Sajikan naskah lengkap secara langsung di dalam percakapan menggunakan struktur Markdown yang rapi (bab, sub-bab, tabel komparatif, dan poin analisis mendalam). Seluruh materi disajikan utuh dan transparan tanpa ada bagian yang disembunyikan atau diisolasi agar mudah dibaca dan disalin langsung oleh pengguna.`;
       } else if (isExplicitCleanCodeCmd) {
         systemContent = (systemContent ? `${systemContent}\n\n` : '') + `### MANDAT KHUSUS KODE MURNI (TANPA PRATINJAU)
 Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa \`\`\`lang ... \`\`\` tanpa membungkusnya sebagai berkas protokol atau kartu pratinjau.`;
@@ -34506,7 +34137,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             ? 'application/pdf'
             : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
           const cleanTitle = (sanitizeTitle(promptText).substring(0, 32) || 'Dokumen_Resmi').replace(/\s+/g, '_');
-          lastMsg.content += `\n\n[INSTRUKSI FORMAT WAJIB: Tuliskan HANYA 1-2 kalimat pengantar/penjelasan singkat dari Anda di awal, lalu bungkus SELURUH isi teks dokumen secara utuh di dalam blok <<<ZOZ_FILE name="${cleanTitle}.${targetDocExt}" mime="${targetDocMime}" lang="markdown"> ... <<<END_ZOZ_FILE>>> agar teks dokumen terisolasi menjadi berkas siap unduh dan tidak memenuhi ruang chat.]`;
+          // Tanpa instruksi isolasi - seluruh output disajikan lengkap di chat
         }
       }
 
