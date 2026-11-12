@@ -1646,6 +1646,28 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           updated_at: nowIso
         };
         this.save(errorLesson);
+      } else if (!errorLesson && typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.detectGroundTruthCorrectionOrExplanation === 'function') {
+        // Deteksi Otomatis Koreksi / Penjelasan Kunci Jawaban Resmi dari Pengguna atau Asisten
+        const gt = ZozTextSafety.detectGroundTruthCorrectionOrExplanation(rawUser, rawAsst);
+        if (gt && gt.detected) {
+          const lessonId = `lesson_${this.hashText(gt.questionText)}`;
+          const existingLesson = this.getAll(userId).find(m => m && m.id === lessonId);
+          errorLesson = {
+            id: lessonId,
+            userId,
+            user_id: userId,
+            category: 'error_lesson',
+            scope,
+            confidence: 0.999,
+            questionText: gt.questionText.slice(0, 600),
+            falsifiedAnswers: [gt.falsifiedAnswer],
+            verifiedAnswer: gt.verifiedAnswer,
+            content: gt.content,
+            created_at: existingLesson?.created_at || nowIso,
+            updated_at: nowIso
+          };
+          this.save(errorLesson);
+        }
       }
 
       // 2. Persistent Format Preference Memory (bila pengguna meminta selalu format huruf/singkat)
@@ -4563,8 +4585,18 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       const deltaRival = hasRivalModels ? 1.0 : 0.0;
       const deltaSwitch = isTurnSwitched ? 1.0 : 0.0;
       const modelEntropy = kModels > 1 ? (kModels - 1) / (kModels + 1) : 0.0;
-      const psi = Math.min(1.0, (0.50 * deltaRival) + (0.35 * deltaSwitch) + (0.15 * modelEntropy));
-      const pFocus = 1.0 - (0.06 / (1.0 + Math.exp(6.0 * (psi - 0.45))));
+      let psi = Math.min(1.0, (0.50 * deltaRival) + (0.35 * deltaSwitch) + (0.15 * modelEntropy));
+      let pFocus = 1.0 - (0.06 / (1.0 + Math.exp(6.0 * (psi - 0.45))));
+
+      // Hubungkan Sensor Aversi Kesalahan Matematis Murni ke Sistem Saraf BioEndocrine
+      const errAversionCheck = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeMathematicalErrorAversion === 'function' && promptText)
+        ? ZozTextSafety.computeMathematicalErrorAversion(promptText, { session })
+        : null;
+      if (errAversionCheck && errAversionCheck.fearIndex >= 0.35) {
+        psi = Math.max(psi, errAversionCheck.fearIndex);
+        pFocus = Math.max(pFocus, 0.999);
+        this.secreteStress(Math.round(18 * errAversionCheck.fearIndex), `[Sensor Aversi Kesalahan Matematis] Risiko penalti kerugian tinggi aktif (Φ_fear = ${errAversionCheck.fearPct}%): Memaksimalkan kewaspadaan kognitif & presisi deduktif`);
+      }
       const pFocusPct = (pFocus * 100).toFixed(1);
 
       this.lastVigilance = {

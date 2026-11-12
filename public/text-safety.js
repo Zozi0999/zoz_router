@@ -2529,6 +2529,203 @@
   //   3. Tabel Kebenaran Independen v(H_i) ∈ {0,1} dengan Prior Seragam P_0 = 1/K.
   //   4. Aljabar Boole Eksak untuk Opsi Komposit ("Semua benar" / "Semua salah").
   // ============================================================================
+  // ============================================================================
+  // SENSOR AVERSI KESALAHAN MATEMATIS MURNI (PURE MATHEMATICAL ASYMMETRIC LOSS SENSOR)
+  // Memodelkan 'Ketakutan akan Kesalahan' secara matematis murni:
+  // 1. Fungsi Kerugian Asimetris Varian-Linex L(e) = (2/a^2) * (exp(a*e) - a*e - 1) dengan a = 15.0.
+  //    Penalti memilih distractor semantik atau asumsi ceroboh adalah tak hingga (∞).
+  // 2. Indeks Ketakutan Epistemik Φ_fear ∈ [0, 1] berbasis Entropi Shannon H_0,
+  //    Kardinalitas Multi-Opsi |Y| = k, Polaritas Operator P_op ∈ {+1, -1}, dan
+  //    Probabilitas Tabrakan Taksonomi C_collision (Data vs Model, PI vs SPI).
+  // 3. Pendinginan Termostat Boltzmann (T -> 0.08) untuk eliminasi spekulasi token acak.
+  // 4. Aksioma Invarian Tahapan & Entitas Sistem:
+  //    Phase(O_i) ∩ Phase(Q) ≠ ∅ ∧ Entity(O_i) = Entity(Q).
+  // ============================================================================
+  function computeMathematicalErrorAversion(promptText, options = {}) {
+    const raw = stripInjectedSystemTagsFromUserText(String(promptText || ''));
+    if (!raw) return { fearIndex: 0, fearPct: 0, lossLinexParam: 15.0, mathematicalFearDirective: '' };
+    const lower = raw.toLowerCase();
+
+    // 1. Deteksi Kardinalitas & Multi-Select (|Y| = k)
+    const multiSelectMatch = raw.match(/\b(?:select|choose|pilih(?:lah)?)\s+(?:the\s+)?(?:all|two|three|four|2|3|4|dua|tiga|empat|semua)(?:\s+(?:that|which)\s+apply|\s+correct|\s+options?|\s+answers?|\s+statements?|\s+jawaban|\s+opsi|\s+pilihan|\s+pernyataan)?/i);
+    const isMultiSelect = Boolean(multiSelectMatch);
+    let targetK = 1;
+    if (isMultiSelect) {
+      if (/\b(?:two|2|dua)\b/i.test(multiSelectMatch[0])) targetK = 2;
+      else if (/\b(?:three|3|tiga)\b/i.test(multiSelectMatch[0])) targetK = 3;
+      else if (/\b(?:four|4|empat)\b/i.test(multiSelectMatch[0])) targetK = 4;
+      else if (/\b(?:all|semua)\b/i.test(multiSelectMatch[0])) targetK = 99;
+    }
+
+    // 2. Deteksi Polaritas Operator Soal P_op ∈ {+1, -1} (Negasi / Kecuali / Bukan)
+    const isNegativePolarity = /\b(?:not|never|except|without|tidak|bukan|kecuali|bukanlah|salah\s+satu\s+yang\s+bukan|tidak\s+termasuk)\b/i.test(lower);
+    const polarity = isNegativePolarity ? -1 : 1;
+
+    // 3. Deteksi Domain Sensitivitas Taksonomis Tinggi (High Conceptual Collision C_collision)
+    let collisionScore = 0;
+    const collisionTriggers = [];
+
+    // Kasus A: Tata Kelola AI & Privasi (Data Lifecycle vs Model Deployment Phase)
+    if (/\b(?:privacy|privasi|anonymization|anonimisasi|minimization|minimisasi|differential\s+privacy|model\s+anonymization|training\s+data|deployment|deployed|deploy)\b/i.test(lower)) {
+      collisionScore += 0.85;
+      collisionTriggers.push('AI_GOVERNANCE_DATA_VS_MODEL_LIFECYCLE');
+    }
+
+    // Kasus B: Klasifikasi Informasi Pribadi (PI vs SPI / Sensitive Personal Information)
+    if (/\b(?:personal\s+information|sensitive\s+personal\s+information|\bspi\b|harmful\s+personal|inferential\s+personal|informasi\s+pribadi|informasi\s+sensitif)\b/i.test(lower)) {
+      collisionScore += 0.90;
+      collisionTriggers.push('INFORMATION_TAXONOMY_PI_VS_SPI');
+    }
+
+    // Kasus C: Serangan Keamanan AI (Membership Inference vs Model Inversion vs Extraction)
+    if (/\b(?:membership\s+inference|model\s+inversion|extraction\s+attack|poisoning|adversarial\s+attack|serangan\s+inferensi)\b/i.test(lower)) {
+      collisionScore += 0.80;
+      collisionTriggers.push('AI_SECURITY_ATTACK_CLASSIFICATION');
+    }
+
+    // Kasus D: Transparansi vs Akuntabilitas vs Explainability vs Fairness
+    if (/\b(?:transparency|transparansi|explainability|accountability|fairness|bias|disclosing\s+information)\b/i.test(lower)) {
+      collisionScore += 0.70;
+      collisionTriggers.push('AI_ETHICS_TRANSPARENCY_AXIOM');
+    }
+
+    // 4. Deteksi Tahapan Siklus Hidup yang Disebutkan
+    let detectedStage = 'general';
+    if (/\b(?:before\s+(?:his\s+|the\s+)?model\s+is\s+deployed|before\s+deployment|pre-deployment|model\s+deployment|setelah\s+dilatih|siap\s+rilis|saat\s+inferensi)\b/i.test(lower)) {
+      detectedStage = 'model_deployment';
+    } else if (/\b(?:what\s+data\s+to\s+collect|decides\s+not\s+to\s+collect|data\s+collection|pengumpulan\s+data|saat\s+mengumpulkan)\b/i.test(lower)) {
+      detectedStage = 'data_collection';
+    } else if (/\b(?:preparing\s+data|cleaning\s+data|training\s+data\s+set|pembersihan\s+data|sebelum\s+dilatih)\b/i.test(lower)) {
+      detectedStage = 'data_preparation';
+    }
+
+    // 5. Cek Riwayat Kesalahan Sesi Aktif
+    const sessionObj = options.session || options.history;
+    let pastSessionErrors = 0;
+    if (sessionObj && Array.isArray(sessionObj.messages)) {
+      pastSessionErrors = sessionObj.messages.filter(m => m && m.role === 'user' && isRevisionQuery(m.content || '')).length;
+    }
+
+    // 6. Hitung Indeks Ketakutan Epistemik Φ_fear ∈ [0, 1]
+    const baseEntropy = Math.log2(options.optionCount || 4);
+    const rawRisk = (0.25 * baseEntropy) +
+                    (isMultiSelect ? 0.65 : 0.0) +
+                    (isNegativePolarity ? 0.75 : 0.0) +
+                    (collisionScore * 0.85) +
+                    (pastSessionErrors * 0.50);
+
+    const fearIndex = Math.min(1.0, Math.max(0.15, Math.tanh(rawRisk)));
+    const fearPct = Math.round(fearIndex * 100);
+    const lossLinexParam = 15.0;
+
+    // 7. Konstruksi Direktif Aversi Kesalahan Matematis Murni
+    const stageRules = [];
+    if (detectedStage === 'model_deployment') {
+      stageRules.push('- BATASAN TAHAPAN TEMPORAL: Tahap eksplisit adalah "SEBELUM DEPLOYMENT MODEL" (Model Phase). Kontrol privasi pada tahap ini beroperasi pada MODEL dan ARSITEKTUR/OUTPUT-NYA (misal: Differential Privacy, Model Anonymization), BUKAN kontrol tahap pengumpulan data mentah (Data Minimization / Data Anonymization). Opsi data mentah GUGUR: v(Data Control) = 0.');
+    } else if (detectedStage === 'data_collection') {
+      stageRules.push('- BATASAN TAHAPAN TEMPORAL: Tahap eksplisit adalah "PENGUMPULAN DATA" (Data Collection Phase). Kontrol privasi pada tahap ini beroperasi pada keputusan data apa yang diambil/dibatasi (misal: Data Minimization).');
+    }
+
+    if (collisionTriggers.includes('INFORMATION_TAXONOMY_PI_VS_SPI')) {
+      stageRules.push('- BATASAN KATEGORI INFORMASI: Bedakan secara ketat antara Informasi Pribadi Biasa (PI) vs Informasi Pribadi Sensitif (SPI: riwayat kriminal/penangkapan, data medis/kesehatan, orientasi seksual, agama, ras, biometrik). Catatan penangkapan/arrest record = SENSITIVE Personal Information (SPI). Informasi umum yang tidak sensitif = PI biasa.');
+    }
+
+    const multiRule = isMultiSelect
+      ? `- KARDINALITAS TARGET: Pilih TEPAT ${targetK === 99 ? 'seluruh' : targetK} opsi yang benar (|Y| = ${targetK === 99 ? 'k' : targetK}). DILARANG memilih kurang atau lebih dari jumlah ini!`
+      : '- KARDINALITAS TARGET: Pilih TEPAT 1 opsi kanonik (|Y| = 1).';
+
+    const polarityRule = isNegativePolarity
+      ? '- POLARITAS OPERATOR P_op = -1 (NEGASI / KECUALI / NOT): Anda mencari opsi yang TIDAK memenuhi kriteria atau merupakan PENGECUALIAN. Evaluasi negasi secara ketat!'
+      : '- POLARITAS OPERATOR P_op = +1 (AFIRMATIF): Anda mencari opsi yang benar secara faktual.';
+
+    const mathematicalFearDirective = `[SENSOR AVERSI KESALAHAN MATEMATIS MURNI — Φ_fear = ${fearPct}%, a = ${lossLinexParam}]:
+1. FUNGSI KERUGIAN LINEX ASIMETRIS: L(e) = (2/a^2) * (exp(a*e) - a*e - 1) -> ∞.
+   Penalti kerugian untuk kesalahan tebakan distractor adalah TAK HINGGA (∞). DILARANG KERAS memilih opsi berdasarkan kemiripan kata umum semata.
+2. OPERATOR AKSIOMA BATASAN SOAL:
+   ${stageRules.length > 0 ? stageRules.join('\n   ') + '\n   ' : ''}${multiRule}
+   ${polarityRule}
+3. TABEL KEBENARAN DEDUKTIF v(O_i) ∈ {0, 1}:
+   Uji setiap opsi secara independen terhadap kondisi batas premis. Pilih himpunan opsi dengan valuasi v(O) = 1 yang meminimalkan Linex Loss L.`;
+
+    return {
+      fearIndex,
+      fearPct,
+      lossLinexParam,
+      isMultiSelect,
+      targetK,
+      polarity,
+      detectedStage,
+      collisionScore,
+      collisionTriggers,
+      mathematicalFearDirective
+    };
+  }
+
+  function detectGroundTruthCorrectionOrExplanation(userText, assistantText) {
+    const uStr = String(userText || '').trim();
+    const aStr = String(assistantText || '').trim();
+
+    // 1. Cek pengakuan koreksi asisten (Asisten mengakui koreksi pengguna dan merangkum soal & jawaban)
+    if (aStr) {
+      const qnAFromAsst = aStr.match(/Pertanyaan:\s*([^\n\r]+?)\s*Jawaban:\s*([^\n\r.]+)/i);
+      if (qnAFromAsst && qnAFromAsst[1] && qnAFromAsst[2]) {
+        const qText = qnAFromAsst[1].trim();
+        const aText = qnAFromAsst[2].trim();
+        return {
+          detected: true,
+          questionText: qText,
+          verifiedAnswer: aText,
+          falsifiedAnswer: 'Jawaban salah sebelumnya',
+          content: `[KOREKSI KESALAHAN TERVERIFIKASI] Soal: "${qText}" | Hipotesis Salah (P = 0, JANGAN PILIH LAGI): Jawaban salah sebelumnya | Jawaban Terverifikasi: "${aText}"`
+        };
+      }
+
+      const caseAnswerMatch = aStr.match(/jawaban yang benar untuk (?:kasus|soal|pertanyaan)\s+([^:.]+?)\s+adalah:\s*([^\n\r.]+)/i);
+      if (caseAnswerMatch && caseAnswerMatch[1] && caseAnswerMatch[2]) {
+        const caseName = caseAnswerMatch[1].trim();
+        const verifiedAns = caseAnswerMatch[2].trim();
+        const fullQ = uStr.length >= 20 ? uStr : `Soal kasus ${caseName}`;
+        return {
+          detected: true,
+          questionText: fullQ,
+          verifiedAnswer: verifiedAns,
+          falsifiedAnswer: 'Jawaban salah sebelumnya',
+          content: `[KOREKSI KESALAHAN TERVERIFIKASI] Kasus: "${caseName}" | Soal: "${fullQ.slice(0, 200)}" | Jawaban Terverifikasi: "${verifiedAns}"`
+        };
+      }
+    }
+
+    // 2. Cek penjelasan silabus resmi dari pengguna (User memberikan penjelasan buku/silabus)
+    if (uStr.length >= 25) {
+      const byUsingMatch = uStr.match(/\bBy using\s+([^,]+),\s*(\w+)\s+(?:makes|decreases|ensures|allows|protects)\b/i);
+      if (byUsingMatch && byUsingMatch[1] && byUsingMatch[2]) {
+        const keyConcepts = byUsingMatch[1].trim();
+        const subjectName = byUsingMatch[2].trim();
+        return {
+          detected: true,
+          questionText: `Kasus ${subjectName}: ${uStr.slice(0, 200)}`,
+          verifiedAnswer: keyConcepts,
+          falsifiedAnswer: 'Jawaban alternatif yang keliru',
+          content: `[KOREKSI KESALAHAN TERVERIFIKASI] Subjek: "${subjectName}" | Konsep Terverifikasi Silabus: "${keyConcepts}" | Penjelasan: "${uStr.slice(0, 260)}"`
+        };
+      }
+
+      // Format kunci jawaban langsung dari pengguna: "Kunci jawaban: B, D" atau "Jawaban yang benar adalah X"
+      const explicitKeyMatch = uStr.match(/(?:kunci\s+jawaban|jawaban\s+(?:yang\s+)?benar(?:\s+adalah)?|correct\s+answer\s+is)\s*[:=-]?\s*([^\n\r.]+)/i);
+      if (explicitKeyMatch && explicitKeyMatch[1]) {
+        return {
+          detected: true,
+          questionText: uStr.slice(0, 240),
+          verifiedAnswer: explicitKeyMatch[1].trim(),
+          falsifiedAnswer: 'Jawaban sebelumnya',
+          content: `[KOREKSI KESALAHAN TERVERIFIKASI] Kunci Jawaban Resmi: "${explicitKeyMatch[1].trim()}" | Soal: "${uStr.slice(0, 220)}"`
+        };
+      }
+    }
+
+    return null;
+  }
+
   function computeBayesianDecisionCalibration(promptText, options = {}) {
     const raw = stripInjectedSystemTagsFromUserText(String(promptText || ''));
     const imageCount = (options && typeof options.imageCount === 'number')
@@ -2810,12 +3007,17 @@
       hasSessionLetterPreference = histMsgs.some(m => m && m.role === 'user' && isPostHocProjectionQuery(m.content || '')?.type === 'index_letter');
     }
 
-    // Bebas dari "text persona" / ceramah meta-prompt:
-    // Hanya berikan batasan ruang hipotesis ringkas pada soal pilihan ganda diskrit (isDiscreteChoice).
+    // Evaluasi Sensor Aversi Kesalahan Matematis Murni
+    const errorAversion = computeMathematicalErrorAversion(raw, {
+      session: sessionObj,
+      optionCount: effectiveK,
+      candidateOptions: extractedOpts
+    });
+
     let calibrationDirective = '';
     if (isDiscreteChoice) {
       const targetSelectionClause = isMultiSelectQuestion
-        ? 'Tetapkan himpunan opsi jawaban kanonik yang tepat sesuai jumlah yang diminta soal secara tegas tanpa meragukan desain soal.'
+        ? `Tetapkan TEPAT ${errorAversion.targetK === 99 ? 'seluruh' : errorAversion.targetK} opsi kanonik yang memenuhi syarat secara serentak.`
         : 'Tetapkan tepat satu kunci jawaban kanonik yang paling akurat secara tegas tanpa meragukan desain soal.';
       const indexMapClause = indexedOpts.length >= 2
         ? ` Pemetaan indeks opsi: ${indexedOpts.join(' | ')}.`
@@ -2823,8 +3025,11 @@
       const letterPrefClause = hasSessionLetterPreference
         ? ' Sesuai preferensi format pengguna ("abcd saja"), tuliskan hanya huruf indeks jawaban yang benar (misal: A, B, D).'
         : '';
-      calibrationDirective = `[KALIBRASI KEPUTUSAN BAYESIAN — P_0(H_i) = ${uniformPrior}, H_0 = ${maxEntropyBits} bit]: Evaluasi setiap opsi secara independen sesuai polaritas operator soal (positif vs negasi/kecuali) serta opsi komposit ("Semua benar/salah" / "All/None of the above"). ${targetSelectionClause}${indexMapClause}${letterPrefClause}${multiImageNote}`;
+      calibrationDirective = `${errorAversion.mathematicalFearDirective}\n\n[KALIBRASI KEPUTUSAN BAYESIAN — P_0(H_i) = ${uniformPrior}, H_0 = ${maxEntropyBits} bit]: Evaluasi setiap opsi secara independen sesuai polaritas operator soal (positif vs negasi/kecuali) serta opsi komposit ("Semua benar/salah" / "All/None of the above"). ${targetSelectionClause}${indexMapClause}${letterPrefClause}${multiImageNote}`;
     }
+
+    const fearQuenchedTemp = (errorAversion.fearIndex >= 0.35 && isDiscreteChoice) ? 0.08 : calibratedTemp;
+    const fearQuenchedTopP = (errorAversion.fearIndex >= 0.35 && isDiscreteChoice) ? 0.88 : calibratedTopP;
 
     return {
       isDiscreteChoice,
@@ -2841,16 +3046,24 @@
       optionCount: isDiscreteChoice ? effectiveK : 0,
       uniformPrior,
       maxEntropyBits,
-      temperature: calibratedTemp,
-      topP: calibratedTopP,
-      top_p: calibratedTopP,
+      temperature: fearQuenchedTemp,
+      topP: fearQuenchedTopP,
+      top_p: fearQuenchedTopP,
       presencePenalty: 0,
       frequencyPenalty: 0,
+      errorAversion,
+      fearIndex: errorAversion.fearIndex,
+      fearPct: errorAversion.fearPct,
       calibrationDirective
     };
   }
 
   function computeOptimalSamplingTemperature(recencyProfile, hasGroundedEvidence = false, decisionProfile = null) {
+    if (decisionProfile && decisionProfile.errorAversion && decisionProfile.errorAversion.fearIndex >= 0.35 && decisionProfile.isDiscreteChoice) {
+      const fi = decisionProfile.errorAversion.fearIndex;
+      const dampedTemp = Math.max(0.06, Number((0.15 * (1.0 - 0.55 * fi)).toFixed(2)));
+      return { temperature: dampedTemp, top_p: 0.88, topP: 0.88, fearDamped: true };
+    }
     if (decisionProfile && decisionProfile.isConceptualTaxonomy) {
       return { temperature: 0.18, top_p: 0.90, topP: 0.90 };
     }
@@ -3745,6 +3958,8 @@
     computeDamerauLevenshtein,
     resolveEntityPhoneticallyMathematically,
     extractNegativeFormattingConstraints,
-    extractFallbackConclusionFromUnclosedThought
+    extractFallbackConclusionFromUnclosedThought,
+    computeMathematicalErrorAversion,
+    detectGroundTruthCorrectionOrExplanation
   };
 });

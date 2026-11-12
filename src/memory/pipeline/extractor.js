@@ -175,6 +175,31 @@ function triggerAsyncBackgroundExtraction({
 
       // 0A. Simpan Pelajaran Koreksi Kesalahan Counterfactual (Error-Learning Memory: P(H_falsified) = 0)
       let resolvedErrorLesson = errorLesson;
+
+      // Deteksi otomatis koreksi penjelasan silabus atau konfirmasi kunci jawaban resmi
+      if (!resolvedErrorLesson && userMessage && assistantResponse) {
+        const uStr = String(userMessage || '').trim();
+        const aStr = String(assistantResponse || '').trim();
+
+        // 1. Cek pengakuan jawaban resmi asisten
+        const qnA = aStr.match(/Pertanyaan:\s*([^\n\r]+?)\s*Jawaban:\s*([^\n\r.]+)/i);
+        if (qnA && qnA[1] && qnA[2]) {
+          resolvedErrorLesson = {
+            questionText: qnA[1].trim(),
+            content: `[KOREKSI KESALAHAN TERVERIFIKASI] Soal: "${qnA[1].trim()}" | Hipotesis Salah (P = 0, JANGAN PILIH LAGI): Jawaban salah sebelumnya | Jawaban Terverifikasi: "${qnA[2].trim()}"`
+          };
+        } else {
+          // 2. Cek kutipan penjelasan silabus resmi dari pengguna ("By using X and Y, Subject makes it...")
+          const byUsingMatch = uStr.match(/\bBy using\s+([^,]+),\s*(\w+)\s+(?:makes|decreases|ensures|allows|protects)\b/i);
+          if (byUsingMatch && byUsingMatch[1] && byUsingMatch[2]) {
+            resolvedErrorLesson = {
+              questionText: `Kasus ${byUsingMatch[2].trim()}: ${uStr.slice(0, 200)}`,
+              content: `[KOREKSI KESALAHAN TERVERIFIKASI] Subjek: "${byUsingMatch[2].trim()}" | Konsep Terverifikasi Silabus: "${byUsingMatch[1].trim()}" | Penjelasan: "${uStr.slice(0, 260)}"`
+            };
+          }
+        }
+      }
+
       if (!resolvedErrorLesson && userMessage.includes('[PROYEKSI RUANG KEADAAN REVISI') && assistantResponse && assistantResponse.trim().length >= 2) {
         const qMatch = userMessage.match(/Konteks Pertanyaan Asli:\n([\s\S]*?)\n\nHipotesis yang TELAH TERFALSIFIKASI/i);
         const fMatch = userMessage.match(/Hipotesis yang TELAH TERFALSIFIKASI[^:]*:\n([\s\S]*?)\n\n/i);
