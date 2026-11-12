@@ -1787,10 +1787,12 @@
     const QUIZ_REVISION_EXACT_REGEX = /^(?:\s*(?:ganti|ubah|tukar|pilihkan\s+(?:yang\s+)?lain|coba\s+(?:yang\s+)?lain|bukan\s+(?:itu|yang\s+ini|yang\s+tadi)|salah\b|masih\s+salah|opsi\s+lain|jawaban\s+lain|alternatif\s+lain|jawaban\s+kedua|nomor\s+lain|ganti\s+(?:opsi|jawaban|pilihan)|bukan\s+[A-Fa-f]|change\s+(?:the\s+)?answer|try\s+another|pick\s+another|switch\s+(?:to|answer)|not\s+that|wrong|incorrect)\s*[!?.~,"'`]*)+$/i;
     const QUIZ_FAILURE_FEEDBACK_REGEX = /\b(?:anda\s+)?(?:tidak|belum)\s+lulus\b|\b(?:gagal|failed|fail|not\s+passing|re-?take|retake)\b|\b(?:your\s+score|skor(?:\s+anda)?|score|nilai(?:\s+saya)?|passing(?:\s+grade|\s+score)?)\s*(?:is|:|=|adalah)?\s*"?\s*\d{1,3}\s*%/i;
     const QUIZ_REVISION_PHRASE_REGEX = /\b(?:ganti\s+(?:jawabannya|jawaban|opsi|pilihan)|coba\s+ganti|salah\s+ganti|masih\s+salah|bukan\s+itu|jawaban\s+(?:lain|kedua|baru|yang\s+benar|berikutnya)|pilih\s+(?:yang\s+)?lain|opsi\s+lain|alternatif\s+lain|jawaban\s+salah|salah\s+(?:jawabannya|opsinya|pilihannya)|koreksi\s+(?:jawabannya|pilihan)|revisi\s+jawaban|change\s+(?:the\s+)?answer|switch\s+(?:the\s+)?option|try\s+another\s+option|wrong\s+answer)\b/i;
+    const LMS_QUIZ_FEEDBACK_REGEX = /\b(?:not\s+quite|that'?s\s+not\s+(?:quite\s+)?right|incorrect|almost(?:,\s+but)?|try\s+again|consider\s+the|think\s+about|pikirkan\s+kembali|kurang\s+tepat|belum\s+tepat)\b/i;
 
     if (QUIZ_REVISION_EXACT_REGEX.test(clean)) return true;
     if (QUIZ_FAILURE_FEEDBACK_REGEX.test(clean)) return true;
     if (QUIZ_REVISION_PHRASE_REGEX.test(clean)) return true;
+    if (LMS_QUIZ_FEEDBACK_REGEX.test(clean)) return true;
 
     const hasErrorToken = /\b(?:salah+|slh|keliru|bukan|salahnya|salahk?an|wrong|incorrect|false|err|error)\b|not\s+(?:that|this|the\s+one|right|correct)/i.test(lower);
     const hasChangeToken = /\b(?:gant+i+|ubah+|tukar+|pili+h+|coba+|cari+|gnti|plh|change|switch|replace|retry|another|next|alternative|alternatif|try)\b/i.test(lower);
@@ -2589,6 +2591,32 @@
       collisionTriggers.push('AI_ETHICS_TRANSPARENCY_AXIOM');
     }
 
+    // Kasus E: Taksonomi Antarmuka AI vs Jebakan Leksikal Alat Perantara
+    if (/\b(?:common\s+ai\s+interface|ai\s+interface|antarmuka\s+ai)\b/i.test(lower) ||
+        (/\b(?:voice\s+assistants?|chatbots?|text-based\s+ai\s+interfaces?|recommendation\s+systems?)\b/i.test(lower) && /\b(?:scenario|interface|tool|depict|represent)\b/i.test(lower))) {
+      collisionScore += 0.95;
+      collisionTriggers.push('AI_INTERFACE_TAXONOMY_VS_LEXICAL_TRAP');
+    }
+
+    // Kasus F: Taksonomi Tantangan Data (Data Challenges: Missing Context vs Uncertain Outcomes vs Inconsistent Structure)
+    if (/\b(?:data\s+challenge|tantangan\s+data|missing\s+context|uncertain\s+outcomes|inconsistent\s+structure)\b/i.test(lower) ||
+        /\b(?:linking\s+past\s+data\s+to\s+what\s+might\s+happen\s+next|unusual\s+weather\s+or\s+viral\s+trends|drove\s+a\s+spike)\b/i.test(lower)) {
+      collisionScore += 0.95;
+      collisionTriggers.push('DATA_CHALLENGES_TAXONOMY');
+    }
+
+    // Kasus G: Limitasi AI & Halusinasi (AI Hallucinations vs Bias vs Gaps in Training Data)
+    if (/\b(?:ai\s+limitation|limitasi\s+ai|ai\s+hallucination|bias\s+in\s+ai|gaps\s+in\s+training\s+data|misunderstood\s+ai\s+output)\b/i.test(lower)) {
+      collisionScore += 0.90;
+      collisionTriggers.push('AI_LIMITATIONS_TAXONOMY');
+    }
+
+    // Kasus H: Pengambilan Keputusan Sadar Privasi / Informed Decision Making & Permissions
+    if (/\b(?:informed\s+decision\s+making|consent\s+and\s+permissions|data\s+privacy\s+practices|responsible\s+ai\s+use)\b/i.test(lower)) {
+      collisionScore += 0.90;
+      collisionTriggers.push('INFORMED_DECISION_MAKING_PRIVACY');
+    }
+
     // 4. Deteksi Tahapan Siklus Hidup yang Disebutkan
     let detectedStage = 'general';
     if (/\b(?:before\s+(?:his\s+|the\s+)?model\s+is\s+deployed|before\s+deployment|pre-deployment|model\s+deployment|setelah\s+dilatih|siap\s+rilis|saat\s+inferensi)\b/i.test(lower)) {
@@ -2628,6 +2656,29 @@
 
     if (collisionTriggers.includes('INFORMATION_TAXONOMY_PI_VS_SPI')) {
       stageRules.push('- BATASAN KATEGORI INFORMASI: Bedakan secara ketat antara Informasi Pribadi Biasa (PI) vs Informasi Pribadi Sensitif (SPI: riwayat kriminal/penangkapan, data medis/kesehatan, orientasi seksual, agama, ras, biometrik). Catatan penangkapan/arrest record = SENSITIVE Personal Information (SPI). Informasi umum yang tidak sensitif = PI biasa.');
+    }
+
+    if (collisionTriggers.includes('AI_INTERFACE_TAXONOMY_VS_LEXICAL_TRAP')) {
+      stageRules.push('- AKSIOMA TAKSONOMI ANTARMUKA AI: Evaluasi modalitas I/O dan operasi transformasi inti, BUKAN nama alat semata:\n' +
+        '     * Text-based AI interfaces: Pengguna memasukkan teks/paragraf dan sistem melakukan operasi transformasi teks (menyederhanakan bahasa/simplify, menulis ulang/rewriting, merangkum, menerjemahkan). Kata "online AI chat tool" di skenario penulisan ulang adalah DISTRACTOR LEKSIKAL; modalitas utamanya adalah Text-based AI interface (v(Text-based) = 1, v(Chatbots) = 0).\n' +
+        '     * Chatbots: Interaksi percakapan dialog interaktif bolak-balik (turn-based conversational dialogue).\n' +
+        '     * Voice assistants: Berbasis input/output suara/audio (ucapan/mendengar).\n' +
+        '     * Recommendation systems: Saran konten, produk, atau feed.');
+    }
+
+    if (collisionTriggers.includes('DATA_CHALLENGES_TAXONOMY')) {
+      stageRules.push('- AKSIOMA TAKSONOMI TANTANGAN DATA:\n' +
+        '     * Uncertain outcomes: Terjadi saat membandingkan data historis namun tidak dapat mengisolasi variabel penyebab spesifik (misal: cuaca tidak biasa vs tren viral) atau kesulitan menghubungkan data masa lalu dengan apa yang akan terjadi selanjutnya ("linking past data to what might happen next"). v(Uncertain outcomes) = 1, v(Missing context) = 0, v(Inconsistent structure) = 0.\n' +
+        '     * Missing context: Data kehilangan latar belakang informasi pengumpulan (misal unit ukuran atau konteks lingkungan tidak dicatat).\n' +
+        '     * Inconsistent structure: Data memiliki format/skema tidak seragam (misal perbedaan kolom atau tipe data).');
+    }
+
+    if (collisionTriggers.includes('AI_LIMITATIONS_TAXONOMY')) {
+      stageRules.push('- AKSIOMA LIMITASI AI: Artikel jurnal/referensi fiktif yang tidak nyata atau dikarang model = AI Hallucination Risks (v(Hallucination) = 1). Bias = ketidakadilan sistemik. Gaps in training data = domain tidak ada dalam korpus latihan.');
+    }
+
+    if (collisionTriggers.includes('INFORMED_DECISION_MAKING_PRIVACY')) {
+      stageRules.push('- AKSIOMA KEPUTUSAN SADAR & PERIZINAN: Mengizinkan akses satu fitur (misal mikrofon) dan secara selektif memblokir akses fitur lain (foto & kontak) = Consent and permissions (v(Consent and permissions) = 1).');
     }
 
     const multiRule = isMultiSelect
@@ -2719,6 +2770,20 @@
           verifiedAnswer: explicitKeyMatch[1].trim(),
           falsifiedAnswer: 'Jawaban sebelumnya',
           content: `[KOREKSI KESALAHAN TERVERIFIKASI] Kunci Jawaban Resmi: "${explicitKeyMatch[1].trim()}" | Soal: "${uStr.slice(0, 220)}"`
+        };
+      }
+
+      // Format umpan balik LMS / Ujian: "Not quite. Consider the difficulty..."
+      const lmsFeedbackMatch = uStr.match(/\b(?:not\s+quite|that'?s\s+not\s+(?:quite\s+)?right|incorrect|almost(?:,\s+but)?)[.:!,\s]*(?:consider\s+([^\n\r.]+))?/i);
+      if (lmsFeedbackMatch) {
+        const hint = (lmsFeedbackMatch[1] || uStr).trim();
+        const verifiedAns = (aStr && aStr.length <= 15) ? `Opsi ${aStr.trim()}` : (aStr ? aStr.slice(0, 100).trim() : 'Jawaban revisi');
+        return {
+          detected: true,
+          questionText: `Umpan Balik LMS: "${uStr.slice(0, 220)}"`,
+          verifiedAnswer: verifiedAns,
+          falsifiedAnswer: 'Opsi yang salah pada percobaan awal',
+          content: `[KOREKSI KESALAHAN TERVERIFIKASI] Umpan Balik / Petunjuk Silabus: "${hint}" | Jawaban Terverifikasi: "${verifiedAns}"`
         };
       }
     }

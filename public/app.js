@@ -27544,6 +27544,20 @@ ${blocks}
     const pTrim = promptText.trim();
     if (pTrim.length < 3 || pTrim.length > 500) return null;
 
+    // 0. TOLAK MUTLAK jika kueri adalah soal ujian/kuis/evaluasi pilihan ganda diskrit
+    if (typeof ZozTextSafety !== 'undefined') {
+      try {
+        const cal = ZozTextSafety.computeBayesianDecisionCalibration(pTrim);
+        if (cal && (cal.isDiscreteChoice || cal.isConceptualTaxonomy || (cal.candidateOptions && cal.candidateOptions.length >= 2))) {
+          return null;
+        }
+      } catch (e) {}
+    }
+    if (/\b(?:which\s+(?:of\s+the\s+following|data\s+challenge|ai\s+interface|aspect|control|limitation)|what\s+(?:ai\s+limitation|data\s+challenge|aspect)|manakah\s+(?:dari|berikut)|pilihan\s+ganda|multiple\s+choice)\b/i.test(pTrim) ||
+        /^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)]\s+)/m.test(pTrim)) {
+      return null;
+    }
+
     // 1. Tolak kueri coding, matematika simbolik, perintah studio/dokumen, atau obrolan emosional/basa-basi abstrak
     if (/\b(?:function|def |class |const |let |var |import |SELECT |UPDATE |DELETE |INSERT |<script|<html>|<\?php|print\(|console\.log|regex|fourier|integral|diferensial|turunan|matriks|eigen|debug|error|bug|syntax)\b/i.test(pTrim)) {
       return null;
@@ -27604,7 +27618,9 @@ ${blocks}
       }
 
       // B. Permintaan Foto / Gambar Eksplisit -> terjemahkan ke Bahasa Inggris & panggil Unsplash (per_page: 3)
-      const explicitPhotoMatch = text.match(/\b(?:carikan|cari|berikan|tampilkan|sertakan|mana|lihat|ambilkan|show|give|display|find)?\s*(?:beberapa\s+|banyak\s+)?(?:contoh\s+)?(?:foto|fhoto|gambar|photo|picture|image|visual)(?:nya|s)?\s*(?:dari|tentang|mengenai|untuk|of|about|for)?\s+([a-zA-Z0-9\s\-]{3,50})/i);
+      // Kata kerja imperatif WAJIB hadir, ATAU kalimat diawali kata benda foto ("foto kucing")
+      const explicitPhotoMatch = text.match(/\b(?:carikan|cari|berikan|tampilkan|sertakan|ambilkan|show|give|display|find)\s+(?:beberapa\s+|banyak\s+)?(?:contoh\s+)?(?:foto|fhoto|gambar|photo|picture|image|visual)(?:nya|s)?\s*(?:dari|tentang|mengenai|untuk|of|about|for)?\s+([a-zA-Z0-9\s\-]{3,50})/i) ||
+        text.match(/^(?:foto|fhoto|gambar|photo|picture|image|visual)(?:nya|s)?\s*(?:dari|tentang|mengenai|untuk|of|about|for)?\s+([a-zA-Z0-9\s\-]{3,50})/i);
       if (explicitPhotoMatch && explicitPhotoMatch[1]) {
         const rawSubject = explicitPhotoMatch[1].trim()
           .replace(/^(?:of|about|for|dari|tentang|mengenai|untuk)\s+/i, '')
