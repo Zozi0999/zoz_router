@@ -60,7 +60,8 @@
       .replace(/>\s*✨\s*\*?Sedang memilih & mengganti[^*]*\*?(?:\s*\(terisolasi[^\)]*\))?\n?/gi, '')
       .replace(/⚡\s*\*?Sedang menyusun kode[^\n*]*\*?\s*(?:\(terisolasi[^\)]*\))?\n?/gi, '')
       .replace(/📄\s*\*?Sedang menyusun dan memformat[^\n*]*\*?\s*(?:\(terisolasi[^\)]*\))?\n?/gi, '')
-      .replace(/\s*\(terisolasi di (?:pratinjau|Studio Dokumen|pratinjau live)\)/gi, '');
+      .replace(/\s*\(terisolasi di (?:pratinjau|Studio Dokumen|pratinjau live)\)/gi, '')
+      .replace(/\n*\[System Note:\s*Jawaban di atas telah diverifikasi menggunakan \d+ Sumber Referensi Web Real-Time via Zoz Router\]\s*/gi, '');
     if (typeof isInternalSystemPayload === 'function' && isInternalSystemPayload(out)) {
       return '';
     }
@@ -9449,10 +9450,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return `<img${updated}>`;
     });
 
-    // Render penanda verifikasi web Zoz Router menjadi badge UI elegan dan terverifikasi
-    result = result.replace(/(?:<p\b[^>]*>\s*)?\[System Note:\s*(Jawaban di atas telah diverifikasi menggunakan \d+ Sumber Referensi Web Real-Time via Zoz Router)\](?:\s*<\/p>)?/gi, (match, noteBody) => {
-      return `<div class="system-note-tag"><i class="fa-solid fa-circle-check" style="color:var(--neon-teal, #10b981); margin-right:4px;"></i><span class="system-note-badge">System Note</span> <span>${escapeHtml(noteBody)}</span></div>`;
-    });
+    // Sembunyikan penanda System Note verifikasi web dari tampilan UI obrolan agar tidak mengganggu pembacaan
+    result = result.replace(/(?:<p\b[^>]*>\s*)?\[System Note:\s*Jawaban di atas telah diverifikasi menggunakan \d+ Sumber Referensi Web Real-Time via Zoz Router\](?:\s*<\/p>)?/gi, '');
 
     // Ubah token penempatan gambar terverifikasi [[ZOZ_IMAGE_DISPLAY:disp_...]] menjadi slot DOM bersih
     // Mendukung double brackets [[...]], single brackets [...], backtick code <code>...</code>, dan plain text
@@ -12249,7 +12248,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       .replace(/>\s*✨\s*\*?Sedang memilih & mengganti[^*]*\*?(?:\s*\(terisolasi[^\)]*\))?\n?/gi, '')
       .replace(/⚡\s*\*?Sedang menyusun kode[^\n*]*\*?\s*(?:\(terisolasi[^\)]*\))?\n?/gi, '')
       .replace(/📄\s*\*?Sedang menyusun dan memformat[^\n*]*\*?\s*(?:\(terisolasi[^\)]*\))?\n?/gi, '')
-      .replace(/\s*\(terisolasi di (?:pratinjau|Studio Dokumen|pratinjau live)\)/gi, '');
+      .replace(/\s*\(terisolasi di (?:pratinjau|Studio Dokumen|pratinjau live)\)/gi, '')
+      .replace(/\n*\[System Note:\s*Jawaban di atas telah diverifikasi menggunakan \d+ Sumber Referensi Web Real-Time via Zoz Router\]\s*/gi, '');
 
     // Konversi tag berkas protokol <<<ZOZ_FILE ...>>> menjadi blok kode markdown alami
     if (
@@ -23375,7 +23375,8 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
       .replace(/>\s*✨\s*\*?Sedang memilih & mengganti[^*]*\*?(?:\s*\(terisolasi[^\)]*\))?\n?/gi, '')
       .replace(/⚡\s*\*?Sedang menyusun kode[^\n*]*\*?\s*(?:\(terisolasi[^\)]*\))?\n?/gi, '')
       .replace(/📄\s*\*?Sedang menyusun dan memformat[^\n*]*\*?\s*(?:\(terisolasi[^\)]*\))?\n?/gi, '')
-      .replace(/\s*\(terisolasi di (?:pratinjau|Studio Dokumen|pratinjau live)\)/gi, '');
+      .replace(/\s*\(terisolasi di (?:pratinjau|Studio Dokumen|pratinjau live)\)/gi, '')
+      .replace(/\n*\[System Note:\s*Jawaban di atas telah diverifikasi menggunakan \d+ Sumber Referensi Web Real-Time via Zoz Router\]\s*/gi, '');
 
     // Jika ada protokol file ZOZ, konversikan menjadi blok markdown biasa agar kode tetap utuh dan terbaca
     if (
