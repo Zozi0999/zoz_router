@@ -2588,13 +2588,24 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
     renderMemoryReceiptsBadge(row, receipts) {
       if (!row || !Array.isArray(receipts) || receipts.length === 0) return;
-      if (row.querySelector('.memory-receipts-badge-wrap')) return;
 
-      const bubble = row.querySelector('.message-bubble');
-      if (!bubble) return;
+      // Ubah icon profil/avatar AI menjadi ikon brain saat memori digunakan
+      const avatarEl = row.querySelector('.message-avatar');
+      if (avatarEl && row.classList.contains('assistant')) {
+        avatarEl.innerHTML = '<i class="fa-solid fa-brain"></i>';
+        avatarEl.classList.add('memory-used');
+        avatarEl.title = `Menggunakan ${receipts.length} memori`;
+      }
 
-      const wrap = document.createElement('div');
-      wrap.className = 'memory-receipts-badge-wrap';
+      // Bersihkan badge lama bila metaBox baru saja di-render ulang
+      row.querySelectorAll('.memory-receipts-badge-wrap').forEach(el => el.remove());
+
+      const metaBox = row.querySelector('.message-meta');
+      const targetContainer = metaBox || row.querySelector('.message-bubble');
+      if (!targetContainer) return;
+
+      const wrap = document.createElement(metaBox ? 'span' : 'div');
+      wrap.className = metaBox ? 'memory-receipts-badge-wrap in-meta' : 'memory-receipts-badge-wrap';
       wrap.innerHTML = `
         <button type="button" class="memory-receipts-badge" title="Klik untuk melihat rincian sumber memori yang digunakan model">
           <i class="fa-solid fa-brain"></i>
@@ -2609,7 +2620,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         this.openReceiptsModal(receipts);
       });
 
-      bubble.appendChild(wrap);
+      targetContainer.appendChild(wrap);
     },
 
     openReceiptsModal(receipts) {
@@ -17226,7 +17237,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     row.className = 'message-row assistant';
     row.dataset.index = idx;
 
-    const avatarIcon = '<i class="fa-solid fa-microchip-ai"></i>';
+    const avatarIcon = '<i class="fa-solid fa-microchip"></i>';
     const cardHtml = createGeneratedImageCardHtml(msg);
 
     row.innerHTML = `
@@ -17267,7 +17278,10 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       row.dataset.rawSessionContent = stripModelTags(extraMeta.content);
     }
 
-    const avatarIcon = role === 'user' ? '<i class="fa-solid fa-user-ninja"></i>' : '<i class="fa-solid fa-microchip-ai"></i>';
+    const hasMemoryReceipts = role === 'assistant' && Boolean(extraMeta && Array.isArray(extraMeta.memoryReceipts) && extraMeta.memoryReceipts.length > 0);
+    const avatarIcon = role === 'user'
+      ? '<i class="fa-solid fa-user-ninja"></i>'
+      : (hasMemoryReceipts ? '<i class="fa-solid fa-brain"></i>' : '<i class="fa-solid fa-microchip"></i>');
     const roleLabel = role === 'user' ? 'Anda' : 'Zoz AI';
 
     const rawImgList = Array.isArray(image) ? image.filter(Boolean) : (image ? [image] : []);
@@ -17412,7 +17426,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     const shouldRenderBubble = (role === 'assistant') || (role === 'user' && hasText);
 
     row.innerHTML = `
-      <div class="message-avatar">${avatarIcon}</div>
+      <div class="message-avatar${hasMemoryReceipts ? ' memory-used' : ''}"${hasMemoryReceipts ? ` title="Menggunakan ${extraMeta.memoryReceipts.length} memori"` : ''}>${avatarIcon}</div>
       <div class="message-content-box">
         <div class="message-meta">
           ${metaContent}
@@ -32236,6 +32250,17 @@ $$
         }
       }
 
+      if (runOptions && runOptions.explicitMemoryReceipt) {
+        if (!jozzMemoryRecall) jozzMemoryRecall = { receipts: [] };
+        if (!Array.isArray(jozzMemoryRecall.receipts)) jozzMemoryRecall.receipts = [];
+        if (!jozzMemoryRecall.receipts.includes(runOptions.explicitMemoryReceipt)) {
+          jozzMemoryRecall.receipts.unshift(runOptions.explicitMemoryReceipt);
+        }
+      }
+      if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
+        JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
+      }
+
       if (runOptions && runOptions.explicitMemoryContextNote) {
         systemContent = `${runOptions.explicitMemoryContextNote}\n\n${systemContent}`;
       }
@@ -33539,20 +33564,15 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
       renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
       renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview);
-      if (runOptions && runOptions.explicitMemoryReceipt) {
-        if (!jozzMemoryRecall) jozzMemoryRecall = { receipts: [] };
-        if (!Array.isArray(jozzMemoryRecall.receipts)) jozzMemoryRecall.receipts = [];
-        jozzMemoryRecall.receipts.unshift(runOptions.explicitMemoryReceipt);
-      }
-      if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
-        JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
-      }
       metaBox.innerHTML = `
         <strong>${escapeHtml(modelName)}</strong>
         <span class="meta-model-badge">Ollama</span>
         <span>⏱️ ${totalTime}s</span>
         <span title="${promptTokens ? `${promptTokens} prompt + ${evalTokens} completion token` : `${evalTokens} completion token`}">⚡ ${tps} tps (${evalTokens} tok)</span>
       `;
+      if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
+        JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
+      }
 
       assistantRow.dataset.fullContent = fullText;
 
@@ -33698,6 +33718,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             <span class="meta-model-badge">Ollama</span>
             <span>⏱️ ${totalTime}s (Dihentikan)</span>
           `;
+          if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
+            JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
+          }
           const stoppedContentToSave = appendWebVerificationNote(stoppedText, webSources);
           session.messages.push({
             role: 'assistant',
@@ -33705,6 +33728,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             model: modelName,
             engine: 'ollama',
             sources: webSources,
+            memoryReceipts: (jozzMemoryRecall?.receipts?.length > 0) ? jozzMemoryRecall.receipts : undefined,
             files: stoppedPartial.files.length > 0 ? stoppedPartial.files : undefined,
             stats: { duration: totalTime, tokens: tokenCount, stopped: true },
             timestamp: new Date().toISOString()
@@ -33792,6 +33816,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
               <span>⏱️ ${totalTime}s</span>
             `;
           }
+          if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
+            JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
+          }
           if (STATE.sessions.some(s => s.id === session.id)) {
             const rescuedContentToSave = appendWebVerificationNote(cleanRescued, webSources);
             session.messages.push({
@@ -33800,6 +33827,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
               model: modelName,
               engine: 'ollama',
               sources: webSources,
+              memoryReceipts: (jozzMemoryRecall?.receipts?.length > 0) ? jozzMemoryRecall.receipts : undefined,
               files: rescuePartial.files.length > 0 ? rescuePartial.files : undefined,
               stats: { duration: totalTime, tokens: tokenCount },
               timestamp: new Date().toISOString()
@@ -34147,6 +34175,17 @@ $$
         } catch (memRecallErr) {
           console.warn('[Jozz Memory] OpenRouter recall warning:', memRecallErr);
         }
+      }
+
+      if (runOptions && runOptions.explicitMemoryReceipt) {
+        if (!jozzMemoryRecall) jozzMemoryRecall = { receipts: [] };
+        if (!Array.isArray(jozzMemoryRecall.receipts)) jozzMemoryRecall.receipts = [];
+        if (!jozzMemoryRecall.receipts.includes(runOptions.explicitMemoryReceipt)) {
+          jozzMemoryRecall.receipts.unshift(runOptions.explicitMemoryReceipt);
+        }
+      }
+      if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
+        JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
       }
 
       if (runOptions && runOptions.explicitMemoryContextNote) {
@@ -35836,14 +35875,6 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
       renderYouTubeCardsForMessage(assistantRow, fullText, foundYouTubeIds);
       renderMessageFiles(assistantRow, generatedFiles, hasNegativePreview);
-      if (runOptions && runOptions.explicitMemoryReceipt) {
-        if (!jozzMemoryRecall) jozzMemoryRecall = { receipts: [] };
-        if (!Array.isArray(jozzMemoryRecall.receipts)) jozzMemoryRecall.receipts = [];
-        jozzMemoryRecall.receipts.unshift(runOptions.explicitMemoryReceipt);
-      }
-      if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
-        JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
-      }
       const effectiveDisplay = (actualModelUsed && actualModelUsed !== displayModel && actualModelUsed !== modelName) ? `${displayModel} → ${actualModelUsed} (Failover)` : displayModel;
       metaBox.innerHTML = `
         <strong title="${actualModelUsed ? escapeHtml('Model dialihkan ke ' + actualModelUsed) : escapeHtml(displayModel)}">${escapeHtml(effectiveDisplay)}</strong>
@@ -35852,6 +35883,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         <span>⏱️ ${totalTime}s</span>
         <span title="${promptTokens ? `${promptTokens} prompt + ${evalTokens} completion token` : `${evalTokens} completion token`}">⚡ ${tps} tps (${evalTokens} tok)</span>
       `;
+      if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
+        JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
+      }
 
       // Recovery sisa token dari background task server jika stream terputus di tengah jalan
       if (isStreamInterrupted && session?.id && DeviceStorage.isDeviceBackendAvailable) {
@@ -36025,6 +36059,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             <span class="meta-model-badge" style="${engineLabel === 'Ollama Cloud' ? 'background:rgba(0,242,254,0.15); color:var(--neon-cyan);' : 'background:rgba(255,82,0,0.15); color:var(--neon-amber);'}">${engineLabel}</span>
             <span>⏱️ ${totalTime}s (Dihentikan)</span>
           `;
+          if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
+            JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
+          }
           const stoppedContentToSave = appendWebVerificationNote(stoppedText, webSources);
           session.messages.push({
             role: 'assistant',
@@ -36032,6 +36069,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             model: displayModel,
             engine: engineMode,
             sources: webSources,
+            memoryReceipts: (jozzMemoryRecall?.receipts?.length > 0) ? jozzMemoryRecall.receipts : undefined,
             files: stoppedPartial.files.length > 0 ? stoppedPartial.files : undefined,
             stats: { duration: totalTime, tokens: tokenCount, stopped: true },
             timestamp: new Date().toISOString()
@@ -36079,6 +36117,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
               <span>⏱️ ${totalTime}s</span>
             `;
           }
+          if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
+            JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
+          }
           if (STATE.sessions.some(s => s.id === session.id)) {
             const rescuedContentToSave = appendWebVerificationNote(cleanRescued, webSources);
             session.messages.push({
@@ -36087,6 +36128,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
               model: actualModelUsed || displayModel,
               engine: engineMode,
               sources: webSources,
+              memoryReceipts: (jozzMemoryRecall?.receipts?.length > 0) ? jozzMemoryRecall.receipts : undefined,
               files: rescuePartial.files.length > 0 ? rescuePartial.files : undefined,
               stats: { duration: totalTime, tokens: tokenCount },
               timestamp: new Date().toISOString()
