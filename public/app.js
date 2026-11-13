@@ -9331,24 +9331,21 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return null;
     };
 
-    // 3. Transformasi Baris Sumber Referensi / Daftar Pustaka di Bagian Bawah
-    // Format: [1] Yahoo Finance - Anthropic's Claude... atau - [1] Crypto Briefing...
-    const refLineRegex = /(?:^|\n|\r|<br\s*\/?>|<<<ZOZ_PROTECTED_BLOCK_\d+>>>)\s*(?:[-*•]\s*)?\[(\d+)\]\s*([^<\n\r]+?)(?=(?:\n|\r|<br\s*\/?>|<<<ZOZ_PROTECTED_BLOCK_\d+>>>|$))/gi;
-    protectedHtml = protectedHtml.replace(refLineRegex, (fullMatch, numStr, textBody) => {
-      const cleanBody = textBody.trim();
-      const src = getSourceForNumber(numStr, cleanBody);
-      if (src && src.url) {
-        const u = src.url;
-        const t = (src.title || cleanBody).trim();
-        const blockHtml = `\n<div class="citation-source-item"><a href="${escapeHtml(u)}" target="_blank" rel="noopener noreferrer" class="citation-ref-badge citation-list-badge" title="${escapeHtml(t)}">[${numStr}]</a><a href="${escapeHtml(u)}" target="_blank" rel="noopener noreferrer" class="citation-source-link" title="Buka sumber asli: ${escapeHtml(u)}"><span class="citation-source-text">${escapeHtml(cleanBody)}</span> <i class="fa-solid fa-arrow-up-right-from-square citation-link-icon"></i></a></div>`;
-        const placeholder = `<<<ZOZ_PROTECTED_BLOCK_${protectedBlocks.length}>>>`;
-        protectedBlocks.push(blockHtml);
-        return placeholder;
+    // 3. Pertahankan pergantian baris antar butir daftar referensi bernomor ([1] ... [2] ...)
+    // tanpa membungkusnya ke dalam balok berborder, lalu biarkan seluruh [N] dirender seragam sebagai badge nomor.
+    protectedHtml = protectedHtml.replace(/\r?\n(?=\s*(?:[-*•]\s*)?\[\d+\]\s+[^\n<]*<<<ZOZ_PROTECTED_BLOCK_\d+>>>)/g, (nl, offset, fullStr) => {
+      const lookahead = fullStr.slice(offset + nl.length, offset + nl.length + 320);
+      const blockMatch = lookahead.match(/<<<ZOZ_PROTECTED_BLOCK_(\d+)>>>/);
+      if (blockMatch) {
+        const blk = protectedBlocks[parseInt(blockMatch[1], 10)] || '';
+        if (/^<a\b/i.test(blk)) {
+          return '<br>\n';
+        }
       }
-      return fullMatch;
+      return nl;
     });
 
-    // 4. Transformasi Sitasi Gabungan / Rentang:
+    // 4. Transformasi Sitasi Gabungan / Rentang menjadi badge nomor seragam (.citation-ref-badge):
     // A. Rentang [1-3] atau [1–3]
     protectedHtml = protectedHtml.replace(/\[(\d+)\s*[-–—]\s*(\d+)\]/g, (match, sStr, eStr) => {
       const startN = parseInt(sStr, 10);
@@ -9394,12 +9391,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     });
 
     // 5. Pulihkan seluruh blok yang dilindungi
-    let restoredHtml = protectedHtml.replace(/<<<ZOZ_PROTECTED_BLOCK_(\d+)>>>/g, (_, idx) => {
+    const restoredHtml = protectedHtml.replace(/<<<ZOZ_PROTECTED_BLOCK_(\d+)>>>/g, (_, idx) => {
       return protectedBlocks[parseInt(idx, 10)] || '';
     });
-
-    // Rapikan tag <p> kosong yang mungkin membungkus .citation-source-item
-    restoredHtml = restoredHtml.replace(/<p>\s*(<div class="citation-source-item">[\s\S]*?<\/div>)\s*<\/p>/gi, '$1');
 
     return restoredHtml;
   }
