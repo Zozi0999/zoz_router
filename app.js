@@ -17274,6 +17274,25 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       }
     }
 
+    if (assistantIdx < 0 && els?.messagesList && typeof els.messagesList.querySelectorAll === 'function') {
+      const domRows = Array.from(els.messagesList.querySelectorAll('.message-row'));
+      const domPos = domRows.indexOf(row);
+      if (domPos >= 0) {
+        const visibleIndices = [];
+        for (let i = 0; i < session.messages.length; i++) {
+          const m = session.messages[i];
+          if (m && m.role === 'user' && typeof m.content === 'string' && typeof isInternalSystemPayload === 'function' && isInternalSystemPayload(m.content)) {
+            continue;
+          }
+          visibleIndices.push(i);
+        }
+        const mappedIdx = visibleIndices[domPos];
+        if (typeof mappedIdx === 'number' && session.messages[mappedIdx]?.role === 'assistant') {
+          assistantIdx = mappedIdx;
+        }
+      }
+    }
+
     if (assistantIdx < 0 && row?.dataset?.fullContent) {
       const targetContent = row.dataset.fullContent.trim();
       if (targetContent) {
@@ -17367,6 +17386,19 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       return false;
     }
 
+    const removedTail = session.messages.slice(resolved.userIdx);
+    const restoreTurnOnAbort = () => {
+      if (STATE.sessions && !STATE.sessions.some(s => s.id === session.id)) return;
+      if (session.messages.length === resolved.userIdx) {
+        session.messages = [...session.messages.slice(0, resolved.userIdx), ...removedTail];
+        savePersistedState();
+        renderCurrentSession();
+        if (typeof ChatEndocrine !== 'undefined') {
+          ChatEndocrine.syncFromSession(session);
+        }
+      }
+    };
+
     session.messages = session.messages.slice(0, resolved.userIdx);
     savePersistedState();
     renderCurrentSession();
@@ -17374,16 +17406,21 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       ChatEndocrine.syncFromSession(session);
     }
 
-    if (els.promptInput) els.promptInput.value = promptToSend;
-    STATE.attachedImages = restoredImages.length > 0 ? [...restoredImages] : [];
-    STATE.attachedDocs = restoredDocs.length > 0 ? [...restoredDocs] : [];
-    renderAttachmentPreviews();
     if (STATE.isPromptHidden) {
       togglePromptVisibility(false);
     }
 
     AudioEngine.click();
-    handleSendPrompt({ skipAutoFold: true }).catch((err) => {
+    handleSendPrompt({
+      skipAutoFold: true,
+      preserveComposer: true,
+      overrideText: promptToSend,
+      overrideImages: restoredImages,
+      overrideDocs: restoredDocs
+    }).then(() => {
+      restoreTurnOnAbort();
+    }).catch((err) => {
+      restoreTurnOnAbort();
       console.error('Regenerate output gagal:', err);
       showToast('Gagal meminta ulang output: ' + (err && err.message ? err.message : err), 'error');
     });
@@ -28100,12 +28137,12 @@ ${blocks}
     const isPhotoEditCardVisible = Boolean(els.photoEditReferenceCard && els.photoEditReferenceCard.style.display !== 'none');
     const isPhotoEditActive = Boolean(STATE.photoEditImage && (STATE.isImageGenMode || isExplicitEditCommand || isPhotoEditCardVisible));
 
-    const images = [...(STATE.attachedImages || [])];
+    const images = Array.isArray(options.overrideImages) ? [...options.overrideImages] : [...(STATE.attachedImages || [])];
     if (images.length === 0 && isPhotoEditActive) {
       images.push(STATE.photoEditImage);
     }
     const image = images.length > 0 ? images[0] : null;
-    const docs = [...(STATE.attachedDocs || [])];
+    const docs = Array.isArray(options.overrideDocs) ? [...options.overrideDocs] : [...(STATE.attachedDocs || [])];
 
     let explicitMemoryReceipt = null;
     let explicitMemoryContextNote = '';
@@ -28742,16 +28779,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
       AudioEngine.send();
 
-      // Reset input & attachments
-      if (els.promptInput) {
-        els.promptInput.value = '';
-        autoResizeTextarea(els.promptInput);
+      // Reset input & attachments (kecuali mode preserveComposer seperti tombol Ulangi)
+      if (!options.preserveComposer) {
+        if (els.promptInput) {
+          els.promptInput.value = '';
+          autoResizeTextarea(els.promptInput);
+        }
+        // M6 & v404: Bersihkan total state pelipatan & kartu composer saat prompt terkirim
+        if (typeof resetPromptFoldState === 'function') resetPromptFoldState(false);
+        STATE.attachedDocs = [];
+        clearAttachedImages();
+        renderAttachmentPreviews();
       }
-      // M6 & v404: Bersihkan total state pelipatan & kartu composer saat prompt terkirim
-      if (typeof resetPromptFoldState === 'function') resetPromptFoldState(false);
-      STATE.attachedDocs = [];
-      clearAttachedImages();
-      renderAttachmentPreviews();
     }
 
     // Integritas Auto-Start Model: Jika pengguna mengonfigurasi model auto-start,
@@ -46543,6 +46582,14 @@ Aturan:
         });
       }
 
+      const runFallbackEnter = () => {
+        term.write('\r\n');
+        const cmdToRun = paneState._inputLine || '';
+        paneState._inputLine = '';
+        paneState._fromTermInput = true;
+        this.executeInput(paneNum, cmdToRun);
+      };
+
       if (isMobile && term.textarea) {
         const emitMobileText = (textToEmit) => {
           if (!textToEmit) return;
@@ -46605,10 +46652,7 @@ Aturan:
             if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
               this.sendPtyInput(paneState.sessionId || sessionId, '\r');
             } else if (paneState && paneState.isFallbackMode) {
-              term.write('\r\n');
-              const cmdToRun = paneState._inputLine || '';
-              paneState._inputLine = '';
-              if (cmdToRun.trim()) this.executeInput(paneNum, cmdToRun.trim());
+              runFallbackEnter();
             }
             return;
           }
@@ -46731,10 +46775,7 @@ Aturan:
               if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
                 this.sendPtyInput(paneState.sessionId || sessionId, '\r');
               } else if (paneState && paneState.isFallbackMode) {
-                term.write('\r\n');
-                const cmdToRun = paneState._inputLine || '';
-                paneState._inputLine = '';
-                if (cmdToRun.trim()) this.executeInput(paneNum, cmdToRun.trim());
+                runFallbackEnter();
               }
             }
             return;
@@ -46912,12 +46953,7 @@ Aturan:
             if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
               this.sendPtyInput(paneState.sessionId || sessionId, '\r');
             } else if (paneState && paneState.isFallbackMode) {
-              term.write('\r\n');
-              const cmdToRun = paneState._inputLine || '';
-              paneState._inputLine = '';
-              if (cmdToRun.trim()) {
-                this.executeInput(paneNum, cmdToRun.trim());
-              }
+              runFallbackEnter();
             }
             return false;
           }
@@ -47495,11 +47531,7 @@ Aturan:
 
         // Mode Cloud Sandbox / Fallback Exec (Vercel / Cloud)
         if (data === '\r' || data === '\n') {
-          term.write('\r\n');
-          const cmdToRun = paneState._inputLine || '';
-          paneState._inputLine = '';
-          paneState._fromTermInput = true;
-          this.executeInput(paneNum, cmdToRun);
+          runFallbackEnter();
         } else if (data === '\x7f' || data === '\b') {
           if (paneState._inputLine && paneState._inputLine.length > 0) {
             paneState._inputLine = paneState._inputLine.slice(0, -1);
@@ -47850,7 +47882,7 @@ Aturan:
       pos = -1;
       while ((pos = str.indexOf('\x1b[1;', pos + 1)) !== -1) {
         const endH = str.indexOf('H', pos);
-        if (endH !== -1 && endH <= pos + 6) {
+        if (endH !== -1 && endH <= pos + 8) {
           const colStr = str.slice(pos + 4, endH);
           if (/^\d+$/.test(colStr)) {
             homePositions.push({ idx: pos, len: endH - pos + 1, col: parseInt(colStr, 10) });

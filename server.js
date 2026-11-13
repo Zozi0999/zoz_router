@@ -555,7 +555,7 @@ function cleanConptyData(str, sessionOrPane) {
   pos = -1;
   while ((pos = str.indexOf('\x1b[1;', pos + 1)) !== -1) {
     const endH = str.indexOf('H', pos);
-    if (endH !== -1 && endH <= pos + 6) {
+    if (endH !== -1 && endH <= pos + 8) {
       const colStr = str.slice(pos + 4, endH);
       if (/^\d+$/.test(colStr)) {
         homePositions.push({ idx: pos, len: endH - pos + 1, col: parseInt(colStr, 10) });
