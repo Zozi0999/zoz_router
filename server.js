@@ -516,6 +516,8 @@ function hasVisibleTerminalPrompt(bufferStr) {
 function cleanConptyData(str, sessionOrPane) {
   if (typeof str !== 'string' || !str) return str;
 
+  const hasScreenClearOrErase = str.includes('\x1b[2J') || str.includes('\x1b[3J') || str.includes('\x1b[H') || str.includes('\x1b[1;') || str.includes('\x1b[J') || str.includes('\x1bc');
+
   // Cross-chunk horizontal duplicate prompt elimination:
   if (sessionOrPane && sessionOrPane._lastHorizontalPrompt) {
     const lastPrompt = sessionOrPane._lastHorizontalPrompt;
@@ -524,10 +526,10 @@ function cleanConptyData(str, sessionOrPane) {
         str = str.slice(lastPrompt.length).replace(/^[ \t]+/, '');
         if (!str) return '';
       }
-    } else {
+    } else if (!hasScreenClearOrErase) {
       const escaped = lastPrompt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const leadRe = new RegExp('^(?:\\x1b\\[[0-9;?]*[a-zA-Z])*' + escaped + '[ \\t]*');
-      if (leadRe.test(str) && !str.startsWith('\x1b[H') && !str.startsWith('\x1b[2J') && !str.startsWith('\x1b[3J')) {
+      if (leadRe.test(str)) {
         str = str.replace(leadRe, '');
         if (!str) return '';
       }
@@ -549,19 +551,22 @@ function cleanConptyData(str, sessionOrPane) {
   // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) yang diakhiri cursor home (\x1b[H / \x1b[1;1H / \x1b[1;colH)
   const homePositions = [];
   let pos = -1;
-  while ((pos = str.indexOf('\x1b[H', pos + 1)) !== -1) homePositions.push({ idx: pos, len: 3 });
+  while ((pos = str.indexOf('\x1b[H', pos + 1)) !== -1) homePositions.push({ idx: pos, len: 3, col: 1 });
   pos = -1;
   while ((pos = str.indexOf('\x1b[1;', pos + 1)) !== -1) {
     const endH = str.indexOf('H', pos);
     if (endH !== -1 && endH <= pos + 6) {
-      homePositions.push({ idx: pos, len: endH - pos + 1 });
+      const colStr = str.slice(pos + 4, endH);
+      if (/^\d+$/.test(colStr)) {
+        homePositions.push({ idx: pos, len: endH - pos + 1, col: parseInt(colStr, 10) });
+      }
     }
   }
 
   // Urutkan dari indeks terbesar ke terkecil agar pemotongan string tidak merusak offset
   homePositions.sort((a, b) => b.idx - a.idx);
 
-  for (const { idx: targetIdx, len: seqLen } of homePositions) {
+  for (const { idx: targetIdx, len: seqLen, col } of homePositions) {
     let startIdx = targetIdx;
     let kCount = 0;
     while (startIdx > 0) {
@@ -591,19 +596,17 @@ function cleanConptyData(str, sessionOrPane) {
     }
 
     if (kCount >= 3) {
-      // Ditemukan wipe loop! Ganti seluruh loop destruktif dengan clear screen standar ANSI murni
       const afterTarget = targetIdx + seqLen;
-      let tailIdx = afterTarget;
-      if (str.startsWith('\x1b[?25h', tailIdx) || str.startsWith('\x1b[?25l', tailIdx)) {
-        tailIdx += 6;
+      const seqStr = str.slice(targetIdx, afterTarget);
+      if (col > 1) {
+        // ConPTY top-down prompt redraw (\x1b[?25lPS C:\...>\x1b[K\r\n...\x1b[1;19H\x1b[?25h):
+        // Pertahankan prompt baris-1 & kursor, ganti hanya wipe loop dengan erase-to-end-of-screen (\x1b[K\x1b[J).
+        str = str.slice(0, startIdx) + '\x1b[K\x1b[J' + seqStr + str.slice(afterTarget);
+      } else {
+        // Full-screen wipe sebelum redraw (\x1b[K\r\n...\x1b[H):
+        // Ganti loop destruktif dengan clear screen ANSI murni tanpa menelan \x1b[?25h (visibilitas kursor).
+        str = str.slice(0, startIdx) + '\x1b[2J\x1b[3J\x1b[H' + str.slice(afterTarget);
       }
-      // Hapus seluruh jejak prompt lama yang tertinggal di pStart sebelum wipe loop
-      let pStart = str.slice(0, startIdx);
-      const oldPromptMatch = pStart.match(/PS [^\r\n>]+>[ \t]*$/);
-      if (oldPromptMatch) {
-        pStart = pStart.slice(0, oldPromptMatch.index);
-      }
-      str = pStart + '\x1b[2J\x1b[3J\x1b[H' + str.slice(tailIdx);
     }
   }
 
@@ -618,7 +621,15 @@ function cleanConptyData(str, sessionOrPane) {
     const pEnd = str.match(/PS [A-Za-z]:\\[^\r\n>]*>[ \t]*$/);
     if (pEnd) {
       sessionOrPane._lastHorizontalPrompt = pEnd[0].trim();
-    } else if (str.includes('\n') || str.includes('\r') || str.includes('\x1b[2J')) {
+    } else if (
+      str.includes('\n') ||
+      str.includes('\r') ||
+      str.includes('\x1b[2J') ||
+      str.includes('\x1b[3J') ||
+      str.includes('\x1b[H') ||
+      str.includes('\x1b[J') ||
+      str.includes('\x1bc')
+    ) {
       sessionOrPane._lastHorizontalPrompt = '';
     }
   }

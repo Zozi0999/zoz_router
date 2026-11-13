@@ -46588,12 +46588,11 @@ Aturan:
             if (enteredCmd === 'cls' || enteredCmd === 'clear') {
               paneState._lastScreenClearAt = now;
               paneState._userScrolledUp = false;
+              if (paneState.screenContainer) paneState.screenContainer.scrollTop = 0;
               if (paneState.isFallbackMode) {
-                try {
-                  term.write('\x1b[2J\x1b[3J\x1b[H');
-                  term.clear();
-                  term.scrollToBottom();
-                } catch (_) {}
+                paneState._inputLine = '';
+                this.clearActiveScreen();
+                return;
               }
               if (paneState.updateScrollUI) paneState.updateScrollUI();
             } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
@@ -46609,7 +46608,7 @@ Aturan:
               term.write('\r\n');
               const cmdToRun = paneState._inputLine || '';
               paneState._inputLine = '';
-              if (cmdToRun.trim()) this.executeCommand(cmdToRun.trim());
+              if (cmdToRun.trim()) this.executeInput(paneNum, cmdToRun.trim());
             }
             return;
           }
@@ -46715,12 +46714,11 @@ Aturan:
               if (enteredCmd === 'cls' || enteredCmd === 'clear') {
                 paneState._lastScreenClearAt = now;
                 paneState._userScrolledUp = false;
+                if (paneState.screenContainer) paneState.screenContainer.scrollTop = 0;
                 if (paneState.isFallbackMode) {
-                  try {
-                    term.write('\x1b[2J\x1b[3J\x1b[H');
-                    term.clear();
-                    term.scrollToBottom();
-                  } catch (_) {}
+                  paneState._inputLine = '';
+                  this.clearActiveScreen();
+                  return;
                 }
                 if (paneState.updateScrollUI) paneState.updateScrollUI();
               } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
@@ -46736,7 +46734,7 @@ Aturan:
                 term.write('\r\n');
                 const cmdToRun = paneState._inputLine || '';
                 paneState._inputLine = '';
-                if (cmdToRun.trim()) this.executeCommand(cmdToRun.trim());
+                if (cmdToRun.trim()) this.executeInput(paneNum, cmdToRun.trim());
               }
             }
             return;
@@ -46892,12 +46890,12 @@ Aturan:
             if (enteredCmd === 'cls' || enteredCmd === 'clear') {
               paneState._lastScreenClearAt = now;
               paneState._userScrolledUp = false;
+              if (paneState.screenContainer) paneState.screenContainer.scrollTop = 0;
               if (paneState.isFallbackMode) {
-                try {
-                  term.write('\x1b[2J\x1b[3J\x1b[H');
-                  term.clear();
-                  term.scrollToBottom();
-                } catch (_) {}
+                this.resetImeLine(paneState);
+                paneState._inputLine = '';
+                this.clearActiveScreen();
+                return false;
               }
               if (paneState.updateScrollUI) paneState.updateScrollUI();
             } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
@@ -46918,7 +46916,7 @@ Aturan:
               const cmdToRun = paneState._inputLine || '';
               paneState._inputLine = '';
               if (cmdToRun.trim()) {
-                this.executeCommand(cmdToRun.trim());
+                this.executeInput(paneNum, cmdToRun.trim());
               }
             }
             return false;
@@ -47430,12 +47428,12 @@ Aturan:
           if (enteredCmd === 'cls' || enteredCmd === 'clear') {
             paneState._lastScreenClearAt = now;
             paneState._userScrolledUp = false;
+            if (paneState.screenContainer) paneState.screenContainer.scrollTop = 0;
             if (paneState.isFallbackMode) {
-              try {
-                term.write('\x1b[2J\x1b[3J\x1b[H');
-                term.clear();
-                term.scrollToBottom();
-              } catch (_) {}
+              this.resetImeLine(paneState);
+              paneState._inputLine = '';
+              this.clearActiveScreen();
+              return;
             }
             if (paneState.updateScrollUI) paneState.updateScrollUI();
           } else if (enteredCmd === 'endorfin' || enteredCmd === 'heal' || enteredCmd === 'selfheal' || enteredCmd === 'self-heal') {
@@ -47813,6 +47811,8 @@ Aturan:
     cleanConptyData(str, paneState) {
       if (typeof str !== 'string' || !str) return str;
 
+      const hasScreenClearOrErase = str.includes('\x1b[2J') || str.includes('\x1b[3J') || str.includes('\x1b[H') || str.includes('\x1b[1;') || str.includes('\x1b[J') || str.includes('\x1bc');
+
       // Cross-chunk horizontal duplicate prompt elimination:
       if (paneState && paneState._lastHorizontalPrompt) {
         const lastPrompt = paneState._lastHorizontalPrompt;
@@ -47821,10 +47821,10 @@ Aturan:
             str = str.slice(lastPrompt.length).replace(/^[ \t]+/, '');
             if (!str) return '';
           }
-        } else {
+        } else if (!hasScreenClearOrErase) {
           const escaped = lastPrompt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           const leadRe = new RegExp('^(?:\\x1b\\[[0-9;?]*[a-zA-Z])*' + escaped + '[ \\t]*');
-          if (leadRe.test(str) && !str.startsWith('\x1b[H') && !str.startsWith('\x1b[2J') && !str.startsWith('\x1b[3J')) {
+          if (leadRe.test(str)) {
             str = str.replace(leadRe, '');
             if (!str) return '';
           }
@@ -47846,19 +47846,22 @@ Aturan:
       // 1. Deteksi ConPTY screen wipe: loop pembersihan baris (\x1b[K\r\n) yang diakhiri cursor home (\x1b[H / \x1b[1;1H / \x1b[1;colH)
       const homePositions = [];
       let pos = -1;
-      while ((pos = str.indexOf('\x1b[H', pos + 1)) !== -1) homePositions.push({ idx: pos, len: 3 });
+      while ((pos = str.indexOf('\x1b[H', pos + 1)) !== -1) homePositions.push({ idx: pos, len: 3, col: 1 });
       pos = -1;
       while ((pos = str.indexOf('\x1b[1;', pos + 1)) !== -1) {
         const endH = str.indexOf('H', pos);
         if (endH !== -1 && endH <= pos + 6) {
-          homePositions.push({ idx: pos, len: endH - pos + 1 });
+          const colStr = str.slice(pos + 4, endH);
+          if (/^\d+$/.test(colStr)) {
+            homePositions.push({ idx: pos, len: endH - pos + 1, col: parseInt(colStr, 10) });
+          }
         }
       }
 
       // Urutkan dari indeks terbesar ke terkecil agar pemotongan string tidak merusak offset
       homePositions.sort((a, b) => b.idx - a.idx);
 
-      for (const { idx: targetIdx, len: seqLen } of homePositions) {
+      for (const { idx: targetIdx, len: seqLen, col } of homePositions) {
         let startIdx = targetIdx;
         let kCount = 0;
         while (startIdx > 0) {
@@ -47888,19 +47891,17 @@ Aturan:
         }
 
         if (kCount >= 3) {
-          // Ditemukan wipe loop! Ganti seluruh loop destruktif dengan clear screen standar ANSI murni
           const afterTarget = targetIdx + seqLen;
-          let tailIdx = afterTarget;
-          if (str.startsWith('\x1b[?25h', tailIdx) || str.startsWith('\x1b[?25l', tailIdx)) {
-            tailIdx += 6;
+          const seqStr = str.slice(targetIdx, afterTarget);
+          if (col > 1) {
+            // ConPTY top-down prompt redraw (\x1b[?25lPS C:\...>\x1b[K\r\n...\x1b[1;19H\x1b[?25h):
+            // Pertahankan prompt baris-1 & kursor, ganti hanya wipe loop dengan erase-to-end-of-screen (\x1b[K\x1b[J).
+            str = str.slice(0, startIdx) + '\x1b[K\x1b[J' + seqStr + str.slice(afterTarget);
+          } else {
+            // Full-screen wipe sebelum redraw (\x1b[K\r\n...\x1b[H):
+            // Ganti loop destruktif dengan clear screen ANSI murni tanpa menelan \x1b[?25h (visibilitas kursor).
+            str = str.slice(0, startIdx) + '\x1b[2J\x1b[3J\x1b[H' + str.slice(afterTarget);
           }
-          // Hapus seluruh jejak prompt lama yang tertinggal di pStart sebelum wipe loop
-          let pStart = str.slice(0, startIdx);
-          const oldPromptMatch = pStart.match(/PS [^\r\n>]+>[ \t]*$/);
-          if (oldPromptMatch) {
-            pStart = pStart.slice(0, oldPromptMatch.index);
-          }
-          str = pStart + '\x1b[2J\x1b[3J\x1b[H' + str.slice(tailIdx);
         }
       }
 
@@ -47915,7 +47916,15 @@ Aturan:
         const pEnd = str.match(/PS [A-Za-z]:\\[^\r\n>]*>[ \t]*$/);
         if (pEnd) {
           paneState._lastHorizontalPrompt = pEnd[0].trim();
-        } else if (str.includes('\n') || str.includes('\r') || str.includes('\x1b[2J')) {
+        } else if (
+          str.includes('\n') ||
+          str.includes('\r') ||
+          str.includes('\x1b[2J') ||
+          str.includes('\x1b[3J') ||
+          str.includes('\x1b[H') ||
+          str.includes('\x1b[J') ||
+          str.includes('\x1bc')
+        ) {
           paneState._lastHorizontalPrompt = '';
         }
       }
@@ -47946,6 +47955,9 @@ Aturan:
             paneState._userScrolledUp = false;
           }
           currentTerm.write(cleanData, () => {
+            if (isScreenClear && paneState.screenContainer) {
+              paneState.screenContainer.scrollTop = 0;
+            }
             if (this.isMobileDevice()) {
               this.syncMobileScreenPosition(paneState);
             }
@@ -48684,11 +48696,16 @@ Aturan:
           pane.term.write('\x1b[2J\x1b[3J\x1b[H');
           pane.term.clear();
           pane.term.scrollToBottom();
+          if (pane.screenContainer) pane.screenContainer.scrollTop = 0;
         } catch (_) {}
         this.resetImeLine(pane);
+        pane._inputLine = '';
         if (pane.updateScrollUI) pane.updateScrollUI();
         if (pane.sessionId && !pane.isFallbackMode) {
           this.sendPtyInput(pane.sessionId, '\x0c');
+        } else if (pane.isFallbackMode) {
+          const conf = this.shells[pane.shell] || this.shells.powershell;
+          pane.term.write(`\x1b[36m${conf.prompt.replace('{cwd}', pane.cwd)}\x1b[0m `);
         }
         return;
       }
@@ -49060,7 +49077,7 @@ Aturan:
             if (paneState?.term && !paneState.isFallbackMode) {
               this.sendPtyInput(sId, `${cmdType}\r`);
             } else {
-              this.executeCommand(cmdType);
+              this.executeInput(paneNum, cmdType);
             }
             keepFocus();
             return;
