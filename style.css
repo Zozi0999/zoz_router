@@ -2763,6 +2763,14 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   background: var(--bg-card);
 }
 
+.msg-action-btn.regen-msg-btn:hover i {
+  transform: rotate(90deg);
+}
+
+.msg-action-btn.regen-msg-btn i {
+  transition: transform 0.25s ease;
+}
+
 .msg-action-btn.read-report-btn {
   background: rgba(0, 240, 255, 0.08);
   border: 1px solid rgba(0, 240, 255, 0.3);

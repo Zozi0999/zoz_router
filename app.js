@@ -17225,6 +17225,171 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     });
   }
 
+  function restoreDocsFromUserMessage(targetUserMsg, fallbackDocs = null) {
+    let restoredDocs = (fallbackDocs && Array.isArray(fallbackDocs))
+      ? [...fallbackDocs]
+      : ((targetUserMsg && Array.isArray(targetUserMsg.docs)) ? [...targetUserMsg.docs] : []);
+    if (restoredDocs.length === 0 || !targetUserMsg) return restoredDocs;
+
+    return restoredDocs.map((d) => {
+      if (!d) return d;
+      if (typeof d.content === 'string' && d.content.trim().length > 0) {
+        return d;
+      }
+      if (Array.isArray(targetUserMsg.docs)) {
+        const foundDoc = targetUserMsg.docs.find(
+          td => td && td.name === d.name && typeof td.content === 'string' && td.content.trim().length > 0
+        );
+        if (foundDoc) return { ...d, content: foundDoc.content };
+      }
+      if (typeof targetUserMsg.content === 'string') {
+        const safeName = (d.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const docRegex = new RegExp(`--- \\[LAMPIRAN DOKUMEN:\\s*${safeName}[^\\n]*\\] ---\\r?\\n([\\s\\S]*?)(?:\\r?\\n--- \\[AKHIR DOKUMEN:\\s*${safeName}[^\\n]*\\] ---|$)`, 'i');
+        const match = targetUserMsg.content.match(docRegex);
+        if (match && match[1]) {
+          return { ...d, content: match[1] };
+        }
+      }
+      return d;
+    });
+  }
+
+  function resolvePrecedingUserTurnForAssistantRow(session, row) {
+    if (!session || !Array.isArray(session.messages) || session.messages.length === 0) return null;
+
+    let assistantIdx = -1;
+    const rawIdx = parseInt(row?.dataset?.index, 10);
+    if (!Number.isNaN(rawIdx) && rawIdx >= 0 && rawIdx < session.messages.length && session.messages[rawIdx]?.role === 'assistant') {
+      assistantIdx = rawIdx;
+    }
+
+    if (assistantIdx < 0 && row?.dataset?.reportDate) {
+      const targetTs = row.dataset.reportDate;
+      for (let i = session.messages.length - 1; i >= 0; i--) {
+        const m = session.messages[i];
+        if (m && m.role === 'assistant' && m.timestamp === targetTs) {
+          assistantIdx = i;
+          break;
+        }
+      }
+    }
+
+    if (assistantIdx < 0 && row?.dataset?.fullContent) {
+      const targetContent = row.dataset.fullContent.trim();
+      if (targetContent) {
+        for (let i = session.messages.length - 1; i >= 0; i--) {
+          const m = session.messages[i];
+          if (m && m.role === 'assistant' && typeof m.content === 'string') {
+            const candidate = (typeof safeAssistantText === 'function' ? safeAssistantText(m.content) : m.content).trim();
+            if (candidate === targetContent || stripModelTags(m.content).trim() === targetContent) {
+              assistantIdx = i;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (assistantIdx < 0 && els?.messagesList && row === els.messagesList.lastElementChild) {
+      const lastMsg = session.messages[session.messages.length - 1];
+      if (lastMsg && lastMsg.role === 'assistant') {
+        assistantIdx = session.messages.length - 1;
+      }
+    }
+
+    const searchStart = assistantIdx >= 0 ? assistantIdx - 1 : session.messages.length - 1;
+    for (let i = searchStart; i >= 0; i--) {
+      const candidate = session.messages[i];
+      if (!candidate || candidate.role !== 'user') continue;
+      if (typeof candidate.content === 'string' && typeof isInternalSystemPayload === 'function' && isInternalSystemPayload(candidate.content)) {
+        continue;
+      }
+      return { assistantIdx, userIdx: i, userMsg: candidate };
+    }
+    return null;
+  }
+
+  function extractUserPromptPayloadForResend(targetUserMsg) {
+    if (!targetUserMsg) return { promptToSend: '', restoredImages: [], restoredDocs: [] };
+    const restoredImages = Array.isArray(targetUserMsg.images)
+      ? targetUserMsg.images.filter(Boolean)
+      : (targetUserMsg.image ? [targetUserMsg.image] : []);
+    const restoredDocs = restoreDocsFromUserMessage(targetUserMsg, targetUserMsg.docs);
+
+    let promptToSend = (typeof targetUserMsg.displayContent === 'string' && targetUserMsg.displayContent.trim().length > 0)
+      ? targetUserMsg.displayContent
+      : (typeof targetUserMsg.content === 'string' ? targetUserMsg.content : '');
+
+    promptToSend = typeof stripModelTags === 'function' ? stripModelTags(promptToSend) : promptToSend;
+
+    if (restoredImages.length > 0 && /^📷 \[\d+ Foto Lampiran\]$/.test(promptToSend.trim())) {
+      promptToSend = '';
+    }
+    if (restoredDocs.length > 0) {
+      if (/^\[File:\s*[^\]]+\]$/i.test(promptToSend.trim())) {
+        promptToSend = '';
+      } else if (/\[File:\s*[^\]]+\]/i.test(promptToSend)) {
+        promptToSend = promptToSend.replace(/\s*\[File:\s*[^\]]+\]/gi, '').trim();
+      }
+      if (/^Tolong (?:pelajari|baca)(?:, [^.]*)?(?:dokumen|isi file dokumen)[^.]*\.?$/i.test(promptToSend.trim())) {
+        promptToSend = '';
+      }
+    }
+
+    promptToSend = promptToSend.trim();
+    if (!promptToSend && restoredImages.length === 0 && restoredDocs.length === 0 && typeof targetUserMsg.content === 'string') {
+      promptToSend = (typeof stripModelTags === 'function' ? stripModelTags(targetUserMsg.content) : targetUserMsg.content).trim();
+    }
+
+    return { promptToSend, restoredImages, restoredDocs };
+  }
+
+  function regenerateAssistantOutputFromRow(row) {
+    if (STATE.isGenerating || STATE.isSending) {
+      showToast('Masih ada respons yang sedang diproses — tunggu selesai dulu sebelum meminta ulang.', 'error');
+      return false;
+    }
+
+    const session = getActiveSession();
+    if (!session || !Array.isArray(session.messages) || session.messages.length === 0) {
+      return false;
+    }
+
+    const resolved = resolvePrecedingUserTurnForAssistantRow(session, row);
+    if (!resolved || resolved.userIdx < 0 || !resolved.userMsg) {
+      showToast('Prompt pengguna sebelumnya tidak ditemukan untuk diulang.', 'error');
+      return false;
+    }
+
+    const { promptToSend, restoredImages, restoredDocs } = extractUserPromptPayloadForResend(resolved.userMsg);
+    if (!promptToSend && restoredImages.length === 0 && restoredDocs.length === 0) {
+      showToast('Prompt tidak boleh kosong.', 'error');
+      return false;
+    }
+
+    session.messages = session.messages.slice(0, resolved.userIdx);
+    savePersistedState();
+    renderCurrentSession();
+    if (typeof ChatEndocrine !== 'undefined') {
+      ChatEndocrine.syncFromSession(session);
+    }
+
+    if (els.promptInput) els.promptInput.value = promptToSend;
+    STATE.attachedImages = restoredImages.length > 0 ? [...restoredImages] : [];
+    STATE.attachedDocs = restoredDocs.length > 0 ? [...restoredDocs] : [];
+    renderAttachmentPreviews();
+    if (STATE.isPromptHidden) {
+      togglePromptVisibility(false);
+    }
+
+    AudioEngine.click();
+    handleSendPrompt({ skipAutoFold: true }).catch((err) => {
+      console.error('Regenerate output gagal:', err);
+      showToast('Gagal meminta ulang output: ' + (err && err.message ? err.message : err), 'error');
+    });
+    return true;
+  }
+
   function renderSavedImageMessage(msg, idx = -1) {
     const row = document.createElement('div');
     row.className = 'message-row assistant';
@@ -17437,6 +17602,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         <div class="message-actions-bar">
           ${role === 'user' ? `<button class="msg-action-btn edit-msg-btn" title="${hasText ? 'Edit & Kirim Ulang Prompt' : 'Masukkan Prompt untuk Foto/File'}"><i class="fa-solid fa-pen-to-square"></i> ${hasText ? 'Edit' : 'Masukkan Prompt'}</button>` : ''}
           <button class="msg-action-btn copy-msg-btn" title="Salin Pesan"><i class="fa-solid fa-copy"></i> Salin</button>
+          ${role === 'assistant' ? `<button class="msg-action-btn regen-msg-btn" title="Minta Ulang Output AI" aria-label="Minta Ulang Output AI"><i class="fa-solid fa-rotate-right"></i> Ulangi</button>` : ''}
         </div>
       </div>
     `;
@@ -17624,29 +17790,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
             const targetUserMsg = (msgIdx >= 0 && msgIdx < session.messages.length) ? session.messages[msgIdx] : null;
 
             // Preserve / restore attached documents with their full text content
-            let restoredDocs = (docs && Array.isArray(docs)) ? [...docs] : [];
-            if (restoredDocs.length > 0 && targetUserMsg) {
-              restoredDocs = restoredDocs.map(d => {
-                if (d && typeof d.content === 'string' && d.content.trim().length > 0) {
-                  return d;
-                }
-                // Check if targetUserMsg.docs has content
-                if (Array.isArray(targetUserMsg.docs)) {
-                  const foundDoc = targetUserMsg.docs.find(td => td && td.name === d.name && typeof td.content === 'string' && td.content.trim().length > 0);
-                  if (foundDoc) return { ...d, content: foundDoc.content };
-                }
-                // Extract content from targetUserMsg.content
-                if (targetUserMsg.content && typeof targetUserMsg.content === 'string') {
-                  const safeName = (d.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                  const docRegex = new RegExp(`--- \\[LAMPIRAN DOKUMEN:\\s*${safeName}[^\\n]*\\] ---\\r?\\n([\\s\\S]*?)(?:\\r?\\n--- \\[AKHIR DOKUMEN:\\s*${safeName}[^\\n]*\\] ---|$)`, 'i');
-                  const match = targetUserMsg.content.match(docRegex);
-                  if (match && match[1]) {
-                    return { ...d, content: match[1] };
-                  }
-                }
-                return d;
-              });
-            }
+            let restoredDocs = restoreDocsFromUserMessage(targetUserMsg, docs);
 
             let promptToSend = textToSend;
             if (convertToMd) {
@@ -17775,6 +17919,12 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         }, 2000);
       }, 'Pesan disalin ke clipboard!');
     });
+
+    if (role === 'assistant') {
+      row.querySelector('.regen-msg-btn')?.addEventListener('click', () => {
+        regenerateAssistantOutputFromRow(row);
+      });
+    }
 
     els.messagesList?.appendChild(row);
     const savedVideoIds = (extraMeta && Array.isArray(extraMeta.videoIds)) ? extraMeta.videoIds : [];
@@ -33598,6 +33748,11 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
           timestamp: new Date().toISOString()
         });
+        if (assistantRow && assistantRow.dataset) {
+          assistantRow.dataset.index = String(session.messages.length - 1);
+          const pushedMsg = session.messages[session.messages.length - 1];
+          if (pushedMsg?.timestamp) assistantRow.dataset.reportDate = pushedMsg.timestamp;
+        }
         session.updatedAt = new Date().toISOString();
         savePersistedState();
         renderChatHistory(els.searchHistoryInput?.value || '');
@@ -35935,6 +36090,11 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
           timestamp: new Date().toISOString()
         });
+        if (assistantRow && assistantRow.dataset) {
+          assistantRow.dataset.index = String(session.messages.length - 1);
+          const pushedMsg = session.messages[session.messages.length - 1];
+          if (pushedMsg?.timestamp) assistantRow.dataset.reportDate = pushedMsg.timestamp;
+        }
         session.updatedAt = new Date().toISOString();
         savePersistedState();
         renderChatHistory(els.searchHistoryInput?.value || '');
