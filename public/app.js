@@ -5116,6 +5116,11 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         return this.formula;
       }
 
+      if (this._resetSessionId && targetSession.id === this._resetSessionId && targetSession.messages.length < (this._resetFromIndex || 0)) {
+        this._resetSessionId = null;
+        this._resetFromIndex = 0;
+      }
+
       const startIdx = (this._resetSessionId && targetSession.id === this._resetSessionId)
         ? Math.max(0, Math.min(targetSession.messages.length, this._resetFromIndex || 0))
         : 0;
@@ -7004,8 +7009,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       }
       if (curLast && curLast.role === 'assistant') {
         if (curLast.content !== trimmed && (trimmed.length > (curLast.content || '').length || !curLast.content)) {
-          const effectiveSources = Array.isArray(data.sources) ? data.sources : (Array.isArray(curLast.sources) ? curLast.sources : null);
-          curLast.content = (effectiveSources && effectiveSources.length > 0) ? appendWebVerificationNote(trimmed, effectiveSources) : trimmed;
+          curLast.content = trimmed;
           curLast.backgroundCompleted = true;
           activeSession.updatedAt = new Date().toISOString();
           savePersistedState();
@@ -7015,11 +7019,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           showToast('✨ AI telah selesai menjawab di latar belakang saat Anda keluar.');
         }
       } else {
-        const effectiveSources = Array.isArray(data.sources) ? data.sources : null;
-        const contentToSave = (effectiveSources && effectiveSources.length > 0) ? appendWebVerificationNote(trimmed, effectiveSources) : trimmed;
         activeSession.messages.push({
           role: 'assistant',
-          content: contentToSave,
+          content: trimmed,
           model: data.model || 'AI Model',
           timestamp: new Date().toISOString(),
           backgroundCompleted: true,
@@ -7268,11 +7270,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           // berjalan saat lastMsg assistant (bukan saat lastMsg null + teks kosong).
           if (!lastMsg || lastMsg.role !== 'assistant') {
             if (finalReportText.trim()) {
-              const effectiveSources = Array.isArray(data.sources) ? data.sources : null;
-              const contentToSave = (effectiveSources && effectiveSources.length > 0) ? appendWebVerificationNote(finalReportText, effectiveSources) : finalReportText;
               session.messages.push({
                 role: 'assistant',
-                content: contentToSave,
+                content: finalReportText,
                 model: modelName || data.model,
                 timestamp: new Date().toISOString(),
                 backgroundCompleted: true,
@@ -7281,8 +7281,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             }
           } else {
             if (finalReportText) {
-              const effectiveSources = Array.isArray(data.sources) ? data.sources : (Array.isArray(lastMsg.sources) ? lastMsg.sources : null);
-              lastMsg.content = (effectiveSources && effectiveSources.length > 0) ? appendWebVerificationNote(finalReportText, effectiveSources) : finalReportText;
+              lastMsg.content = finalReportText;
             }
             lastMsg.model = modelName || data.model || lastMsg.model;
             lastMsg.backgroundCompleted = true;
@@ -9301,7 +9300,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // - <script>, <style>, <math>, katex blocks
     // - Tag HTML apa pun (<[^>]+>)
     const protectedBlocks = [];
-    const tagPattern = /(<(?:pre|code|a|script|style)\b[^>]*>[\s\S]*?<\/(?:pre|code|a|script|style)>|<span\b[^>]*class=["\'][^"\']*katex[^"\']*[\\s\S]*?<\/span>|<div\b[^>]*class=["\'][^"\']*katex[^"\']*[\\s\S]*?<\/div>|<[^>]+>)/gi;
+    const tagPattern = /(<(?:pre|code|a|script|style|math)\b[^>]*>[\s\S]*?<\/(?:pre|code|a|script|style|math)>|<[^>]+>)/gi;
     let protectedHtml = html.replace(tagPattern, (match) => {
       const placeholder = `<<<ZOZ_PROTECTED_BLOCK_${protectedBlocks.length}>>>`;
       protectedBlocks.push(match);
@@ -9334,11 +9333,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
     // 3. Pertahankan pergantian baris antar butir daftar referensi bernomor ([1] ... [2] ...)
     // tanpa membungkusnya ke dalam balok berborder, lalu biarkan seluruh [N] dirender seragam sebagai badge nomor.
-    protectedHtml = protectedHtml.replace(/\r?\n(?=\s*(?:[-*•]\s*)?\[\d+\]\s+[^\n<]*<<<ZOZ_PROTECTED_BLOCK_\d+>>>)/g, (nl, offset, fullStr) => {
-      const lookahead = fullStr.slice(offset + nl.length, offset + nl.length + 320);
-      const blockMatch = lookahead.match(/<<<ZOZ_PROTECTED_BLOCK_(\d+)>>>/);
-      if (blockMatch) {
-        const blk = protectedBlocks[parseInt(blockMatch[1], 10)] || '';
+    protectedHtml = protectedHtml.replace(/\r?\n(?=\s*(?:[-*•]\s*)?\[\d+\]\s+[^\n]*<<<ZOZ_PROTECTED_BLOCK_\d+>>>)/g, (nl, offset, fullStr) => {
+      const restOfLine = fullStr.slice(offset + nl.length).split(/\r?\n/, 1)[0] || '';
+      const blockMatches = restOfLine.matchAll(/<<<ZOZ_PROTECTED_BLOCK_(\d+)>>>/g);
+      for (const bm of blockMatches) {
+        const blk = protectedBlocks[parseInt(bm[1], 10)] || '';
         if (/^<a\b/i.test(blk)) {
           return '<br>\n';
         }
@@ -17675,6 +17674,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
             
             // Re-render UI up to the truncated point
             renderCurrentSession();
+            if (typeof ChatEndocrine !== 'undefined') {
+              ChatEndocrine.syncFromSession(session);
+            }
 
             // Set prompt input and send
             if (els.promptInput) els.promptInput.value = promptToSend;
@@ -31966,6 +31968,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const row = document.createElement('div');
     row.className = 'message-row assistant studio-detached-row';
     row.innerHTML = `
+      <div class="message-avatar"><i class="fa-solid fa-microchip"></i></div>
       <div class="message-content-box">
         <div class="message-bubble">
           <div class="msg-text-content"><span class="typing-cursor"></span></div>
@@ -33578,10 +33581,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           patchFailures: extractedAiFiles.patchFailures
         });
       } else if (STATE.sessions.some(s => s.id === session.id)) {
-        const contentToSave = appendWebVerificationNote(fullText, webSources);
         session.messages.push({
           role: 'assistant',
-          content: contentToSave,
+          content: fullText,
           reasoning: streamRenderer.accumulatedReasoning || undefined,
           reasoning_content: streamRenderer.accumulatedReasoning || undefined,
           model: modelName,
@@ -33716,10 +33718,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
             JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
           }
-          const stoppedContentToSave = appendWebVerificationNote(stoppedText, webSources);
           session.messages.push({
             role: 'assistant',
-            content: stoppedContentToSave,
+            content: stoppedText,
             model: modelName,
             engine: 'ollama',
             sources: webSources,
@@ -33815,10 +33816,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
           }
           if (STATE.sessions.some(s => s.id === session.id)) {
-            const rescuedContentToSave = appendWebVerificationNote(cleanRescued, webSources);
             session.messages.push({
               role: 'assistant',
-              content: rescuedContentToSave,
+              content: cleanRescued,
               model: modelName,
               engine: 'ollama',
               sources: webSources,
@@ -35916,10 +35916,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           patchFailures: extractedAiFiles.patchFailures
         });
       } else if (STATE.sessions.some(s => s.id === session.id)) {
-        const contentToSave = appendWebVerificationNote(fullText, webSources);
         session.messages.push({
           role: 'assistant',
-          content: contentToSave,
+          content: fullText,
           reasoning: streamRenderer.accumulatedReasoning || undefined,
           reasoning_content: streamRenderer.accumulatedReasoning || undefined,
           model: actualModelUsed || displayModel,
@@ -36057,10 +36056,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           if (jozzMemoryRecall?.receipts?.length > 0 && typeof JozzMemoryUI !== 'undefined') {
             JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
           }
-          const stoppedContentToSave = appendWebVerificationNote(stoppedText, webSources);
           session.messages.push({
             role: 'assistant',
-            content: stoppedContentToSave,
+            content: stoppedText,
             model: displayModel,
             engine: engineMode,
             sources: webSources,
@@ -36116,10 +36114,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             JozzMemoryUI.renderMemoryReceiptsBadge(assistantRow, jozzMemoryRecall.receipts);
           }
           if (STATE.sessions.some(s => s.id === session.id)) {
-            const rescuedContentToSave = appendWebVerificationNote(cleanRescued, webSources);
             session.messages.push({
               role: 'assistant',
-              content: rescuedContentToSave,
+              content: cleanRescued,
               model: actualModelUsed || displayModel,
               engine: engineMode,
               sources: webSources,

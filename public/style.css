@@ -14058,14 +14058,6 @@ body.mermaid-has-fullscreen {
   transform: translateY(0);
 }
 
-/* ==========================================================================
-   SYSTEM NOTE VERIFICATION TAG & BADGE
-   ========================================================================== */
-.system-note-tag,
-.system-note-badge {
-  display: none !important;
-}
-
 /* =========================================================================
    TERMINAL NEURAL // CLI CONSOLE (In-Tab Interactive Multi-Shell Console)
    Inspired by terminal-extension (Aura Es / Aura Api Cyberpunk Styling)
