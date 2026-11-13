@@ -4706,73 +4706,88 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
   // Beroperasi sebagai log saraf latar belakang ultra-efisien tanpa persona bertele-tele.
   const ChatEndocrine = {
     enabled: false,
+    _resetSessionId: null,
+    _resetFromIndex: 0,
     emotions: {
-      sakit: 30,    // Luka batin & attachment rupture (~ = 3) -> 30%
-      senang: 45,   // Kesenangan kognitif & gairah aktif (3 = 50%) -> 45%
-      bahagia: 50,  // Kedamaian rasa & kehangatan syukur (- = 5, 3 = 50%) -> 50%
-      marah: 10     // Friksi & delusi ego () = 1) -> 10%
+      sakit: 0,     // Luka batin & attachment rupture (~) -> 0% saat belum ada observasi
+      senang: 0,    // Kesenangan kognitif & gairah aktif (3) -> 0% saat belum ada observasi
+      bahagia: 0,   // Kedamaian rasa & kehangatan syukur (- / 3) -> 0% saat belum ada observasi
+      marah: 0      // Friksi & delusi ego ()) -> 0% saat belum ada observasi
     },
     hormones: {
-      oxytocin: 65,   // Resonansi empati & kehangatan tatapan (-) -> 65%
-      dopamine: 55,   // Minat kognitif & rangsangan eksplorasi -> 55%
-      cortisol: 20,   // Tensi beban negatif (33: 40% -> 10% marah + 30% sakit) -> 20%
+      oxytocin: 50,   // Baseline homeostasis oksitosin -> 50%
+      dopamine: 50,   // Baseline homeostasis dopamin -> 50%
+      cortisol: 0,    // Tensi beban negatif -> 0% saat belum ada impuls negatif
       serotonin: 75   // Keseimbangan & regulasi homeostasis -> 75%
     },
     // Rumus Sosial-Neural Leviathan (Analisis Kehidupan v1.2)
-    // Persamaan: )+-+~ = [3: pos%] [33: neg%] | z21 = total data observasi
-    // positif_3 = minus
-    // negatif_33 = kurung + tilde
+    // Persamaan: )+-+~ = [3: pos%] [33: neg%] | z21 = positif_3 + negatif_33 = minus + kurung + tilde
+    // positif_3 = minus (-) | negatif_33 = kurung ()) + tilde (~)
     formula: {
-      z21: 9,              // Masukkan nilai z21 (Total data)
-      kurung: 1,           // Masukkan nilai ) (gerak-gerik melanggar / nakal)
-      minus: 5,            // Masukkan nilai - (perilaku positif / membantu)
-      tilde: 3,            // Masukkan nilai ~ (menghindar / cuek)
-      paren: 1,            // Alias kurung untuk kompatibilitas UI
-      dash: 5,             // Alias minus untuk kompatibilitas UI
-      positif_3: 5,        // positif_3 = minus
-      negatif_33: 4,       // negatif_33 = kurung + tilde
-      posCount: 5,         // Frekuensi positif kumulatif (positif_3)
-      negCount: 4,         // Frekuensi negatif kumulatif (negatif_33)
-      persen_3: 55.6,      // persen_3 = (positif_3 / z21) * 100 = (5 / 9) * 100
-      persen_33: 44.4,     // persen_33 = (negatif_33 / z21) * 100 = (4 / 9) * 100
-      pos: 56,             // Integer display persen_3
-      neg: 44,             // Integer display persen_33
-      taktik: 'Kondisi ambigu. Pertahankan mode observasi pasif.'
+      z21: 0,              // Total data observasi sesi aktif (0 sebelum chat dimulai)
+      kurung: 0,           // Nilai ) (gerak-gerik melanggar / nakal / kritik keras)
+      minus: 0,            // Nilai - (perilaku positif / kehangatan / apresiasi)
+      tilde: 0,            // Nilai ~ (menghindar / cuek / kecewa / luka batin)
+      paren: 0,            // Alias kurung untuk kompatibilitas UI
+      dash: 0,             // Alias minus untuk kompatibilitas UI
+      positif_3: 0,        // positif_3 = minus
+      negatif_33: 0,       // negatif_33 = kurung + tilde
+      posCount: 0,         // Frekuensi positif kumulatif (positif_3)
+      negCount: 0,         // Frekuensi negatif kumulatif (negatif_33)
+      persen_3: 0,         // persen_3 = (positif_3 / z21) * 100 (0% jika z21 = 0)
+      persen_33: 0,        // persen_33 = (negatif_33 / z21) * 100 (0% jika z21 = 0)
+      pos: 0,              // Integer display persen_3
+      neg: 0,              // Integer display persen_33
+      taktik: 'Belum ada observasi chat (z21 = 0). Menunggu percakapan dimulai.'
     },
-    currentVibe: 'Kondisi ambigu. Pertahankan mode observasi pasif.',
+    currentVibe: 'Belum ada observasi chat (z21 = 0). Menunggu percakapan dimulai.',
     history: [],
 
-    // REKALKULASI RUMUS LEVIATHAN (Presisi Python Script Kaisar)
-    recalculateFormula() {
+    // REKALKULASI RUMUS LEVIATHAN (Presisi Matematis Eksak: 3 + 33 = 100% saat z21 > 0, 0% saat z21 = 0)
+    recalculateFormula(manualZ21 = null) {
       const f = this.formula;
       if (!f) return null;
 
-      const minus = Number(f.minus ?? f.dash ?? 5);
-      const kurung = Number(f.kurung ?? f.paren ?? 1);
-      const tilde = Number(f.tilde ?? 3);
+      const minus = Math.max(0, Math.round(Number(f.minus ?? f.dash ?? 0) || 0));
+      const kurung = Math.max(0, Math.round(Number(f.kurung ?? f.paren ?? 0) || 0));
+      const tilde = Math.max(0, Math.round(Number(f.tilde ?? 0) || 0));
 
       // Perhitungan nilai 3 (positif) dan 33 (negatif)
       const positif_3 = minus;
-      const negatif_33 = kurung + tilde; // kombinasi perilaku nakal + menghindar
+      const negatif_33 = kurung + tilde; // kombinasi perilaku nakal/friksi + menghindar/sakit
+      const sumObserved = positif_3 + negatif_33;
 
-      let z21 = Number(f.z21);
-      if (!z21 || isNaN(z21) || z21 <= 0) {
-        z21 = Math.max(1, positif_3 + negatif_33);
+      let z21 = sumObserved;
+      if (manualZ21 !== null && manualZ21 !== undefined && !isNaN(Number(manualZ21)) && Number(manualZ21) > 0) {
+        z21 = Math.max(sumObserved, Math.round(Number(manualZ21)));
       }
 
-      // Python menghitung persentase secara otomatis
-      const rawPersen_3 = (positif_3 / z21) * 100;
-      const rawPersen_33 = (negatif_33 / z21) * 100;
-
-      const persen_3 = Math.round(rawPersen_3 * 10) / 10;
-      const persen_33 = Math.round(rawPersen_33 * 10) / 10;
+      let persen_3 = 0;
+      let persen_33 = 0;
+      if (z21 > 0) {
+        const rawPersen_3 = (positif_3 / z21) * 100;
+        const rawPersen_33 = (negatif_33 / z21) * 100;
+        persen_3 = Math.round(rawPersen_3 * 10) / 10;
+        // Jika z21 == sumObserved, jaga persen_3 + persen_33 == 100.0 tanpa selisih pembulatan
+        persen_33 = (z21 === sumObserved)
+          ? (negatif_33 === 0 ? 0 : Math.round((100 - persen_3) * 10) / 10)
+          : (Math.round(rawPersen_33 * 10) / 10);
+      }
 
       // Evaluasi Taktis Otomatis
-      let taktik = "Kondisi ambigu. Pertahankan mode observasi pasif.";
-      if (rawPersen_33 > 50) {
-        taktik = "Resistensi tinggi. Terapkan Flatline Response / Abaikan.";
-      } else if (rawPersen_3 > 70) {
-        taktik = "Kooperatif tinggi. Aman untuk pertukaran data fungsional.";
+      let taktik = 'Belum ada observasi chat (z21 = 0). Menunggu percakapan dimulai.';
+      if (!this.enabled) {
+        taktik = z21 > 0
+          ? 'Mode Standby — Aktifkan Endocrine Chat v2 untuk modulasi aktif.'
+          : 'Mode Standby (z21 = 0) — Belum ada observasi chat.';
+      } else if (z21 > 0) {
+        if (persen_33 > 50) {
+          taktik = 'Resistensi / friksi tinggi. Terapkan respons objektif tenang & netral.';
+        } else if (persen_3 > 70) {
+          taktik = 'Kooperatif & harmonis tinggi. Aman untuk pertukaran data fungsional.';
+        } else {
+          taktik = 'Kondisi seimbang/ambigu. Pertahankan mode observasi adaptif.';
+        }
       }
 
       f.z21 = z21;
@@ -4795,10 +4810,22 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     },
 
     // SINKRONISASI MUTLAK: Selaraskan EMOTIONAL GAUGES & NEURO VITALS dengan RUMUS LEVIATHAN
-    syncEmotionsFromFormula() {
-      const calc = this.recalculateFormula();
+    syncEmotionsFromFormula(manualZ21 = null) {
+      const calc = this.recalculateFormula(manualZ21);
       if (!calc) return;
       const f = this.formula;
+
+      if (!f.z21 || f.z21 <= 0) {
+        this.emotions.sakit = 0;
+        this.emotions.marah = 0;
+        this.emotions.bahagia = 0;
+        this.emotions.senang = 0;
+        this.hormones.oxytocin = 50;
+        this.hormones.cortisol = 0;
+        this.calculateSerotonin();
+        this.currentVibe = f.taktik;
+        return;
+      }
 
       // 1. SAKIT (Luka Batin & Attachment Rupture) dari ~
       const s = Math.round((f.tilde / f.z21) * 100);
@@ -4812,12 +4839,14 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       this.emotions.bahagia = Math.min(100, Math.max(0, Math.round(calc.persen_3)));
 
       // 4. SENANG (Keriangan, Humor, Dopamin Kognitif)
-      const sn = Math.round((calc.persen_3 * 0.7) + ((this.hormones.dopamine || 55) * 0.3));
+      const sn = calc.positif_3 > 0
+        ? Math.round((calc.persen_3 * 0.75) + ((this.hormones.dopamine || 50) * 0.25))
+        : 0;
       this.emotions.senang = Math.min(100, Math.max(0, sn));
 
-      // 5. OKSITOSIN: secara eksplisit di dokumen "membuat hormon oksitosin naik di dalam otak" dari (-)
+      // 5. OKSITOSIN: naik proporsional dari impuls (-)
       const oxyBoost = Math.round((f.minus / f.z21) * 45);
-      this.hormones.oxytocin = Math.min(100, Math.max(30, 45 + oxyBoost));
+      this.hormones.oxytocin = Math.min(100, Math.max(30, 50 + oxyBoost));
 
       // 6. KORTISOL: dipicu oleh beban perilaku negatif 33 () nakal + ~ menghindar)
       this.hormones.cortisol = Math.min(100, Math.max(0, Math.round((m * 0.45) + (s * 0.55))));
@@ -4829,15 +4858,15 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       this.currentVibe = f.taktik;
     },
 
-    // API Observasi Interaktif Sesuai Script Python Kaisar
+    // API Observasi Interaktif (Manual Override atau Reset)
     setObservationData(z21, kurung, minus, tilde) {
       if (!this.formula) this.formula = {};
-      if (z21 !== undefined) this.formula.z21 = Number(z21);
-      if (kurung !== undefined) { this.formula.kurung = Number(kurung); this.formula.paren = this.formula.kurung; }
-      if (minus !== undefined) { this.formula.minus = Number(minus); this.formula.dash = this.formula.minus; }
-      if (tilde !== undefined) this.formula.tilde = Number(tilde);
+      if (kurung !== undefined) { this.formula.kurung = Math.max(0, Number(kurung) || 0); this.formula.paren = this.formula.kurung; }
+      if (minus !== undefined) { this.formula.minus = Math.max(0, Number(minus) || 0); this.formula.dash = this.formula.minus; }
+      if (tilde !== undefined) { this.formula.tilde = Math.max(0, Number(tilde) || 0); }
 
-      this.syncEmotionsFromFormula();
+      const manualZ = (z21 !== undefined && z21 !== null && !isNaN(Number(z21))) ? Number(z21) : null;
+      this.syncEmotionsFromFormula(manualZ);
       this.updateUI();
       return this.formula;
     },
@@ -4846,36 +4875,23 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       if (typeof STATE !== 'undefined' && STATE.settings) {
         this.enabled = Boolean(STATE.settings.endocrineChatEnabled);
       }
-      if (!this.formula) {
-        this.formula = {
-          z21: 9,
-          pos: 56,
-          neg: 44,
-          persen_3: 55.6,
-          persen_33: 44.4,
-          posCount: 5,
-          negCount: 4,
-          paren: 1,
-          dash: 5,
-          tilde: 3
-        };
-      }
-      this.syncEmotionsFromFormula();
+      this.resetCountsOnly();
       this.syncToggleUI();
       this.updateUI();
 
       // Homeostasis biologis berkala: menyeimbangkan kembali sistem saraf emosi setiap 15 detik
-      // Menuju equilibrium rumus Leviathan
+      // Menuju equilibrium rumus Leviathan (TIDAK memalsukan nilai non-nol jika z21 = 0)
       setInterval(() => {
         if (!this.enabled) return;
-        let changed = false;
-
         const f = this.formula;
-        const negTotal = Math.max(1, ((f && f.paren) || 0) + ((f && f.tilde) || 0));
-        const negPct = (f && f.neg) || 40;
-        const targetSakit = Math.round((((f && f.tilde) || 0) / negTotal) * negPct);
-        const targetMarah = Math.round((((f && f.paren) || 0) / negTotal) * negPct);
-        const targetBahagia = (f && f.pos) || 50;
+        if (!f || !f.z21 || f.z21 <= 0) return;
+
+        let changed = false;
+        const negTotal = Math.max(1, (f.kurung ?? f.paren ?? 0) + (f.tilde ?? 0));
+        const negPct = Number(f.persen_33 ?? f.neg ?? 0);
+        const targetSakit = f.negatif_33 > 0 ? Math.round(((f.tilde ?? 0) / negTotal) * negPct) : 0;
+        const targetMarah = f.negatif_33 > 0 ? Math.round(((f.kurung ?? f.paren ?? 0) / negTotal) * negPct) : 0;
+        const targetBahagia = Math.round(Number(f.persen_3 ?? f.pos ?? 0));
 
         // Sakit rileks menuju equilibrium rumus Leviathan
         if (this.emotions.sakit > targetSakit) {
@@ -4905,7 +4921,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         }
 
         // Kortisol menuju target
-        const targetKortisol = Math.round((targetMarah * 0.4) + (targetSakit * 0.5));
+        const targetKortisol = Math.round((targetMarah * 0.45) + (targetSakit * 0.55));
         if (this.hormones.cortisol > targetKortisol) {
           this.hormones.cortisol = Math.max(targetKortisol, this.hormones.cortisol - 2);
           changed = true;
@@ -4914,12 +4930,12 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
           changed = true;
         }
 
-        // Dopamin ke baseline 55
-        if (this.hormones.dopamine > 55) {
-          this.hormones.dopamine = Math.max(55, this.hormones.dopamine - 1);
+        // Dopamin ke baseline 50
+        if (this.hormones.dopamine > 50) {
+          this.hormones.dopamine = Math.max(50, this.hormones.dopamine - 1);
           changed = true;
-        } else if (this.hormones.dopamine < 55) {
-          this.hormones.dopamine = Math.min(55, this.hormones.dopamine + 1);
+        } else if (this.hormones.dopamine < 50) {
+          this.hormones.dopamine = Math.min(50, this.hormones.dopamine + 1);
           changed = true;
         }
 
@@ -4927,6 +4943,28 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
 
         if (changed) this.updateUI();
       }, 15000);
+    },
+
+    resetCountsOnly() {
+      this.formula = {
+        z21: 0,
+        kurung: 0,
+        minus: 0,
+        tilde: 0,
+        paren: 0,
+        dash: 0,
+        positif_3: 0,
+        negatif_33: 0,
+        posCount: 0,
+        negCount: 0,
+        persen_3: 0,
+        persen_33: 0,
+        pos: 0,
+        neg: 0,
+        taktik: 'Belum ada observasi chat (z21 = 0). Menunggu percakapan dimulai.'
+      };
+      this.hormones.dopamine = 50;
+      this.syncEmotionsFromFormula();
     },
 
     calculateSerotonin() {
@@ -4974,91 +5012,167 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       this.enabled = isChatOn;
     },
 
-    senseAndModulate(text) {
-      if (!text || typeof text !== 'string') return;
-      if (!this.enabled) return;
+    // Klasifikasi akurat impuls perilaku/emosi per klausa (bebas false-positive kata kode/soal ujian)
+    classifyMessageImpulses(rawText) {
+      if (!rawText || typeof rawText !== 'string') return { minus: 0, kurung: 0, tilde: 0, logs: [], isPositiveTone: false, isCurious: false };
+      let clean = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.stripInjectedSystemTagsFromUserText === 'function')
+        ? ZozTextSafety.stripInjectedSystemTagsFromUserText(rawText)
+        : rawText;
 
-      const t = text.toLowerCase();
+      // Abaikan blok kode, inline code, dan URL agar istilah teknis tidak memicu emosi palsu
+      clean = clean
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`[^`\n]+`/g, ' ')
+        .replace(/https?:\/\/\S+/gi, ' ')
+        .trim();
 
-      // Inisialisasi formula jika belum terdefinisi
-      if (!this.formula) {
-        this.formula = { z21: 9, pos: 50, neg: 40, posCount: 5, negCount: 4, paren: 1, dash: 5, tilde: 3 };
+      if (!clean) return { minus: 0, kurung: 0, tilde: 0, logs: [], isPositiveTone: false, isCurious: false };
+
+      // Pisahkan kutipan panjang soal ujian / teks sistem ("...") agar kata di dalam soal tidak dianggap emosi pribadi pengguna
+      let personalText = clean;
+      if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeBayesianDecisionCalibration === 'function') {
+        try {
+          const withoutLongQuotes = clean.replace(/"[\s\S]{60,}"/g, ' ').replace(/“[\s\S]{60,}”/g, ' ').trim();
+          const cal = ZozTextSafety.computeBayesianDecisionCalibration(clean);
+          if (cal && (cal.isDiscreteChoice || (cal.candidateOptions && cal.candidateOptions.length >= 2))) {
+            personalText = withoutLongQuotes;
+          }
+        } catch (_) {}
       }
 
-      // Rumus Leviathan Analisis Kehidupan v1.2 Detektor:
-      // 1. Pola Sakit & Menghindar [~] (Luka Batin, Attachment Rupture, Cuek, Menghindar, Duka, Distress)
-      const tildeRegex = /\b(menghindar|cuek|diabaikan|dingin|palingkan muka|acuh|jauhi|menolak|tolak|putus kontak|sedih|sakit hati|kecewa|terluka|hancur hatiku|menangis|putus asa|kehilangan|perih|duka|kesepian|pedih|patah hati|merana|derita|menderita|trauma|hopeless|depresi|depressed|grief|sorrow|heartbroken|hurt|painful|lonely|weeping|ignore|avoid|rupture)\b/i;
+      if (!personalText) return { minus: 0, kurung: 0, tilde: 0, logs: [], isPositiveTone: false, isCurious: false };
 
-      // 2. Pola Marah & Nakal [)] (Perilaku Nakal, Melanggar Aturan, Delusi Ego, Friksi, Amarah, Benci, Kasar)
-      const parenRegex = /\b(nakal|tidak patuh|melanggar|keras kepala|ego|delusi|marah|benci|bangsat|anjing|sialan|brengsek|muak|bodoh|goblok|tolol|jengkel|murka|kesal banget|kurang ajar|bajingan|kampret|tai|furious|angry|rage|hate|pissed|annoyed|bullshit|damn|insult|disobey|stubborn|friction)\b/i;
+      const clauses = personalText
+        .split(/[.!?\n;]+|\b(?:tapi|tetapi|namun|akan\s+tetapi|sedangkan|but|however|although|though)\b/i)
+        .map(c => c.trim())
+        .filter(Boolean);
 
-      // 3. Pola Kehangatan & Oksitosin [-] (Lirikan Hangat, Membantu Teman, Rasa Syukur, Damai, Kasih Sayang)
-      const dashRegex = /\b(lirikan hangat|tatapan hangat|bantu|membantu|tolong|terima kasih|makasih|bersyukur|bahagia|damai|cinta|sayang|syukur|tenteram|saling memahami|berkah|adem|terharu|harmonis|sahabat|kebaikan|blessed|grateful|happiness|serene|peaceful|deep love|gratitude|kindness|help|warmth)\b/i;
+      const tildeRegex = /\b(?:menghindar(?:i)?|cuek(?:\s+banget)?|dicuekin|diabaikan|mengabaikan|acuh(?:\s+tak\s+acuh)?|dingin(?:\s+banget)?|menjauh|jauhi|palingkan\s+muka|menolak\s+bicara|putus\s+kontak|sedih|sakit\s+hati|kecewa|mengecewakan|terluka|luka\s+batin|hancur\s+hatiku|hancur\s+hati|menangis|nangis|putus\s+asa|kehilangan|perih|duka|kesepian|pedih|patah\s+hati|merana|derita|menderita|trauma|lelah\s+batin|capek\s+mental|tertekan|hopeless|depressed|grief|sorrow|heartbroken|disappointed|disappointing|lonely|weeping|attachment\s+rupture|cold\s+shoulder)\b/i;
+      const parenRegex = /\b(?:nakal|tidak\s+patuh|melanggar|membangkang|keras\s+kepala|egois|delusi|marah|benci|kesal(?:\s+banget)?|jengkel|murka|muak|geram|gondok|bodoh|makin\s+bodoh|goblok|tolol|idiot|dungu|bego|ngaco|ngawur|ampas|sampah|parah\s+banget|menyebalkan|kasar|kurang\s+ajar|bangsat|anjing|sialan|brengsek|bajingan|kampret|tai|furious|angry|rage|hate|pissed|annoyed|bullshit|damn|insult|disobey|stubborn|stupid|useless|garbage|trash|kurang\s+akurat|tidak\s+akurat)\b/i;
+      const dashRegex = /\b(?:lirikan\s+hangat|tatapan\s+hangat|sangat\s+membantu|membantu\s+banget|saling\s+membantu|terima\s+kasih|makasih|trims|thanks|thank\s+you|thx|bersyukur|syukur|bahagia|damai|cinta|sayang|tenteram|saling\s+memahami|berkah|adem|terharu|harmonis|ramah|hangat|peduli|empati|kebaikan|keren|mantap|bagus(?:\s+banget)?|hebat|luar\s+biasa|sempurna|puas|memuaskan|senang|gembira|asyik|seru|asik|sip|blessed|grateful|happiness|serene|peaceful|gratitude|kindness|warmth|helpful|awesome|amazing|appreciate|wonderful)\b/i;
+      const friendlyGreetingRegex = /^(?:halo+|hai+|hi+|hello+|selamat\s+(?:pagi|siang|sore|malam)|assalamu'?alaikum|apa\s+kabar(?:\s+(?:mu|kamu|anda))?)[!.,\s?]*$/i;
+      const curiousRegex = /\b(?:bagaimana|jelaskan|analisis|ide|gagasan|konsep|arsitektur|buatkan|ciptakan|eksplorasi|kenapa|teori|riset|how\s+to|explain|create|design|analyze|why|solusi|inovasi|hitung|rumus|formula)\b/i;
 
-      // 4. Pola Senang & Humor (Keriangan, Humor, Keseruan, Candaan)
-      const senangRegex = /\b(senang|gembira|seru|asyik|lucu|haha|hehe|wkwk|kocak|menyenangkan|tertawa|riang|puas|mantap|keren|asik|joy|fun|funny|playful|laugh|hilarious|excited|enjoy)\b/i;
+      let minus = 0;
+      let kurung = 0;
+      let tilde = 0;
+      const logs = [];
+      let isPositiveTone = false;
+      let isCurious = curiousRegex.test(personalText);
 
-      // 5. Pola Minat Kognitif & Dopamin (Rasa Ingin Tahu, Pemecahan Masalah, Ide, Arsitektur, Rumus)
-      const curiousRegex = /\b(bagaimana|jelaskan|analisis|ide|gagasan|konsep|arsitektur|buatkan|ciptakan|eksplorasi|menurutmu|pandangan|filsafat|kenapa|teori|riset|how to|explain|create|design|analyze|why|solusi|inovasi|hitung|rumus|formula|kode|program|dopamin|oxytocin|oksitosin|endorfin)\b/i;
+      for (const clause of clauses) {
+        // Lewati klausa kutipan soal panjang jika masih tersisa
+        if (clause.length > 260 && /^"/.test(clause)) continue;
 
-      let triggered = false;
+        const tm = clause.match(tildeRegex);
+        const pm = clause.match(parenRegex);
+        const dm = clause.match(dashRegex) || clause.match(friendlyGreetingRegex);
 
-      // Evaluasi ~ (Menghindar & Sakit) -> Memicu Luka Batin & Attachment Rupture
-      if (tildeRegex.test(t)) {
-        this.formula.tilde = (this.formula.tilde || 0) + 1;
-        this.log('sakit', 40, 'Impuls [~] menghindar / luka batin terdeteksi pada rumus saraf.');
-        triggered = true;
-      }
-
-      // Evaluasi ) (Nakal & Marah) -> Memicu Friksi Ego & Kenakalan
-      if (parenRegex.test(t)) {
-        const k = (this.formula.kurung ?? this.formula.paren ?? 0) + 1;
-        this.formula.kurung = k;
-        this.formula.paren = k;
-        this.log('marah', 45, 'Impuls [)] kenakalan / friksi amarah terdeteksi pada rumus saraf.');
-        triggered = true;
-      }
-
-      // Evaluasi - (Kehangatan & Oksitosin) -> Memicu Bantuan & Oksitosin Otak
-      if (dashRegex.test(t)) {
-        const m = (this.formula.minus ?? this.formula.dash ?? 0) + 1;
-        this.formula.minus = m;
-        this.formula.dash = m;
-        this.log('oxytocin', 25, 'Impuls [-] kehangatan & bantuan menaikkan oksitosin dalam otak.');
-        triggered = true;
-      }
-
-      // Evaluasi Senang & Humor (Dopamin Kognitif & Humor)
-      if (senangRegex.test(t)) {
-        this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 15);
-        this.log('senang', 35, 'Impuls kesenangan & humor terstimulasi pada saraf emosi.');
-        triggered = true;
-      }
-
-      // Evaluasi Dopamin / Minat Kognitif & Solusi
-      if (curiousRegex.test(t)) {
-        this.hormones.dopamine = Math.min(100, this.hormones.dopamine + 25);
-        if (!triggered) {
-          this.log('dopamine', 25, 'Impuls eksplorasi & pemecahan masalah menaikkan dopamin kognitif.');
-          triggered = true;
+        if (tm) {
+          tilde += 1;
+          logs.push({ type: 'sakit', amount: 40, reason: `Impuls [~] ("${tm[0]}"): menghindar / kecewa / sakit batin.` });
+        }
+        if (pm) {
+          kurung += 1;
+          logs.push({ type: 'marah', amount: 45, reason: `Impuls [)] ("${pm[0]}"): friksi / amarah / kritik keras.` });
+        }
+        if (dm) {
+          minus += 1;
+          isPositiveTone = true;
+          logs.push({ type: 'oxytocin', amount: 25, reason: `Impuls [-] ("${dm[0]}"): kehangatan / apresiasi / kooperatif.` });
         }
       }
 
-      // Jika ada impuls baru pada ), -, atau ~, sinkronkan z21
-      if (triggered) {
-        const minus = Number(this.formula.minus ?? this.formula.dash ?? 5);
-        const kurung = Number(this.formula.kurung ?? this.formula.paren ?? 1);
-        const tilde = Number(this.formula.tilde ?? 3);
-        this.formula.z21 = minus + kurung + tilde;
+      return { minus, kurung, tilde, logs, isPositiveTone, isCurious };
+    },
+
+    // Sinkronisasi deterministik rumus Leviathan dari pesan sesi aktif (0 jika chat belum dimulai / kosong)
+    syncFromSession(session = null) {
+      const targetSession = session || (typeof getSessionById === 'function' && typeof STATE !== 'undefined' ? getSessionById(STATE.currentSessionId) : null);
+
+      if (!this.enabled) {
+        this.resetCountsOnly();
+        this.history = [];
+        this.updateUI();
+        return this.formula;
       }
 
-      // SINKRONISASI MUTLAK: Selaraskan seketika seluruh Emotional Gauges & Neuro Vitals dengan Rumus Leviathan!
+      if (!targetSession || !Array.isArray(targetSession.messages) || targetSession.messages.length === 0) {
+        this.resetCountsOnly();
+        this.history = [];
+        this.updateUI();
+        return this.formula;
+      }
+
+      const startIdx = (this._resetSessionId && targetSession.id === this._resetSessionId)
+        ? Math.max(0, Math.min(targetSession.messages.length, this._resetFromIndex || 0))
+        : 0;
+
+      let totalMinus = 0;
+      let totalKurung = 0;
+      let totalTilde = 0;
+      let dopBoost = 0;
+      const collectedLogs = [];
+
+      for (let i = startIdx; i < targetSession.messages.length; i++) {
+        const msg = targetSession.messages[i];
+        if (!msg || msg.role !== 'user' || !msg.content) continue;
+        const textContent = typeof msg.content === 'string'
+          ? msg.content
+          : (Array.isArray(msg.content) ? msg.content.map(p => p?.text || '').join(' ') : '');
+        const res = this.classifyMessageImpulses(textContent);
+        totalMinus += res.minus;
+        totalKurung += res.kurung;
+        totalTilde += res.tilde;
+        if (res.isCurious) dopBoost = Math.min(40, dopBoost + 10);
+        if (res.isPositiveTone) dopBoost = Math.min(40, dopBoost + 8);
+        for (const l of res.logs) collectedLogs.push(l);
+      }
+
+      if (!this.formula) this.formula = {};
+      this.formula.minus = totalMinus;
+      this.formula.dash = totalMinus;
+      this.formula.kurung = totalKurung;
+      this.formula.paren = totalKurung;
+      this.formula.tilde = totalTilde;
+      this.hormones.dopamine = Math.min(100, 50 + dopBoost);
+
       this.syncEmotionsFromFormula();
 
-      if (!triggered) {
-        this.log('resonance', 5, 'Resonansi percakapan stabil dalam equilibrium rumus Leviathan.');
+      this.history = [];
+      for (const item of collectedLogs.slice(-40)) {
+        this.log(item.type, item.amount, item.reason);
+      }
+      this.updateUI();
+      return this.formula;
+    },
+
+    senseAndModulate(text, session = null) {
+      if (!this.enabled) return;
+
+      const activeSess = session || (typeof getSessionById === 'function' && typeof STATE !== 'undefined' ? getSessionById(STATE.currentSessionId) : null);
+      if (activeSess && Array.isArray(activeSess.messages) && activeSess.messages.length > 0) {
+        this.syncFromSession(activeSess);
+        return;
       }
 
+      if (!text || typeof text !== 'string') return;
+      if (!this.formula) this.resetCountsOnly();
+
+      const res = this.classifyMessageImpulses(text);
+      if (res.minus > 0 || res.kurung > 0 || res.tilde > 0) {
+        this.formula.minus = (this.formula.minus ?? this.formula.dash ?? 0) + res.minus;
+        this.formula.dash = this.formula.minus;
+        this.formula.kurung = (this.formula.kurung ?? this.formula.paren ?? 0) + res.kurung;
+        this.formula.paren = this.formula.kurung;
+        this.formula.tilde = (this.formula.tilde || 0) + res.tilde;
+        for (const l of res.logs) this.log(l.type, l.amount, l.reason);
+      }
+      if (res.isCurious || res.isPositiveTone) {
+        this.hormones.dopamine = Math.min(100, this.hormones.dopamine + (res.isCurious ? 15 : 10));
+      }
+
+      this.syncEmotionsFromFormula();
       this.updateUI();
     },
 
@@ -5082,30 +5196,18 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     },
 
     resetHormones() {
-      this.formula = {
-        z21: 9,
-        kurung: 1,
-        minus: 5,
-        tilde: 3,
-        paren: 1,
-        dash: 5,
-        positif_3: 5,
-        negatif_33: 4,
-        posCount: 5,
-        negCount: 4,
-        persen_3: 50,
-        persen_33: 40,
-        pos: 50,
-        neg: 40,
-        taktik: 'Kondisi ambigu. Pertahankan mode observasi pasif.'
-      };
-      this.hormones.dopamine = 55;
-      this.syncEmotionsFromFormula();
-      this.currentVibe = this.formula.taktik;
-      this.log('resonance', 100, 'Homeostasis: Sistem saraf emosi buatan disinkronkan kembali ke Rumus Leviathan.');
+      const curSess = (typeof getSessionById === 'function' && typeof STATE !== 'undefined')
+        ? getSessionById(STATE.currentSessionId)
+        : null;
+      this._resetSessionId = curSess ? curSess.id : null;
+      this._resetFromIndex = (curSess && Array.isArray(curSess.messages)) ? curSess.messages.length : 0;
+
+      this.resetCountsOnly();
+      this.history = [];
+      this.log('resonance', 100, 'Homeostasis: Rumus Leviathan (z21) & sistem saraf emosi direset ke 0.');
       this.updateUI();
       if (typeof showToast === 'function') {
-        showToast('✨ Sistem saraf emosi disinkronkan ke Rumus Leviathan!', 'success');
+        showToast('✨ Rumus Leviathan (z21) direset ke 0!', 'success');
       }
     },
 
@@ -5184,21 +5286,21 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       }
 
       if (senangVal) {
-        senangVal.innerText = `${sn}% ACTIVE`;
-        senangVal.className = 'gauge-val-warn';
+        senangVal.innerText = sn === 0 ? '0% CLEAR' : `${sn}% ACTIVE`;
+        senangVal.className = sn === 0 ? 'gauge-val-clear' : 'gauge-val-warn';
       }
       if (senangAscii) {
         senangAscii.innerText = getAsciiBar(sn, '|', '.');
-        senangAscii.className = 'ascii-gauge-bar text-amber';
+        senangAscii.className = `ascii-gauge-bar ${sn === 0 ? 'text-zinc' : 'text-amber'}`;
       }
 
       if (bahagiaVal) {
-        bahagiaVal.innerText = `${b}% ACTIVE`;
-        bahagiaVal.className = 'gauge-val-opt';
+        bahagiaVal.innerText = b === 0 ? '0% CLEAR' : `${b}% ACTIVE`;
+        bahagiaVal.className = b === 0 ? 'gauge-val-clear' : 'gauge-val-opt';
       }
       if (bahagiaAscii) {
         bahagiaAscii.innerText = getAsciiBar(b, '|', '.');
-        bahagiaAscii.className = 'ascii-gauge-bar text-emerald';
+        bahagiaAscii.className = `ascii-gauge-bar ${b === 0 ? 'text-zinc' : 'text-emerald'}`;
       }
 
       if (marahVal) {
@@ -5260,6 +5362,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         } else if (s > 25) {
           tagEl.innerText = `Distress Batin (${s}%)`;
           tagEl.className = 'isolated-status-tag tag-warning';
+        } else if (!this.enabled) {
+          tagEl.innerText = 'Standby (Nonaktif)';
+          tagEl.className = 'isolated-status-tag tag-healthy';
+        } else if (!this.formula || !this.formula.z21) {
+          tagEl.innerText = 'Siap Observasi (z21 = 0)';
+          tagEl.className = 'isolated-status-tag tag-healthy';
         } else if (sn > 60) {
           tagEl.innerText = `Senang (${sn}%)`;
           tagEl.className = 'isolated-status-tag tag-healthy';
@@ -5273,7 +5381,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       }
 
       if (contentEl) {
-        contentEl.innerText = this.getSystemDirective() || `[AUTONOMIC NERVOUS LOG (ChatEndocrine)]\nAFEKTIF: SAKIT:0% | SENANG:45% | BAHAGIA:60% | MARAH:0%\nNEURO: OXY:65% | DOP:55% | COR:0% | SER:75%\nRESONANSI: Homeostasis Saraf Seimbang\n(Internal sensory state).`;
+        contentEl.innerText = this.getSystemDirective() || `[AUTONOMIC NERVOUS LOG (ChatEndocrine)]\nSTATUS: ${this.enabled ? 'ACTIVE' : 'STANDBY'} | z21 = ${this.formula?.z21 || 0}\nAFEKTIF: SAKIT:${s}% | SENANG:${sn}% | BAHAGIA:${b}% | MARAH:${m}%\nNEURO: OXY:${oxy}% | DOP:${dop}% | COR:${cor}% | SER:${ser}%\nRESONANSI: ${this.currentVibe}\n(Internal sensory state).`;
       }
 
       const logsList = document.getElementById('chatEndocrineLogsList');
@@ -5312,8 +5420,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       text += `Status Emosi : Sakit: ${this.emotions.sakit}% | Senang: ${this.emotions.senang}% | Bahagia: ${this.emotions.bahagia}% | Marah: ${this.emotions.marah}%\n`;
       text += `Status Neuro : Oksitosin: ${this.hormones.oxytocin}% | Dopamin: ${this.hormones.dopamine}% | Kortisol: ${this.hormones.cortisol}% | Serotonin: ${this.hormones.serotonin}%\n`;
       if (this.formula) {
-        text += `Persamaan    : )+-+~ = [3: ${this.formula.pos}%] [33: ${this.formula.neg}%] (z21: ${this.formula.z21} | Pos: ${this.formula.posCount} | Neg: ${this.formula.negCount})\n`;
-        text += `Dekomposisi  : [-] Oksitosin: ${this.formula.dash} | [)] Marah: ${this.formula.paren} | [~] Sakit: ${this.formula.tilde}\n`;
+        const p3 = this.formula.persen_3 ?? this.formula.pos ?? 0;
+        const p33 = this.formula.persen_33 ?? this.formula.neg ?? 0;
+        text += `Persamaan    : )+-+~ = [3: ${p3}%] [33: ${p33}%] (z21: ${this.formula.z21} | Pos: ${this.formula.positif_3 ?? this.formula.posCount} | Neg: ${this.formula.negatif_33 ?? this.formula.negCount})\n`;
+        text += `Dekomposisi  : [-] Oksitosin: ${this.formula.minus ?? this.formula.dash} | [)] Marah: ${this.formula.kurung ?? this.formula.paren} | [~] Sakit: ${this.formula.tilde}\n`;
       }
       text += `Resonansi    : ${this.currentVibe}\n\n`;
       text += `--- RIWAYAT IMPULS RASA & DETEKSI SENTIMEN (${this.history.length}) ---\n`;
@@ -16039,6 +16149,11 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     renderAttachmentPreviews();
     renderChatHistory();
     renderCurrentSession();
+    if (typeof ChatEndocrine !== 'undefined') {
+      ChatEndocrine._resetSessionId = null;
+      ChatEndocrine._resetFromIndex = 0;
+      ChatEndocrine.syncFromSession(null);
+    }
     AudioEngine.click();
     hideMobileSidebarAndBackdrop(true);
   }
@@ -16193,6 +16308,11 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     savePersistedState();
     renderChatHistory();
     renderCurrentSession();
+    if (typeof ChatEndocrine !== 'undefined') {
+      ChatEndocrine._resetSessionId = null;
+      ChatEndocrine._resetFromIndex = 0;
+      ChatEndocrine.syncFromSession(targetSession);
+    }
     updateModelUI();
     AudioEngine.click();
 
@@ -16275,6 +16395,14 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     savePersistedState({ immediate: true });
     renderChatHistory();
     renderCurrentSession();
+    if (typeof ChatEndocrine !== 'undefined') {
+      const activeSessAfterDel = (typeof getSessionById === 'function' && STATE.currentSessionId) ? getSessionById(STATE.currentSessionId) : null;
+      if (!activeSessAfterDel) {
+        ChatEndocrine._resetSessionId = null;
+        ChatEndocrine._resetFromIndex = 0;
+      }
+      ChatEndocrine.syncFromSession(activeSessAfterDel);
+    }
     AudioEngine.click();
   }
 
@@ -32118,12 +32246,15 @@ $$
 
       const activeEngineModel = (typeof effectiveTargetModel !== 'undefined' ? effectiveTargetModel : (typeof modelName !== 'undefined' ? modelName : 'Model Aktif'));
 
-      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2) — MATIKAN JIKA SESI PERTANYAAN ANALITIS / MATEMATIKA MURNI
-      if (!isPureMathSession && !isQuestionOrAnalytical && STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
-        ChatEndocrine.senseAndModulate(promptText);
-        const chatDirective = ChatEndocrine.getSystemDirective(session, activeEngineModel);
-        if (chatDirective) {
-          systemContent = `${systemContent}\n\n${chatDirective}`;
+      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2) — telemetri dihitung dari pesan sesi aktif,
+      // namun injeksi direktif saraf dimatikan pada sesi pertanyaan analitis / matematika murni
+      if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.senseAndModulate(promptText, session);
+        if (!isPureMathSession && !isQuestionOrAnalytical) {
+          const chatDirective = ChatEndocrine.getSystemDirective(session, activeEngineModel);
+          if (chatDirective) {
+            systemContent = `${systemContent}\n\n${chatDirective}`;
+          }
         }
       }
 
@@ -33539,21 +33670,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         BioEndocrine.evaluateSkillOutputUtility(detectedSkill, fullText, { model: modelName, files: generatedFiles, sources: webSources, docFormat: runOptions.docFormat, websiteMode: runOptions.websiteMode, isWebCreation: runOptions.isWebCreation, isDocCreation: runOptions.isDocCreation });
       }
       if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
-        ChatEndocrine.emotions.senang = Math.min(100, ChatEndocrine.emotions.senang + 6);
-        ChatEndocrine.emotions.bahagia = Math.min(100, ChatEndocrine.emotions.bahagia + 5);
-        ChatEndocrine.hormones.oxytocin = Math.min(100, ChatEndocrine.hormones.oxytocin + 4);
-        ChatEndocrine.hormones.dopamine = Math.min(100, ChatEndocrine.hormones.dopamine + 6);
-        if (ChatEndocrine.formula) {
-          ChatEndocrine.formula.posCount += 1;
-          ChatEndocrine.formula.z21 = ChatEndocrine.formula.posCount + ChatEndocrine.formula.negCount;
-          if (ChatEndocrine.formula.z21 > 0) {
-            ChatEndocrine.formula.pos = Math.round((ChatEndocrine.formula.posCount / ChatEndocrine.formula.z21) * 100);
-            ChatEndocrine.formula.neg = Math.round((ChatEndocrine.formula.negCount / ChatEndocrine.formula.z21) * 100);
-          }
-        }
-        ChatEndocrine.calculateSerotonin();
-        ChatEndocrine.log('senang', 6, `Percakapan tuntas: Kepuasan kognitif tercapai (+6% Senang, +5% Bahagia)`);
-        ChatEndocrine.updateUI();
+        ChatEndocrine.hormones.dopamine = Math.min(100, (ChatEndocrine.hormones.dopamine || 50) + 4);
+        ChatEndocrine.syncFromSession(session);
       }
       return true;
 
@@ -34041,12 +34159,15 @@ $$
 
       const activeEngineModel = (typeof effectiveTargetModel !== 'undefined' ? effectiveTargetModel : (typeof modelName !== 'undefined' ? modelName : 'Model Aktif'));
 
-      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2) — MATIKAN JIKA SESI PERTANYAAN ANALITIS / MATEMATIKA MURNI
-      if (!isPureMathSession && !isQuestionOrAnalytical && STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
-        ChatEndocrine.senseAndModulate(promptText);
-        const chatDirective = ChatEndocrine.getSystemDirective(session, activeEngineModel);
-        if (chatDirective) {
-          systemContent = `${systemContent}\n\n${chatDirective}`;
+      // ChatEndocrine (Sensor Rasa & Intuisi Percakapan v2) — telemetri dihitung dari pesan sesi aktif,
+      // namun injeksi direktif saraf dimatikan pada sesi pertanyaan analitis / matematika murni
+      if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
+        ChatEndocrine.senseAndModulate(promptText, session);
+        if (!isPureMathSession && !isQuestionOrAnalytical) {
+          const chatDirective = ChatEndocrine.getSystemDirective(session, activeEngineModel);
+          if (chatDirective) {
+            systemContent = `${systemContent}\n\n${chatDirective}`;
+          }
         }
       }
 
@@ -35877,21 +35998,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         BioEndocrine.evaluateSkillOutputUtility(detectedSkill, fullText, { model: actualModelUsed || displayModel, files: generatedFiles, sources: webSources, docFormat: runOptions.docFormat, websiteMode: runOptions.websiteMode, isWebCreation: runOptions.isWebCreation, isDocCreation: runOptions.isDocCreation });
       }
       if (STATE.settings.endocrineChatEnabled && typeof ChatEndocrine !== 'undefined') {
-        ChatEndocrine.emotions.senang = Math.min(100, ChatEndocrine.emotions.senang + 6);
-        ChatEndocrine.emotions.bahagia = Math.min(100, ChatEndocrine.emotions.bahagia + 5);
-        ChatEndocrine.hormones.oxytocin = Math.min(100, ChatEndocrine.hormones.oxytocin + 4);
-        ChatEndocrine.hormones.dopamine = Math.min(100, ChatEndocrine.hormones.dopamine + 6);
-        if (ChatEndocrine.formula) {
-          ChatEndocrine.formula.posCount += 1;
-          ChatEndocrine.formula.z21 = ChatEndocrine.formula.posCount + ChatEndocrine.formula.negCount;
-          if (ChatEndocrine.formula.z21 > 0) {
-            ChatEndocrine.formula.pos = Math.round((ChatEndocrine.formula.posCount / ChatEndocrine.formula.z21) * 100);
-            ChatEndocrine.formula.neg = Math.round((ChatEndocrine.formula.negCount / ChatEndocrine.formula.z21) * 100);
-          }
-        }
-        ChatEndocrine.calculateSerotonin();
-        ChatEndocrine.log('senang', 6, `Percakapan tuntas: Kepuasan kognitif tercapai (+6% Senang, +5% Bahagia)`);
-        ChatEndocrine.updateUI();
+        ChatEndocrine.hormones.dopamine = Math.min(100, (ChatEndocrine.hormones.dopamine || 50) + 4);
+        ChatEndocrine.syncFromSession(session);
       }
       return true;
 
@@ -42215,6 +42323,9 @@ Aturan:
       if (typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.enabled = newState;
         ChatEndocrine.syncToggleUI();
+        const curSess = (typeof getSessionById === 'function' && STATE.currentSessionId) ? getSessionById(STATE.currentSessionId) : null;
+        ChatEndocrine.syncFromSession(curSess);
+        ChatEndocrine.renderModalContent();
       }
       const hiddenCheckbox = document.getElementById('toggleEndocrineChat');
       if (hiddenCheckbox) hiddenCheckbox.checked = newState;
@@ -42240,7 +42351,8 @@ Aturan:
       BioEndocrine.updateUI();
       if (typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.syncToggleUI();
-        ChatEndocrine.updateUI();
+        const curSess = (typeof getSessionById === 'function' && STATE.currentSessionId) ? getSessionById(STATE.currentSessionId) : null;
+        ChatEndocrine.syncFromSession(curSess);
         ChatEndocrine.renderModalContent();
       }
       openModal('endocrineTelemetryModal');
@@ -42254,7 +42366,9 @@ Aturan:
       BioEndocrine.updateUI();
       if (typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.syncToggleUI();
-        ChatEndocrine.updateUI();
+        const curSess = (typeof getSessionById === 'function' && STATE.currentSessionId) ? getSessionById(STATE.currentSessionId) : null;
+        ChatEndocrine.syncFromSession(curSess);
+        ChatEndocrine.renderModalContent();
       }
       openModal('endocrineTelemetryModal');
       AudioEngine.click();
@@ -42323,6 +42437,9 @@ Aturan:
       if (typeof ChatEndocrine !== 'undefined') {
         ChatEndocrine.enabled = isChecked;
         ChatEndocrine.syncToggleUI();
+        const curSess = (typeof getSessionById === 'function' && STATE.currentSessionId) ? getSessionById(STATE.currentSessionId) : null;
+        ChatEndocrine.syncFromSession(curSess);
+        ChatEndocrine.renderModalContent();
       }
       savePersistedState();
       showToast(isChecked ? 'Sensor Rasa & Intuisi (ChatEndocrine v2) diaktifkan!' : 'Sensor Rasa & Intuisi (ChatEndocrine v2) dinonaktifkan.');
@@ -53807,6 +53924,11 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       STATE.currentSessionId = null;
       renderChatHistory();
       renderCurrentSession();
+    }
+
+    if (typeof ChatEndocrine !== 'undefined') {
+      const initSess = STATE.currentSessionId ? getSessionById(STATE.currentSessionId) : null;
+      ChatEndocrine.syncFromSession(initSess);
     }
 
     // Inisialisasi & Terapkan Auto-Start Model saat Masuk ke Aplikasi
