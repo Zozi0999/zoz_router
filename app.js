@@ -81,7 +81,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://angeles-horizon-towns-maintenance.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://browsers-mask-variations-convicted.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -49708,7 +49708,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://angeles-horizon-towns-maintenance.trycloudflare.com',
+    activeTunnelUrl: 'https://browsers-mask-variations-convicted.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
