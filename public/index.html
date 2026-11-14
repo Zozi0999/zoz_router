@@ -35,7 +35,7 @@
       }
     });
     try {
-      var currentVer = 'v20261113_tmwendwje';
+      var currentVer = 'v20261114_tmwg42viq';
       var savedVer = localStorage.getItem('__zoz_ver__');
       if (savedVer !== currentVer) {
         localStorage.setItem('__zoz_ver__', currentVer);
@@ -49,7 +49,7 @@
         }
       }
     } catch (_) {}
-    window.__ZOZ_VERSION__ = 'v20261113_tmwendwje';
+    window.__ZOZ_VERSION__ = 'v20261114_tmwg42viq';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png?v=20261112_v765">
@@ -109,8 +109,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261112_v765">
-  <link rel="stylesheet" href="style.css?v=20261112_v765">
+  <link rel="preload" as="style" href="style.css?v=20261113_v774">
+  <link rel="stylesheet" href="style.css?v=20261113_v774">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -530,9 +530,12 @@
 
       <!-- Mode 2: WhatsApp Contact Picker (Posisinya sama persis dengan AI model picker) -->
       <div class="relative group model-picker-container" id="singleWaContactPickerWrap" style="display: none; align-items: center; gap: 6px;">
-        <button class="flex items-center space-x-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-3 py-1 rounded-lg transition-all duration-150 text-[11.5px] font-mono cursor-pointer model-picker-chip" id="waContactPickerChip" title="Pilih Kontak WhatsApp" type="button">
-          <i class="fa-brands fa-whatsapp text-emerald-400 chip-icon"></i>
-          <span class="text-emerald-200 font-medium current-model-name" id="currentWaContactLabel">Pilih Kontak WA</span>
+        <button class="flex items-center bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-2.5 py-1 rounded-lg transition-all duration-150 text-[11.5px] font-mono cursor-pointer model-picker-chip wa-contact-picker-chip" id="waContactPickerChip" title="Klik avatar untuk profil, klik untuk pilih kontak WhatsApp" type="button">
+          <span class="wa-chip-avatar-slot" id="waChipAvatarSlot" title="Klik foto profil kontak">
+            <i class="fa-brands fa-whatsapp text-emerald-400 chip-icon"></i>
+          </span>
+          <span class="text-emerald-200 font-medium current-model-name wa-chip-name-label" id="currentWaContactLabel">Pilih Kontak WA</span>
+          <span class="wa-chip-file-badge" id="waChipFileBadge" style="display: none;" title="Kontak memiliki berkas"><i class="fa-solid fa-paperclip"></i></span>
           <svg class="lucide lucide-chevron-down w-3 h-3 text-emerald-400 chip-arrow" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="m6 9 6 6 6-6"></path></svg>
         </button>
 
@@ -544,7 +547,7 @@
             <button type="button" class="btn btn-xs btn-outline" id="btnOpenAddContactFromDropdown" style="flex: 1; border-color: rgba(16,185,129,0.4); color: #10b981; background: rgba(16,185,129,0.08); display: flex; align-items: center; justify-content: center; gap: 5px; font-weight: 600;">
               <i class="fa-solid fa-user-plus"></i> + Kontak Baru
             </button>
-            <button type="button" class="btn btn-xs btn-outline" id="btnSyncWaContacts" style="border-color: rgba(255,255,255,0.2); color: var(--text-dim); padding: 0 10px;" title="Segarkan Kontak">
+            <button type="button" class="btn btn-xs btn-outline" id="btnSyncWaContacts" style="border-color: rgba(255,255,255,0.2); color: var(--text-dim); padding: 0 10px;" title="Sinkron Profil & Foto Kontak WhatsApp">
               <i class="fa-solid fa-rotate"></i>
             </button>
           </div>
@@ -2861,6 +2864,27 @@
         <button class="term-chip" type="button" data-cmd="help">help</button>
         <button class="term-chip" type="button" data-cmd="cls">cls</button>
       </div>
+
+      <!-- Terminal Right-Click Context Menu (Salin, Tempel, Pilih Semua, Bersihkan) -->
+      <div class="term-context-menu" id="termContextMenu" role="menu" aria-label="Menu Terminal" style="display: none;">
+        <button type="button" class="term-ctx-item" id="btnTermCtxCopy" data-action="copy" role="menuitem">
+          <span class="term-ctx-left"><i class="fa-regular fa-copy"></i> <span>Salin</span></span>
+          <span class="term-ctx-shortcut">Ctrl+C</span>
+        </button>
+        <button type="button" class="term-ctx-item" id="btnTermCtxPaste" data-action="paste" role="menuitem">
+          <span class="term-ctx-left"><i class="fa-regular fa-paste"></i> <span>Tempel</span></span>
+          <span class="term-ctx-shortcut">Ctrl+V</span>
+        </button>
+        <div class="term-ctx-divider" role="separator"></div>
+        <button type="button" class="term-ctx-item" id="btnTermCtxSelectAll" data-action="select-all" role="menuitem">
+          <span class="term-ctx-left"><i class="fa-solid fa-object-group"></i> <span>Pilih Semua</span></span>
+          <span class="term-ctx-shortcut">All</span>
+        </button>
+        <button type="button" class="term-ctx-item" id="btnTermCtxClear" data-action="clear" role="menuitem">
+          <span class="term-ctx-left"><i class="fa-solid fa-eraser"></i> <span>Bersihkan Layar</span></span>
+          <span class="term-ctx-shortcut">Ctrl+L</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -3062,7 +3086,7 @@
           <!-- WA Connected State Card (Ditampilkan saat terhubung) -->
           <div class="wa-connected-card" id="waConnectedCard" style="display: none;">
             <div class="wa-connected-header">
-              <div class="wa-avatar-badge">
+              <div class="wa-avatar-badge" id="waMyAvatarBadge">
                 <i class="fa-brands fa-whatsapp"></i>
               </div>
               <div class="wa-details">
@@ -3073,6 +3097,9 @@
             <div class="wa-actions-row">
               <button type="button" class="btn btn-sm btn-primary" id="btnOpenWaChatDirect">
                 <i class="fa-solid fa-comments"></i> Buka Chat WhatsApp Sekarang
+              </button>
+              <button type="button" class="btn btn-sm btn-outline" id="btnSyncWaProfilesModal" title="Sinkronkan foto profil & status WA kontak">
+                <i class="fa-solid fa-arrows-rotate"></i> Sinkron Profil
               </button>
               <button type="button" class="btn btn-sm btn-outline-danger" id="btnDisconnectWaDevice">
                 <i class="fa-solid fa-arrow-right-from-bracket"></i> Putuskan Perangkat
@@ -3142,6 +3169,133 @@
           <input type="file" id="inputTermQrFile" accept="image/*" style="display: none;">
           <button type="button" class="term-qr-action-btn" id="btnTermToggleTorch" title="Nyalakan / Matikan Senter Flash" style="display: none;">
             <i class="fa-solid fa-bolt"></i> <span>Flash</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WhatsApp Profile Detail & Theme Customizer Modal -->
+  <div class="modal-backdrop" id="waProfileModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="waProfileModalName">
+    <div class="modal-dialog wa-profile-modal-dialog" id="waProfileModalDialog" data-scene="aurora" data-produce="apple">
+      <!-- Animated Atmospheric Scene Layers covering the entire Contact/User Profile Preview -->
+      <div class="wa-profile-scene-bg" aria-hidden="true">
+        <div class="wa-call-scene-layer wa-call-scene-aurora">
+          <div class="wa-aurora-ribbon wa-aurora-r1"></div>
+          <div class="wa-aurora-ribbon wa-aurora-r2"></div>
+          <div class="wa-aurora-ribbon wa-aurora-r3"></div>
+          <div class="wa-aurora-crystal-facets"></div>
+        </div>
+        <div class="wa-call-scene-layer wa-call-scene-starlight">
+          <div class="wa-starfield wa-starfield-sm"></div>
+          <div class="wa-starfield wa-starfield-md"></div>
+          <div class="wa-starfield-glow"></div>
+        </div>
+        <div class="wa-call-scene-layer wa-call-scene-ocean">
+          <div class="wa-ocean-caustics"></div>
+          <div class="wa-ocean-wave wa-ocean-w1"></div>
+          <div class="wa-ocean-wave wa-ocean-w2"></div>
+          <div class="wa-ocean-bubbles">
+            <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-header wa-profile-modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <i class="fa-brands fa-whatsapp text-emerald-400"></i>
+          <span style="font-weight: 700; font-size: 0.92rem; color: #f8fafc;">Pratinjau Profil &amp; Tema</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <button type="button" class="wa-profile-theme-toggle-pill" id="btnWaProfileModalTheme" title="Kustom Latar Belakang & Buah/Sayur">
+            <i class="fa-solid fa-palette"></i> <span>Kustom Tema</span>
+          </button>
+          <button type="button" class="tb-btn icon-only" id="btnCloseWaProfileModal" title="Tutup">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+      <div class="modal-body wa-profile-modal-body">
+        <div class="wa-profile-hero" id="waProfileHeroThemed" data-scene="aurora" data-produce="apple">
+          <div class="wa-profile-avatar-stage" id="waProfileAvatarStage">
+            <div class="wa-produce-orbit wa-produce-orbit-profile" id="waProfileProduceOrbit" aria-hidden="true"></div>
+            <div class="wa-profile-hero-avatar" id="waProfileModalAvatar">W</div>
+          </div>
+          <div class="wa-profile-hero-title-wrap">
+            <div class="wa-profile-type-pill" id="waProfileModalType">Kontak WhatsApp</div>
+            <h3 class="wa-profile-hero-name" id="waProfileModalName">-</h3>
+            <div class="wa-profile-hero-phone" id="waProfileModalPhone">-</div>
+          </div>
+        </div>
+
+        <!-- Inline Profile & Contact Preview Theme Customizer -->
+        <div class="wa-call-customizer-panel wa-profile-customizer-panel" id="waProfileThemeCustomizer" style="display: none;">
+          <div class="wa-customizer-section">
+            <div class="wa-customizer-label"><i class="fa-solid fa-mountain-sun"></i> Tema Latar Pratinjau Profil &amp; Kontak</div>
+            <div class="wa-theme-pills-grid" id="waSceneSelectorGrid">
+              <button type="button" class="wa-theme-pill" data-scene-choice="aurora">
+                <span class="wa-theme-swatch wa-swatch-aurora"></span>
+                <span>Kristal Aurora Borealis</span>
+              </button>
+              <button type="button" class="wa-theme-pill" data-scene-choice="starlight">
+                <span class="wa-theme-swatch wa-swatch-starlight"></span>
+                <span>Gelap Bintang Kecil</span>
+              </button>
+              <button type="button" class="wa-theme-pill" data-scene-choice="ocean">
+                <span class="wa-theme-swatch wa-swatch-ocean"></span>
+                <span>Air Laut</span>
+              </button>
+              <button type="button" class="wa-theme-pill" data-scene-choice="default">
+                <span class="wa-theme-swatch wa-swatch-default"></span>
+                <span>Standar Gelap</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="wa-customizer-section">
+            <div class="wa-customizer-label"><i class="fa-solid fa-seedling"></i> Hiasan Buah &amp; Sayur Mengitari Profil</div>
+            <div class="wa-produce-pills-grid" id="waProduceSelectorGrid">
+              <button type="button" class="wa-produce-pill" data-produce-choice="apple">🍎 Apel</button>
+              <button type="button" class="wa-produce-pill" data-produce-choice="carrot">🥕 Wortel</button>
+              <button type="button" class="wa-produce-pill" data-produce-choice="banana">🍌 Pisang</button>
+              <button type="button" class="wa-produce-pill" data-produce-choice="broccoli">🥦 Brokoli</button>
+              <button type="button" class="wa-produce-pill" data-produce-choice="garden">🍎🥕🍌🥦 Campuran</button>
+              <button type="button" class="wa-produce-pill" data-produce-choice="none">Polos</button>
+            </div>
+          </div>
+
+          <label class="wa-theme-sync-toggle">
+            <input type="checkbox" id="chkWaThemeApplyChat" checked>
+            <span>Terapkan latar belakang tema ini juga di Area Pratinjau Chat Kontak WA</span>
+          </label>
+        </div>
+
+        <div class="wa-profile-info-card">
+          <div class="wa-profile-info-row">
+            <span class="wa-profile-info-label"><i class="fa-solid fa-quote-left"></i> Info / Bio</span>
+            <p class="wa-profile-info-value" id="waProfileModalAbout">Belum ada info bio / deskripsi.</p>
+          </div>
+          <div class="wa-profile-info-row" id="waProfileModalNotifyRow" style="display: none;">
+            <span class="wa-profile-info-label"><i class="fa-regular fa-user"></i> Nama Push WhatsApp</span>
+            <p class="wa-profile-info-value" id="waProfileModalNotify">-</p>
+          </div>
+          <div class="wa-profile-info-row">
+            <span class="wa-profile-info-label"><i class="fa-solid fa-fingerprint"></i> JID WhatsApp</span>
+            <p class="wa-profile-info-value wa-profile-mono" id="waProfileModalJid">-</p>
+          </div>
+        </div>
+        <div class="wa-profile-actions-bar">
+          <button type="button" class="btn btn-sm btn-primary" id="btnWaProfileModalChat">
+            <i class="fa-solid fa-comments"></i> Buka Chat
+          </button>
+          <button type="button" class="btn btn-sm btn-outline" id="btnWaProfileModalRefresh" title="Ambil ulang foto profil & status terbaru dari WhatsApp">
+            <i class="fa-solid fa-arrows-rotate"></i> Sinkron Ulang
+          </button>
+          <button type="button" class="btn btn-sm btn-outline" id="btnWaProfileModalEditName" title="Ubah nama tampilan kontak ini">
+            <i class="fa-solid fa-user-pen"></i> Ubah Nama
+          </button>
+          <button type="button" class="btn btn-sm btn-outline" id="btnWaProfileModalCopy" title="Salin nomor telepon">
+            <i class="fa-regular fa-copy"></i> Salin Nomor
           </button>
         </div>
       </div>
@@ -3396,6 +3550,6 @@
   <!-- Reasoning suppression & Bayesian calibration engine (must load before app.js) -->
   <script src="text-safety.js?v=20261112_v765" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261112_v765" defer></script>
+  <script src="app.js?v=v20261114_tmwg42viq" defer></script>
 </body>
 </html>

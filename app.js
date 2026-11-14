@@ -82,7 +82,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://queensland-uncle-den-essential.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://mechanisms-nationally-promise-medicine.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -8435,9 +8435,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return token;
     });
 
-    // 5. Kembalikan blok kode
+    // 5. Kembalikan blok kode (aman dari pola $ / $$ di dalam isi kode)
     for (const cb of codeBlocks) {
-      clean = clean.replace(cb.token, cb.content);
+      clean = clean.split(cb.token).join(cb.content);
     }
 
     // 6. Kembalikan escaped dollar
@@ -8689,9 +8689,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     let out = text;
 
     // 0. Lindungi blok kode berpagar (``` ... ```) dan kode inline (` ... `) dari pembersihan rumus
+    // Gunakan token PUA bebas garis bawah (_) agar tidak pernah termutasi oleh aturan subskrip _0 -> ₀
     const codeBlocks = [];
-    out = out.replace(/```[\s\S]*?```|`[^`\n]+`/g, (match) => {
-      const token = `%%ZOZ_PURE_MATH_CODE_${codeBlocks.length}%%`;
+    out = out.replace(/```[\s\S]*?```|``[^`\n]+``|`[^`\n]+`/g, (match) => {
+      const token = `\uE000ZOZPUREMATHCODE${codeBlocks.length}\uE001`;
       codeBlocks.push({ token, content: match });
       return token;
     });
@@ -8979,9 +8980,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // 18. Rapikan baris kosong
     out = out.split('\n').map(l => l.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 
-    // 19. Kembalikan blok kode yang dilindungi
+    // 19. Kembalikan blok kode yang dilindungi (aman dari pola $ / $$ dalam isi kode)
     for (const cb of codeBlocks) {
-      out = out.replace(cb.token, cb.content);
+      out = out.split(cb.token).join(cb.content);
     }
 
     return out;
@@ -17275,7 +17276,8 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     }
 
     if (assistantIdx < 0 && els?.messagesList && typeof els.messagesList.querySelectorAll === 'function') {
-      const domRows = Array.from(els.messagesList.querySelectorAll('.message-row'));
+      const domRows = Array.from(els.messagesList.querySelectorAll('.message-row:not(.studio-detached-row)'))
+        .filter(r => r === row || r.dataset?.index !== '-1');
       const domPos = domRows.indexOf(row);
       if (domPos >= 0) {
         const visibleIndices = [];
@@ -17387,7 +17389,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     }
 
     const removedTail = session.messages.slice(resolved.userIdx);
+    let skipRestoreOnAbort = false;
     const restoreTurnOnAbort = () => {
+      if (skipRestoreOnAbort) return;
       if (STATE.sessions && !STATE.sessions.some(s => s.id === session.id)) return;
       if (session.messages.length === resolved.userIdx) {
         session.messages = [...session.messages.slice(0, resolved.userIdx), ...removedTail];
@@ -17414,6 +17418,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     handleSendPrompt({
       skipAutoFold: true,
       preserveComposer: true,
+      onCommandHandled: () => { skipRestoreOnAbort = true; },
       overrideText: promptToSend,
       overrideImages: restoredImages,
       overrideDocs: restoredDocs
@@ -17920,27 +17925,28 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       let textToCopy = (role === 'assistant' ? safeAssistantText(rawText) : rawText)
         .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
         .trim();
+      const textWithoutCode = textToCopy.replace(/```[\s\S]*?```|``[^`\n]+``|`[^`\n]+`/g, '');
       const hasMathMarkup = role === 'assistant' && (
-        textToCopy.includes('$$') ||
-        textToCopy.includes('\\(') ||
-        textToCopy.includes('\\[') ||
-        textToCopy.includes('\\frac') ||
-        textToCopy.includes('\\text{') ||
-        textToCopy.includes('\\rightarrow') ||
-        textToCopy.includes('\\int') ||
-        textToCopy.includes('\\sum') ||
-        textToCopy.includes('\\prod') ||
-        textToCopy.includes('\\partial') ||
-        textToCopy.includes('\\sqrt') ||
-        textToCopy.includes('\\zeta') ||
-        textToCopy.includes('\\mathbb') ||
-        textToCopy.includes('\\mathcal') ||
-        textToCopy.includes('\\hat') ||
-        textToCopy.includes('\\hbar') ||
-        textToCopy.includes('\\wedge') ||
-        /\\[a-zA-Z]{2,}/.test(textToCopy) ||
-        /\^\{[0-9+\-=()nis]+\}/.test(textToCopy) ||
-        /_\{[0-9+\-=()aehijklmnoprstuvx]+\}/.test(textToCopy)
+        textWithoutCode.includes('$$') ||
+        textWithoutCode.includes('\\(') ||
+        textWithoutCode.includes('\\[') ||
+        textWithoutCode.includes('\\frac') ||
+        textWithoutCode.includes('\\text{') ||
+        textWithoutCode.includes('\\rightarrow') ||
+        textWithoutCode.includes('\\int') ||
+        textWithoutCode.includes('\\sum') ||
+        textWithoutCode.includes('\\prod') ||
+        textWithoutCode.includes('\\partial') ||
+        textWithoutCode.includes('\\sqrt') ||
+        textWithoutCode.includes('\\zeta') ||
+        textWithoutCode.includes('\\mathbb') ||
+        textWithoutCode.includes('\\mathcal') ||
+        textWithoutCode.includes('\\hat') ||
+        textWithoutCode.includes('\\hbar') ||
+        textWithoutCode.includes('\\wedge') ||
+        /\\[a-zA-Z]{2,}/.test(textWithoutCode) ||
+        /\^\{[0-9+\-=()nis]+\}/.test(textWithoutCode) ||
+        /_\{[0-9+\-=()aehijklmnoprstuvx]+\}/.test(textWithoutCode)
       );
       if (hasMathMarkup) {
         textToCopy = purifyPureMathFormula(textToCopy);
@@ -28132,13 +28138,17 @@ ${blocks}
     // HARUS `let`: blok auto-convert saat kirim (lihat di bawah) dan jalur rewrite
     // URL me-assign ulang rawText. Pakai `const` akan melempar TypeError senyap
     // di dalam try tanpa catch sehingga pesan tidak pernah terkirim.
+    const preserveComposer = Boolean(options.preserveComposer);
+    const markCommandHandled = () => {
+      if (typeof options.onCommandHandled === 'function') options.onCommandHandled();
+    };
     let rawText = options.overrideText !== undefined ? options.overrideText : (els.promptInput ? els.promptInput.value.trim() : '');
-    const isExplicitEditCommand = /^\/(?:edit|editfoto|editphoto)\b/i.test(rawText.trim()) || /^(?:edit|editfoto):/i.test(rawText.trim());
+    const isExplicitEditCommandTop = /^\/(?:edit|editfoto|editphoto)\b/i.test(rawText.trim()) || /^(?:edit|editfoto):/i.test(rawText.trim());
     const isPhotoEditCardVisible = Boolean(els.photoEditReferenceCard && els.photoEditReferenceCard.style.display !== 'none');
-    const isPhotoEditActive = Boolean(STATE.photoEditImage && (STATE.isImageGenMode || isExplicitEditCommand || isPhotoEditCardVisible));
+    const isPhotoEditActiveTop = !preserveComposer && Boolean(STATE.photoEditImage && (STATE.isImageGenMode || isExplicitEditCommandTop || isPhotoEditCardVisible));
 
     const images = Array.isArray(options.overrideImages) ? [...options.overrideImages] : [...(STATE.attachedImages || [])];
-    if (images.length === 0 && isPhotoEditActive) {
+    if (images.length === 0 && isPhotoEditActiveTop) {
       images.push(STATE.photoEditImage);
     }
     const image = images.length > 0 ? images[0] : null;
@@ -28161,10 +28171,16 @@ ${blocks}
       }
     }
 
+    const clearComposerPrompt = () => {
+      if (!preserveComposer && els.promptInput) {
+        els.promptInput.value = '';
+        autoResizeTextarea(els.promptInput);
+      }
+    };
+
     // Intersepsi Perintah Scrubbing Kode Bocor Nemotron (/scrub /bersihkan-kode)
     if (/^\/(?:scrub|bersihkan-kode|bersihkan|purge-code)\b/i.test(rawText.trim())) {
-      if (els.promptInput) els.promptInput.value = '';
-      autoResizeTextarea(els.promptInput);
+      clearComposerPrompt();
       showToast('🧹 Memulai Zoz Nemotron Code Scrubber...', 'info');
       const activeSes = getActiveSession();
       if (activeSes) {
@@ -28175,13 +28191,13 @@ ${blocks}
           AudioEngine.click();
         });
       }
+      markCommandHandled();
       return;
     }
 
     // Intersepsi Perintah Refresh Browser di Obrolan Utama
     if (/^(?:\/?(?:refresh|muat\s*ulang|reload|f5)|tolong\s+(?:refresh|muat\s*ulang))(?:\s+(?:browser|pratinjau|preview|halaman|tab|web|iframe))?$/i.test(rawText.trim())) {
-      if (els.promptInput) els.promptInput.value = '';
-      autoResizeTextarea(els.promptInput);
+      clearComposerPrompt();
       const activeSes = getActiveSession();
       const latestFile = getLatestWebsiteFileInSession(activeSes);
       let refreshed = false;
@@ -28205,6 +28221,7 @@ ${blocks}
         appendAssistantMessageToChat('🔄 **Pratinjau Browser Dimuat Ulang**\n\nHalaman website pada pratinjau live telah dimuat ulang secara instan dengan kode terbaru.');
         showToast('Pratinjau browser website dimuat ulang.', 'success');
         AudioEngine.click();
+        markCommandHandled();
         return;
       }
     }
@@ -28212,6 +28229,7 @@ ${blocks}
     // Intersepsi Mode WhatsApp: jika pengguna sedang di mode WhatsApp, kirim ke WhatsApp alih-alih AI
     if (STATE.chatMode === 'whatsapp') {
       await WhatsAppController.sendCurrentPrompt(rawText);
+      markCommandHandled();
       return;
     }
 
@@ -28237,46 +28255,37 @@ ${blocks}
 
     // Intersepsi perintah keluar / beralih mode cepat
     const trimmedLow = rawText.toLowerCase();
-    if (trimmedLow === '/chat' || trimmedLow === '/teks' || trimmedLow === '/text') {
+    if (!preserveComposer && (trimmedLow === '/chat' || trimmedLow === '/teks' || trimmedLow === '/text')) {
       STATE.isImageGenMode = false;
       STATE.isMusicGenMode = false;
       clearPhotoEdit();
       updateImageGenModeUI();
       updateMusicGenModeUI();
-      if (els.promptInput) {
-        els.promptInput.value = '';
-        autoResizeTextarea(els.promptInput);
-      }
+      clearComposerPrompt();
       showToast('Mode percakapan standar aktif.');
       AudioEngine.click();
       return;
     }
-    if (trimmedLow === '/img' || trimmedLow === '/image' || trimmedLow === '/gambar') {
+    if (!preserveComposer && (trimmedLow === '/img' || trimmedLow === '/image' || trimmedLow === '/gambar')) {
       STATE.isImageGenMode = true;
       STATE.isMusicGenMode = false;
       updateImageGenModeUI();
       updateMusicGenModeUI();
-      if (els.promptInput) {
-        els.promptInput.value = '';
-        autoResizeTextarea(els.promptInput);
-      }
+      clearComposerPrompt();
       AudioEngine.click();
       return;
     }
-    if (trimmedLow === '/music' || trimmedLow === '/musik' || trimmedLow === '/audio' || trimmedLow === '/song' || trimmedLow === '/lagu') {
+    if (!preserveComposer && (trimmedLow === '/music' || trimmedLow === '/musik' || trimmedLow === '/audio' || trimmedLow === '/song' || trimmedLow === '/lagu')) {
       STATE.isMusicGenMode = true;
       STATE.isImageGenMode = false;
       clearPhotoEdit();
       updateMusicGenModeUI();
       updateImageGenModeUI();
-      if (els.promptInput) {
-        els.promptInput.value = '';
-        autoResizeTextarea(els.promptInput);
-      }
+      clearComposerPrompt();
       AudioEngine.click();
       return;
     }
-    if (trimmedLow === '/diagram' || trimmedLow === '/website' || trimmedLow === '/web' || trimmedLow === '/dokumen' || trimmedLow === '/kodenya-saja') {
+    if (!preserveComposer && (trimmedLow === '/diagram' || trimmedLow === '/website' || trimmedLow === '/web' || trimmedLow === '/dokumen' || trimmedLow === '/kodenya-saja')) {
       showToast(`Silakan ketik deskripsi setelah ${trimmedLow} (contoh: ${trimmedLow} alur sistem)`, 'info');
       if (els.promptInput) {
         els.promptInput.value = trimmedLow + ' ';
@@ -28289,20 +28298,16 @@ ${blocks}
 
     // Intersepsi Slash Command Jozz Memory & Incognito
     if (trimmedLow === '/memory' || trimmedLow === '/memories' || trimmedLow === '/jozz-memory') {
-      if (els.promptInput) {
-        els.promptInput.value = '';
-        autoResizeTextarea(els.promptInput);
-      }
+      clearComposerPrompt();
       openModal('jozzMemoryModal');
       JozzMemoryUI.refresh();
+      markCommandHandled();
       return;
     }
     if (trimmedLow === '/incognito' || trimmedLow === '/privat' || trimmedLow === '/private') {
-      if (els.promptInput) {
-        els.promptInput.value = '';
-        autoResizeTextarea(els.promptInput);
-      }
+      clearComposerPrompt();
       JozzMemoryUI.toggleIncognito();
+      markCommandHandled();
       return;
     }
 
@@ -28826,9 +28831,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const isToolImageCapable = (STATE.mode === 'openrouter' || targetModel.includes('/')) && Boolean(STATE.settings.openRouterKey) && doesModelSupportTools(targetModel);
     const canModelHandleImage = isDirectImageCapable || isToolImageCapable;
 
-    const shouldRunMusic = Boolean(STATE.isMusicGenMode || isExplicitMusicCommand);
-    const isPhotoEditActive = Boolean(STATE.photoEditImage && (STATE.isImageGenMode || isExplicitEditCommand || (els.photoEditReferenceCard && els.photoEditReferenceCard.style.display !== 'none')));
-    const shouldRunImage = Boolean(STATE.isImageGenMode || isExplicitImageCommand || isPhotoEditActive);
+    const shouldRunMusic = Boolean((!preserveComposer && STATE.isMusicGenMode) || isExplicitMusicCommand);
+    const isPhotoEditActive = !preserveComposer && Boolean(STATE.photoEditImage && (STATE.isImageGenMode || isExplicitEditCommand || (els.photoEditReferenceCard && els.photoEditReferenceCard.style.display !== 'none')));
+    const hasOverrideRefEdit = Boolean(preserveComposer && isExplicitEditCommand && images.length > 0);
+    const shouldRunImage = Boolean((!preserveComposer && STATE.isImageGenMode) || isExplicitImageCommand || isPhotoEditActive || hasOverrideRefEdit);
 
     if (shouldRunMusic) {
       const cleanMusicPrompt = extractMusicPrompt(text);
@@ -28837,10 +28843,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const cleanImgPrompt = extractImagePrompt(text);
       // Foto referensi aktif → kirim sebagai referenceImage (img2img). Server yang
       // memilih jalur Pollinations img2img / OpenRouter input_references otomatis.
-      const effectiveRefPhoto = isPhotoEditActive ? (STATE.photoEditImage || (images.length > 0 ? images[0] : null)) : null;
+      const effectiveRefPhoto = isPhotoEditActive
+        ? (STATE.photoEditImage || (images.length > 0 ? images[0] : null))
+        : (hasOverrideRefEdit ? (images[0] || null) : null);
       await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel, effectiveRefPhoto);
       // Jika mode edit foto telah selesai dieksekusi, bersihkan agar tidak membajak prompt berikutnya
-      if (isPhotoEditActive) {
+      if (isPhotoEditActive && !preserveComposer) {
         clearPhotoEdit();
       }
     } else if (isExplicitImageCommand && !canModelHandleImage && !STATE.settings.openRouterKey && (STATE.mode === 'openrouter' || targetModel.includes('/'))) {
@@ -40982,6 +40990,7 @@ Aturan:
     }
     if (modalId === 'terminalModal' && typeof TerminalManager !== 'undefined') {
       try {
+        TerminalManager.hideTerminalContextMenu?.();
         const tab = TerminalManager.getActiveTab?.();
         [tab?.pane1, tab?.pane2].forEach(p => {
           if (p?.term?.textarea) p.term.textarea.blur();
@@ -42531,20 +42540,6 @@ Aturan:
     els.sidebarTerminalBtn?.addEventListener('click', () => {
       if (isMobile()) closeMobileSidebar(false);
       TerminalManager.toggle();
-    });
-    els.sidebarWhatsAppBtn?.addEventListener('click', () => {
-      if (isMobile()) closeMobileSidebar(false);
-      if (typeof WhatsAppController !== 'undefined') {
-        if (!WhatsAppController.isAllowedAccess()) {
-          WhatsAppController.showLocalhostOnlyModal();
-          return;
-        }
-        if (STATE.chatMode === 'whatsapp') {
-          WhatsAppController.setChatMode('ai');
-        } else {
-          WhatsAppController.setChatMode('whatsapp');
-        }
-      }
     });
 
     // Pengontrol Cybernetic Endocrine Chat v2 di Bawah Tombol Terminal
@@ -46301,6 +46296,7 @@ Aturan:
 
     minimize() {
       try {
+        this.hideTerminalContextMenu?.();
         const tab = this.getActiveTab();
         [tab?.pane1, tab?.pane2].forEach(p => {
           if (p?.term?.textarea) p.term.textarea.blur();
@@ -46449,10 +46445,19 @@ Aturan:
           }
         }
       });
-      container.addEventListener('mousedown', () => {
+      container.addEventListener('mousedown', (e) => {
+        if (e.button === 2) {
+          paneState._contextMenuSelText = this.getPaneSelectionText(paneState);
+        }
+      }, true);
+      container.addEventListener('mousedown', (e) => {
         if (this.activePane !== paneNum) {
           this.setActivePane(paneNum);
         }
+        if (e.button === 2) {
+          return;
+        }
+        this.hideTerminalContextMenu?.();
         if (paneState && paneState.term) {
           try {
             paneState.term.focus();
@@ -46460,6 +46465,16 @@ Aturan:
           } catch (_) {}
         }
       });
+      container.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.activePane !== paneNum) {
+          this.setActivePane(paneNum);
+        }
+        const capturedSel = this.getPaneSelectionText(paneState) || paneState._contextMenuSelText || '';
+        paneState._contextMenuSelText = '';
+        this.showTerminalContextMenu(paneNum, e.clientX, e.clientY, capturedSel);
+      }, true);
       container.addEventListener('touchstart', () => {
         if (this.activePane !== paneNum) {
           this.setActivePane(paneNum);
@@ -46498,7 +46513,8 @@ Aturan:
         scrollback: 5000,
         allowTransparency: true,
         convertEol: false,
-        bellStyle: 'none'
+        bellStyle: 'none',
+        rightClickSelectsWord: false
       });
 
       if (term.onBell) {
@@ -46617,6 +46633,21 @@ Aturan:
           }
         };
 
+        const emitMobileBackspace = (count = 1, customPtySeq = null) => {
+          const n = Math.max(0, count | 0);
+          if (n <= 0) return;
+          if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+            this.sendPtyInput(paneState.sessionId || sessionId, customPtySeq || '\x7f'.repeat(n));
+          } else if (paneState && paneState.isFallbackMode) {
+            for (let i = 0; i < n; i++) {
+              if (paneState._inputLine && paneState._inputLine.length > 0) {
+                paneState._inputLine = paneState._inputLine.slice(0, -1);
+                term.write('\b \b');
+              }
+            }
+          }
+        };
+
         // Capture-phase beforeinput: Penanganan presisi Enter, Backspace (saat kosong), dan Paste di ponsel
         term.textarea.addEventListener('beforeinput', (e) => {
           const now = Date.now();
@@ -46671,14 +46702,7 @@ Aturan:
               paneState._lastBackspaceTime = now;
               this.resetImeLine(paneState);
               const delChar = e.inputType === 'deleteWordBackward' ? '\x17' : '\x7f';
-              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-                this.sendPtyInput(paneState.sessionId || sessionId, delChar);
-              } else if (paneState && paneState.isFallbackMode) {
-                if (paneState._inputLine && paneState._inputLine.length > 0) {
-                  paneState._inputLine = paneState._inputLine.slice(0, -1);
-                  term.write('\b \b');
-                }
-              }
+              emitMobileBackspace(1, delChar);
               return;
             }
             // Pastikan kursor seleksi selalu berada di ujung akhir textarea agar penghapusan tepat di ekor
@@ -46743,9 +46767,7 @@ Aturan:
                 }
                 const effStart = Math.max(lcp, activeWordStart);
                 const delCount = Math.max(0, oldText.length - effStart);
-                if (delCount > 0 && paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-                  this.sendPtyInput(paneState.sessionId || sessionId, '\x7f'.repeat(delCount));
-                }
+                if (delCount > 0) emitMobileBackspace(delCount);
                 const insertText = cleanVal.slice(effStart);
                 if (insertText.length > 0) emitMobileText(insertText);
               }
@@ -46816,19 +46838,7 @@ Aturan:
             paneState._lastBackspaceTime = now;
             paneState._lastEmittedChar = '\x7f';
             paneState._lastEmitTime = now;
-            if (delCount > 0) {
-              const delSeq = '\x7f'.repeat(delCount);
-              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-                this.sendPtyInput(paneState.sessionId || sessionId, delSeq);
-              } else if (paneState && paneState.isFallbackMode) {
-                for (let i = 0; i < delCount; i++) {
-                  if (paneState._inputLine && paneState._inputLine.length > 0) {
-                    paneState._inputLine = paneState._inputLine.slice(0, -1);
-                    term.write('\b \b');
-                  }
-                }
-              }
-            }
+            if (delCount > 0) emitMobileBackspace(delCount);
             return;
           }
 
@@ -46879,17 +46889,7 @@ Aturan:
           if (delCount > 0) {
             paneState._lastBackspaceHandled = now;
             paneState._lastBackspaceTime = now;
-            const delSeq = '\x7f'.repeat(delCount);
-            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-              this.sendPtyInput(paneState.sessionId || sessionId, delSeq);
-            } else if (paneState && paneState.isFallbackMode) {
-              for (let i = 0; i < delCount; i++) {
-                if (paneState._inputLine && paneState._inputLine.length > 0) {
-                  paneState._inputLine = paneState._inputLine.slice(0, -1);
-                  term.write('\b \b');
-                }
-              }
-            }
+            emitMobileBackspace(delCount);
           }
 
           if (insertText.length > 0) {
@@ -47064,18 +47064,7 @@ Aturan:
           if (keyLower === 'v') {
             ev.preventDefault();
             ev.stopPropagation();
-            if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
-              navigator.clipboard.readText().then((clipText) => {
-                if (clipText) {
-                  if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-                    this.sendPtyInput(paneState.sessionId || sessionId, clipText);
-                  } else if (paneState && paneState.isFallbackMode) {
-                    paneState._inputLine = (paneState._inputLine || '') + clipText;
-                    term.write(clipText);
-                  }
-                }
-              }).catch(() => {});
-            }
+            this.pasteToPane(paneNum);
             return false;
           }
 
@@ -48719,6 +48708,119 @@ Aturan:
       `;
     },
 
+    getPaneSelectionText(paneState) {
+      if (!paneState) return '';
+      try {
+        if (paneState.term && typeof paneState.term.getSelection === 'function') {
+          const termSel = paneState.term.getSelection();
+          if (termSel && termSel.length > 0) return termSel;
+        }
+      } catch (_) {}
+      try {
+        if (typeof window !== 'undefined' && typeof window.getSelection === 'function') {
+          const domSel = window.getSelection()?.toString() || '';
+          if (domSel.length > 0) return domSel;
+        }
+      } catch (_) {}
+      return '';
+    },
+
+    copyPaneSelection(paneNum = this.activePane, explicitText = null) {
+      const targetPane = paneNum || this.activePane || 1;
+      const paneState = this.getPaneState(targetPane);
+      const text = (typeof explicitText === 'string' && explicitText.length > 0)
+        ? explicitText
+        : this.getPaneSelectionText(paneState);
+      if (!text) {
+        showToast('Blok teks di terminal terlebih dahulu untuk disalin.', 'info');
+        return false;
+      }
+      copyTextToClipboard(text, () => {
+        showToast('📋 Teks terminal disalin ke clipboard!', 'success');
+      });
+      this.focusActiveInput();
+      return true;
+    },
+
+    async pasteToPane(paneNum = this.activePane) {
+      const targetPane = paneNum || this.activePane || 1;
+      const tab = this.getActiveTab();
+      const paneState = this.getPaneState(targetPane);
+      const sId = paneState?.sessionId || (tab ? this.getEffectiveSessionId(tab, targetPane) : '');
+      if (paneState) {
+        this.resetImeLine(paneState);
+      }
+      try {
+        if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') {
+          showToast('Clipboard otomatis dibatasi browser pada koneksi HTTP LAN. Gunakan tekan-tahan atau Ctrl+V.', 'info');
+          this.focusActiveInput();
+          return false;
+        }
+        const clipText = await navigator.clipboard.readText();
+        if (!clipText) {
+          this.focusActiveInput();
+          return false;
+        }
+        if (paneState && paneState.term && !paneState.isFallbackMode && sId) {
+          this.sendPtyInput(sId, clipText);
+        } else if (paneState && paneState.term && paneState.isFallbackMode) {
+          paneState._inputLine = (paneState._inputLine || '') + clipText;
+          paneState.term.write(clipText);
+        } else {
+          const input = document.getElementById(`termCliInput${targetPane}`);
+          if (input) {
+            input.value += clipText;
+            input.focus();
+          }
+        }
+        this.focusActiveInput();
+        return true;
+      } catch (err) {
+        showToast('Gagal membaca clipboard. Izinkan akses clipboard di browser.', 'warning');
+        this.focusActiveInput();
+        return false;
+      }
+    },
+
+    showTerminalContextMenu(paneNum, clientX, clientY, capturedText = '') {
+      const menu = document.getElementById('termContextMenu');
+      const card = document.querySelector('#terminalModal .terminal-modal-card');
+      if (!menu || !card) return;
+
+      const paneState = this.getPaneState(paneNum || this.activePane || 1);
+      const selectedText = capturedText || this.getPaneSelectionText(paneState) || '';
+      this._ctxState = {
+        paneNum: paneNum || this.activePane || 1,
+        selectedText
+      };
+
+      const copyBtn = document.getElementById('btnTermCtxCopy');
+      if (copyBtn) {
+        copyBtn.disabled = !selectedText;
+        copyBtn.title = selectedText ? 'Salin teks terseleksi ke clipboard' : 'Blok teks terlebih dahulu untuk menyalin';
+      }
+
+      menu.style.visibility = 'hidden';
+      menu.style.display = 'flex';
+      const cardRect = card.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+      const rawLeft = clientX - cardRect.left;
+      const rawTop = clientY - cardRect.top;
+      const maxLeft = Math.max(6, cardRect.width - menuRect.width - 6);
+      const maxTop = Math.max(6, cardRect.height - menuRect.height - 6);
+      menu.style.left = `${Math.max(6, Math.min(rawLeft, maxLeft))}px`;
+      menu.style.top = `${Math.max(6, Math.min(rawTop, maxTop))}px`;
+      menu.style.visibility = 'visible';
+    },
+
+    hideTerminalContextMenu() {
+      const menu = document.getElementById('termContextMenu');
+      if (menu && menu.style.display !== 'none') {
+        menu.style.display = 'none';
+      }
+      this._ctxState = null;
+    },
+
     clearActiveScreen() {
       const pane = this.getPaneState(this.activePane);
       if (pane && pane.term) {
@@ -49146,27 +49248,7 @@ Aturan:
           }
 
           if (keyType === 'paste') {
-            this.resetImeLine(paneState);
-            try {
-              if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
-                const text = await navigator.clipboard.readText();
-                if (text) {
-                  if (paneState?.term && !paneState.isFallbackMode) {
-                    this.sendPtyInput(sId, text);
-                  } else {
-                    const input = document.getElementById(`termCliInput${paneNum}`);
-                    if (input) {
-                      input.value += text;
-                      input.focus();
-                    }
-                  }
-                }
-              } else {
-                showToast('Clipboard otomatis dibatasi pada koneksi HTTP LAN. Gunakan tekan-tahan (long-press) atau Ctrl+V.', 'info');
-              }
-            } catch (err) {
-              showToast('Gagal membaca clipboard. Izinkan akses clipboard di browser.', 'warning');
-            }
+            await this.pasteToPane(paneNum);
             keepFocus();
             return;
           }
@@ -49398,7 +49480,51 @@ Aturan:
         bottomBtnEl.addEventListener('touchstart', handleScrollToBottom, { passive: false });
       }
 
-      // Per-pane header action buttons
+      const ctxMenuEl = document.getElementById('termContextMenu');
+      if (ctxMenuEl) {
+        ctxMenuEl.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        });
+        ctxMenuEl.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const item = e.target.closest('.term-ctx-item');
+          if (!item || item.disabled) return;
+          const action = item.getAttribute('data-action');
+          const ctx = this._ctxState || { paneNum: this.activePane || 1, selectedText: '' };
+          this.hideTerminalContextMenu();
+          const targetPane = ctx.paneNum || this.activePane || 1;
+          this.setActivePane(targetPane);
+          const paneState = this.getPaneState(targetPane);
+
+          if (action === 'copy') {
+            this.copyPaneSelection(targetPane, ctx.selectedText);
+          } else if (action === 'paste') {
+            await this.pasteToPane(targetPane);
+          } else if (action === 'select-all') {
+            if (paneState?.term && typeof paneState.term.selectAll === 'function') {
+              paneState.term.selectAll();
+            }
+            this.focusActiveInput();
+          } else if (action === 'clear') {
+            this.clearActiveScreen();
+            this.focusActiveInput();
+          }
+        });
+        document.addEventListener('mousedown', (e) => {
+          if (ctxMenuEl.style.display !== 'none' && !ctxMenuEl.contains(e.target)) {
+            this.hideTerminalContextMenu();
+          }
+        }, true);
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && ctxMenuEl.style.display !== 'none') {
+            this.hideTerminalContextMenu();
+            this.focusActiveInput();
+          }
+        }, true);
+        window.addEventListener('resize', () => this.hideTerminalContextMenu());
+      }
+
       document.getElementById('btnPaneAutoEnter1')?.addEventListener('click', (e) => {
         e.stopPropagation();
         this.toggleAutoEnter(1);
@@ -49699,18 +49825,19 @@ Aturan:
         if (paneState.isFallbackMode || !paneState.sessionId) return;
 
         if (e.ctrlKey && !e.altKey && !e.metaKey) {
-          if ((e.key === 'c' || e.key === 'C') && (!window.getSelection || !window.getSelection().toString())) {
+          if (e.key === 'c' || e.key === 'C') {
+            const selText = this.getPaneSelectionText(paneState);
             e.preventDefault();
             e.stopPropagation();
-            this.sendPtyInput(paneState.sessionId, '\x03');
+            if (selText) {
+              this.copyPaneSelection(this.activePane || 1, selText);
+            } else {
+              this.sendPtyInput(paneState.sessionId, '\x03');
+            }
           } else if (e.key === 'v' || e.key === 'V') {
             e.preventDefault();
             e.stopPropagation();
-            if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
-              navigator.clipboard.readText().then((clipText) => {
-                if (clipText && paneState.sessionId) this.sendPtyInput(paneState.sessionId, clipText);
-              }).catch(() => {});
-            }
+            this.pasteToPane(this.activePane || 1);
           } else if (e.key === 'd' || e.key === 'D') {
             e.preventDefault();
             e.stopPropagation();
@@ -50068,7 +50195,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://queensland-uncle-den-essential.trycloudflare.com',
+    activeTunnelUrl: 'https://mechanisms-nationally-promise-medicine.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -50614,6 +50741,7 @@ Aturan:
         : [tunnel, ''];
       const uniqueBases = [...new Set(bases.filter(b => b !== null && b !== undefined))];
       let lastErr = null;
+      let saw404 = false;
 
       for (let attempt = 0; attempt <= retries; attempt++) {
         for (const base of uniqueBases) {
@@ -50623,10 +50751,15 @@ Aturan:
             const url = `${cleanBase}${cleanEndpoint}`;
             const fetchOpts = { ...options };
             if (!fetchOpts.signal) {
-              const defaultTimeout = endpoint.includes('/summarize') ? 35000 : 12000;
+              const defaultTimeout = endpoint.includes('/summarize')
+                ? 35000
+                : (endpoint.includes('/sync-profiles') ? 60000 : 12000);
               fetchOpts.signal = AbortSignal.timeout(defaultTimeout);
             }
             const res = await fetch(url, fetchOpts);
+            if (res.status === 404) {
+              saw404 = true;
+            }
             if (res.ok || (res.status >= 400 && res.status < 500 && res.status !== 404)) {
               return res;
             }
@@ -50639,6 +50772,9 @@ Aturan:
         }
       }
       if (lastErr) throw lastErr;
+      if (saw404) {
+        throw new Error('Endpoint server belum tersedia (404). Pastikan server Zoz Router sudah di-restart.');
+      }
       throw new Error('Koneksi ke server WhatsApp sedang disinkronkan ulang');
     },
 
@@ -50919,7 +51055,15 @@ Aturan:
         }
       });
 
-      // Contact Picker Chip & Dropdown
+      // Contact Picker Chip & Avatar Profile Click
+      document.getElementById('waChipAvatarSlot')?.addEventListener('click', (e) => {
+        if (!this.activeContact) return;
+        e.preventDefault();
+        e.stopPropagation();
+        AudioEngine.click();
+        this.closeContactDropdown();
+        this.openProfileModal(this.activeContact);
+      });
       els.waContactPickerChip?.addEventListener('click', (e) => {
         e.stopPropagation();
         this.toggleContactDropdown();
@@ -50977,11 +51121,34 @@ Aturan:
       // Consent Modal & Summary Pop-up Listeners
       this.bindSummaryModalListeners();
 
-      // Refresh / Sync Contacts Button
+      // Refresh / Sync Contacts & Profiles Button
       els.btnSyncWaContacts?.addEventListener('click', () => {
         AudioEngine.click();
-        this.fetchContacts(true);
+        this.syncProfiles({ force: true, notify: true });
       });
+      document.getElementById('btnSyncWaProfilesModal')?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.syncProfiles({ force: true, notify: true });
+      });
+      document.getElementById('waMyAvatarBadge')?.addEventListener('click', (e) => {
+        if (!this.status?.myJid) return;
+        e.preventDefault();
+        e.stopPropagation();
+        AudioEngine.click();
+        this.openProfileModal({
+          id: this.status.myJid,
+          name: this.status.myName || 'Akun WhatsApp Anda',
+          phone: this.status.phone || '',
+          hasAvatar: Boolean(this.status.myHasAvatar),
+          avatarUpdatedAt: this.status.myAvatarUpdatedAt || 0,
+          about: 'Akun WhatsApp yang terhubung aktif pada Zoz Router',
+          isSelf: true
+        });
+      });
+      this.bindProfileModalListeners();
+      this.bindProfileThemeListeners();
+      this.loadWaThemePrefs();
+      this.applyWaThemeEverywhere();
 
       // Connect WA Button inside Modal
       els.btnConnectWa?.addEventListener('click', () => {
@@ -51110,25 +51277,11 @@ Aturan:
                 if (els.waPairingCodeBox) els.waPairingCodeBox.style.display = 'block';
               }
             } else if (parsed.event === 'contacts') {
-              this.contacts = parsed.data || [];
-              this.contacts.sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
-              if (els.waContactCountDisplay) {
-                els.waContactCountDisplay.textContent = `${this.contacts.length} Kontak`;
-              }
-              const emptySelectBtn = document.getElementById('btnEmptyStateSelectContact');
-              if (emptySelectBtn) {
-                emptySelectBtn.innerHTML = `<i class="fa-solid fa-address-book"></i> Pilih Kontak (${this.contacts.length})`;
-              }
-              if (STATE.chatMode === 'whatsapp') {
-                this.renderSidebarWaChats();
-                if (!this.activeContact && this.contacts.length > 0) {
-                  const savedJid = localStorage.getItem('zoz_wa_active_jid');
-                  const target = (savedJid && this.contacts.find(c => c.id === savedJid)) || this.contacts[0];
-                  if (target) this.selectContact(target);
-                }
-              }
-              if (els.waContactDropdownMenu && els.waContactDropdownMenu.style.display === 'block') {
-                this.renderContactDropdownList();
+              this.applyContactsUpdate(parsed.data || []);
+              if (STATE.chatMode === 'whatsapp' && !this.activeContact && this.contacts.length > 0) {
+                const savedJid = localStorage.getItem('zoz_wa_active_jid');
+                const target = (savedJid && this.contacts.find(c => c.id === savedJid)) || this.contacts[0];
+                if (target) this.selectContact(target);
               }
             } else if (parsed.event === 'chat_cleared') {
               const clearedJid = parsed.data?.jid;
@@ -51263,6 +51416,120 @@ Aturan:
       }
     },
 
+    getAvatarSrc(jid, updatedAt = 0) {
+      if (!jid) return '';
+      const q = `?jid=${encodeURIComponent(jid)}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}${updatedAt ? `&v=${updatedAt}` : ''}`;
+      return this.getApiUrl('/api/wa/avatar' + q);
+    },
+
+    renderAvatarHtml(contactOrJid, wrapperClass = 'wa-chat-avatar', displayName = '', extraInnerHtml = '', extraStyle = '') {
+      const isObj = contactOrJid && typeof contactOrJid === 'object';
+      const jid = isObj ? contactOrJid.id : contactOrJid;
+      const hasAvatar = isObj ? Boolean(contactOrJid.hasAvatar) : Boolean(jid);
+      const updatedAt = isObj ? (contactOrJid.avatarUpdatedAt || 0) : 0;
+      const fallbackText = String(displayName || (isObj ? contactOrJid.name : '') || 'W')
+        .replace(/^👥\s*/, '').trim().charAt(0).toUpperCase() || 'W';
+      const src = (hasAvatar && jid) ? this.getAvatarSrc(jid, updatedAt) : '';
+      const imgHtml = src
+        ? `<img class="wa-avatar-img" src="${escapeHtml(src)}" alt="${escapeHtml(displayName || fallbackText)}" loading="lazy" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='flex';">`
+        : '';
+      const fallbackStyle = src ? 'display:none;' : 'display:flex;';
+      const styleAttr = extraStyle ? ` style="${extraStyle}"` : '';
+      return `<div class="${wrapperClass}"${styleAttr}>${imgHtml}<span class="wa-avatar-fallback" style="${fallbackStyle}">${escapeHtml(fallbackText)}</span>${extraInnerHtml}</div>`;
+    },
+
+    applyContactsUpdate(nextContacts) {
+      this.contacts = Array.isArray(nextContacts) ? [...nextContacts] : [];
+      this.contacts.sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+
+      if (this.activeContact && this.activeContact.id) {
+        const updatedActive = this.contacts.find(c => c.id === this.activeContact.id);
+        if (updatedActive) {
+          this.activeContact = updatedActive;
+          if (STATE.chatMode === 'whatsapp') {
+            this.updateContactChipUI();
+        this.applyWaThemeEverywhere();
+            this.refreshActiveChatHeaderBar();
+          }
+        }
+      }
+
+      if (els.waContactCountDisplay) {
+        els.waContactCountDisplay.textContent = `${this.contacts.length} Kontak`;
+      }
+      const emptySelectBtn = document.getElementById('btnEmptyStateSelectContact');
+      if (emptySelectBtn) {
+        emptySelectBtn.innerHTML = `<i class="fa-solid fa-address-book"></i> Pilih Kontak (${this.contacts.length})`;
+      }
+
+      if (STATE.chatMode === 'whatsapp' || (els.waChatHistoryList && els.waChatHistoryList.style.display !== 'none')) {
+        this.renderSidebarWaChats();
+      }
+      if (els.waContactDropdownMenu && els.waContactDropdownMenu.style.display === 'block') {
+        this.renderContactDropdownList();
+      }
+    },
+
+    async syncProfiles({ force = true, notify = true } = {}) {
+      if (this.isSyncingProfiles) return;
+      if (this.status && this.status.connected === false && !this.status.hasStoredSession) {
+        if (notify) showToast('WhatsApp belum terhubung. Hubungkan perangkat dulu sebelum sinkron profil.', 'warning');
+        return;
+      }
+      this.isSyncingProfiles = true;
+      const syncBtns = [
+        els.btnSyncWaContacts,
+        document.getElementById('btnSyncWaProfilesModal'),
+        document.getElementById('btnSidebarSyncWaProfiles'),
+        document.getElementById('btnHeaderSyncProfile')
+      ].filter(Boolean);
+      syncBtns.forEach(btn => {
+        btn.disabled = true;
+        btn.querySelector('i')?.classList.add('fa-spin');
+      });
+      try {
+        const q = `?userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
+        const res = await this.waFetch('/api/wa/sync-profiles' + q, {
+          method: 'POST',
+          headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            userId: this.getUserId(),
+            pin: this.getPin(),
+            force,
+            limit: 40
+          }),
+          signal: AbortSignal.timeout(60000)
+        }, 1);
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || !data.success) {
+          throw new Error(data?.error || 'Gagal menyinkronkan profil WhatsApp');
+        }
+        if (data.status) {
+          this.handleStatusUpdate(data.status);
+        }
+        if (Array.isArray(data.contacts)) {
+          this.applyContactsUpdate(data.contacts);
+        } else {
+          await this.fetchContacts(false);
+        }
+        if (notify) {
+          const checkedCount = data.syncedCount ?? data.synced ?? 0;
+          showToast(
+            `Profil tersinkron: ${checkedCount} kontak diperiksa (${data.avatarsUpdated || 0} foto baru)`,
+            'success'
+          );
+        }
+      } catch (err) {
+        if (notify) showToast(err.message || 'Gagal sinkron profil WhatsApp', 'error');
+      } finally {
+        this.isSyncingProfiles = false;
+        syncBtns.forEach(btn => {
+          btn.disabled = false;
+          btn.querySelector('i')?.classList.remove('fa-spin');
+        });
+      }
+    },
+
     async fetchContacts(notify = false) {
       try {
         const q = `?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
@@ -51272,16 +51539,7 @@ Aturan:
         }, 2);
         const data = await res.json().catch(() => null);
         if (data && data.success && Array.isArray(data.contacts)) {
-          this.contacts = data.contacts;
-          this.contacts.sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
-
-          if (els.waContactCountDisplay) {
-            els.waContactCountDisplay.textContent = `${this.contacts.length} Kontak`;
-          }
-          const emptySelectBtn = document.getElementById('btnEmptyStateSelectContact');
-          if (emptySelectBtn) {
-            emptySelectBtn.innerHTML = `<i class="fa-solid fa-address-book"></i> Pilih Kontak (${this.contacts.length})`;
-          }
+          this.applyContactsUpdate(data.contacts);
 
           // Auto-select contact jika belum ada yang aktif dan sedang dalam mode WhatsApp
           if (!this.activeContact && this.contacts.length > 0 && STATE.chatMode === 'whatsapp') {
@@ -51292,14 +51550,6 @@ Aturan:
             }
           }
 
-          // Render sidebar jika Mode WhatsApp aktif atau tab sidebar WA terbuka
-          if (STATE.chatMode === 'whatsapp' || (els.waChatHistoryList && els.waChatHistoryList.style.display !== 'none')) {
-            this.renderSidebarWaChats();
-          }
-          // Render dropdown jika menu dropdown terbuka
-          if (els.waContactDropdownMenu && els.waContactDropdownMenu.style.display === 'block') {
-            this.renderContactDropdownList();
-          }
           if (notify) showToast(`Kontak WhatsApp tersinkron (${this.contacts.length} kontak)`, 'success');
         } else if (!this.status || !this.status.connected) {
           if (this.contacts.length === 0) {
@@ -51343,6 +51593,22 @@ Aturan:
         if (els.panePairMethodPhone) els.panePairMethodPhone.style.display = 'none';
         if (els.waQrSection) els.waQrSection.style.display = 'none';
         if (els.waConnectedCard) els.waConnectedCard.style.display = 'flex';
+        const myBadge = document.getElementById('waMyAvatarBadge');
+        if (myBadge) {
+          if (status.myHasAvatar && status.myJid) {
+            myBadge.classList.add('has-photo');
+            myBadge.innerHTML = `<img class="wa-avatar-img" src="${escapeHtml(this.getAvatarSrc(status.myJid, status.myAvatarUpdatedAt || 0))}" alt="${escapeHtml(status.myName || 'WhatsApp')}" onerror="this.parentElement.classList.remove('has-photo'); this.parentElement.innerHTML='<i class=\\'fa-brands fa-whatsapp\\'></i>';">`;
+          } else {
+            myBadge.classList.remove('has-photo');
+            myBadge.innerHTML = '<i class="fa-brands fa-whatsapp"></i>';
+          }
+        }
+        const connectedTitleEl = els.waConnectedCard?.querySelector('.wa-title');
+        if (connectedTitleEl) {
+          connectedTitleEl.textContent = status.myName
+            ? `WhatsApp Terhubung (${status.myName})`
+            : 'WhatsApp Terhubung Aktif';
+        }
         if (els.waConnectedPhoneDisplay) els.waConnectedPhoneDisplay.textContent = status.phone || '-';
         if (els.waContactCountDisplay) els.waContactCountDisplay.textContent = `${this.contacts.length || status.contactCount || 0} Kontak`;
         if (els.waConnectedDevicesCard) els.waConnectedDevicesCard.style.display = 'block';
@@ -51356,6 +51622,7 @@ Aturan:
           this.contacts = [];
           this.activeContact = null;
           this.updateContactChipUI();
+        this.applyWaThemeEverywhere();
           if (STATE.chatMode === 'whatsapp') {
             this.renderSidebarWaChats();
             this.renderEmptyWaState();
@@ -51668,6 +51935,7 @@ Aturan:
           els.promptInput.placeholder = "";
         }
         this.setSidebarHistoryTab('ai', false);
+        this.applyWaThemeEverywhere();
         if (render) {
           renderCurrentSession();
         }
@@ -51697,6 +51965,7 @@ Aturan:
         }
 
         this.updateContactChipUI();
+        this.applyWaThemeEverywhere();
 
         if (render) {
           if (!this.activeContact && this.contacts.length > 0) {
@@ -51745,8 +52014,8 @@ Aturan:
       if (els.historyLabelTitle) {
         els.historyLabelTitle.textContent = isAi ? 'Riwayat AI' : 'Kontak WhatsApp';
       }
-      if (els.chatHistoryList) els.chatHistoryList.style.display = isAi ? 'block' : 'none';
-      if (els.waChatHistoryList) els.waChatHistoryList.style.display = !isAi ? 'block' : 'none';
+      if (els.chatHistoryList) els.chatHistoryList.style.display = isAi ? 'flex' : 'none';
+      if (els.waChatHistoryList) els.waChatHistoryList.style.display = !isAi ? 'flex' : 'none';
 
       if (!isAi) {
         if (els.sidebarWaUnreadDot) els.sidebarWaUnreadDot.style.display = 'none';
@@ -51807,6 +52076,8 @@ Aturan:
     },
 
     updateContactChipUI() {
+      const chipAvatarSlot = document.getElementById('waChipAvatarSlot');
+      const chipFileBadge = document.getElementById('waChipFileBadge');
       if (els.currentWaContactLabel) {
         if (this.activeContact) {
           const isGroup = this.activeContact.id && this.activeContact.id.endsWith('@g.us');
@@ -51817,12 +52088,27 @@ Aturan:
             cleanName = this.cleanDisplayName(cleanName, this.activeContact.phone || this.activeContact.id);
           }
           const hasFile = Boolean(this.activeContact.hasFile);
-          els.currentWaContactLabel.innerHTML = `
-            <span>${escapeHtml(cleanName)}</span>
-            ${hasFile ? '<span class="wa-active-contact-file-tag">🔴 Ada Berkas</span>' : ''}
-          `;
+          els.currentWaContactLabel.textContent = cleanName;
+          els.currentWaContactLabel.title = cleanName;
+          if (chipAvatarSlot) {
+            chipAvatarSlot.classList.add('is-profile-trigger');
+            chipAvatarSlot.title = `Klik untuk lihat profil ${cleanName}`;
+            if (this.activeContact.hasAvatar && this.activeContact.id) {
+              chipAvatarSlot.innerHTML = `<img class="wa-chip-avatar" src="${escapeHtml(this.getAvatarSrc(this.activeContact.id, this.activeContact.avatarUpdatedAt || 0))}" alt="" onerror="this.parentElement.innerHTML='<i class=\\'fa-brands fa-whatsapp text-emerald-400 chip-icon\\'></i>';">`;
+            } else {
+              chipAvatarSlot.innerHTML = '<i class="fa-brands fa-whatsapp text-emerald-400 chip-icon"></i>';
+            }
+          }
+          if (chipFileBadge) chipFileBadge.style.display = hasFile ? 'inline-flex' : 'none';
         } else {
           els.currentWaContactLabel.textContent = 'Pilih Kontak WA';
+          els.currentWaContactLabel.title = 'Pilih Kontak WhatsApp';
+          if (chipAvatarSlot) {
+            chipAvatarSlot.classList.remove('is-profile-trigger');
+            chipAvatarSlot.title = 'WhatsApp';
+            chipAvatarSlot.innerHTML = '<i class="fa-brands fa-whatsapp text-emerald-400 chip-icon"></i>';
+          }
+          if (chipFileBadge) chipFileBadge.style.display = 'none';
         }
       }
       if (els.promptInput) {
@@ -51903,26 +52189,38 @@ Aturan:
         }
         const cleanPhone = isGroup ? 'Grup WhatsApp' : (this.formatPhoneNumber(c.phone || c.id) || c.phone || '');
         const hasFile = Boolean(c.hasFile || (c.lastMessage && (c.lastMessage.includes('[Dokumen:') || c.lastMessage.includes('[Foto]'))));
+        const aboutText = (c.about || '').trim();
+        const subParts = [cleanPhone];
+        if (aboutText) subParts.push(aboutText);
+        else if (c.lastMessage) subParts.push(c.lastMessage);
 
-        const initial = cleanName.replace(/^👥\s*/, '').charAt(0).toUpperCase() || 'W';
+        const avatarDot = hasFile ? '<span class="wa-contact-file-dot-red" title="Mengirim berkas"></span>' : '';
         item.innerHTML = `
-          <div class="image-model-icon-box" style="position: relative; background: rgba(37,211,102,0.15); border-color: rgba(37,211,102,0.4); color: #25D366; font-weight: bold; width: 32px; height: 32px;">
-            ${initial}
-            ${hasFile ? '<span class="wa-contact-file-dot-red" title="Mengirim berkas"></span>' : ''}
-          </div>
+          ${this.renderAvatarHtml(c, 'wa-dropdown-avatar', cleanName, avatarDot)}
           <div class="image-model-info" style="text-align: left; flex: 1; min-width: 0;">
             <div class="image-model-title-row">
               <span class="image-model-title" style="color: #25D366;">${escapeHtml(cleanName)}</span>
-              ${hasFile ? '<span class="wa-file-badge-red" style="font-size:0.65rem; padding:1px 5px; margin-left:6px;"><i class="fa-solid fa-paperclip"></i> [Berkas]</span>' : ''}
+              ${hasFile ? '<span class="wa-file-badge-red" style="font-size:0.65rem; padding:1px 5px;"><i class="fa-solid fa-paperclip"></i> [Berkas]</span>' : ''}
               ${c.unreadCount > 0 ? `<span class="wa-chat-unread">${c.unreadCount}</span>` : ''}
             </div>
-            <span class="image-model-desc">${escapeHtml(cleanPhone)} &bull; ${escapeHtml(c.lastMessage || 'Tidak ada pesan')}</span>
+            <span class="image-model-desc">${escapeHtml(subParts.join(' • '))}</span>
           </div>
           ${this.activeContact && this.activeContact.id === c.id ? '<i class="fa-solid fa-check image-model-check"></i>' : ''}
-          <span class="wa-contact-dots-btn" role="button" tabindex="0" title="Opsi Nomor (Rangkum / Bersihkan Chat)">
+          <span class="wa-contact-dots-btn" role="button" tabindex="0" title="Opsi Nomor (Profil / Rangkum / Bersihkan Chat)">
             <i class="fa-solid fa-ellipsis-vertical"></i>
           </span>
         `;
+
+        const avatarEl = item.querySelector('.wa-dropdown-avatar');
+        if (avatarEl) {
+          avatarEl.title = 'Klik untuk lihat profil';
+          avatarEl.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            AudioEngine.click();
+            this.openProfileModal(c);
+          });
+        }
 
         const dotsBtn = item.querySelector('.wa-contact-dots-btn');
         if (dotsBtn) {
@@ -51934,7 +52232,7 @@ Aturan:
         }
 
         item.addEventListener('click', (e) => {
-          if (e.target.closest('.wa-contact-dots-btn')) return;
+          if (e.target.closest('.wa-contact-dots-btn') || e.target.closest('.wa-dropdown-avatar')) return;
           this.selectContact(c);
         });
 
@@ -51979,6 +52277,22 @@ Aturan:
       const displayList = this.contacts.slice(0, MAX_SIDEBAR);
       const fragment = document.createDocumentFragment();
 
+      const syncBar = document.createElement('div');
+      syncBar.className = 'wa-sidebar-sync-bar';
+      syncBar.innerHTML = `
+        <span style="font-size:0.7rem; color:var(--text-dim);">${this.contacts.length} kontak WA</span>
+        <button type="button" class="btn btn-xs btn-outline" id="btnSidebarSyncWaProfiles" style="padding:2px 8px; font-size:0.7rem; border-color:rgba(37,211,102,0.35); color:#25D366;" title="Sinkronkan foto profil & bio WA kontak">
+          <i class="fa-solid fa-arrows-rotate"></i> Sinkron Profil
+        </button>
+      `;
+      syncBar.querySelector('#btnSidebarSyncWaProfiles')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        AudioEngine.click();
+        this.syncProfiles({ force: true, notify: true });
+      });
+      fragment.appendChild(syncBar);
+
       displayList.forEach(c => {
         const item = document.createElement('div');
         const isActive = this.activeContact && this.activeContact.id === c.id;
@@ -51992,27 +52306,26 @@ Aturan:
           cleanName = this.cleanDisplayName(cleanName, c.phone || c.id);
         }
         const hasFile = Boolean(c.hasFile || (c.lastMessage && (c.lastMessage.includes('[Dokumen:') || c.lastMessage.includes('[Foto]'))));
+        const aboutText = (c.about || '').trim();
+        if (aboutText) item.title = aboutText;
 
-        const initial = cleanName.replace(/^👥\s*/, '').charAt(0).toUpperCase() || 'W';
         let timeStr = '';
         if (c.lastTimestamp) {
           const d = new Date(c.lastTimestamp);
           timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
         }
 
+        const avatarDot = hasFile ? '<span class="wa-contact-file-dot-red" title="Mengirim berkas"></span>' : '';
         item.innerHTML = `
-          <div class="wa-chat-avatar" style="position: relative;">
-            ${initial}
-            ${hasFile ? '<span class="wa-contact-file-dot-red" title="Mengirim berkas"></span>' : ''}
-          </div>
+          ${this.renderAvatarHtml(c, 'wa-chat-avatar', cleanName, avatarDot)}
           <div class="wa-chat-info" style="flex: 1; min-width: 0;">
             <div class="wa-chat-top-row">
               <span class="wa-chat-name">${escapeHtml(cleanName)}</span>
-              ${hasFile ? '<span class="wa-file-badge-red" style="font-size:0.62rem; padding:1px 4px; margin-left:4px;"><i class="fa-solid fa-paperclip"></i> [Berkas]</span>' : ''}
               <span class="wa-chat-time">${timeStr}</span>
             </div>
             <div class="wa-chat-bottom-row">
-              <span class="wa-chat-preview">${escapeHtml(c.lastMessage || 'Ketuk untuk membuka')}</span>
+              <span class="wa-chat-preview">${escapeHtml(c.lastMessage || aboutText || 'Ketuk untuk membuka')}</span>
+              ${hasFile ? '<span class="wa-chat-file-pill" title="Mengirim berkas"><i class="fa-solid fa-paperclip"></i> Berkas</span>' : ''}
               ${c.unreadCount > 0 ? `<span class="wa-chat-unread">${c.unreadCount}</span>` : ''}
             </div>
           </div>
@@ -52020,6 +52333,18 @@ Aturan:
             <i class="fa-solid fa-ellipsis-vertical"></i>
           </button>
         `;
+
+        const avatarEl = item.querySelector('.wa-chat-avatar');
+        if (avatarEl) {
+          avatarEl.title = 'Klik foto untuk lihat profil';
+          avatarEl.style.cursor = 'pointer';
+          avatarEl.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            AudioEngine.click();
+            this.openProfileModal(c);
+          });
+        }
 
         const dotsBtn = item.querySelector('.wa-contact-dots-btn');
         if (dotsBtn) {
@@ -52031,7 +52356,7 @@ Aturan:
         }
 
         item.addEventListener('click', (e) => {
-          if (e.target.closest('.wa-contact-dots-btn')) return;
+          if (e.target.closest('.wa-contact-dots-btn') || e.target.closest('.wa-chat-avatar')) return;
           this.selectContact(c);
           if (STATE.chatMode !== 'whatsapp') {
             this.setChatMode('whatsapp');
@@ -52054,39 +52379,69 @@ Aturan:
       els.waChatHistoryList.appendChild(fragment);
     },
 
-    async loadMessagesForContact(jid) {
-      if (!this.isAllowedAccess()) {
-        this.showLocalhostOnlyModal();
-        return;
-      }
-      if (!els.messagesList) return;
-      if (els.welcomeHero) els.welcomeHero.style.display = 'none';
-      els.messagesList.innerHTML = '';
-
-      const isGroup = this.activeContact?.id && this.activeContact.id.endsWith('@g.us');
-      let headerName = (this.activeContact?.name || jid).trim();
+    renderChatHeaderBarContent(headerBar, jid) {
+      if (!headerBar) return;
+      const contact = (this.activeContact && this.activeContact.id === jid)
+        ? this.activeContact
+        : (this.contacts.find(c => c.id === jid) || { id: jid });
+      const isGroup = contact?.id && contact.id.endsWith('@g.us');
+      let headerName = (contact?.name || jid).trim();
       if (isGroup) {
         headerName = headerName.startsWith('👥') ? headerName : `👥 ${headerName || 'Grup WhatsApp'}`;
       } else {
-        headerName = this.cleanDisplayName(headerName, this.activeContact?.phone || jid);
+        headerName = this.cleanDisplayName(headerName, contact?.phone || jid);
       }
-      const headerPhone = isGroup ? 'Grup WhatsApp' : (this.formatPhoneNumber(this.activeContact?.phone || jid.split('@')[0]) || jid.split('@')[0]);
+      const headerPhone = isGroup ? 'Grup WhatsApp' : (this.formatPhoneNumber(contact?.phone || jid.split('@')[0]) || jid.split('@')[0]);
+      const aboutText = (contact?.about || '').trim();
 
-      const headerBar = document.createElement('div');
-      headerBar.className = 'wa-chat-header-bar';
       headerBar.innerHTML = `
         <div class="wa-chat-header-info">
-          <i class="fa-brands fa-whatsapp text-emerald-400" style="font-size: 1.1rem;"></i>
-          <span class="wa-chat-header-name">${escapeHtml(headerName)}</span>
-          <span class="wa-chat-header-phone">(${escapeHtml(headerPhone)})</span>
-          ${this.activeContact?.hasFile ? '<span class="wa-active-contact-file-tag">🔴 Ada Berkas</span>' : ''}
+          ${this.renderAvatarHtml(contact, 'wa-chat-header-avatar', headerName)}
+          <div style="display:flex; flex-direction:column; min-width:0;">
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <span class="wa-chat-header-name" style="cursor:pointer;" title="Klik untuk lihat profil">${escapeHtml(headerName)}</span>
+              <span class="wa-chat-header-phone">(${escapeHtml(headerPhone)})</span>
+              ${contact?.hasFile ? '<span class="wa-active-contact-file-tag">🔴 Ada Berkas</span>' : ''}
+            </div>
+            ${aboutText ? `<span class="wa-chat-header-about" title="${escapeHtml(aboutText)}">${escapeHtml(aboutText)}</span>` : ''}
+          </div>
         </div>
         <div class="wa-chat-header-actions" style="display: flex; align-items: center; gap: 6px;">
-          <button type="button" id="btnActionHeaderDotsMenu" class="wa-contact-dots-btn" title="Opsi Nomor (Rangkum / Bersihkan Chat)">
+          <button type="button" id="btnHeaderTheme" class="wa-contact-dots-btn" title="Kustom Tema Profil, Latar &amp; Buah/Sayur">
+            <i class="fa-solid fa-palette" style="color: #38bdf8;"></i>
+          </button>
+          <button type="button" id="btnHeaderSyncProfile" class="wa-contact-dots-btn" title="Sinkron Foto &amp; Status Profil">
+            <i class="fa-solid fa-arrows-rotate"></i>
+          </button>
+          <button type="button" id="btnActionHeaderDotsMenu" class="wa-contact-dots-btn" title="Opsi Nomor (Profil / Tema / Rangkum / Bersihkan Chat)">
             <i class="fa-solid fa-ellipsis-vertical"></i>
           </button>
         </div>
       `;
+      const openActiveProfile = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        AudioEngine.click();
+        this.openProfileModal(this.activeContact || { id: jid, name: headerName, phone: headerPhone });
+      };
+      const headerAvatarEl = headerBar.querySelector('.wa-chat-header-avatar');
+      const headerNameEl = headerBar.querySelector('.wa-chat-header-name');
+      headerAvatarEl?.classList.add('is-profile-trigger');
+      headerNameEl?.classList.add('is-profile-trigger');
+      headerAvatarEl?.addEventListener('click', openActiveProfile);
+      headerNameEl?.addEventListener('click', openActiveProfile);
+      headerBar.querySelector('#btnHeaderTheme')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        AudioEngine.click();
+        this.openThemeCustomizerPreview(this.activeContact || { id: jid, name: headerName, phone: headerPhone });
+      });
+      headerBar.querySelector('#btnHeaderSyncProfile')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        AudioEngine.click();
+        this.syncProfiles({ force: true, notify: true });
+      });
       const headerDotsBtn = headerBar.querySelector('#btnActionHeaderDotsMenu');
       if (headerDotsBtn) {
         headerDotsBtn.addEventListener('click', (e) => {
@@ -52096,6 +52451,28 @@ Aturan:
           this.openContactDotsMenu(contactObj, headerDotsBtn, e);
         });
       }
+    },
+
+    refreshActiveChatHeaderBar() {
+      if (!this.activeContact?.id || !els.messagesList) return;
+      const headerBar = els.messagesList.querySelector('.wa-chat-header-bar');
+      if (headerBar) {
+        this.renderChatHeaderBarContent(headerBar, this.activeContact.id);
+      }
+    },
+
+    async loadMessagesForContact(jid) {
+      if (!this.isAllowedAccess()) {
+        this.showLocalhostOnlyModal();
+        return;
+      }
+      if (!els.messagesList) return;
+      if (els.welcomeHero) els.welcomeHero.style.display = 'none';
+      els.messagesList.innerHTML = '';
+
+      const headerBar = document.createElement('div');
+      headerBar.className = 'wa-chat-header-bar';
+      this.renderChatHeaderBarContent(headerBar, jid);
       els.messagesList.appendChild(headerBar);
 
       try {
@@ -53199,6 +53576,14 @@ Aturan:
         <div class="wa-dots-menu-header" title="${escapeHtml(cleanName)}">
           <i class="fa-brands fa-whatsapp text-emerald-400"></i> ${escapeHtml(cleanName)}
         </div>
+        <button type="button" class="wa-dots-menu-item" data-action="profile">
+          <i class="fa-regular fa-id-card" style="color: #10b981; width: 16px; text-align: center;"></i>
+          <span>Lihat Profil Lengkap</span>
+        </button>
+        <button type="button" class="wa-dots-menu-item" data-action="theme">
+          <i class="fa-solid fa-palette" style="color: #38bdf8; width: 16px; text-align: center;"></i>
+          <span>Tema Profil &amp; Latar</span>
+        </button>
         <button type="button" class="wa-dots-menu-item" data-action="rename">
           <i class="fa-solid fa-user-pen" style="color: #38bdf8; width: 16px; text-align: center;"></i>
           <span>Ubah Nama / Custom Nama</span>
@@ -53233,6 +53618,22 @@ Aturan:
       menu.style.top = `${top}px`;
       menu.style.left = `${left}px`;
 
+      menu.querySelector('[data-action="theme"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        AudioEngine.click();
+        this.closeContactDotsMenu();
+        this.closeContactDropdown();
+        this.openThemeCustomizerPreview(contact);
+      });
+
+      menu.querySelector('[data-action="profile"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        AudioEngine.click();
+        this.closeContactDotsMenu();
+        this.closeContactDropdown();
+        this.openProfileModal(contact);
+      });
+
       menu.querySelector('[data-action="rename"]')?.addEventListener('click', (e) => {
         e.stopPropagation();
         AudioEngine.click();
@@ -53255,6 +53656,371 @@ Aturan:
         AudioEngine.click();
         this.closeContactDotsMenu();
         await this.clearContactHistory(contact);
+      });
+    },
+
+    profileModalTarget: null,
+
+    bindProfileModalListeners() {
+      const modal = document.getElementById('waProfileModal');
+      if (!modal) return;
+      document.getElementById('btnCloseWaProfileModal')?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.closeProfileModal();
+      });
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) this.closeProfileModal();
+      });
+      document.getElementById('btnWaProfileModalChat')?.addEventListener('click', () => {
+        AudioEngine.click();
+        const target = this.profileModalTarget;
+        this.closeProfileModal();
+        if (target && !target.isSelf) {
+          this.selectContact(target);
+          if (STATE.chatMode !== 'whatsapp') {
+            this.setChatMode('whatsapp');
+          }
+        }
+      });
+      document.getElementById('btnWaProfileModalTheme')?.addEventListener('click', () => {
+        AudioEngine.click();
+        this.toggleProfileThemeCustomizer();
+      });
+      document.getElementById('btnWaProfileModalEditName')?.addEventListener('click', () => {
+        AudioEngine.click();
+        const target = this.profileModalTarget;
+        this.closeProfileModal();
+        if (target && !target.isSelf) {
+          this.openEditContactNameModal(target);
+        }
+      });
+      document.getElementById('btnWaProfileModalCopy')?.addEventListener('click', async () => {
+        AudioEngine.click();
+        const target = this.profileModalTarget;
+        if (!target) return;
+        const phone = this.formatPhoneNumber(target.phone || target.id) || target.id || '';
+        const copied = await copyTextToClipboard(phone);
+        showToast(copied ? `Disalin: ${phone}` : 'Gagal menyalin nomor', copied ? 'success' : 'error');
+      });
+      document.getElementById('btnWaProfileModalRefresh')?.addEventListener('click', async () => {
+        AudioEngine.click();
+        const target = this.profileModalTarget;
+        if (!target?.id) return;
+        const btn = document.getElementById('btnWaProfileModalRefresh');
+        if (btn) {
+          btn.disabled = true;
+          btn.querySelector('i')?.classList.add('fa-spin');
+        }
+        try {
+          const refreshUrl = this.getApiUrl(
+            `/api/wa/avatar?jid=${encodeURIComponent(target.id)}&refresh=1&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`
+          );
+          await fetch(refreshUrl, { headers: this.getAuthHeaders(), cache: 'no-store' }).catch(() => {});
+          await this.syncProfiles({ force: true, notify: false });
+          const refreshed = target.isSelf
+            ? {
+                ...target,
+                name: this.status?.myName || target.name,
+                hasAvatar: Boolean(this.status?.myHasAvatar),
+                avatarUpdatedAt: Date.now()
+              }
+            : (this.contacts.find(c => c.id === target.id) || target);
+          this.renderProfileModalContent(refreshed);
+          showToast('Profil kontak berhasil diperbarui', 'success');
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.querySelector('i')?.classList.remove('fa-spin');
+          }
+        }
+      });
+    },
+
+    renderProfileModalContent(contact) {
+      if (!contact || !contact.id) return;
+      this.profileModalTarget = contact;
+      const isSelf = Boolean(contact.isSelf);
+      const isGroup = !isSelf && contact.id.endsWith('@g.us');
+      let cleanName = (contact.name || '').trim();
+      if (isGroup) {
+        cleanName = cleanName.replace(/^👥\s*/, '') || 'Grup WhatsApp';
+      } else if (!isSelf) {
+        cleanName = this.cleanDisplayName(cleanName, contact.phone || contact.id);
+      }
+      const displayPhone = isGroup
+        ? 'Grup WhatsApp'
+        : (this.formatPhoneNumber(contact.phone || contact.id.split('@')[0]) || contact.id.split('@')[0]);
+      const aboutText = (contact.about || '').trim();
+      const notifyText = (!isGroup && !isSelf && contact.notify && contact.notify.trim() !== cleanName)
+        ? contact.notify.trim()
+        : '';
+
+      const avatarEl = document.getElementById('waProfileModalAvatar');
+      if (avatarEl) {
+        avatarEl.innerHTML = '';
+        const fallbackChar = (cleanName || 'W').charAt(0).toUpperCase();
+        if (contact.hasAvatar) {
+          const img = document.createElement('img');
+          img.className = 'wa-avatar-img';
+          img.src = this.getAvatarSrc(contact.id, contact.avatarUpdatedAt || Date.now());
+          img.alt = cleanName;
+          img.onerror = () => {
+            avatarEl.textContent = fallbackChar;
+          };
+          avatarEl.appendChild(img);
+        } else {
+          avatarEl.textContent = fallbackChar;
+        }
+      }
+
+      const typeEl = document.getElementById('waProfileModalType');
+      const nameEl = document.getElementById('waProfileModalName');
+      const phoneEl = document.getElementById('waProfileModalPhone');
+      const aboutEl = document.getElementById('waProfileModalAbout');
+      const notifyRowEl = document.getElementById('waProfileModalNotifyRow');
+      const notifyEl = document.getElementById('waProfileModalNotify');
+      const jidEl = document.getElementById('waProfileModalJid');
+      const chatBtn = document.getElementById('btnWaProfileModalChat');
+      const editNameBtn = document.getElementById('btnWaProfileModalEditName');
+      const copyBtn = document.getElementById('btnWaProfileModalCopy');
+
+      if (typeEl) typeEl.textContent = isSelf ? 'Akun WhatsApp Anda' : (isGroup ? 'Grup WhatsApp' : 'Kontak WhatsApp');
+      if (nameEl) nameEl.textContent = cleanName || '-';
+      if (phoneEl) phoneEl.textContent = displayPhone || '-';
+      if (aboutEl) aboutEl.textContent = aboutText || (isGroup ? 'Tidak ada deskripsi grup.' : 'Belum ada bio / info status (atau disembunyikan privasi WhatsApp).');
+      if (notifyRowEl && notifyEl) {
+        if (notifyText) {
+          notifyEl.textContent = notifyText;
+          notifyRowEl.style.display = 'flex';
+        } else {
+          notifyRowEl.style.display = 'none';
+        }
+      }
+      if (jidEl) jidEl.textContent = contact.id || '-';
+      if (chatBtn) chatBtn.style.display = isSelf ? 'none' : 'inline-flex';
+      if (editNameBtn) editNameBtn.style.display = isSelf ? 'none' : 'inline-flex';
+      if (copyBtn) copyBtn.style.display = isGroup ? 'none' : 'inline-flex';
+      this.applyThemeToProfileModal();
+    },
+
+    openProfileModal(contactOrJid, opts = {}) {
+      const modal = document.getElementById('waProfileModal');
+      if (!modal) return;
+      const contact = (typeof contactOrJid === 'string')
+        ? (this.contacts.find(c => c.id === contactOrJid) || { id: contactOrJid })
+        : contactOrJid;
+      if (!contact || !contact.id) return;
+      this.renderProfileModalContent(contact);
+      this.toggleProfileThemeCustomizer(Boolean(opts.openCustomizer));
+      modal.style.display = 'flex';
+    },
+
+    closeProfileModal() {
+      const modal = document.getElementById('waProfileModal');
+      if (modal) modal.style.display = 'none';
+    },
+
+    // =========================================================================
+    // PROFILE & CONTACT PREVIEW SCENIC BACKGROUNDS & FRUIT/VEGETABLE ORBIT ENGINE
+    // =========================================================================
+
+    waThemePrefs: {
+      scene: 'aurora',
+      produce: 'apple',
+      applyToChat: true
+    },
+
+    profileCustomizerOpen: false,
+
+    loadWaThemePrefs() {
+      try {
+        const raw = localStorage.getItem('zoz_wa_theme_prefs');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            if (['aurora', 'starlight', 'ocean', 'default'].includes(parsed.scene)) {
+              this.waThemePrefs.scene = parsed.scene;
+            }
+            if (['apple', 'carrot', 'banana', 'broccoli', 'garden', 'none'].includes(parsed.produce)) {
+              this.waThemePrefs.produce = parsed.produce;
+            }
+            if (typeof parsed.applyToChat === 'boolean') {
+              this.waThemePrefs.applyToChat = parsed.applyToChat;
+            } else if (typeof parsed.applyToProfile === 'boolean') {
+              this.waThemePrefs.applyToChat = parsed.applyToProfile;
+            }
+          }
+        }
+      } catch (_) {}
+      return this.waThemePrefs;
+    },
+
+    saveWaThemePrefs() {
+      try {
+        localStorage.setItem('zoz_wa_theme_prefs', JSON.stringify(this.waThemePrefs));
+      } catch (_) {}
+    },
+
+    getProduceSvgHtml(kind) {
+      const icons = {
+        apple: `<svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true">
+          <path d="M16.5 7.5c0-2.2 1.6-4.2 3.8-4.7-.1 2.2-1.5 4.2-3.8 4.7z" fill="#4ade80"/>
+          <path d="M15.4 8.2c-.3-2.3-1.4-4-2.8-5.1" stroke="#92400e" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          <path d="M16 9.3c-3.4-1.5-8.4.4-9.5 5.4-1.2 5.4 2.6 13.4 7.1 13.7 1.3.1 2.1-.6 2.4-.6s1.1.7 2.4.6c4.5-.3 8.3-8.3 7.1-13.7-1.1-5-6.1-6.9-9.5-5.4z" fill="#ef4444"/>
+          <ellipse cx="11.2" cy="14.2" rx="1.7" ry="3.3" transform="rotate(-18 11.2 14.2)" fill="#fca5a5" opacity="0.55"/>
+        </svg>`,
+        carrot: `<svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true">
+          <path d="M18.5 7.2c1.2-2.6 3.5-4 5.7-4.1-.3 2.1-1.6 3.9-3.9 4.7 2-.5 4.4 0 5.9 1.6-2.2.7-4.5.6-6.3-.5" fill="#22c55e"/>
+          <path d="M7.2 26.8c-.7.7-1.9-.5-1.2-1.2l7.8-13.6c1.5-2.6 5.1-3.3 7.4-1 2.3 2.3 1.6 5.9-1 7.4L7.2 26.8z" fill="#fb923c"/>
+          <path d="M14.3 15.2l3.1 3.1M11.6 19.3l2.4 2.4" stroke="#c2410c" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>`,
+        banana: `<svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true">
+          <path d="M6.2 22.8c4.6 4.7 13.9 4.5 18.8-3.6 2.3-3.8 2.8-8.7 1.6-13.3l-2.6-.7c-.1 3.2-.9 6.8-2.9 9.7-3.4 4.9-8.8 6.4-13.8 5.2l-1.1 2.7z" fill="#facc15"/>
+          <path d="M24.2 5.2l2.4.7.5-1.8-2-.5-.9 1.6zM5.6 21.1l1.2 2.2-1.8.8-.8-1.6 1.4-1.4z" fill="#854d0e"/>
+          <path d="M9.5 23.4c4.3.7 9.1-1.2 12.1-5.4" stroke="#fef9c3" stroke-width="1.3" stroke-linecap="round" fill="none" opacity="0.8"/>
+        </svg>`,
+        broccoli: `<svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true">
+          <path d="M13.5 17.5h5v9.2c0 1.2-1 2.1-2.5 2.1s-2.5-.9-2.5-2.1v-9.2z" fill="#86efac"/>
+          <circle cx="10.5" cy="14" r="5" fill="#16a34a"/>
+          <circle cx="21.5" cy="14" r="5" fill="#15803d"/>
+          <circle cx="16" cy="9.8" r="5.6" fill="#22c55e"/>
+          <circle cx="13.5" cy="8.5" r="2.1" fill="#4ade80" opacity="0.7"/>
+        </svg>`
+      };
+      return icons[kind] || icons.apple;
+    },
+
+    renderProduceOrbit(containerEl, produce, radiusPx = 59, count = 10) {
+      if (!containerEl) return;
+      containerEl.innerHTML = '';
+      if (!produce || produce === 'none') return;
+
+      const mixOrder = ['apple', 'carrot', 'banana', 'broccoli'];
+      const labels = {
+        apple: 'Apel',
+        carrot: 'Wortel',
+        banana: 'Pisang',
+        broccoli: 'Brokoli'
+      };
+
+      for (let i = 0; i < count; i++) {
+        const angle = (2 * Math.PI * i) / count - Math.PI / 2;
+        const tx = Math.cos(angle) * radiusPx;
+        const ty = Math.sin(angle) * radiusPx;
+        const kind = produce === 'garden' ? mixOrder[i % mixOrder.length] : produce;
+
+        const node = document.createElement('span');
+        node.className = 'wa-produce-orbit-item';
+        node.dataset.produceKind = kind;
+        node.title = labels[kind] || kind;
+        node.style.setProperty('--orbit-tx', `${tx.toFixed(1)}px`);
+        node.style.setProperty('--orbit-ty', `${ty.toFixed(1)}px`);
+        node.style.setProperty('--orbit-delay', `${(i * 0.18).toFixed(2)}s`);
+        node.innerHTML = this.getProduceSvgHtml(kind);
+        containerEl.appendChild(node);
+      }
+    },
+
+    applyThemeToProfileModal() {
+      const dialog = document.getElementById('waProfileModalDialog');
+      const hero = document.getElementById('waProfileHeroThemed');
+      const orbit = document.getElementById('waProfileProduceOrbit');
+      if (dialog) {
+        dialog.setAttribute('data-scene', this.waThemePrefs.scene);
+        dialog.setAttribute('data-produce', this.waThemePrefs.produce);
+      }
+      if (hero) {
+        hero.setAttribute('data-scene', this.waThemePrefs.scene);
+        hero.setAttribute('data-produce', this.waThemePrefs.produce);
+      }
+      if (orbit) {
+        const isSmallViewport = window.innerWidth <= 540;
+        this.renderProduceOrbit(orbit, this.waThemePrefs.produce, isSmallViewport ? 53 : 59, isSmallViewport ? 8 : 10);
+      }
+    },
+
+    applyWaThemeEverywhere() {
+      this.loadWaThemePrefs();
+
+      document.querySelectorAll('#waSceneSelectorGrid .wa-theme-pill').forEach(btn => {
+        btn.classList.toggle('is-active', btn.dataset.sceneChoice === this.waThemePrefs.scene);
+      });
+      document.querySelectorAll('#waProduceSelectorGrid .wa-produce-pill').forEach(btn => {
+        btn.classList.toggle('is-active', btn.dataset.produceChoice === this.waThemePrefs.produce);
+      });
+
+      const syncChk = document.getElementById('chkWaThemeApplyChat');
+      if (syncChk) syncChk.checked = Boolean(this.waThemePrefs.applyToChat);
+
+      this.applyThemeToProfileModal();
+
+      const mainContent = document.getElementById('mainContent');
+      if (mainContent) {
+        if (STATE.chatMode === 'whatsapp' && this.waThemePrefs.applyToChat && this.waThemePrefs.scene !== 'default') {
+          mainContent.classList.add('wa-chat-themed');
+          mainContent.setAttribute('data-wa-scene', this.waThemePrefs.scene);
+        } else {
+          mainContent.classList.remove('wa-chat-themed');
+          mainContent.removeAttribute('data-wa-scene');
+        }
+      }
+    },
+
+    toggleProfileThemeCustomizer(forceOpen) {
+      const panel = document.getElementById('waProfileThemeCustomizer');
+      const btn = document.getElementById('btnWaProfileModalTheme');
+      const next = typeof forceOpen === 'boolean' ? forceOpen : !this.profileCustomizerOpen;
+      this.profileCustomizerOpen = next;
+      if (panel) panel.style.display = next ? 'flex' : 'none';
+      if (btn) btn.classList.toggle('is-active', next);
+    },
+
+    openThemeCustomizerPreview(contact) {
+      const target = contact || this.activeContact || (this.status?.myJid ? {
+        id: this.status.myJid,
+        name: this.status.myName || 'Akun WhatsApp Anda',
+        phone: this.status.phone || '',
+        hasAvatar: Boolean(this.status.myHasAvatar),
+        avatarUpdatedAt: this.status.myAvatarUpdatedAt || 0,
+        about: 'Akun WhatsApp yang terhubung aktif pada Zoz Router',
+        isSelf: true
+      } : {
+        id: 'preview',
+        name: 'Pratinjau Profil & Tema',
+        phone: '',
+        about: 'Sesuaikan latar belakang dan hiasan buah/sayur di sekeliling profil.',
+        isSelf: true
+      });
+      this.openProfileModal(target, { openCustomizer: true });
+    },
+
+    bindProfileThemeListeners() {
+      document.querySelectorAll('#waSceneSelectorGrid .wa-theme-pill').forEach(btn => {
+        btn.addEventListener('click', () => {
+          AudioEngine.click();
+          const chosen = btn.dataset.sceneChoice;
+          if (!chosen) return;
+          this.waThemePrefs.scene = chosen;
+          this.saveWaThemePrefs();
+          this.applyWaThemeEverywhere();
+        });
+      });
+
+      document.querySelectorAll('#waProduceSelectorGrid .wa-produce-pill').forEach(btn => {
+        btn.addEventListener('click', () => {
+          AudioEngine.click();
+          const chosen = btn.dataset.produceChoice;
+          if (!chosen) return;
+          this.waThemePrefs.produce = chosen;
+          this.saveWaThemePrefs();
+          this.applyWaThemeEverywhere();
+        });
+      });
+
+      document.getElementById('chkWaThemeApplyChat')?.addEventListener('change', (e) => {
+        this.waThemePrefs.applyToChat = Boolean(e.target.checked);
+        this.saveWaThemePrefs();
+        this.applyWaThemeEverywhere();
       });
     },
 
