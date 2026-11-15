@@ -3464,6 +3464,20 @@ export default {
 
         let content = '';
         let title = cleanTarget;
+        let binaryRejectedReason = '';
+
+        const isWorkerBinaryOrGarbledPdf = (sampleText) => {
+          if (typeof sampleText !== 'string' || !sampleText) return false;
+          const head = sampleText.slice(0, 12000);
+          if (/^%PDF-\d\.\d/i.test(head.trimStart())) return true;
+          if (/\b\d+\s+\d+\s+obj\b/.test(head) && /\bendobj\b/.test(head) && /%PDF-\d\.\d/i.test(head)) return true;
+          let garbageCount = 0;
+          for (let k = 0; k < head.length; k++) {
+            const c = head.charCodeAt(k);
+            if (c === 0xFFFD || (c < 0x20 && c !== 0x09 && c !== 0x0A && c !== 0x0D)) garbageCount++;
+          }
+          return head.length >= 40 && garbageCount >= 4 && (garbageCount / head.length) > 0.04;
+        };
 
         // 1. Prioritaskan Jina Reader untuk ekstraksi halaman penuh bebas blokir
         try {
@@ -3472,9 +3486,12 @@ export default {
             signal: AbortSignal.timeout(15000)
           });
           if (jinaRes.ok) {
-            content = await jinaRes.text();
-            const titleMatch = content.match(/^Title:\s*(.+)$/m);
-            if (titleMatch) title = titleMatch[1].trim();
+            const jinaText = await jinaRes.text();
+            if (jinaText && !isWorkerBinaryOrGarbledPdf(jinaText)) {
+              content = jinaText;
+              const titleMatch = content.match(/^Title:\s*(.+)$/m);
+              if (titleMatch) title = titleMatch[1].trim();
+            }
           }
         } catch (_) {}
 
@@ -3486,30 +3503,64 @@ export default {
               signal: AbortSignal.timeout(10000)
             });
             if (directRes.ok) {
-              const html = await directRes.text();
-              const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-              if (titleMatch) title = titleMatch[1].trim();
-              content = html.replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
-                            .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
-                            .replace(/<nav\b[\s\S]*?<\/nav>/gi, ' ')
-                            .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
-                            .replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ')
-                            .replace(/<aside\b[\s\S]*?<\/aside>/gi, ' ')
-                            .replace(/<!--[\s\S]*?-->/g, ' ')
-                            .replace(/<[^>]+>/g, ' ')
-                            .replace(/&amp;/g, '&')
-                            .replace(/&lt;/g, '<')
-                            .replace(/&gt;/g, '>')
-                            .replace(/&quot;/g, '"')
-                            .replace(/&#39;/g, "'")
-                            .replace(/&#x27;/g, "'")
-                            .replace(/&nbsp;/g, ' ')
-                            .replace(/\s+/g, ' ').trim();
+              const directCtype = String(directRes.headers.get('content-type') || '').toLowerCase();
+              const isNonTextMime = /^(?:image|audio|video)\/|application\/(?:pdf|octet-stream|zip|x-gzip|msword|vnd\.openxmlformats-)/.test(directCtype);
+              if (isNonTextMime) {
+                binaryRejectedReason = `Konten biner/PDF (${directCtype || 'application/octet-stream'}) tidak dapat diekstrak langsung di mode Cloudflare Stateless.`;
+              } else {
+                const html = await directRes.text();
+                if (isWorkerBinaryOrGarbledPdf(html)) {
+                  binaryRejectedReason = 'Konten biner atau PDF mentah terdeteksi pada respons URL dan tidak dapat dibaca sebagai HTML.';
+                } else {
+                  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+                  if (titleMatch) title = titleMatch[1].trim();
+                  const stripped = html.replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+                                       .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+                                       .replace(/<nav\b[\s\S]*?<\/nav>/gi, ' ')
+                                       .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
+                                       .replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ')
+                                       .replace(/<aside\b[\s\S]*?<\/aside>/gi, ' ')
+                                       .replace(/<!--[\s\S]*?-->/g, ' ')
+                                       .replace(/<[^>]+>/g, ' ')
+                                       .replace(/&amp;/g, '&')
+                                       .replace(/&lt;/g, '<')
+                                       .replace(/&gt;/g, '>')
+                                       .replace(/&quot;/g, '"')
+                                       .replace(/&#39;/g, "'")
+                                       .replace(/&#x27;/g, "'")
+                                       .replace(/&nbsp;/g, ' ')
+                                       .replace(/\s+/g, ' ').trim();
+                  if (isWorkerBinaryOrGarbledPdf(stripped)) {
+                    binaryRejectedReason = 'Hasil ekstraksi teks mengandung karakter biner/PDF rusak.';
+                  } else {
+                    content = stripped;
+                  }
+                }
+              }
             }
           } catch (_) {}
         }
 
-        const trimmedContent = (content || '').slice(0, maxChars);
+        if (binaryRejectedReason) {
+          return new Response(JSON.stringify({
+            success: false,
+            error: binaryRejectedReason
+          }), {
+            status: 415,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        const trimmedContent = (content || '').slice(0, maxChars).trim();
+        if (!trimmedContent) {
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'Gagal mengekstrak konten teks yang dapat dibaca dari URL tersebut.'
+          }), {
+            status: 502,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
         return new Response(JSON.stringify({
           success: true,
           url: cleanTarget,

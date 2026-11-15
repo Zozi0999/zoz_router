@@ -35,7 +35,7 @@
       }
     });
     try {
-      var currentVer = 'v20261115_tmwhja7o9';
+      var currentVer = 'v20261115_v781';
       var savedVer = localStorage.getItem('__zoz_ver__');
       if (savedVer !== currentVer) {
         localStorage.setItem('__zoz_ver__', currentVer);
@@ -49,7 +49,7 @@
         }
       }
     } catch (_) {}
-    window.__ZOZ_VERSION__ = 'v20261115_tmwhja7o9';
+    window.__ZOZ_VERSION__ = 'v20261115_v781';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png?v=20261112_v765">
@@ -109,8 +109,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261113_v774">
-  <link rel="stylesheet" href="style.css?v=20261113_v774">
+  <link rel="preload" as="style" href="style.css?v=20261115_v781">
+  <link rel="stylesheet" href="style.css?v=20261115_v781">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -2631,13 +2631,13 @@
 
           <!-- Scan QR Pairing Button -->
           <button class="tb-btn" id="btnTermOpenQrScanner" type="button" title="Pindai QR Code untuk Pairing Remote">
-            <i class="fa-solid fa-qrcode" style="font-size: 0.75rem; color: #22d3ee;"></i>
+            <svg viewBox="0 0 24 24" width="13" height="13" stroke="#22d3ee" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>
             <span id="labelTermOpenQrScanner">Scan QR</span>
           </button>
 
           <!-- Quick Switch to WhatsApp Mode -->
           <button class="tb-btn tb-btn-wa-switch" id="btnTermSwitchToWa" type="button" title="Beralih Cepat ke WhatsApp Chat">
-            <i class="fa-brands fa-whatsapp" style="color: #25D366; font-size: 0.82rem;"></i>
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="#25D366" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
             <span>WhatsApp</span>
           </button>
 
@@ -2645,6 +2645,11 @@
           <button class="tb-btn tb-btn-mobile-connect" id="btnTermMobileConnect" type="button" title="Sambungkan ke Laptop (Scan QR / Tunnel)">
             <i class="fa-solid fa-laptop-code" style="color: var(--neon-cyan);"></i>
             <span class="mobile-connect-label">Sambungkan</span>
+          </button>
+
+          <!-- Search Terminal Output (Ctrl+Shift+F) -->
+          <button class="tb-btn icon-only" id="btnTermSearch" type="button" title="Cari Teks di Output Terminal (Ctrl+Shift+F)">
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
           </button>
 
           <!-- Split View Toggle -->
@@ -2655,17 +2660,18 @@
 
           <!-- Fullscreen Toggle -->
           <button class="tb-btn icon-only" id="btnTermFullscreen" type="button" title="Layar Penuh Terminal (F11)">
-            <i class="fa-solid fa-expand" id="iconTermFullscreen" style="font-size: 0.8rem;"></i>
+            <i class="fa-solid fa-expand" id="iconTermFullscreen" style="display: none;"></i>
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
           </button>
 
           <!-- Minimize Terminal Button -->
           <button class="tb-btn icon-only tb-btn-minimize" id="btnTermMinimize" type="button" aria-label="Minimize Terminal" title="Ciutkan / Minimize Terminal">
-            <i class="fa-solid fa-minus" style="font-size: 0.85rem;"></i>
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
           </button>
 
           <!-- Close Modal -->
           <button class="tb-btn icon-only tb-btn-close" id="btnTermClose" type="button" data-close="terminalModal" aria-label="Tutup Terminal" title="Tutup Terminal (Esc)">
-            <i class="fa-solid fa-xmark" style="font-size: 0.9rem;"></i>
+            <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
         </div>
       </div>
@@ -2708,6 +2714,19 @@
             </button>
           </div>
         </div>
+      </div>
+
+      <!-- In-Tab Terminal Output Search Bar (Ctrl+Shift+F) -->
+      <div class="term-search-bar" id="termSearchBar" style="display: none;">
+        <div class="term-search-input-wrap">
+          <i class="fa-solid fa-magnifying-glass term-search-icon"></i>
+          <input type="text" id="inputTermSearch" class="term-search-input" placeholder="Cari di terminal..." autocomplete="off" spellcheck="false" />
+          <span class="term-search-count" id="termSearchCount">0/0</span>
+        </div>
+        <button type="button" class="term-search-btn" id="btnTermSearchCase" title="Peka Huruf Besar/Kecil (Match Case)">Aa</button>
+        <button type="button" class="term-search-btn" id="btnTermSearchPrev" title="Hasil Sebelumnya (Shift+Enter)">&#9650;</button>
+        <button type="button" class="term-search-btn" id="btnTermSearchNext" title="Hasil Berikutnya (Enter)">&#9660;</button>
+        <button type="button" class="term-search-btn" id="btnTermSearchClose" title="Tutup Pencarian (Esc)">&times;</button>
       </div>
 
       <!-- Terminal Workspace: Single or Split Panes -->
@@ -2828,11 +2847,12 @@
         </button>
       </div>
 
-      <!-- Mobile Touch Keybar (Termux Native 2-Row x 8-Column Architecture) -->
+      <!-- Mobile Touch Keybar (Termux Native 2-Row x 9-Column Architecture) -->
       <div class="terminal-mobile-keybar" id="termMobileTouchKeybar" style="display: none;">
-        <!-- Row 1: System, Modifiers & Arrow Navigation (8 keys) -->
+        <!-- Row 1: System, Modifiers (SHIFT/CTRL/ALT) & Arrow Navigation (9 keys) -->
         <button type="button" class="term-touch-key" data-key="Escape" title="Escape (Tutup Menu/Batal)">ESC</button>
-        <button type="button" class="term-touch-key" data-key="Tab" title="Tab Autocomplete">TAB</button>
+        <button type="button" class="term-touch-key" data-key="Tab" title="Tab Autocomplete (atau Shift+Tab)">TAB</button>
+        <button type="button" class="term-touch-key term-mod-key shift-modifier-key" id="btnTouchShift" data-key="shift_toggle" title="Shift Modifier Toggle (Shift+Tab, Shift+Enter, Huruf Kapital)">SHIFT</button>
         <button type="button" class="term-touch-key term-mod-key ctrl-modifier-key" id="btnTouchCtrl" data-key="ctrl_toggle" title="Ctrl Modifier Toggle (Termux style)">CTRL</button>
         <button type="button" class="term-touch-key term-mod-key alt-modifier-key" id="btnTouchAlt" data-key="alt_toggle" title="Alt Modifier Toggle">ALT</button>
         <button type="button" class="term-touch-key" data-key="ArrowLeft" title="Panah Kiri / Geser Kursor ke Kiri">←</button>
@@ -2840,15 +2860,16 @@
         <button type="button" class="term-touch-key" data-key="ArrowUp" title="Panah Atas / Riwayat Sebelumnya">↑</button>
         <button type="button" class="term-touch-key" data-key="ArrowDown" title="Panah Bawah / Riwayat Selanjutnya">↓</button>
 
-        <!-- Row 2: Signals, AI Shortcuts, Editing & Enter (8 keys) -->
+        <!-- Row 2: Signals, AI Shortcuts, Editing & Enter (9 keys) -->
         <button type="button" class="term-touch-key danger-key" data-key="ctrl_c" title="Interupsi Perintah (Ctrl+C)">^C</button>
         <button type="button" class="term-touch-key" data-key="ctrl_l" title="Bersihkan Layar (Ctrl+L)">^L</button>
         <button type="button" class="term-touch-key auto-enter-key" id="btnTouchAutoEnter" data-cmd="auto_enter" title="Toggle Auto Y/Enter Otomatis">⚡Auto</button>
         <button type="button" class="term-touch-key slash-key" data-key="slash" title="Slash Command AI CLI (/)">/</button>
         <button type="button" class="term-touch-key" data-key="Home" title="Home (Awal Baris)">HOME</button>
         <button type="button" class="term-touch-key" data-key="End" title="End (Akhir Baris)">END</button>
+        <button type="button" class="term-touch-key" data-key="Delete" title="Delete (Hapus Kanan)">DEL</button>
         <button type="button" class="term-touch-key" data-key="paste" title="Tempel Clipboard">Paste</button>
-        <button type="button" class="term-touch-key primary" data-key="Enter" title="Kirim Enter">↵</button>
+        <button type="button" class="term-touch-key primary" data-key="Enter" title="Kirim Enter (atau Shift+Enter baris baru)">↵</button>
       </div>
 
       <!-- Quick Command Action Chips Bar -->
@@ -3147,7 +3168,7 @@
           <span>Pindai QR Code Remote Tunnel</span>
         </div>
         <button type="button" class="tb-btn icon-only" id="btnTermCloseQrScanner" title="Tutup Kamera">
-          <i class="fa-solid fa-xmark"></i>
+          <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
         </button>
       </div>
       <div class="modal-body term-qr-scanner-body">
@@ -3211,7 +3232,7 @@
             <i class="fa-solid fa-palette"></i> <span>Kustom Tema</span>
           </button>
           <button type="button" class="tb-btn icon-only" id="btnCloseWaProfileModal" title="Tutup">
-            <i class="fa-solid fa-xmark"></i>
+            <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
         </div>
       </div>
@@ -3548,8 +3569,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression & Bayesian calibration engine (must load before app.js) -->
-  <script src="text-safety.js?v=20261112_v765" defer></script>
+  <script src="text-safety.js?v=20261115_v781" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=v20261115_tmwhja7o9" defer></script>
+  <script src="app.js?v=20261115_v781" defer></script>
 </body>
 </html>

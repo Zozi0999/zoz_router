@@ -509,6 +509,102 @@ function hasVisibleTerminalPrompt(bufferStr) {
 }
 
 /**
+ * Normalisasi input PTY berbasis jenis shell target:
+ * - UNIX / WSL / Node / Python / non-Windows: pertahankan Alt+Backspace (\x1b\x7f, \x1b\x08) seutuhnya.
+ * - PowerShell Windows ConPTY: petakan Alt+Backspace (\x1b\x7f, \x1b\x08) ke \x17 (Ctrl+W BackwardKillWord)
+ *   agar menghapus satu kata utuh tanpa memicu echo ^H / ^¿ dari ConPTY.
+ * - CMD Windows ConPTY: petakan ke \x08 (Backspace standar cmd.exe).
+ */
+function sanitizePtyInputForShell(sessionOrShell, rawData) {
+  if (typeof rawData !== 'string' || !rawData) return rawData || '';
+  if (process.platform !== 'win32') return rawData;
+  const shell = (typeof sessionOrShell === 'string' ? sessionOrShell : sessionOrShell?.shell || 'powershell').toLowerCase();
+  if (shell === 'wsl' || shell === 'bash' || shell === 'ubuntu-wsl' || shell === 'node' || shell === 'python') {
+    return rawData;
+  }
+  if (shell === 'cmd' || shell === 'cmd.exe') {
+    return rawData.replace(/\x1b\x7f/g, '\x08').replace(/\x1b\x08/g, '\x08');
+  }
+  return rawData.replace(/\x1b\x7f/g, '\x17').replace(/\x1b\x08/g, '\x17');
+}
+
+/**
+ * Pemotongan buffer replay terminal (maks maxChars) secara aman pada batas chunk
+ * atau melangkahi fragmen sekuens ANSI incomplete agar output reconnect tidak terpotong di tengah kode escape.
+ */
+function sliceReplayBufferSafely(chunks, maxChars = 65536) {
+  if (!Array.isArray(chunks) || chunks.length === 0) return '';
+  const selected = [];
+  let total = 0;
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    const ch = chunks[i];
+    if (!ch) continue;
+    if (total + ch.length <= maxChars) {
+      selected.push(ch);
+      total += ch.length;
+    } else {
+      if (selected.length === 0) {
+        let tail = ch.slice(-maxChars);
+        const firstEsc = tail.indexOf('\x1b');
+        const firstNl = tail.indexOf('\n');
+        if (firstEsc > 0 && firstNl !== -1 && firstNl < firstEsc) {
+          tail = tail.slice(firstNl + 1);
+        } else if (tail.startsWith('[') || tail.startsWith(']')) {
+          if (firstNl !== -1 && firstNl < 256) tail = tail.slice(firstNl + 1);
+          else if (firstEsc > 0) tail = tail.slice(firstEsc);
+        }
+        selected.push(tail);
+      }
+      break;
+    }
+  }
+  return selected.reverse().join('');
+}
+
+/**
+ * Membersihkan seluruh timer, PTY, socket WebSocket, dan SSE client dari satu sesi terminal secara atomik.
+ */
+function destroyTerminalSession(sessionId, session) {
+  if (session) {
+    if (session._autoEnterRetryTimer) {
+      clearTimeout(session._autoEnterRetryTimer);
+      session._autoEnterRetryTimer = null;
+    }
+    if (session._resizeTimer) {
+      clearTimeout(session._resizeTimer);
+      session._resizeTimer = null;
+    }
+    if (session._disconnectTimer) {
+      clearTimeout(session._disconnectTimer);
+      session._disconnectTimer = null;
+    }
+    const ptyProc = session.pty;
+    session.pty = null;
+    try {
+      if (ptyProc && typeof ptyProc.kill === 'function') ptyProc.kill();
+    } catch (_) {}
+    if (session.clients) {
+      for (const client of session.clients) {
+        try { if (!client.writableEnded) client.end(); } catch (_) {}
+      }
+      session.clients.clear();
+    }
+    if (session.wsClients) {
+      for (const ws of session.wsClients) {
+        try {
+          ws.write(encodeWsFrame(JSON.stringify({ type: 'exit', exitCode: 0, signal: 'SIGTERM' })));
+        } catch (_) {}
+        try { ws.destroy(); } catch (_) {}
+      }
+      session.wsClients.clear();
+    }
+  }
+  if (sessionId) {
+    activeTerminalSessions.delete(sessionId);
+  }
+}
+
+/**
  * Helper normalisasi stream ConPTY Windows di level global (Linear-Time O(N) Zero-Backtracking)
  * untuk memurnikan sekuens hapus layar (cls / Clear-Host) tanpa risiko ReDoS pada TUI besar (codex/agy).
  * Diakses oleh jalur SSE (/api/terminal/stream) maupun jalur WebSocket (handleTerminalWebSocketUpgrade).
@@ -638,46 +734,149 @@ function cleanConptyData(str, sessionOrPane) {
 }
 
 /**
- * Autonomous Server-Side Auto Y / Auto Enter Engine
+ * Normalisasi deterministik chunk output terminal (ANSI/ConPTY) untuk pendeteksi prompt Auto Enter.
+ * Mempartisi sekuens escape secara matematis:
+ * - OSC & SGR styling/mode (m/h/l/K/...) -> '' (menjaga token terpecah antar chunk seperti '[y' + '/N]' tetap utuh)
+ * - Pergerakan kursor & pembersihan layar (H/f/C/G/J/...) & CR/LF -> ' ' (menjaga batas kata TUI)
+ */
+function stripTerminalAnsiForMatcher(rawData) {
+  if (!rawData || typeof rawData !== 'string') return '';
+  return rawData
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b\[[0-9;?]*[mhlrsuK]/g, '')
+    .replace(/\x1b\[[0-9;?]*[@-~]/g, ' ')
+    .replace(/\x1b[@-Z\\-_]/g, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, '');
+}
+
+/**
+ * Selalu rekam jendela geser output PTY (3000 char) terlepas dari status autoEnter OFF/ON.
+ * Invarian: Jika prompt muncul saat Auto Enter OFF lalu pengguna menyalakannya kembali (0 -> 1),
+ * tail prompt masih tersimpan utuh dan langsung terdeteksi tanpa menunggu output baru.
+ */
+function appendAutoEnterBuffer(session, rawData) {
+  if (!session || !rawData || typeof rawData !== 'string') return;
+  if (rawData.includes('\x1b[2J') || rawData.includes('\x1b[3J') || rawData.includes('\x1bc')) {
+    session.recentTextBuffer = '';
+  }
+  const cleanedChunk = stripTerminalAnsiForMatcher(rawData);
+  if (!cleanedChunk) return;
+  session.recentTextBuffer = ((session.recentTextBuffer || '') + cleanedChunk).slice(-3000);
+}
+
+/**
+ * Catat aktivitas input manual pengguna dan reset epoch prompt bila pengguna mengirimkan
+ * submit/interupsi eksplisit (\r, \n, Ctrl+C \x03, Esc \x1b) agar prompt lama yang sudah
+ * dijawab manual tidak terpicu ulang saat Auto Enter dihidupkan kembali.
+ */
+function markSessionManualInput(session, rawInput) {
+  if (!session) return;
+  session.lastInputAt = Date.now();
+  if (typeof rawInput === 'string' && /[\r\n\x03\x1b]/.test(rawInput)) {
+    session.recentTextBuffer = '';
+    if (session._autoEnterRetryTimer) {
+      clearTimeout(session._autoEnterRetryTimer);
+      session._autoEnterRetryTimer = null;
+    }
+  }
+}
+
+/**
+ * Sinkronisasi atomik & idempoten status Auto Enter (0 <-> 1) ke seluruh sesi PTY aktif.
+ * Menjamin transisi 0 -> 1 selalu mengaktifkan ulang seluruh latch, timer, dan mengevaluasi
+ * prompt yang sedang menunggu di layar saat ini juga.
+ */
+function syncAutoEnterState(enabled, sourceLabel = 'WS') {
+  const nextState = Boolean(enabled);
+  globalAutoEnterEnabled = nextState;
+  savePersistedTunnelState();
+
+  for (const [id, s] of activeTerminalSessions.entries()) {
+    s.autoEnter = nextState;
+    if (s._autoEnterRetryTimer) {
+      clearTimeout(s._autoEnterRetryTimer);
+      s._autoEnterRetryTimer = null;
+    }
+    if (nextState) {
+      // Reset latch cooldown agar penyalaan ulang (0 -> 1) langsung aktif tanpa dead-lock
+      s.lastAutoRespondAt = 0;
+      setImmediate(() => {
+        if (s && s.autoEnter && s.pty) {
+          handleServerAutoEnter(s, '', { fromToggleOn: true });
+        }
+      });
+    }
+    const autoPayload = JSON.stringify({ type: 'auto-enter-status', autoEnter: nextState, session: id });
+    for (const client of s.clients) {
+      try { if (!client.writableEnded) client.write(`data: ${autoPayload}\n\n`); } catch (_) {}
+    }
+    if (s.wsClients && s.wsClients.size > 0) {
+      const wsFrame = encodeWsFrame(autoPayload);
+      for (const ws of s.wsClients) {
+        try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+      }
+    }
+  }
+  console.log(`[AutoEnter] Synchronized autoEnter=${nextState} across all laptop terminal sessions via ${sourceLabel}.`);
+  return nextState;
+}
+
+/**
+ * Autonomous Server-Side Auto Y / Auto Enter Engine (Fixed-Point & Lossless Buffer)
  * Memantau output PTY secara real-time di background Windows host.
  * Ketika mendeteksi prompt perizinan (Claude Code, Antigravity CLI, Gemini CLI, PowerShell, npm),
  * server langsung mengirimkan konfirmasi (Enter / 'y\r') secara mandiri ke proses PTY.
- * Berjalan terus menerus bahkan jika pengguna mengunci HP, beralih aplikasi, atau terputus jaringan.
  */
-function handleServerAutoEnter(session, data) {
-  if (!session || !session.autoEnter || !session.pty) return;
-  if (!data || typeof data !== 'string') return;
+function handleServerAutoEnter(session, data, opts = {}) {
+  if (!session || !session.pty) return;
+  if (data && typeof data === 'string') {
+    appendAutoEnterBuffer(session, data);
+  }
+  if (!session.autoEnter) return;
+
+  if (session._autoEnterRetryTimer) {
+    clearTimeout(session._autoEnterRetryTimer);
+    session._autoEnterRetryTimer = null;
+  }
 
   const now = Date.now();
-  // Jeda minimum antar auto-respond: 1000ms untuk mencegah spam / duplicate response
-  if (session.lastAutoRespondAt && (now - session.lastAutoRespondAt) < 1000) return;
-  // Jangan auto-respond jika ada user input manual dalam 1200ms terakhir
-  if (session.lastInputAt && (now - session.lastInputAt) < 1200) return;
-
-  // Akumulasikan buffer teks terbaru (maks 3000 karakter)
-  session.recentTextBuffer = ((session.recentTextBuffer || '') + ' ' + data).slice(-3000);
-
-  // Bersihkan ANSI escape sequence dan karakter kontrol
-  const clean = session.recentTextBuffer
-    .replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1b\\))/g, '')
-    .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, ' ')
-    .replace(/\s+/g, ' ');
-
-  // Guard: Jangan pernah auto-respond pada password/secret/PIN prompt
-  if (/(?:password|passphrase|secret key|access token|api key|pin):\s*$/i.test(clean)) return;
-
-  // Guard: Jangan auto-respond jika hanya berada di prompt shell biasa tanpa dialog interaktif
-  if (/(?:PS [A-Z]:\\[^>]*>\s*$|^[^>]*>\s*$)/i.test(clean) && !/(?:Run this command|permission|allow|accept|approve|proceed|continue|\b[yY]\/[nN]\b|>\s*1\.)/i.test(clean)) {
+  // Invarian jeda deterministik: hitung sisa tunda (holdoffMs). Jika > 0, jadwalkan ulang
+  // tepat setelah jeda berakhir sehingga prompt yang masuk di jendela tunda TIDAK pernah hilang.
+  const minWaitAuto = session.lastAutoRespondAt ? Math.max(0, 1000 - (now - session.lastAutoRespondAt)) : 0;
+  const minWaitInput = (session.lastInputAt && !opts.ignoreRecentInput) ? Math.max(0, 1200 - (now - session.lastInputAt)) : 0;
+  const holdoffMs = Math.max(minWaitAuto, minWaitInput);
+  if (holdoffMs > 0) {
+    session._autoEnterRetryTimer = setTimeout(() => {
+      session._autoEnterRetryTimer = null;
+      if (session && session.autoEnter && session.pty) {
+        handleServerAutoEnter(session, '', { ignoreRecentInput: false });
+      }
+    }, holdoffMs + 25);
     return;
   }
 
+  // Pertahankan batas baris agar guard prompt shell tidak tertembus kata historis di scrollback atas
+  const recentLines = String(session.recentTextBuffer || '')
+    .split('\n')
+    .map(l => l.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  if (recentLines.length === 0) return;
+
+  const lastLine = recentLines[recentLines.length - 1];
+  // Guard: Jangan pernah auto-respond pada password/secret/PIN prompt
+  if (/(?:password|passphrase|secret key|access token|api key|pin):\s*$/i.test(lastLine)) return;
+
+  // Guard: Jika baris aktif paling bawah sudah kembali ke prompt shell biasa, hentikan
+  if (/^(?:PS\s+[A-Z]:\\[^>]*>|[A-Z]:\\[^>]*>|[^@\s]+@[^:\s]+:[^$#]*[$#]|[$#>])$/i.test(lastLine)) {
+    return;
+  }
+
+  // Fokuskan deteksi pada ekor aktif (maks. 10 baris / 650 karakter terakhir)
+  const cleanFull = recentLines.slice(-10).join(' ');
+  const clean = cleanFull.length > 650 ? cleanFull.slice(-650) : cleanFull;
+
   // Pola 1: Dialog menu / permission interaktif CLI (Claude Code, Gemini CLI, Antigravity CLI / AGY, Inquirer)
-  // Menangkap:
-  // - "Allow creation of this file? > 1. Yes, allow creation"
-  // - "Allow edit of this file? > 1. Yes, allow edit"
-  // - "Accept this file edit? > 1. Yes, accept this change"
-  // - "Run this command? > 1. Yes, run command"
-  // - Setiap menu pilihan yang memiliki cursor affirmative "> 1. Yes..." atau "> 1. Allow..." dsb.
   const isCliAffirmativeMenu = (
     /(?:[>❯›→*]\s*(?:1\.|\(?1\)?|\[1\])?\s*(?:Yes|Allow|Accept|Approve|Proceed|Continue|Confirm|Run|Always|Apply|Save|Overwrite|Keep|Create|Update|Execute|Ya|Izinkan|Setujui|Lanjutkan)\b)/i.test(clean) ||
     (
@@ -794,7 +993,7 @@ const MIME_TYPES = {
 };
 
 const IS_VERCEL_ENV = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-const DATA_DIR = IS_VERCEL_ENV ? path.join('/tmp', 'data') : path.join(__dirname, 'data');
+const DATA_DIR = IS_VERCEL_ENV ? path.join('/tmp', 'data') : (process.env.ZOZ_DATA_DIR ? path.resolve(process.env.ZOZ_DATA_DIR) : path.join(__dirname, 'data'));
 const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 
@@ -3152,8 +3351,7 @@ function reapOrphanedTerminalSessions() {
     if (activeClients === 0) {
       const idleTime = now - (session.lastActivity || session.createdAt || now);
       if (idleTime > MAX_IDLE_TTL) {
-        try { if (session.pty && typeof session.pty.kill === 'function') session.pty.kill(); } catch (_) {}
-        activeTerminalSessions.delete(id);
+        destroyTerminalSession(id, session);
         console.log(`[PTY Reaper] Reaped orphaned terminal session ${id} (idle ${Math.round(idleTime / 3600000)}h, 0 clients).`);
       }
     }
@@ -3171,8 +3369,7 @@ function reapOrphanedTerminalSessions() {
     unattached.sort((a, b) => a.lastActivity - b.lastActivity);
     while (activeTerminalSessions.size > MAX_SESSIONS && unattached.length > 0) {
       const target = unattached.shift();
-      try { if (target.session.pty && typeof target.session.pty.kill === 'function') target.session.pty.kill(); } catch (_) {}
-      activeTerminalSessions.delete(target.id);
+      destroyTerminalSession(target.id, target.session);
       console.log(`[PTY Reaper] Capacity limit exceeded (> ${MAX_SESSIONS}). Reaped oldest unattached session ${target.id}.`);
     }
   }
@@ -3798,18 +3995,27 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
 
     // Jika file sesi fisik belum ada di disk (misal user langsung keluar sesaat setelah kirim pesan),
     // buat otomatis struktur sesi agar jawaban latar belakang tidak hilang dan pertanyaan user tetap ada
+    function buildServerUserMessageRecord(rawPromptText, imgs, tsMs) {
+      const contentStr = rawPromptText || (imgs ? 'Analisis gambar terlampir ini.' : '...');
+      const uMsg = {
+        id: 'msg_usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        role: 'user',
+        content: contentStr,
+        images: imgs || undefined,
+        image: (imgs && imgs[0]) || undefined,
+        timestamp: new Date(tsMs || Date.now()).toISOString()
+      };
+      if (typeof textSafety.normalizeUserMessagePresentation === 'function') {
+        textSafety.normalizeUserMessagePresentation(uMsg);
+      }
+      return uMsg;
+    }
+
     if (!sessData || typeof sessData !== 'object') {
       const initialMsgs = [];
 
       if (cleanUserPrompt || (savedUserImgs && savedUserImgs.length > 0)) {
-        initialMsgs.push({
-          id: 'msg_usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-          role: 'user',
-          content: cleanUserPrompt || (savedUserImgs ? 'Analisis gambar terlampir ini.' : '...'),
-          images: savedUserImgs || undefined,
-          image: (savedUserImgs && savedUserImgs[0]) || undefined,
-          timestamp: new Date(Date.now() - 3000).toISOString()
-        });
+        initialMsgs.push(buildServerUserMessageRecord(cleanUserPrompt, savedUserImgs, Date.now() - 3000));
       }
 
       let dynamicTitle = 'Percakapan Baru';
@@ -3942,17 +4148,14 @@ async function _appendSessionFileSerialized(cleanSid, effectiveUid, userPrompt, 
     // Jika ini giliran baru yang belum dicatat di disk, tambahkan pesan user terlebih dahulu
     // PERINGATAN KETAT: DILARANG menambahkan pesan user palsu jika payload berupa digest/hasil penelusuran internal!
     if (isDifferentTurn && !isInternalSystemPayload(cleanUserPrompt) && (cleanUserPrompt || (savedUserImgs && savedUserImgs.length > 0))) {
-      msgs.push({
-        id: 'msg_usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-        role: 'user',
-        content: cleanUserPrompt || (savedUserImgs ? 'Analisis gambar terlampir ini.' : '...'),
-        images: savedUserImgs || undefined,
-        image: (savedUserImgs && savedUserImgs[0]) || undefined,
-        timestamp: new Date(Date.now() - 2000).toISOString()
-      });
+      msgs.push(buildServerUserMessageRecord(cleanUserPrompt, savedUserImgs, Date.now() - 2000));
     } else if (lastUserMsg && savedUserImgs && savedUserImgs.length > 0 && (!lastUserMsg.images || lastUserMsg.images.length === 0)) {
       lastUserMsg.images = savedUserImgs;
       lastUserMsg.image = savedUserImgs[0];
+    }
+
+    if (typeof textSafety.normalizeUserMessagePresentation === 'function') {
+      msgs.forEach(m => { if (m && m.role === 'user') textSafety.normalizeUserMessagePresentation(m); });
     }
 
     const newMsg = {
@@ -4358,6 +4561,290 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
 }
 
 
+const PDF_TEMP_DIR = path.join(os.tmpdir(), 'zoz_pdf_extract');
+const PDF_PYTHON_EXTRACT_SCRIPT = [
+  'import sys, json, re',
+  'path = sys.argv[1]',
+  'limit = int(sys.argv[2]) if len(sys.argv) > 2 else 12000',
+  'out_parts = []',
+  'total = 0',
+  'title = ""',
+  'pages = 0',
+  'try:',
+  '    import fitz',
+  '    doc = fitz.open(path)',
+  '    pages = len(doc)',
+  '    meta = doc.metadata or {}',
+  '    title = (meta.get("title") or "").strip()',
+  '    for idx, page in enumerate(doc):',
+  '        txt = (page.get_text("text") or "").strip()',
+  '        if txt:',
+  '            block = f"[Halaman {idx + 1}]\\n{txt}"',
+  '            out_parts.append(block)',
+  '            total += len(block)',
+  '            if total >= limit:',
+  '                break',
+  '    doc.close()',
+  'except Exception:',
+  '    from pypdf import PdfReader',
+  '    reader = PdfReader(path)',
+  '    pages = len(reader.pages)',
+  '    meta = reader.metadata or {}',
+  '    if hasattr(meta, "get"):',
+  '        title = str(meta.get("/Title") or "").strip()',
+  '    for idx, page in enumerate(reader.pages):',
+  '        txt = (page.extract_text() or "").strip()',
+  '        if txt:',
+  '            block = f"[Halaman {idx + 1}]\\n{txt}"',
+  '            out_parts.append(block)',
+  '            total += len(block)',
+  '            if total >= limit:',
+  '                break',
+  'text = "\\n\\n".join(out_parts)',
+  'text = re.sub(r"[ \\t]{2,}", " ", text)',
+  'text = re.sub(r"\\n{3,}", "\\n\\n", text).strip()',
+  'print(json.dumps({"ok": bool(text), "title": title, "pages": pages, "text": text[:limit]}, ensure_ascii=False))'
+].join('\n');
+
+/**
+ * Mengekstrak teks UTF-8 bersih dari buffer biner PDF menggunakan PyMuPDF (fitz) atau pypdf
+ * sehingga PDF web (termasuk URL tanpa ekstensi .pdf seperti arxiv.org/pdf/...) tidak pernah
+ * didekode sebagai UTF-8/HTML mentah (%PDF-1.7 mojibake).
+ */
+function extractPdfTextFromBuffer(pdfBuffer, maxChars = 12000) {
+  return new Promise((resolve) => {
+    if (!Buffer.isBuffer(pdfBuffer) || pdfBuffer.length < 8) {
+      return resolve({ ok: false, error: 'Buffer PDF kosong atau tidak valid.' });
+    }
+    const headerSample = pdfBuffer.slice(0, Math.min(1024, pdfBuffer.length)).toString('latin1');
+    if (!headerSample.includes('%PDF-')) {
+      return resolve({ ok: false, error: 'Header biner %PDF- tidak ditemukan.' });
+    }
+
+    try {
+      if (!fs.existsSync(PDF_TEMP_DIR)) fs.mkdirSync(PDF_TEMP_DIR, { recursive: true });
+    } catch (_) {}
+
+    const tmpName = `pdf_${Date.now()}_${crypto.randomBytes(6).toString('hex')}.pdf`;
+    const tmpPath = path.join(PDF_TEMP_DIR, tmpName);
+    const cleanupTmp = () => {
+      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
+    };
+
+    try {
+      fs.writeFileSync(tmpPath, pdfBuffer);
+    } catch (writeErr) {
+      cleanupTmp();
+      return resolve({ ok: false, error: `Gagal menyiapkan PDF sementara: ${writeErr.message}` });
+    }
+
+    const pythonCandidates = [];
+    if (process.env.PYTHON_EXEC) pythonCandidates.push(process.env.PYTHON_EXEC);
+    pythonCandidates.push('python', 'python3');
+
+    const safeEnv = {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1',
+      PYTHONUNBUFFERED: '1'
+    };
+
+    const runWithExec = (candIdx) => {
+      if (candIdx >= pythonCandidates.length) {
+        cleanupTmp();
+        return resolve({ ok: false, error: 'Interpreter Python untuk ekstraksi PDF tidak tersedia.' });
+      }
+      const pyExec = pythonCandidates[candIdx];
+      let settled = false;
+      let stdoutData = '';
+      let stderrData = '';
+      let proc;
+      try {
+        proc = spawn(pyExec, ['-u', '-c', PDF_PYTHON_EXTRACT_SCRIPT, tmpPath, String(Math.max(1000, maxChars))], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          env: safeEnv
+        });
+      } catch (spawnErr) {
+        if (spawnErr && spawnErr.code === 'ENOENT') return runWithExec(candIdx + 1);
+        cleanupTmp();
+        return resolve({ ok: false, error: `Gagal menjalankan ekstraktor PDF: ${spawnErr.message}` });
+      }
+
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          try { proc.kill('SIGKILL'); } catch (_) {}
+          cleanupTmp();
+          resolve({ ok: false, error: 'Ekstraksi PDF timeout (15s).' });
+        }
+      }, 15000);
+
+      proc.stdout.on('data', chunk => {
+        if (stdoutData.length < 250000) stdoutData += chunk.toString('utf8');
+      });
+      proc.stderr.on('data', chunk => {
+        if (stderrData.length < 8000) stderrData += chunk.toString('utf8');
+      });
+      proc.on('error', (err) => {
+        clearTimeout(timer);
+        if (settled) return;
+        settled = true;
+        if (err && err.code === 'ENOENT') {
+          return runWithExec(candIdx + 1);
+        }
+        cleanupTmp();
+        resolve({ ok: false, error: `Error ekstraktor PDF: ${err.message}` });
+      });
+      proc.on('close', (code) => {
+        clearTimeout(timer);
+        if (settled) return;
+        settled = true;
+        cleanupTmp();
+        if (code === 0 && stdoutData.trim()) {
+          try {
+            const lines = stdoutData.trim().split(/\r?\n/);
+            const parsed = JSON.parse(lines[lines.length - 1]);
+            const cleanText = typeof parsed.text === 'string' ? parsed.text.trim() : '';
+            if (parsed.ok && cleanText && !textSafety.isGarbledPdfBinaryText(cleanText)) {
+              return resolve({
+                ok: true,
+                title: typeof parsed.title === 'string' ? parsed.title.trim() : '',
+                pages: Number(parsed.pages) || 0,
+                text: cleanText
+              });
+            }
+          } catch (_) {}
+        }
+        resolve({ ok: false, error: stderrData.trim() || 'Isi PDF tidak mengandung teks terbaca (kemungkinan hasil pindaian gambar atau terenkripsi).' });
+      });
+    };
+
+    runWithExec(0);
+  });
+}
+
+/**
+ * Pembaca stream HTTP bersama yang membedakan PDF biner, konten biner non-PDF,
+ * dan HTML/teks sehingga biner PDF tidak pernah terpotong paksa di 300KB atau
+ * dikonversi menjadi karakter UTF-8 rusak.
+ */
+function consumeHttpDocumentStream(req, res, opts) {
+  const {
+    maxHtmlBytes = 300000,
+    maxPdfBytes = 12 * 1024 * 1024,
+    maxChars = 8000,
+    onPdfExtracted,
+    onHtmlBuffered,
+    onErrorOrNonText
+  } = opts;
+
+  const contentType = String(res.headers['content-type'] || '').toLowerCase();
+  const headerIsPdf = contentType.includes('application/pdf') || contentType.includes('application/x-pdf') || contentType.includes('application/acrobat');
+  const headerIsStrictBinary = !headerIsPdf && (
+    /^(image|audio|video|font)\//i.test(contentType) ||
+    /application\/(zip|x-tar|gzip|x-rar|x-7z|msword|vnd\.ms-)/i.test(contentType)
+  );
+  const headerIsOctetStream = !headerIsPdf && contentType.includes('application/octet-stream');
+
+  if (headerIsStrictBinary) {
+    try { res.resume(); req.destroy(); } catch (_) {}
+    onErrorOrNonText(`Tipe konten biner tidak didukung (${contentType.split(';')[0]})`);
+    return;
+  }
+
+  const enc = (res.headers['content-encoding'] || '').toLowerCase();
+  let stream = res;
+  try {
+    if (enc === 'gzip') stream = res.pipe(zlib.createGunzip());
+    else if (enc === 'deflate') stream = res.pipe(zlib.createInflate());
+    else if (enc === 'br') stream = res.pipe(zlib.createBrotliDecompress());
+  } catch (_) {
+    stream = res;
+  }
+
+  const chunks = [];
+  let totalLen = 0;
+  let finished = false;
+  let detectedIsPdf = headerIsPdf;
+  let abortedBinary = false;
+
+  const finalizeBuffer = async (allowPartialHtml = false) => {
+    if (finished || abortedBinary) return;
+    finished = true;
+    const buf = chunks.length > 0 ? Buffer.concat(chunks) : Buffer.alloc(0);
+    if (!detectedIsPdf && buf.length >= 5) {
+      const headLatin1 = buf.slice(0, Math.min(1024, buf.length)).toString('latin1');
+      if (headLatin1.includes('%PDF-')) detectedIsPdf = true;
+    }
+
+    if (detectedIsPdf) {
+      if (buf.length > maxPdfBytes) {
+        return onErrorOrNonText('Ukuran dokumen PDF web melebihi batas 12 MB.');
+      }
+      const pdfRes = await extractPdfTextFromBuffer(buf, maxChars);
+      if (pdfRes && pdfRes.ok && pdfRes.text) {
+        return onPdfExtracted(pdfRes);
+      }
+      return onErrorOrNonText((pdfRes && pdfRes.error) || 'Dokumen PDF tidak dapat diekstrak.');
+    }
+
+    const rawText = buf.toString('utf8');
+    if (rawText && textSafety.isGarbledPdfBinaryText(rawText)) {
+      return onErrorOrNonText('Konten biner tidak dapat dibaca sebagai teks HTML.');
+    }
+    return onHtmlBuffered(rawText);
+  };
+
+  stream.on('data', chunk => {
+    if (finished || abortedBinary) return;
+    const bufChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    if (chunks.length === 0) {
+      const firstHead = bufChunk.slice(0, Math.min(1024, bufChunk.length)).toString('latin1');
+      if (firstHead.includes('%PDF-')) {
+        detectedIsPdf = true;
+      } else if (headerIsOctetStream) {
+        abortedBinary = true;
+        finished = true;
+        try { res.unpipe(); if (stream !== res) stream.destroy(); req.destroy(); } catch (_) {}
+        onErrorOrNonText('Stream octet-stream biner bukan PDF atau teks HTML.');
+        return;
+      }
+    }
+
+    chunks.push(bufChunk);
+    totalLen += bufChunk.length;
+
+    if (detectedIsPdf) {
+      if (totalLen > maxPdfBytes) {
+        abortedBinary = true;
+        finished = true;
+        try { res.unpipe(); if (stream !== res) stream.destroy(); req.destroy(); } catch (_) {}
+        onErrorOrNonText('Ukuran PDF web melebihi batas maksimal 12 MB.');
+      }
+    } else if (totalLen >= maxHtmlBytes) {
+      try { res.unpipe(); if (stream !== res) stream.destroy(); req.destroy(); } catch (_) {}
+      finalizeBuffer(true);
+    }
+  });
+
+  stream.on('end', () => { finalizeBuffer(false); });
+  const handleErr = (msg) => {
+    try { res.unpipe(); } catch (_) {}
+    try { if (stream !== res) stream.destroy(); } catch (_) {}
+    if (!finished && !abortedBinary) {
+      if (chunks.length > 0 && !detectedIsPdf) {
+        finalizeBuffer(true);
+      } else {
+        finished = true;
+        onErrorOrNonText(msg);
+      }
+    }
+  };
+  stream.on('error', () => handleErr('Stream decompression error'));
+  res.on('error', () => handleErr('Response error'));
+}
+
 // Helper untuk melakukan web scraping / pemindaian konten artikel mendalam dari URL dengan proteksi redirect loop & SSRF
 function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
   let cleanTarget = String(targetUrl || '').trim();
@@ -4388,20 +4875,45 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
         method: 'GET',
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.9,*/*;q=0.8',
           'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
           'Accept-Encoding': 'gzip, deflate, br'
         },
-        timeout: 9000
+        timeout: 15000
       };
 
-      let rawHtml = '';
       let resolved = false;
+      const tryJinaOrFail = (fallbackError) => {
+        if (resolved) return;
+        resolved = true;
+        if (redirectCount === 0) {
+          return fallbackJinaReader(cleanTarget, maxChars).then(jinaRes => {
+            if (jinaRes && jinaRes.text && jinaRes.text.length > 30 && !textSafety.isGarbledPdfBinaryText(jinaRes.text)) {
+              return resolve({
+                success: true,
+                url: cleanTarget,
+                domain: parsedUrl.hostname,
+                title: jinaRes.title || parsedUrl.hostname,
+                charCount: Math.min(jinaRes.text.length, maxChars),
+                content: jinaRes.text.substring(0, maxChars),
+                text: jinaRes.text.substring(0, maxChars)
+              });
+            }
+            return resolve({ success: false, error: fallbackError });
+          }).catch(() => resolve({ success: false, error: fallbackError }));
+        }
+        return resolve({ success: false, error: fallbackError });
+      };
 
       function finishExtract(html) {
         if (resolved) return;
         resolved = true;
         try {
+          if (textSafety.isGarbledPdfBinaryText(html)) {
+            resolved = false;
+            return tryJinaOrFail('Konten biner PDF/non-teks tidak dapat dibaca sebagai HTML.');
+          }
+
           const titleMatch = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
           let pageTitle = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
           pageTitle = pageTitle
@@ -4423,7 +4935,10 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
             .replace(/<!--[\s\S]*?-->/g, ' ');
 
           clean = cleanHtmlText(clean);
-
+          if (textSafety.isGarbledPdfBinaryText(clean)) {
+            resolved = false;
+            return tryJinaOrFail('Konten hasil ekstraksi terdeteksi biner/rusak.');
+          }
 
           resolve({
             success: true,
@@ -4454,160 +4969,52 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
 
         if (res.statusCode < 200 || res.statusCode >= 300) {
           res.resume();
-          resolved = true;
-          if (redirectCount === 0) {
-            return fallbackJinaReader(cleanTarget, maxChars).then(jinaRes => {
-              if (jinaRes && jinaRes.text && jinaRes.text.length > 30) {
-                return resolve({
-                  success: true,
-                  url: cleanTarget,
-                  domain: parsedUrl.hostname,
-                  title: jinaRes.title || parsedUrl.hostname,
-                  charCount: Math.min(jinaRes.text.length, maxChars),
-                  content: jinaRes.text.substring(0, maxChars),
-                  text: jinaRes.text.substring(0, maxChars)
-                });
-              }
-              return resolve({ success: false, error: `HTTP ${res.statusCode}` });
-            }).catch(() => resolve({ success: false, error: `HTTP ${res.statusCode}` }));
-          }
-          return resolve({ success: false, error: `HTTP ${res.statusCode}` });
+          return tryJinaOrFail(`HTTP ${res.statusCode}`);
         }
 
-        // Dekompresi stream jika server web mengembalikan format gzip, deflate, atau brotli
-        const enc = (res.headers['content-encoding'] || '').toLowerCase();
-        let stream = res;
-        try {
-          if (enc === 'gzip') {
-            stream = res.pipe(zlib.createGunzip());
-          } else if (enc === 'deflate') {
-            stream = res.pipe(zlib.createInflate());
-          } else if (enc === 'br') {
-            stream = res.pipe(zlib.createBrotliDecompress());
-          }
-        } catch (_) {
-          stream = res;
-        }
-
-        let chunks = [];
-        let totalLen = 0;
-        stream.on('data', chunk => {
-          chunks.push(chunk);
-          totalLen += chunk.length;
-          if (totalLen >= 300000 && !resolved) {
-            req.destroy();
-            rawHtml = Buffer.concat(chunks).toString('utf8');
-            finishExtract(rawHtml);
-          }
-        });
-
-        stream.on('end', () => {
-          if (!resolved) {
-            rawHtml = typeof chunks !== 'undefined' && chunks.length > 0 ? Buffer.concat(chunks).toString('utf8') : rawHtml;
-            finishExtract(rawHtml);
-          }
-        });
-        stream.on('error', () => {
-          try { res.unpipe(); } catch (_) {}
-          try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (!resolved) {
+        consumeHttpDocumentStream(req, res, {
+          maxHtmlBytes: 300000,
+          maxPdfBytes: 12 * 1024 * 1024,
+          maxChars,
+          onPdfExtracted: (pdfRes) => {
+            if (resolved) return;
             resolved = true;
-            if (redirectCount === 0) {
-              return fallbackJinaReader(targetUrl, maxChars).then(jinaRes => {
-                if (jinaRes && jinaRes.text && jinaRes.text.length > 30) {
-                  return resolve({
-                    success: true,
-                    url: targetUrl,
-                    domain: parsedUrl.hostname,
-                    title: jinaRes.title || parsedUrl.hostname,
-                    charCount: Math.min(jinaRes.text.length, maxChars),
-                    content: jinaRes.text.substring(0, maxChars)
-                  });
-                }
-                return resolve({ success: false, error: 'Stream decompression error' });
-              }).catch(() => resolve({ success: false, error: 'Stream decompression error' }));
-            }
-            resolve({ success: false, error: 'Stream decompression error' });
-          }
-        });
-        res.on('error', () => {
-          try { res.unpipe(); } catch (_) {}
-          try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (!resolved) {
-            resolved = true;
-            if (redirectCount === 0) {
-              return fallbackJinaReader(targetUrl, maxChars).then(jinaRes => {
-                if (jinaRes && jinaRes.text && jinaRes.text.length > 30) {
-                  return resolve({
-                    success: true,
-                    url: targetUrl,
-                    domain: parsedUrl.hostname,
-                    title: jinaRes.title || parsedUrl.hostname,
-                    charCount: Math.min(jinaRes.text.length, maxChars),
-                    content: jinaRes.text.substring(0, maxChars)
-                  });
-                }
-                return resolve({ success: false, error: 'Response error' });
-              }).catch(() => resolve({ success: false, error: 'Response error' }));
-            }
-            resolve({ success: false, error: 'Response error' });
-          }
+            const pdfFileLabel = path.basename(parsedUrl.pathname || '') || parsedUrl.hostname;
+            const cleanText = pdfRes.text.substring(0, maxChars);
+            resolve({
+              success: true,
+              isPdf: true,
+              pageCount: pdfRes.pages || undefined,
+              url: cleanTarget,
+              domain: parsedUrl.hostname,
+              title: pdfRes.title || `${pdfFileLabel} (${parsedUrl.hostname})`,
+              charCount: cleanText.length,
+              content: cleanText,
+              text: cleanText
+            });
+          },
+          onHtmlBuffered: (rawHtml) => finishExtract(rawHtml),
+          onErrorOrNonText: (errMsg) => tryJinaOrFail(errMsg)
         });
       });
 
       req.on('timeout', () => {
         req.destroy();
-        if (!resolved) {
-          resolved = true;
-          if (redirectCount === 0) {
-            return fallbackJinaReader(targetUrl, maxChars).then(jinaRes => {
-              if (jinaRes && jinaRes.text && jinaRes.text.length > 30) {
-                return resolve({
-                  success: true,
-                  url: targetUrl,
-                  domain: parsedUrl.hostname,
-                  title: jinaRes.title || parsedUrl.hostname,
-                  charCount: Math.min(jinaRes.text.length, maxChars),
-                  content: jinaRes.text.substring(0, maxChars)
-                });
-              }
-              return resolve({ success: false, error: 'Network timeout (9s)' });
-            }).catch(() => resolve({ success: false, error: 'Network timeout (9s)' }));
-          }
-          resolve({ success: false, error: 'Network timeout (9s)' });
-        }
+        tryJinaOrFail('Network timeout (15s)');
       });
       req.on('error', (err) => {
-        if (!resolved) {
-          resolved = true;
-          if (redirectCount === 0) {
-            return fallbackJinaReader(targetUrl, maxChars).then(jinaRes => {
-              if (jinaRes && jinaRes.text && jinaRes.text.length > 30) {
-                return resolve({
-                  success: true,
-                  url: targetUrl,
-                  domain: parsedUrl.hostname,
-                  title: jinaRes.title || parsedUrl.hostname,
-                  charCount: Math.min(jinaRes.text.length, maxChars),
-                  content: jinaRes.text.substring(0, maxChars)
-                });
-              }
-              return resolve({ success: false, error: err.message });
-            }).catch(() => resolve({ success: false, error: err.message }));
-          }
-          resolve({ success: false, error: err.message });
-        }
+        tryJinaOrFail(err.message);
       });
       req.end();
     } catch (err) {
       if (redirectCount === 0) {
         return fallbackJinaReader(targetUrl, maxChars).then(jinaRes => {
-          if (jinaRes && jinaRes.text && jinaRes.text.length > 30) {
+          if (jinaRes && jinaRes.text && jinaRes.text.length > 30 && !textSafety.isGarbledPdfBinaryText(jinaRes.text)) {
             return resolve({
               success: true,
               url: targetUrl,
-              domain: parsedUrl.hostname,
-              title: jinaRes.title || parsedUrl.hostname,
+              domain: parsedUrl?.hostname || '',
+              title: jinaRes.title || parsedUrl?.hostname || targetUrl,
               charCount: Math.min(jinaRes.text.length, maxChars),
               content: jinaRes.text.substring(0, maxChars)
             });
@@ -5891,22 +6298,29 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
         method: 'GET',
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.9,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
           'Accept-Encoding': 'gzip, deflate, br'
         },
-        timeout: 10000
+        timeout: 15000
       };
 
       let resolved = false;
-      let rawHtml = '';
-      let chunks2 = [];
-      let totalLen2 = 0;
+      const tryJinaOrFail = (fallbackError) => {
+        if (resolved) return;
+        resolved = true;
+        if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve);
+        resolve({ url: cleanTarget, error: fallbackError, text: '' });
+      };
 
       function finishParsing(html) {
         if (resolved) return;
         resolved = true;
         try {
+          if (textSafety.isGarbledPdfBinaryText(html)) {
+            resolved = false;
+            return tryJinaOrFail('Konten biner PDF/non-teks tidak dapat dibaca sebagai HTML.');
+          }
           const htmlPublishedAt = extractHtmlPublishedDate(html);
           const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
           const title = titleMatch ? cleanHtmlText(titleMatch[1]) : '';
@@ -5939,7 +6353,7 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
 
           clean = cleanHtmlText(clean);
 
-          if (clean.length < 50 && redirectCount === 0) {
+          if ((clean.length < 50 || textSafety.isGarbledPdfBinaryText(clean)) && redirectCount === 0) {
             return fallbackJinaReader(cleanTarget, maxChars).then((jinaRes) => {
               if (htmlPublishedAt && jinaRes && !jinaRes.published_at) jinaRes.published_at = htmlPublishedAt;
               resolve(jinaRes);
@@ -5975,59 +6389,40 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
 
         if (res.statusCode < 200 || res.statusCode >= 300) {
           res.resume();
-          resolved = true;
-          if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve);
-          return resolve({ url: cleanTarget, error: `HTTP ${res.statusCode}`, text: '' });
+          return tryJinaOrFail(`HTTP ${res.statusCode}`);
         }
 
-        // Decompress stream if server sent gzip, deflate, or brotli
-        const enc = (res.headers['content-encoding'] || '').toLowerCase();
-        let stream = res;
-        try {
-          if (enc === 'gzip') {
-            stream = res.pipe(zlib.createGunzip());
-          } else if (enc === 'deflate') {
-            stream = res.pipe(zlib.createInflate());
-          } else if (enc === 'br') {
-            stream = res.pipe(zlib.createBrotliDecompress());
-          }
-        } catch (_) {
-          stream = res;
-        }
-
-        stream.on('data', chunk => {
-          chunks2.push(chunk);
-          totalLen2 += chunk.length;
-          if (totalLen2 >= 600000 && !resolved) {
-            req.destroy();
-            rawHtml = Buffer.concat(chunks2).toString('utf8');
-            finishParsing(rawHtml);
-          }
-        });
-
-        stream.on('end', () => { if (!resolved) { rawHtml = chunks2.length > 0 ? Buffer.concat(chunks2).toString('utf8') : rawHtml; finishParsing(rawHtml); } });
-        stream.on('error', (err) => {
-          try { res.unpipe(); } catch (_) {}
-          try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
-          else if (!resolved) { resolved = true; if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve); resolve({ url: cleanTarget, error: err.message, text: '' }); }
-        });
-        res.on('error', (err) => {
-          try { res.unpipe(); } catch (_) {}
-          try { if (stream !== res) stream.destroy(); } catch (_) {}
-          if (chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
-          else if (!resolved) { resolved = true; if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve); resolve({ url: cleanTarget, error: err.message, text: '' }); }
+        consumeHttpDocumentStream(req, res, {
+          maxHtmlBytes: 600000,
+          maxPdfBytes: 12 * 1024 * 1024,
+          maxChars,
+          onPdfExtracted: (pdfRes) => {
+            if (resolved) return;
+            resolved = true;
+            const pdfFileLabel = path.basename(parsedUrl.pathname || '') || parsedUrl.hostname;
+            const cleanText = pdfRes.text.substring(0, maxChars);
+            resolve({
+              url: cleanTarget,
+              isPdf: true,
+              pageCount: pdfRes.pages || undefined,
+              title: pdfRes.title || `${pdfFileLabel} (${parsedUrl.hostname})`,
+              text: cleanText,
+              totalLength: cleanText.length,
+              published_at: '',
+              links: []
+            });
+          },
+          onHtmlBuffered: (rawHtml) => finishParsing(rawHtml),
+          onErrorOrNonText: (errMsg) => tryJinaOrFail(errMsg)
         });
       });
 
       req.on('timeout', () => {
         req.destroy();
-        if (chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
-        else if (!resolved) { resolved = true; if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve); resolve({ url: cleanTarget, error: 'Connection timeout', text: '' }); }
+        tryJinaOrFail('Connection timeout');
       });
       req.on('error', (err) => {
-        if (chunks2.length > 0) { rawHtml = Buffer.concat(chunks2).toString('utf8'); finishParsing(rawHtml); } else if (rawHtml.length > 0) { finishParsing(rawHtml); }
-        else if (!resolved) { resolved = true; if (redirectCount === 0) return fallbackJinaReader(cleanTarget, maxChars).then(resolve); resolve({ url: cleanTarget, error: err.message, text: '' }); }
+        tryJinaOrFail(err.message);
       });
       req.end();
     } catch (err) {
@@ -6060,7 +6455,7 @@ function fallbackJinaReader(targetUrl, maxChars = 5000) {
           }
         });
         res.on('end', () => {
-          if (res.statusCode === 200 && md.length > 50) {
+          if (res.statusCode === 200 && md.length > 50 && !textSafety.isGarbledPdfBinaryText(md)) {
             const titleMatch = md.match(/^Title:\s*(.+)$/m) || md.match(/^#\s+(.+)$/m);
             const pubMatch = md.match(/^Published Time:\s*(.+)$/mi);
             const title = titleMatch ? cleanHtmlText(titleMatch[1].trim()) : extractDomainSafe(targetUrl);
@@ -6758,7 +7153,18 @@ async function requestHandler(req, res) {
             await fsp.unlink(fullPath).catch(() => {});
             continue;
           }
-          const lastMsg = (sess.messages && sess.messages.length > 0) ? sess.messages[sess.messages.length - 1].content : '';
+          const lastMsgObj = (sess.messages && sess.messages.length > 0) ? sess.messages[sess.messages.length - 1] : null;
+          let lastMsg = '';
+          if (lastMsgObj) {
+            if (typeof lastMsgObj.displayContent === 'string' && lastMsgObj.displayContent.trim()) {
+              lastMsg = lastMsgObj.displayContent;
+            } else if (lastMsgObj.role === 'user' && typeof lastMsgObj.content === 'string' && typeof textSafety.parseAttachedDocsFromPrompt === 'function') {
+              const parsedLast = textSafety.parseAttachedDocsFromPrompt(lastMsgObj.content);
+              lastMsg = parsedLast.hasMarkers ? (parsedLast.displayContent || (parsedLast.docs[0] ? parsedLast.docs[0].name : '')) : lastMsgObj.content;
+            } else {
+              lastMsg = typeof lastMsgObj.content === 'string' ? lastMsgObj.content : '';
+            }
+          }
           // stat hanya saat createdAt/updatedAt tidak ada di isi file (hemat 2 syscall/file)
           let createdAt = sess.createdAt;
           let updatedAt = sess.updatedAt;
@@ -6797,6 +7203,9 @@ async function requestHandler(req, res) {
     }
     try {
       const data = JSON.parse(fs.readFileSync(sessFile, 'utf8'));
+      if (typeof textSafety.normalizeSessionMessagesPresentation === 'function') {
+        textSafety.normalizeSessionMessagesPresentation(data);
+      }
       return sendJSON(res, 200, data);
     } catch (err) {
       return sendJSON(res, 500, { error: 'Gagal memuat file sesi: ' + err.message });
@@ -6855,7 +7264,10 @@ async function requestHandler(req, res) {
                 }
               }
             });
-            if (mergedAnyImage) {
+            const mergedUserMeta = (typeof textSafety.mergeUserMessagesMetadata === 'function')
+              ? textSafety.mergeUserMessagesMetadata(existing.messages, body.messages)
+              : false;
+            if (mergedAnyImage || mergedUserMeta) {
               fs.writeFileSync(sessFile, JSON.stringify(existing, null, 2), 'utf8');
             }
           }
@@ -6866,8 +7278,15 @@ async function requestHandler(req, res) {
             const diskMsgsLen = Array.isArray(existing.messages) ? existing.messages.length : 0;
             const clientMsgsLen = Array.isArray(body.messages) ? body.messages.length : 0;
             if (diskTime > clientTime && diskMsgsLen >= clientMsgsLen) {
+              if (typeof textSafety.normalizeSessionMessagesPresentation === 'function' && textSafety.normalizeSessionMessagesPresentation(existing)) {
+                try { fs.writeFileSync(sessFile, JSON.stringify(existing, null, 2), 'utf8'); } catch (_) {}
+              }
               return sendJSON(res, 200, { success: true, session: existing, rehydratedFromDisk: true });
             }
+          }
+
+          if (Array.isArray(body.messages) && typeof textSafety.mergeUserMessagesMetadata === 'function') {
+            textSafety.mergeUserMessagesMetadata(body.messages, (existing && Array.isArray(existing.messages)) ? existing.messages : []);
           }
         } catch (_) {}
       }
@@ -7641,7 +8060,7 @@ async function requestHandler(req, res) {
       reqCwd = reqCwd.slice(1, -1).trim();
     }
     const targetCwd = (reqCwd && fs.existsSync(reqCwd) && path.resolve(reqCwd).toLowerCase() !== WORKSPACE_ROOT.toLowerCase()) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
-    const cols = Math.max(45, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
+    const cols = Math.max(32, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
     const rows = Math.max(8, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
 
     res.writeHead(200, {
@@ -7721,16 +8140,16 @@ async function requestHandler(req, res) {
           if (data.includes('\x1b[3J') || data.includes('\x1b[2J')) {
             session.buffer = [data];
           } else {
-            if (session.buffer.length > 120) session.buffer.shift();
+            if (session.buffer.length > 250) session.buffer.shift();
             session.buffer.push(data);
           }
           handleServerAutoEnter(session, data);
-          const payload = `data: ${JSON.stringify({ type: 'data', data })}\n\n`;
+          const payload = `data: ${JSON.stringify({ type: 'data', data, cleaned: true })}\n\n`;
           for (const client of session.clients) {
             try { if (!client.writableEnded) client.write(payload); } catch (_) {}
           }
           if (session.wsClients && session.wsClients.size > 0) {
-            const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data }));
+            const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data, cleaned: true }));
             for (const ws of session.wsClients) {
               try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
             }
@@ -7738,6 +8157,11 @@ async function requestHandler(req, res) {
         });
 
         ptyProcess.onExit(({ exitCode, signal }) => {
+          if (session._autoEnterRetryTimer) {
+            clearTimeout(session._autoEnterRetryTimer);
+            session._autoEnterRetryTimer = null;
+          }
+          session.pty = null;
           const payload = `data: ${JSON.stringify({ type: 'exit', exitCode, signal })}\n\n`;
           for (const client of session.clients) {
             try { if (!client.writableEnded) client.write(payload); } catch (_) {}
@@ -7757,9 +8181,7 @@ async function requestHandler(req, res) {
         return res.end();
       }
     } else {
-      if (reqUrl.searchParams.has('autoEnter')) {
-        session.autoEnter = (reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true');
-      }
+      // Pertahankan session.autoEnter otoritatif saat klien menyambung ulang; perubahan status dilakukan via syncAutoEnterState
       if (session && session.pty && typeof session.pty.resize === 'function' && reqUrl.searchParams.has('cols') && reqUrl.searchParams.has('rows')) {
         const isRemote = isRemoteTunnelRequest(req);
         const hasActiveClients = (session.clients && session.clients.size > 0) || (session.wsClients && session.wsClients.size > 0);
@@ -7778,9 +8200,8 @@ async function requestHandler(req, res) {
     // Kirim konfirmasi terkoneksi dan buffer historis jika ada
     res.write(`data: ${JSON.stringify({ type: 'connected', session: sessionId, shell: session.shell, cwd: session.cwd, cols: session.cols || cols, rows: session.rows || rows, autoEnter: Boolean(session.autoEnter) })}\n\n`);
     if (session.buffer && session.buffer.length > 0) {
-      let replay = session.buffer.join('');
-      if (replay.length > 16384) replay = replay.slice(-16384);
-      res.write(`data: ${JSON.stringify({ type: 'init', data: replay })}\n\n`);
+      const replay = sliceReplayBufferSafely(session.buffer, 65536);
+      res.write(`data: ${JSON.stringify({ type: 'init', data: replay, cleaned: true })}\n\n`);
       if (!hasVisibleTerminalPrompt(replay) && session.pty && (Date.now() - (session.createdAt || 0)) > 3000) {
         setTimeout(() => {
           if (session && session.pty) {
@@ -7851,32 +8272,7 @@ async function requestHandler(req, res) {
         return sendJSON(res, 401, { error: pinCheck.error });
       }
       const sessionId = (body.session || 'default').trim();
-      const enabled = Boolean(body.enabled);
-      if (globalAutoEnterEnabled === enabled) {
-        return sendJSON(res, 200, { success: true, session: sessionId, autoEnter: enabled });
-      }
-      globalAutoEnterEnabled = enabled;
-      savePersistedTunnelState();
-
-      const targetSession = activeTerminalSessions.get(sessionId);
-      if (targetSession) {
-        targetSession.autoEnter = enabled;
-      }
-      // Sinkronisasi status Auto Enter ke seluruh sesi laptop aktif
-      for (const [id, s] of activeTerminalSessions.entries()) {
-        s.autoEnter = enabled;
-        const autoPayload = JSON.stringify({ type: 'auto-enter-status', autoEnter: enabled, session: id });
-        for (const client of s.clients) {
-          try { if (!client.writableEnded) client.write(`data: ${autoPayload}\n\n`); } catch (_) {}
-        }
-        if (s.wsClients && s.wsClients.size > 0) {
-          const wsFrame = encodeWsFrame(autoPayload);
-          for (const ws of s.wsClients) {
-            try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
-          }
-        }
-      }
-      console.log(`[AutoEnter] Synchronized autoEnter=${enabled} across all laptop terminal sessions via HTTP.`);
+      const enabled = syncAutoEnterState(Boolean(body.enabled), 'HTTP');
       return sendJSON(res, 200, { success: true, session: sessionId, autoEnter: enabled });
     } catch (e) {
       return sendJSON(res, 500, { error: e.message });
@@ -7894,13 +8290,12 @@ async function requestHandler(req, res) {
       }
       const sessionId = (body.session || 'default').trim();
       const rawData = typeof body.data === 'string' ? body.data : '';
-      // Normalisasi sekuens escape Backspace (\x1b\x7f dan \x1b\x08) agar ConPTY Windows tidak menampilkan echo ^H
-      const data = rawData.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f');
       const session = activeTerminalSessions.get(sessionId);
       if (session && session.pty) {
+        const data = sanitizePtyInputForShell(session, rawData);
         session.pty.write(data);
         session.lastActivity = Date.now();
-        session.lastInputAt = Date.now();
+        markSessionManualInput(session, data);
         return sendJSON(res, 200, { success: true });
       }
       return sendJSON(res, 200, { success: false, reason: 'Session not found or PTY inactive', fallback: !nodePty });
@@ -7919,7 +8314,7 @@ async function requestHandler(req, res) {
         return sendJSON(res, 401, { error: pinCheck.error });
       }
       const sessionId = (body.session || 'default').trim();
-      const cols = Math.max(45, Math.min(400, parseInt(body.cols || '100', 10)));
+      const cols = Math.max(32, Math.min(400, parseInt(body.cols || '100', 10)));
       const rows = Math.max(8, Math.min(200, parseInt(body.rows || '28', 10)));
       const session = activeTerminalSessions.get(sessionId);
       if (session && session.pty && typeof session.pty.resize === 'function') {
@@ -7980,7 +8375,8 @@ async function requestHandler(req, res) {
       const sessionId = (body.session || 'default').trim();
       const session = activeTerminalSessions.get(sessionId);
       if (session) {
-        try { if (session.pty) session.pty.kill(); } catch (_) {}
+        destroyTerminalSession(sessionId, session);
+      } else {
         activeTerminalSessions.delete(sessionId);
       }
       return sendJSON(res, 200, { success: true });
@@ -8473,6 +8869,69 @@ async function requestHandler(req, res) {
       return sendJSON(res, 200, { success: true, contact });
     } catch (err) {
       return sendJSON(res, 400, { success: false, error: err.message });
+    }
+  }
+
+  if (pathname === '/api/wa/avatar' && method === 'GET') {
+    const tenant = getWaTenant(req, reqUrl);
+    if (!tenant || !tenant.success) {
+      return sendJSON(res, tenant?.status || 401, {
+        success: false,
+        error: tenant?.error || 'Unauthorized: PIN WhatsApp salah atau belum terdaftar',
+        requiresPin: tenant?.requiresPin
+      });
+    }
+    const jid = reqUrl.searchParams.get('jid');
+    if (!jid) return sendJSON(res, 400, { success: false, error: 'Parameter jid wajib diisi' });
+    const refresh = reqUrl.searchParams.get('refresh') === '1';
+    if (refresh && tenant.gateway.status.connected) {
+      await tenant.gateway.syncContactProfile(jid, { force: true });
+    }
+    let buf = tenant.gateway.getCachedAvatarBuffer(jid);
+    if (!buf && tenant.gateway.status.connected && !refresh) {
+      const existing = tenant.gateway.contacts.get(jid);
+      const isSelf = jid === tenant.gateway.getMyNormalizedJid();
+      if ((existing && !existing.avatarCheckedAt) || (isSelf && !tenant.gateway.status.myAvatarCheckedAt)) {
+        await tenant.gateway.syncContactProfile(jid, { force: false });
+        buf = tenant.gateway.getCachedAvatarBuffer(jid);
+      }
+    }
+    if (!buf) {
+      res.writeHead(404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      return res.end(JSON.stringify({ success: false, error: 'Foto profil tidak tersedia' }));
+    }
+    res.writeHead(200, {
+      'Content-Type': 'image/jpeg',
+      'Content-Length': buf.length,
+      'Cache-Control': 'private, max-age=300'
+    });
+    return res.end(buf);
+  }
+
+  if (pathname === '/api/wa/sync-profiles' && method === 'POST') {
+    const body = (await safeParseBody(req)) || {};
+    const tenant = getWaTenant(req, reqUrl, body);
+    if (!tenant || !tenant.success) {
+      return sendJSON(res, tenant?.status || 403, {
+        success: false,
+        error: tenant?.error || 'Unauthorized: PIN WhatsApp salah atau belum terdaftar',
+        requiresPin: tenant?.requiresPin,
+        userId: tenant?.userId
+      });
+    }
+    try {
+      const result = await tenant.gateway.syncAllProfiles({
+        force: body.force !== false,
+        limit: Number(body.limit) || 60
+      });
+      return sendJSON(res, 200, {
+        success: true,
+        ...result,
+        status: tenant.gateway.getStatus(),
+        contacts: tenant.gateway.getContacts()
+      });
+    } catch (err) {
+      return sendJSON(res, 500, { success: false, error: err.message });
     }
   }
 
@@ -12530,8 +12989,17 @@ function encodeWsFrame(str) {
   return Buffer.concat([header, buf]);
 }
 
+const MAX_WS_PAYLOAD_BYTES = 1024 * 1024;
+const MAX_WS_BUFFER_BYTES = 2 * 1024 * 1024;
+
 function processWsStream(socket, chunk, onMessage) {
   if (chunk && chunk.length > 0) {
+    const nextLen = (socket._wsBuffer ? socket._wsBuffer.length : 0) + chunk.length;
+    if (nextLen > MAX_WS_BUFFER_BYTES) {
+      socket._wsBuffer = null;
+      onMessage({ type: 'error', reason: 'ws-buffer-overflow' });
+      return;
+    }
     socket._wsBuffer = socket._wsBuffer ? Buffer.concat([socket._wsBuffer, chunk]) : chunk;
   }
   const buf = socket._wsBuffer;
@@ -12552,8 +13020,20 @@ function processWsStream(socket, chunk, onMessage) {
       headerLen = 4;
     } else if (payloadLen === 127) {
       if (offset + 10 > buf.length) break;
-      payloadLen = Number(buf.readBigUInt64BE(offset + 2));
+      const bigLen = buf.readBigUInt64BE(offset + 2);
+      if (bigLen > BigInt(MAX_WS_PAYLOAD_BYTES)) {
+        socket._wsBuffer = null;
+        onMessage({ type: 'error', reason: 'ws-frame-too-large' });
+        return;
+      }
+      payloadLen = Number(bigLen);
       headerLen = 10;
+    }
+
+    if (payloadLen > MAX_WS_PAYLOAD_BYTES) {
+      socket._wsBuffer = null;
+      onMessage({ type: 'error', reason: 'ws-frame-too-large' });
+      return;
     }
 
     if (isMasked) {
@@ -12645,7 +13125,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
     reqCwd = reqCwd.slice(1, -1).trim();
   }
   const targetCwd = (reqCwd && fs.existsSync(reqCwd) && path.resolve(reqCwd).toLowerCase() !== WORKSPACE_ROOT.toLowerCase()) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
-  const cols = Math.max(45, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
+  const cols = Math.max(32, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
   const rows = Math.max(8, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
 
   let session = activeTerminalSessions.get(sessionId);
@@ -12700,10 +13180,10 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       const flushWsBatch = () => {
         wsFlushScheduled = false;
         if (!pendingWsData) return;
-        const out = cleanConptyData(pendingWsData, session);
+        const out = pendingWsData;
         pendingWsData = '';
         if (session.wsClients && session.wsClients.size > 0) {
-          const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data: out }));
+          const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data: out, cleaned: true }));
           for (const ws of session.wsClients) {
             try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
           }
@@ -12720,18 +13200,18 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
         if (data.includes('\x1b[3J') || data.includes('\x1b[2J')) {
           session.buffer = [data];
         } else {
-          if (session.buffer.length > 120) session.buffer.shift();
+          if (session.buffer.length > 250) session.buffer.shift();
           session.buffer.push(data);
         }
         handleServerAutoEnter(session, data);
-        const payload = `data: ${JSON.stringify({ type: 'data', data })}\n\n`;
+        const payload = `data: ${JSON.stringify({ type: 'data', data, cleaned: true })}\n\n`;
         for (const client of session.clients) {
           try { if (!client.writableEnded) client.write(payload); } catch (_) {}
         }
         if (session.wsClients && session.wsClients.size > 0) {
           if (!wsFlushScheduled && data.length < 32) {
             // Interactive keystroke fast-path: Zero-latency immediate transmission!
-            const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data }));
+            const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data, cleaned: true }));
             for (const ws of session.wsClients) {
               try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
             }
@@ -12746,6 +13226,11 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       });
 
       ptyProcess.onExit(({ exitCode, signal }) => {
+        if (session._autoEnterRetryTimer) {
+          clearTimeout(session._autoEnterRetryTimer);
+          session._autoEnterRetryTimer = null;
+        }
+        session.pty = null;
         const payload = `data: ${JSON.stringify({ type: 'exit', exitCode, signal })}\n\n`;
         for (const client of session.clients) {
           try { if (!client.writableEnded) client.write(payload); } catch (_) {}
@@ -12772,9 +13257,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       clearTimeout(session._disconnectTimer);
       session._disconnectTimer = null;
     }
-    if (reqUrl.searchParams.has('autoEnter')) {
-      session.autoEnter = (reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true');
-    }
+    // Pertahankan session.autoEnter otoritatif saat klien menyambung ulang; perubahan status dilakukan via syncAutoEnterState
     if (session && session.pty && typeof session.pty.resize === 'function' && reqUrl.searchParams.has('cols') && reqUrl.searchParams.has('rows')) {
       const isRemote = isRemoteTunnelRequest(req);
       const hasActiveClients = (session.clients && session.clients.size > 0) || (session.wsClients && session.wsClients.size > 0);
@@ -12803,9 +13286,8 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       autoEnter: Boolean(session.autoEnter)
     })));
     if (session.buffer && session.buffer.length > 0) {
-      let replay = session.buffer.join('');
-      if (replay.length > 16384) replay = replay.slice(-16384);
-      socket.write(encodeWsFrame(JSON.stringify({ type: 'init', data: replay })));
+      const replay = sliceReplayBufferSafely(session.buffer, 65536);
+      socket.write(encodeWsFrame(JSON.stringify({ type: 'init', data: replay, cleaned: true })));
       // Jika buffer hanya berisi sekuens clear/wipe tanpa teks alfanumerik yang tampak,
       // refresh shell dengan carriage return lembut (\r) agar prompt host tidak kosong di layar klien
       if (!hasVisibleTerminalPrompt(replay) && session.pty && (Date.now() - (session.createdAt || 0)) > 3000) {
@@ -12819,7 +13301,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
   } catch (_) {}
 
   const onWsMessage = (msg) => {
-    if (msg.type === 'close') {
+    if (msg.type === 'close' || msg.type === 'error') {
       try { socket.destroy(); } catch (_) {}
       return;
     }
@@ -12831,31 +13313,10 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
         if (str.startsWith('{') && str.endsWith('}')) {
           const parsed = JSON.parse(str);
           if (parsed.type === 'auto-enter') {
-            const enabled = Boolean(parsed.enabled);
-            if (globalAutoEnterEnabled === enabled && session.autoEnter === enabled) {
-              return;
-            }
-            session.autoEnter = enabled;
-            globalAutoEnterEnabled = enabled;
-            savePersistedTunnelState();
-            // Sinkronisasi status Auto Enter ke seluruh sesi laptop aktif
-            for (const [id, s] of activeTerminalSessions.entries()) {
-              s.autoEnter = enabled;
-              const autoPayload = JSON.stringify({ type: 'auto-enter-status', autoEnter: enabled, session: id });
-              for (const client of s.clients) {
-                try { if (!client.writableEnded) client.write(`data: ${autoPayload}\n\n`); } catch (_) {}
-              }
-              if (s.wsClients && s.wsClients.size > 0) {
-                const wsFrame = encodeWsFrame(autoPayload);
-                for (const ws of s.wsClients) {
-                  try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
-                }
-              }
-            }
-            console.log(`[AutoEnter] Synchronized autoEnter=${enabled} across all laptop terminal sessions via WS.`);
+            syncAutoEnterState(Boolean(parsed.enabled), 'WS');
             return;
           } else if (parsed.type === 'resize' && session.pty) {
-            const c = Math.max(45, Math.min(300, parseInt(parsed.cols, 10) || cols));
+            const c = Math.max(32, Math.min(300, parseInt(parsed.cols, 10) || cols));
             const r = Math.max(8, Math.min(100, parseInt(parsed.rows, 10) || rows));
             const applyWsPtyResize = (targetC, targetR) => {
               if (!session.pty || (session.cols === targetC && session.rows === targetR)) return;
@@ -12894,16 +13355,16 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
             }
             return;
           } else if (parsed.type === 'input' && typeof parsed.data === 'string' && session.pty) {
-            session.lastInputAt = Date.now();
-            const safeData = parsed.data.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f');
+            const safeData = sanitizePtyInputForShell(session, parsed.data);
+            markSessionManualInput(session, safeData);
             session.pty.write(safeData);
             return;
           }
         }
       } catch (_) {}
       if (session.pty) {
-        session.lastInputAt = Date.now();
-        const safeStr = typeof str === 'string' ? str.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f') : str;
+        const safeStr = typeof str === 'string' ? sanitizePtyInputForShell(session, str) : str;
+        markSessionManualInput(session, safeStr);
         session.pty.write(safeStr);
       }
     }
@@ -13039,3 +13500,4 @@ if (require.main === module && !process.env.VERCEL) {
 
 module.exports = server;
 module.exports.requestHandler = requestHandler;
+module.exports._pdfHelpers = { extractPdfTextFromBuffer, consumeHttpDocumentStream };

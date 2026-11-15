@@ -5722,6 +5722,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         }
       }
     });
+    if (window.ZozTextSafety && typeof window.ZozTextSafety.mergeUserMessagesMetadata === 'function') {
+      window.ZozTextSafety.mergeUserMessagesMetadata(destMessages, sourceMessages);
+    }
   }
 
   // ==================== INDEXEDDB CHAT VAULT ====================
@@ -6339,7 +6342,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           });
           clearTimeout(timeoutId);
           if (res.ok) {
-            return await res.json();
+            const diskSess = await res.json();
+            if (diskSess && window.ZozTextSafety && typeof window.ZozTextSafety.normalizeSessionMessagesPresentation === 'function') {
+              window.ZozTextSafety.normalizeSessionMessagesPresentation(diskSess);
+            }
+            return diskSess;
           }
         } catch (e) {
           console.warn('DeviceStorage getSession failed, falling back to ChatDB:', e.message);
@@ -6347,7 +6354,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       }
       try {
         const localSess = await ChatDB.getSession(id);
-        if (localSess) return localSess;
+        if (localSess) {
+          if (window.ZozTextSafety && typeof window.ZozTextSafety.normalizeSessionMessagesPresentation === 'function') {
+            window.ZozTextSafety.normalizeSessionMessagesPresentation(localSess);
+          }
+          return localSess;
+        }
       } catch (dbErr) {
         console.warn('ChatDB getSession fallback error:', dbErr.message);
       }
@@ -6700,9 +6712,14 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
                       m.model = m.engine === 'ollama' ? (STATE.settings.ollamaModel || 'llama3.2:3b') : (STATE.settings.openRouterModel || 'openrouter/free');
                     }
                   }
-                  if (m.role === 'user' && m.docs && Array.isArray(m.docs) && m.docs.length > 0 && typeof m.displayContent === 'string') {
-                    if (/^Tolong (?:pelajari|baca)(?:, [^.]*)?(?:dokumen|isi file dokumen)[^.]*\.?$/i.test(m.displayContent.trim())) {
-                      m.displayContent = '';
+                  if (m.role === 'user') {
+                    if (window.ZozTextSafety && typeof window.ZozTextSafety.normalizeUserMessagePresentation === 'function') {
+                      window.ZozTextSafety.normalizeUserMessagePresentation(m);
+                    }
+                    if (m.docs && Array.isArray(m.docs) && m.docs.length > 0 && typeof m.displayContent === 'string') {
+                      if (/^Tolong (?:pelajari|baca)(?:, [^.]*)?(?:dokumen|isi file dokumen)[^.]*\.?$/i.test(m.displayContent.trim())) {
+                        m.displayContent = '';
+                      }
                     }
                   }
                   if (Array.isArray(m.files)) {
@@ -6787,6 +6804,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         }
         let didRestoreAnyImage = false;
         validDbSessions.forEach(dbSess => {
+          if (window.ZozTextSafety && typeof window.ZozTextSafety.normalizeSessionMessagesPresentation === 'function') {
+            window.ZozTextSafety.normalizeSessionMessagesPresentation(dbSess);
+          }
           const memSess = STATE.sessions.find(s => s.id === dbSess.id);
           if (memSess && Array.isArray(memSess.messages) && Array.isArray(dbSess.messages)) {
             preserveMultimodalImages(memSess.messages, dbSess.messages);
@@ -7446,16 +7466,25 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
               safeImages = m.images.map(img => (typeof img === 'string' && img.startsWith('data:') && img.length > 60000) ? '[data:image]' : img);
             }
             let safeImage = (typeof m.image === 'string' && m.image.startsWith('data:') && m.image.length > 60000) ? '[data:image]' : m.image;
+            if (m.role === 'user' && window.ZozTextSafety && typeof window.ZozTextSafety.normalizeUserMessagePresentation === 'function') {
+              window.ZozTextSafety.normalizeUserMessagePresentation(m);
+            }
+            // File buatan AI & dokumen Markdown auto-fold: pertahankan konten hanya
+            // untuk 5 pesan terakhir per sesi agar kuota mirror ~5MB tidak cepat penuh
+            // sementara pratinjau langsung setelah reload tetap tersedia sebelum IDB sync.
+            const keepRecentContent = mIdx >= ((s.messages || []).length - 5);
             let safeDocs = undefined;
             if (Array.isArray(m.docs)) {
-              safeDocs = m.docs.map(d => ({ name: d.name, size: d.size }));
+              safeDocs = m.docs.map(d => ({
+                name: d.name,
+                size: d.size,
+                url: d.url,
+                isWeb: d.isWeb,
+                isAutoConvertedMarkdown: d.isAutoConvertedMarkdown ? true : undefined,
+                content: (keepRecentContent && d.isAutoConvertedMarkdown && typeof d.content === 'string' && d.content.length <= 120000) ? d.content : undefined
+              }));
             }
-            // File buatan AI (AI File Studio): isi konten (content) adalah bagian
-            // terbesar dari ukuran mirror dan membuat kuota ~5MB 'zoz_router_sessions_v1'
-            // mudah penuh. IndexedDB tetap sumber kebenaran; mirror hanya menyimpan
-            // isi file untuk 5 pesan terakhir per sesi — kartu yang paling mungkin
-            // dibuka pengguna sesaat setelah reload sebelum sinkronisasi IDB selesai.
-            const keepFileContent = mIdx >= ((s.messages || []).length - 5);
+            const keepFileContent = keepRecentContent;
             let safeFiles = undefined;
             if (Array.isArray(m.files) && m.files.length > 0) {
               safeFiles = m.files.map(f => ({
@@ -7628,23 +7657,25 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         ADD_TAGS: [
           'details', 'summary',
           // KaTeX & MathML tags
-          'annotation', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub',
-          'mfrac', 'mover', 'munder', 'msubsup', 'mtable', 'mtr', 'mtd', 'math'
+          'annotation', 'annotation-xml', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub',
+          'mfrac', 'mover', 'munder', 'munderover', 'msubsup', 'mtable', 'mtr', 'mtd',
+          'mtext', 'mspace', 'mstyle', 'msqrt', 'mroot', 'mfenced', 'menclose', 'mpadded',
+          'mphantom', 'mmultiscripts', 'mprescripts', 'none', 'mlabeledtr', 'math'
         ],
-        ADD_ATTR: ['target', 'rel', 'open', 'xmlns', 'display', 'data-latex', 'aria-hidden'],
+        ADD_ATTR: [
+          'target', 'rel', 'open', 'xmlns', 'display', 'data-latex', 'aria-hidden',
+          'encoding', 'mathvariant', 'displaystyle', 'stretchy', 'fence', 'separator',
+          'lspace', 'rspace', 'width', 'height', 'depth', 'voffset', 'columnalign',
+          'rowalign', 'columnspacing', 'rowspacing', 'notation', 'linethickness',
+          'accent', 'accentunder', 'movablelimits', 'scriptlevel', 'minsize', 'maxsize',
+          'symmetric', 'viewBox', 'preserveAspectRatio'
+        ],
         FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'nav', 'header', 'footer', 'section', 'main', 'aside', 'html', 'head', 'body', 'title', 'meta', 'link'],
         FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover']
       });
     }
     // Fallback native sanitizer jika DOMPurify belum termuat atau offline
-    return dirtyHtml
-      .replace(/<script\b[\s\S]*?<\/script>/gi, '')
-      .replace(/<style\b[\s\S]*?<\/style>/gi, '')
-      .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, '')
-      .replace(/<object\b[\s\S]*?<\/object>/gi, '')
-      .replace(/<embed\b[\s\S]*?<\/embed>/gi, '')
-      .replace(/<form\b[\s\S]*?<\/form>/gi, '')
-      .replace(/\bon\w+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
+    return fastSanitizeHtml(dirtyHtml);
   }
 
   // ==================== DETERMINISTIC REASONING & WEB SYNTHESIS PROCESSORS ====================
@@ -8173,31 +8204,27 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
   function fastSanitizeHtml(dirtyHtml) {
     if (!dirtyHtml || typeof dirtyHtml !== 'string') return '';
-    return dirtyHtml
+    let clean = dirtyHtml
       .replace(/<script\b[\s\S]*?<\/script>/gi, '')
       .replace(/<style\b[\s\S]*?<\/style>/gi, '')
       .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, '')
       .replace(/<object\b[\s\S]*?<\/object>/gi, '')
       .replace(/<embed\b[\s\S]*?<\/embed>/gi, '')
-      .replace(/<form\b[\s\S]*?<\/form>/gi, '')
-      .replace(/\bon\w+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
+      .replace(/<form\b[\s\S]*?<\/form>/gi, '');
+    // Hapus atribut event handler (on...) HANYA di dalam tag HTML pembuka agar teks persamaan seperti "only=1" di luar atribut tetap aman
+    return clean.replace(/<([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*?)>/g, (fullTag, tagName, attrs) => {
+      if (!attrs || !/\bon\w+\s*=/i.test(attrs)) return fullTag;
+      const sanitizedAttrs = attrs.replace(/\s+on[a-z]+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
+      return `<${tagName}${sanitizedAttrs}>`;
+    });
   }
 
-  // Mengamankan dan merapikan output HTML dari AI:
-  // 1. Mencegah HTML/CSS website un-fenced bocor ke tampilan gelembung obrolan chat.
-  // 2. Membungkus dokumen HTML utuh (<!DOCTYPE html... / <html...) yang tidak difence menjadi satu blok ```html utuh tanpa memotong di tengah jalan.
-  // 3. Menjaga integritas blok ZOZ_FILE murni tanpa menyisipkan fence markdown tambahan.
-  function normalizeHtmlCodeBlocksInMarkdown(text) {
+  // Bungkus dokumen HTML utuh (<!DOCTYPE html... / <html...) un-fenced menjadi satu blok ```html utuh
+  function normalizeUnfencedFullHtmlDocumentInMarkdown(text) {
     if (!text || typeof text !== 'string') return text;
-
-    // Jika teks berada di dalam protokol berkas ZOZ_FILE, biarkan murni tanpa mutasi fence
     if (text.includes('<<<ZOZ_FILE') || text.includes('<<<ZOZ_EDIT') || text.includes('<<<ZOZ_MODIFY')) {
       return text;
     }
-
-    // 1. Tangani dokumen HTML utuh (<!DOCTYPE html... atau <html...) yang tidak difence
-    // Dokumen HTML utuh TIDAK BOLEH dipotong di tengah jalan saat baris mencapai ratusan!
-    // Seluruh dokumen dari pembuka sampai </html> (atau akhir teks) adalah SATU blok kode utuh.
     const hasHtmlSignature = text.includes('<!DOCTYPE') || text.includes('<html');
     if (hasHtmlSignature && !text.includes('```html') && !text.includes('```htm')) {
       const docStartMatch = /<!DOCTYPE\s+html|<html\b/i.exec(text);
@@ -8206,7 +8233,6 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         const prefixText = text.slice(0, docStart);
         const codeFencesBefore = (prefixText.match(/```/g) || []).length;
         if (codeFencesBefore % 2 === 0) {
-          // Di luar blok kode: bungkus seluruh dokumen HTML sampai </html> atau akhir teks
           const restText = text.slice(docStart);
           const docEndMatch = /<\/html>/i.exec(restText);
           const docEnd = docEndMatch ? (docStart + docEndMatch.index + docEndMatch[0].length) : text.length;
@@ -8222,6 +8248,26 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           return res;
         }
       }
+    }
+    return text;
+  }
+
+  // Mengamankan dan merapikan output HTML dari AI:
+  // 1. Mencegah HTML/CSS website un-fenced bocor ke tampilan gelembung obrolan chat.
+  // 2. Membungkus dokumen HTML utuh (<!DOCTYPE html... / <html...) yang tidak difence menjadi satu blok ```html utuh tanpa memotong di tengah jalan.
+  // 3. Menjaga integritas blok ZOZ_FILE murni tanpa menyisipkan fence markdown tambahan.
+  function normalizeHtmlCodeBlocksInMarkdown(text, options = {}) {
+    if (!text || typeof text !== 'string') return text;
+
+    // Jika teks berada di dalam protokol berkas ZOZ_FILE, biarkan murni tanpa mutasi fence
+    if (text.includes('<<<ZOZ_FILE') || text.includes('<<<ZOZ_EDIT') || text.includes('<<<ZOZ_MODIFY')) {
+      return text;
+    }
+
+    // 1. Tangani dokumen HTML utuh (<!DOCTYPE html... atau <html...) yang tidak difence
+    if (!options.skipFullDocCheck) {
+      const wrappedDoc = normalizeUnfencedFullHtmlDocumentInMarkdown(text);
+      if (wrappedDoc !== text) return wrappedDoc;
     }
 
     // 2. Jika ada blok kode markdown atau potongan HTML khusus di luar blok kode
@@ -8276,8 +8322,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         continue;
       }
 
-      // Deteksi baris yang jelas merupakan kode HTML atau bagian dari elemen web
-      const isHtmlTagLine = /^<\/?(?:header|nav|section|article|aside|footer|main|style|script|div|head|body|table|form|html|!DOCTYPE|svg|canvas|ul|ol|li|button|input|label|p|h[1-6]|span|a|link|meta|title)\b/i.test(trimmed);
+      // Deteksi baris tag HTML asli (wajib diikuti spasi+atribut atau '>', bukan notasi sudut matematika seperti <p, q> atau <a, b>)
+      const isHtmlTagLine = /^<(?:(?:!DOCTYPE\s+html)|(?:\/?(?:header|nav|section|article|aside|footer|main|style|script|div|head|body|table|form|html|svg|canvas|ul|ol|li|button|input|label|p|h[1-6]|span|a|link|meta|title)(?:\s+[a-zA-Z_:!@]|\s*\/?>|$)))/i.test(trimmed);
       const isHtmlLike = isHtmlTagLine || 
                          (unfencedHtmlBuffer.length > 0 && (trimmed.startsWith('<') || trimmed.endsWith('>') || trimmed.endsWith(';') || trimmed.endsWith('{') || trimmed.endsWith('}') || trimmed === ''));
 
@@ -8286,7 +8332,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       } else {
         if (unfencedHtmlBuffer.length > 0) {
           // Hanya bungkus jika terdapat tag pembuka atau doctype yang sah, bukan sekadar tag penutup yatim (seperti </div>)
-          const hasOpeningTag = unfencedHtmlBuffer.some(l => /<(?:!DOCTYPE|[a-zA-Z0-9_-]+)\b/i.test(l.trim()) && !/^<\//.test(l.trim()));
+          const hasOpeningTag = unfencedHtmlBuffer.some(l => /^<(?:!DOCTYPE\s+html|[a-zA-Z0-9_-]+(?:\s+[a-zA-Z_:!@]|\s*\/?>|$))/i.test(l.trim()) && !/^<\//.test(l.trim()));
           if (hasOpeningTag && unfencedHtmlBuffer.length >= 2) {
             result.push('```html');
             result.push(...unfencedHtmlBuffer);
@@ -8301,7 +8347,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     }
 
     if (unfencedHtmlBuffer.length > 0) {
-      const hasOpeningTag = unfencedHtmlBuffer.some(l => /<(?:!DOCTYPE|[a-zA-Z0-9_-]+)\b/i.test(l.trim()) && !/^<\//.test(l.trim()));
+      const hasOpeningTag = unfencedHtmlBuffer.some(l => /^<(?:!DOCTYPE\s+html|[a-zA-Z0-9_-]+(?:\s+[a-zA-Z_:!@]|\s*\/?>|$))/i.test(l.trim()) && !/^<\//.test(l.trim()));
       if (hasOpeningTag && unfencedHtmlBuffer.length >= 2) {
         result.push('```html');
         result.push(...unfencedHtmlBuffer);
@@ -8322,8 +8368,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     const parts = text.split(/(```[\s\S]*?```)/g);
     for (let i = 0; i < parts.length; i += 2) {
       let t = parts[i];
-      // 1. Pastikan ada baris baru jika tabel menempel langsung setelah kalimat (titik dua)
-      t = t.replace(/:\s*(\|(?=[^|\n]+\|))/g, ':\n\n|');
+      // 1. Pastikan ada baris baru jika tabel multi-sel (>= 2 sel atau diikuti separator tabel) menempel langsung setelah titik dua
+      t = t.replace(/:\s*(\|(?=[^|\n]+\|[^|\n]*\||[^|\n]+\|\s*\n\s*\|(?:\s*:?-+:?\s*\|)+))/g, ':\n\n|');
 
       // 2. Pisahkan jika header dan separator markdown digabung dalam satu baris
       t = t.replace(/(\|[^|\n]+\|)\s*(\|(?:\s*:?-+:?\s*\|)+)/g, '$1\n$2');
@@ -8383,67 +8429,446 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   }
 
   // ==================== KATEX MATHEMATICAL FORMULA RENDERING ENGINE ====================
+  const ZOZ_MATH_CODE_PREFIX = '\uE000ZOZCS';
+  const ZOZ_MATH_DISPLAY_PREFIX = '\uE000ZOZMD';
+  const ZOZ_MATH_INLINE_PREFIX = '\uE000ZOZMI';
+  const ZOZ_MATH_TOKEN_SUFFIX = '\uE001';
+  const ZOZ_ESCAPED_DOLLAR_TOKEN = '\uE000ZOZEDOL\uE001';
+
+  const ZOZ_SUPPORTED_MATH_ENV_NAMES = new Set([
+    'equation', 'equation*', 'align', 'align*', 'aligned', 'alignedat',
+    'gather', 'gather*', 'gathered', 'alignat', 'alignat*',
+    'flalign', 'flalign*', 'multline', 'multline*',
+    'pmatrix', 'bmatrix', 'Bmatrix', 'vmatrix', 'Vmatrix', 'smallmatrix',
+    'cases', 'rcases', 'dcases', 'drcases', 'matrix', 'array',
+    'split', 'CD', 'eqnarray', 'eqnarray*', 'subequations'
+  ]);
+
+  function countPrecedingBackslashes(str, idx) {
+    let count = 0;
+    let p = idx - 1;
+    while (p >= 0 && str.charCodeAt(p) === 92) {
+      count++;
+      p--;
+    }
+    return count;
+  }
+
+  function isValidInlineMathCandidate(inner, nextChar, hasEdgeWhitespace) {
+    if (!inner) return false;
+    const trimmed = inner.trim();
+    if (!trimmed) return false;
+
+    // Closing '$' diikuti digit (misal "$5 ... $10") hampir selalu mata uang, bukan rumus matematika
+    if (nextChar && nextChar >= '0' && nextChar <= '9') return false;
+
+    const hasMathOperator = /[\\^_{}=<>±×÷∑∫∏√∂∇≈≠≤≥∞∈∉∀∃⊂⊃⊆⊇∪∩·∘→←↔⇒⇔α-ωΑ-Ω|+\-*/]/.test(trimmed);
+    const hasLatexCmd = /\\[a-zA-Z]+/.test(trimmed);
+
+    // Jika dibuka/ditutup spasi ($ ... $) atau multi-baris, wajib memuat ekspresi matematika/LaTeX eksplisit tanpa prosa bebas
+    if (trimmed.includes('\n')) {
+      const hasExplicitMathBlock = /\\(?:begin|frac|dfrac|tfrac|sqrt|sum|int|prod|lim|partial|nabla|infty|alpha|beta|gamma|delta|theta|lambda|sigma|omega|mathbb|mathbf|mathrm|text|left|right)\b/.test(trimmed) || /[=^_{}]/.test(trimmed);
+      if (!hasExplicitMathBlock) return false;
+      const outsideTextCmds = trimmed.replace(/\\(?:text|mathrm|textbf|textit|operatorname)\s*\{[^{}]*\}/g, ' ');
+      if (/\b[a-zA-Z]{2,}\s+[a-zA-Z]{2,}\s+[a-zA-Z]{2,}\b/.test(outsideTextCmds)) return false;
+    }
+    if (hasEdgeWhitespace) {
+      if (!hasLatexCmd && !/[=^_{}<>+\-*/\\|]/.test(trimmed)) return false;
+      if (/^\d[\d,.]*(?:\s+(?:and|or|to|dan|atau|per|sampai)\b|$)/i.test(trimmed)) return false;
+    }
+
+    // Jika dibuka langsung dengan angka (misal $5 atau $10), cegah pengikatan kata prosa/mata uang ("$5 dan $10 serta ($PATH)")
+    if (/^\d/.test(trimmed)) {
+      const hasMathRelationOrLatex = hasLatexCmd || /[=<>^_{}+*/|]/.test(trimmed);
+      if (!hasMathRelationOrLatex) {
+        if (/\s+[a-zA-Z]{2,}\b/.test(trimmed) || /[(\[]\s*$/.test(trimmed) || /^\d[\d.,]*[)\]]\s*/.test(trimmed)) {
+          return false;
+        }
+        if (!/^[0-9.,]+(?:[a-zA-Z]{1,2}|%)?$/.test(trimmed)) {
+          return false;
+        }
+      } else if (/\b[a-zA-Z]{2,}\s+[a-zA-Z]{2,}\b/.test(trimmed) && !hasLatexCmd && !/[=<>^_{}]/.test(trimmed)) {
+        return false;
+      }
+    }
+
+    // Tolak fragmen terbalik akibat kurung buka menggantung tepat sebelum '$' seperti "($PATH) lalu ($HOME)"
+    if (!hasLatexCmd && /\(\s*$/.test(trimmed)) return false;
+
+    // Cegah dua tanda dolar shell/prosa tak berpasangan ($PATH) ... ($HOME) mengikat kalimat normal
+    if (!hasMathOperator && !hasLatexCmd) {
+      const wordMatches = trimmed.match(/\b[a-zA-Z]{2,}\b/g) || [];
+      if (wordMatches.length >= 2) return false;
+    }
+
+    return true;
+  }
+
   function extractAndProtectMath(text) {
     if (!text || typeof text !== 'string') return { text: '', mathBlocks: [] };
 
     const mathBlocks = [];
     let placeholderCounter = 0;
 
-    // 1. Lindungi blok kode berpagar (``` ... ```) dan kode inline (` ... `)
+    // 1. Lindungi blok kode berpagar (``` ... ```, termasuk yang belum tertutup saat streaming) dan kode inline (` ... `)
     const codeBlocks = [];
-    let clean = text.replace(/```[\s\S]*?```|`[^`\n]+`/g, (match) => {
-      const token = `%%ZOZ_CODE_SAFE_${codeBlocks.length}%%`;
+    let clean = text.replace(/```[\s\S]*?(?:```|$)|``[^`\n]+``|`[^`\n]+`/g, (match) => {
+      const token = `${ZOZ_MATH_CODE_PREFIX}${codeBlocks.length}${ZOZ_MATH_TOKEN_SUFFIX}`;
       codeBlocks.push({ token, content: match });
       return token;
     });
 
-    // 2. Lindungi escape dollar: \$
-    clean = clean.replace(/\\(\$)/g, '%%ZOZ_ESCAPED_DOLLAR%%');
-
-    // 2b. Ekstrak Display Math dari lingkungan LaTeX eksplisit (\begin{equation}...\end{equation}, \begin{align}...\end{align}, dll.)
-    const mathEnvRegex = /\\begin\{(?:equation|align|aligned|gather|gathered|alignat|flalign|multline|pmatrix|bmatrix|vmatrix|Vmatrix|cases|matrix)\*?\}([\s\S]+?)\\end\{(?:equation|align|aligned|gather|gathered|alignat|flalign|multline|pmatrix|bmatrix|vmatrix|Vmatrix|cases|matrix)\*?\}/g;
-    clean = clean.replace(mathEnvRegex, (match) => {
-      const formula = match.trim();
-      if (!formula) return match;
-      const token = `%%ZOZ_MATH_DISPLAY_${placeholderCounter++}%%`;
-      mathBlocks.push({ token, formula, displayMode: true });
-      return `\n\n${token}\n\n`;
+    // 2. Lindungi escape dollar ganjil (\$) tanpa merusak jeda baris LaTeX (\\$)
+    clean = clean.replace(/(\\*)\$/g, (match, slashes) => {
+      if (slashes.length % 2 === 1) {
+        return slashes.slice(0, -1) + ZOZ_ESCAPED_DOLLAR_TOKEN;
+      }
+      return match;
     });
 
-    // 2c. Normalisasi keseimbangan delimiter $$ display math: jika jumlah ganjil (pemotongan stream/unclosed), tutup secara aman
-    const doubleDollarCount = (clean.match(/\$\$/g) || []).length;
-    if (doubleDollarCount % 2 !== 0) {
-      clean += '\n$$';
+    const restoreEscapedDollars = (s) => (s && s.includes(ZOZ_ESCAPED_DOLLAR_TOKEN))
+      ? s.split(ZOZ_ESCAPED_DOLLAR_TOKEN).join('\\$')
+      : s;
+
+    // 3. Pemindai deterministik outer-to-inner:
+    // $$...$$, \[...\], dan \begin{env}...\end{env} standalone diproses luar-ke-dalam agar
+    // lingkungan bersarang (\begin{aligned}, \begin{pmatrix}, \begin{cases} di dalam $$...$$)
+    // tetap utuh menjadi SATU blok KaTeX tanpa ekstraksi ganda atau kebocoran token placeholder.
+    const out = [];
+    const len = clean.length;
+    let i = 0;
+
+    const pushDisplayBlock = (rawFormula, rawSource, startIdx, endIdx) => {
+      const formula = restoreEscapedDollars(rawFormula).trim();
+      if (!formula) {
+        out.push(clean.slice(startIdx, endIdx));
+        return;
+      }
+      const token = `${ZOZ_MATH_DISPLAY_PREFIX}${placeholderCounter++}${ZOZ_MATH_TOKEN_SUFFIX}`;
+      mathBlocks.push({ token, formula, rawSource: restoreEscapedDollars(rawSource), displayMode: true });
+
+      const lastNl = clean.lastIndexOf('\n', startIdx - 1);
+      const lineBefore = clean.slice(lastNl + 1, startIdx);
+      const isLineOnlyPrefix = /^[ \t>]*$/.test(lineBefore);
+      const afterText = clean.slice(endIdx);
+      const firstLineAfter = afterText.split(/\r?\n/, 1)[0] || '';
+      const isInsideTableRow = /^\s*\|/.test(lineBefore) && (firstLineAfter.includes('|') || (lineBefore.match(/\|/g) || []).length >= 2);
+      const endsWithNewline = /^\r?\n/.test(afterText);
+
+      if (isInsideTableRow) {
+        // Jangan pernah menyisipkan newline ganda di dalam baris tabel Markdown karena akan memecah sel tabel
+        out.push(token);
+      } else if (isLineOnlyPrefix) {
+        // Pertahankan indentasi daftar (1. / -) maupun kutipan (>) agar display math panjang di dalam list tidak memecah list menjadi <pre><code>
+        const indent = lineBefore;
+        if (!indent) {
+          out.push(`\n\n${token}\n\n`);
+        } else {
+          out.push(`\n${indent}\n${indent}${token}\n${endsWithNewline ? '' : indent}`);
+        }
+      } else {
+        const prefixMatch = lineBefore.match(/^([ \t]*(?:>\s*)*)/);
+        const contIndent = prefixMatch ? prefixMatch[1] : '';
+        if (!contIndent) {
+          out.push(`\n\n${token}\n\n`);
+        } else {
+          out.push(`\n${contIndent}\n${contIndent}${token}\n${contIndent}`);
+        }
+      }
+    };
+
+    const pushInlineBlock = (rawFormula, rawSource) => {
+      const formula = restoreEscapedDollars(rawFormula).trim();
+      if (!formula) return false;
+      const token = `${ZOZ_MATH_INLINE_PREFIX}${placeholderCounter++}${ZOZ_MATH_TOKEN_SUFFIX}`;
+      mathBlocks.push({ token, formula, rawSource: restoreEscapedDollars(rawSource), displayMode: false });
+      out.push(token);
+      return true;
+    };
+
+    const hasMathParagraphBreak = (nlIdx) => {
+      const rest = clean.slice(nlIdx + 1);
+      if (/^[ \t]*(?:#{1,6}\s|\uE000ZOZCS)/.test(rest)) return true;
+      const blankMatch = /^[ \t]*\n([ \t]*)/.exec(rest);
+      if (!blankMatch) return false;
+      const afterBlank = rest.slice(blankMatch[0].length);
+      if (!afterBlank) return false;
+      if (/^(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|---+|===+|\*\*\*+|\|[^|\n]+\||\\\[)/.test(afterBlank)) {
+        return true;
+      }
+      // Jika baris baru setelah jeda kosong membuka blok $$ ... (bukan baris penutup $$ berdiri sendiri), hentikan pencarian
+      if (/^\$\$[ \t]*[^\s$]/.test(afterBlank)) {
+        return true;
+      }
+      const nextParaLine = afterBlank.split('\n', 1)[0] || '';
+      const strippedTexText = nextParaLine.replace(/\\(?:text|mathrm|textbf|textit|operatorname)\s*\{[^{}]*\}/g, ' ').trim();
+      if (strippedTexText && !/[\\^_{}=<>|]/.test(strippedTexText) && /\b[a-zA-Z\u00C0-\u024F]{2,}\s+[a-zA-Z\u00C0-\u024F]{2,}\b/.test(strippedTexText)) {
+        return true;
+      }
+      return false;
+    };
+
+    const findMatchingDoubleDollar = (start) => {
+      const maxScan = Math.min(len - 1, start + 12000);
+      let j = start;
+      while (j < maxScan) {
+        if (clean.startsWith(ZOZ_MATH_CODE_PREFIX, j)) {
+          return -1;
+        }
+        if (clean[j] === '\n' && hasMathParagraphBreak(j)) {
+          return -1;
+        }
+        if (clean[j] === '$' && clean[j + 1] === '$' && countPrecedingBackslashes(clean, j) % 2 === 0) {
+          return j;
+        }
+        j++;
+      }
+      return -1;
+    };
+
+    const findMatchingCloseParenOrBracket = (start, closeSeq) => {
+      const isInlineParen = closeSeq === '\\)';
+      const maxScan = Math.min(len - 1, start + (isInlineParen ? 2400 : 12000));
+      let j = start;
+      while (j < maxScan) {
+        if (clean.startsWith(ZOZ_MATH_CODE_PREFIX, j)) {
+          return -1;
+        }
+        if (isInlineParen && clean[j] === '\n' && clean[j + 1] === '\n') {
+          return -1;
+        }
+        if (!isInlineParen && clean[j] === '\n' && hasMathParagraphBreak(j)) {
+          return -1;
+        }
+        if (clean[j] === closeSeq[0] && clean[j + 1] === closeSeq[1] && countPrecedingBackslashes(clean, j) % 2 === 0) {
+          return j;
+        }
+        j++;
+      }
+      return -1;
+    };
+
+    const findMatchingMathEnvEnd = (startAfterOpen) => {
+      const envTagRegex = /\\(begin|end)\{([a-zA-Z*]+)\}/g;
+      envTagRegex.lastIndex = startAfterOpen;
+      const maxEnd = Math.min(len, startAfterOpen + 12000);
+      let depth = 1;
+      let m;
+      while ((m = envTagRegex.exec(clean)) !== null) {
+        if (m.index >= maxEnd) return -1;
+        const segment = clean.slice(startAfterOpen, m.index);
+        if (segment.includes(ZOZ_MATH_CODE_PREFIX)) return -1;
+        if (/\n[ \t]*\n[ \t]*(?:#{1,6}\s|\d+[.)]\s|[-*+]\s)/.test(segment)) return -1;
+        if (countPrecedingBackslashes(clean, m.index) % 2 !== 0) continue;
+        if (m[1] === 'begin') depth++;
+        else depth--;
+        if (depth === 0) {
+          return envTagRegex.lastIndex;
+        }
+      }
+      return -1;
+    };
+
+    const findMatchingSingleDollar = (start) => {
+      const limit = Math.min(len, start + 2400);
+      let j = start;
+      let newlineCount = 0;
+      while (j < limit) {
+        const ch = clean[j];
+        if (ch === '\uE000' && clean.startsWith(ZOZ_MATH_CODE_PREFIX, j)) {
+          return -1;
+        }
+        if (ch === '\n') {
+          newlineCount++;
+          // Izinkan rumus multi-baris di dalam $ ... $ (mis. matriks/cases), tolak blok baru atau blank line
+          if (newlineCount > 20) return -1;
+          if (clean[j + 1] === '\n') return -1;
+          const restLine = clean.slice(j + 1);
+          if (/^[ \t]*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|\$\$|\\\[)/.test(restLine)) {
+            return -1;
+          }
+        }
+        if (ch === '$') {
+          if (clean[j + 1] === '$') {
+            return -1;
+          }
+          if (countPrecedingBackslashes(clean, j) % 2 === 0) {
+            return j;
+          }
+        }
+        j++;
+      }
+      return -1;
+    };
+
+    while (i < len) {
+      // a. Lewati placeholder blok kode secara utuh
+      if (clean[i] === '\uE000') {
+        const endTok = clean.indexOf(ZOZ_MATH_TOKEN_SUFFIX, i);
+        if (endTok !== -1) {
+          out.push(clean.slice(i, endTok + 1));
+          i = endTok + 1;
+          continue;
+        }
+      }
+
+      // b. Display Math $$ ... $$ (termasuk penutupan aman jika ganjil saat streaming)
+      if (clean[i] === '$' && clean[i + 1] === '$' && countPrecedingBackslashes(clean, i) % 2 === 0) {
+        const closeIdx = findMatchingDoubleDollar(i + 2);
+        if (closeIdx !== -1) {
+          const inner = clean.slice(i + 2, closeIdx);
+          if (inner.trim()) {
+            pushDisplayBlock(inner, clean.slice(i, closeIdx + 2), i, closeIdx + 2);
+            i = closeIdx + 2;
+            continue;
+          }
+          out.push(clean.slice(i, closeIdx + 2));
+          i = closeIdx + 2;
+          continue;
+        } else {
+          // Display math terbuka di ekor (biasanya sedang streaming): tutup aman HANYA jika tidak melintasi jeda paragraf/heading/blok kode
+          const tail = clean.slice(i + 2);
+          const isStreamingTailOnly = Boolean(
+            tail.trim() &&
+            tail.length <= 4000 &&
+            !/\n[ \t]*\n/.test(tail) &&
+            !tail.includes(ZOZ_MATH_CODE_PREFIX) &&
+            !/(?:^|\n)[ \t]*#{1,6}\s/.test(tail)
+          );
+          if (isStreamingTailOnly) {
+            pushDisplayBlock(tail, clean.slice(i), i, len);
+            i = len;
+            continue;
+          }
+          // Biarkan delimiter tak berpasangan sebagai teks biasa agar paritas rumus berikutnya tidak terbalik
+          out.push('$$');
+          i += 2;
+          continue;
+        }
+      }
+
+      // c. Display Math \[ ... \]
+      if (clean[i] === '\\' && clean[i + 1] === '[' && countPrecedingBackslashes(clean, i) % 2 === 0) {
+        const closeIdx = findMatchingCloseParenOrBracket(i + 2, '\\]');
+        if (closeIdx !== -1) {
+          const inner = clean.slice(i + 2, closeIdx);
+          if (inner.trim()) {
+            pushDisplayBlock(inner, clean.slice(i, closeIdx + 2), i, closeIdx + 2);
+            i = closeIdx + 2;
+            continue;
+          }
+        } else {
+          const tail = clean.slice(i + 2);
+          if (
+            tail.trim() &&
+            tail.length <= 4000 &&
+            !/\n\s*\n/.test(tail) &&
+            !tail.includes(ZOZ_MATH_CODE_PREFIX) &&
+            !/(?:^|\n)[ \t]*#{1,6}\s/.test(tail) &&
+            /[\\^_=+\-*/]|\\n/.test(tail)
+          ) {
+            pushDisplayBlock(tail, clean.slice(i), i, len);
+            i = len;
+            continue;
+          }
+          out.push('\\[');
+          i += 2;
+          continue;
+        }
+      }
+
+      // d. Display Math dari lingkungan LaTeX eksplisit (\begin{equation}...\end{equation}, \begin{align}...\end{align}, dll.)
+      if (clean[i] === '\\' && clean.startsWith('\\begin{', i) && countPrecedingBackslashes(clean, i) % 2 === 0) {
+        const openMatch = /^\\begin\{([a-zA-Z*]+)\}/.exec(clean.slice(i, i + 40));
+        if (openMatch && ZOZ_SUPPORTED_MATH_ENV_NAMES.has(openMatch[1])) {
+          const endEnvIdx = findMatchingMathEnvEnd(i + openMatch[0].length);
+          if (endEnvIdx !== -1) {
+            const fullEnv = clean.slice(i, endEnvIdx);
+            pushDisplayBlock(fullEnv, fullEnv, i, endEnvIdx);
+            i = endEnvIdx;
+            continue;
+          }
+        }
+      }
+
+      // e. Inline Math \( ... \)
+      if (clean[i] === '\\' && clean[i + 1] === '(' && countPrecedingBackslashes(clean, i) % 2 === 0) {
+        const closeIdx = findMatchingCloseParenOrBracket(i + 2, '\\)');
+        if (closeIdx !== -1) {
+          const inner = clean.slice(i + 2, closeIdx);
+          if (pushInlineBlock(inner, clean.slice(i, closeIdx + 2))) {
+            i = closeIdx + 2;
+            continue;
+          }
+        }
+      }
+
+      // f. Inline Math $ ... $
+      if (clean[i] === '$' && clean[i + 1] !== '$' && countPrecedingBackslashes(clean, i) % 2 === 0) {
+        const closeIdx = findMatchingSingleDollar(i + 1);
+        if (closeIdx !== -1 && closeIdx > i + 1) {
+          const inner = clean.slice(i + 1, closeIdx);
+          const hasEdgeWhitespace = /^[ \t\r\n]|[ \t\r\n]$/.test(inner);
+          const nextChar = clean[closeIdx + 1] || '';
+          if (isValidInlineMathCandidate(inner, nextChar, hasEdgeWhitespace)) {
+            if (pushInlineBlock(inner, clean.slice(i, closeIdx + 1))) {
+              i = closeIdx + 1;
+              continue;
+            }
+          }
+        }
+      }
+
+      out.push(clean[i]);
+      i++;
     }
 
-    // 3. Ekstrak Display Math: $$ ... $$ dan \[ ... \]
-    clean = clean.replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g, (match, p1, p2) => {
-      const formula = (p1 || p2 || '').trim();
-      if (!formula) return match;
-      const token = `%%ZOZ_MATH_DISPLAY_${placeholderCounter++}%%`;
-      mathBlocks.push({ token, formula, displayMode: true });
-      return `\n\n${token}\n\n`;
-    });
+    let resultText = out.join('');
 
-    // 4. Ekstrak Inline Math: $ ... $ dan \( ... \)
-    clean = clean.replace(/\\\(([\s\S]+?)\\\)|(?<!\$)\$([^\s$](?:[^$\n]*?[^\s$])?)\$(?!\$|\d)/g, (match, p1, p2) => {
-      const formula = (p1 || p2 || '').trim();
-      if (!formula) return match;
-      // Formula berupa angka murni ($0$, $1$, dsb.) adalah notasi matematika inline valid yang harus dihidrasi ke KaTeX
-      const token = `%%ZOZ_MATH_INLINE_${placeholderCounter++}%%`;
-      mathBlocks.push({ token, formula, displayMode: false });
-      return token;
-    });
-
-    // 5. Kembalikan blok kode (aman dari pola $ / $$ di dalam isi kode)
+    // 4. Kembalikan blok kode (aman dari pola $ / $$ di dalam isi kode)
     for (const cb of codeBlocks) {
-      clean = clean.split(cb.token).join(cb.content);
+      resultText = resultText.split(cb.token).join(cb.content);
     }
 
-    // 6. Kembalikan escaped dollar
-    clean = clean.replace(/%%ZOZ_ESCAPED_DOLLAR%%/g, '\\$');
+    // 5. Kembalikan escaped dollar pada prosa luar
+    resultText = restoreEscapedDollars(resultText);
 
-    return { text: clean, mathBlocks };
+    return { text: resultText, mathBlocks };
+  }
+
+  function restoreMathTokensInsideCodeFences(text, mathBlocks) {
+    if (!text || !mathBlocks || mathBlocks.length === 0) return text;
+    if (!text.includes('```') || !text.includes('\uE000')) return text;
+    const tokenMap = new Map();
+    for (const item of mathBlocks) {
+      if (item && item.token && item.rawSource) {
+        tokenMap.set(item.token, item.rawSource);
+      }
+    }
+    if (tokenMap.size === 0) return text;
+    return text.replace(/```[\s\S]*?(?:```|$)/g, (fence) => {
+      let restored = fence;
+      if (!restored.includes('\uE000')) return restored;
+      for (const [tok, raw] of tokenMap.entries()) {
+        if (restored.includes(tok)) {
+          restored = restored.split(tok).join(raw);
+        }
+      }
+      return restored;
+    });
+  }
+
+  function normalizeLatexFormulaForKatex(formula) {
+    if (!formula || typeof formula !== 'string') return '';
+    return formula
+      .replace(/\\label\{[^{}]*\}/g, '')
+      .replace(/\\begin\{subequations\}\s*/g, '')
+      .replace(/\s*\\end\{subequations\}/g, '')
+      .replace(/\\begin\{(?:eqnarray|flalign)\*?\}/g, '\\begin{aligned}')
+      .replace(/\\end\{(?:eqnarray|flalign)\*?\}/g, '\\end{aligned}')
+      .replace(/\\begin\{multline\*?\}/g, '\\begin{gathered}')
+      .replace(/\\end\{multline\*?\}/g, '\\end{gathered}')
+      .trim();
   }
 
   function hydrateMath(renderedHtml, mathBlocks) {
@@ -8453,11 +8878,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
     for (const item of mathBlocks) {
       let rendered = '';
+      const katexFormula = normalizeLatexFormulaForKatex(item.formula);
       try {
         if (hasKatex) {
-          rendered = window.katex.renderToString(item.formula, {
+          rendered = window.katex.renderToString(katexFormula, {
             displayMode: item.displayMode,
-            throwOnError: false
+            throwOnError: false,
+            strict: false
           });
         } else {
           const tag = item.displayMode ? 'div' : 'span';
@@ -8468,14 +8895,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       }
 
       if (item.displayMode) {
-        const pWrapped = new RegExp(`<p>\\s*${item.token}\\s*<\\/p>`, 'g');
-        if (pWrapped.test(result)) {
-          result = result.replace(pWrapped, rendered);
-        } else {
-          result = result.replace(item.token, rendered);
-        }
-      } else {
-        result = result.replace(item.token, rendered);
+        const escapedTok = item.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pWrapped = new RegExp(`<p>\\s*${escapedTok}\\s*<\\/p>`, 'g');
+        // Gunakan fungsi replacer agar pola $$ / $& / $' di <annotation> KaTeX tidak diekspansi oleh String.replace
+        result = result.replace(pWrapped, () => rendered);
+      }
+      if (result.includes(item.token)) {
+        result = result.split(item.token).join(rendered);
       }
     }
     return result;
@@ -8684,16 +9110,43 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     return str;
   }
 
+  function transpileBinomRecursive(text) {
+    let str = text;
+    let binomIdx;
+    while ((binomIdx = str.search(/\\(?:binom|dbinom|tbinom)(?![a-zA-Z])/)) !== -1) {
+      const m = str.slice(binomIdx).match(/^\\(?:binom|dbinom|tbinom)(?![a-zA-Z])/);
+      if (!m) break;
+      let afterCmd = binomIdx + m[0].length;
+      while (afterCmd < str.length && /\s/.test(str[afterCmd])) afterCmd++;
+      const topGroup = extractBalancedGroup(str, afterCmd);
+      if (!topGroup) break;
+      let afterTop = topGroup.endIndex + 1;
+      while (afterTop < str.length && /\s/.test(str[afterTop])) afterTop++;
+      const botGroup = extractBalancedGroup(str, afterTop);
+      if (!botGroup) break;
+      const topStr = transpileBinomRecursive(topGroup.content.trim());
+      const botStr = transpileBinomRecursive(botGroup.content.trim());
+      str = str.substring(0, binomIdx) + `C(${topStr}, ${botStr})` + str.substring(botGroup.endIndex + 1);
+    }
+    return str;
+  }
+
   function purifyPureMathFormula(text, options = {}) {
     if (!text || typeof text !== 'string') return '';
     let out = text;
 
-    // 0. Lindungi blok kode berpagar (``` ... ```) dan kode inline (` ... `) dari pembersihan rumus
+    // 0. Lindungi blok kode berpagar (``` ... ```), kode inline (` ... `), dan URL (https://...) dari pembersihan rumus
     // Gunakan token PUA bebas garis bawah (_) agar tidak pernah termutasi oleh aturan subskrip _0 -> ₀
     const codeBlocks = [];
     out = out.replace(/```[\s\S]*?```|``[^`\n]+``|`[^`\n]+`/g, (match) => {
       const token = `\uE000ZOZPUREMATHCODE${codeBlocks.length}\uE001`;
       codeBlocks.push({ token, content: match });
+      return token;
+    });
+    const urlBlocks = [];
+    out = out.replace(/https?:\/\/[^\s<>)\]]+/gi, (match) => {
+      const token = `\uE000ZOZPUREMATHURL${urlBlocks.length}\uE001`;
+      urlBlocks.push({ token, content: match });
       return token;
     });
 
@@ -8708,6 +9161,43 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       }
       return match;
     });
+
+    // 1b. Transpilasi lingkungan LaTeX (\begin{cases}, \begin{pmatrix}, \begin{aligned}, dsb.)
+    out = out.replace(/\\begin\{(?:d|r)?cases\}([\s\S]*?)\\end\{(?:d|r)?cases\}/g, (_, body) => {
+      const rows = body
+        .split(/\\\\(?:\s*\[[^\]]*\])?/)
+        .map(r => r.replace(/[ \t]*&[ \t]*/g, ', ').trim())
+        .filter(Boolean);
+      if (rows.length === 0) return '';
+      if (rows.length === 1) return `{ ${rows[0]}`;
+      return rows.map(r => `{ ${r}`).join('\n');
+    });
+
+    out = out.replace(/\\begin\{(pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|smallmatrix|matrix|array)\}(?:\{[^}]*\})?([\s\S]*?)\\end\{\1\}/g, (_, env, body) => {
+      const openBr = env === 'pmatrix' ? '(' : env === 'Bmatrix' ? '{' : env === 'vmatrix' ? '|' : env === 'Vmatrix' ? '‖' : '[';
+      const closeBr = env === 'pmatrix' ? ')' : env === 'Bmatrix' ? '}' : env === 'vmatrix' ? '|' : env === 'Vmatrix' ? '‖' : ']';
+      const rows = body
+        .replace(/\\hline/g, '')
+        .split(/\\\\(?:\s*\[[^\]]*\])?/)
+        .map(r => r.split('&').map(c => c.trim()).filter((cell, idx, arr) => arr.length > 1 || cell !== '').join(', '))
+        .map(r => r.trim())
+        .filter(Boolean);
+      if (rows.length === 0) return '';
+      if (rows.length === 1) return `${openBr}${rows[0]}${closeBr}`;
+      return rows.map(r => `${openBr}${r}${closeBr}`).join('\n');
+    });
+
+    out = out.replace(/\\begin\{(?:aligned|align\*?|alignedat|gather\*?|gathered|split|multline\*?|equation\*?|eqnarray\*?)\}(?:\{[^}]*\})?([\s\S]*?)\\end\{(?:aligned|align\*?|alignedat|gather\*?|gathered|split|multline\*?|equation\*?|eqnarray\*?)\}/g, (_, body) => {
+      return body
+        .replace(/\\\\(?:\s*\[[^\]]*\])?/g, '\n')
+        .replace(/[ \t]*&[ \t]*/g, ' ');
+    });
+
+    // Baris baru LaTeX (\\ atau \\[4pt]) di dalam formula display
+    out = out.replace(/\\\\(?:\s*\[[^\]]*\])?/g, '\n');
+    if (options.isDisplay) {
+      out = out.replace(/[ \t]*&[ \t]*/g, ' ');
+    }
 
     // Pastikan perintah LaTeX terpisah dari pembungkus teks (misal: \nabla\mathbf{u} -> \nabla \mathbf{u})
     out = out.replace(/(\\[a-zA-Z]+)(\\(?:mathbf|mathit|mathrm|boldsymbol|bm|mathcal|mathscr|mathbb|text)\b)/g, '$1 $2');
@@ -8731,7 +9221,15 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     out = out.replace(/\\(?:mathcal|mathscr)\{([A-Z])\}/g, (m, c) => calMap[c] || c);
     out = out.replace(/\\(?:mathcal|mathscr)\s*([A-Z])/g, (m, c) => calMap[c] || c);
 
-    // 4. Dekompresi dan lepas pembungkus teks LaTeX secara rekursif: \text{...}, \mathrm{...}, \operatorname{...}, dsb.
+    // 4. Dekompresi dan lepas pembungkus teks LaTeX secara rekursif: \text{...}, \mathrm{...}, \operatorname{...}, \boxed{...}, dsb.
+    out = out.replace(/\\boxed\s*\{([^{}]+)\}/g, '[$1]');
+    out = out.replace(/\\(?:cancel|bcancel|xcancel)\s*\{([^{}]+)\}/g, '$1');
+    out = out.replace(/\\(?:phantom|vphantom|hphantom)\s*\{[^{}]*\}/g, '');
+    out = out.replace(/\\tag\s*\{([^{}]+)\}/g, '   ($1)');
+    out = out.replace(/\\pmod\s*\{([^{}]+)\}/g, ' (mod $1)');
+    out = out.replace(/\\bmod(?![a-zA-Z])/g, ' mod ');
+    out = out.replace(/\\(?:displaystyle|textstyle|scriptstyle|scriptscriptstyle|nonumber|notag|allowbreak)(?![a-zA-Z])/g, '');
+
     let prev;
     do {
       prev = out;
@@ -8761,9 +9259,17 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     out = out.replace(/\\langle(?![a-zA-Z])/g, '⟨');
     out = out.replace(/\\rangle(?![a-zA-Z])/g, '⟩');
 
-    // Panah berlabel teks (\xrightarrow{...}, \xleftarrow{...})
+    // Panah berlabel teks (\xrightarrow{...}, \xleftarrow{...}, \overset, \underset)
     out = out.replace(/\\xrightarrow\s*\{([^{}]+)\}/g, '—[$1]→');
     out = out.replace(/\\xleftarrow\s*\{([^{}]+)\}/g, '←[$1]—');
+    out = out.replace(/\\(?:overset|stackrel)\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, (_, top, base) => {
+      const b = base.trim();
+      if (b === '\\to' || b === '\\rightarrow' || b === '→') return `—[${top.trim()}]→`;
+      return `${b}^(${top.trim()})`;
+    });
+    out = out.replace(/\\underset\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, (_, bot, base) => `${base.trim()}_(${bot.trim()})`);
+    out = out.replace(/\\underbrace\s*\{([^{}]+)\}\s*_\s*\{([^{}]+)\}/g, '($1)_[$2]');
+    out = out.replace(/\\overbrace\s*\{([^{}]+)\}\s*\^\s*\{([^{}]+)\}/g, '($1)^[$2]');
 
     // Limit terproyeksi
     out = out.replace(/\\varprojlim(?![a-zA-Z])/g, 'proj lim');
@@ -8875,12 +9381,19 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       .replace(/\\setminus(?![a-zA-Z])/g, '∖')
       .replace(/\\\|/g, '‖');
 
-    // Bentuk akar kuadrat proporsional: √atom vs √(compound)
+    // Bentuk akar pangkat-n (\sqrt[n]{x}) dan akar kuadrat proporsional: √atom vs √(compound)
+    out = out.replace(/\\sqrt\[2\]\{([^{}]+)\}/g, '\\sqrt{$1}');
+    out = out.replace(/\\sqrt\[3\]\{([a-zA-Z0-9\u0370-\u03FF])\}/g, '∛$1');
+    out = out.replace(/\\sqrt\[3\]\{([^{}]+)\}/g, '∛($1)');
+    out = out.replace(/\\sqrt\[4\]\{([a-zA-Z0-9\u0370-\u03FF])\}/g, '∜$1');
+    out = out.replace(/\\sqrt\[4\]\{([^{}]+)\}/g, '∜($1)');
+    out = out.replace(/\\sqrt\[([^\]]+)\]\{([^{}]+)\}/g, '^($1)√($2)');
     out = out.replace(/\\sqrt\{([a-zA-Z0-9\u0370-\u03FF])\}/g, '√$1');
     out = out.replace(/\\sqrt\{([^{}]+)\}/g, '√($1)');
     out = out.replace(/\\sqrt\s*([a-zA-Z0-9\u0370-\u03FF])/g, '√$1');
 
-    // 11. Transpilasi Pecahan Bertingkat & Bersarang (\frac, \dfrac, \tfrac)
+    // 11. Transpilasi Binomial (\binom) & Pecahan Bertingkat (\frac, \dfrac, \tfrac)
+    out = transpileBinomRecursive(out);
     out = transpileFractionsRecursive(out);
 
     // 12. Fungsi Matematika Standar (Lepas garis miring dan format spasi presisi)
@@ -8935,8 +9448,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       }
       return '_' + inner;
     });
-    // Subskrip karakter tunggal: _1, _2, _j, _k, _n, _γ, dsb.
-    out = out.replace(/_([0-9aehijklmnoprstuvxβγρφχ])(?![a-zA-Z0-9])/g, (m, c) => subMap[c] || m);
+    // Subskrip karakter tunggal pada variabel matematika (hindari merusak kata prosa biasa seperti langkah_1 / variabel_x)
+    out = out.replace(/(?<![a-zA-Z]{3})_([0-9aehijklmnoprstuvxβγρφχ])(?![a-zA-Z0-9])/g, (m, c) => subMap[c] || m);
 
     // 14. Lepas karakter yang di-escape: \{, \}, \_, \%, \&, \#, \$
     out = out.replace(/\\([{}%&#_$])/g, '$1');
@@ -8951,36 +9464,44 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // Rapatkan operator aksen kuantum dengan fungsi gelombang: Ĥ Ψ -> ĤΨ
     out = out.replace(/([ĤÂÊÎÔÛĈĜĴŜŴŶẐ])\s+([ΨΦ])/g, '$1$2');
 
-    // 16. Spasi matematika presisi di sekitar relasi dan operator
+    // 16. Spasi matematika presisi di sekitar relasi dan operator (HANYA spasi horizontal [ \t], JANGAN memakan newline \n!)
     out = out
-      .replace(/\s*→\s*/g, ' → ')
-      .replace(/\s*←\s*/g, ' ← ')
-      .replace(/\s*⇒\s*/g, ' ⇒ ')
-      .replace(/\s*⇔\s*/g, ' ⇔ ')
-      .replace(/\s*=\s*/g, ' = ')
-      .replace(/\s*≅\s*/g, ' ≅ ')
-      .replace(/\s*≡\s*/g, ' ≡ ')
-      .replace(/\s*≈\s*/g, ' ≈ ')
-      .replace(/\s*≠\s*/g, ' ≠ ')
-      .replace(/\s*≤\s*/g, ' ≤ ')
-      .replace(/\s*≥\s*/g, ' ≥ ')
-      .replace(/\s*∈\s*/g, ' ∈ ')
-      .replace(/\s*∉\s*/g, ' ∉ ')
-      .replace(/\s*∩\s*/g, ' ∩ ')
-      .replace(/\s*∪\s*/g, ' ∪ ')
-      .replace(/\s*∧\s*/g, ' ∧ ')
-      .replace(/\s*∨\s*/g, ' ∨ ')
-      .replace(/\s*·\s*/g, ' · ')
-      .replace(/\s*±\s*/g, ' ± ')
-      .replace(/ {2,}/g, ' ');
+      .replace(/[ \t]*→[ \t]*/g, ' → ')
+      .replace(/[ \t]*←[ \t]*/g, ' ← ')
+      .replace(/[ \t]*⇒[ \t]*/g, ' ⇒ ')
+      .replace(/[ \t]*⇔[ \t]*/g, ' ⇔ ')
+      .replace(/[ \t]*=[ \t]*/g, ' = ')
+      .replace(/[ \t]*≅[ \t]*/g, ' ≅ ')
+      .replace(/[ \t]*≡[ \t]*/g, ' ≡ ')
+      .replace(/[ \t]*≈[ \t]*/g, ' ≈ ')
+      .replace(/[ \t]*≠[ \t]*/g, ' ≠ ')
+      .replace(/[ \t]*≤[ \t]*/g, ' ≤ ')
+      .replace(/[ \t]*≥[ \t]*/g, ' ≥ ')
+      .replace(/[ \t]*∈[ \t]*/g, ' ∈ ')
+      .replace(/[ \t]*∉[ \t]*/g, ' ∉ ')
+      .replace(/[ \t]*∩[ \t]*/g, ' ∩ ')
+      .replace(/[ \t]*∪[ \t]*/g, ' ∪ ')
+      .replace(/[ \t]*∧[ \t]*/g, ' ∧ ')
+      .replace(/[ \t]*∨[ \t]*/g, ' ∨ ')
+      .replace(/[ \t]*·[ \t]*/g, ' · ')
+      .replace(/[ \t]*±[ \t]*/g, ' ± ')
+      .replace(/^([ \t]*)(.*)$/gm, (_, indent, rest) => indent + rest.replace(/[ \t]{2,}/g, ' '));
 
     // 17. Bersihkan kurung berlebih ganda: ((...)) -> (...)
-    out = out.replace(/\(\s*\(([^()]+)\)\s*\)/g, '($1)');
+    out = out.replace(/\(\s*\(([^()\n]+)\)\s*\)/g, '($1)');
 
-    // 18. Rapikan baris kosong
-    out = out.split('\n').map(l => l.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    // 18. Rapikan baris tanpa merusak indentasi list/struktur
+    out = out
+      .split('\n')
+      .map(l => (options.isDisplay ? l.trim() : l.replace(/[ \t]+$/, '')))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
 
-    // 19. Kembalikan blok kode yang dilindungi (aman dari pola $ / $$ dalam isi kode)
+    // 19. Kembalikan URL dan blok kode yang dilindungi
+    for (const ub of urlBlocks) {
+      out = out.split(ub.token).join(ub.content);
+    }
     for (const cb of codeBlocks) {
       out = out.split(cb.token).join(cb.content);
     }
@@ -8988,7 +9509,242 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     return out;
   }
 
-  // ==================== PURE MATHEMATICS CLIPBOARD ENGINE ====================
+  /**
+   * Serialisasi DOM pesan/fragmen seleksi menjadi teks terstruktur yang rapi untuk Clipboard Mobile & Desktop:
+   * - Membuang seluruh elemen UI (.code-header, tombol Salin/Pratinjau/Edit, toolbar Mermaid, .katex-html duplikat)
+   * - Mengubah rumus KaTeX & .zoz-math-formula menjadi notasi matematika murni yang bersih
+   * - Mempertahankan struktur paragraf, penomoran list (<ol>/<ul>), tabel (|), dan indentasi blok kode (<pre><code>)
+   */
+  function serializeMessageDomToCleanText(rootNode) {
+    if (!rootNode) return '';
+    const container = document.createElement('div');
+    if (rootNode.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+      container.appendChild(rootNode.cloneNode(true));
+    } else if (rootNode.nodeType === Node.ELEMENT_NODE) {
+      container.appendChild(rootNode.cloneNode(true));
+    } else {
+      return (rootNode.textContent || '').trim();
+    }
+
+    // 1. Buang seluruh krom UI non-konten agar tidak ikut tersalin
+    const uiGarbage = container.querySelectorAll(
+      '.code-header, .mermaid-header, .mermaid-toolbar, .mermaid-err-copy-btn, ' +
+      '.message-actions-bar, .message-meta, .message-avatar, .ai-file-card-actions, ' +
+      '.code-copy-btn, .code-preview-btn, .code-edit-btn, script, style, svg'
+    );
+    for (let i = 0; i < uiGarbage.length; i++) {
+      uiGarbage[i].remove();
+    }
+
+    // 2. Ganti setiap blok rumus (.katex-display, .katex, .zoz-math-formula) dengan teks matematika murni
+    const katexDisplays = container.querySelectorAll('.katex-display');
+    for (let i = 0; i < katexDisplays.length; i++) {
+      const el = katexDisplays[i];
+      const ann = el.querySelector('annotation');
+      const rawTex = ann ? (ann.textContent || '') : (el.textContent || '');
+      const cleanMath = purifyPureMathFormula(rawTex, { isDisplay: true });
+      el.replaceWith(document.createTextNode(`\n\n${cleanMath}\n\n`));
+    }
+
+    const katexInlines = container.querySelectorAll('.katex');
+    for (let i = 0; i < katexInlines.length; i++) {
+      const el = katexInlines[i];
+      const ann = el.querySelector('annotation');
+      const rawTex = ann ? (ann.textContent || '') : (el.textContent || '');
+      const isDisp = Boolean(el.closest('.katex-display'));
+      const cleanMath = purifyPureMathFormula(rawTex, { isDisplay: isDisp });
+      el.replaceWith(document.createTextNode(isDisp ? `\n\n${cleanMath}\n\n` : cleanMath));
+    }
+
+    const leftoverKatexHtml = container.querySelectorAll('.katex-html, .katex-mathml');
+    for (let i = 0; i < leftoverKatexHtml.length; i++) {
+      leftoverKatexHtml[i].remove();
+    }
+
+    const zozMathBlocks = container.querySelectorAll('.zoz-math-formula');
+    for (let i = 0; i < zozMathBlocks.length; i++) {
+      const el = zozMathBlocks[i];
+      const rawTex = el.getAttribute('data-latex') || el.textContent || '';
+      const isDisp = el.classList.contains('display-math');
+      const cleanMath = purifyPureMathFormula(rawTex, { isDisplay: isDisp });
+      el.replaceWith(document.createTextNode(isDisp ? `\n\n${cleanMath}\n\n` : cleanMath));
+    }
+
+    // 3. Rekursi DOM untuk menghasilkan teks murni dengan struktur paragraf, list, tabel, dan kode utuh
+    function walk(node, ctx = { inPre: false, listDepth: 0 }) {
+      if (!node) return '';
+      if (node.nodeType === Node.TEXT_NODE) {
+        const val = node.nodeValue || '';
+        if (ctx.inPre) return val;
+        // Pertahankan baris baru eksplisit dari rumus display-math, namun rapikan spasi inline HTML
+        return val
+          .split('\n')
+          .map(part => part.replace(/[\r\t ]+/g, ' '))
+          .join('\n');
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return '';
+
+      const tag = (node.tagName || '').toUpperCase();
+      if (tag === 'BR') return '\n';
+      if (tag === 'HR') return '\n\n───\n\n';
+
+      if (tag === 'PRE') {
+        const codeEl = node.querySelector('code') || node;
+        const rawCode = (codeEl.textContent || '').replace(/\r\n/g, '\n').replace(/^\n+|\n+$/g, '');
+        return `\n\n${rawCode}\n\n`;
+      }
+
+      if (tag === 'CODE' && !ctx.inPre) {
+        return node.textContent || '';
+      }
+
+      if (tag === 'TABLE') {
+        const rows = [];
+        const trList = node.querySelectorAll('tr');
+        for (let r = 0; r < trList.length; r++) {
+          const cells = [];
+          const cellEls = trList[r].querySelectorAll('th, td');
+          for (let c = 0; c < cellEls.length; c++) {
+            const cellText = walk(cellEls[c], ctx).replace(/\s*\n\s*/g, ' ').replace(/[ \t]{2,}/g, ' ').trim();
+            cells.push(cellText);
+          }
+          if (cells.some(Boolean)) {
+            rows.push(cells.join(' | '));
+          }
+        }
+        return rows.length ? `\n\n${rows.join('\n')}\n\n` : '';
+      }
+
+      if (tag === 'UL' || tag === 'OL') {
+        const items = [];
+        const startNum = tag === 'OL' ? (parseInt(node.getAttribute('start') || '1', 10) || 1) : 1;
+        let itemIndex = 0;
+        const indent = '  '.repeat(ctx.listDepth || 0);
+        for (let i = 0; i < node.children.length; i++) {
+          const child = node.children[i];
+          if ((child.tagName || '').toUpperCase() !== 'LI') continue;
+          const prefix = tag === 'OL' ? `${startNum + itemIndex}. ` : '• ';
+          itemIndex++;
+          const mainParts = [];
+          const nestedLists = [];
+          for (let j = 0; j < child.childNodes.length; j++) {
+            const cn = child.childNodes[j];
+            const cnTag = cn.nodeType === Node.ELEMENT_NODE ? (cn.tagName || '').toUpperCase() : '';
+            if (cnTag === 'UL' || cnTag === 'OL') {
+              const nestedStr = walk(cn, { ...ctx, listDepth: (ctx.listDepth || 0) + 1 }).trim();
+              if (nestedStr) nestedLists.push(nestedStr);
+            } else {
+              mainParts.push(walk(cn, ctx));
+            }
+          }
+          const lineText = mainParts.join('').replace(/^\s+|\s+$/g, '').replace(/\n{2,}/g, '\n');
+          let fullItem = `${indent}${prefix}${lineText}`;
+          if (nestedLists.length > 0) {
+            fullItem += '\n' + nestedLists.join('\n');
+          }
+          items.push(fullItem);
+        }
+        const sep = (ctx.listDepth || 0) > 0 ? '\n' : '\n\n';
+        return items.length ? `${sep}${items.join('\n')}${sep}` : '';
+      }
+
+      let inner = '';
+      for (let i = 0; i < node.childNodes.length; i++) {
+        inner += walk(node.childNodes[i], ctx);
+      }
+
+      if (/^H[1-6]$/.test(tag)) {
+        return `\n\n${inner.trim()}\n\n`;
+      }
+      if (tag === 'P') {
+        return `\n\n${inner.trim()}\n\n`;
+      }
+      if (tag === 'LI') {
+        return `\n• ${inner.trim()}\n`;
+      }
+      if (tag === 'BLOCKQUOTE') {
+        const quoted = inner
+          .trim()
+          .split('\n')
+          .map(l => `> ${l}`)
+          .join('\n');
+        return `\n\n${quoted}\n\n`;
+      }
+      if (tag === 'DIV' || tag === 'SECTION' || tag === 'ARTICLE') {
+        return `\n${inner.trim()}\n`;
+      }
+      return inner;
+    }
+
+    let result = walk(container, { inPre: false, listDepth: 0 });
+    result = result
+      .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
+      .replace(/\r\n/g, '\n')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    return result;
+  }
+
+  /**
+   * Pemformatan bersih teks output asisten untuk tombol Salin (.copy-msg-btn):
+   * Mengutamakan serialisasi DOM terstruktur (.msg-text-content) agar bebas artefak Markdown/LaTeX mentah,
+   * dengan fallback pembersih Markdown + LaTeX terisolasi jika DOM belum tersedia.
+   */
+  function formatAssistantOutputForCopy(rawMarkdown, textContentEl = null) {
+    if (textContentEl && textContentEl.childNodes && textContentEl.childNodes.length > 0) {
+      const domClean = serializeMessageDomToCleanText(textContentEl);
+      if (domClean) return domClean;
+    }
+    if (!rawMarkdown || typeof rawMarkdown !== 'string') return '';
+    let out = safeAssistantText(rawMarkdown)
+      .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
+      .trim();
+
+    // Lindungi blok kode terlebih dahulu
+    const savedCodes = [];
+    out = out.replace(/```(?:[a-zA-Z0-9_+-]+)?\r?\n([\s\S]*?)```|```([\s\S]*?)```/g, (_, c1, c2) => {
+      const codeBody = (c1 !== undefined ? c1 : c2 || '').replace(/^\n+|\n+$/g, '');
+      const tok = `\uE000ZOZCOPYCODE${savedCodes.length}\uE001`;
+      savedCodes.push({ tok, codeBody });
+      return `\n\n${tok}\n\n`;
+    });
+
+    // Bersihkan rumus display dan inline secara terisolasi
+    out = out.replace(/\$\$([\s\S]*?)\$\$|\\\[([\s\S]*?)\\\]/g, (_, m1, m2) => {
+      const body = m1 !== undefined ? m1 : m2;
+      return `\n\n${purifyPureMathFormula(body, { isDisplay: true })}\n\n`;
+    });
+    out = out.replace(/\\\(([\s\S]*?)\\\)/g, (_, m1) => purifyPureMathFormula(m1, { isDisplay: false }));
+    out = out.replace(/(?<!\\)\$([^$\n]+?)(?<!\\)\$/g, (match, inner) => {
+      const trimmed = inner.trim();
+      if (/^[\d.]+$|^[a-zA-Z]$|\\\w|[\^_{}=≠≤≥+\-·×÷∫∑∏√∂∇α-ωΑ-Ω]/.test(trimmed)) {
+        return purifyPureMathFormula(trimmed, { isDisplay: false });
+      }
+      return match;
+    });
+
+    // Jika masih ada perintah LaTeX telanjang di luar delimiter
+    if (/\\(?:frac|dfrac|tfrac|sqrt|sum|int|prod|alpha|beta|gamma|delta|theta|lambda|pi|sigma|omega|infty|partial|nabla|begin)\b/.test(out)) {
+      out = purifyPureMathFormula(out, { isDisplay: false });
+    }
+
+    // Bersihkan sintaks Markdown kasar (###, **, __) agar rapi saat ditempel di aplikasi mobile
+    out = out
+      .replace(/^[ \t]*#{1,6}[ \t]+(.+)$/gm, '$1')
+      .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+      .replace(/__([^_\n]+)__/g, '$1')
+      .replace(/^[ \t]*[-*][ \t]+/gm, '• ')
+      .replace(/`([^`\n]+)`/g, '$1');
+
+    for (const item of savedCodes) {
+      out = out.split(item.tok).join(item.codeBody);
+    }
+
+    return out.replace(/\r\n/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  // ==================== PURE MATHEMATICS & MOBILE CHAT CLIPBOARD ENGINE ====================
   let isPureMathClipboardInitialized = false;
 
   function initPureMathClipboardEngine() {
@@ -9001,15 +9757,48 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return element ? element.closest('.katex, .katex-display, .zoz-math-formula') : null;
     }
 
+    function closestElement(node, selector) {
+      if (!node) return null;
+      const element = node instanceof Element ? node : node.parentElement;
+      return element ? element.closest(selector) : null;
+    }
+
     document.addEventListener('copy', (e) => {
       try {
+        // JANGAN pernah membajak event copy dari fallbackCopyText proxy textarea atau elemen input/textarea!
+        const activeEl = document.activeElement;
+        const targetEl = e.target instanceof Element ? e.target : null;
+        if (
+          activeEl?.getAttribute?.('data-zoz-clipboard-proxy') === 'true' ||
+          targetEl?.getAttribute?.('data-zoz-clipboard-proxy') === 'true' ||
+          activeEl?.tagName === 'TEXTAREA' ||
+          activeEl?.tagName === 'INPUT' ||
+          targetEl?.tagName === 'TEXTAREA' ||
+          targetEl?.tagName === 'INPUT'
+        ) {
+          return;
+        }
+
         const selection = window.getSelection();
         if (!selection || selection.isCollapsed || !e.clipboardData) return;
         if (selection.rangeCount === 0) return;
 
-        const range = selection.getRangeAt(0);
+        const origRange = selection.getRangeAt(0);
+        const range = origRange.cloneRange();
 
-        // Jika titik awal atau akhir seleksi berada di dalam formula matematika, perluas cakupan
+        // Jika seleksi berada di dalam satu blok kode <pre><code> saja, pertahankan teks & indentasi kode 100% murni
+        const startPre = closestElement(range.startContainer, 'pre');
+        const endPre = closestElement(range.endContainer, 'pre');
+        if (startPre && startPre === endPre) {
+          const rawSel = selection.toString().replace(/\r\n/g, '\n');
+          if (rawSel) {
+            e.clipboardData.setData('text/plain', rawSel);
+            e.preventDefault();
+          }
+          return;
+        }
+
+        // Jika titik awal atau akhir seleksi berada di dalam formula matematika, perluas cakupan pada cloneRange
         const startKatex = closestKatexNode(range.startContainer);
         if (startKatex) {
           try { range.setStartBefore(startKatex); } catch (_) {}
@@ -9020,59 +9809,16 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         }
 
         const fragment = range.cloneContents();
-        const hasMathml = Boolean(fragment.querySelector('.katex-mathml'));
-        const hasKatex = Boolean(fragment.querySelector('.katex'));
-        const hasZozFormula = Boolean(fragment.querySelector('.zoz-math-formula'));
+        const isInsideChatBubble = Boolean(
+          closestElement(range.commonAncestorContainer, '.message-bubble, .msg-text-content, .doc-preview-content') ||
+          fragment.querySelector('.message-bubble, .msg-text-content, .code-header, .katex, .katex-mathml, .zoz-math-formula')
+        );
 
-        if (!hasMathml && !hasKatex && !hasZozFormula) {
-          // Tidak ada formula matematika KaTeX/MathML dalam seleksi, biarkan penyalinan standar peramban
+        if (!isInsideChatBubble) {
           return;
         }
 
-        // Hapus elemen visual .katex-html agar tidak menghasilkan duplikasi teks visual
-        const htmlVisualBlocks = fragment.querySelectorAll('.katex-html');
-        for (let i = 0; i < htmlVisualBlocks.length; i++) {
-          const el = htmlVisualBlocks[i];
-          if (el.remove) el.remove();
-          else if (el.parentNode) el.parentNode.removeChild(el);
-        }
-
-        // Gantikan setiap elemen .katex-mathml dengan teks formula matematika murni
-        const mathmlBlocks = fragment.querySelectorAll('.katex-mathml');
-        for (let i = 0; i < mathmlBlocks.length; i++) {
-          const el = mathmlBlocks[i];
-          const annotation = el.querySelector('annotation');
-          const rawTex = annotation ? (annotation.textContent || '') : '';
-          const isDisplay = Boolean(el.closest('.katex-display'));
-          const cleanMath = purifyPureMathFormula(rawTex, { isDisplay });
-          const textNode = document.createTextNode(isDisplay ? `\n${cleanMath}\n` : cleanMath);
-          const target = el.closest('.katex') || el;
-          if (target.replaceWith) {
-            target.replaceWith(textNode);
-          } else if (target.parentNode) {
-            target.parentNode.replaceChild(textNode, target);
-          }
-        }
-
-        // Gantikan formula fallback .zoz-math-formula
-        const zozMathBlocks = fragment.querySelectorAll('.zoz-math-formula');
-        for (let i = 0; i < zozMathBlocks.length; i++) {
-          const el = zozMathBlocks[i];
-          const rawTex = el.getAttribute('data-latex') || el.textContent || '';
-          const isDisplay = el.classList.contains('display-math');
-          const cleanMath = purifyPureMathFormula(rawTex, { isDisplay });
-          const textNode = document.createTextNode(isDisplay ? `\n${cleanMath}\n` : cleanMath);
-          if (el.replaceWith) {
-            el.replaceWith(textNode);
-          } else if (el.parentNode) {
-            el.parentNode.replaceChild(textNode, el);
-          }
-        }
-
-        // Ekstrak teks murni yang telah dibersihkan secara matematika
-        let cleanText = fragment.textContent || '';
-        cleanText = cleanText.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-
+        const cleanText = serializeMessageDomToCleanText(fragment);
         if (cleanText) {
           e.clipboardData.setData('text/plain', cleanText);
           e.preventDefault();
@@ -9081,6 +9827,171 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         console.warn('[ZOZ PURE MATH CLIPBOARD]: Fallback to default copy', copyErr);
       }
     }, true);
+  }
+
+  /**
+   * Pembersih Output Terminal untuk Clipboard Mobile & Desktop:
+   * - Menghapus kode ANSI/OSC, karakter zero-width, dan banner sambutan internal
+   * - Menghapus seluruh bingkai kotak TUI (╭───╮, │ ... │, ╰───╯, ┌───┐, dll.)
+   * - Menyambung kembali kalimat/prosa yang terpotong paksa akibat kolom terminal mobile yang sempit
+   *   sambil tetap menjaga baris perintah shell, daftar bernomor/bullet, dan blok kode.
+   */
+  function cleanTerminalOutputForCopy(rawText, paneState = null) {
+    if (typeof rawText !== 'string' || !rawText) return '';
+    let text = rawText
+      .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .replace(/\r\n|\r/g, '\n');
+
+    const rawLines = text.split('\n');
+    const parsedLines = [];
+
+    for (let i = 0; i < rawLines.length; i++) {
+      const rawLine = rawLines[i];
+      const trimmed = rawLine.trim();
+
+      if (
+        trimmed.includes('ZOZ TERMINAL PRO') ||
+        trimmed.includes('Full Interactive PTY') ||
+        trimmed.includes('Ketik perintah shell di bawah')
+      ) {
+        continue;
+      }
+
+      if (/^[ \t]*[╭╮╰╯┌┐└┘┏┓┗┛╔╗╚╝├┤┬┴┼╞╡╤╧╪╟╢╥╨╫─━═╌╍┄┅┈┉]+(?:[ \t]*[╭╮╰╯┌┐└┘┏┓┗┛╔╗╚╝├┤┬┴┼╞╡╤╧╪╟╢╥╨╫─━═╌╍┄┅┈┉]+)*[ \t]*$/.test(rawLine) && trimmed.length >= 3) {
+        parsedLines.push({ type: 'box_border', text: '', inBox: true });
+        continue;
+      }
+
+      const dualBoxMatch = rawLine.match(/^[ \t]*[│┃║▏▎▍▌▋▊▉█][ \t]?(.*?)[ \t]*[│┃║▏▎▍▌▋▊▉█][ \t]*$/);
+      if (dualBoxMatch) {
+        const innerWithRightPad = rawLine.replace(/^[ \t]*[│┃║▏▎▍▌▋▊▉█][ \t]?/, '').replace(/[│┃║▏▎▍▌▋▊▉█][ \t]*$/, '');
+        const hadRightPadSpace = /[ \t]{2,}$/.test(innerWithRightPad);
+        const cleanInner = dualBoxMatch[1].replace(/[ \t]+$/, '');
+        parsedLines.push({
+          type: 'line',
+          text: cleanInner,
+          inBox: true,
+          hadRightPadSpace
+        });
+        continue;
+      }
+
+      const leftBoxMatch = rawLine.match(/^[ \t]*[│┃║][ \t](.*)$/);
+      if (leftBoxMatch) {
+        parsedLines.push({
+          type: 'line',
+          text: leftBoxMatch[1].replace(/[ \t]+$/, ''),
+          inBox: true,
+          hadRightPadSpace: false
+        });
+        continue;
+      }
+
+      parsedLines.push({
+        type: 'line',
+        text: rawLine.replace(/[ \t]+$/, ''),
+        inBox: false,
+        hadRightPadSpace: false
+      });
+    }
+
+    const termCols = (paneState && paneState.term && paneState.term.cols) ? paneState.term.cols : 80;
+    const isStructuralStart = (str) => {
+      const s = str.trim();
+      if (!s) return true;
+      return (
+        /^(\d+[.)]|[-*•‣▪▸▹]|\[[ xX]\])\s+/.test(s) ||
+        /^#{1,6}\s+/.test(s) ||
+        /^(PS\s+[A-Za-z]:|[A-Za-z]:\\[^>]*>|[$#>❯➜]\s+|\w+@[\w.-]+[:~])/.test(s) ||
+        /^[|├└┌┐┘┬┴┼]/.test(s) ||
+        /^```/.test(s) ||
+        /^[A-Za-z0-9_ -]{1,22}:\s+\S/.test(s)
+      );
+    };
+    const isCodeLikeLine = (str) => {
+      const s = str.trim();
+      if (!s) return false;
+      return (
+        /[;{}\\[\]()]$/.test(s) ||
+        /^\s{2,}/.test(str) ||
+        /^(const|let|var|function|def|class|import|from|return|if|else|for|while|switch|case|try|catch|async|await|git|npm|node|python|pip|docker|curl|cd|dir|ls|echo)\b/.test(s)
+      );
+    };
+
+    const outputLines = [];
+    let prevItem = null;
+
+    for (let i = 0; i < parsedLines.length; i++) {
+      const item = parsedLines[i];
+      if (item.type === 'box_border') {
+        if (outputLines.length > 0 && outputLines[outputLines.length - 1] !== '') {
+          outputLines.push('');
+        }
+        prevItem = null;
+        continue;
+      }
+
+      const lineText = item.text;
+      const trimmed = lineText.trim();
+      if (!trimmed) {
+        if (outputLines.length > 0 && outputLines[outputLines.length - 1] !== '') {
+          outputLines.push('');
+        }
+        prevItem = null;
+        continue;
+      }
+
+      if (prevItem && outputLines.length > 0) {
+        const prevText = outputLines[outputLines.length - 1];
+        const prevTrimmed = prevText.trim();
+        const prevEndsSentence = /[.!?:;]$/.test(prevTrimmed);
+        const currStartsLower = /^[a-z]/.test(trimmed);
+        const currStartsProseWord = /^[a-zA-Z0-9('"“‘]/.test(trimmed);
+
+        if (/https?:\/\/[^\s]+$/.test(prevTrimmed) && /^[a-zA-Z0-9/_?&=%#.-]+$/.test(trimmed) && !trimmed.includes(' ')) {
+          outputLines[outputLines.length - 1] = prevText + trimmed;
+          prevItem = item;
+          continue;
+        }
+
+        const shouldUnwrapBoxProse = (
+          item.inBox &&
+          prevItem.inBox &&
+          !isStructuralStart(lineText) &&
+          !isCodeLikeLine(lineText) &&
+          !isCodeLikeLine(prevItem.text) &&
+          currStartsProseWord &&
+          (!prevEndsSentence || currStartsLower)
+        );
+
+        const shouldUnwrapNarrowViewport = (
+          !item.inBox &&
+          !prevItem.inBox &&
+          prevItem.text.length >= Math.max(28, termCols - 10) &&
+          !isStructuralStart(lineText) &&
+          !isCodeLikeLine(lineText) &&
+          !isCodeLikeLine(prevItem.text) &&
+          currStartsProseWord &&
+          (!prevEndsSentence || currStartsLower)
+        );
+
+        if (shouldUnwrapBoxProse || shouldUnwrapNarrowViewport) {
+          outputLines[outputLines.length - 1] = prevText.replace(/[ \t]+$/, '') + ' ' + trimmed;
+          prevItem = item;
+          continue;
+        }
+      }
+
+      outputLines.push(lineText);
+      prevItem = item;
+    }
+
+    return outputLines
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   function normalizeMathematicalTextForInput(text) {
@@ -9220,7 +10131,15 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
   function autoWrapMathFormulas(text) {
     if (!text || typeof text !== 'string') return '';
-    let out = text;
+
+    // Lindungi blok kode dan formula LaTeX yang sudah valid agar tidak dibungkus ganda ($$$...$$$)
+    const { text: protectedMathText, mathBlocks } = extractAndProtectMath(text);
+    const codeSafeBlocks = [];
+    let out = protectedMathText.replace(/```[\s\S]*?(?:```|$)|``[^`\n]+``|`[^`\n]+`/g, (match) => {
+      const tok = `\uE000ZOZWRAPCODE${codeSafeBlocks.length}\uE001`;
+      codeSafeBlocks.push({ tok, content: match });
+      return tok;
+    });
 
     // a. Deteksi formula persamaan eksplisit (mis. "f_{w,b}(x) = wx + b" atau "y = wx + b")
     out = out.replace(/(?<!\$)\b([a-zA-Z]_{[^}]+}\([a-zA-Z0-9, \t]+\)\s*=\s*[^.,;!?\n]+)/g, (match, formula) => {
@@ -9236,8 +10155,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return match.replace(`(${v1}, ${v2})`, `$(${v1}, ${v2})$`).replace(`(${v1},${v2})`, `$(${v1}, ${v2})$`);
     });
 
-    // d. Deteksi opsi kuis berupa variabel tunggal matematika (misal baris terpisah berisi "x" atau "m" atau "y", atau awalan bullet/radio)
-    out = out.replace(/(^|\n)\s*(?:[A-Da-d0-9][.)]\s*)?([a-zA-Z])\s*(?=[.,;!?]?(?:\n|$))/g, (match, pre, v) => {
+    // d. Deteksi opsi kuis berupa variabel tunggal matematika sambil mempertahankan awalan daftar (1., a), dst.)
+    out = out.replace(/((?:^|\n)[ \t]*(?:[A-Da-d0-9][.)][ \t]*)?)([a-zA-Z])(?=[ \t]*[.,;!?]?(?:\n|$))/g, (match, pre, v) => {
       return `${pre}$${v}$`;
     });
 
@@ -9250,6 +10169,21 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // g. Bersihkan pembungkusan ganda jika ada ($$$...$$$ -> $...$)
     out = out.replace(/\${3,}/g, '$$');
 
+    // Kembalikan kode & formula asli yang sebelumnya sudah valid
+    for (const cb of codeSafeBlocks) {
+      out = out.split(cb.tok).join(cb.content);
+    }
+    for (const item of mathBlocks) {
+      if (item && item.token && item.rawSource) {
+        if (item.displayMode) {
+          const escapedTok = item.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const nlTok = new RegExp(`\\n{1,2}[ \\t>]*${escapedTok}\\n{1,2}`, 'g');
+          out = out.replace(nlTok, () => `\n${item.rawSource}\n`);
+        }
+        out = out.split(item.token).join(item.rawSource);
+      }
+    }
+
     return out;
   }
 
@@ -9257,7 +10191,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     if (!text) return '';
     const wrapped = autoWrapMathFormulas(text);
     const { text: protectedText, mathBlocks } = extractAndProtectMath(wrapped);
-    let html = escapeHtml(protectedText).replace(/\n/g, '<br>');
+    // Hapus semua newline tepat sebelum/sesudah token display math (.katex-display sudah display:block + margin 0.85rem)
+    const collapsed = protectedText
+      .replace(/(?:[ \t]*\r?\n)+(\uE000ZOZMD\d+\uE001)/g, '$1')
+      .replace(/(\uE000ZOZMD\d+\uE001)(?:\r?\n[ \t]*)+/g, '$1');
+    let html = escapeHtml(collapsed).replace(/\n/g, '<br>');
     html = hydrateMath(html, mathBlocks);
     return html;
   }
@@ -9296,13 +10234,50 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     });
 
     // 2. Lindungi blok-blok yang DILARANG dimodifikasi:
+    // - Elemen matematika KaTeX (.katex, .katex-display) & fallback (.zoz-math-formula) yang memiliki span bertingkat
     // - <pre><code>...</code></pre> dan <code>...</code> (mencegah korupsi array index kode)
     // - <a>...</a> (mencegah link bersarang / nested links)
-    // - <script>, <style>, <math>, katex blocks
+    // - <script>, <style>, <math>
     // - Tag HTML apa pun (<[^>]+>)
+    const mathProtectedBlocks = [];
     const protectedBlocks = [];
+    const protectMathElementsForCitations = (sourceHtml) => {
+      const openRe = /<(span|div)\b[^>]*class=["'][^"']*\b(?:katex-display|katex|zoz-math-formula)\b[^"']*["'][^>]*>/gi;
+      const outParts = [];
+      let cursor = 0;
+      let match;
+      while ((match = openRe.exec(sourceHtml)) !== null) {
+        if (match.index < cursor) continue;
+        const tagName = match[1].toLowerCase();
+        const tagSearchRe = new RegExp(`<(\\/?)${tagName}\\b[^>]*>`, 'gi');
+        tagSearchRe.lastIndex = openRe.lastIndex;
+        let depth = 1;
+        let endIdx = -1;
+        let tm;
+        while ((tm = tagSearchRe.exec(sourceHtml)) !== null) {
+          if (tm[1] === '/') depth--;
+          else if (!tm[0].endsWith('/>')) depth++;
+          if (depth === 0) {
+            endIdx = tagSearchRe.lastIndex;
+            break;
+          }
+        }
+        if (endIdx !== -1) {
+          outParts.push(sourceHtml.slice(cursor, match.index));
+          const placeholder = `\uE000ZOZCITMATH${mathProtectedBlocks.length}\uE001`;
+          mathProtectedBlocks.push(sourceHtml.slice(match.index, endIdx));
+          outParts.push(placeholder);
+          cursor = endIdx;
+          openRe.lastIndex = endIdx;
+        }
+      }
+      outParts.push(sourceHtml.slice(cursor));
+      return outParts.join('');
+    };
+
+    let protectedHtml = protectMathElementsForCitations(html);
     const tagPattern = /(<(?:pre|code|a|script|style|math)\b[^>]*>[\s\S]*?<\/(?:pre|code|a|script|style|math)>|<[^>]+>)/gi;
-    let protectedHtml = html.replace(tagPattern, (match) => {
+    protectedHtml = protectedHtml.replace(tagPattern, (match) => {
       const placeholder = `<<<ZOZ_PROTECTED_BLOCK_${protectedBlocks.length}>>>`;
       protectedBlocks.push(match);
       return placeholder;
@@ -9392,9 +10367,14 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     });
 
     // 5. Pulihkan seluruh blok yang dilindungi
-    const restoredHtml = protectedHtml.replace(/<<<ZOZ_PROTECTED_BLOCK_(\d+)>>>/g, (_, idx) => {
+    let restoredHtml = protectedHtml.replace(/<<<ZOZ_PROTECTED_BLOCK_(\d+)>>>/g, (_, idx) => {
       return protectedBlocks[parseInt(idx, 10)] || '';
     });
+    if (mathProtectedBlocks.length > 0) {
+      restoredHtml = restoredHtml.replace(/\uE000ZOZCITMATH(\d+)\uE001/g, (_, idx) => {
+        return mathProtectedBlocks[parseInt(idx, 10)] || '';
+      });
+    }
 
     return restoredHtml;
   }
@@ -9407,15 +10387,24 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     
     let contentHtml = '';
     if (mainText) {
-      // Perbaiki tabel markdown single-line yang rusak agar ter-render sebagai tabel HTML
-      const tableFixedContent = fixSingleLineMarkdownTables(mainText);
-      // Amankan dan bungkus blok HTML/website agar rapi di dalam blok kode, tidak bocor ke DOM obrolan
-      const safeContent = normalizeHtmlCodeBlocksInMarkdown(tableFixedContent);
       // Selama streaming, lewati reflowShreddedProse agar CPU hemat daya
-      const displayContent = isStreaming ? safeContent : reflowShreddedProse(safeContent);
+      const displayContent = isStreaming ? mainText : reflowShreddedProse(mainText);
 
-      // Ekstrak dan lindungi formula matematika KaTeX sebelum diproses oleh Marked.js
-      const { text: textForMarked, mathBlocks } = extractAndProtectMath(displayContent);
+      // 1. Jika terdapat dokumen HTML utuh tanpa fence (<!DOCTYPE / <html), bungkus dulu agar $ template JS tidak dianggap math
+      const docNormalized = normalizeUnfencedFullHtmlDocumentInMarkdown(displayContent);
+
+      // 2. Ekstrak dan lindungi formula matematika KaTeX SEBELUM perbaikan tabel & fragmen HTML
+      // sehingga simbol |, <, >, {, } di dalam rumus panjang tidak pernah dirusak menjadi tabel atau ```html
+      const { text: protectedMathText, mathBlocks } = extractAndProtectMath(docNormalized);
+
+      // 3. Perbaiki tabel markdown single-line yang rusak agar ter-render sebagai tabel HTML
+      const tableFixedContent = fixSingleLineMarkdownTables(protectedMathText);
+
+      // 4. Amankan dan bungkus potongan HTML un-fenced agar rapi di dalam blok kode
+      const htmlSafeContent = normalizeHtmlCodeBlocksInMarkdown(tableFixedContent, { skipFullDocCheck: true });
+
+      // 5. Jika ada potongan HTML yang ternyata terbungkus menjadi ```html dan memuat token math, pulihkan sumber asli formulanya
+      const textForMarked = restoreMathTokensInsideCodeFences(htmlSafeContent, mathBlocks);
 
       if (window.marked) {
         try {
@@ -11709,20 +12698,25 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         </div>
       `;
 
+      const extractCleanPreCodeText = () => {
+        let rawCode = '';
+        if (codeBlock) {
+          rawCode = codeBlock.textContent || codeBlock.innerText || '';
+        } else {
+          const clone = pre.cloneNode(true);
+          const oldHeader = clone.querySelector('.code-header');
+          if (oldHeader) oldHeader.remove();
+          rawCode = clone.textContent || clone.innerText || '';
+        }
+        return rawCode.replace(/\r\n|\r/g, '\n').replace(/\n$/, '');
+      };
+
       if (isPreviewableCode) {
         const prevBtn = header.querySelector('.code-preview-btn');
         if (prevBtn) {
           prevBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            let codeText = '';
-            if (codeBlock) {
-              codeText = codeBlock.innerText || codeBlock.textContent || '';
-            } else {
-              const clone = pre.cloneNode(true);
-              const oldHeader = clone.querySelector('.code-header');
-              if (oldHeader) oldHeader.remove();
-              codeText = clone.innerText || clone.textContent || '';
-            }
+            const codeText = extractCleanPreCodeText();
 
             const docName = guessFileNameFromLang(lang.toLowerCase(), codeText);
             const mime = guessMimeFromName(docName);
@@ -11737,15 +12731,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         if (editBtn) {
           editBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            let codeText = '';
-            if (codeBlock) {
-              codeText = codeBlock.innerText || codeBlock.textContent || '';
-            } else {
-              const clone = pre.cloneNode(true);
-              const oldHeader = clone.querySelector('.code-header');
-              if (oldHeader) oldHeader.remove();
-              codeText = clone.innerText || clone.textContent || '';
-            }
+            const codeText = extractCleanPreCodeText();
             const docName = guessFileNameFromLang(lang.toLowerCase(), codeText);
             const mime = guessMimeFromName(docName);
             const aiFile = pre._aiFile || buildAIFile(docName, mime, lang.toLowerCase(), codeText, 'Edit Kode');
@@ -11762,15 +12748,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const copyBtn = header.querySelector('.code-copy-btn');
       copyBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        let codeText = '';
-        if (codeBlock) {
-          codeText = codeBlock.innerText || codeBlock.textContent || '';
-        } else {
-          const clone = pre.cloneNode(true);
-          const oldHeader = clone.querySelector('.code-header');
-          if (oldHeader) oldHeader.remove();
-          codeText = clone.innerText || clone.textContent || '';
-        }
+        const codeText = extractCleanPreCodeText();
         
         const setCopiedState = () => {
           copyBtn.innerHTML = '<i class="fa-solid fa-check" style="color:var(--neon-teal);"></i> <span class="copy-text" style="color:var(--neon-teal);">Disalin!</span>';
@@ -12148,22 +13126,25 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.setAttribute('aria-hidden', 'true');
+    textarea.setAttribute('data-zoz-clipboard-proxy', 'true');
     textarea.style.position = 'fixed';
-    textarea.style.left = '-9999px';
-    textarea.style.top = '-9999px';
-    textarea.style.width = '2em';
-    textarea.style.height = '2em';
+    textarea.style.left = '0';
+    textarea.style.top = '0';
+    textarea.style.width = '1px';
+    textarea.style.height = '1px';
     textarea.style.padding = '0';
     textarea.style.border = 'none';
     textarea.style.outline = 'none';
     textarea.style.boxShadow = 'none';
     textarea.style.background = 'transparent';
+    textarea.style.opacity = '0';
+    textarea.style.pointerEvents = 'none';
     textarea.style.fontSize = '16px';
-    textarea.contentEditable = 'true';
-    textarea.readOnly = false;
+    textarea.contentEditable = 'false';
+    textarea.readOnly = true;
     document.body.appendChild(textarea);
     try {
-      textarea.focus();
+      textarea.focus({ preventScroll: true });
       textarea.select();
       textarea.setSelectionRange(0, textarea.value.length);
       const successful = document.execCommand('copy');
@@ -13331,7 +14312,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     let sep = '\n';
     if (/[,;:]$/.test(existingText) && /^[a-zA-Z0-9_"'(]/.test(chunk)) {
       sep = ' ';
-    } else if (/[({\[/\\-]$/.test(existingText) || /^[.,;:!?)}\]/>]/.test(chunk)) {
+    } else if (/[({\[/\\^_-]$/.test(existingText) || /^[.,;:!?)}\]/>]/.test(chunk)) {
       sep = '';
     }
 
@@ -13546,13 +14527,14 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     const backtickCount = (trimmed.match(/```/g) || []).length;
     if (backtickCount % 2 !== 0) return true;
 
-    // 2b. Check for unclosed display math ($$)
-    const displayMathCount = (trimmed.match(/\$\$/g) || []).length;
+    // 2b. Check for unclosed display math ($$) dan \[ ... \] di luar blok kode berpagar tertutup
+    const trimmedOutsideClosedCode = trimmed.replace(/```[\s\S]*?```/g, '');
+    const displayMathCount = (trimmedOutsideClosedCode.match(/\$\$/g) || []).length;
     if (displayMathCount % 2 !== 0 && normFinish !== 'stop' && normFinish !== 'end_turn') return true;
 
     // 2c. Check for unclosed LaTeX brackets \[ ... \]
-    const openBracketMath = (trimmed.match(/\\\[/g) || []).length;
-    const closeBracketMath = (trimmed.match(/\\\]/g) || []).length;
+    const openBracketMath = (trimmedOutsideClosedCode.match(/\\\[/g) || []).length;
+    const closeBracketMath = (trimmedOutsideClosedCode.match(/\\\]/g) || []).length;
     if (openBracketMath > closeBracketMath && normFinish !== 'stop' && normFinish !== 'end_turn') return true;
 
     // 3. Check for HTML document completion
@@ -13922,8 +14904,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       savePersistedState();
       renderChatHistory(els.searchHistoryInput?.value || '');
 
-      const container = options.container || row?.querySelector('.msg-actions');
-      if (container && (isStillIncomplete || isOutputTruncated(currentAccumulated))) {
+      const container = options.container || row?.querySelector('.message-actions-bar') || row?.querySelector('.msg-actions') || row?.querySelector('.message-content-box');
+      if (!options.isAutoContinue && container && (isStillIncomplete || isOutputTruncated(currentAccumulated, lastContFinishReason || 'stop'))) {
         attachContinuationButton(container, session, row, modelName, engine, currentAccumulated, { isWebsite: isWebContinue });
       }
 
@@ -13933,6 +14915,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         showToast(isStillIncomplete ? msgStill : msgSuccess, isStillIncomplete ? 'info' : 'success');
       }
       AudioEngine.click();
+      return {
+        text: currentAccumulated,
+        isStillIncomplete,
+        finishReason: lastContFinishReason || (isActuallyComplete ? 'stop' : null)
+      };
     } catch (err) {
       if (directBtn) {
         directBtn.innerHTML = origDirectHtml || '<i class="fa-solid fa-play"></i> Lanjutkan Sekarang';
@@ -13981,6 +14968,78 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     });
 
     container.appendChild(btn);
+  }
+
+  /**
+   * Menangani auto-continuation setelah stream berakhir dan hanya memasang tombol
+   * "Lanjutkan" jika output benar-benar masih terpotong berdasarkan finishReason/status terbaru.
+   */
+  async function resolvePostStreamContinuation(assistantRow, ctx) {
+    const {
+      session,
+      modelName,
+      engine,
+      initialText,
+      finishReason,
+      isFileIncomplete,
+      groundedImageDisplays,
+      isWebTask,
+      isAborted,
+      isAutoContinuation,
+      engineLabel
+    } = ctx;
+
+    let finalText = initialText;
+    let stillFileIncomplete = Boolean(isFileIncomplete);
+    let effectiveFinishReason = finishReason;
+    let continued = false;
+
+    const needsContinuation = !isAborted && !isAutoContinuation && (stillFileIncomplete || isOutputTruncated(finalText, effectiveFinishReason));
+    if (needsContinuation) {
+      console.log(`[${engineLabel} Auto-Recovery] Respons terputus/terpotong di tengah jalan. Menyambung otomatis...`);
+      try {
+        const contResult = await executeResponseContinuation(assistantRow, {
+          session,
+          modelName,
+          engine,
+          previousText: finalText,
+          imageDisplays: groundedImageDisplays,
+          isWebsite: isWebTask,
+          forceTakeover: true,
+          isAutoContinue: true
+        });
+        if (groundedImageDisplays && groundedImageDisplays.length > 0) {
+          renderGroundedImageDisplaysForRow(assistantRow, groundedImageDisplays);
+        }
+        if (contResult && typeof contResult.text === 'string') {
+          finalText = contResult.text;
+          stillFileIncomplete = Boolean(contResult.isStillIncomplete);
+          effectiveFinishReason = contResult.finishReason || 'stop';
+          continued = true;
+        } else if (assistantRow?.dataset?.fullContent) {
+          finalText = assistantRow.dataset.fullContent;
+          stillFileIncomplete = Boolean(extractGeneratedFiles(finalText, true).hasIncompleteFile);
+          effectiveFinishReason = null;
+          continued = true;
+        }
+      } catch (autoContErr) {
+        console.warn(`[${engineLabel} Seamless Auto-Continuation Notice]:`, autoContErr);
+      }
+    }
+
+    const stillTruncated = stillFileIncomplete || isOutputTruncated(finalText, effectiveFinishReason);
+    if (stillTruncated) {
+      attachContinuationButton(
+        assistantRow.querySelector('.message-content-box') || assistantRow,
+        session,
+        assistantRow,
+        modelName,
+        engine,
+        finalText,
+        { isWebsite: isWebTask }
+      );
+    }
+    return { text: finalText, stillTruncated, continued };
   }
 
   async function streamContinuationOpenRouter(session, modelName, promptInstruction, bubbleText, currentFullText, options = {}) {
@@ -17025,7 +18084,19 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         renderSavedImageMessage(msg, idx);
         return;
       }
+      if (msg.role === 'user' && window.ZozTextSafety && typeof window.ZozTextSafety.normalizeUserMessagePresentation === 'function') {
+        window.ZozTextSafety.normalizeUserMessagePresentation(msg);
+      }
       let textToDisplay = (msg.role === 'user' && typeof msg.displayContent === 'string') ? msg.displayContent : (msg.content || '');
+      if (msg.role === 'user' && typeof textToDisplay === 'string' && textToDisplay.includes('--- [LAMPIRAN DOKUMEN:') && window.ZozTextSafety && typeof window.ZozTextSafety.parseAttachedDocsFromPrompt === 'function') {
+        const parsedInline = window.ZozTextSafety.parseAttachedDocsFromPrompt(textToDisplay);
+        if (parsedInline.hasMarkers) {
+          textToDisplay = parsedInline.displayContent;
+          if ((!Array.isArray(msg.docs) || msg.docs.length === 0) && parsedInline.docs.length > 0) {
+            msg.docs = parsedInline.docs;
+          }
+        }
+      }
       textToDisplay = stripModelTags(textToDisplay);
       const imagesToDisplay = msg.images || (msg.image ? [msg.image] : null);
       if (imagesToDisplay && imagesToDisplay.length > 0 && /^📷 \[\d+ Foto Lampiran\]$/.test(textToDisplay.trim())) {
@@ -17332,14 +18403,24 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
 
   function extractUserPromptPayloadForResend(targetUserMsg) {
     if (!targetUserMsg) return { promptToSend: '', restoredImages: [], restoredDocs: [] };
+    if (targetUserMsg.role === 'user' && window.ZozTextSafety && typeof window.ZozTextSafety.normalizeUserMessagePresentation === 'function') {
+      window.ZozTextSafety.normalizeUserMessagePresentation(targetUserMsg);
+    }
     const restoredImages = Array.isArray(targetUserMsg.images)
       ? targetUserMsg.images.filter(Boolean)
       : (targetUserMsg.image ? [targetUserMsg.image] : []);
     const restoredDocs = restoreDocsFromUserMessage(targetUserMsg, targetUserMsg.docs);
 
-    let promptToSend = (typeof targetUserMsg.displayContent === 'string' && targetUserMsg.displayContent.trim().length > 0)
+    let promptToSend = (typeof targetUserMsg.displayContent === 'string')
       ? targetUserMsg.displayContent
       : (typeof targetUserMsg.content === 'string' ? targetUserMsg.content : '');
+
+    if (typeof promptToSend === 'string' && promptToSend.includes('--- [LAMPIRAN DOKUMEN:') && window.ZozTextSafety && typeof window.ZozTextSafety.parseAttachedDocsFromPrompt === 'function') {
+      const parsedPrompt = window.ZozTextSafety.parseAttachedDocsFromPrompt(promptToSend);
+      if (parsedPrompt.hasMarkers) {
+        promptToSend = parsedPrompt.displayContent;
+      }
+    }
 
     promptToSend = typeof stripModelTags === 'function' ? stripModelTags(promptToSend) : promptToSend;
 
@@ -17509,7 +18590,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     if (docs && Array.isArray(docs) && docs.length > 0 && role === 'user') {
       docsHtml = `
         <div class="attached-docs-badge-row">
-          ${docs.map(d => {
+          ${docs.map((d, dIdx) => {
             const isWebDoc = Boolean(d.isWeb || (d.name && d.name.startsWith('[Web:')) || d.url);
             let targetUrl = d.url;
             if (!targetUrl && isWebDoc && typeof d.content === 'string') {
@@ -17529,7 +18610,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
               `;
             }
             return `
-              <div class="msg-doc-badge" data-doc-name="${escapeHtml(d.name || '')}" title="Klik untuk membuka & membaca file lampiran">
+              <div class="msg-doc-badge" data-doc-idx="${dIdx}" data-doc-name="${escapeHtml(d.name || '')}" title="Klik untuk membuka & membaca file lampiran">
                 <i class="${iconClass}" style="${iconColor}"></i>
                 <span class="msg-doc-name" title="${escapeHtml(d.name)}">${escapeHtml(d.name)}</span>
                 <span class="msg-doc-size">${escapeHtml(d.size || '')}</span>
@@ -17689,7 +18770,12 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         badgeEl.style.cursor = 'pointer';
         badgeEl.addEventListener('click', (e) => {
           e.stopPropagation();
-          const targetDoc = (docs && docs[bIdx]) ? docs[bIdx] : null;
+          const parsedIdx = parseInt(badgeEl.dataset.docIdx, 10);
+          const docIdx = Number.isFinite(parsedIdx) ? parsedIdx : bIdx;
+          const liveDocs = (currentSess?.messages?.[index]?.docs && Array.isArray(currentSess.messages[index].docs))
+            ? currentSess.messages[index].docs
+            : docs;
+          const targetDoc = (liveDocs && liveDocs[docIdx]) ? liveDocs[docIdx] : (docs && docs[docIdx]) || null;
           if (!targetDoc) return;
           let docContent = targetDoc.rawContent || targetDoc.content || '';
           if (!docContent) {
@@ -17700,11 +18786,12 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
               const match = fullSourceText.match(docRegex);
               if (match && match[1]) {
                 docContent = match[1];
-              } else if (targetDoc.isAutoConvertedMarkdown || (docs && docs.length === 1)) {
-                // Fallback untuk dokumen markdown hasil auto-fold / rangkuman WhatsApp
-                const rawInstruction = extraMeta?.displayContent || (typeof content === 'string' ? content : '');
-                if (rawInstruction && fullSourceText.endsWith(rawInstruction)) {
-                  docContent = fullSourceText.slice(0, fullSourceText.length - rawInstruction.length).trim();
+              } else if (liveDocs && liveDocs.length === 1) {
+                // Fallback untuk 1 dokumen markdown hasil auto-fold / rangkuman WhatsApp
+                const rawInstruction = (extraMeta?.displayContent || currentSess?.messages?.[index]?.displayContent || (typeof content === 'string' ? content : '')).trim();
+                if (rawInstruction && fullSourceText.trimEnd().endsWith(rawInstruction)) {
+                  const cutPos = fullSourceText.lastIndexOf(rawInstruction);
+                  docContent = cutPos >= 0 ? fullSourceText.slice(0, cutPos).trim() : fullSourceText;
                 } else {
                   docContent = fullSourceText;
                 }
@@ -17716,7 +18803,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
             size: targetDoc.size,
             content: docContent,
             rawContent: docContent,
-            isAutoConvertedMarkdown: targetDoc.isAutoConvertedMarkdown || true
+            isAutoConvertedMarkdown: Boolean(targetDoc.isAutoConvertedMarkdown)
           }, -1);
         });
       });
@@ -17755,6 +18842,12 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
 
         // Create inline editor
         let originalContent = content;
+        if (role === 'user' && typeof originalContent === 'string' && originalContent.includes('--- [LAMPIRAN DOKUMEN:') && window.ZozTextSafety && typeof window.ZozTextSafety.parseAttachedDocsFromPrompt === 'function') {
+          const parsedOrig = window.ZozTextSafety.parseAttachedDocsFromPrompt(originalContent);
+          if (parsedOrig.hasMarkers) {
+            originalContent = parsedOrig.displayContent;
+          }
+        }
         if (role === 'user' && docs && Array.isArray(docs) && docs.length > 0 && typeof originalContent === 'string') {
           if (/^\[File:\s*[^\]]+\]$/i.test(originalContent.trim())) {
             const sessMsg = (index >= 0 && currentSess?.messages?.[index]) ? currentSess.messages[index] : null;
@@ -17911,9 +19004,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     // Message copy button with visual checkmark feedback & safe fallback
     row.querySelector('.copy-msg-btn')?.addEventListener('click', function() {
       const copyBtn = this;
+      const textEl = row.querySelector('.msg-text-content');
       let rawText = row.dataset.fullContent;
       if (!rawText) {
-        const textEl = row.querySelector('.msg-text-content');
         rawText = textEl ? (textEl.innerText || textEl.textContent || '') : (content || '');
       }
       if (role === 'user' && !rawText && docs && docs.length > 0) {
@@ -17922,34 +19015,13 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       if (role === 'user' && !rawText && imgList.length > 0) {
         rawText = '[Foto Lampiran]';
       }
-      let textToCopy = (role === 'assistant' ? safeAssistantText(rawText) : rawText)
-        .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
-        .trim();
-      const textWithoutCode = textToCopy.replace(/```[\s\S]*?```|``[^`\n]+``|`[^`\n]+`/g, '');
-      const hasMathMarkup = role === 'assistant' && (
-        textWithoutCode.includes('$$') ||
-        textWithoutCode.includes('\\(') ||
-        textWithoutCode.includes('\\[') ||
-        textWithoutCode.includes('\\frac') ||
-        textWithoutCode.includes('\\text{') ||
-        textWithoutCode.includes('\\rightarrow') ||
-        textWithoutCode.includes('\\int') ||
-        textWithoutCode.includes('\\sum') ||
-        textWithoutCode.includes('\\prod') ||
-        textWithoutCode.includes('\\partial') ||
-        textWithoutCode.includes('\\sqrt') ||
-        textWithoutCode.includes('\\zeta') ||
-        textWithoutCode.includes('\\mathbb') ||
-        textWithoutCode.includes('\\mathcal') ||
-        textWithoutCode.includes('\\hat') ||
-        textWithoutCode.includes('\\hbar') ||
-        textWithoutCode.includes('\\wedge') ||
-        /\\[a-zA-Z]{2,}/.test(textWithoutCode) ||
-        /\^\{[0-9+\-=()nis]+\}/.test(textWithoutCode) ||
-        /_\{[0-9+\-=()aehijklmnoprstuvx]+\}/.test(textWithoutCode)
-      );
-      if (hasMathMarkup) {
-        textToCopy = purifyPureMathFormula(textToCopy);
+      let textToCopy = '';
+      if (role === 'assistant') {
+        textToCopy = formatAssistantOutputForCopy(rawText, textEl);
+      } else {
+        textToCopy = String(rawText || '')
+          .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
+          .trim();
       }
       copyTextToClipboard(textToCopy, () => {
         const origHtml = copyBtn.innerHTML;
@@ -26784,13 +27856,21 @@ ${blocks}
         if (isAnyVideoUrlClient(u)) return false;
         // Abaikan CDN, font, dan library asset eksternal dalam kode
         if (h.includes('cdn.') || h.includes('cdnjs.') || h.includes('jsdelivr.') || h.includes('unpkg.com') || h.includes('googleapis.com') || h.includes('gstatic.com')) return false;
-        // Abaikan file asset, script, style, binary
-        if (/\.(png|jpe?g|webp|gif|svg|ico|mp4|webm|mp3|wav|ogg|pdf|js|mjs|cjs|css|json|map|wasm|woff2?|ttf|eot)$/i.test(pathname)) return false;
+        // Abaikan file asset, script, style, arsip/biner non-dokumen (tautan .pdf tetap diperbolehkan karena server mendukung ekstraksi PDF)
+        if (/\.(png|jpe?g|webp|gif|svg|ico|mp4|webm|mp3|wav|ogg|js|mjs|cjs|css|json|map|wasm|woff2?|ttf|eot|zip|exe|dmg|tar|gz)$/i.test(pathname)) return false;
         return true;
       } catch (_) {
         return false;
       }
     });
+  }
+
+  function isBinaryOrGarbledWebText(text) {
+    if (typeof text !== 'string' || !text) return false;
+    if (window.ZozTextSafety && typeof window.ZozTextSafety.isGarbledPdfBinaryText === 'function') {
+      return window.ZozTextSafety.isGarbledPdfBinaryText(text);
+    }
+    return /^%PDF-\d\.\d/i.test(text.trimStart());
   }
 
   async function extractWebContentFromUrl(targetUrl, maxChars = 8000) {
@@ -26799,19 +27879,23 @@ ${blocks}
     if (!/^https?:\/\//i.test(clean)) clean = 'https://' + clean;
 
     if (clientWebContentCache.has(clean)) {
-      return clientWebContentCache.get(clean);
+      const cached = clientWebContentCache.get(clean);
+      if (cached && !isBinaryOrGarbledWebText(cached.content)) {
+        return cached;
+      }
+      clientWebContentCache.delete(clean);
     }
 
-    // 1. Coba endpoint ekstraksi web resmi Zoz Router (/api/extract-web)
+    // 1. Coba endpoint ekstraksi web resmi Zoz Router (/api/extract-web) — mendukung HTML & PDF web
     try {
       const ep = getUniversalApiUrl('/api/extract-web?url=' + encodeURIComponent(clean) + '&maxChars=' + maxChars);
       const res = await fetch(ep, {
         headers: { 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(10000)
+        signal: AbortSignal.timeout(18000)
       });
       if (res.ok) {
         const data = await res.json();
-        if (data && data.success && data.content && data.content.length > 30) {
+        if (data && data.success && data.content && data.content.length > 30 && !isBinaryOrGarbledWebText(data.content)) {
           rememberWebContent(clean, data);
           return data;
         }
@@ -26824,12 +27908,12 @@ ${blocks}
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: clean, maxChars }),
-        signal: AbortSignal.timeout(10000)
+        signal: AbortSignal.timeout(18000)
       });
       if (res.ok) {
         const data = await res.json();
         const text = data.content || data.text || '';
-        if (text && text.length > 30) {
+        if (text && text.length > 30 && !isBinaryOrGarbledWebText(text)) {
           const formatted = {
             success: true,
             url: clean,
@@ -26848,11 +27932,11 @@ ${blocks}
     try {
       const jinaRes = await fetch(`https://r.jina.ai/${encodeURI(clean)}`, {
         headers: { 'Accept': 'text/plain' },
-        signal: AbortSignal.timeout(8000)
+        signal: AbortSignal.timeout(10000)
       });
       if (jinaRes.ok) {
         const markdown = await jinaRes.text();
-        if (markdown && markdown.length > 50) {
+        if (markdown && markdown.length > 50 && !isBinaryOrGarbledWebText(markdown)) {
           const titleMatch = markdown.match(/^Title:\s*(.+)$/m) || markdown.match(/^#\s+(.+)$/m);
           let docTitle = titleMatch ? titleMatch[1].trim() : '';
           try { if (!docTitle) docTitle = new URL(clean).hostname; } catch (_) {}
@@ -28513,7 +29597,7 @@ STATUS OPERASI: PENCATATAN MEMORI GAGAL KARENA TIDAK ADA KONTEKS.
         const scrapeResults = await Promise.all(scrapePromises);
         let extractedCount = 0;
         scrapeResults.forEach(res => {
-          if (res && res.success && res.content && res.content.length > 30) {
+          if (res && res.success && res.content && res.content.length > 30 && !isBinaryOrGarbledWebText(res.content)) {
             if (!docs.some(existing => existing && existing.url === res.url)) {
               extractedCount++;
               const docName = `[Web: ${res.title || res.domain}]`;
@@ -28770,7 +29854,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       session.updatedAt = new Date().toISOString();
       if (!options._autoRegenCount) {
         session.messages.push(userMsg);
-        savePersistedState();
+        savePersistedState({ immediate: true });
         renderChatHistory(els.searchHistoryInput?.value || '');
 
         // Immediately render user's message bubble
@@ -32883,7 +33967,6 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               throw new Error(errStr);
             }
             if (parsed.done_reason) doneReason = parsed.done_reason;
-          if (parsed.done && !doneReason) doneReason = 'stop';
             if (parsed.done && !doneReason) doneReason = 'stop';
             if (parsed.done && (parsed.eval_count !== undefined || parsed.prompt_eval_count !== undefined)) {
               ollamaUsage = {
@@ -33836,44 +34919,23 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         }
       }
 
-      // SEAMLESS AUTO-CONTINUATION: Jika output terpotong, sambung otomatis tanpa putus
-      const needsOllamaContinuation = !STATE.abortController?.signal?.aborted && !runOptions._isAutoContinuation && (isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, doneReason));
-      if (needsOllamaContinuation) {
-        console.log('[Ollama Auto-Recovery] Respons terpotong di tengah jalan. Menyambung otomatis...');
-        try {
-          await executeResponseContinuation(assistantRow, {
-            session,
-            modelName,
-            engine: 'ollama',
-            previousText: rawFullTextBeforeStripping,
-            imageDisplays: groundedImageDisplays,
-            isWebsite: isWebTask,
-            forceTakeover: true,
-            isAutoContinue: true
-          });
-          if (groundedImageDisplays.length > 0) {
-            renderGroundedImageDisplaysForRow(assistantRow, groundedImageDisplays);
-          }
-          if (assistantRow.dataset.fullContent) {
-            fullText = assistantRow.dataset.fullContent;
-            rawFullTextBeforeStripping = fullText;
-          }
-        } catch (autoContErr) {
-          console.warn('[Ollama Seamless Auto-Continuation Notice]:', autoContErr);
-        }
-      }
-
-      // Check if output is STILL cut in half after auto-continuation and provide fallback button
-      if (isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, doneReason)) {
-        attachContinuationButton(
-          assistantRow.querySelector('.message-content-box') || assistantRow,
-          session,
-          assistantRow,
-          modelName,
-          'ollama',
-          rawFullTextBeforeStripping,
-          { isWebsite: isWebTask }
-        );
+      // SEAMLESS AUTO-CONTINUATION: Jika output terpotong, sambung otomatis dan perbarui alasan berhenti terkini
+      const ollamaContRes = await resolvePostStreamContinuation(assistantRow, {
+        session,
+        modelName,
+        engine: 'ollama',
+        initialText: rawFullTextBeforeStripping,
+        finishReason: doneReason,
+        isFileIncomplete: isFileStillIncomplete,
+        groundedImageDisplays,
+        isWebTask,
+        isAborted: Boolean(STATE.abortController?.signal?.aborted),
+        isAutoContinuation: Boolean(runOptions._isAutoContinuation),
+        engineLabel: 'Ollama'
+      });
+      if (ollamaContRes.continued) {
+        fullText = ollamaContRes.text;
+        rawFullTextBeforeStripping = ollamaContRes.text;
       }
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + modelName, fullText);
@@ -36179,45 +37241,23 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
 
       // SEAMLESS AUTO-CONTINUATION: Hanya picu auto-continuation jika output benar-benar terpotong/tidak tuntas secara matematis
-      const isOpenRouterActuallyTruncated = Boolean(isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, finishReason));
-      const needsOpenRouterContinuation = !STATE.abortController?.signal?.aborted && !runOptions._isAutoContinuation && isOpenRouterActuallyTruncated;
-      if (needsOpenRouterContinuation) {
-        console.log('[OpenRouter Auto-Recovery] Respons terputus/terpotong di tengah jalan. Menyambung otomatis...');
-        try {
-          await executeResponseContinuation(assistantRow, {
-            session,
-            modelName: actualModelUsed || displayModel,
-            engine: engineMode,
-            previousText: rawFullTextBeforeStripping,
-            imageDisplays: groundedImageDisplays,
-            isWebsite: isWebTask,
-            forceTakeover: true,
-            isAutoContinue: true
-          });
-          if (groundedImageDisplays.length > 0) {
-            renderGroundedImageDisplaysForRow(assistantRow, groundedImageDisplays);
-          }
-          if (assistantRow.dataset.fullContent) {
-            fullText = assistantRow.dataset.fullContent;
-            rawFullTextBeforeStripping = fullText;
-            isStreamInterrupted = false;
-          }
-        } catch (autoContErr) {
-          console.warn('[OpenRouter Seamless Auto-Continuation Notice]:', autoContErr);
-        }
-      }
-
-      // Check if output is STILL cut in half after auto-continuation and provide fallback button (tanpa toast error)
-      if (isFileStillIncomplete || isOutputTruncated(rawFullTextBeforeStripping, finishReason)) {
-        attachContinuationButton(
-          assistantRow.querySelector('.message-content-box') || assistantRow,
-          session,
-          assistantRow,
-          actualModelUsed || displayModel,
-          engineMode,
-          rawFullTextBeforeStripping,
-          { isWebsite: isWebTask }
-        );
+      const orContRes = await resolvePostStreamContinuation(assistantRow, {
+        session,
+        modelName: actualModelUsed || displayModel,
+        engine: engineMode,
+        initialText: rawFullTextBeforeStripping,
+        finishReason,
+        isFileIncomplete: isFileStillIncomplete,
+        groundedImageDisplays,
+        isWebTask,
+        isAborted: Boolean(STATE.abortController?.signal?.aborted),
+        isAutoContinuation: Boolean(runOptions._isAutoContinuation),
+        engineLabel: 'OpenRouter'
+      });
+      if (orContRes.continued) {
+        fullText = orContRes.text;
+        rawFullTextBeforeStripping = orContRes.text;
+        isStreamInterrupted = false;
       }
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + (actualModelUsed || displayModel), fullText);
@@ -43614,6 +44654,9 @@ Aturan:
 
     // Keyboard shortcuts: Alt+I (Image Mode / Dropdown), Alt+M (Music Mode / Dropdown), Alt+S (Search Mode / Dropdown) & Alt+H (Toggle Prompt Visibility)
     document.addEventListener('keydown', (e) => {
+      if (document.getElementById('terminalModal')?.classList.contains('show')) {
+        return;
+      }
       if (e.altKey && (e.key === 'h' || e.key === 'H')) {
         e.preventDefault();
         togglePromptVisibility();
@@ -44262,6 +45305,21 @@ Aturan:
       syncTerminalOnResume();
     });
 
+    const syncMobileAppContainerHeight = (rawVh) => {
+      if (!appContainer) return;
+      const isMobileViewport = window.innerWidth <= 768;
+      if (!isMobileViewport) {
+        if (appContainer.style.height) appContainer.style.height = '';
+        return;
+      }
+      const vh = Number(rawVh) || (window.visualViewport ? window.visualViewport.height : window.innerHeight);
+      if (!vh || vh <= 120) return;
+      const topNavEl = document.querySelector('.top-nav');
+      const topNavH = topNavEl ? topNavEl.getBoundingClientRect().height : 52;
+      const targetH = Math.max(120, Math.round(vh - topNavH));
+      appContainer.style.height = `${targetH}px`;
+    };
+
     if (window.visualViewport) {
       const handleResize = () => {
         // JANGAN proses jika dokumen sedang diminimize atau tersembunyi
@@ -44271,12 +45329,10 @@ Aturan:
         // Abaikan geometri cacat/0 saat jendela diminimize ke taskbar
         if (vh <= 120) return;
 
-        const isTouchMobile = window.innerWidth <= 768 || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        const isTouchMobile = window.innerWidth <= 768;
 
-        // HANYA adapt inline container height untuk perangkat mobile touch screen (pada PC biarkan CSS 100dvh yang murni)
-        if (isTouchMobile && appContainer) {
-          appContainer.style.height = `${vh}px`;
-        }
+        // HANYA adapt inline container height untuk layar mobile (dikurangi tinggi .top-nav agar composer tidak terpotong)
+        syncMobileAppContainerHeight(vh);
         autoResizeTextarea(els.promptInput);
 
         // Jika keyboard virtual mobile terbuka (visual viewport berkurang signifikan)
@@ -44304,11 +45360,13 @@ Aturan:
           window.scrollTo(0, 0);
         }
       });
+      syncMobileAppContainerHeight(window.visualViewport.height);
     }
 
     // Adapt textarea sizing on window resize
     window.addEventListener('resize', () => {
       if (document.hidden || document.visibilityState === 'hidden') return;
+      syncMobileAppContainerHeight();
       autoResizeTextarea(els.promptInput);
     });
 
@@ -44318,10 +45376,7 @@ Aturan:
         if (document.hidden || document.visibilityState === 'hidden') return;
         setTimeout(() => {
           if (document.hidden || document.visibilityState === 'hidden') return;
-          const isTouchMobile = window.innerWidth <= 768 || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-          if (isTouchMobile && window.visualViewport && appContainer && window.visualViewport.height > 120) {
-            appContainer.style.height = `${window.visualViewport.height}px`;
-          }
+          syncMobileAppContainerHeight();
           // HINDARI menarik percakapan ke bawah jika pengguna sedang menggulir ke atas membaca pesan lama
           if (!userScrolledUp) {
             smartScrollChatToBottom(false);
@@ -44333,10 +45388,7 @@ Aturan:
         if (document.hidden || document.visibilityState === 'hidden') return;
         setTimeout(() => {
           if (document.hidden || document.visibilityState === 'hidden') return;
-          const isTouchMobile = window.innerWidth <= 768 || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-          if (isTouchMobile && window.visualViewport && appContainer && window.visualViewport.height > 120) {
-            appContainer.style.height = `${window.visualViewport.height}px`;
-          }
+          syncMobileAppContainerHeight();
         }, 100);
       });
     }
@@ -44476,15 +45528,378 @@ Aturan:
     remotePingMs: null,
     remotePingTimer: null,
     tunnelInfo: { active: false, tunnelUrl: '', wssUrl: '', pin: '' },
+    isShiftActive: false,
     isCtrlActive: false,
     isAltActive: false,
 
     isMobileDevice() {
       const ua = navigator.userAgent || navigator.vendor || window.opera || '';
       const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+      if (isMobileUA) return true;
       const isNarrow = (window.innerWidth <= 768);
       const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-      return (isMobileUA || (isNarrow && isTouch));
+      // Laptop Windows layar sentuh dengan keyboard fisik/mouse (any-pointer: fine) tetap memakai mode desktop penuh
+      const hasFinePointer = Boolean(window.matchMedia && window.matchMedia('(any-pointer: fine)').matches);
+      return (isNarrow && isTouch && !hasFinePointer);
+    },
+
+    /**
+     * Enkoder Matematika Murni CSI/VT Keyboard (Mendukung penuh Shift, Ctrl, Alt, & kombinasinya):
+     * Bitmask modifier m = (shift ? 1 : 0) | (alt ? 2 : 0) | (ctrl ? 4 : 0), parameter ANSI = m + 1.
+     */
+    encodeTerminalKeyEvent(e, paneState = null) {
+      if (!e || !e.key) return '';
+      const pureModifiers = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'NumLock', 'ScrollLock', 'AltGraph', 'Process', 'Dead']);
+      if (pureModifiers.has(e.key)) return '';
+
+      const shift = Boolean(e.shiftKey);
+      const alt = Boolean(e.altKey);
+      const ctrl = Boolean(e.ctrlKey);
+      const meta = Boolean(e.metaKey);
+      if (meta) return '';
+
+      const m = (shift ? 1 : 0) | (alt ? 2 : 0) | (ctrl ? 4 : 0);
+      const appCursor = Boolean(paneState?.term?.modes?.applicationCursorKeysMode);
+
+      if (e.key === 'Tab') {
+        if (!ctrl && !alt) return shift ? '\x1b[Z' : '\t';
+        return '';
+      }
+      if (e.key === 'Enter') {
+        if (!ctrl && !alt && !shift) return '\r';
+        if (shift && !ctrl && !alt) return '\n';
+        if (alt && !ctrl && !shift) return '\x1b\r';
+        if (ctrl && !alt && !shift) return '\n';
+        return '\r';
+      }
+      if (e.key === 'Backspace') {
+        const base = ctrl ? '\b' : '\x7f';
+        return alt ? ('\x1b' + base) : base;
+      }
+      if (e.key === 'Escape') {
+        return alt ? '\x1b\x1b' : '\x1b';
+      }
+
+      const cursorFinals = { ArrowUp: 'A', ArrowDown: 'B', ArrowRight: 'C', ArrowLeft: 'D', Home: 'H', End: 'F' };
+      if (cursorFinals[e.key]) {
+        const fin = cursorFinals[e.key];
+        if (m > 0) return `\x1b[1;${m + 1}${fin}`;
+        return (appCursor ? '\x1bO' : '\x1b[') + fin;
+      }
+
+      const tildeCodes = { Insert: 2, Delete: 3, PageUp: 5, PageDown: 6 };
+      if (tildeCodes[e.key]) {
+        const code = tildeCodes[e.key];
+        if (m > 0) return `\x1b[${code};${m + 1}~`;
+        return `\x1b[${code}~`;
+      }
+
+      const f1to4 = { F1: 'P', F2: 'Q', F3: 'R', F4: 'S' };
+      if (f1to4[e.key]) {
+        const fin = f1to4[e.key];
+        return m > 0 ? `\x1b[1;${m + 1}${fin}` : `\x1bO${fin}`;
+      }
+
+      const f5to12 = { F5: 15, F6: 17, F7: 18, F8: 19, F9: 20, F10: 21, F11: 23, F12: 24 };
+      if (f5to12[e.key]) {
+        const code = f5to12[e.key];
+        return m > 0 ? `\x1b[${code};${m + 1}~` : `\x1b[${code}~`;
+      }
+
+      if (ctrl && !alt && !shift && e.key.length === 1) {
+        const upper = e.key.toUpperCase().charCodeAt(0);
+        if (upper >= 65 && upper <= 90) return String.fromCharCode(upper - 64);
+        if (e.key === ' ' || e.key === '@') return '\x00';
+        if (e.key === '[') return '\x1b';
+        if (e.key === '\\') return '\x1c';
+        if (e.key === ']') return '\x1d';
+      }
+
+      if (alt && !ctrl && e.key.length === 1) {
+        return '\x1b' + e.key;
+      }
+
+      if (!ctrl && !alt && e.key.length === 1) {
+        return e.key;
+      }
+      return '';
+    },
+
+    /**
+     * Terapkan modifier Shift untuk huruf maupun angka/simbol US saat mengetik lewat Sticky SHIFT mobile.
+     */
+    applyMobileShiftChar(ch) {
+      if (!ch || ch.length !== 1) return ch || '';
+      const shiftMap = {
+        '1': '!', '2': '@', '3': '#', '4': '$', '5': '%',
+        '6': '^', '7': '&', '8': '*', '9': '(', '0': ')',
+        '`': '~', '-': '_', '=': '+', '[': '{', ']': '}',
+        '\\': '|', ';': ':', "'": '"', ',': '<', '.': '>', '/': '?'
+      };
+      if (Object.prototype.hasOwnProperty.call(shiftMap, ch)) return shiftMap[ch];
+      return ch.toUpperCase();
+    },
+
+    /**
+     * Tutup dan bersihkan seluruh resource DOM/network/PTY dari sebuah pane secara atomik tanpa kebocoran.
+     */
+    destroyPaneResources(paneState, options = {}) {
+      if (!paneState) return;
+      const keepTerm = Boolean(options.keepTerm);
+      const killRemotePty = options.killRemotePty !== false;
+
+      if (paneState._reconnectTimer) {
+        clearTimeout(paneState._reconnectTimer);
+        paneState._reconnectTimer = null;
+      }
+      if (paneState._stabilityTimer) {
+        clearTimeout(paneState._stabilityTimer);
+        paneState._stabilityTimer = null;
+      }
+      if (paneState._touchInertiaRaf) {
+        cancelAnimationFrame(paneState._touchInertiaRaf);
+        paneState._touchInertiaRaf = null;
+      }
+      if (paneState.eventSource) {
+        try { paneState.eventSource.close(); } catch (_) {}
+        paneState.eventSource = null;
+      }
+      if (paneState.ws) {
+        try {
+          paneState.ws._manualClose = true;
+          paneState.ws.close();
+        } catch (_) {}
+        paneState.ws = null;
+      }
+      if (killRemotePty && paneState.sessionId) {
+        const sid = paneState.sessionId;
+        const headers = { 'Content-Type': 'application/json' };
+        if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
+        fetch(this.getTerminalApiUrl('/api/terminal/kill'), {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ session: sid, pin: this.remotePin || undefined })
+        }).catch(() => {});
+      }
+
+      if (!keepTerm) {
+        if (paneState._resizeObserver) {
+          try { paneState._resizeObserver.disconnect(); } catch (_) {}
+          paneState._resizeObserver = null;
+        }
+        if (paneState._linkDisposable) {
+          try { paneState._linkDisposable.dispose(); } catch (_) {}
+          paneState._linkDisposable = null;
+        }
+        if (paneState.term) {
+          try { paneState.term.dispose(); } catch (_) {}
+          paneState.term = null;
+        }
+        if (paneState.screenContainer && paneState.screenContainer.parentNode) {
+          try { paneState.screenContainer.parentNode.removeChild(paneState.screenContainer); } catch (_) {}
+        }
+        paneState.screenContainer = null;
+        paneState.fitAddon = null;
+        paneState.sessionId = null;
+        paneState.ptyCols = 0;
+        paneState.ptyRows = 0;
+      }
+    },
+
+    /**
+     * Peta indeks string (hasil line.translateToString) -> kolom sel visual xterm (0-based)
+     * agar highlight Search & koordinat LinkProvider akurat di samping emoji/ikon lebar.
+     */
+    _buildLineStrToColMap(line, strLen) {
+      const strToCol = new Array(strLen + 1);
+      let sPos = 0;
+      const lineLen = line.length || 0;
+      for (let col = 0; col < lineLen && sPos <= strLen; col++) {
+        const cell = line.getCell ? line.getCell(col) : null;
+        if (!cell) {
+          strToCol[sPos++] = col;
+          continue;
+        }
+        const width = cell.getWidth();
+        if (width === 0) continue;
+        const chars = cell.getChars();
+        const adv = chars ? chars.length : 1;
+        for (let k = 0; k < adv && sPos <= strLen; k++) {
+          strToCol[sPos++] = col;
+        }
+      }
+      while (sPos <= strLen) {
+        strToCol[sPos] = lineLen;
+        sPos++;
+      }
+      return strToCol;
+    },
+
+    /**
+     * Daftarkan LinkProvider bawaan xterm.js agar URL http(s) pada output terminal dapat diklik langsung.
+     */
+    registerTerminalUrlLinkProvider(term, paneState) {
+      if (!term || typeof term.registerLinkProvider !== 'function') return null;
+      const urlRe = /https?:\/\/[^\s<>"'`\u0000-\u001f]+/g;
+      return term.registerLinkProvider({
+        provideLinks: (bufferLineNumber, callback) => {
+          try {
+            const buf = term.buffer?.active;
+            if (!buf || bufferLineNumber < 1 || bufferLineNumber > buf.length) {
+              callback(undefined);
+              return;
+            }
+            const line = buf.getLine(bufferLineNumber - 1);
+            if (!line) {
+              callback(undefined);
+              return;
+            }
+            const rawText = line.translateToString(false);
+            if (!rawText || !rawText.includes('http')) {
+              callback(undefined);
+              return;
+            }
+            const colMap = this._buildLineStrToColMap(line, rawText.length);
+            const links = [];
+            urlRe.lastIndex = 0;
+            let match;
+            while ((match = urlRe.exec(rawText)) !== null) {
+              let url = match[0].replace(/[.,;:!?)\]]+$/, '');
+              if (url.length < 10) continue;
+              const startX = (colMap[match.index] ?? match.index) + 1;
+              const endCol = colMap[match.index + url.length - 1] ?? (match.index + url.length - 1);
+              const endX = endCol + 1;
+              links.push({
+                text: url,
+                range: {
+                  start: { x: startX, y: bufferLineNumber },
+                  end: { x: endX, y: bufferLineNumber }
+                },
+                activate: (_ev, text) => {
+                  if (term.hasSelection && term.hasSelection()) return;
+                  if (text && /^https?:\/\//i.test(text)) {
+                    try { window.open(text, '_blank', 'noopener,noreferrer'); } catch (_) {}
+                  }
+                }
+              });
+            }
+            callback(links.length > 0 ? links : undefined);
+          } catch (_) {
+            callback(undefined);
+          }
+        }
+      });
+    },
+
+    openSearchBar() {
+      const bar = document.getElementById('termSearchBar');
+      const input = document.getElementById('inputTermSearch');
+      if (!bar || !input) return;
+      bar.style.display = 'flex';
+      document.getElementById('btnTermSearch')?.classList.add('active');
+      const pane = this.getPaneState(this.activePane || 1);
+      const sel = this.getPaneSelectionText(pane);
+      if (sel && sel.length <= 120 && !sel.includes('\n')) {
+        input.value = sel;
+      }
+      input.focus();
+      input.select();
+      if (input.value) {
+        this.runTerminalSearch(input.value, false);
+      }
+    },
+
+    closeSearchBar() {
+      const bar = document.getElementById('termSearchBar');
+      if (bar) bar.style.display = 'none';
+      document.getElementById('btnTermSearch')?.classList.remove('active');
+      this._searchState = null;
+      this.focusActiveInput();
+    },
+
+    runTerminalSearch(query, stepForward = true) {
+      const pane = this.getPaneState(this.activePane || 1);
+      const countEl = document.getElementById('termSearchCount');
+      const term = pane?.term;
+      if (!term || !term.buffer || !term.buffer.active) {
+        if (countEl) countEl.textContent = '0/0';
+        return;
+      }
+      const rawQuery = String(query || '');
+      if (!rawQuery) {
+        this._searchState = { query: '', matches: [], activeIndex: -1 };
+        try { term.clearSelection(); } catch (_) {}
+        if (countEl) countEl.textContent = '0/0';
+        return;
+      }
+      const caseSensitive = Boolean(this._searchCaseSensitive);
+      const needle = caseSensitive ? rawQuery : rawQuery.toLowerCase();
+      const buf = term.buffer.active;
+      const matches = [];
+      for (let rowIdx = 0; rowIdx < buf.length; rowIdx++) {
+        const line = buf.getLine(rowIdx);
+        if (!line) continue;
+        const lineText = line.translateToString(true);
+        if (!lineText) continue;
+        const haystack = caseSensitive ? lineText : lineText.toLowerCase();
+        if (!haystack.includes(needle)) continue;
+        const colMap = this._buildLineStrToColMap(line, lineText.length);
+        let searchFrom = 0;
+        let hitIdx = -1;
+        while ((hitIdx = haystack.indexOf(needle, searchFrom)) !== -1) {
+          const startCol = colMap[hitIdx] ?? hitIdx;
+          const endColExcl = colMap[hitIdx + rawQuery.length] ?? (startCol + rawQuery.length);
+          matches.push({ row: rowIdx, col: startCol, len: Math.max(1, endColExcl - startCol) });
+          searchFrom = hitIdx + Math.max(1, rawQuery.length);
+        }
+      }
+
+      if (matches.length === 0) {
+        this._searchState = { query: rawQuery, matches: [], activeIndex: -1 };
+        try { term.clearSelection(); } catch (_) {}
+        if (countEl) countEl.textContent = '0/0';
+        return;
+      }
+
+      // Pilih match terdekat ke bawah atau atas dari akhir buffer
+      const activeIndex = stepForward ? (matches.length - 1) : 0;
+      this._searchState = { query: rawQuery, matches, activeIndex };
+      this._highlightSearchMatch();
+    },
+
+    stepTerminalSearch(delta = 1) {
+      const input = document.getElementById('inputTermSearch');
+      const query = input ? input.value : '';
+      if (!query) return;
+      if (!this._searchState || this._searchState.query !== query) {
+        this.runTerminalSearch(query, delta >= 0);
+        return;
+      }
+      const { matches } = this._searchState;
+      if (!matches || matches.length === 0) return;
+      const next = (this._searchState.activeIndex + delta + matches.length) % matches.length;
+      this._searchState.activeIndex = next;
+      this._highlightSearchMatch();
+    },
+
+    _highlightSearchMatch() {
+      const countEl = document.getElementById('termSearchCount');
+      const state = this._searchState;
+      const pane = this.getPaneState(this.activePane || 1);
+      const term = pane?.term;
+      if (!state || !state.matches || state.matches.length === 0 || !term) {
+        if (countEl) countEl.textContent = '0/0';
+        return;
+      }
+      const idx = Math.max(0, Math.min(state.matches.length - 1, state.activeIndex));
+      const m = state.matches[idx];
+      if (countEl) countEl.textContent = `${idx + 1}/${state.matches.length}`;
+      try {
+        const targetTop = Math.max(0, m.row - Math.floor((term.rows || 24) / 3));
+        term.scrollToLine(targetTop);
+        term.select(m.col, m.row, m.len);
+        if (pane.updateScrollUI) pane.updateScrollUI();
+      } catch (_) {}
     },
 
     syncMobileViewport() {
@@ -46160,11 +47575,13 @@ Aturan:
         try {
           pane.ws.send(JSON.stringify({ type: 'auto-enter', enabled: pane.autoEnter, session: sessionId }));
           syncedViaWs = true;
+          pane._pendingAutoEnterSync = false;
         } catch (_) {}
       }
 
       // 2. Fallback sync via HTTP REST endpoint hanya jika WS belum/tidak terhubung
       if (!syncedViaWs) {
+        pane._pendingAutoEnterSync = Boolean(pane.ws && pane.ws.readyState === WebSocket.CONNECTING);
         this.sendAutoEnterToServer(sessionId, pane.autoEnter);
       }
 
@@ -46509,7 +47926,7 @@ Aturan:
       const approxCharH = Math.round((this.fontSize || 13) * 1.38);
       const rawW = container.clientWidth || screenEl.clientWidth || window.innerWidth || (isMob ? 390 : 960);
       const rawH = container.clientHeight || screenEl.clientHeight || Math.max(240, (window.innerHeight || 720) - 130);
-      const initCols = Math.max(isMob ? 45 : 60, Math.floor(rawW / approxCharW));
+      const initCols = Math.max(isMob ? 32 : 60, Math.floor(rawW / approxCharW));
       const initRows = Math.max(20, Math.floor(rawH / approxCharH));
       if (isMob) {
         paneState._stableMobileCols = initCols;
@@ -46543,6 +47960,8 @@ Aturan:
       if (fitAddon) {
         term.loadAddon(fitAddon);
       }
+
+      paneState._linkDisposable = this.registerTerminalUrlLinkProvider(term, paneState);
 
       term.open(container);
 
@@ -46638,7 +48057,12 @@ Aturan:
         const emitMobileText = (textToEmit) => {
           if (!textToEmit) return;
           let out = textToEmit;
-          // Dukung penuh Sticky CTRL & ALT dari bilah tombol sentuh ponsel
+          // Dukung penuh Sticky SHIFT, CTRL & ALT dari bilah tombol sentuh ponsel
+          if (this.isShiftActive && out.length === 1) {
+            this.isShiftActive = false;
+            document.getElementById('btnTouchShift')?.classList.remove('active');
+            out = this.applyMobileShiftChar(out);
+          }
           if (this.isCtrlActive && out.length === 1) {
             this.isCtrlActive = false;
             document.getElementById('btnTouchCtrl')?.classList.remove('active');
@@ -46647,7 +48071,8 @@ Aturan:
             else if (code >= 97 && code <= 122) out = String.fromCharCode(code - 96);
             else if (out === ' ' || out === '@') out = '\x00';
             this.resetImeLine(paneState);
-          } else if (this.isAltActive && out.length === 1) {
+          }
+          if (this.isAltActive && out.length === 1) {
             this.isAltActive = false;
             document.getElementById('btnTouchAlt')?.classList.remove('active');
             out = '\x1b' + out;
@@ -46951,11 +48376,83 @@ Aturan:
         }, true);
       }
 
-      // Presisi Penanganan Tombol Khusus xterm (Enter, Backspace, Ctrl Shortcuts)
+      // Presisi Penanganan Tombol Khusus xterm (Enter, Shift+Enter, Tab/Shift+Tab, Backspace, Ctrl/Shift Shortcuts)
       term.attachCustomKeyEventHandler((ev) => {
-        // 1. Eksekusi Enter Presisi (Mobile & Desktop)
+        // 0. Konsumsi Sticky Modifier dari Mobile Touch Keybar jika aktif saat mengetik tombol fisik/virtual
+        if (ev.type === 'keydown' && ev.key === 'Tab') {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const useShift = Boolean(ev.shiftKey || this.isShiftActive);
+          if (this.isShiftActive) {
+            this.isShiftActive = false;
+            document.getElementById('btnTouchShift')?.classList.remove('active');
+          }
+          if (ev.ctrlKey || ev.metaKey) return true;
+          const seq = useShift ? '\x1b[Z' : '\t';
+          this.resetImeLine(paneState);
+          if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+            this.sendPtyInput(paneState.sessionId || sessionId, seq);
+          } else if (paneState && paneState.isFallbackMode && !useShift) {
+            paneState._inputLine = (paneState._inputLine || '') + '  ';
+            term.write('  ');
+          }
+          return false;
+        }
+
+        // Shift+Insert (Tempel Clipboard Tersanitasi) & Ctrl+Insert (Salin Seleksi)
+        if (ev.type === 'keydown' && (ev.key === 'Insert' || ev.keyCode === 45)) {
+          if (ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+            if (window.isSecureContext && navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+              ev.preventDefault();
+              ev.stopPropagation();
+              this.pasteToPane(paneNum);
+              return false;
+            }
+            return false;
+          }
+          if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey && !ev.altKey) {
+            const selText = this.getPaneSelectionText(paneState);
+            if (selText) {
+              ev.preventDefault();
+              ev.stopPropagation();
+              this.copyPaneSelection(paneNum, selText);
+              return false;
+            }
+          }
+        }
+
+        // 1. Eksekusi Enter Presisi (Pisahkan Enter biasa vs Shift+Enter / Alt+Enter / Ctrl+Enter)
         if (ev.key === 'Enter' || ev.keyCode === 13) {
           if (ev.type === 'keydown') {
+            const useShift = Boolean(ev.shiftKey || this.isShiftActive);
+            if (this.isShiftActive) {
+              this.isShiftActive = false;
+              document.getElementById('btnTouchShift')?.classList.remove('active');
+            }
+            // Shift+Enter atau Ctrl+Enter -> kirim newline lembut (\n) tanpa mengeksekusi perintah
+            if ((useShift || ev.ctrlKey) && !ev.altKey && !ev.metaKey) {
+              ev.preventDefault();
+              ev.stopPropagation();
+              this.resetImeLine(paneState);
+              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                this.sendPtyInput(paneState.sessionId || sessionId, '\n');
+              } else if (paneState && paneState.isFallbackMode) {
+                paneState._inputLine = (paneState._inputLine || '') + '\n';
+                term.write('\r\n');
+              }
+              return false;
+            }
+            // Alt+Enter -> biarkan xterm / kirim \x1b\r secara native
+            if (ev.altKey && !ev.ctrlKey && !ev.metaKey) {
+              ev.preventDefault();
+              ev.stopPropagation();
+              this.resetImeLine(paneState);
+              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+                this.sendPtyInput(paneState.sessionId || sessionId, '\x1b\r');
+              }
+              return false;
+            }
+
             const now = Date.now();
             if (paneState._lastEnterSentAt && (now - paneState._lastEnterSentAt) < 120) {
               return false;
@@ -47043,16 +48540,13 @@ Aturan:
               return false;
             }
             const now = Date.now();
-            if (paneState._lastBackspaceHandled && (now - paneState._lastBackspaceHandled) < 15) {
-              return false;
-            }
             paneState._lastBackspaceTime = now;
             paneState._lastBackspaceHandled = now;
             if (ev.altKey) {
               ev.preventDefault();
               ev.stopPropagation();
               if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-                this.sendPtyInput(paneState.sessionId || sessionId, '\x7f');
+                this.sendPtyInput(paneState.sessionId || sessionId, '\x1b\x7f');
               } else if (paneState && paneState.isFallbackMode) {
                 if (paneState._inputLine && paneState._inputLine.length > 0) {
                   paneState._inputLine = paneState._inputLine.slice(0, -1);
@@ -47065,7 +48559,7 @@ Aturan:
         }
 
         // =========================================================================
-        // Penanganan Presisi Pintasan Keyboard CTRL (Ctrl+C, Ctrl+V, Ctrl+L, Ctrl+Z, dll.)
+        // Penanganan Presisi Pintasan Keyboard CTRL & CTRL+SHIFT
         // =========================================================================
         if (ev.type === 'keydown' && (ev.ctrlKey || ev.metaKey) && !ev.altKey) {
           const keyLower = (ev.key || '').toLowerCase();
@@ -47075,26 +48569,35 @@ Aturan:
             return true;
           }
 
-          // 2. Ctrl+C: Jika ada teks terseleksi, biarkan Copy; jika TIDAK ada seleksi, kirim SIGINT (\x03)
-          if (keyLower === 'c') {
-            const hasSel = (term.hasSelection && term.hasSelection()) || (window.getSelection && window.getSelection().toString());
-            if (hasSel) {
-              return true;
-            } else {
-              ev.preventDefault();
-              ev.stopPropagation();
-              this.resetImeLine(paneState);
-              if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
-                this.sendPtyInput(paneState.sessionId || sessionId, '\x03');
-              } else if (paneState && paneState.isFallbackMode) {
-                term.write('^C\r\n');
-                paneState._inputLine = '';
+          // 2. Ctrl+Shift+C: Wajib HANYA Copy (jangan pernah mengirim SIGINT \x03 saat Shift ditekan!)
+          //    Ctrl+C (tanpa Shift): Copy jika ada seleksi, SIGINT (\x03) jika kosong.
+          if (keyLower === 'c' || ev.code === 'KeyC') {
+            const selText = this.getPaneSelectionText(paneState);
+            if (ev.shiftKey) {
+              if (selText) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                this.copyPaneSelection(paneNum, selText);
+                return false;
               }
-              return false;
+              return true;
             }
+            if (selText) {
+              return true;
+            }
+            ev.preventDefault();
+            ev.stopPropagation();
+            this.resetImeLine(paneState);
+            if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
+              this.sendPtyInput(paneState.sessionId || sessionId, '\x03');
+            } else if (paneState && paneState.isFallbackMode) {
+              term.write('^C\r\n');
+              paneState._inputLine = '';
+            }
+            return false;
           }
 
-          // 3. Ctrl+V: Tempel (Paste) clipboard teks tersanitasi (tanpa auto-Enter tanpa persetujuan)
+          // 3. Ctrl+V / Ctrl+Shift+V: Tempel (Paste) clipboard teks tersanitasi
           if (keyLower === 'v' || ev.code === 'KeyV') {
             if (window.isSecureContext && navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
               ev.preventDefault();
@@ -47105,6 +48608,20 @@ Aturan:
             // Pada HTTP LAN non-secure, biarkan browser menembakkan event 'paste' asli pada term.textarea
             // yang langsung disanitasi oleh capture-phase listener paste tanpa dialog izin clipboard.
             return false;
+          }
+
+          // Ctrl+Shift+F -> Buka Pencarian Output Terminal In-Tab
+          if (ev.shiftKey && keyLower === 'f') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            this.openSearchBar();
+            return false;
+          }
+
+          // Invarian Modifier Shift: Jika Shift ditekan bersama Ctrl (selain Ctrl+Shift+C/V/F),
+          // JANGAN membajak pintasan seperti Ctrl+Shift+I (DevTools), Ctrl+Shift+R, Ctrl+Shift+A..Z menjadi \x01-\x1a!
+          if (ev.shiftKey) {
+            return true;
           }
 
           // 4. Ctrl+L: Clear screen (Form Feed \x0c) - Cegah browser membajak fokus ke Address Bar
@@ -47141,7 +48658,7 @@ Aturan:
           }
 
           // 7. Ctrl+A: Pindah kursor ke awal baris (\x01) - Cegah browser Select All
-          if (keyLower === 'a' && !ev.shiftKey) {
+          if (keyLower === 'a') {
             ev.preventDefault();
             ev.stopPropagation();
             if (paneState && !paneState.isFallbackMode && (paneState.sessionId || sessionId)) {
@@ -47202,7 +48719,7 @@ Aturan:
             return false;
           }
 
-          // 13. Karakter kontrol alfabetik universal A-Z (\x01 - \x1a)
+          // 13. Karakter kontrol alfabetik universal A-Z (\x01 - \x1a) hanya ketika Shift TIDAK ditekan
           if (ev.key && ev.key.length === 1) {
             const charCode = ev.key.toUpperCase().charCodeAt(0);
             if (charCode >= 65 && charCode <= 90) { // A-Z
@@ -47248,10 +48765,10 @@ Aturan:
           try { paneState._resizeObserver.disconnect(); } catch (_) {}
         }
         paneState._resizeObserver = new ResizeObserver(() => {
-          if (!paneState.term || paneState._isRemoteResizing) return;
+          if (document.hidden || !paneState.term || paneState._isRemoteResizing) return;
           if (paneState._desktopResizeTimer) clearTimeout(paneState._desktopResizeTimer);
           paneState._desktopResizeTimer = setTimeout(() => {
-            if (!paneState.term || paneState._isRemoteResizing) return;
+            if (document.hidden || !paneState.term || paneState._isRemoteResizing) return;
             const vv = window.visualViewport;
             const isKeyboardOpen = this.isMobileDevice() && vv && (vv.height < window.innerHeight * 0.75);
             if (isKeyboardOpen) {
@@ -47471,12 +48988,12 @@ Aturan:
         paneState._lastDataEmitAt = Date.now();
 
         // INVARIAN EMITOR TUNGGAL PADA PERANGKAT MOBILE:
-        // Di ponsel, seluruh karakter teks cetak, spasi, simbol, tab, dan backspace
-        // telah dikirim secara eksklusif oleh transduser LCP (N(c) = 1).
-        // Abaikan emisi duplikat dari engine internal xterm!
+        // Abaikan hanya duplikasi karakter cetak (charCode >= 32 dan != DEL), sambil TETAP meloloskan
+        // Tab (\t), Backspace (\x7f), Escape/Panah (\x1b...), Ctrl-kode (\x00..\x1a), serta CR/LF!
         if (this.isMobileDevice()) {
           if (typeof data === 'string' && data.length > 0) {
-            if (!data.startsWith('\x1b') && data !== '\r' && data !== '\n') {
+            const firstCode = data.charCodeAt(0);
+            if (firstCode >= 32 && firstCode !== 127) {
               return;
             }
           }
@@ -47683,7 +49200,7 @@ Aturan:
 
       const activeTerm = paneState.term;
       const dims = (paneState.fitAddon && paneState.fitAddon.proposeDimensions()) || null;
-      const cols = (dims && dims.cols >= 45) ? dims.cols : ((activeTerm && activeTerm.cols) ? activeTerm.cols : (this.isMobileDevice() ? 48 : 100));
+      const cols = (dims && dims.cols >= 32) ? dims.cols : ((activeTerm && activeTerm.cols) ? activeTerm.cols : (this.isMobileDevice() ? 38 : 100));
       const rows = (dims && dims.rows >= 8) ? dims.rows : ((activeTerm && activeTerm.rows) ? activeTerm.rows : (this.isMobileDevice() ? 25 : 28));
       let queryParams = `session=${encodeURIComponent(sessionId)}&shell=${encodeURIComponent(paneState.shell)}&cwd=${encodeURIComponent(paneState.cwd)}&cols=${cols}&rows=${rows}&autoEnter=${paneState.autoEnter ? '1' : '0'}`;
       const effectivePin = this.remotePin || localStorage.getItem('zoz_last_tunnel_pin') || '';
@@ -47741,10 +49258,14 @@ Aturan:
           if (paneState.term) {
             this.sendPtyResize(sessionId, paneState.term.cols, paneState.term.rows);
           }
-          // Sinkronkan kembali status autoEnter klien terkini bila tombol sempat ditoggle saat CONNECTING
-          try {
-            ws.send(JSON.stringify({ type: 'auto-enter', enabled: Boolean(paneState.autoEnter), session: sessionId }));
-          } catch (_) {}
+          // Hanya kirim perubahan autoEnter ke server apabila pengguna sempat men-toggle saat CONNECTING;
+          // jika tidak, ikuti status otoritatif dari server pada frame 'connected'
+          if (paneState._pendingAutoEnterSync) {
+            paneState._pendingAutoEnterSync = false;
+            try {
+              ws.send(JSON.stringify({ type: 'auto-enter', enabled: Boolean(paneState.autoEnter), session: sessionId }));
+            } catch (_) {}
+          }
           // Invarian Stabilitas Jaringan:
           // Counter kegagalan HANYA direset jika koneksi terbukti stabil minimal 15 detik
           // Mencegah siklus tak berhingga 0 -> 1 -> 0 saat koneksi berkedip (fluttering)
@@ -48006,7 +49527,9 @@ Aturan:
             paneState._userScrolledUp = false;
           }
           let cleanData = msg.data.includes('\x07') ? msg.data.replace(/\x07/g, '') : msg.data;
-          cleanData = this.cleanConptyData(cleanData, paneState);
+          if (!msg.cleaned) {
+            cleanData = this.cleanConptyData(cleanData, paneState);
+          }
 
           const isScreenClear = cleanData.includes('\x1b[2J') ||
                                 cleanData.includes('\x1b[3J') ||
@@ -48094,14 +49617,16 @@ Aturan:
           this.updatePaneHeaders();
         }
         if (typeof msg.autoEnter === 'boolean') {
-          const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${sessionId}`) || localStorage.getItem('zoz_term_auto_enter_last');
-          if (savedAuto === '1' && !msg.autoEnter) {
-            paneState.autoEnter = true;
-            if (paneNum === 1 && tab) tab.autoEnter = true;
-            this.sendAutoEnterToServer(sessionId, true);
+          if (paneState._pendingAutoEnterSync) {
+            paneState._pendingAutoEnterSync = false;
+            this.sendAutoEnterToServer(sessionId, Boolean(paneState.autoEnter));
           } else {
             paneState.autoEnter = msg.autoEnter;
             if (paneNum === 1 && tab) tab.autoEnter = msg.autoEnter;
+            try {
+              localStorage.setItem(`zoz_term_auto_enter_${sessionId}`, msg.autoEnter ? '1' : '0');
+              localStorage.setItem('zoz_term_auto_enter_last', msg.autoEnter ? '1' : '0');
+            } catch (_) {}
           }
           this.updateAutoEnterUI();
         }
@@ -48241,9 +49766,6 @@ Aturan:
 
     sendPtyInput(sessionId, data) {
       if (!data) return;
-      if (typeof data === 'string') {
-        data = data.replace(/\x1b\x7f/g, '\x7f').replace(/\x1b\x08/g, '\x7f');
-      }
       const tab = this.getActiveTab();
       // Fast-path: Prioritaskan WebSocket pane aktif secara langsung
       const targetPane = (this.activePane === 2 ? tab?.pane2 : tab?.pane1) || tab?.pane1;
@@ -48286,12 +49808,28 @@ Aturan:
       try {
         const headers = { 'Content-Type': 'application/json' };
         if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
-        await fetch(this.getTerminalApiUrl('/api/terminal/input'), {
+        const res = await fetch(this.getTerminalApiUrl('/api/terminal/input'), {
           method: 'POST',
           headers,
           body: JSON.stringify({ session: sessionId, data: batch, pin: this.remotePin || undefined })
         });
-      } catch (_) {
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+      } catch (err) {
+        const now = Date.now();
+        if (!this._lastInputErrToastAt || (now - this._lastInputErrToastAt) > 5000) {
+          this._lastInputErrToastAt = now;
+          if (typeof showToast === 'function') {
+            showToast(`Koneksi input terminal gagal (${err?.message || 'terputus'}).`, 'warning');
+          }
+        }
+        const statusDot = document.querySelector(`#termPane${this.activePane || 1} .pane-status-dot`);
+        const statusLabel = document.querySelector(`#termPane${this.activePane || 1} .pane-status-label`);
+        if (statusDot) statusDot.className = 'pane-status-dot offline';
+        if (statusLabel && statusLabel.textContent && !statusLabel.textContent.includes('Terputus')) {
+          statusLabel.textContent = 'Terputus (Coba Lagi)';
+        }
       } finally {
         q.isSending = false;
         if (q.queue && q.queue.length > 0) {
@@ -48301,7 +49839,7 @@ Aturan:
     },
 
     async sendPtyResize(sessionId, cols, rows) {
-      const minSafeCols = this.isMobileDevice() ? 45 : 60;
+      const minSafeCols = this.isMobileDevice() ? 32 : 60;
       const minSafeRows = this.isMobileDevice() ? 8 : 20;
       const safeCols = Math.max(minSafeCols, parseInt(cols, 10) || minSafeCols);
       const safeRows = Math.max(minSafeRows, parseInt(rows, 10) || (this.isMobileDevice() ? 12 : 28));
@@ -48326,7 +49864,7 @@ Aturan:
     },
 
     fitPane(paneState, forcePtyResize = true) {
-      if (!paneState || !paneState.term || !paneState.screenContainer) return;
+      if (document.hidden || !paneState || !paneState.term || !paneState.screenContainer) return;
       const modal = document.getElementById('terminalModal');
       if (modal && !modal.classList.contains('show')) return;
       const term = paneState.term;
@@ -48349,7 +49887,7 @@ Aturan:
           const dims = paneState.fitAddon.proposeDimensions();
           if (dims && dims.cols > 10 && dims.rows > 5) {
             dimsValid = true;
-            targetCols = Math.max(isMobile ? 45 : 60, dims.cols);
+            targetCols = Math.max(isMobile ? 32 : 60, dims.cols);
             if (isMobile) {
               if (isKeyboardOpen) {
                 // Saat keyboard terbuka di ponsel: Kunci dimensi baris dan kolom agar identik baseline layar penuh,
@@ -48364,7 +49902,7 @@ Aturan:
                   paneState._stableMobileRows = targetRows;
                 }
               } else {
-                targetCols = Math.max(45, dims.cols);
+                targetCols = Math.max(32, dims.cols);
                 targetRows = Math.max(20, dims.rows);
                 paneState._stableMobileCols = targetCols;
                 paneState._stableMobileRows = targetRows;
@@ -48380,7 +49918,7 @@ Aturan:
       if (!dimsValid || !targetCols || !targetRows || targetCols < 20 || targetRows < 8) {
         const containerW = container.clientWidth || window.innerWidth || (isMobile ? 390 : 960);
         const containerH = container.clientHeight || Math.max(240, (window.innerHeight || 720) - 130);
-        targetCols = Math.max(isMobile ? 45 : 60, Math.floor(containerW / charW));
+        targetCols = Math.max(isMobile ? 32 : 60, Math.floor(containerW / charW));
         if (isMobile) {
           if (isKeyboardOpen) {
             if (paneState._stableMobileCols) targetCols = paneState._stableMobileCols;
@@ -48393,7 +49931,7 @@ Aturan:
               paneState._stableMobileRows = targetRows;
             }
           } else {
-            targetCols = Math.max(45, targetCols);
+            targetCols = Math.max(32, targetCols);
             targetRows = Math.max(20, Math.floor(containerH / charH));
             paneState._stableMobileCols = targetCols;
             paneState._stableMobileRows = targetRows;
@@ -48509,6 +50047,10 @@ Aturan:
       this.updatePaneHeaders();
       this.focusActiveInput();
       this.fitAllPanes();
+      const sBar = document.getElementById('termSearchBar');
+      if (sBar && sBar.style.display !== 'none') {
+        this.runTerminalSearch(document.getElementById('inputTermSearch')?.value || '', true);
+      }
       if (typeof AudioEngine !== 'undefined') AudioEngine.click();
     },
 
@@ -48523,28 +50065,7 @@ Aturan:
       const closingTab = this.tabs[idx];
 
       [closingTab.pane1, closingTab.pane2].forEach(p => {
-        if (!p) return;
-        if (p._resizeObserver) {
-          try { p._resizeObserver.disconnect(); } catch (_) {}
-          p._resizeObserver = null;
-        }
-        if (p.eventSource) {
-          try { p.eventSource.close(); } catch (_) {}
-          p.eventSource = null;
-        }
-        if (p.sessionId) {
-          const headers = { 'Content-Type': 'application/json' };
-          if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
-          fetch(this.getTerminalApiUrl('/api/terminal/kill'), {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ session: p.sessionId, pin: this.remotePin || undefined })
-          }).catch(() => {});
-        }
-        if (p.term) {
-          try { p.term.dispose(); } catch (_) {}
-          p.term = null;
-        }
+        this.destroyPaneResources(p, { keepTerm: false, killRemotePty: true });
       });
 
       this.tabs.splice(idx, 1);
@@ -48648,18 +50169,10 @@ Aturan:
       this.renderTabs();
 
       if (pane.term) {
-        if (pane.sessionId) {
-          const headers = { 'Content-Type': 'application/json' };
-          if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
-          fetch(this.getTerminalApiUrl('/api/terminal/kill'), {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ session: pane.sessionId, pin: this.remotePin || undefined })
-          }).catch(() => {});
-        }
+        this.destroyPaneResources(pane, { keepTerm: true, killRemotePty: true });
         pane.sessionId = `${tab.id}-p${paneNum}-${Date.now()}`;
         pane.term.write(`\r\n\x1b[36m⚡ Berpindah ke shell: ${this.shells[shellKey].name} [${shellKey}]\x1b[0m\r\n`);
-        this.connectStream(tab, pane, paneNum);
+        this.connectStream(tab, pane, paneNum, true);
       } else {
         const screen = document.getElementById(`termScreen${paneNum}`);
         if (screen) {
@@ -48734,6 +50247,7 @@ Aturan:
       if (tab.isSplit) {
         this.initXtermPane(2);
       } else {
+        this.destroyPaneResources(tab.pane2, { keepTerm: false, killRemotePty: true });
         this.setActivePane(1);
       }
       this.fitAllPanes();
@@ -48766,18 +50280,65 @@ Aturan:
       `;
     },
 
+    cleanTerminalOutputForCopy(rawText, paneState = null) {
+      return cleanTerminalOutputForCopy(rawText, paneState);
+    },
+
+    getPaneRecentOutputText(paneState) {
+      if (!paneState) return '';
+      try {
+        if (paneState.term && paneState.term.buffer && paneState.term.buffer.active && !paneState.isFallbackMode) {
+          const buf = paneState.term.buffer.active;
+          const totalLines = buf.length || 0;
+          const collected = [];
+          for (let i = 0; i < totalLines; i++) {
+            const line = buf.getLine(i);
+            if (!line) continue;
+            const str = line.translateToString(true);
+            if (line.isWrapped && collected.length > 0) {
+              collected[collected.length - 1] += str;
+            } else {
+              collected.push(str);
+            }
+          }
+          while (collected.length > 0 && !collected[collected.length - 1].trim()) {
+            collected.pop();
+          }
+          // Remove trailing idle shell prompt if it has no command after it
+          if (collected.length > 1 && /^(PS\s+[A-Za-z]:[^>]*>|[A-Za-z]:\\[^>]*>|[$#>❯➜])\s*$/.test(collected[collected.length - 1].trim())) {
+            collected.pop();
+          }
+          const recentSlice = collected.slice(-120).join('\n');
+          return this.cleanTerminalOutputForCopy(recentSlice, paneState);
+        }
+      } catch (_) {}
+      try {
+        const pNum = paneState.paneNum || this.activePane || 1;
+        const fallbackOut = document.getElementById(`termFallbackOut${pNum}`);
+        if (fallbackOut) {
+          const raw = fallbackOut.textContent || fallbackOut.innerText || '';
+          return this.cleanTerminalOutputForCopy(raw, paneState);
+        }
+      } catch (_) {}
+      return '';
+    },
+
     getPaneSelectionText(paneState) {
       if (!paneState) return '';
       try {
         if (paneState.term && typeof paneState.term.getSelection === 'function') {
           const termSel = paneState.term.getSelection();
-          if (termSel && termSel.length > 0) return termSel;
+          if (termSel && termSel.length > 0) {
+            return this.cleanTerminalOutputForCopy(termSel, paneState);
+          }
         }
       } catch (_) {}
       try {
         if (typeof window !== 'undefined' && typeof window.getSelection === 'function') {
           const domSel = window.getSelection()?.toString() || '';
-          if (domSel.length > 0) return domSel;
+          if (domSel.length > 0) {
+            return this.cleanTerminalOutputForCopy(domSel, paneState);
+          }
         }
       } catch (_) {}
       return '';
@@ -48786,15 +50347,25 @@ Aturan:
     copyPaneSelection(paneNum = this.activePane, explicitText = null) {
       const targetPane = paneNum || this.activePane || 1;
       const paneState = this.getPaneState(targetPane);
-      const text = (typeof explicitText === 'string' && explicitText.length > 0)
-        ? explicitText
+      let text = (typeof explicitText === 'string' && explicitText.length > 0)
+        ? this.cleanTerminalOutputForCopy(explicitText, paneState)
         : this.getPaneSelectionText(paneState);
+      let copiedRecentFallback = false;
       if (!text) {
-        showToast('Blok teks di terminal terlebih dahulu untuk disalin.', 'info');
+        text = this.getPaneRecentOutputText(paneState);
+        copiedRecentFallback = Boolean(text);
+      }
+      if (!text) {
+        showToast('Belum ada output terminal untuk disalin.', 'info');
         return false;
       }
       copyTextToClipboard(text, () => {
-        showToast('📋 Teks terminal disalin ke clipboard!', 'success');
+        showToast(
+          copiedRecentFallback
+            ? '📋 Output terminal terbaru berhasil disalin (bersih & rapi)!'
+            : '📋 Teks terminal disalin ke clipboard!',
+          'success'
+        );
       });
       this.focusActiveInput();
       return true;
@@ -48899,8 +50470,15 @@ Aturan:
 
       const copyBtn = document.getElementById('btnTermCtxCopy');
       if (copyBtn) {
-        copyBtn.disabled = !selectedText;
-        copyBtn.title = selectedText ? 'Salin teks terseleksi ke clipboard' : 'Blok teks terlebih dahulu untuk menyalin';
+        const hasRecentOut = Boolean(selectedText || this.getPaneRecentOutputText(paneState));
+        copyBtn.disabled = !hasRecentOut;
+        const labelSpan = copyBtn.querySelector('span');
+        if (labelSpan) {
+          labelSpan.textContent = selectedText ? 'Salin Seleksi' : 'Salin Output';
+        }
+        copyBtn.title = selectedText
+          ? 'Salin teks terseleksi ke clipboard'
+          : 'Salin output terminal terbaru (bersih tanpa bingkai kotak)';
       }
 
       menu.style.visibility = 'hidden';
@@ -49329,6 +50907,15 @@ Aturan:
             return;
           }
 
+          if (keyType === 'shift_toggle') {
+            this.isShiftActive = !this.isShiftActive;
+            const shiftBtn = document.getElementById('btnTouchShift');
+            if (shiftBtn) shiftBtn.classList.toggle('active', this.isShiftActive);
+            showToast(this.isShiftActive ? 'SHIFT aktif (Shift+Tab, Shift+Enter, Panah/Huruf Kapital)' : 'SHIFT nonaktif', 'info');
+            keepFocus();
+            return;
+          }
+
           if (keyType === 'ctrl_toggle') {
             this.isCtrlActive = !this.isCtrlActive;
             const ctrlBtn = document.getElementById('btnTouchCtrl');
@@ -49348,6 +50935,21 @@ Aturan:
           }
 
           if (keyType === 'Enter') {
+            if (this.isShiftActive || this.isAltActive) {
+              const useShift = this.isShiftActive;
+              const useAlt = this.isAltActive;
+              this.isShiftActive = false;
+              this.isAltActive = false;
+              document.getElementById('btnTouchShift')?.classList.remove('active');
+              document.getElementById('btnTouchAlt')?.classList.remove('active');
+              const enterSeq = useAlt ? '\x1b\r' : (useShift ? '\n' : '\r');
+              this.resetImeLine(paneState);
+              if (paneState?.term && !paneState.isFallbackMode && sId) {
+                this.sendPtyInput(sId, enterSeq);
+              }
+              keepFocus();
+              return;
+            }
             this.sendEnterToPane(paneNum);
             keepFocus();
             return;
@@ -49359,9 +50961,33 @@ Aturan:
             return;
           }
 
+          // Konsumsi kombinasi modifier sticky (SHIFT / ALT / CTRL) pada tombol navigasi Touch Keybar
+          const modMask = (this.isShiftActive ? 1 : 0) | (this.isAltActive ? 2 : 0) | (this.isCtrlActive ? 4 : 0);
+          const clearAllTouchModifiers = () => {
+            if (this.isShiftActive) {
+              this.isShiftActive = false;
+              document.getElementById('btnTouchShift')?.classList.remove('active');
+            }
+            if (this.isCtrlActive) {
+              this.isCtrlActive = false;
+              document.getElementById('btnTouchCtrl')?.classList.remove('active');
+            }
+            if (this.isAltActive) {
+              this.isAltActive = false;
+              document.getElementById('btnTouchAlt')?.classList.remove('active');
+            }
+          };
+
           let ptySeq = '';
-          if (keyType === 'slash') ptySeq = '/';
+          if (keyType === 'slash') {
+            ptySeq = this.isShiftActive ? this.applyMobileShiftChar('/') : '/';
+            if (modMask > 0) clearAllTouchModifiers();
+          }
           else if (keyType === 'Backspace') ptySeq = '\x7f';
+          else if (keyType === 'Delete') {
+            ptySeq = modMask > 0 ? `\x1b[3;${modMask + 1}~` : '\x1b[3~';
+            if (modMask > 0) clearAllTouchModifiers();
+          }
           else if (keyType === 'PgUp') {
             if (paneState?.term) {
               const isMouseOrAlt = Boolean(
@@ -49403,8 +51029,14 @@ Aturan:
               }
             }
           }
-          else if (keyType === 'Escape') ptySeq = '\x1b';
-          else if (keyType === 'Tab') ptySeq = '\t';
+          else if (keyType === 'Escape') {
+            ptySeq = this.isAltActive ? '\x1b\x1b' : '\x1b';
+            if (modMask > 0) clearAllTouchModifiers();
+          }
+          else if (keyType === 'Tab') {
+            ptySeq = this.isShiftActive ? '\x1b[Z' : '\t';
+            if (modMask > 0) clearAllTouchModifiers();
+          }
           else if (keyType === 'ctrl_c') {
             ptySeq = '\x03';
             if (this.isCtrlActive) {
@@ -49428,12 +51060,12 @@ Aturan:
           }
           else if (keyType === 'ctrl_a') ptySeq = '\x01';
           else if (keyType === 'ctrl_e') ptySeq = '\x05';
-          else if (keyType === 'Home') ptySeq = '\x1b[H';
-          else if (keyType === 'End') ptySeq = '\x1b[F';
-          else if (keyType === 'ArrowUp') ptySeq = '\x1b[A';
-          else if (keyType === 'ArrowDown') ptySeq = '\x1b[B';
-          else if (keyType === 'ArrowLeft') ptySeq = '\x1b[D';
-          else if (keyType === 'ArrowRight') ptySeq = '\x1b[C';
+          else if (keyType === 'Home' || keyType === 'End' || keyType === 'ArrowUp' || keyType === 'ArrowDown' || keyType === 'ArrowLeft' || keyType === 'ArrowRight') {
+            const cMap = { Home: 'H', End: 'F', ArrowUp: 'A', ArrowDown: 'B', ArrowLeft: 'D', ArrowRight: 'C' };
+            const fin = cMap[keyType];
+            ptySeq = modMask > 0 ? `\x1b[1;${modMask + 1}${fin}` : `\x1b[${fin}`;
+            if (modMask > 0) clearAllTouchModifiers();
+          }
 
           if (ptySeq) {
             if (keyType === 'Backspace') {
@@ -49533,6 +51165,35 @@ Aturan:
       });
       document.getElementById('btnBannerScanQr')?.addEventListener('click', () => this.openQrScannerModal());
       document.getElementById('btnBannerManual')?.addEventListener('click', () => this.showRemoteOverlay());
+      document.getElementById('btnTermSearch')?.addEventListener('click', () => {
+        const bar = document.getElementById('termSearchBar');
+        if (bar && bar.style.display !== 'none') this.closeSearchBar();
+        else this.openSearchBar();
+      });
+      document.getElementById('btnTermSearchClose')?.addEventListener('click', () => this.closeSearchBar());
+      document.getElementById('btnTermSearchNext')?.addEventListener('click', () => this.stepTerminalSearch(1));
+      document.getElementById('btnTermSearchPrev')?.addEventListener('click', () => this.stepTerminalSearch(-1));
+      document.getElementById('btnTermSearchCase')?.addEventListener('click', (e) => {
+        this._searchCaseSensitive = !this._searchCaseSensitive;
+        e.currentTarget.classList.toggle('active', Boolean(this._searchCaseSensitive));
+        const val = document.getElementById('inputTermSearch')?.value || '';
+        this.runTerminalSearch(val, true);
+      });
+      const termSearchInput = document.getElementById('inputTermSearch');
+      if (termSearchInput) {
+        termSearchInput.addEventListener('input', (e) => {
+          this.runTerminalSearch(e.target.value, true);
+        });
+        termSearchInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            this.stepTerminalSearch(e.shiftKey ? -1 : 1);
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            this.closeSearchBar();
+          }
+        });
+      }
       document.getElementById('btnTermSplit')?.addEventListener('click', () => this.toggleSplit());
       document.getElementById('btnTermFullscreen')?.addEventListener('click', () => this.toggleFullscreen());
       document.getElementById('btnTermAddTab')?.addEventListener('click', () => this.addTab());
@@ -49903,8 +51564,20 @@ Aturan:
         const remoteOverlay = document.getElementById('termRemoteOverlay');
         if (remoteOverlay && remoteOverlay.style.display !== 'none' && remoteOverlay.style.display !== '') return;
 
-        // Izinkan pintasan browser standar & toggle terminal
-        if (e.key === 'F5' || e.key === 'F12' || (e.ctrlKey && (e.key === '`' || e.code === 'Backquote' || e.key === 'r' || e.key === 'R' || e.key === 'w' || e.key === 'W'))) {
+        // Izinkan pintasan browser standar, DevTools, & toggle terminal
+        if (
+          e.key === 'F5' ||
+          e.key === 'F12' ||
+          (e.ctrlKey && e.shiftKey && ['i', 'j', 'r', 'k'].includes((e.key || '').toLowerCase())) ||
+          (e.ctrlKey && !e.shiftKey && (e.key === '`' || e.code === 'Backquote' || e.key === 'r' || e.key === 'R' || e.key === 'w' || e.key === 'W'))
+        ) {
+          return;
+        }
+
+        if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && ((e.key || '').toLowerCase() === 'f' || e.code === 'KeyF')) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.openSearchBar();
           return;
         }
 
@@ -49936,89 +51609,75 @@ Aturan:
 
         if (paneState.isFallbackMode || !paneState.sessionId) return;
 
-        if (e.ctrlKey && !e.altKey && !e.metaKey) {
-          if (e.key === 'c' || e.key === 'C') {
+        // Penekanan modifier murni (Shift, Ctrl, Alt, CapsLock) hanya memfokuskan textarea lalu menunggu tombol utama
+        if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'NumLock', 'ScrollLock', 'AltGraph'].includes(e.key)) {
+          return;
+        }
+
+        // Copy / Paste pintasan desktop ketika fokus sempat berada di luar term.textarea
+        if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+          const kl = (e.key || '').toLowerCase();
+          if (kl === 'c' || e.code === 'KeyC') {
             const selText = this.getPaneSelectionText(paneState);
             e.preventDefault();
             e.stopPropagation();
             if (selText) {
               this.copyPaneSelection(this.activePane || 1, selText);
-            } else {
+            } else if (!e.shiftKey) {
               this.sendPtyInput(paneState.sessionId, '\x03');
             }
-          } else if (e.key === 'v' || e.key === 'V' || e.code === 'KeyV') {
+            return;
+          }
+          if (kl === 'v' || e.code === 'KeyV') {
             e.preventDefault();
             e.stopPropagation();
             this.pasteToPane(this.activePane || 1);
-          } else if (e.key === 'd' || e.key === 'D') {
+            return;
+          }
+        }
+        if (e.key === 'Insert' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.pasteToPane(this.activePane || 1);
+          return;
+        }
+        if (e.key === 'Insert' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+          const selText = this.getPaneSelectionText(paneState);
+          if (selText) {
             e.preventDefault();
             e.stopPropagation();
-            this.sendPtyInput(paneState.sessionId, '\x04');
-          } else if (e.key === 'l' || e.key === 'L') {
-            e.preventDefault();
-            e.stopPropagation();
-            this.sendPtyInput(paneState.sessionId, '\x0c');
-          } else if (e.key === 'z' || e.key === 'Z') {
-            e.preventDefault();
-            e.stopPropagation();
-            this.sendPtyInput(paneState.sessionId, '\x1a');
+            this.copyPaneSelection(this.activePane || 1, selText);
+            return;
+          }
+        }
+
+        if ((e.key === 'PageUp' || e.key === 'PageDown') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          const isUp = (e.key === 'PageUp');
+          const isMouseOrAlt = !e.shiftKey && Boolean(
+            (paneState.term._core && paneState.term._core._coreMouseService && paneState.term._core._coreMouseService.areMouseEventsActive) ||
+            (paneState.term.modes && paneState.term.modes.mouseTrackingMode && paneState.term.modes.mouseTrackingMode !== 'none') ||
+            (paneState.term.buffer && paneState.term.buffer.active && paneState.term.buffer.active.type === 'alternate')
+          );
+          if (isMouseOrAlt && paneState.sessionId) {
+            const col = Math.max(1, Math.floor((paneState.term.cols || 80) / 2));
+            const row = Math.max(1, Math.floor((paneState.term.rows || 24) / 2));
+            const btn = isUp ? 64 : 65;
+            const tilde = isUp ? '5' : '6';
+            this.sendPtyInput(paneState.sessionId, `\x1b[<${btn};${col};${row}M`.repeat(5) + `\x1b[${tilde}~`);
+          } else {
+            paneState.term.scrollPages(isUp ? -1 : 1);
+            if (paneState.updateScrollUI) paneState.updateScrollUI();
           }
           return;
         }
 
-        if (!e.ctrlKey && !e.altKey && !e.metaKey) {
-          let seq = '';
-          if (e.key.length === 1) seq = e.key;
-          else if (e.key === 'Enter') seq = '\r';
-          else if (e.key === 'Backspace') seq = '\x7f';
-          else if (e.key === 'Escape') seq = '\x1b';
-          else if (e.key === 'Tab') seq = '\t';
-          else if (e.key === 'ArrowUp') seq = '\x1b[A';
-          else if (e.key === 'ArrowDown') seq = '\x1b[B';
-          else if (e.key === 'ArrowRight') seq = '\x1b[C';
-          else if (e.key === 'ArrowLeft') seq = '\x1b[D';
-          else if (e.key === 'PageUp') {
-            e.preventDefault();
-            e.stopPropagation();
-            const isMouseOrAlt = Boolean(
-              (paneState.term._core && paneState.term._core._coreMouseService && paneState.term._core._coreMouseService.areMouseEventsActive) ||
-              (paneState.term.modes && paneState.term.modes.mouseTrackingMode && paneState.term.modes.mouseTrackingMode !== 'none') ||
-              (paneState.term.buffer && paneState.term.buffer.active && paneState.term.buffer.active.type === 'alternate')
-            );
-            if (isMouseOrAlt && paneState.sessionId) {
-              const col = Math.max(1, Math.floor((paneState.term.cols || 80) / 2));
-              const row = Math.max(1, Math.floor((paneState.term.rows || 24) / 2));
-              this.sendPtyInput(paneState.sessionId, `\x1b[<64;${col};${row}M`.repeat(5) + '\x1b[5~');
-            } else {
-              paneState.term.scrollPages(-1);
-              if (paneState.updateScrollUI) paneState.updateScrollUI();
-            }
-            return;
-          }
-          else if (e.key === 'PageDown') {
-            e.preventDefault();
-            e.stopPropagation();
-            const isMouseOrAlt = Boolean(
-              (paneState.term._core && paneState.term._core._coreMouseService && paneState.term._core._coreMouseService.areMouseEventsActive) ||
-              (paneState.term.modes && paneState.term.modes.mouseTrackingMode && paneState.term.modes.mouseTrackingMode !== 'none') ||
-              (paneState.term.buffer && paneState.term.buffer.active && paneState.term.buffer.active.type === 'alternate')
-            );
-            if (isMouseOrAlt && paneState.sessionId) {
-              const col = Math.max(1, Math.floor((paneState.term.cols || 80) / 2));
-              const row = Math.max(1, Math.floor((paneState.term.rows || 24) / 2));
-              this.sendPtyInput(paneState.sessionId, `\x1b[<65;${col};${row}M`.repeat(5) + '\x1b[6~');
-            } else {
-              paneState.term.scrollPages(1);
-              if (paneState.updateScrollUI) paneState.updateScrollUI();
-            }
-            return;
-          }
-
-          if (seq) {
-            e.preventDefault();
-            e.stopPropagation();
-            this.sendPtyInput(paneState.sessionId, seq);
-          }
+        const encodedSeq = this.encodeTerminalKeyEvent(e, paneState);
+        if (encodedSeq) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.sendPtyInput(paneState.sessionId, encodedSeq);
         }
       }, true);
 
@@ -55201,6 +56860,9 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     stripGeneratedFileBlocks,
     hideFileBlocksForDisplay,
     purifyPureMathFormula,
+    serializeMessageDomToCleanText,
+    formatAssistantOutputForCopy,
+    cleanTerminalOutputForCopy,
     normalizeMathematicalTextForInput,
     initPureMathClipboardEngine
   };

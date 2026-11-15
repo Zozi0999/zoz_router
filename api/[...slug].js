@@ -171,6 +171,18 @@ module.exports = async function handler(req, res) {
     if (finished) return;
     finished = true;
     console.error(`[Vercel Gateway Timeout] ${rawUrl} melampaui batas watchdog ${WATCHDOG_MS}ms (maxDuration terkonfigurasi: ${configuredMaxDuration}s)`);
+    if (res.headersSent && isStreamingPath) {
+      const resCtype = String(res.getHeader('content-type') || '').toLowerCase();
+      try {
+        if (resCtype.includes('text/event-stream') || pathname.includes('openrouter')) {
+          res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'length' }], zoz_watchdog_timeout: true })}\n\ndata: [DONE]\n\n`);
+        } else {
+          res.write(`${JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, done_reason: 'length', zoz_watchdog_timeout: true })}\n`);
+        }
+      } catch (_) {}
+      try { res.end(); } catch (_) {}
+      return;
+    }
     sendJson(res, 504, {
       success: false,
       error: `Gateway timeout: Permintaan tidak selesai dalam ${WATCHDOG_MS}ms.`,

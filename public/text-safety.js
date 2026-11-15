@@ -1408,8 +1408,12 @@
         buffer = '';
       }
       const leftover = finishTagStrippers();
-      if (leftover && isJsonSequence) {
-        output += JSON.stringify({ message: { role: 'assistant', content: leftover }, done: false }) + '\n';
+      if (leftover) {
+        if (isJsonSequence) {
+          output += JSON.stringify({ message: { role: 'assistant', content: leftover }, done: false }) + '\n';
+        } else if (isOpenRouter) {
+          output += 'data: ' + JSON.stringify({ choices: [{ index: 0, delta: { content: leftover } }] }) + '\n\n';
+        }
       }
       return output;
     }
@@ -3982,6 +3986,277 @@
     return out.trim();
   }
 
+  /**
+   * Mendeteksi apakah teks merupakan aliran biner PDF mentah atau mojibake biner
+   * (%PDF-1.x, stream/endobj, atau kepadatan karakter kontrol / U+FFFD tinggi)
+   * yang tidak boleh diperlakukan sebagai teks UTF-8 atau HTML.
+   */
+  function isGarbledPdfBinaryText(text) {
+    if (typeof text !== 'string' || !text) return false;
+    const sample = text.slice(0, 12000);
+    const trimmed = sample.trimStart();
+
+    // Header biner PDF eksplisit dengan marker objek/stream internal
+    const startsWithPdfSig = /^%PDF-\d\.\d/i.test(trimmed);
+    const hasPdfStructMarkers = (
+      (/\b\d+\s+\d+\s+obj\b/.test(sample) && /\bendobj\b/.test(sample)) ||
+      (/\bstream\b[\s\S]{0,600}\bendstream\b/.test(sample)) ||
+      (/\/FlateDecode\b/.test(sample) && /\/Type\s*\/(?:Page|Catalog|XObject|Font)/i.test(sample))
+    );
+    if (startsWithPdfSig) {
+      if (hasPdfStructMarkers || /[\uFFFD\x00-\x08\x0B\x0C\x0E-\x1F]/.test(sample.slice(0, 2000))) {
+        return true;
+      }
+      // Header %PDF- dengan keterbacaan rendah tanpa teks normal yang utuh
+      if (sample.length >= 80 && !/\b(?:introduction|abstract|pendahuluan|ringkasan|bab\s+1)\b/i.test(sample)) {
+        return true;
+      }
+    }
+    if (hasPdfStructMarkers && /%PDF-\d\.\d/i.test(sample)) {
+      return true;
+    }
+
+    // Hitung kepadatan karakter pengganti Unicode (U+FFFD) dan kontrol biner C0
+    let garbageCount = 0;
+    const len = sample.length;
+    for (let i = 0; i < len; i++) {
+      const code = sample.charCodeAt(i);
+      if (code === 0xFFFD || (code < 0x20 && code !== 0x09 && code !== 0x0A && code !== 0x0D)) {
+        garbageCount++;
+      }
+    }
+    if (len >= 40 && garbageCount >= 4 && (garbageCount / len) > 0.04) {
+      return true;
+    }
+    if (garbageCount >= 2 && hasPdfStructMarkers) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Membersihkan string tampilan pengguna dari tag sistem internal, tag [File: ...],
+   * serta kalimat filler otomatis saat terdapat lampiran dokumen/web.
+   */
+  function cleanUserDisplayPrompt(text, hasDocs = false) {
+    if (typeof text !== 'string') return '';
+    let out = stripInjectedSystemTagsFromUserText(text);
+    if (hasDocs) {
+      out = out.replace(/\s*\[File:\s*[^\]]+\]/gi, '').trim();
+      if (/^Tolong (?:pelajari|baca)(?:, [^.]*)?(?:dokumen|isi file dokumen)[^.]*\.?$/i.test(out)) {
+        out = '';
+      }
+    }
+    return out.trim();
+  }
+
+  /**
+   * Mengekstrak blok lampiran --- [LAMPIRAN DOKUMEN: ...] --- ... --- [AKHIR DOKUMEN: ...] ---
+   * dari teks prompt mentah sehingga UI setelah refresh selalu merender prompt bersih
+   * dan chip lampiran yang bisa diklik, bukan teks pembungkus atau isi mentah dokumen.
+   */
+  function parseAttachedDocsFromPrompt(rawText) {
+    if (typeof rawText !== 'string' || !rawText) {
+      return { hasMarkers: false, docs: [], displayContent: '' };
+    }
+    const markerRegex = /--- \[LAMPIRAN DOKUMEN:\s*([^\r\n]+?)\]\s*---[ \t]*\r?\n?([\s\S]*?)\r?\n?--- \[AKHIR DOKUMEN:\s*([^\r\n]+?)\]\s*---/g;
+    const docs = [];
+    let hasMarkers = false;
+
+    let cleanText = rawText.replace(markerRegex, (_fullMatch, headerLabel, bodyText) => {
+      hasMarkers = true;
+      const rawHeader = String(headerLabel || '').trim();
+      const sizeMatch = rawHeader.match(/^(.*?)\s*\(([^()]+)\)\s*$/);
+      const name = (sizeMatch ? sizeMatch[1] : rawHeader).trim() || 'Dokumen';
+      const body = String(bodyText || '').trim();
+      const size = (sizeMatch ? sizeMatch[2] : `${body.length} karakter`).trim();
+
+      const urlMatch = body.match(/^Sumber URL:\s*(https?:\/\/\S+)/im);
+      const docUrl = urlMatch ? urlMatch[1].trim() : undefined;
+      const isWeb = Boolean(docUrl || /^\[Web:/i.test(name));
+
+      docs.push({
+        name,
+        size,
+        content: body,
+        url: docUrl,
+        isWeb
+      });
+      return '';
+    });
+
+    // Penanganan defensif jika blok pembuka terpotong tanpa penutup --- [AKHIR DOKUMEN: ...] ---
+    if (!hasMarkers && /--- \[LAMPIRAN DOKUMEN:/i.test(cleanText)) {
+      hasMarkers = true;
+      const unclosedMatch = cleanText.match(/--- \[LAMPIRAN DOKUMEN:\s*([^\r\n]+?)\]\s*---[ \t]*\r?\n?([\s\S]*)$/);
+      if (unclosedMatch) {
+        const rawHeader = String(unclosedMatch[1] || '').trim();
+        const sizeMatch = rawHeader.match(/^(.*?)\s*\(([^()]+)\)\s*$/);
+        const name = (sizeMatch ? sizeMatch[1] : rawHeader).trim() || 'Dokumen';
+        const body = String(unclosedMatch[2] || '').trim();
+        const size = (sizeMatch ? sizeMatch[2] : `${body.length} karakter`).trim();
+        const urlMatch = body.match(/^Sumber URL:\s*(https?:\/\/\S+)/im);
+        const docUrl = urlMatch ? urlMatch[1].trim() : undefined;
+        docs.push({
+          name,
+          size,
+          content: body,
+          url: docUrl,
+          isWeb: Boolean(docUrl || /^\[Web:/i.test(name))
+        });
+        cleanText = cleanText.slice(0, unclosedMatch.index);
+      }
+    }
+
+    const cleanedDisplay = cleanUserDisplayPrompt(cleanText.replace(/\n{3,}/g, '\n\n').trim(), docs.length > 0 || hasMarkers);
+    return {
+      hasMarkers,
+      docs,
+      displayContent: cleanedDisplay
+    };
+  }
+
+  /**
+   * Menormalisasi pesan pengguna agar tidak pernah menampilkan wrapper mentah
+   * --- [LAMPIRAN DOKUMEN: ...] --- atau isi biner mentah setelah reload.
+   */
+  function normalizeUserMessagePresentation(msg) {
+    if (!msg || msg.role !== 'user' || typeof msg !== 'object') return false;
+    let mutated = false;
+    const rawContent = typeof msg.content === 'string' ? msg.content : '';
+    const parsed = parseAttachedDocsFromPrompt(rawContent);
+
+    if (parsed.hasMarkers && parsed.docs.length > 0) {
+      if (!Array.isArray(msg.docs) || msg.docs.length === 0) {
+        msg.docs = parsed.docs.map(d => ({
+          name: d.name,
+          size: d.size,
+          url: d.url,
+          isWeb: d.isWeb,
+          content: (typeof d.content === 'string' && d.content.length <= 500000) ? d.content : undefined
+        }));
+        mutated = true;
+      } else {
+        // Pulihkan field yang hilang (misal setelah sinkronisasi mirror localStorage yang memangkas content/url)
+        msg.docs.forEach((d, idx) => {
+          if (!d || typeof d !== 'object') return;
+          const fallbackDoc = parsed.docs[idx] || parsed.docs.find(pd => pd.name === d.name);
+          if (!fallbackDoc) return;
+          if (!d.content && fallbackDoc.content && fallbackDoc.content.length <= 500000) { d.content = fallbackDoc.content; mutated = true; }
+          if (!d.url && fallbackDoc.url) { d.url = fallbackDoc.url; mutated = true; }
+          if (d.isWeb === undefined && fallbackDoc.isWeb) { d.isWeb = fallbackDoc.isWeb; mutated = true; }
+          if (!d.size && fallbackDoc.size) { d.size = fallbackDoc.size; mutated = true; }
+        });
+      }
+    }
+
+    const hasBadDisplay = (
+      typeof msg.displayContent !== 'string' ||
+      msg.displayContent.includes('--- [LAMPIRAN DOKUMEN:') ||
+      isGarbledPdfBinaryText(msg.displayContent)
+    );
+    if (hasBadDisplay && parsed.hasMarkers) {
+      msg.displayContent = parsed.displayContent;
+      mutated = true;
+    } else if (typeof msg.displayContent === 'string' && msg.displayContent && Array.isArray(msg.docs) && msg.docs.length > 0) {
+      const cleaned = cleanUserDisplayPrompt(msg.displayContent, true);
+      if (cleaned !== msg.displayContent) {
+        msg.displayContent = cleaned;
+        mutated = true;
+      }
+    }
+
+    return mutated;
+  }
+
+  /**
+   * Mempertahankan displayContent & docs pesan user saat daftar pesan ditimpa dari disk
+   * atau digabungkan saat rehidrasi sesi.
+   */
+  function mergeUserMessagesMetadata(destMessages, sourceMessages) {
+    if (!Array.isArray(destMessages) || destMessages.length === 0) return false;
+    let mutated = false;
+    const srcList = Array.isArray(sourceMessages) ? sourceMessages : [];
+
+    // Indeks cepat pesan user di sumber berdasarkan ID, konten, serta posisi giliran user
+    const srcUserById = new Map();
+    const srcUserByContent = new Map();
+    const srcUserOrdinals = [];
+    srcList.forEach((m) => {
+      if (!m || m.role !== 'user') return;
+      srcUserOrdinals.push(m);
+      if (m.id) srcUserById.set(m.id, m);
+      if (typeof m.content === 'string' && m.content) srcUserByContent.set(m.content, m);
+    });
+
+    let userOrdinal = 0;
+    destMessages.forEach((dMsg, idx) => {
+      if (!dMsg || dMsg.role !== 'user') return;
+      const ordinalIdx = userOrdinal++;
+      let sMsg = null;
+      if (idx < srcList.length && srcList[idx] && srcList[idx].role === 'user') {
+        sMsg = srcList[idx];
+      } else if (dMsg.id && srcUserById.has(dMsg.id)) {
+        sMsg = srcUserById.get(dMsg.id);
+      } else if (typeof dMsg.content === 'string' && srcUserByContent.has(dMsg.content)) {
+        sMsg = srcUserByContent.get(dMsg.content);
+      } else if (ordinalIdx < srcUserOrdinals.length) {
+        const candidate = srcUserOrdinals[ordinalIdx];
+        if (candidate && (candidate.content === dMsg.content || (typeof candidate.displayContent === 'string' && typeof dMsg.content === 'string' && dMsg.content.includes(candidate.displayContent)))) {
+          sMsg = candidate;
+        }
+      }
+
+      if (sMsg) {
+        const sDisplayValid = typeof sMsg.displayContent === 'string' &&
+          !sMsg.displayContent.includes('--- [LAMPIRAN DOKUMEN:') &&
+          !isGarbledPdfBinaryText(sMsg.displayContent);
+        const dDisplayMissingOrBad = typeof dMsg.displayContent !== 'string' ||
+          dMsg.displayContent.includes('--- [LAMPIRAN DOKUMEN:') ||
+          isGarbledPdfBinaryText(dMsg.displayContent);
+        if (sDisplayValid && dDisplayMissingOrBad) {
+          dMsg.displayContent = sMsg.displayContent;
+          mutated = true;
+        }
+        if (Array.isArray(sMsg.docs) && sMsg.docs.length > 0) {
+          if (!Array.isArray(dMsg.docs) || dMsg.docs.length === 0) {
+            dMsg.docs = sMsg.docs;
+            mutated = true;
+          } else {
+            dMsg.docs.forEach((dd, di) => {
+              const sd = sMsg.docs[di] || sMsg.docs.find(item => item && item.name === dd?.name);
+              if (!dd || !sd) return;
+              if (!dd.content && sd.content) { dd.content = sd.content; mutated = true; }
+              if (!dd.url && sd.url) { dd.url = sd.url; mutated = true; }
+              if (dd.isWeb === undefined && sd.isWeb !== undefined) { dd.isWeb = sd.isWeb; mutated = true; }
+              if (dd.isAutoConvertedMarkdown === undefined && sd.isAutoConvertedMarkdown !== undefined) {
+                dd.isAutoConvertedMarkdown = sd.isAutoConvertedMarkdown;
+                mutated = true;
+              }
+            });
+          }
+        }
+      }
+
+      if (normalizeUserMessagePresentation(dMsg)) {
+        mutated = true;
+      }
+    });
+
+    return mutated;
+  }
+
+  function normalizeSessionMessagesPresentation(sessionObj) {
+    if (!sessionObj || !Array.isArray(sessionObj.messages)) return false;
+    let mutated = false;
+    sessionObj.messages.forEach(m => {
+      if (m && m.role === 'user' && normalizeUserMessagePresentation(m)) {
+        mutated = true;
+      }
+    });
+    return mutated;
+  }
+
   return {
     cleanPseudoCotJson,
     isZeroInformationQuery,
@@ -4025,6 +4300,12 @@
     extractNegativeFormattingConstraints,
     extractFallbackConclusionFromUnclosedThought,
     computeMathematicalErrorAversion,
-    detectGroundTruthCorrectionOrExplanation
+    detectGroundTruthCorrectionOrExplanation,
+    isGarbledPdfBinaryText,
+    cleanUserDisplayPrompt,
+    parseAttachedDocsFromPrompt,
+    normalizeUserMessagePresentation,
+    mergeUserMessagesMetadata,
+    normalizeSessionMessagesPresentation
   };
 });

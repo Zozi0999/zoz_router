@@ -83,11 +83,13 @@ class WhatsAppGateway {
       this.configFile = path.join(this.baseDir, 'config.json');
     }
 
-    this.contacts = new Map(); // jid -> { id, name, notify, phone, lastMessage, lastTimestamp, unreadCount }
+    this.contacts = new Map(); // jid -> { id, name, notify, phone, lastMessage, lastTimestamp, unreadCount, hasAvatar, avatarUpdatedAt, about }
     this.messages = new Map(); // jid -> [ { id, fromMe, text, timestamp, senderName, status, media } ]
     this.rawMessages = new Map(); // id -> raw Baileys WAMessage
     this.groupMetadataCache = new Map(); // jid -> { id, subject, ... }
     this.uploadsDir = path.join(__dirname, 'data', 'uploads');
+    this.avatarsDir = path.join(this.baseDir, 'avatars');
+    this._profileSyncInFlight = null;
     this.config = { pinHash: null, createdAt: Date.now() };
 
     this.status = {
@@ -916,6 +918,255 @@ class WhatsAppGateway {
     }
   }
 
+  ensureAvatarsDir() {
+    try {
+      if (!fs.existsSync(this.avatarsDir)) {
+        fs.mkdirSync(this.avatarsDir, { recursive: true });
+      }
+    } catch (_) {}
+  }
+
+  getAvatarFilePath(jid) {
+    const safeName = String(jid || 'unknown').replace(/[^a-zA-Z0-9._-]/g, '_');
+    return path.join(this.avatarsDir, `${safeName}.jpg`);
+  }
+
+  getMyNormalizedJid() {
+    const rawId = this.sock?.user?.id || this.status?.user?.id || '';
+    const num = rawId ? rawId.split('@')[0].split(':')[0] : '';
+    return num ? `${num}@s.whatsapp.net` : '';
+  }
+
+  clearCachedAvatars() {
+    try {
+      if (fs.existsSync(this.avatarsDir)) {
+        fs.rmSync(this.avatarsDir, { recursive: true, force: true });
+      }
+    } catch (_) {}
+  }
+
+  getCachedAvatarBuffer(jid) {
+    if (!jid) return null;
+    try {
+      const filePath = this.getAvatarFilePath(jid);
+      if (!fs.existsSync(filePath)) return null;
+      const buf = fs.readFileSync(filePath);
+      if (!buf || buf.length < 32) return null;
+      return buf;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async downloadAvatarToCache(jid, remoteUrl) {
+    if (!jid || !remoteUrl) return false;
+    try {
+      this.ensureAvatarsDir();
+      const res = await fetch(remoteUrl, { signal: AbortSignal.timeout(6000) });
+      if (!res.ok) return false;
+      const arrBuf = await res.arrayBuffer();
+      const buf = Buffer.from(arrBuf);
+      if (buf.length < 64) return false;
+      const filePath = this.getAvatarFilePath(jid);
+      const tmpPath = `${filePath}.tmp`;
+      await fsp.writeFile(tmpPath, buf);
+      await fsp.rename(tmpPath, filePath);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async syncBatchStatuses(jids = []) {
+    if (!this.sock || !this.status.connected || typeof this.sock.fetchStatus !== 'function') return 0;
+    const targets = jids.filter(j => j && !j.endsWith('@g.us') && !j.endsWith('@lid') && j !== 'status@broadcast');
+    if (targets.length === 0) return 0;
+
+    let updated = 0;
+    const CHUNK_SIZE = 15;
+    for (let i = 0; i < targets.length; i += CHUNK_SIZE) {
+      const chunk = targets.slice(i, i + CHUNK_SIZE);
+      try {
+        const results = await this.sock.fetchStatus(...chunk);
+        if (Array.isArray(results)) {
+          for (const item of results) {
+            if (!item || !item.id) continue;
+            const resolvedId = await this.resolveLidToPhone(item.id);
+            const contact = this.contacts.get(resolvedId) || this.contacts.get(item.id);
+            if (!contact) continue;
+            const rawStatus = typeof item.status === 'string'
+              ? item.status
+              : (item.status && typeof item.status.status === 'string' ? item.status.status : '');
+            const cleanAbout = rawStatus.trim();
+            contact.aboutCheckedAt = Date.now();
+            if (cleanAbout !== (contact.about || '')) {
+              contact.about = cleanAbout;
+              updated++;
+            }
+          }
+        }
+      } catch (_) {}
+      if (i + CHUNK_SIZE < targets.length) {
+        await new Promise(r => setTimeout(r, 150));
+      }
+    }
+    return updated;
+  }
+
+  async syncContactProfile(jid, { force = false, skipBroadcast = false } = {}) {
+    if (!jid || !this.sock || !this.status.connected) return false;
+    if (jid === 'status@broadcast' || jid.endsWith('@lid') || jid.includes('6281234567890')) return false;
+
+    const myJid = this.getMyNormalizedJid();
+    const isSelfTarget = Boolean(myJid && jid === myJid);
+    const contact = this.contacts.get(jid);
+    if (!contact && !isSelfTarget) return false;
+
+    const now = Date.now();
+    const TTL_MS = 30 * 60 * 1000;
+    const lastChecked = isSelfTarget ? (this.status.myAvatarCheckedAt || 0) : (contact?.avatarCheckedAt || 0);
+    const currentlyHasAvatar = isSelfTarget ? Boolean(this.status.myHasAvatar) : Boolean(contact?.hasAvatar);
+    if (!force && lastChecked && (now - lastChecked) < TTL_MS) {
+      if (!currentlyHasAvatar || fs.existsSync(this.getAvatarFilePath(jid))) {
+        return false;
+      }
+    }
+
+    let changed = false;
+    if (contact && jid.endsWith('@g.us') && (force || !this.groupMetadataCache.has(jid))) {
+      try {
+        const meta = await this.sock.groupMetadata(jid);
+        if (meta) {
+          this.groupMetadataCache.set(jid, meta);
+          if (meta.subject && meta.subject !== contact.name) {
+            contact.name = meta.subject;
+            contact.notify = meta.subject;
+            changed = true;
+          }
+          const desc = typeof meta.desc === 'string' ? meta.desc.trim() : '';
+          if (desc && desc !== (contact.about || '')) {
+            contact.about = desc.slice(0, 180);
+            changed = true;
+          }
+        }
+      } catch (_) {}
+    }
+
+    let remotePicUrl = null;
+    try {
+      remotePicUrl = await this.sock.profilePictureUrl(jid, 'preview', 6000);
+    } catch (_) {
+      remotePicUrl = null;
+    }
+
+    if (remotePicUrl) {
+      const ok = await this.downloadAvatarToCache(jid, remotePicUrl);
+      if (ok) {
+        if (isSelfTarget) {
+          this.status.myHasAvatar = true;
+          this.status.myAvatarUpdatedAt = now;
+        }
+        if (contact) {
+          contact.hasAvatar = true;
+          contact.avatarUpdatedAt = now;
+          contact.avatarUrl = remotePicUrl;
+          changed = true;
+        }
+      }
+    } else {
+      try {
+        const fPath = this.getAvatarFilePath(jid);
+        if (fs.existsSync(fPath)) fs.unlinkSync(fPath);
+      } catch (_) {}
+      if (isSelfTarget && this.status.myHasAvatar) {
+        this.status.myHasAvatar = false;
+      }
+      if (contact && contact.hasAvatar) {
+        contact.hasAvatar = false;
+        contact.avatarUrl = '';
+        changed = true;
+      }
+    }
+
+    if (isSelfTarget) {
+      this.status.myAvatarCheckedAt = now;
+    }
+    if (contact) {
+      contact.avatarCheckedAt = now;
+    }
+
+    if (!skipBroadcast && changed) {
+      this.savePersistedData();
+      this.broadcast('contacts', this.getContacts());
+    }
+    return changed;
+  }
+
+  async syncAllProfiles({ force = false, limit = 60 } = {}) {
+    if (!this.sock || !this.status.connected) {
+      return { success: false, syncedCount: 0, avatarsUpdated: 0, total: 0 };
+    }
+    if (this._profileSyncInFlight) {
+      return await this._profileSyncInFlight;
+    }
+
+    this._profileSyncInFlight = (async () => {
+      let avatarsUpdated = 0;
+      let aboutUpdated = 0;
+      let syncedCount = 0;
+
+      try {
+        const myJid = this.getMyNormalizedJid();
+        if (myJid) {
+          await this.syncContactProfile(myJid, { force, skipBroadcast: true });
+          this.broadcast('status', this.getStatus());
+        }
+
+        const targets = Array.from(this.contacts.values())
+          .filter(c => this.isRealContact(c))
+          .sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0))
+          .slice(0, Math.max(1, limit));
+
+        const individualJids = targets
+          .filter(c => !c.id.endsWith('@g.us') && (force || !c.aboutCheckedAt))
+          .map(c => c.id);
+        if (individualJids.length > 0) {
+          aboutUpdated = await this.syncBatchStatuses(individualJids);
+        }
+
+        const CONCURRENCY = 4;
+        for (let i = 0; i < targets.length; i += CONCURRENCY) {
+          if (!this.sock || !this.status.connected) break;
+          const batch = targets.slice(i, i + CONCURRENCY);
+          const batchResults = await Promise.all(
+            batch.map(async (c) => {
+              const updated = await this.syncContactProfile(c.id, { force, skipBroadcast: true });
+              syncedCount++;
+              return updated ? 1 : 0;
+            })
+          );
+          avatarsUpdated += batchResults.reduce((sum, n) => sum + n, 0);
+
+          if ((i + batch.length) < targets.length && (avatarsUpdated > 0 || aboutUpdated > 0)) {
+            this.savePersistedData();
+            this.broadcast('contacts', this.getContacts());
+          }
+          if (i + CONCURRENCY < targets.length) {
+            await new Promise(r => setTimeout(r, 80));
+          }
+        }
+
+        this.savePersistedData();
+        this.broadcast('contacts', this.getContacts());
+        return { success: true, syncedCount, avatarsUpdated, aboutUpdated, total: targets.length };
+      } finally {
+        this._profileSyncInFlight = null;
+      }
+    })();
+
+    return await this._profileSyncInFlight;
+  }
+
   hasStoredSession() {
     try {
       const credsFile = path.join(this.authDir, 'creds.json');
@@ -1022,6 +1273,10 @@ class WhatsAppGateway {
       connecting: this.status.connecting,
       isPairing: Boolean(this.status.isPairing),
       phone: this.status.phone,
+      myName: this.status.user?.name || '',
+      myHasAvatar: Boolean(this.status.myHasAvatar),
+      myAvatarUpdatedAt: this.status.myAvatarUpdatedAt || 0,
+      myJid: this.getMyNormalizedJid(),
       user: this.status.user,
       qr: this.status.qr,
       pairingCode: this.status.pairingCode || null,
@@ -1162,9 +1417,11 @@ class WhatsAppGateway {
           this.broadcast('status', this.getStatus());
           this.savePersistedData();
 
-          // Sinkronisasi nama grup WhatsApp asli dari Baileys di latar belakang
+          // Sinkronisasi nama grup & profil orang-orang (foto + bio) di latar belakang
           setTimeout(() => {
-            this.syncAllGroupMetadata().catch(() => {});
+            this.syncAllGroupMetadata()
+              .then(() => this.syncAllProfiles({ limit: 50, force: false }))
+              .catch(() => {});
           }, 800);
 
           if (resolveSettled) {
@@ -1205,6 +1462,7 @@ class WhatsAppGateway {
             this.status.user = null;
             this.contacts.clear();
             this.messages.clear();
+            this.clearCachedAvatars();
             try { if (fs.existsSync(this.contactsFile)) fs.unlinkSync(this.contactsFile); } catch (_) {}
             try { if (fs.existsSync(this.messagesFile)) fs.unlinkSync(this.messagesFile); } catch (_) {}
             this.cleanupAuthDir(true);
@@ -1406,6 +1664,7 @@ class WhatsAppGateway {
 
       this.sock.ev.on('contacts.update', async (updates) => {
         let changed = false;
+        const avatarRefreshJids = [];
         for (const u of updates) {
           if (!u.id) continue;
           const uid = await this.resolveLidToPhone(u.id);
@@ -1415,10 +1674,16 @@ class WhatsAppGateway {
             if (u.notify) existing.notify = u.notify;
             changed = true;
           }
+          if (u.imgUrl !== undefined) {
+            avatarRefreshJids.push(uid);
+          }
         }
         if (changed) {
           this.savePersistedData();
           this.broadcast('contacts', this.getContacts());
+        }
+        for (const refreshJid of avatarRefreshJids) {
+          this.syncContactProfile(refreshJid, { force: true }).catch(() => {});
         }
       });
 
@@ -1686,6 +1951,10 @@ class WhatsAppGateway {
             }
           }
 
+          if (!contact.avatarCheckedAt) {
+            this.syncContactProfile(jid, { force: false }).catch(() => {});
+          }
+
           // Broadcast pesan baru HANYA untuk pesan baru yang belum ada di layar
           this.broadcast('new_message', {
             jid,
@@ -1743,6 +2012,7 @@ class WhatsAppGateway {
     if (logout) {
       this.contacts.clear();
       this.messages.clear();
+      this.clearCachedAvatars();
       try { if (fs.existsSync(this.contactsFile)) fs.unlinkSync(this.contactsFile); } catch (_) {}
       try { if (fs.existsSync(this.messagesFile)) fs.unlinkSync(this.messagesFile); } catch (_) {}
       this.cleanupAuthDir(true);
@@ -2005,6 +2275,9 @@ class WhatsAppGateway {
 
     this.savePersistedData();
     this.broadcast('contacts', this.getContacts());
+    if (this.sock && this.status.connected) {
+      this.syncContactProfile(jid, { force: true }).catch(() => {});
+    }
     return existing;
   }
 
@@ -2102,7 +2375,10 @@ class WhatsAppGateway {
         name: formattedName,
         phone: isGroup ? 'Grup WhatsApp' : (c.phone || c.id.split('@')[0]),
         hasFile,
-        isGroup
+        isGroup,
+        hasAvatar: Boolean(c.hasAvatar),
+        avatarUpdatedAt: c.avatarUpdatedAt || 0,
+        about: c.about || ''
       };
     }).sort((a, b) => {
       const tsA = a.lastTimestamp || 0;
