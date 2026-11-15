@@ -82,7 +82,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://mechanisms-nationally-promise-medicine.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://buildings-everywhere-border-framed.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -46139,6 +46139,13 @@ Aturan:
       if (!pane) return;
       pane.autoEnter = !pane.autoEnter;
       if (paneNum === 1) tab.autoEnter = pane.autoEnter;
+      if (pane._autoRespondTimer) {
+        clearTimeout(pane._autoRespondTimer);
+        pane._autoRespondTimer = null;
+      }
+      if (pane.autoEnter) {
+        pane._lastAutoRespond = 0;
+      }
       this.updateAutoEnterUI();
 
       const sessionId = pane.sessionId || this.getEffectiveSessionId(tab, paneNum);
@@ -46159,6 +46166,14 @@ Aturan:
       // 2. Fallback sync via HTTP REST endpoint hanya jika WS belum/tidak terhubung
       if (!syncedViaWs) {
         this.sendAutoEnterToServer(sessionId, pane.autoEnter);
+      }
+
+      if (pane.autoEnter && pane.isFallbackMode && pane._recentText) {
+        setTimeout(() => {
+          if (pane.autoEnter) {
+            this.handleAutoRespond(tab, pane, paneNum, '', { fromToggleOn: true });
+          }
+        }, 10);
       }
 
       const paneName = paneNum === 2 ? 'Panel 2' : 'Panel 1';
@@ -46542,6 +46557,19 @@ Aturan:
         term.textarea.setAttribute('data-gramm', 'false');
         term.textarea.setAttribute('data-enable-grammarly', 'false');
         term.textarea.setAttribute('aria-autocomplete', 'none');
+
+        // Capture-phase Paste Transducer (Desktop & Mobile):
+        // Mencegat event 'paste' SEBELUM xterm internal _onPaste mengubah \n -> \r dan langsung mengeksekusi perintah.
+        term.textarea.addEventListener('paste', (e) => {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          const clipText = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
+          if (clipText) {
+            this.dispatchSanitizedPaste(paneNum, clipText);
+          } else {
+            this.pasteToPane(paneNum);
+          }
+        }, true);
       }
 
       // =========================================================================
@@ -46715,7 +46743,7 @@ Aturan:
             return;
           }
 
-          // 3. Tempelan Clipboard / Paste (insertFromPaste)
+          // 3. Tempelan Clipboard / Paste (insertFromPaste) — wajib melalui sanitizer agar tidak pernah auto-Enter
           if (e.inputType === 'insertFromPaste') {
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -46723,11 +46751,11 @@ Aturan:
             if (!text && e.dataTransfer) {
               text = e.dataTransfer.getData('text/plain');
             }
-            text = (text || '').replace(/[\u200B\uFEFF]/g, '');
             if (text) {
-              emitMobileText(text);
+              this.dispatchSanitizedPaste(paneNum, text);
+            } else {
+              this.resetImeLine(paneState);
             }
-            this.resetImeLine(paneState);
             return;
           }
         }, true);
@@ -46739,9 +46767,15 @@ Aturan:
         // 3. Path C (Koreksi Kata Aktif / LCP dengan Invarian Batas Kata Ekor):
         //    Menghitung batas kata aktif dengan mengabaikan spasi ekor (oldText.replace(/\s+$/, '')),
         //    sehingga koreksi Gboard seperti 'bai ' -> 'baik ' atau 'tidak ' -> 'tidak?' terkirim 100% utuh!
-        term.textarea.addEventListener('input', () => {
+        term.textarea.addEventListener('input', (e) => {
           const rawVal = (term.textarea.value || '').replace(/[\u200B\uFEFF\u00A0]/g, ' ');
           const oldText = paneState._imeBuffer || '';
+
+          if (e && e.inputType === 'insertFromPaste') {
+            const pastedDelta = rawVal.startsWith(oldText) ? rawVal.slice(oldText.length) : rawVal;
+            this.dispatchSanitizedPaste(paneNum, pastedDelta);
+            return;
+          }
 
           try {
             const tLen = term.textarea.value.length;
@@ -47060,11 +47094,16 @@ Aturan:
             }
           }
 
-          // 3. Ctrl+V: Tempel (Paste) clipboard teks ke PTY terminal
-          if (keyLower === 'v') {
-            ev.preventDefault();
-            ev.stopPropagation();
-            this.pasteToPane(paneNum);
+          // 3. Ctrl+V: Tempel (Paste) clipboard teks tersanitasi (tanpa auto-Enter tanpa persetujuan)
+          if (keyLower === 'v' || ev.code === 'KeyV') {
+            if (window.isSecureContext && navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+              ev.preventDefault();
+              ev.stopPropagation();
+              this.pasteToPane(paneNum);
+              return false;
+            }
+            // Pada HTTP LAN non-secure, biarkan browser menembakkan event 'paste' asli pada term.textarea
+            // yang langsung disanitasi oleh capture-phase listener paste tanpa dialog izin clipboard.
             return false;
           }
 
@@ -47702,6 +47741,10 @@ Aturan:
           if (paneState.term) {
             this.sendPtyResize(sessionId, paneState.term.cols, paneState.term.rows);
           }
+          // Sinkronkan kembali status autoEnter klien terkini bila tombol sempat ditoggle saat CONNECTING
+          try {
+            ws.send(JSON.stringify({ type: 'auto-enter', enabled: Boolean(paneState.autoEnter), session: sessionId }));
+          } catch (_) {}
           // Invarian Stabilitas Jaringan:
           // Counter kegagalan HANYA direset jika koneksi terbukti stabil minimal 15 detik
           // Mencegah siklus tak berhingga 0 -> 1 -> 0 saat koneksi berkedip (fluttering)
@@ -48092,31 +48135,50 @@ Aturan:
       }
     },
 
-    handleAutoRespond(tab, paneState, paneNum, chunk) {
-      if (!paneState || !paneState.autoEnter || !chunk || typeof chunk !== 'string') return;
+    handleAutoRespond(tab, paneState, paneNum, chunk, opts = {}) {
+      if (!paneState) return;
 
       // Saat terhubung ke backend host laptop (PTY), Auto Enter ditangani langsung oleh server di laptop!
-      // Hal ini menjamin Auto Enter tetap menyala dan mengeksekusi konfirmasi di laptop meskipun
-      // pengguna menutup aplikasi HP, mematikan layar, atau keluar dari browser.
       if (!paneState.isFallbackMode && (this.isRemoteConnected || this.isWindowsSynced || paneState.ws || paneState.eventSource)) {
         return;
       }
 
-      // Do not auto-respond if user was actively typing/submitting in the last 1200ms
+      if (chunk && typeof chunk === 'string') {
+        const cleanChunk = chunk
+          .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+          .replace(/\x1b\[[0-9;?]*[mhlrsuK]/g, '')
+          .replace(/\x1b\[[0-9;?]*[@-~]/g, ' ')
+          .replace(/\x1b[@-Z\\-_]/g, '')
+          .replace(/[\r\n]+/g, ' ')
+          .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, '');
+        if (cleanChunk) {
+          paneState._recentText = ((paneState._recentText || '') + cleanChunk).slice(-3000);
+        }
+      }
+
+      if (!paneState.autoEnter) return;
+
+      if (paneState._autoRespondTimer) {
+        clearTimeout(paneState._autoRespondTimer);
+        paneState._autoRespondTimer = null;
+      }
+
       const now = Date.now();
-      if (paneState._lastDataEmitAt && (now - paneState._lastDataEmitAt) < 1200) return;
-      if (paneState._lastAutoRespond && (now - paneState._lastAutoRespond) < 1000) return;
+      const minWaitAuto = paneState._lastAutoRespond ? Math.max(0, 1000 - (now - paneState._lastAutoRespond)) : 0;
+      const minWaitInput = (paneState._lastDataEmitAt && !opts.ignoreRecentInput) ? Math.max(0, 1200 - (now - paneState._lastDataEmitAt)) : 0;
+      const holdoffMs = Math.max(minWaitAuto, minWaitInput);
+      if (holdoffMs > 0) {
+        paneState._autoRespondTimer = setTimeout(() => {
+          paneState._autoRespondTimer = null;
+          if (paneState && paneState.autoEnter) {
+            this.handleAutoRespond(tab, paneState, paneNum, '');
+          }
+        }, holdoffMs + 25);
+        return;
+      }
 
-      // Strip ANSI escape codes (CSI, OSC, etc.) and control characters
-      const cleanChunk = chunk
-        .replace(/\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1b\\))/g, '')
-        .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, ' ');
-
-      if (!cleanChunk.trim()) return;
-
-      // Keep recent active window (last 3000 chars to account for large file diffs and tool previews)
-      paneState._recentText = ((paneState._recentText || '') + ' ' + cleanChunk).slice(-3000);
-      const textBuffer = paneState._recentText.replace(/\s+/g, ' ').trim();
+      const textBuffer = (paneState._recentText || '').replace(/\s+/g, ' ').trim();
+      if (!textBuffer) return;
 
       // Guard: Never auto-respond if waiting at password prompt
       if (/(?:password|passphrase|secret key|access token|api key|pin):\s*$/i.test(textBuffer)) return;
@@ -48126,10 +48188,6 @@ Aturan:
         return;
       }
 
-      // Type 1: Universal Interactive CLI Affirmative Menus (AGY CLI, Gemini CLI, Claude Code, Inquirer, Enquirer, etc.)
-      // Matches any menu where Option 1 is pre-selected with cursor (>, ❯, ›, →, *) and offers affirmative action:
-      // Yes, Allow, Accept, Approve, Proceed, Continue, Confirm, Run, Always, Apply, Save, Overwrite, Keep, Create, Update, Execute, Ya, Izinkan, Setujui, Lanjutkan
-      // OR any prompt question ending with '?' followed by navigation/option indicators.
       const isCliAffirmativeMenu = (
         /(?:[>❯›→*]\s*(?:1\.|\(?1\)?|\[1\])?\s*(?:Yes|Allow|Accept|Approve|Proceed|Continue|Confirm|Run|Always|Apply|Save|Overwrite|Keep|Create|Update|Execute|Ya|Izinkan|Setujui|Lanjutkan)\b)/i.test(textBuffer) ||
         (
@@ -48138,10 +48196,8 @@ Aturan:
         )
       );
 
-      // Type 2: Interactive batch confirmation dialogs (e.g. [y/n], [Y/n], (yes/no), Terminate batch job (Y/N)?)
       const confirmYRegex = /(?:\[[yY]\/[nN]\]|\([yY]\/[nN]\)|\?.*\(Y\/n\)|\?.*\(y\/N\)|\(yes\/no\)|\[yes\/no\]|Terminate batch job \(Y\/N\)\?|\bdo you want to continue\s*\(?[yY]\/[nN]\)?|\bare you sure\s*\(?[yY]\/[nN]\)?|\bproceed with operation\s*\(?[yY]\/[nN]\)?|\bOk to proceed\? \([yY]\)|\bApakah Anda yakin|\bLanjutkan\?)/i;
 
-      // Type 3: Explicit "press enter to continue" prompts
       const enterOnlyRegex = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b|\btekan enter untuk\b|\[enter\] to continue|\(enter to continue\))/i;
 
       const sId = paneState.sessionId || `${tab.id}-p${paneNum}`;
@@ -48152,7 +48208,6 @@ Aturan:
         setTimeout(() => {
           if (paneState.autoEnter && sId) {
             this.sendPtyInput(sId, '\r');
-            // Dual-flush newline to ensure ConPTY interactive readline triggers
             setTimeout(() => {
               if (paneState.autoEnter && sId) {
                 this.sendPtyInput(sId, '\n');
@@ -48192,6 +48247,9 @@ Aturan:
       const tab = this.getActiveTab();
       // Fast-path: Prioritaskan WebSocket pane aktif secara langsung
       const targetPane = (this.activePane === 2 ? tab?.pane2 : tab?.pane1) || tab?.pane1;
+      if (targetPane && typeof data === 'string' && /[\r\n\x03\x1b]/.test(data)) {
+        targetPane._recentText = '';
+      }
       if (targetPane && targetPane.ws && targetPane.ws.readyState === WebSocket.OPEN) {
         try {
           targetPane.ws.send(JSON.stringify({ type: 'input', session: targetPane.sessionId || sessionId, data }));
@@ -48742,11 +48800,69 @@ Aturan:
       return true;
     },
 
-    async pasteToPane(paneNum = this.activePane) {
+    /**
+     * Transformasi matematika murni tempelan clipboard Pi(S, bracketed):
+     * - Menghapus seluruh \r/\n ekor agar paste Ctrl+V tidak pernah mengeksekusi Enter tanpa persetujuan.
+     * - Jika terminal berada dalam Bracketed Paste Mode aktif DAN teks multi-baris, membungkus atomik \x1b[200~...\x1b[201~.
+     * - Pada mode shell/ConPTY biasa, memetakan newline internal -> spasi sehingga nol karakter {\r, \n} terkirim.
+     */
+    sanitizePasteText(rawText, paneState = null) {
+      if (typeof rawText !== 'string' || !rawText) return '';
+      let text = rawText.replace(/[\u200B\uFEFF]/g, '').replace(/\r\n|\r/g, '\n');
+      text = text.replace(/\n+$/, '');
+      if (!text) return '';
+      const term = paneState?.term;
+      const isBracketed = Boolean(term && term.modes && term.modes.bracketedPasteMode && !paneState?.isFallbackMode);
+      if (isBracketed && text.includes('\n')) {
+        return `\x1b[200~${text}\x1b[201~`;
+      }
+      return text.replace(/\n+/g, ' ');
+    },
+
+    /**
+     * Penyalur tunggal deterministik untuk seluruh sumber Paste (Ctrl+V, native paste, konteks, touch keybar)
+     * dengan deduplikasi mikro agar tidak pernah terjadi tempel ganda atau eksekusi Enter otomatis.
+     */
+    dispatchSanitizedPaste(paneNum = this.activePane, rawText = '') {
       const targetPane = paneNum || this.activePane || 1;
       const tab = this.getActiveTab();
       const paneState = this.getPaneState(targetPane);
       const sId = paneState?.sessionId || (tab ? this.getEffectiveSessionId(tab, targetPane) : '');
+      const now = Date.now();
+      if (paneState && paneState._lastPasteDispatchAt && (now - paneState._lastPasteDispatchAt) < 40 && paneState._lastPasteRaw === rawText) {
+        this.resetImeLine(paneState);
+        return false;
+      }
+      if (paneState) {
+        paneState._lastPasteDispatchAt = now;
+        paneState._lastPasteRaw = rawText;
+        paneState._lastDataEmitAt = now;
+        this.resetImeLine(paneState);
+      }
+      const safeText = this.sanitizePasteText(rawText, paneState);
+      if (!safeText) {
+        this.focusActiveInput();
+        return false;
+      }
+      if (paneState && paneState.term && !paneState.isFallbackMode && sId) {
+        this.sendPtyInput(sId, safeText);
+      } else if (paneState && paneState.term && paneState.isFallbackMode) {
+        paneState._inputLine = (paneState._inputLine || '') + safeText;
+        paneState.term.write(safeText);
+      } else {
+        const input = document.getElementById(`termCliInput${targetPane}`);
+        if (input) {
+          input.value += safeText;
+          input.focus();
+        }
+      }
+      this.focusActiveInput();
+      return true;
+    },
+
+    async pasteToPane(paneNum = this.activePane) {
+      const targetPane = paneNum || this.activePane || 1;
+      const paneState = this.getPaneState(targetPane);
       if (paneState) {
         this.resetImeLine(paneState);
       }
@@ -48761,20 +48877,7 @@ Aturan:
           this.focusActiveInput();
           return false;
         }
-        if (paneState && paneState.term && !paneState.isFallbackMode && sId) {
-          this.sendPtyInput(sId, clipText);
-        } else if (paneState && paneState.term && paneState.isFallbackMode) {
-          paneState._inputLine = (paneState._inputLine || '') + clipText;
-          paneState.term.write(clipText);
-        } else {
-          const input = document.getElementById(`termCliInput${targetPane}`);
-          if (input) {
-            input.value += clipText;
-            input.focus();
-          }
-        }
-        this.focusActiveInput();
-        return true;
+        return this.dispatchSanitizedPaste(targetPane, clipText);
       } catch (err) {
         showToast('Gagal membaca clipboard. Izinkan akses clipboard di browser.', 'warning');
         this.focusActiveInput();
@@ -49162,12 +49265,15 @@ Aturan:
           if (e.cancelable) e.preventDefault();
         }, { passive: false });
 
-        let lastTouchTap = 0;
+        let lastTouchEndAt = 0;
         const handleTouchKey = async (e) => {
           const now = Date.now();
-          if (now - lastTouchTap < 200) return;
-          lastTouchTap = now;
-          if (e && e.cancelable) e.preventDefault();
+          if (e && e.type === 'touchend') {
+            lastTouchEndAt = now;
+          } else if (e && e.type === 'click' && (now - lastTouchEndAt) < 650) {
+            return;
+          }
+          if (e && e.cancelable && e.type === 'touchend') e.preventDefault();
           e.stopPropagation();
           const keyType = btn.getAttribute('data-key');
           const cmdType = btn.getAttribute('data-cmd');
@@ -49385,16 +49491,19 @@ Aturan:
 
       const tbAutoEnterBtn = document.getElementById('btnTermToolbarAutoEnter');
       if (tbAutoEnterBtn) {
-        let lastAutoToggle = 0;
+        let lastAutoTouchAt = 0;
         const handleAutoToggle = (e) => {
           const now = Date.now();
-          if (now - lastAutoToggle < 300) return;
-          lastAutoToggle = now;
-          if (e && e.cancelable) e.preventDefault();
+          if (e && e.type === 'touchend') {
+            lastAutoTouchAt = now;
+          } else if (e && e.type === 'click' && (now - lastAutoTouchAt) < 650) {
+            return;
+          }
+          if (e && e.cancelable && e.type === 'touchend') e.preventDefault();
           this.toggleAutoEnter(this.activePane || 1);
         };
         tbAutoEnterBtn.addEventListener('click', handleAutoToggle);
-        tbAutoEnterBtn.addEventListener('touchend', handleAutoToggle);
+        tbAutoEnterBtn.addEventListener('touchend', handleAutoToggle, { passive: false });
       }
       document.getElementById('btnTermSyncWindows')?.addEventListener('click', () => this.trySyncWindows(true));
       document.getElementById('btnTermRemoteTunnel')?.addEventListener('click', () => this.openRemoteTunnelModal('terminal'));
@@ -49700,12 +49809,15 @@ Aturan:
       const chipsBar = document.getElementById('termQuickChipsBar');
       if (chipsBar) {
         chipsBar.querySelectorAll('.term-chip').forEach(chip => {
-          let lastChipTap = 0;
+          let lastChipTouchAt = 0;
           const handleChipTap = (e) => {
             const now = Date.now();
-            if (now - lastChipTap < 250) return;
-            lastChipTap = now;
-            if (e && e.cancelable) e.preventDefault();
+            if (e && e.type === 'touchend') {
+              lastChipTouchAt = now;
+            } else if (e && e.type === 'click' && (now - lastChipTouchAt) < 650) {
+              return;
+            }
+            if (e && e.cancelable && e.type === 'touchend') e.preventDefault();
             const cmd = chip.getAttribute('data-cmd');
             if (cmd) {
               if (cmd === 'endorfin' || cmd === 'heal') {
@@ -49834,7 +49946,7 @@ Aturan:
             } else {
               this.sendPtyInput(paneState.sessionId, '\x03');
             }
-          } else if (e.key === 'v' || e.key === 'V') {
+          } else if (e.key === 'v' || e.key === 'V' || e.code === 'KeyV') {
             e.preventDefault();
             e.stopPropagation();
             this.pasteToPane(this.activePane || 1);
@@ -50195,7 +50307,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://mechanisms-nationally-promise-medicine.trycloudflare.com',
+    activeTunnelUrl: 'https://buildings-everywhere-border-framed.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
