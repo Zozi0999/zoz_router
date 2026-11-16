@@ -1231,8 +1231,10 @@ export default {
             targetModel.includes('671b') ||
             targetModel.includes('675b')
           ));
-          const numPredictReq = (body.options?.num_predict && Number.isFinite(body.options.num_predict)) ? body.options.num_predict : 2048;
-          const initialMaxTokens = isDenseModel ? Math.min(numPredictReq, 2048) : Math.min(numPredictReq || 16384, 16384);
+          const requestedPredict = (body.options?.num_predict && Number.isFinite(body.options.num_predict))
+            ? body.options.num_predict
+            : ((body.max_tokens && Number.isFinite(body.max_tokens)) ? body.max_tokens : 16384);
+          const initialMaxTokens = isDenseModel ? Math.min(requestedPredict, 8192) : Math.min(requestedPredict, 16384);
 
           const openRouterPayload = {
             model: targetModel,
@@ -1301,7 +1303,7 @@ export default {
               });
             } else if ((orRes.status >= 500 || orRes.status === 429 || orRes.status === 404 || /provider returned error|temporarily unavailable|overloaded|no endpoints/i.test(errMsg)) && openRouterPayload.model !== 'deepseek/deepseek-chat') {
               openRouterPayload.model = 'deepseek/deepseek-chat';
-              openRouterPayload.max_tokens = Math.min(openRouterPayload.max_tokens || 2048, 2048);
+              openRouterPayload.max_tokens = Math.min(openRouterPayload.max_tokens || 8192, 8192);
               orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
                 headers: orHeaders,
@@ -1354,60 +1356,107 @@ export default {
             let buffer = '';
             let accumulatedContent = '';
             let accumulatedReasoning = '';
+            let lastFinishReason = null;
+            let sentDone = false;
+            const processSseLine = async (rawLine) => {
+              const trimmed = rawLine.trim();
+              if (!trimmed.startsWith('data:')) return;
+              const dataStr = trimmed.slice(5).trim();
+              if (dataStr === '[DONE]') {
+                if (!accumulatedContent.trim() && accumulatedReasoning.trim()) {
+                  const fallback = extractFallbackConclusionFromUnclosedThought(accumulatedReasoning);
+                  if (fallback) {
+                    await writer.write(encoder.encode(JSON.stringify({
+                      model: body.model || 'qwen2.5:1.5b',
+                      created_at: new Date().toISOString(),
+                      message: { role: 'assistant', content: fallback },
+                      done: false
+                    }) + '\n'));
+                  }
+                }
+                sentDone = true;
+                await writer.write(encoder.encode(JSON.stringify({
+                  model: body.model || 'qwen2.5:1.5b',
+                  created_at: new Date().toISOString(),
+                  message: { role: 'assistant', content: '' },
+                  done: true,
+                  done_reason: lastFinishReason || 'stop'
+                }) + '\n'));
+                return;
+              }
+              try {
+                const parsed = JSON.parse(dataStr);
+                const ch = parsed.choices?.[0];
+                if (ch?.finish_reason) lastFinishReason = ch.finish_reason;
+                const deltaContent = ch?.delta?.content || '';
+                const deltaReasoning = ch?.delta?.reasoning || ch?.delta?.reasoning_content || '';
+                const deltaToolCalls = ch?.delta?.tool_calls;
+                if (deltaContent) accumulatedContent += deltaContent;
+                if (deltaReasoning) accumulatedReasoning += deltaReasoning;
+                if (deltaContent || deltaReasoning || deltaToolCalls) {
+                  const msgPayload = { role: 'assistant', content: deltaContent };
+                  if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
+                  if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
+                  await writer.write(encoder.encode(JSON.stringify({
+                    model: body.model || 'qwen2.5:1.5b',
+                    created_at: new Date().toISOString(),
+                    message: msgPayload,
+                    done: false
+                  }) + '\n'));
+                }
+              } catch (_) {}
+            };
+
             try {
               while (true) {
                 const { done, value } = await reader.read();
-                if (done) break;
+                if (done) {
+                  buffer += decoder.decode();
+                  break;
+                }
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
                 for (const line of lines) {
-                  const trimmed = line.trim();
-                  if (!trimmed.startsWith('data:')) continue;
-                  const dataStr = trimmed.slice(5).trim();
-                  if (dataStr === '[DONE]') {
-                    if (!accumulatedContent.trim() && accumulatedReasoning.trim()) {
-                      const fallback = extractFallbackConclusionFromUnclosedThought(accumulatedReasoning);
-                      if (fallback) {
-                        await writer.write(encoder.encode(JSON.stringify({
-                          model: body.model || 'qwen2.5:1.5b',
-                          created_at: new Date().toISOString(),
-                          message: { role: 'assistant', content: fallback },
-                          done: false
-                        }) + '\n'));
-                      }
-                    }
+                  await processSseLine(line);
+                }
+              }
+              if (buffer && buffer.trim()) {
+                await processSseLine(buffer);
+              }
+              if (!sentDone) {
+                if (!accumulatedContent.trim() && accumulatedReasoning.trim()) {
+                  const fallback = extractFallbackConclusionFromUnclosedThought(accumulatedReasoning);
+                  if (fallback) {
                     await writer.write(encoder.encode(JSON.stringify({
                       model: body.model || 'qwen2.5:1.5b',
                       created_at: new Date().toISOString(),
-                      message: { role: 'assistant', content: '' },
-                      done: true
+                      message: { role: 'assistant', content: fallback },
+                      done: false
                     }) + '\n'));
-                    continue;
                   }
-                  try {
-                    const parsed = JSON.parse(dataStr);
-                    const deltaContent = parsed.choices?.[0]?.delta?.content || '';
-                    const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
-                    const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
-                    if (deltaContent) accumulatedContent += deltaContent;
-                    if (deltaReasoning) accumulatedReasoning += deltaReasoning;
-                    if (deltaContent || deltaReasoning || deltaToolCalls) {
-                      const msgPayload = { role: 'assistant', content: deltaContent };
-                      if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
-                      if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
-                      await writer.write(encoder.encode(JSON.stringify({
-                        model: body.model || 'qwen2.5:1.5b',
-                        created_at: new Date().toISOString(),
-                        message: msgPayload,
-                        done: false
-                      }) + '\n'));
-                    }
-                  } catch (_) {}
                 }
+                await writer.write(encoder.encode(JSON.stringify({
+                  model: body.model || 'qwen2.5:1.5b',
+                  created_at: new Date().toISOString(),
+                  message: { role: 'assistant', content: '' },
+                  done: true,
+                  done_reason: lastFinishReason || 'incomplete'
+                }) + '\n'));
               }
             } catch (err) {
               console.error('Error in Ollama cloud streaming proxy:', err);
+              if (!sentDone) {
+                try {
+                  await writer.write(encoder.encode(JSON.stringify({
+                    model: body.model || 'qwen2.5:1.5b',
+                    created_at: new Date().toISOString(),
+                    message: { role: 'assistant', content: '' },
+                    done: true,
+                    done_reason: lastFinishReason || 'incomplete'
+                  }) + '\n'));
+                } catch (_) {}
+              }
             } finally {
               await writer.close();
             }
@@ -1756,7 +1805,7 @@ export default {
               reqModel.includes('675b')
             ));
             const calculatedMaxTokens = isDenseModelOr
-              ? Math.min(body.max_tokens || 2048, 2048)
+              ? Math.min(body.max_tokens || 8192, 8192)
               : (body.max_tokens || 16384);
 
             const out = {

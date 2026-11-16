@@ -15,6 +15,7 @@ const crypto = require('crypto');
 const dns = require('dns');
 const net = require('net');
 const os = require('os');
+const { StringDecoder } = require('string_decoder');
 const { spawn, execSync, execFile } = require('child_process');
 const textSafety = require('./text-safety');
 const { createImageGroundingService } = require('./image-grounding');
@@ -8984,11 +8985,12 @@ async function requestHandler(req, res) {
     }
 
     // 1. Cek apakah di memori pesan kontak sudah tercatat URL berkas ini
+    let existingMsg = null;
     if (tenant.gateway) {
       const msgList = (jid && typeof tenant.gateway.getMessages === 'function')
         ? tenant.gateway.getMessages(jid)
         : (jid && tenant.gateway.messages ? (tenant.gateway.messages.get(jid) || []) : []);
-      let existingMsg = msgList.find(m => m.id === msgId);
+      existingMsg = msgList.find(m => m.id === msgId) || null;
       if (!existingMsg && tenant.gateway.messages) {
         for (const list of tenant.gateway.messages.values()) {
           const found = list.find(m => m.id === msgId);
@@ -8996,9 +8998,18 @@ async function requestHandler(req, res) {
         }
       }
       if (existingMsg?.media?.url) {
-        return sendJSON(res, 200, { success: true, url: existingMsg.media.url, ready: true });
+        return sendJSON(res, 200, { success: true, url: existingMsg.media.url, ready: true, media: existingMsg.media });
       }
     }
+
+    const syncResolvedMediaToMessage = (resolvedUrl, mediaObj = null) => {
+      if (existingMsg && resolvedUrl) {
+        existingMsg.media = { ...(existingMsg.media || {}), ...(mediaObj || {}), url: resolvedUrl };
+        if (tenant.gateway && typeof tenant.gateway.savePersistedData === 'function') {
+          tenant.gateway.savePersistedData();
+        }
+      }
+    };
 
     // 2. Coba unduh on-demand jika raw message ada di memory atau wa-raw-media.json
     let rawMsg = tenant.gateway.rawMessages?.get(msgId);
@@ -9014,9 +9025,11 @@ async function requestHandler(req, res) {
 
     if (rawMsg) {
       try {
-        const url = await tenant.gateway.downloadAndSaveMedia(rawMsg, { id: msgId, media: { fileName: cleanFileName } });
+        const targetItem = existingMsg || { id: msgId, media: { fileName: cleanFileName } };
+        const url = await tenant.gateway.downloadAndSaveMedia(rawMsg, targetItem);
         if (url) {
-          return sendJSON(res, 200, { success: true, url, ready: true });
+          syncResolvedMediaToMessage(url, targetItem.media);
+          return sendJSON(res, 200, { success: true, url, ready: true, media: targetItem.media });
         }
       } catch (e) {
         console.warn('Error downloading on-demand WA media:', e.message);
@@ -9033,17 +9046,27 @@ async function requestHandler(req, res) {
           await new Promise(r => setTimeout(r, 250));
           waited += 250;
           if (fs.existsSync(filePath)) {
-            return sendJSON(res, 200, { success: true, url: `/uploads/${savedFilename}`, ready: true });
+            const url = `/uploads/${savedFilename}`;
+            syncResolvedMediaToMessage(url);
+            return sendJSON(res, 200, { success: true, url, ready: true });
           }
           if (fs.existsSync(UPLOADS_DIR)) {
             const diskFiles = fs.readdirSync(UPLOADS_DIR);
-            const matching = diskFiles.find(f => f.startsWith(`wa_${msgId}_`));
-            if (matching) return sendJSON(res, 200, { success: true, url: `/uploads/${matching}`, ready: true });
+            const matching = diskFiles.find(f => f.startsWith(`wa_${safeMsgId}_`));
+            if (matching) {
+              const url = `/uploads/${matching}`;
+              syncResolvedMediaToMessage(url);
+              return sendJSON(res, 200, { success: true, url, ready: true });
+            }
           }
           if (!rawMsg && tenant.gateway.rawMessages?.has(msgId)) {
             rawMsg = tenant.gateway.rawMessages.get(msgId);
-            const url = await tenant.gateway.downloadAndSaveMedia(rawMsg, { id: msgId, media: { fileName: cleanFileName } });
-            if (url) return sendJSON(res, 200, { success: true, url, ready: true });
+            const targetItem = existingMsg || { id: msgId, media: { fileName: cleanFileName } };
+            const url = await tenant.gateway.downloadAndSaveMedia(rawMsg, targetItem);
+            if (url) {
+              syncResolvedMediaToMessage(url, targetItem.media);
+              return sendJSON(res, 200, { success: true, url, ready: true, media: targetItem.media });
+            }
           }
         }
       } catch (resendErr) {
@@ -11085,8 +11108,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           targetCloudModel.includes('671b') ||
           targetCloudModel.includes('675b')
         ));
-        const numPredictReq = (body.options?.num_predict && Number.isFinite(body.options.num_predict)) ? body.options.num_predict : 2048;
-        const initialMaxTokens = isDenseModel ? Math.min(numPredictReq, 2048) : Math.min(numPredictReq || 16384, 16384);
+        const requestedPredict = (body.options?.num_predict && Number.isFinite(body.options.num_predict))
+          ? body.options.num_predict
+          : ((body.max_tokens && Number.isFinite(body.max_tokens)) ? body.max_tokens : 16384);
+        const initialMaxTokens = isDenseModel ? Math.min(requestedPredict, 8192) : Math.min(requestedPredict, 16384);
 
         const orPayload = {
           model: targetCloudModel,
@@ -11134,7 +11159,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             path: '/api/v1/chat/completions',
             method: 'POST',
             headers: hdrs,
-            timeout: 120000
+            agent: openRouterHttpsAgent,
+            timeout: 300000
           };
 
           const bridgeReq = https.request(reqOptions, (bridgeRes) => {
@@ -11172,7 +11198,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   if ((bStatus >= 500 || bStatus === 429 || bStatus === 404 || /provider returned error|temporarily unavailable|overloaded|no endpoints/i.test(msg)) && retryCount === 0 && payload.model !== 'deepseek/deepseek-chat') {
                     console.log(`[Ollama Cloud Bridge Auto-Recovery] Model ${payload.model} upstream HTTP ${bStatus} (${msg}). Fallback ke deepseek/deepseek-chat...`);
                     payload.model = 'deepseek/deepseek-chat';
-                    payload.max_tokens = Math.min(payload.max_tokens || 2048, 2048);
+                    payload.max_tokens = Math.min(payload.max_tokens || 8192, 8192);
                     return executeBridgeRequest(payload, retryCount + 1);
                   }
                   if (isStream) {
@@ -11245,86 +11271,73 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             let sseBuffer = '';
             let accumulatedContent = '';
             let accumulatedReasoning = '';
-            bridgeRes.on('data', chunk => {
-              sseBuffer += chunk.toString();
-              const lines = sseBuffer.split('\n');
-              sseBuffer = lines.pop() || '';
-              for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed.startsWith('data:')) continue;
-                const dataStr = trimmed.slice(5).trim();
-                if (dataStr === '[DONE]') {
-                  if (!accumulatedContent.trim() && accumulatedReasoning.trim()) {
-                    const fallback = (typeof textSafety.extractFallbackConclusionFromUnclosedThought === 'function')
-                      ? textSafety.extractFallbackConclusionFromUnclosedThought(accumulatedReasoning)
-                      : accumulatedReasoning.slice(-800).trim();
-                    if (fallback) {
-                      res.write(JSON.stringify({
-                        model: body.model || 'qwen2.5:1.5b',
-                        created_at: new Date().toISOString(),
-                        message: { role: 'assistant', content: fallback },
-                        done: false
-                      }) + '\n');
-                    }
-                  }
-                  res.write(JSON.stringify({
-                    model: body.model || 'qwen2.5:1.5b',
-                    created_at: new Date().toISOString(),
-                    message: { role: 'assistant', content: '' },
-                    done: true
-                  }) + '\n');
-                  continue;
-                }
-                try {
-                  const parsed = JSON.parse(dataStr);
-                  const delta = parsed.choices?.[0]?.delta?.content || '';
-                  const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
-                  const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
-                  if (delta) accumulatedContent += delta;
-                  if (deltaReasoning) accumulatedReasoning += deltaReasoning;
-                  if (delta || deltaToolCalls || deltaReasoning) {
-                    const msgPayload = { role: 'assistant', content: delta };
-                    if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
-                    if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
+            let lastFinishReason = null;
+            let sentDone = false;
+            const bridgeDecoder = new StringDecoder('utf8');
+            const processBridgeLine = (rawLine) => {
+              const trimmed = rawLine.trim();
+              if (!trimmed.startsWith('data:')) return;
+              const dataStr = trimmed.slice(5).trim();
+              if (dataStr === '[DONE]') {
+                if (!accumulatedContent.trim() && accumulatedReasoning.trim()) {
+                  const fallback = (typeof textSafety.extractFallbackConclusionFromUnclosedThought === 'function')
+                    ? textSafety.extractFallbackConclusionFromUnclosedThought(accumulatedReasoning)
+                    : accumulatedReasoning.slice(-800).trim();
+                  if (fallback) {
                     res.write(JSON.stringify({
                       model: body.model || 'qwen2.5:1.5b',
                       created_at: new Date().toISOString(),
-                      message: msgPayload,
+                      message: { role: 'assistant', content: fallback },
                       done: false
                     }) + '\n');
                   }
-                } catch (_) {}
+                }
+                sentDone = true;
+                res.write(JSON.stringify({
+                  model: body.model || 'qwen2.5:1.5b',
+                  created_at: new Date().toISOString(),
+                  message: { role: 'assistant', content: '' },
+                  done: true,
+                  done_reason: lastFinishReason || 'stop'
+                }) + '\n');
+                return;
+              }
+              try {
+                const parsed = JSON.parse(dataStr);
+                const ch = parsed.choices?.[0];
+                if (ch?.finish_reason) lastFinishReason = ch.finish_reason;
+                const delta = ch?.delta?.content || '';
+                const deltaToolCalls = ch?.delta?.tool_calls;
+                const deltaReasoning = ch?.delta?.reasoning || ch?.delta?.reasoning_content || '';
+                if (delta) accumulatedContent += delta;
+                if (deltaReasoning) accumulatedReasoning += deltaReasoning;
+                if (delta || deltaToolCalls || deltaReasoning) {
+                  const msgPayload = { role: 'assistant', content: delta };
+                  if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
+                  if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
+                  res.write(JSON.stringify({
+                    model: body.model || 'qwen2.5:1.5b',
+                    created_at: new Date().toISOString(),
+                    message: msgPayload,
+                    done: false
+                  }) + '\n');
+                }
+              } catch (_) {}
+            };
 
+            bridgeRes.on('data', chunk => {
+              sseBuffer += bridgeDecoder.write(chunk);
+              const lines = sseBuffer.split('\n');
+              sseBuffer = lines.pop() || '';
+              for (const line of lines) {
+                processBridgeLine(line);
               }
             });
 
             bridgeRes.on('end', () => {
+              sseBuffer += bridgeDecoder.end();
               if (sseBuffer && sseBuffer.trim()) {
-                const trimmed = sseBuffer.trim();
-                if (trimmed.startsWith('data:')) {
-                  const dataStr = trimmed.slice(5).trim();
-                  if (dataStr !== '[DONE]') {
-                    try {
-                      const parsed = JSON.parse(dataStr);
-                      const delta = parsed.choices?.[0]?.delta?.content || '';
-                      const deltaToolCalls = parsed.choices?.[0]?.delta?.tool_calls;
-                      const deltaReasoning = parsed.choices?.[0]?.delta?.reasoning || parsed.choices?.[0]?.delta?.reasoning_content || '';
-                      if (delta) accumulatedContent += delta;
-                      if (deltaReasoning) accumulatedReasoning += deltaReasoning;
-                      if (delta || deltaToolCalls || deltaReasoning) {
-                        const msgPayload = { role: 'assistant', content: delta };
-                        if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
-                        if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
-                        res.write(JSON.stringify({
-                          model: body.model || 'qwen2.5:1.5b',
-                          created_at: new Date().toISOString(),
-                          message: msgPayload,
-                          done: false
-                        }) + '\n');
-                      }
-                    } catch (_) {}
-                  }
-                }
+                processBridgeLine(sseBuffer);
               }
               if (!accumulatedContent.trim() && accumulatedReasoning.trim()) {
                 const fallback = (typeof textSafety.extractFallbackConclusionFromUnclosedThought === 'function')
@@ -11340,12 +11353,15 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 }
               }
               if (!res.writableEnded) {
-                res.write(JSON.stringify({
-                  model: body.model || 'qwen2.5:1.5b',
-                  created_at: new Date().toISOString(),
-                  message: { role: 'assistant', content: '' },
-                  done: true
-                }) + '\n');
+                if (!sentDone) {
+                  res.write(JSON.stringify({
+                    model: body.model || 'qwen2.5:1.5b',
+                    created_at: new Date().toISOString(),
+                    message: { role: 'assistant', content: '' },
+                    done: true,
+                    done_reason: lastFinishReason || 'incomplete'
+                  }) + '\n');
+                }
                 res.end();
               }
             });
@@ -11499,8 +11515,17 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       let proxyReq = null;
       let hasSplicedRefusal = false;
       let horocycleHalted = false;
+      let ollamaKeepAliveTimer = null;
+
+      const clearOllamaKeepAlive = () => {
+        if (ollamaKeepAliveTimer) {
+          clearInterval(ollamaKeepAliveTimer);
+          ollamaKeepAliveTimer = null;
+        }
+      };
 
       res.on('close', () => {
+        clearOllamaKeepAlive();
         if (res.writableEnded) return; // penyelesaian normal, bukan disconnect klien
         clientDisconnected = true;
         // JANGAN hancurkan proxyReq jika sessionId ada! Biarkan server menyelesaikan generasi LLM di latar belakang
@@ -11537,7 +11562,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         proxyReq = client.request(ollamaUrl.toString(), {
           method: 'POST',
           headers: proxyHeaders,
-          timeout: 120000
+          timeout: 300000
         }, (proxyRes) => {
           if (sessionId && dbActiveChatTasks[sessionId]) {
             dbActiveChatTasks[sessionId].proxyReq = proxyReq;
@@ -11644,7 +11669,25 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             }
           }
 
+          if (isStream) {
+            clearOllamaKeepAlive();
+            ollamaKeepAliveTimer = setInterval(() => {
+              if (clientDisconnected || res.writableEnded || res.destroyed) {
+                clearOllamaKeepAlive();
+                return;
+              }
+              try {
+                res.write('\n');
+              } catch (_) {
+                clearOllamaKeepAlive();
+              }
+            }, 12000);
+          }
+
           proxyRes.on('data', chunk => {
+            if (proxyReq && !proxyReq.destroyed) {
+              try { proxyReq.setTimeout(300000); } catch (_) {}
+            }
             if (hasSplicedRefusal || horocycleHalted) return;
             const safeChunk = reasoningFilter.push(chunk);
             const gateDiag = reasoningFilter.getGateDiagnostics ? reasoningFilter.getGateDiagnostics() : null;
@@ -11676,7 +11719,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               const splicedData = JSON.stringify(splicedBody);
               const splicedHeaders = { ...proxyHeaders, 'Content-Length': Buffer.byteLength(splicedData) };
               const splicedFilter = textSafety.createProviderStreamFilter('ollama', 'stream', { userPrompt, bypassPreambleStrip: true });
-              const splicedReq = client.request(ollamaUrl.toString(), { method: 'POST', headers: splicedHeaders, timeout: 120000 }, (splicedRes) => {
+              const splicedReq = client.request(ollamaUrl.toString(), { method: 'POST', headers: splicedHeaders, timeout: 300000 }, (splicedRes) => {
                 splicedRes.on('data', sChunk => {
                   const sSafe = splicedFilter.push(sChunk);
                   if (sessionId && sSafe) accumulateChatChunk(sessionId, sSafe, 'ollama');
@@ -11685,6 +11728,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   }
                 });
                 splicedRes.on('end', () => {
+                  clearOllamaKeepAlive();
                   const sTail = splicedFilter.end();
                   if (sessionId && sTail) accumulateChatChunk(sessionId, sTail, 'ollama');
                   if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
@@ -11692,12 +11736,14 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   }
                 });
                 splicedRes.on('error', () => {
+                  clearOllamaKeepAlive();
                   if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
                     try { res.end(); } catch (_) {}
                   }
                 });
               });
               splicedReq.on('error', () => {
+                clearOllamaKeepAlive();
                 if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
                   try { res.end(); } catch (_) {}
                 }
@@ -11707,23 +11753,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               return;
             }
 
-            // 2. Horocycle Singularity Breaker (Poincaré Disk K = -1): Hentikan perulangan token tak hingga
+            // Diagnostic log only: Never kill or truncate active user chat stream based on heuristic manifold
             if (isStream && gateDiag && gateDiag.horocycleTrapped && !horocycleHalted) {
               horocycleHalted = true;
-              try { proxyReq.destroy(); } catch (_) {}
-              if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
-                try {
-                  if (safeChunk) res.write(safeChunk);
-                  res.write(JSON.stringify({
-                    model: body.model || 'deepseek-v4.1-flash:cloud',
-                    created_at: new Date().toISOString(),
-                    message: { role: 'assistant', content: '' },
-                    done: true
-                  }) + '\n');
-                  res.end();
-                } catch (_) {}
-              }
-              return;
+              console.warn(`[Ollama Stream Diagnostics] Potential repetition orbit detected for session ${sessionId || 'anon'}. Allowing stream to continue.`);
             }
 
             // Persist hanya event jawaban bersih; reasoning provider tidak disimpan.
@@ -11747,7 +11780,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           });
 
           proxyRes.on('end', () => {
-            if (hasSplicedRefusal || horocycleHalted) return;
+            clearOllamaKeepAlive();
+            if (hasSplicedRefusal) return;
             const safeTail = reasoningFilter.end();
             if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'ollama');
             if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
@@ -11778,7 +11812,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           });
 
           proxyRes.on('error', (err) => {
-            if (hasSplicedRefusal || horocycleHalted) return;
+            clearOllamaKeepAlive();
+            if (hasSplicedRefusal) return;
             if (sessionId && dbActiveChatTasks[sessionId]) {
               markChatTaskInterrupted(sessionId, err.message || 'Ollama stream interrupted');
             }
@@ -11798,7 +11833,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
 
         proxyReq.on('timeout', async () => {
-          if (hasSplicedRefusal || horocycleHalted) return;
+          clearOllamaKeepAlive();
+          if (hasSplicedRefusal) return;
           if (!proxyReq.destroyed) proxyReq.destroy();
           if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
             const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
@@ -11821,7 +11857,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         });
 
         proxyReq.on('error', async (err) => {
-          if (hasSplicedRefusal || horocycleHalted) return;
+          clearOllamaKeepAlive();
+          if (hasSplicedRefusal) return;
           if (canRetryCloud && targetEndpoint.includes('ollama.com') && !res.headersSent && (!clientDisconnected || sessionId)) {
             console.warn(`[Ollama Cloud Retry] Network error on ${targetEndpoint}: ${err.message}. Retrying once with fresh connection...`);
             return dispatchOllamaUpstream(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback, false);
@@ -12357,7 +12394,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         body.model.includes('675b')
       ));
       if (isDenseModelOr) {
-        body.max_tokens = Math.min(body.max_tokens || 2048, 2048);
+        body.max_tokens = Math.min(body.max_tokens || 8192, 8192);
         if (body.model.includes('beam') || body.model.includes('reflection')) {
           body.reasoning = body.reasoning || { effort: 'medium' };
         }

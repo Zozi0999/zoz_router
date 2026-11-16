@@ -14512,7 +14512,16 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
   function isOutputTruncated(text, finishReason = null) {
     const normFinish = String(finishReason || '').trim().toLowerCase();
-    if (normFinish === 'length' || normFinish === 'max_tokens' || normFinish === 'incomplete' || normFinish === 'interrupted') return true;
+    if (
+      normFinish === 'length' ||
+      normFinish === 'max_tokens' ||
+      normFinish === 'incomplete' ||
+      normFinish === 'interrupted' ||
+      normFinish === 'timeout' ||
+      normFinish === 'error'
+    ) {
+      return true;
+    }
     if (!text) return false;
     const parsed = splitReasoningAndContent(text);
     if (parsed.reasoning && !parsed.content) return true;
@@ -14530,12 +14539,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // 2b. Check for unclosed display math ($$) dan \[ ... \] di luar blok kode berpagar tertutup
     const trimmedOutsideClosedCode = trimmed.replace(/```[\s\S]*?```/g, '');
     const displayMathCount = (trimmedOutsideClosedCode.match(/\$\$/g) || []).length;
-    if (displayMathCount % 2 !== 0 && normFinish !== 'stop' && normFinish !== 'end_turn') return true;
+    if (displayMathCount % 2 !== 0) return true;
 
     // 2c. Check for unclosed LaTeX brackets \[ ... \]
     const openBracketMath = (trimmedOutsideClosedCode.match(/\\\[/g) || []).length;
     const closeBracketMath = (trimmedOutsideClosedCode.match(/\\\]/g) || []).length;
-    if (openBracketMath > closeBracketMath && normFinish !== 'stop' && normFinish !== 'end_turn') return true;
+    if (openBracketMath > closeBracketMath) return true;
 
     // 3. Check for HTML document completion
     const hasClosedHtml = isWebsiteComplete(trimmed);
@@ -14560,15 +14569,22 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     const styleEnds = (trimmed.match(/<\/style>/gi) || []).length;
     if (styleStarts > styleEnds) return true;
 
+    // Bare list marker at end of text (even on short outputs) is always incomplete
+    if (/(?:^|\n)[ \t]*(?:\d+[.)]|[-*•])[ \t]*$/.test(trimmed)) return true;
+
     if (trimmed.length < 50) return false;
 
-    // 6. Check for trailing unfinished punctuation (kecuali garis horizontal --- / === / ***)
-    const unfinishedPunctuation = [':', ',', ';', '(', '[', '{', '\\'];
+    // 6. Check for trailing unfinished punctuation or dangling mathematical operators
+    const unfinishedPunctuation = [':', ',', ';', '(', '[', '{', '\\', '=', '+', '×', '÷', '→', '⇒', '≤', '≥'];
     if (unfinishedPunctuation.some(p => trimmed.endsWith(p))) return true;
     if ((trimmed.endsWith('-') || trimmed.endsWith('—')) && !/[-=*]{3,}$/.test(trimmed)) return true;
 
     // 7. Check for mid-sentence trailing conjunction/preposition words
-    const unfinishedWords = ['dan', 'atau', 'dengan', 'yang', 'untuk', 'pada', 'adalah', 'karena', 'namun', 'tetapi', 'serta', 'dari', 'and', 'or', 'with', 'the', 'for'];
+    const unfinishedWords = [
+      'dan', 'atau', 'dengan', 'yang', 'untuk', 'pada', 'adalah', 'karena', 'namun', 'tetapi', 'serta', 'dari',
+      'sebagai', 'yaitu', 'seperti', 'melalui', 'terdapat', 'berikut', 'antara', 'oleh', 'ke', 'di',
+      'and', 'or', 'with', 'the', 'for', 'of', 'in', 'to', 'is', 'are', 'that', 'including'
+    ];
     if (unfinishedWords.some(w => new RegExp(`\\b${w}$`, 'i').test(trimmed))) return true;
 
     // 8. Jika model secara eksplisit mengirim sinyal EOS ('stop', 'end_turn', 'eos', 'complete'),
@@ -14714,15 +14730,24 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           ? effectiveBase.slice(-50000)
           : effectiveBase;
 
-        // 3. Zero-Persona Mathematical Continuation Signal
-        const continuePrompt = `Continue`;
+        // 3. Signal kelanjutan yang membawa penanda ekor eksak bila provider tidak mendukung assistant-prefill
+        const buildAnchoredContinuationPrompt = (tailText) => {
+          const anchor = String(tailText || '').slice(-220);
+          return `Respons Anda sebelumnya terpotong di tengah jalan. LANJUTKAN tepat dari akhir bagian ini sampai tuntas, TANPA mengulang bagian awal dan TANPA kata pengantar:\n\`\`\`\n${anchor}\n\`\`\``;
+        };
+        const continuePrompt = buildAnchoredContinuationPrompt(fullContext);
         const roundMeta = { finishReason: null };
+        const roundHeartbeat = createHeartbeatStreamController(120000, 180000, null, STATE.abortController?.signal);
 
         let appended = '';
-        if (engine === 'ollama') {
-          appended = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, fullContext, { ...contRunOptions, roundMeta, signal: STATE.abortController?.signal });
-        } else {
-          appended = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, fullContext, { ...contRunOptions, roundMeta, signal: STATE.abortController?.signal });
+        try {
+          if (engine === 'ollama') {
+            appended = await streamContinuationOllama(session, modelName, continuePrompt, bubbleText, fullContext, { ...contRunOptions, roundMeta, heartbeat: roundHeartbeat, signal: roundHeartbeat.signal });
+          } else {
+            appended = await streamContinuationOpenRouter(session, modelName, continuePrompt, bubbleText, fullContext, { ...contRunOptions, roundMeta, heartbeat: roundHeartbeat, signal: roundHeartbeat.signal });
+          }
+        } finally {
+          roundHeartbeat.dispose();
         }
         lastContFinishReason = roundMeta.finishReason || null;
 
@@ -14767,8 +14792,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             if (isActuallyComplete) break;
           }
         } else if (!isWebContinue && !reExtracted.hasIncompleteFile) {
-          // Untuk percakapan biasa / markdown / kode non-website: hentikan loop segera setelah jawaban tuntas secara matematis!
-          if (!isOutputTruncated(currentAccumulated, lastContFinishReason || 'stop')) {
+          // Untuk percakapan biasa / markdown / kode non-website: hentikan loop HANYA jika benar-benar tuntas (jangan memaksa 'stop' jika finishReason masih null!)
+          if (!isOutputTruncated(currentAccumulated, lastContFinishReason)) {
             isActuallyComplete = true;
             break;
           }
@@ -15115,6 +15140,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         model: curModel,
         messages: messagesPayload,
         stream: true,
+        max_tokens: 16384,
         include_reasoning: false,
         provider: { allow_fallbacks: isAutoRouterActive }
       };
@@ -15163,9 +15189,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           if (routeType === 'proxy' && attemptRes.status === 404) {
             continue;
           }
-          // Jika provider menolak payload berakhiran assistant (HTTP 400), tambahkan token kelanjutan murni
+          // Jika provider menolak payload berakhiran assistant (HTTP 400), tambahkan prompt kelanjutan berjangkar
           if (attemptRes.status === 400 && body.messages.length > 0 && body.messages[body.messages.length - 1].role === 'assistant') {
-            const fallbackMessages = [...body.messages, { role: 'user', content: 'Continue' }];
+            const fallbackMessages = [...body.messages, { role: 'user', content: promptInstruction || 'Continue seamlessly from the exact end without repeating earlier text.' }];
             const fallbackBody = { ...body, messages: fallbackMessages };
             const retryRes = await fetch(endpoint, {
               method: 'POST',
@@ -15318,7 +15344,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     let appended = await consumeOpenRouterContinuationStream(res);
 
     // Dual-Mode Zero-Token Fallback: Jika template Jinja provider menutup turn assistant (<|eot_id|>) sehingga HTTP 200 mengembalikan 0 token,
-    // jalankan mode transisi kedua secara langsung tanpa membuang putaran!
+    // jalankan mode transisi kedua dengan instruksi jangkar secara langsung tanpa membuang putaran!
     if ((!appended || !appended.trim()) && !activeSignal?.aborted && res._usedBody && Array.isArray(res._usedBody.messages)) {
       const lastMsg = res._usedBody.messages[res._usedBody.messages.length - 1];
       if (lastMsg && lastMsg.role === 'assistant') {
@@ -15326,7 +15352,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           const fallbackBody = {
             ...res._usedBody,
             ...(res._usedBody.sessionId ? { sessionId: `${res._usedBody.sessionId}_fb` } : {}),
-            messages: [...res._usedBody.messages, { role: 'user', content: 'Continue' }]
+            messages: [...res._usedBody.messages, { role: 'user', content: promptInstruction || 'Continue seamlessly from the exact end without repeating earlier text.' }]
           };
           const fbRes = await fetch(res._usedEndpoint, {
             method: 'POST',
@@ -15416,34 +15442,30 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       ? '/api/ollama/chat'
       : getUniversalApiUrl('/api/ollama/chat');
     const isolatedOllamaSessionId = session?.id ? `${session.id}_cont_${Date.now()}` : undefined;
-    const res = await fetch(chatUrl, {
+    const baseOllamaBody = {
+      model: effectiveModel,
+      messages: messagesPayload,
+      stream: true,
+      ...(isolatedOllamaSessionId ? { sessionId: isolatedOllamaSessionId } : {}),
+      options: {
+        num_ctx: 16384,
+        num_predict: 16384,
+        ...(STATE.settings.useCustomParameters && STATE.settings.temperature !== null ? { temperature: parseFloat(STATE.settings.temperature) } : {})
+      },
+      endpoint: ep,
+      ...(cleanKey ? { apiKey: cleanKey, ollamaApiKey: cleanKey } : {}),
+      ...(STATE.settings.openRouterKey ? { openRouterKey: STATE.settings.openRouterKey } : {})
+    };
+    let res = await fetch(chatUrl, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model: effectiveModel,
-        messages: messagesPayload,
-        stream: true,
-        ...(isolatedOllamaSessionId ? { sessionId: isolatedOllamaSessionId } : {}),
-        options: {
-          num_ctx: 16384,
-          num_predict: 4096,
-          ...(STATE.settings.useCustomParameters && STATE.settings.temperature !== null ? { temperature: parseFloat(STATE.settings.temperature) } : {})
-        },
-        endpoint: ep,
-        ...(cleanKey ? { apiKey: cleanKey, ollamaApiKey: cleanKey } : {}),
-        ...(STATE.settings.openRouterKey ? { openRouterKey: STATE.settings.openRouterKey } : {})
-      }),
+      body: JSON.stringify(baseOllamaBody),
       signal: options.signal || STATE.abortController?.signal
     });
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    let appended = '';
-
-    // Renderer coalesced: alirkan langsung ke gelembung pesan dengan skipEntropyGate agar spasi BPE terjaga
+    const activeSignal = options.signal || STATE.abortController?.signal;
     const renderer = new StreamBufferRenderer(
       bubbleText,
       () => smartScrollChatToBottom(false),
@@ -15452,71 +15474,102 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     );
     renderer.text = currentFullText;
 
-    const activeSignal = options.signal || STATE.abortController?.signal;
-    const abortHandler = () => {
-      try { reader.cancel(); } catch (_) {}
-    };
-    if (activeSignal) {
-      if (activeSignal.aborted) {
+    const consumeOllamaContinuationStream = async (streamRes) => {
+      const reader = streamRes.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let chunkAppended = '';
+
+      const abortHandler = () => {
         try { reader.cancel(); } catch (_) {}
-      } else {
-        activeSignal.addEventListener('abort', abortHandler, { once: true });
+      };
+      if (activeSignal) {
+        if (activeSignal.aborted) {
+          try { reader.cancel(); } catch (_) {}
+        } else {
+          activeSignal.addEventListener('abort', abortHandler, { once: true });
+        }
       }
-    }
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (options.heartbeat && typeof options.heartbeat.kick === 'function') {
-          options.heartbeat.kick();
-        }
-        if (done) {
-          buf += decoder.decode();
-          break;
-        }
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (options.heartbeat && typeof options.heartbeat.kick === 'function') {
+            options.heartbeat.kick();
+          }
+          if (done) {
+            buf += decoder.decode();
+            break;
+          }
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop();
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const parsed = JSON.parse(line);
+              if (parsed.done_reason && options.roundMeta) {
+                options.roundMeta.finishReason = parsed.done_reason;
+              }
+              const chunk = parsed.message?.content || parsed.response || '';
+              if (chunk) {
+                chunkAppended += chunk;
+                renderer.text = stitchContinuationChunk(currentFullText, chunkAppended, { isLivePreview: true });
+                renderer.scheduleRender();
+              }
+            } catch (e) {}
+          }
+        }
+
+        if (buf && buf.trim()) {
           try {
-            const parsed = JSON.parse(line);
+            const parsed = JSON.parse(buf.trim());
             if (parsed.done_reason && options.roundMeta) {
               options.roundMeta.finishReason = parsed.done_reason;
             }
             const chunk = parsed.message?.content || parsed.response || '';
             if (chunk) {
-              appended += chunk;
-              renderer.text = stitchContinuationChunk(currentFullText, appended, { isLivePreview: true });
+              chunkAppended += chunk;
+              renderer.text = stitchContinuationChunk(currentFullText, chunkAppended, { isLivePreview: true });
               renderer.scheduleRender();
             }
           } catch (e) {}
         }
+      } catch (readErr) {
+        console.warn('[streamContinuationOllama] Stream continuation terputus / dibatalkan:', readErr?.message);
+      } finally {
+        if (activeSignal) {
+          try { activeSignal.removeEventListener('abort', abortHandler); } catch (_) {}
+        }
+        try { reader.cancel(); } catch (_) {}
       }
+      return chunkAppended;
+    };
 
-      if (buf && buf.trim()) {
-        try {
-          const parsed = JSON.parse(buf.trim());
-          if (parsed.done_reason && options.roundMeta) {
-            options.roundMeta.finishReason = parsed.done_reason;
-          }
-          const chunk = parsed.message?.content || parsed.response || '';
-          if (chunk) {
-            appended += chunk;
-            renderer.text = stitchContinuationChunk(currentFullText, appended, { isLivePreview: true });
-            renderer.scheduleRender();
-          }
-        } catch (e) {}
-      }
-    } catch (readErr) {
-      console.warn('[streamContinuationOllama] Stream continuation terputus / dibatalkan:', readErr?.message);
-    } finally {
-      if (activeSignal) {
-        try { activeSignal.removeEventListener('abort', abortHandler); } catch (_) {}
-      }
-      try { reader.cancel(); } catch (_) {}
+    let appended = await consumeOllamaContinuationStream(res);
+
+    // Dual-Mode Zero-Token Fallback untuk Ollama: Jika template chat model menutup turn assistant dan mengembalikan 0 token,
+    // kirimkan instruksi jangkar role 'user' secara otomatis pada percobaan yang sama.
+    if ((!appended || !appended.trim()) && !activeSignal?.aborted && messagesPayload.length > 0 && messagesPayload[messagesPayload.length - 1].role === 'assistant') {
+      try {
+        const fbBody = {
+          ...baseOllamaBody,
+          ...(isolatedOllamaSessionId ? { sessionId: `${isolatedOllamaSessionId}_fb` } : {}),
+          messages: [...messagesPayload, { role: 'user', content: promptInstruction || 'Continue seamlessly from the exact end without repeating earlier text.' }]
+        };
+        const fbRes = await fetch(chatUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(fbBody),
+          signal: activeSignal
+        });
+        if (fbRes && fbRes.ok) {
+          appended = await consumeOllamaContinuationStream(fbRes);
+        }
+      } catch (_) {}
     }
+
     renderer.finish({ render: false });
     return appended;
   }
@@ -19165,52 +19218,40 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     });
   }
 
+  async function attachSingleDocFile(file) {
+    if (!file || typeof file.size !== 'number' || file.size <= 0) return false;
+    const sizeStr = (file.size < 1024)
+      ? `${file.size} B`
+      : (file.size < 1024 * 1024)
+        ? `${(file.size / 1024).toFixed(1)} KB`
+        : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+
+    const content = await extractFileContent(file);
+    const dataUrl = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = ev => resolve(ev.target.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+
+    if (!Array.isArray(STATE.attachedDocs)) STATE.attachedDocs = [];
+    STATE.attachedDocs.push({
+      name: file.name || `lampiran_${Date.now()}.bin`,
+      size: sizeStr,
+      content: content,
+      dataUrl: dataUrl,
+      mimeType: file.type || 'application/octet-stream',
+      rawFile: file
+    });
+    return true;
+  }
+
   async function handleDocUpload(e) {
     const files = Array.from(e.target.files || []);
     if (!files || files.length === 0) return;
 
-    let addedDocsCount = 0;
-    let addedImagesCount = 0;
-
-    for (const file of files) {
-      if (!file || typeof file.size !== 'number' || file.size <= 0) continue;
-      // 1. Cek cerdas: Jika user memilih foto/gambar melalui menu Dokumen
-      if (isImageFile(file)) {
-        const ok = await processSingleImageFile(file);
-        if (ok) addedImagesCount++;
-        continue;
-      }
-
-      const sizeStr = (file.size < 1024) 
-        ? `${file.size} B` 
-        : (file.size < 1024 * 1024) 
-          ? `${(file.size / 1024).toFixed(1)} KB` 
-          : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
-
-      const content = await extractFileContent(file);
-      const dataUrl = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = ev => resolve(ev.target.result);
-        reader.onerror = () => resolve(null);
-        reader.readAsDataURL(file);
-      });
-
-      STATE.attachedDocs.push({
-        name: file.name,
-        size: sizeStr,
-        content: content,
-        dataUrl: dataUrl,
-        mimeType: file.type || 'application/octet-stream',
-        rawFile: file
-      });
-      addedDocsCount++;
-    }
-
+    await handleIncomingFiles(files, 'picker-doc');
     if (els.docFileInput) els.docFileInput.value = '';
-    renderAttachmentPreviews();
-    if (addedDocsCount > 0 || addedImagesCount > 0) {
-      AudioEngine.click();
-    }
   }
 
   function removeAttachedDoc(idx) {
@@ -33726,14 +33767,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         modelName.includes('675b')
       ));
       if (isDenseModelOllama) {
-        requestBody.options.num_predict = Math.min(requestBody.options.num_predict || 2048, 2048);
+        requestBody.options.num_predict = Math.min(requestBody.options.num_predict || 8192, 8192);
       }
       if (!requestBody.options.num_ctx) requestBody.options.num_ctx = 16384;
       if (wantsFile || isWebRequest) {
-        if (!requestBody.options.num_predict) requestBody.options.num_predict = 8192;
+        if (!requestBody.options.num_predict) requestBody.options.num_predict = 16384;
       }
       if (!requestBody.options.num_predict) {
-        requestBody.options.num_predict = (isPureMathSession || isQuestionOrAnalytical || wantsFile || isWebRequest) ? 8192 : 4096;
+        requestBody.options.num_predict = (isPureMathSession || isQuestionOrAnalytical || wantsFile || isWebRequest) ? 16384 : 8192;
       }
       if ((decisionCalibration.isDiscreteChoice || decisionCalibration.isAnalyticalQuery) && !wantsFile && !isDocRequest) {
         requestBody.think = true;
@@ -33890,6 +33931,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const decoder = new TextDecoder();
       let buffer = '';
       let doneReason = null;
+      let receivedOllamaDone = false;
       const accumulatedToolCalls = [];
       streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, { ...runOptions, userPrompt: promptText, getSources: () => webSources });
 
@@ -33898,11 +33940,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const resetDeadAirWatchdog = () => {
         if (deadAirTimer) clearTimeout(deadAirTimer);
         deadAirTimer = setTimeout(() => {
-          console.warn(`[Ollama Dead-Air] Model ${modelName} tidak mengirim token selama 60 detik (stalled). Menghentikan stream reader.`);
+          console.warn(`[Ollama Dead-Air] Model ${modelName} tidak mengirim token selama 120 detik (stalled). Menghentikan stream reader.`);
           try {
             STATE.abortController?.abort('DEAD_AIR_TIMEOUT');
           } catch (_) {}
-        }, 60000);
+        }, 120000);
       };
 
       function mergeToolCallsInto(targetArr, toolCallsArray) {
@@ -33967,7 +34009,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               throw new Error(errStr);
             }
             if (parsed.done_reason) doneReason = parsed.done_reason;
-            if (parsed.done && !doneReason) doneReason = 'stop';
+            if (parsed.done) {
+              receivedOllamaDone = true;
+              if (!doneReason) doneReason = 'stop';
+            }
             if (parsed.done && (parsed.eval_count !== undefined || parsed.prompt_eval_count !== undefined)) {
               ollamaUsage = {
                 completion_tokens: parsed.eval_count,
@@ -34919,13 +34964,16 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         }
       }
 
+      // Jika stream berakhir sebelum sinyal done:true dan tidak menghasilkan tool call, tandai sebagai incomplete agar disambung otomatis
+      const isOllamaStreamIncomplete = Boolean(!receivedOllamaDone && tokenCount > 0 && accumulatedToolCalls.length === 0 && autonomousRound === 0);
+
       // SEAMLESS AUTO-CONTINUATION: Jika output terpotong, sambung otomatis dan perbarui alasan berhenti terkini
       const ollamaContRes = await resolvePostStreamContinuation(assistantRow, {
         session,
         modelName,
         engine: 'ollama',
         initialText: rawFullTextBeforeStripping,
-        finishReason: doneReason,
+        finishReason: isOllamaStreamIncomplete ? 'incomplete' : doneReason,
         isFileIncomplete: isFileStillIncomplete,
         groundedImageDisplays,
         isWebTask,
@@ -35667,8 +35715,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           currentModel.includes('671b') ||
           currentModel.includes('675b')
         ));
-        const numPredictReqOr = (runOptions.maxTokens && Number.isFinite(runOptions.maxTokens)) ? runOptions.maxTokens : 2048;
-        const initialMaxTokensOr = isDenseModelOpenRouter ? Math.min(numPredictReqOr, 2048) : Math.min(numPredictReqOr || 16384, 16384);
+        const numPredictReqOr = (runOptions.maxTokens && Number.isFinite(runOptions.maxTokens)) ? runOptions.maxTokens : 16384;
+        const initialMaxTokensOr = isDenseModelOpenRouter ? Math.min(numPredictReqOr, 8192) : Math.min(numPredictReqOr, 16384);
 
         const basePayload = {
           model: currentModel,
@@ -35774,10 +35822,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
           let ttftTimer = setTimeout(() => {
             if (tokenCount === 0) {
-              console.warn(`[OpenRouter TTFT Watchdog] Model ${currentModel} (${routeType}) tidak merespons dalam 18 detik (stalled). Membatalkan...`);
+              console.warn(`[OpenRouter TTFT Watchdog] Model ${currentModel} (${routeType}) tidak merespons dalam 45 detik (stalled). Membatalkan...`);
               try { attemptController.abort('TTFT_TIMEOUT'); } catch (_) {}
             }
-          }, 18000);
+          }, 45000);
 
           try {
             // Pastikan HUD bubbleText bersih dari residu sebelum fetch dimulai
@@ -35795,17 +35843,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             // Resiliensi HTTP 400, 402, 404 & 422: Tangani penolakan credits, tools, top_p, modalities, dsb.
             if (attemptRes.status === 402 || attemptRes.status === 400 || attemptRes.status === 422 || (attemptRes.status === 404 && (targetBody.modalities || targetBody.tools))) {
               let shouldRetry = false;
+              let errText = '';
+              try {
+                const errJson = await attemptRes.clone().json();
+                errText = errJson?.error?.message || errJson?.error || JSON.stringify(errJson);
+              } catch (_) {
+                errText = await attemptRes.clone().text().catch(() => '');
+              }
               if (attemptRes.status === 402) {
-                let errText = '';
-                try {
-                  const errJson = await attemptRes.clone().json();
-                  errText = errJson?.error?.message || errJson?.error || JSON.stringify(errJson);
-                } catch (_) {
-                  errText = await attemptRes.clone().text().catch(() => '');
-                }
                 const affordMatch = errText.match(/can only afford\s+(\d+)/i);
                 const affordTokens = affordMatch ? parseInt(affordMatch[1], 10) : 0;
-                const safeAfford = affordTokens > 256 ? Math.max(512, Math.min(4096, affordTokens - 128)) : 2048;
+                const safeAfford = affordTokens > 256 ? Math.max(512, Math.min(8192, affordTokens - 128)) : 2048;
                 if (!targetBody.max_tokens || targetBody.max_tokens > safeAfford) {
                   targetBody.max_tokens = safeAfford;
                   basePayload.max_tokens = safeAfford;
@@ -35849,9 +35897,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 delete basePayload.temperature;
                 shouldRetry = true;
               }
-              if (targetBody.max_tokens && targetBody.max_tokens > 4096 && attemptRes.status !== 402) {
-                targetBody.max_tokens = 4096;
-                basePayload.max_tokens = 4096;
+              if (targetBody.max_tokens && targetBody.max_tokens > 8192 && attemptRes.status !== 402 && /max_tokens|token|context|length/i.test(errText)) {
+                targetBody.max_tokens = 8192;
+                basePayload.max_tokens = 8192;
                 shouldRetry = true;
               }
               if (shouldRetry) {
@@ -35900,7 +35948,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               continue;
             }
 
-            // attemptRes adalah 200 OK! Mulai membaca stream
+            // attemptRes adalah 200 OK! Mulai membaca stream & alihkan ke deadAirWatchdog (180s)
+            clearTimeout(ttftTimer);
             activeEndpoint = targetUrl;
             activeHeaders = targetHeaders;
             activeRouteType = routeType;
@@ -36129,6 +36178,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               }
               clearTimeout(ttftTimer);
               STATE.abortController?.signal?.removeEventListener('abort', onParentAbort);
+              if (!sseDone && !finishReason && tokenCount > 0 && accumulatedToolCalls.length === 0) {
+                isStreamInterrupted = true;
+              }
               actualModelUsed = resolvedUpstreamModel || currentModel;
               streamSucceeded = true;
               break;
@@ -36537,6 +36589,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           model: activeDigestionModel,
           messages: conversationChain,
           stream: true,
+          max_tokens: initialMaxTokensOr || 16384,
           provider: {
             allow_fallbacks: isAutoRouterActive
           }
@@ -37240,13 +37293,13 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         }
       }
 
-      // SEAMLESS AUTO-CONTINUATION: Hanya picu auto-continuation jika output benar-benar terpotong/tidak tuntas secara matematis
+      // SEAMLESS AUTO-CONTINUATION: Hanya picu auto-continuation jika output terpotong, stream terputus, atau tidak tuntas secara matematis
       const orContRes = await resolvePostStreamContinuation(assistantRow, {
         session,
         modelName: actualModelUsed || displayModel,
         engine: engineMode,
         initialText: rawFullTextBeforeStripping,
-        finishReason,
+        finishReason: isStreamInterrupted ? 'incomplete' : finishReason,
         isFileIncomplete: isFileStillIncomplete,
         groundedImageDisplays,
         isWebTask,
@@ -37806,7 +37859,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           ctx.drawImage(img, 0, 0, width, height);
           try {
             const dataUrl = canvas.toDataURL('image/webp', quality);
-            resolve(dataUrl);
+            resolve(dataUrl && dataUrl.startsWith('data:image/') ? dataUrl : e.target.result);
           } catch (err) {
             resolve(e.target.result);
           }
@@ -37819,15 +37872,28 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
     });
   }
 
+  function readFileAsDataUrlSafe(file) {
+    return new Promise((resolve) => {
+      try {
+        const reader = new FileReader();
+        reader.onload = ev => resolve(ev.target?.result || null);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+      } catch (_) {
+        resolve(null);
+      }
+    });
+  }
+
   async function processSingleImageFile(file) {
     if (!file || typeof file.size !== 'number' || file.size <= 0) return false;
     try {
-      const compressedDataUrl = await compressImageToWebP(file, 1600, 0.88) || (await new Promise(r => {
-        const reader = new FileReader();
-        reader.onload = ev => r(ev.target.result);
-        reader.onerror = () => r(null);
-        reader.readAsDataURL(file);
-      }));
+      const ext = ((file.name || '').split('.').pop() || '').toLowerCase();
+      const mime = (file.type || '').toLowerCase();
+      const preserveOriginal = (mime === 'image/webp' || mime === 'image/gif' || mime === 'image/svg+xml' || ext === 'webp' || ext === 'gif' || ext === 'svg') && file.size <= 2 * 1024 * 1024;
+      const compressedDataUrl = preserveOriginal
+        ? (await readFileAsDataUrlSafe(file))
+        : ((await compressImageToWebP(file, 1600, 0.88)) || (await readFileAsDataUrlSafe(file)));
 
       if (compressedDataUrl) {
         if (!Array.isArray(STATE.attachedImages)) STATE.attachedImages = [];
@@ -37844,24 +37910,55 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
     return false;
   }
 
+  async function handleIncomingFiles(fileList, sourceLabel = 'upload') {
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (files.length === 0) return { images: 0, docs: 0, skipped: 0 };
+
+    let addedImages = 0;
+    let addedDocs = 0;
+    let skipped = 0;
+
+    for (const file of files) {
+      if (!file || typeof file.size !== 'number' || file.size <= 0) {
+        skipped++;
+        continue;
+      }
+      if (isImageFile(file)) {
+        const ok = await processSingleImageFile(file);
+        if (ok) addedImages++;
+        else skipped++;
+      } else {
+        const ok = await attachSingleDocFile(file);
+        if (ok) addedDocs++;
+        else skipped++;
+      }
+    }
+
+    renderAttachmentPreviews();
+
+    const totalAdded = addedImages + addedDocs;
+    if (totalAdded > 0) {
+      AudioEngine.click();
+      if (sourceLabel === 'drag-drop') {
+        const parts = [];
+        if (addedImages > 0) parts.push(`${addedImages} gambar`);
+        if (addedDocs > 0) parts.push(`${addedDocs} dokumen/file`);
+        showToast(`📎 Berhasil melampirkan ${parts.join(' & ')} via drag & drop.`, 'success');
+      }
+    } else if (skipped > 0 && sourceLabel === 'drag-drop') {
+      showToast('⚠️ File kosong atau folder tidak dapat dilampirkan langsung.', 'warning');
+    }
+
+    return { images: addedImages, docs: addedDocs, skipped };
+  }
+
   async function handleImageUpload(e) {
     const files = Array.from(e.target.files || []);
     if (!files || files.length === 0) return;
 
-    let addedCount = 0;
-    for (const file of files) {
-      if (!file || typeof file.size !== 'number' || file.size <= 0 || !isImageFile(file)) continue;
-      const ok = await processSingleImageFile(file);
-      if (ok) addedCount++;
-    }
-
+    await handleIncomingFiles(files, 'picker-image');
     if (els.imageFileInput) els.imageFileInput.value = '';
     if (els.cameraFileInput) els.cameraFileInput.value = '';
-    renderAttachmentPreviews();
-
-    if (addedCount > 0) {
-      AudioEngine.click();
-    }
   }
 
   function removeAttachedImage(idx) {
@@ -43195,8 +43292,17 @@ Aturan:
       }
     });
 
-    // Tangani drag & drop teks kodingan/laporan langsung ke textarea prompt
+    // Tangani drag & drop file maupun teks kodingan/laporan langsung ke textarea prompt
     els.promptInput?.addEventListener('drop', (e) => {
+      const droppedFiles = e.dataTransfer?.files;
+      if (droppedFiles && droppedFiles.length > 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        document.dispatchEvent(new CustomEvent('zoz:clear-drop-overlay'));
+        handleIncomingFiles(droppedFiles, 'drag-drop').catch(() => {});
+        return;
+      }
+
       let droppedText = '';
       try {
         droppedText = e.dataTransfer ? e.dataTransfer.getData('text/plain') : '';
@@ -44323,6 +44429,123 @@ Aturan:
     els.cameraFileInput?.addEventListener('change', handleImageUpload);
     els.removeImageBtn?.addEventListener('click', clearAttachedImage);
     els.docFileInput?.addEventListener('change', handleDocUpload);
+
+    // Global & Composer Drag-and-Drop File Upload Engine (AI Chat & WhatsApp Mode)
+    (function initDragAndDropUploadEngine() {
+      const overlay = document.getElementById('globalFileDropOverlay');
+      const titleEl = document.getElementById('globalDropTitle');
+      const subEl = document.getElementById('globalDropSub');
+      let dragDepth = 0;
+
+      const hasDraggedFiles = (e) => {
+        const dt = e && e.dataTransfer;
+        if (!dt) return false;
+        if (dt.files && dt.files.length > 0) return true;
+        if (dt.types) {
+          return Array.from(dt.types).includes('Files');
+        }
+        return false;
+      };
+
+      const isBlockingModalOpen = () => Boolean(document.querySelector('.modal-backdrop.show'));
+
+      const showDropState = () => {
+        if (isBlockingModalOpen()) return;
+        const isWa = STATE.chatMode === 'whatsapp';
+        if (titleEl) {
+          titleEl.textContent = isWa ? 'Lepas File untuk Dikirim ke WhatsApp' : 'Lepas File di Sini';
+        }
+        if (subEl) {
+          subEl.textContent = isWa
+            ? 'Mendukung Foto, Stiker WebP, PDF, DOCX, Audio, Video & Dokumen'
+            : 'Mendukung Gambar, PDF, DOCX, Kode, CSV, JSON, Markdown & Dokumen Lainnya';
+        }
+        if (overlay) overlay.style.display = 'flex';
+        els.composerBox?.classList.add('drag-file-over');
+      };
+
+      const clearDropState = () => {
+        dragDepth = 0;
+        if (overlay) overlay.style.display = 'none';
+        els.composerBox?.classList.remove('drag-file-over');
+      };
+
+      document.addEventListener('zoz:clear-drop-overlay', clearDropState);
+
+      document.addEventListener('dragenter', (e) => {
+        if (!hasDraggedFiles(e)) return;
+        e.preventDefault();
+        dragDepth++;
+        showDropState();
+      });
+
+      document.addEventListener('dragover', (e) => {
+        if (!hasDraggedFiles(e)) return;
+        e.preventDefault();
+        if (e.dataTransfer) {
+          e.dataTransfer.dropEffect = isBlockingModalOpen() ? 'none' : 'copy';
+        }
+        if (!isBlockingModalOpen() && overlay && overlay.style.display === 'none') {
+          showDropState();
+        }
+      });
+
+      document.addEventListener('dragleave', (e) => {
+        if (!hasDraggedFiles(e)) return;
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0 || (e.clientX <= 0 && e.clientY <= 0)) {
+          clearDropState();
+        }
+      });
+
+      document.addEventListener('drop', (e) => {
+        if (!hasDraggedFiles(e)) return;
+        e.preventDefault();
+        clearDropState();
+
+        if (isBlockingModalOpen()) return;
+
+        // Cek jika ada direktori/folder yang dilepas via Chrome DataTransferItem
+        const dtItems = e.dataTransfer?.items ? Array.from(e.dataTransfer.items) : [];
+        let droppedFiles = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
+        if (dtItems.length > 0) {
+          const validFiles = [];
+          let hasFolder = false;
+          for (const item of dtItems) {
+            if (item.kind !== 'file') continue;
+            const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null;
+            if (entry && entry.isDirectory) {
+              hasFolder = true;
+              continue;
+            }
+            const f = item.getAsFile();
+            if (f) validFiles.push(f);
+          }
+          if (validFiles.length > 0) {
+            droppedFiles = validFiles;
+          } else if (hasFolder) {
+            showToast('⚠️ Folder belum dapat dilampirkan langsung via drag & drop. Pilih file di dalamnya.', 'warning');
+            return;
+          }
+        }
+
+        if (droppedFiles.length === 0) return;
+
+        // Jika pengguna menjatuhkan 1 gambar tepat pada kartu Edit Foto Referensi (Img2Img)
+        if (droppedFiles.length === 1 && els.photoEditReferenceCard && els.photoEditReferenceCard.style.display !== 'none' && e.target?.closest?.('#photoEditReferenceCard') && isImageFile(droppedFiles[0])) {
+          handlePhotoEditFileSelect({ target: { files: [droppedFiles[0]] } });
+          return;
+        }
+
+        handleIncomingFiles(droppedFiles, 'drag-drop').catch((err) => {
+          console.warn('Drag & drop upload error:', err);
+          showToast('❌ Gagal memproses file yang dijatuhkan.', 'error');
+        });
+      });
+
+      document.addEventListener('dragend', clearDropState);
+      window.addEventListener('blur', clearDropState);
+    })();
 
     // Dismiss attachment, search, video search & image model dropdowns when clicking outside
     document.addEventListener('click', (e) => {
@@ -53070,7 +53293,7 @@ Aturan:
                 if (textEl) {
                   textEl.innerHTML = '<span style="font-style: italic; opacity: 0.65;">🚫 Pesan ini telah dihapus</span>';
                 }
-                const mediaEl = bubbleEl.querySelector('.wa-media-preview-box, .wa-doc-box');
+                const mediaEl = bubbleEl.querySelector('.wa-media-preview-box, .wa-doc-box, .wa-bubble-image-wrap, .wa-bubble-sticker-wrap, .wa-bubble-sticker-pending, .wa-bubble-video-wrap, .wa-bubble-audio-wrap, .wa-bubble-doc-chip');
                 if (mediaEl) mediaEl.remove();
                 const badge = bubbleEl.querySelector('.wa-bubble-reaction-badge');
                 if (badge) badge.remove();
@@ -54238,6 +54461,8 @@ Aturan:
         return;
       }
       if (!els.messagesList) return;
+      this._mediaFetchAttemptedIds?.clear();
+      this._mediaResolveQueue = [];
       if (els.welcomeHero) els.welcomeHero.style.display = 'none';
       els.messagesList.innerHTML = '';
 
@@ -54296,6 +54521,8 @@ Aturan:
 
     renderEmptyWaState() {
       if (!els.messagesList) return;
+      this._mediaFetchAttemptedIds?.clear();
+      this._mediaResolveQueue = [];
       if (els.welcomeHero) els.welcomeHero.style.display = 'none';
       els.messagesList.innerHTML = `
         <div style="padding: 70px 20px; text-align: center; color: var(--text-dim); max-width: 520px; margin: 0 auto; animation: fadeIn 0.25s ease-out;">
@@ -54392,6 +54619,19 @@ Aturan:
           type: 'audio',
           fileName: 'audio.mp3',
           mimetype: 'audio/mp4',
+          caption: cleanCaption,
+          url: null
+        };
+      }
+
+      // Pattern 5: Stiker WhatsApp
+      const stkMatch = text.match(/(?:.*?)\[(?:Stiker|Sticker)\]/i);
+      if (stkMatch) {
+        const cleanCaption = text.replace(/(?:[\s\S]*?)\[(?:Stiker|Sticker)\]/gi, '').trim();
+        return {
+          type: 'sticker',
+          fileName: 'sticker.webp',
+          mimetype: 'image/webp',
           caption: cleanCaption,
           url: null
         };
@@ -54858,59 +55098,277 @@ Aturan:
       }
     },
 
+    _mediaFetchAttemptedIds: new Set(),
+    _mediaResolveQueue: [],
+    _mediaResolveActiveCount: 0,
+
+    enqueueMediaResolve(msgId, mediaObj, bubbleWrap, msgObj = null) {
+      if (!msgId || String(msgId).startsWith('temp_')) return;
+      if (this._mediaFetchAttemptedIds.has(msgId)) return;
+      this._mediaFetchAttemptedIds.add(msgId);
+
+      this._mediaResolveQueue.push({ msgId, mediaObj, bubbleWrap, msgObj });
+      this._drainMediaResolveQueue();
+    },
+
+    _drainMediaResolveQueue() {
+      const MAX_CONCURRENT = 2;
+      while (this._mediaResolveActiveCount < MAX_CONCURRENT && this._mediaResolveQueue.length > 0) {
+        const task = this._mediaResolveQueue.shift();
+        if (!task) continue;
+        this._mediaResolveActiveCount++;
+        this._fetchAndApplyWaMedia(task).finally(() => {
+          this._mediaResolveActiveCount = Math.max(0, this._mediaResolveActiveCount - 1);
+          this._drainMediaResolveQueue();
+        });
+      }
+    },
+
+    async _fetchAndApplyWaMedia(task) {
+      const { msgId, mediaObj, bubbleWrap, msgObj } = task;
+      const activeJid = this.activeContact?.id || '';
+      const fileName = mediaObj?.fileName || (mediaObj?.type === 'sticker' ? 'sticker.webp' : 'photo.jpg');
+      try {
+        const jidParam = activeJid ? `&jid=${encodeURIComponent(activeJid)}` : '';
+        const res = await this.waFetch(
+          `/api/wa/media?msgId=${encodeURIComponent(msgId)}&fileName=${encodeURIComponent(fileName)}${jidParam}`,
+          { headers: this.getAuthHeaders() },
+          0
+        );
+        const data = await res.json().catch(() => null);
+        if (data && data.url) {
+          const updatedMedia = { ...(mediaObj || {}), ...(data.media || {}), url: data.url };
+          if (msgObj) {
+            msgObj.media = { ...(msgObj.media || {}), ...updatedMedia };
+          }
+          const memMsg = (this.messages || []).find(m => m.id === msgId);
+          if (memMsg) {
+            memMsg.media = { ...(memMsg.media || {}), ...updatedMedia };
+          }
+          if (bubbleWrap && bubbleWrap.isConnected) {
+            this.renderMediaIntoBubble(bubbleWrap, updatedMedia, memMsg || msgObj || { id: msgId });
+          }
+          return true;
+        }
+      } catch (_) {}
+
+      // Jika media belum tersedia (offline/kadaluarsa), ubah status kartu stiker menjadi klik-untuk-muat-ulang
+      if (bubbleWrap && bubbleWrap.isConnected) {
+        const pendingEl = bubbleWrap.querySelector('.wa-bubble-sticker-pending');
+        if (pendingEl) {
+          const lbl = pendingEl.querySelector('.wa-sticker-pending-label');
+          if (lbl) lbl.textContent = 'Stiker (Ketuk muat ulang)';
+          const ico = pendingEl.querySelector('i');
+          if (ico) ico.className = 'fa-solid fa-rotate-right';
+        }
+      }
+      return false;
+    },
+
+    isStickerMedia(media, msg = null) {
+      if (!media) return false;
+      const mime = String(media.mimetype || '').toLowerCase();
+      const fname = String(media.fileName || '').toLowerCase();
+      const txt = String(msg?.text || '').trim();
+      if (media.type === 'sticker') return true;
+      if (fname === 'sticker.webp' || mime === 'image/webp' && /sticker|stiker/i.test(fname)) return true;
+      if (media.type === 'image' && /\[(?:Stiker|Sticker)\]/i.test(txt)) return true;
+      return false;
+    },
+
+    renderMediaIntoBubble(bubble, rawMedia, msg = null) {
+      if (!bubble || !rawMedia) return;
+      const media = { ...rawMedia };
+      const msgId = msg?.id || bubble.getAttribute('data-msg-id') || '';
+      const anchorMeta = bubble.querySelector('.wa-bubble-meta');
+      const insertMediaEl = (el) => {
+        if (anchorMeta && anchorMeta.parentNode === bubble) {
+          anchorMeta.before(el);
+        } else {
+          bubble.appendChild(el);
+        }
+      };
+
+      const isSticker = this.isStickerMedia(media, msg);
+      if (isSticker) {
+        media.type = 'sticker';
+        const resolvedUrl = media.url ? this.resolveMediaUrl(media.url) : '';
+        const thumbUrl = media.thumbnail && typeof media.thumbnail === 'string'
+          ? (media.thumbnail.startsWith('data:') || media.thumbnail.startsWith('blob:') ? media.thumbnail : this.resolveMediaUrl(media.thumbnail))
+          : '';
+        const displaySrc = resolvedUrl || thumbUrl;
+
+        bubble.querySelectorAll('.wa-bubble-sticker-pending').forEach(el => el.remove());
+
+        if (displaySrc) {
+          let stkWrap = bubble.querySelector('.wa-bubble-sticker-wrap');
+          let img = stkWrap ? stkWrap.querySelector('img') : null;
+          if (!stkWrap) {
+            stkWrap = document.createElement('div');
+            stkWrap.className = 'wa-bubble-sticker-wrap';
+            stkWrap.title = 'Klik untuk memperbesar stiker';
+            img = document.createElement('img');
+            img.className = 'wa-chat-sticker-img';
+            img.alt = 'Stiker WhatsApp';
+            img.loading = 'lazy';
+            img.decoding = 'async';
+            stkWrap.appendChild(img);
+            insertMediaEl(stkWrap);
+          }
+          if (img && img.getAttribute('src') !== displaySrc) {
+            img.src = displaySrc;
+          }
+          if (img) {
+            img.onload = () => {
+              const bubbleTxtEl = bubble.querySelector('.wa-bubble-text');
+              if (bubbleTxtEl && /^(?:🏷️\s*)?\[(?:Stiker|Sticker)\]$/i.test((bubbleTxtEl.textContent || '').trim())) {
+                bubbleTxtEl.style.display = 'none';
+              }
+            };
+            img.onerror = () => {
+              stkWrap.remove();
+              const bubbleTxtEl = bubble.querySelector('.wa-bubble-text');
+              if (bubbleTxtEl) bubbleTxtEl.style.display = '';
+              if (!this._mediaFetchAttemptedIds.has(msgId)) {
+                this.enqueueMediaResolve(msgId, media, bubble, msg);
+              }
+              this._mountStickerPendingChip(bubble, media, msg, 'Stiker (Ketuk muat ulang)');
+            };
+          }
+          stkWrap.onclick = () => {
+            if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([displaySrc], 0);
+          };
+
+          // Jika hanya menampilkan thumbnail sementara url penuh belum ada, ambil versi penuh di latar belakang
+          if (!media.url && msgId) {
+            this.enqueueMediaResolve(msgId, media, bubble, msg);
+          }
+        } else {
+          this._mountStickerPendingChip(bubble, media, msg, 'Memuat stiker...');
+          if (msgId) {
+            this.enqueueMediaResolve(msgId, media, bubble, msg);
+          }
+        }
+        return;
+      }
+
+      if (media.type === 'image') {
+        const resolvedImgUrl = media.url
+          ? this.resolveMediaUrl(media.url)
+          : (media.thumbnail && typeof media.thumbnail === 'string'
+            ? (media.thumbnail.startsWith('data:') || media.thumbnail.startsWith('blob:') ? media.thumbnail : this.resolveMediaUrl(media.thumbnail))
+            : '');
+
+        if (resolvedImgUrl) {
+          let imgWrap = bubble.querySelector('.wa-bubble-image-wrap');
+          let img = imgWrap ? imgWrap.querySelector('img') : null;
+          if (!imgWrap) {
+            imgWrap = document.createElement('div');
+            imgWrap.className = 'wa-bubble-image-wrap';
+            imgWrap.style.cssText = 'margin-top: 6px; cursor: pointer; border-radius: 8px; overflow: hidden; max-width: 260px;';
+            img = document.createElement('img');
+            img.className = 'wa-chat-img-thumb';
+            img.alt = 'Foto WhatsApp';
+            img.style.cssText = 'width: 100%; height: auto; display: block; border-radius: 8px;';
+            img.loading = 'lazy';
+            imgWrap.appendChild(img);
+            insertMediaEl(imgWrap);
+          }
+          if (img && img.getAttribute('src') !== resolvedImgUrl) {
+            img.src = resolvedImgUrl;
+          }
+          imgWrap.setAttribute('data-img-url', resolvedImgUrl);
+          imgWrap.onclick = () => {
+            if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([resolvedImgUrl], 0);
+          };
+        }
+        if (!media.url && msgId) {
+          this.enqueueMediaResolve(msgId, media, bubble, msg);
+        }
+      } else if (media.type === 'video' && media.url) {
+        const resolvedVidUrl = this.resolveMediaUrl(media.url);
+        let vidWrap = bubble.querySelector('.wa-bubble-video-wrap');
+        if (!vidWrap) {
+          vidWrap = document.createElement('div');
+          vidWrap.className = 'wa-bubble-video-wrap';
+          vidWrap.innerHTML = `<video controls playsinline preload="metadata" src="${escapeHtml(resolvedVidUrl)}" style="width: 100%; max-height: 280px; display: block; border-radius: 10px; outline: none;"></video>`;
+          insertMediaEl(vidWrap);
+        } else {
+          const v = vidWrap.querySelector('video');
+          if (v && v.getAttribute('src') !== resolvedVidUrl) v.src = resolvedVidUrl;
+        }
+      } else if (media.type === 'audio' && media.url) {
+        const resolvedAudioUrl = this.resolveMediaUrl(media.url);
+        let audioWrap = bubble.querySelector('.wa-bubble-audio-wrap');
+        if (!audioWrap) {
+          audioWrap = document.createElement('div');
+          audioWrap.className = 'wa-bubble-audio-wrap';
+          audioWrap.style.marginTop = '6px';
+          audioWrap.innerHTML = `<audio controls src="${escapeHtml(resolvedAudioUrl)}" preload="metadata" style="max-width: 100%; height: 32px; border-radius: 20px; outline: none;"></audio>`;
+          insertMediaEl(audioWrap);
+        } else {
+          const a = audioWrap.querySelector('audio');
+          if (a && a.getAttribute('src') !== resolvedAudioUrl) a.src = resolvedAudioUrl;
+        }
+      } else if (media.type === 'document') {
+        let docChip = bubble.querySelector('.wa-bubble-doc-chip');
+        if (!docChip) {
+          docChip = document.createElement('div');
+          docChip.className = 'wa-bubble-doc-chip';
+          docChip.style.cssText = 'margin-top: 6px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer;';
+          docChip.title = 'Klik untuk membuka/mengunduh dokumen';
+          docChip.innerHTML = `
+            <i class="fa-solid fa-file-lines" style="color: #38bdf8; font-size: 1rem;"></i>
+            <span style="font-size: 0.8rem; font-weight: 600; color: #f8fafc; text-decoration: underline;">${escapeHtml(media.fileName || 'dokumen')}</span>
+            <i class="fa-solid fa-download" style="font-size: 0.72rem; opacity: 0.75; margin-left: 4px;"></i>
+          `;
+          insertMediaEl(docChip);
+        }
+        docChip.onclick = () => {
+          this.openDocumentPreview(media, msg || { id: msgId });
+        };
+      }
+    },
+
+    _mountStickerPendingChip(bubble, media, msg, labelText) {
+      if (!bubble) return;
+      let chip = bubble.querySelector('.wa-bubble-sticker-pending');
+      if (!chip) {
+        chip = document.createElement('div');
+        chip.className = 'wa-bubble-sticker-pending';
+        chip.title = 'Klik untuk memuat ulang stiker dari WhatsApp';
+        chip.innerHTML = `
+          <i class="fa-solid fa-note-sticky" style="color: #38bdf8;"></i>
+          <span class="wa-sticker-pending-label">${escapeHtml(labelText)}</span>
+        `;
+        const meta = bubble.querySelector('.wa-bubble-meta');
+        if (meta && meta.parentNode === bubble) meta.before(chip);
+        else bubble.appendChild(chip);
+      } else {
+        const lbl = chip.querySelector('.wa-sticker-pending-label');
+        if (lbl) lbl.textContent = labelText;
+      }
+      const msgId = msg?.id || bubble.getAttribute('data-msg-id') || '';
+      chip.onclick = () => {
+        if (!msgId) return;
+        this._mediaFetchAttemptedIds.delete(msgId);
+        const lbl = chip.querySelector('.wa-sticker-pending-label');
+        if (lbl) lbl.textContent = 'Menyinkronkan stiker...';
+        this.enqueueMediaResolve(msgId, media, bubble, msg);
+      };
+    },
+
     handleMediaReady(payload) {
-      if (!payload || !payload.msgId) return;
+      if (!payload || !payload.msgId || !payload.media) return;
       const { jid, msgId, media } = payload;
+      const memMsg = (this.messages || []).find(m => m.id === msgId);
+      if (memMsg) {
+        memMsg.media = { ...(memMsg.media || {}), ...media };
+      }
       if (this.activeContact && this.activeContact.id === jid) {
         const bubble = els.messagesList?.querySelector(`[data-msg-id="${msgId}"]`);
         if (bubble) {
-          if (media.type === 'image' && media.url) {
-            const resolvedImgUrl = this.resolveMediaUrl(media.url);
-            let imgWrap = bubble.querySelector('.wa-bubble-image-wrap');
-            if (!imgWrap) {
-              imgWrap = document.createElement('div');
-              imgWrap.className = 'wa-bubble-image-wrap';
-              imgWrap.style.cssText = 'margin-top: 6px; cursor: pointer; border-radius: 8px; overflow: hidden; max-width: 260px;';
-              imgWrap.innerHTML = `<img src="${escapeHtml(resolvedImgUrl)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" style="width: 100%; height: auto; display: block; border-radius: 8px;" loading="lazy" />`;
-              bubble.querySelector('.wa-bubble-meta')?.before(imgWrap) || bubble.appendChild(imgWrap);
-            } else {
-              const img = imgWrap.querySelector('img');
-              if (img) img.src = resolvedImgUrl;
-            }
-            imgWrap.onclick = () => {
-              if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([resolvedImgUrl], 0);
-            };
-          } else if (media.type === 'audio' && media.url) {
-            const resolvedAudioUrl = this.resolveMediaUrl(media.url);
-            let audioWrap = bubble.querySelector('.wa-bubble-audio-wrap');
-            if (!audioWrap) {
-              audioWrap = document.createElement('div');
-              audioWrap.className = 'wa-bubble-audio-wrap';
-              audioWrap.style.marginTop = '6px';
-              audioWrap.innerHTML = `<audio controls src="${escapeHtml(resolvedAudioUrl)}" preload="metadata" style="max-width: 100%; height: 32px; border-radius: 20px; outline: none;"></audio>`;
-              bubble.querySelector('.wa-bubble-meta')?.before(audioWrap) || bubble.appendChild(audioWrap);
-            } else {
-              const a = audioWrap.querySelector('audio');
-              if (a) a.src = resolvedAudioUrl;
-            }
-          } else if (media.type === 'document') {
-            let docChip = bubble.querySelector('.wa-bubble-doc-chip');
-            if (!docChip) {
-              docChip = document.createElement('div');
-              docChip.className = 'wa-bubble-doc-chip';
-              docChip.style.cssText = 'margin-top: 6px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer;';
-              docChip.title = 'Klik untuk membuka/mengunduh dokumen';
-              docChip.innerHTML = `
-                <i class="fa-solid fa-file-lines" style="color: #38bdf8; font-size: 1rem;"></i>
-                <span style="font-size: 0.8rem; font-weight: 600; color: #f8fafc; text-decoration: underline;">${escapeHtml(media.fileName || 'dokumen')}</span>
-                <i class="fa-solid fa-download" style="font-size: 0.72rem; opacity: 0.75; margin-left: 4px;"></i>
-              `;
-              bubble.querySelector('.wa-bubble-meta')?.before(docChip) || bubble.appendChild(docChip);
-            }
-            docChip.onclick = () => {
-              this.openDocumentPreview(media, { id: msgId });
-            };
-          }
+          this.renderMediaIntoBubble(bubble, memMsg?.media || media, memMsg || { id: msgId });
         }
       }
     },
@@ -55001,10 +55459,12 @@ Aturan:
         }
       }
 
-      // 3. IDENTIFIKASI BERKAS / FILE (Text-Only Mode: Dokumen, Foto, Video, Audio, Stiker, WPS)
+      const effectiveMedia = msg.media || this.parseMediaFromMessage(msg);
+
+      // 3. IDENTIFIKASI BERKAS / FILE (Dokumen, Foto, Video, Audio, Stiker, WPS)
       const hasFile = Boolean(
         msg.hasFile ||
-        msg.media ||
+        effectiveMedia ||
         (msg.text && (
           msg.text.includes('[Dokumen:') ||
           msg.text.includes('[Document:') ||
@@ -55017,17 +55477,19 @@ Aturan:
         ))
       );
 
-      // 4. SUSUN TEKS MURNI (TEXT-ONLY SESUAI INSTRUKSI)
+      // 4. SUSUN TEKS MURNI
       let textContent = (msg.text || '').trim();
-      if (!textContent && msg.media) {
-        if (msg.media.type === 'document') {
-          textContent = `📄 [Dokumen: ${msg.media.fileName || 'dokumen'}]`;
-        } else if (msg.media.type === 'image') {
+      if (!textContent && effectiveMedia) {
+        if (effectiveMedia.type === 'document') {
+          textContent = `📄 [Dokumen: ${effectiveMedia.fileName || 'dokumen'}]`;
+        } else if (effectiveMedia.type === 'image') {
           textContent = '📷 [Foto]';
-        } else if (msg.media.type === 'audio') {
+        } else if (effectiveMedia.type === 'audio') {
           textContent = '🎵 [Audio/Voice Note]';
-        } else if (msg.media.type === 'video') {
+        } else if (effectiveMedia.type === 'video') {
           textContent = '🎬 [Video]';
+        } else if (effectiveMedia.type === 'sticker') {
+          textContent = '🏷️ [Stiker]';
         }
       }
 
@@ -55084,57 +55546,17 @@ Aturan:
         `;
       }
 
-      // Media element rendering
-      let mediaHtml = '';
-      if (msg.media) {
-        if (msg.media.type === 'image' && msg.media.url) {
-          const resolvedImgUrl = this.resolveMediaUrl(msg.media.url);
-          mediaHtml = `
-            <div class="wa-bubble-image-wrap" style="margin-top: 6px; cursor: pointer; border-radius: 8px; overflow: hidden; max-width: 260px;" data-img-url="${escapeHtml(resolvedImgUrl)}">
-              <img src="${escapeHtml(resolvedImgUrl)}" class="wa-chat-img-thumb" alt="Foto WhatsApp" style="width: 100%; height: auto; display: block; border-radius: 8px;" loading="lazy" />
-            </div>
-          `;
-        } else if (msg.media.type === 'audio' && msg.media.url) {
-          const resolvedAudioUrl = this.resolveMediaUrl(msg.media.url);
-          mediaHtml = `
-            <div class="wa-bubble-audio-wrap" style="margin-top: 6px;">
-              <audio controls src="${escapeHtml(resolvedAudioUrl)}" preload="metadata" style="max-width: 100%; height: 32px; border-radius: 20px; outline: none;"></audio>
-            </div>
-          `;
-        } else if (msg.media.type === 'document') {
-          const docName = msg.media.fileName || 'dokumen';
-          mediaHtml = `
-            <div class="wa-bubble-doc-chip" style="margin-top: 6px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.15); cursor: pointer;" title="Klik untuk membuka/mengunduh dokumen">
-              <i class="fa-solid fa-file-lines" style="color: #38bdf8; font-size: 1rem;"></i>
-              <span style="font-size: 0.8rem; font-weight: 600; color: #f8fafc; text-decoration: underline;">${escapeHtml(docName)}</span>
-              <i class="fa-solid fa-download" style="font-size: 0.72rem; opacity: 0.75; margin-left: 4px;"></i>
-            </div>
-          `;
-        }
-      }
-
       wrap.innerHTML = `
         ${senderHeaderHtml}
         ${textContent ? `<div class="wa-bubble-text">${escapeHtml(textContent)}</div>` : ''}
-        ${mediaHtml}
         <div class="wa-bubble-meta">
           <span>${timeStr}</span>
           ${statusIcon}
         </div>
       `;
 
-      const imgWrap = wrap.querySelector('.wa-bubble-image-wrap');
-      if (imgWrap && msg.media?.url) {
-        const resolvedImgUrl = this.resolveMediaUrl(msg.media.url);
-        imgWrap.addEventListener('click', () => {
-          if (typeof ImageLightbox !== 'undefined') ImageLightbox.open([resolvedImgUrl], 0);
-        });
-      }
-      const docChip = wrap.querySelector('.wa-bubble-doc-chip');
-      if (docChip && msg.media) {
-        docChip.addEventListener('click', () => {
-          this.openDocumentPreview(msg.media, msg);
-        });
+      if (effectiveMedia) {
+        this.renderMediaIntoBubble(wrap, effectiveMedia, msg);
       }
 
       if (msg.reaction) {
@@ -56864,7 +57286,9 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     formatAssistantOutputForCopy,
     cleanTerminalOutputForCopy,
     normalizeMathematicalTextForInput,
-    initPureMathClipboardEngine
+    initPureMathClipboardEngine,
+    handleIncomingFiles,
+    WhatsAppController
   };
 
   // Start on DOM ready (safeguarded against post-DOMContentLoaded script execution)

@@ -54,6 +54,12 @@ function unwrapMessage(msg) {
       curr = curr.documentWithCaptionMessage.message;
     } else if (curr.editedMessage?.message) {
       curr = curr.editedMessage.message;
+    } else if (curr.lottieStickerMessage?.message) {
+      curr = curr.lottieStickerMessage.message;
+    } else if (curr.associatedChildMessage?.message) {
+      curr = curr.associatedChildMessage.message;
+    } else if (curr.deviceSentMessage?.message) {
+      curr = curr.deviceSentMessage.message;
     } else {
       break;
     }
@@ -244,20 +250,30 @@ class WhatsAppGateway {
     };
   }
 
-  safeBufferToBase64(buf) {
+  safeBufferToBase64(buf, defaultMime = 'image/jpeg') {
     if (!buf) return null;
     try {
       if (typeof buf === 'string') {
-        return buf.startsWith('data:') ? buf : `data:image/jpeg;base64,${buf}`;
+        return buf.startsWith('data:') ? buf : `data:${defaultMime};base64,${buf}`;
       }
+      let rawBuf = null;
       if (Buffer.isBuffer(buf)) {
-        return `data:image/jpeg;base64,${buf.toString('base64')}`;
+        rawBuf = buf;
+      } else if (buf && buf.data && Array.isArray(buf.data)) {
+        rawBuf = Buffer.from(buf.data);
+      } else if (buf instanceof Uint8Array || Array.isArray(buf)) {
+        rawBuf = Buffer.from(buf);
       }
-      if (buf && buf.data && Array.isArray(buf.data)) {
-        return `data:image/jpeg;base64,${Buffer.from(buf.data).toString('base64')}`;
-      }
-      if (buf instanceof Uint8Array || Array.isArray(buf)) {
-        return `data:image/jpeg;base64,${Buffer.from(buf).toString('base64')}`;
+      if (rawBuf && rawBuf.length > 0) {
+        let mime = defaultMime;
+        if (rawBuf.length >= 4 && rawBuf[0] === 0x89 && rawBuf[1] === 0x50 && rawBuf[2] === 0x4E && rawBuf[3] === 0x47) {
+          mime = 'image/png';
+        } else if (rawBuf.length >= 12 && rawBuf.slice(0, 4).toString('ascii') === 'RIFF' && rawBuf.slice(8, 12).toString('ascii') === 'WEBP') {
+          mime = 'image/webp';
+        } else if (rawBuf.length >= 3 && rawBuf[0] === 0xFF && rawBuf[1] === 0xD8 && rawBuf[2] === 0xFF) {
+          mime = 'image/jpeg';
+        }
+        return `data:${mime};base64,${rawBuf.toString('base64')}`;
       }
     } catch (_) {}
     return null;
@@ -322,14 +338,16 @@ class WhatsAppGateway {
         url: null
       };
     }
-    if (m.stickerMessage) {
-      const stk = m.stickerMessage;
+    if (m.stickerMessage || m.lottieStickerMessage) {
+      const stk = m.stickerMessage || m.lottieStickerMessage?.message?.stickerMessage || m.lottieStickerMessage;
+      const thumb = this.safeBufferToBase64(stk.pngThumbnail || stk.jpegThumbnail, 'image/webp');
       return {
         type: 'sticker',
         fileName: 'sticker.webp',
         mimetype: stk.mimetype || 'image/webp',
+        isAnimated: Boolean(stk.isAnimated),
         size: stk.fileLength ? Number(stk.fileLength.low || stk.fileLength) : 0,
-        thumbnail: null,
+        thumbnail: thumb,
         caption: '',
         url: null
       };
@@ -341,7 +359,7 @@ class WhatsAppGateway {
     try {
       if (!this.rawMediaFile) return;
       const obj = {};
-      const entries = Array.from(this.rawMessages.entries()).slice(-300);
+      const entries = Array.from(this.rawMessages.entries()).slice(-600);
       for (const [id, msg] of entries) {
         obj[id] = msg;
       }
@@ -353,7 +371,14 @@ class WhatsAppGateway {
     if (!msg) return null;
     const unwrapped = unwrapMessage(msg);
     if (!unwrapped) return null;
-    const isMedia = Boolean(unwrapped.imageMessage || unwrapped.documentMessage || unwrapped.videoMessage || unwrapped.audioMessage || unwrapped.stickerMessage);
+    const isMedia = Boolean(
+      unwrapped.imageMessage ||
+      unwrapped.documentMessage ||
+      unwrapped.videoMessage ||
+      unwrapped.audioMessage ||
+      unwrapped.stickerMessage ||
+      unwrapped.lottieStickerMessage
+    );
     if (!isMedia) return null;
 
     try {
@@ -376,7 +401,7 @@ class WhatsAppGateway {
           else if (unwrapped.imageMessage) rawFileName = 'photo.jpg';
           else if (unwrapped.audioMessage) rawFileName = (unwrapped.audioMessage.mimetype && unwrapped.audioMessage.mimetype.includes('mp4')) ? 'audio.m4a' : 'audio.ogg';
           else if (unwrapped.videoMessage) rawFileName = 'video.mp4';
-          else if (unwrapped.stickerMessage) rawFileName = 'sticker.webp';
+          else if (unwrapped.stickerMessage || unwrapped.lottieStickerMessage) rawFileName = 'sticker.webp';
           else rawFileName = 'file.bin';
         }
         const cleanId = String(id).replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -388,11 +413,21 @@ class WhatsAppGateway {
         const filePath = path.join(uploadsDir, savedFilename);
         fs.writeFileSync(filePath, buffer);
 
+        const extracted = this.extractMediaFromMessage(normalizedMsg) || {};
         if (!messageItem.media) {
-          messageItem.media = this.extractMediaFromMessage(normalizedMsg) || {};
+          messageItem.media = { ...extracted };
+        } else {
+          messageItem.media = { ...extracted, ...messageItem.media };
+        }
+        if (unwrapped.stickerMessage || unwrapped.lottieStickerMessage || cleanFileName === 'sticker.webp') {
+          messageItem.media.type = 'sticker';
+          messageItem.media.mimetype = messageItem.media.mimetype || 'image/webp';
         }
         messageItem.media.url = `/uploads/${savedFilename}`;
         messageItem.media.size = buffer.length;
+        if ((messageItem.media.type === 'sticker' || messageItem.media.type === 'image') && !messageItem.media.thumbnail) {
+          messageItem.media.thumbnail = messageItem.media.url;
+        }
 
         this.savePersistedData();
         return messageItem.media.url;
@@ -406,17 +441,20 @@ class WhatsAppGateway {
   async requestMediaResend(jid, msgId) {
     if (!this.sock || !this.status.connected || !msgId) return false;
     try {
+      const list = this.messages.get(jid) || [];
+      const msg = list.find(m => m.id === msgId);
       const key = {
         remoteJid: jid,
         id: msgId,
-        fromMe: false
+        fromMe: Boolean(msg?.fromMe),
+        ...(jid.endsWith('@g.us') && msg?.participant
+          ? { participant: msg.participant.includes('@') ? msg.participant : `${msg.participant}@s.whatsapp.net` }
+          : {})
       };
       if (typeof this.sock.requestPlaceholderResend === 'function') {
         await this.sock.requestPlaceholderResend(key).catch(() => {});
       }
       if (typeof this.sock.fetchMessageHistory === 'function') {
-        const list = this.messages.get(jid) || [];
-        const msg = list.find(m => m.id === msgId);
         const ts = msg?.timestamp || Date.now();
         await this.sock.fetchMessageHistory(15, key, ts).catch(() => {});
       }
@@ -691,9 +729,23 @@ class WhatsAppGateway {
                     m.media.size = fs.statSync(path.join(uploadsDir, diskMatch)).size;
                   } catch (_) {}
                   const lowerMatch = diskMatch.toLowerCase();
-                  if (lowerMatch.endsWith('.jpg') || lowerMatch.endsWith('.jpeg') || lowerMatch.endsWith('.png') || lowerMatch.endsWith('.webp')) {
+                  const isStickerMsg = lowerMatch.endsWith('sticker.webp') ||
+                    m.media?.type === 'sticker' ||
+                    (m.text && /\[(?:Stiker|Sticker)\]/i.test(m.text));
+                  if (isStickerMsg) {
+                    m.media.type = 'sticker';
+                    m.media.fileName = 'sticker.webp';
+                    m.media.mimetype = 'image/webp';
+                    m.media.thumbnail = m.media.url;
+                  } else if (lowerMatch.endsWith('.jpg') || lowerMatch.endsWith('.jpeg') || lowerMatch.endsWith('.png') || lowerMatch.endsWith('.webp')) {
                     m.media.type = 'image';
                     m.media.thumbnail = m.media.url;
+                  } else if (lowerMatch.endsWith('.mp4') || lowerMatch.endsWith('.webm') || lowerMatch.endsWith('.mov')) {
+                    m.media.type = 'video';
+                    if (!m.media.fileName) m.media.fileName = diskMatch.replace(`wa_${m.id}_`, '');
+                  } else if (lowerMatch.endsWith('.ogg') || lowerMatch.endsWith('.mp3') || lowerMatch.endsWith('.m4a') || lowerMatch.endsWith('.wav')) {
+                    m.media.type = 'audio';
+                    if (!m.media.fileName) m.media.fileName = diskMatch.replace(`wa_${m.id}_`, '');
                   } else {
                     m.media.type = 'document';
                     if (!m.media.fileName) m.media.fileName = diskMatch.replace(`wa_${m.id}_`, '');
@@ -720,6 +772,15 @@ class WhatsAppGateway {
                       type: 'image',
                       fileName: 'photo.jpg',
                       mimetype: 'image/jpeg',
+                      url: fs.existsSync(localPath) ? `/uploads/${savedFile}` : null
+                    };
+                  } else if (/\[(?:Stiker|Sticker)\]/i.test(m.text)) {
+                    const savedFile = `wa_${m.id}_sticker.webp`;
+                    const localPath = path.join(uploadsDir, savedFile);
+                    m.media = {
+                      type: 'sticker',
+                      fileName: 'sticker.webp',
+                      mimetype: 'image/webp',
                       url: fs.existsSync(localPath) ? `/uploads/${savedFile}` : null
                     };
                   }
@@ -1548,9 +1609,9 @@ class WhatsAppGateway {
                          (msg.message.imageMessage ? '📷 [Foto]' : '') ||
                          (msg.message.audioMessage ? '🎵 [Audio/Voice Note]' : '') ||
                          (msg.message.documentMessage ? `📄 [Dokumen: ${msg.message.documentMessage.fileName || 'file'}]` : '') ||
-                         (msg.message.stickerMessage ? '🏷️ [Stiker]' : '') ||
+                         ((msg.message.stickerMessage || msg.message.lottieStickerMessage) ? '🏷️ [Stiker]' : '') ||
                          '';
-            if (!text && !msg.message.imageMessage && !msg.message.audioMessage && !msg.message.documentMessage && !msg.message.videoMessage && !msg.message.stickerMessage) continue;
+            if (!text && !msg.message.imageMessage && !msg.message.audioMessage && !msg.message.documentMessage && !msg.message.videoMessage && !msg.message.stickerMessage && !msg.message.lottieStickerMessage) continue;
 
             let ts = Date.now();
             if (msg.messageTimestamp) {
@@ -1818,10 +1879,10 @@ class WhatsAppGateway {
                        (msg.message.imageMessage ? '📷 [Foto]' : '') ||
                        (msg.message.audioMessage ? '🎵 [Audio/Voice Note]' : '') ||
                        (msg.message.documentMessage ? `📄 [Dokumen: ${msg.message.documentMessage.fileName || 'file'}]` : '') ||
-                       (msg.message.stickerMessage ? '🏷️ [Stiker]' : '') ||
+                       ((msg.message.stickerMessage || msg.message.lottieStickerMessage) ? '🏷️ [Stiker]' : '') ||
                        '';
 
-          if (!text && !msg.message.imageMessage && !msg.message.audioMessage && !msg.message.documentMessage && !msg.message.videoMessage && !msg.message.stickerMessage) continue;
+          if (!text && !msg.message.imageMessage && !msg.message.audioMessage && !msg.message.documentMessage && !msg.message.videoMessage && !msg.message.stickerMessage && !msg.message.lottieStickerMessage) continue;
 
           let ts = Date.now();
           if (msg.messageTimestamp) {
@@ -2141,12 +2202,13 @@ class WhatsAppGateway {
 
       if (mediaBuffer && mediaBuffer.length > 0) {
         const mime = (media.mimetype || media.mimeType || '').toLowerCase();
-        const isImage = media.type === 'image' || mime.startsWith('image/');
+        const isSticker = media.type === 'sticker' || (mime === 'image/webp' && /sticker|stiker/i.test(media.fileName || media.name || ''));
+        const isImage = !isSticker && (media.type === 'image' || mime.startsWith('image/'));
         const isVideo = media.type === 'video' || mime.startsWith('video/');
         const isAudio = media.type === 'audio' || mime.startsWith('audio/');
-        const isDoc = !isImage && !isVideo && !isAudio;
+        const isDoc = !isSticker && !isImage && !isVideo && !isAudio;
 
-        let cleanFileName = (media.fileName || media.name || (isImage ? 'image.jpg' : 'document.bin')).replace(/[^a-zA-Z0-9._-]/g, '_');
+        let cleanFileName = (media.fileName || media.name || (isSticker ? 'sticker.webp' : (isImage ? 'image.jpg' : 'document.bin'))).replace(/[^a-zA-Z0-9._-]/g, '_');
         const savedFilename = `wa_sent_${Date.now()}_${cleanFileName}`;
         const uploadsDir = path.join(__dirname, 'data', 'uploads');
         if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -2154,15 +2216,21 @@ class WhatsAppGateway {
 
         const mediaUrl = `/uploads/${savedFilename}`;
         messageItemMedia = {
-          type: isImage ? 'image' : (isDoc ? 'document' : (isVideo ? 'video' : 'audio')),
+          type: isSticker ? 'sticker' : (isImage ? 'image' : (isDoc ? 'document' : (isVideo ? 'video' : 'audio'))),
           url: mediaUrl,
           fileName: cleanFileName,
-          mimetype: mime || (isImage ? 'image/jpeg' : 'application/octet-stream'),
+          mimetype: mime || (isSticker ? 'image/webp' : (isImage ? 'image/jpeg' : 'application/octet-stream')),
           size: mediaBuffer.length,
           caption: outgoingText
         };
 
-        if (isImage) {
+        if (isSticker) {
+          sent = await this.sock.sendMessage(targetJid, {
+            sticker: mediaBuffer,
+            mimetype: 'image/webp'
+          });
+          if (!outgoingText) outgoingText = '🏷️ [Stiker]';
+        } else if (isImage) {
           sent = await this.sock.sendMessage(targetJid, {
             image: mediaBuffer,
             caption: outgoingText,
@@ -2422,6 +2490,34 @@ class WhatsAppGateway {
     }
 
     return list.map(m => {
+      if (!m.media && m.text && /\[(?:Stiker|Sticker)\]/i.test(m.text)) {
+        const safeId = String(m.id || '').replace(/[^a-zA-Z0-9._-]/g, '_');
+        const savedFile = `wa_${safeId}_sticker.webp`;
+        const localPath = path.join(this.uploadsDir, savedFile);
+        m.media = {
+          type: 'sticker',
+          fileName: 'sticker.webp',
+          mimetype: 'image/webp',
+          url: fs.existsSync(localPath) ? `/uploads/${savedFile}` : null
+        };
+      } else if (m.media && (m.media.type === 'sticker' || m.media.fileName === 'sticker.webp' || (m.text && /\[(?:Stiker|Sticker)\]/i.test(m.text)))) {
+        m.media.type = 'sticker';
+        if (!m.media.fileName) m.media.fileName = 'sticker.webp';
+        if (!m.media.url) {
+          const safeId = String(m.id || '').replace(/[^a-zA-Z0-9._-]/g, '_');
+          const savedFile = `wa_${safeId}_sticker.webp`;
+          const localPath = path.join(this.uploadsDir, savedFile);
+          if (fs.existsSync(localPath)) {
+            m.media.url = `/uploads/${savedFile}`;
+          }
+        }
+      }
+      if (m.media && !m.media.url && this.rawMessages && this.rawMessages.has(m.id)) {
+        const rawMsg = this.rawMessages.get(m.id);
+        this.downloadAndSaveMedia(rawMsg, m).then(url => {
+          if (url) this.broadcast('media_ready', { jid: targetJid, msgId: m.id, media: m.media });
+        }).catch(() => {});
+      }
       const hasFile = Boolean(
         m.hasFile ||
         m.media ||
