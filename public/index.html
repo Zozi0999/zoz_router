@@ -35,7 +35,7 @@
       }
     });
     try {
-      var currentVer = 'v20261117_tmwklloiz';
+      var currentVer = 'v20261117_v788';
       var savedVer = localStorage.getItem('__zoz_ver__');
       if (savedVer !== currentVer) {
         localStorage.setItem('__zoz_ver__', currentVer);
@@ -49,7 +49,7 @@
         }
       }
     } catch (_) {}
-    window.__ZOZ_VERSION__ = 'v20261117_tmwklloiz';
+    window.__ZOZ_VERSION__ = 'v20261117_v788';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png?v=20261112_v765">
@@ -109,8 +109,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261116_v786">
-  <link rel="stylesheet" href="style.css?v=20261116_v786">
+  <link rel="preload" as="style" href="style.css?v=20261117_v788">
+  <link rel="stylesheet" href="style.css?v=20261117_v788">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -484,6 +484,98 @@
                 <span class="action-item-desc">Otomatis aktifkan model ini saat aplikasi dibuka kembali</span>
               </div>
             </button>
+
+            <!-- 3. Tema Chat AI (Buah-buahan & Alam) -->
+            <div class="ai-theme-picker-wrap model-options-theme-section" id="aiChatThemePickerWrap">
+              <button type="button" class="model-options-action-item ai-theme-submenu-trigger" id="btnAiChatTheme" title="Tema Chat AI: Standar Cyber Dark" aria-label="Pilih Tema Buah & Alam Chat AI" aria-haspopup="listbox" aria-expanded="false">
+                <div class="action-item-icon theme-icon-box" aria-hidden="true">
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"></path>
+                    <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"></path>
+                  </svg>
+                </div>
+                <div class="action-item-content">
+                  <div class="action-item-title-row">
+                    <span class="action-item-title">Tema Chat AI</span>
+                    <span class="action-item-badge theme-active-badge" id="aiChatThemeActiveBadge">Standar</span>
+                  </div>
+                  <span class="action-item-desc" id="aiChatThemeActiveDesc">Standar Cyber Dark &bull; Buah &amp; Alam</span>
+                </div>
+                <i class="fa-solid fa-chevron-down ai-theme-chevron" aria-hidden="true"></i>
+              </button>
+              <div class="ai-chat-theme-menu" id="aiChatThemeMenu" role="listbox" aria-label="Pilih Tema Buah & Alam" style="display: none;">
+                <div class="ai-chat-theme-menu-header">
+                  <i class="fa-solid fa-leaf"></i>
+                  <span>Tema Buah &amp; Alam</span>
+                </div>
+                <button type="button" class="ai-chat-theme-option active" data-ai-theme="default" role="option" aria-selected="true">
+                  <span class="ai-theme-swatch-pair" aria-hidden="true">
+                    <span style="background:#00F0FF;"></span>
+                    <span style="background:#0f172a;"></span>
+                  </span>
+                  <span class="ai-theme-opt-text">
+                    <strong>Standar Cyber Dark</strong>
+                    <small>Tema futuristik bawaan ZOZ</small>
+                  </span>
+                  <i class="fa-solid fa-check ai-theme-check" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="ai-chat-theme-option" data-ai-theme="mango-citrus" role="option" aria-selected="false">
+                  <span class="ai-theme-swatch-pair" aria-hidden="true">
+                    <span style="background:#ea580c;"></span>
+                    <span style="background:#29170b;"></span>
+                  </span>
+                  <span class="ai-theme-opt-text">
+                    <strong>🍊 Senja Mangga &amp; Jeruk</strong>
+                    <small>Nuansa buah sitrus hangat &amp; daun tropis</small>
+                  </span>
+                  <i class="fa-solid fa-check ai-theme-check" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="ai-chat-theme-option" data-ai-theme="strawberry-sakura" role="option" aria-selected="false">
+                  <span class="ai-theme-swatch-pair" aria-hidden="true">
+                    <span style="background:#db2777;"></span>
+                    <span style="background:#260d1b;"></span>
+                  </span>
+                  <span class="ai-theme-opt-text">
+                    <strong>🍓 Taman Stroberi &amp; Sakura</strong>
+                    <small>Kelopak bunga beri &amp; warna buah lembut</small>
+                  </span>
+                  <i class="fa-solid fa-check ai-theme-check" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="ai-chat-theme-option" data-ai-theme="apple-orchard" role="option" aria-selected="false">
+                  <span class="ai-theme-swatch-pair" aria-hidden="true">
+                    <span style="background:#bbf7d0;"></span>
+                    <span style="background:#f4fbf2;"></span>
+                  </span>
+                  <span class="ai-theme-opt-text">
+                    <strong>🍏 Kebun Apel Pagi (Terang)</strong>
+                    <small>Latar kebun pagi segar &amp; daun embun</small>
+                  </span>
+                  <i class="fa-solid fa-check ai-theme-check" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="ai-chat-theme-option" data-ai-theme="emerald-forest" role="option" aria-selected="false">
+                  <span class="ai-theme-swatch-pair" aria-hidden="true">
+                    <span style="background:#059669;"></span>
+                    <span style="background:#071b14;"></span>
+                  </span>
+                  <span class="ai-theme-opt-text">
+                    <strong>🌲 Hutan Tropis &amp; Anggur</strong>
+                    <small>Kanopi rimba zamrud &amp; pakis sejuk</small>
+                  </span>
+                  <i class="fa-solid fa-check ai-theme-check" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="ai-chat-theme-option" data-ai-theme="aurora-mountain" role="option" aria-selected="false">
+                  <span class="ai-theme-swatch-pair" aria-hidden="true">
+                    <span style="background:#0d9488;"></span>
+                    <span style="background:#0b1a2e;"></span>
+                  </span>
+                  <span class="ai-theme-opt-text">
+                    <strong>🌌 Aurora Pegunungan</strong>
+                    <small>Cahaya aurora langit &amp; samudra tenang</small>
+                  </span>
+                  <i class="fa-solid fa-check ai-theme-check" aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
           </div>
 
           <div class="model-options-footer" id="modelOptionsFooterInfo">
@@ -3580,8 +3672,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression & Bayesian calibration engine (must load before app.js) -->
-  <script src="text-safety.js?v=20261116_v786" defer></script>
+  <script src="text-safety.js?v=20261117_v788" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=v20261117_tmwklloiz" defer></script>
+  <script src="app.js?v=20261117_v788" defer></script>
 </body>
 </html>

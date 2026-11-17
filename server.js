@@ -1823,6 +1823,70 @@ function mapOllamaModelToOpenRouter(modelId) {
   return 'openrouter/free';
 }
 
+/**
+ * Menormalkan pesan percakapan ke skema OpenRouter API:
+ * - Mengonversi pesan `role: 'tool'` & `assistant.tool_calls` saat mode non-tool aktif
+ * - Menghapus properti Ollama (`images`, `image`) agar tidak ditolak validator OpenRouter
+ * - Mempertahankan prior latent reasoning pada model reasoning/Beam/Reflection
+ */
+function normalizeMessagesForOpenRouter(messages, { normalizeTools = false, includeReasoningPrior = false } = {}) {
+  const mapped = (Array.isArray(messages) ? messages : []).map((m) => {
+    if (!m || typeof m !== 'object') return m;
+
+    if (normalizeTools) {
+      if (m.role === 'tool') {
+        const toolText = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
+        return { role: 'user', content: `[DATA HASIL PENELUSURAN ALAT / TOOL]:\n${toolText}` };
+      }
+      if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+        const textContent = m.content || '[Mengeksekusi alat penelusuran otonom]';
+        const baseM = { role: 'assistant', content: textContent };
+        if (includeReasoningPrior) {
+          baseM.reasoning_content = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${String(textContent).slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+        }
+        return baseM;
+      }
+    }
+
+    const imgs = Array.isArray(m.images) ? m.images : (m.image ? [m.image] : []);
+    const cleanMsg = { ...m };
+    delete cleanMsg.images;
+    delete cleanMsg.image;
+
+    if (includeReasoningPrior && cleanMsg.role === 'assistant') {
+      const rawTxt = typeof cleanMsg.content === 'string' ? cleanMsg.content : '';
+      cleanMsg.reasoning_content = cleanMsg.reasoning || cleanMsg.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${rawTxt.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+    }
+
+    if (imgs.length > 0 && cleanMsg.role === 'user' && !Array.isArray(cleanMsg.content)) {
+      const rawContent = typeof cleanMsg.content === 'string' ? cleanMsg.content : '';
+      const textPart = { type: 'text', text: rawContent || 'Analisis gambar ini.' };
+      const imageParts = imgs.map((img) => {
+        let url = img;
+        if (typeof img === 'string' && !img.startsWith('data:image') && !img.startsWith('http://') && !img.startsWith('https://')) {
+          url = `data:image/webp;base64,${img}`;
+        }
+        return { type: 'image_url', image_url: { url } };
+      });
+      cleanMsg.content = [textPart, ...imageParts];
+    }
+
+    return cleanMsg;
+  });
+
+  const normalized = [];
+  for (const msg of mapped) {
+    if (!msg) continue;
+    const prev = normalized[normalized.length - 1];
+    if (prev && prev.role === 'user' && msg.role === 'user' && typeof prev.content === 'string' && typeof msg.content === 'string') {
+      prev.content = `${prev.content}\n\n${msg.content}`;
+    } else {
+      normalized.push(msg);
+    }
+  }
+  return normalized;
+}
+
 // ==================== GLOBAL SEARCH & ENGLISH QUERY ADAPTER ====================
 // Memastikan kueri pencarian otonom menjangkau indeks internasional/global
 // dan mengonversi topik pengguna berbahasa Indonesia menjadi kata kunci pencarian bahasa Inggris global.
@@ -2807,6 +2871,13 @@ function fetchYouTubeSearchResults(query, limit = 5) {
                   const channel = vr.ownerText?.runs?.map(r => r.text).join('') || vr.longBylineText?.runs?.map(r => r.text).join('') || '';
                   const duration = vr.lengthText?.simpleText || '';
                   const views = vr.viewCountText?.simpleText || '';
+                  const publishedText = vr.publishedTimeText?.simpleText || '';
+                  const descRuns = vr.detailedMetadataSnippets?.[0]?.snippetText?.runs
+                    || vr.descriptionSnippet?.runs
+                    || [];
+                  const description = decodeHtmlEntities(
+                    Array.isArray(descRuns) ? descRuns.map(r => r.text || '').join('') : ''
+                  ).slice(0, 600);
                   const thumb = vr.thumbnail?.thumbnails?.[0]?.url || (`https://i.ytimg.com/vi/${vr.videoId}/hqdefault.jpg`);
                   results.push({
                     platform: 'YouTube',
@@ -2816,6 +2887,8 @@ function fetchYouTubeSearchResults(query, limit = 5) {
                     channel,
                     duration,
                     views,
+                    publishedText,
+                    description,
                     thumbnail: thumb
                   });
                   if (results.length >= limit) break;
@@ -2919,15 +2992,19 @@ function fetchArchiveOrgSearchResults(query, limit = 5) {
         try {
           const json = JSON.parse(data);
           const docs = json?.response?.docs || [];
-          const results = docs.map(doc => ({
-            platform: 'Archive.org',
-            videoId: doc.identifier,
-            url: `https://archive.org/details/${doc.identifier}`,
-            title: decodeHtmlEntities(doc.title || doc.identifier),
-            channel: 'Internet Archive',
-            duration: doc.duration || '',
-            views: ''
-          }));
+          const results = docs.map(doc => {
+            const rawDesc = Array.isArray(doc.description) ? doc.description.join(' ') : (doc.description || '');
+            return {
+              platform: 'Archive.org',
+              videoId: doc.identifier,
+              url: `https://archive.org/details/${doc.identifier}`,
+              title: decodeHtmlEntities(doc.title || doc.identifier),
+              channel: 'Internet Archive',
+              duration: doc.duration || '',
+              views: '',
+              description: cleanHtmlText(rawDesc).slice(0, 600)
+            };
+          });
           resolve(results);
         } catch (_) {
           resolve([]);
@@ -2945,7 +3022,7 @@ function fetchDailymotionSearchResults(query, limit = 5) {
   const cleanQ = String(query || '').trim();
   if (!cleanQ) return Promise.resolve([]);
   const targetUrl = 'https://api.dailymotion.com/videos?search=' + encodeURIComponent(cleanQ) +
-    '&fields=id,title,channel,duration,views_total,thumbnail_url,url&limit=' + safeLimit;
+    '&fields=id,title,description,channel,duration,views_total,thumbnail_url,url&limit=' + safeLimit;
   return new Promise((resolve) => {
     const req = https.get(targetUrl, {
       headers: {
@@ -2975,6 +3052,7 @@ function fetchDailymotionSearchResults(query, limit = 5) {
               channel: item.channel || 'Dailymotion',
               duration: durationStr,
               views: item.views_total ? `${item.views_total} views` : '',
+              description: cleanHtmlText(item.description || '').slice(0, 600),
               thumbnail: item.thumbnail_url || ''
             };
           });
@@ -3106,6 +3184,29 @@ async function searchRelatedVideos({ videoUrl = '', query = '', platform = 'auto
 
   if (videos.length === 0 && !isAdultIntent && detectedPlatform !== 'youtube') {
     videos = await fetchYouTubeSearchResults(searchTerms, safeLimit);
+  }
+
+  // Enrich top YouTube video results with full description/synopsis so AI can explain video contents accurately
+  const enrichTargets = videos
+    .filter(v => v && v.platform === 'YouTube' && v.url && (!v.description || v.description.length < 120))
+    .slice(0, 3);
+  if (enrichTargets.length > 0) {
+    await Promise.allSettled(enrichTargets.map(async (v) => {
+      try {
+        const info = await Promise.race([
+          fetchYouTubeInfo(v.url),
+          new Promise(resolve => setTimeout(() => resolve(null), 2600))
+        ]);
+        if (info && info.success) {
+          if (info.description && info.description.length > String(v.description || '').length) {
+            v.description = cleanHtmlText(info.description).slice(0, 900);
+          }
+          if (!v.duration && info.durationText) v.duration = info.durationText;
+          if (!v.channel && info.channel) v.channel = info.channel;
+          if (!v.views && info.views) v.views = info.views;
+        }
+      } catch (_) {}
+    }));
   }
 
   const resultData = {
@@ -3579,14 +3680,17 @@ function resolveParentSessionId(sid) {
 function isInternalSystemPayload(text) {
   if (!text || typeof text !== 'string') return false;
   const trimmed = text.trim();
-  return trimmed.startsWith('[DATA HASIL PENELUSURAN INTERNAL]') ||
+  return trimmed.startsWith('[DATA HASIL PENELUSURAN') ||
+         trimmed.startsWith('[DATA PENELUSURAN FAKTA]') ||
          trimmed.startsWith('[HASIL prepare_image_display') ||
          trimmed.startsWith('[HASIL search_images') ||
          trimmed.startsWith('[HASIL ') ||
          trimmed.startsWith('[INSTRUKSI PENYAJIAN JAWABAN AKHIR]') ||
+         trimmed.startsWith('[PANDUAN SINTESIS') ||
          trimmed.startsWith('[SPESIFIKASI SINTESIS BUKTI') ||
          trimmed.startsWith('[ALUR VERIFIKASI VISUAL AKTIF]') ||
-         trimmed.startsWith('[HASIL EKSEKUSI TOOL]');
+         trimmed.startsWith('[HASIL EKSEKUSI TOOL]') ||
+         trimmed.startsWith('BATASAN DOMAIN KLAIM:');
 }
 
 // Defense-in-depth: Gerbang Nol-Informasi Shannon di sisi server (mencegah unconditioned prior collapse & halusinasi gambar)
@@ -11093,50 +11197,38 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           targetCloudModel.includes('r1')
         ));
 
-        // Multimodal Translation & Tool Normalization & Latent Reasoning Preservation:
-        // 1. Konversi skema images Ollama ke OpenRouter multimodal content parts.
-        // 2. Normalisasi pesan role: 'tool' dan assistant tool_calls untuk model yang tidak mendukung native function calling.
-        // 3. Rekonstruksi ruang keadaan laten (reasoning_content) pada pesan asisten untuk model Beam/Reflection agar template Jinja tidak gagal (HTTP 400).
-        const normalizedOrMessages = (body.messages || []).map(m => {
-          if (!m) return m;
-
-          if (isNonToolModel) {
-            if (m.role === 'tool') {
-              const toolText = (typeof m.content === 'string') ? m.content : JSON.stringify(m.content || '');
-              return { role: 'user', content: `[DATA HASIL PENELUSURAN ALAT / TOOL]:\n${toolText}` };
-            }
-            if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-              const textContent = m.content || `[Mengeksekusi alat penelusuran otonom]`;
-              const baseM = { role: 'assistant', content: textContent };
-              if (isBeamOrReasoning) {
-                baseM.reasoning_content = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${textContent.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+        sessionId = sanitizeTaskKey(body.sessionId || req.headers['x-session-id'] || null);
+        delete body.sessionId;
+        if (sessionId) {
+          if (dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].status === 'streaming') {
+            try {
+              if (dbActiveChatTasks[sessionId].proxyReq && !dbActiveChatTasks[sessionId].proxyReq.destroyed) {
+                dbActiveChatTasks[sessionId].proxyReq.destroy();
               }
-              return baseM;
-            }
+            } catch (_) {}
+            delete dbActiveChatTasks[sessionId];
           }
+          dbActiveChatTasks[sessionId] = {
+            sessionId,
+            userId: reqUserId,
+            model: body.model || targetCloudModel,
+            provider: 'ollama',
+            userPrompt: null,
+            userImages: null,
+            fullText: '',
+            fullBytes: 0,
+            fullEpoch: 0,
+            rawBuffer: '',
+            status: 'streaming',
+            startedAt: Date.now(),
+            proxyReq: null
+          };
+        }
 
-          if (m.role === 'assistant' && isBeamOrReasoning) {
-            const rawContent = (typeof m.content === 'string') ? m.content : '';
-            const latentPrior = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${rawContent.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
-            return { ...m, reasoning_content: latentPrior };
-          }
-
-          const imgs = Array.isArray(m.images) ? m.images : (m.image ? [m.image] : []);
-          if (imgs.length > 0 && m.role === 'user') {
-            const rawContent = (typeof m.content === 'string') ? m.content : '';
-            const textPart = { type: 'text', text: rawContent || 'Analisis gambar ini.' };
-            const imageParts = imgs.map(img => {
-              let url = img;
-              if (typeof img === 'string') {
-                if (!img.startsWith('data:image') && !img.startsWith('http://') && !img.startsWith('https://')) {
-                  url = `data:image/webp;base64,${img}`;
-                }
-              }
-              return { type: 'image_url', image_url: { url } };
-            });
-            return { ...m, content: [textPart, ...imageParts] };
-          }
-          return m;
+        // Multimodal Translation, Tool Normalization & Latent Reasoning Preservation
+        const normalizedOrMessages = normalizeMessagesForOpenRouter(body.messages, {
+          normalizeTools: isNonToolModel,
+          includeReasoningPrior: isBeamOrReasoning
         });
 
         const isDenseModel = Boolean(targetCloudModel && (
@@ -11174,12 +11266,44 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
         const isStream = body.stream !== false;
         let activeBridgeReq = null;
+        let clientDisconnected = false;
 
-        req.on('close', () => {
-          if (!res.writableEnded && activeBridgeReq) {
+        res.on('close', () => {
+          if (res.writableEnded) return;
+          clientDisconnected = true;
+          if (!sessionId && activeBridgeReq && !activeBridgeReq.destroyed) {
             try { activeBridgeReq.destroy(); } catch (_) {}
           }
         });
+
+        const writeBridgeNdjson = (obj) => {
+          const line = JSON.stringify(obj) + '\n';
+          if (sessionId) accumulateChatChunk(sessionId, line, 'ollama');
+          if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+            try { res.write(line); } catch (_) {}
+          }
+        };
+
+        const finalizeBridgeTask = (errMsg = null) => {
+          if (!sessionId || !dbActiveChatTasks[sessionId]) return;
+          if (dbActiveChatTasks[sessionId].status === 'aborted') {
+            delete dbActiveChatTasks[sessionId];
+            return;
+          }
+          if (errMsg) {
+            markChatTaskInterrupted(sessionId, errMsg);
+            return;
+          }
+          flushChatTaskBuffer(sessionId, 'ollama');
+          const task = dbActiveChatTasks[sessionId];
+          task.status = 'completed';
+          task.completedAt = Date.now();
+          if (task.fullText && task.fullText.trim()) {
+            appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model)
+              .catch(err => console.warn('Gagal simpan respons bridge ke sesi:', err && err.message));
+          }
+          delete dbActiveChatTasks[sessionId];
+        };
 
         const executeBridgeRequest = (payload, retryCount = 0) => {
           const postData = JSON.stringify(payload);
@@ -11202,25 +11326,27 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           };
 
           const bridgeReq = https.request(reqOptions, (bridgeRes) => {
+            if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+              delete dbActiveChatTasks[sessionId];
+              if (!bridgeReq.destroyed) try { bridgeReq.destroy(); } catch (_) {}
+              return;
+            }
             const bStatus = bridgeRes.statusCode || 200;
             if (bStatus >= 400) {
               let errBuf = '';
               bridgeRes.on('data', chunk => errBuf += chunk);
               bridgeRes.on('end', () => {
-                if (res.writableEnded) return;
+                if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+                  delete dbActiveChatTasks[sessionId];
+                  return;
+                }
                 try {
                   const parsed = JSON.parse(errBuf);
                   const msg = parsed?.error?.message || parsed?.error || `OpenRouter bridge error: HTTP ${bStatus}`;
                   // Auto-Recovery Missing Reasoning on Jinja Template (Beam / Reflection)
                   if (bStatus === 400 && /missing its reasoning|allow_missing_thinking/i.test(msg) && retryCount <= 1) {
                     console.log(`[Ollama Cloud Bridge Auto-Recovery] Model ${payload.model} template missing reasoning. Injeksi reasoning_content...`);
-                    payload.messages = payload.messages.map(m => {
-                      if (m && m.role === 'assistant') {
-                        const txt = (typeof m.content === 'string') ? m.content : '';
-                        return { ...m, reasoning_content: m.reasoning_content || m.reasoning || `Evaluasi analitis dan penalaran konseptual: ${txt.slice(0, 150).replace(/[\r\n]+/g, ' ')}` };
-                      }
-                      return m;
-                    });
+                    payload.messages = normalizeMessagesForOpenRouter(payload.messages, { includeReasoningPrior: true });
                     return executeBridgeRequest(payload, retryCount + 1);
                   }
                   // Auto-Recovery HTTP 402: kalibrasi kapasitas token reservation
@@ -11239,6 +11365,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                     payload.max_tokens = Math.min(payload.max_tokens || 8192, 8192);
                     return executeBridgeRequest(payload, retryCount + 1);
                   }
+                  if (sessionId) delete dbActiveChatTasks[sessionId];
+                  if (clientDisconnected || res.writableEnded) return;
                   if (isStream) {
                     res.writeHead(200, {
                       'Content-Type': 'application/x-ndjson; charset=utf-8',
@@ -11252,6 +11380,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                     sendJSON(res, bStatus, { error: msg });
                   }
                 } catch (_) {
+                  if (sessionId) delete dbActiveChatTasks[sessionId];
+                  if (clientDisconnected || res.writableEnded) return;
                   if (isStream) {
                     res.writeHead(200, {
                       'Content-Type': 'application/x-ndjson; charset=utf-8',
@@ -11269,7 +11399,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               return;
             }
 
-            if (isStream) {
+            if (isStream && !clientDisconnected && !res.headersSent && !res.writableEnded) {
               res.writeHead(200, {
                 'Content-Type': 'application/x-ndjson; charset=utf-8',
                 'Cache-Control': 'no-cache',
@@ -11282,6 +11412,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               let rawResp = '';
               bridgeRes.on('data', chunk => rawResp += chunk);
               bridgeRes.on('end', () => {
+                if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+                  delete dbActiveChatTasks[sessionId];
+                  return;
+                }
                 try {
                   const parsed = JSON.parse(rawResp);
                   const txt = parsed.choices?.[0]?.message?.content || '';
@@ -11293,14 +11427,22 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   if (parsed.choices?.[0]?.message?.tool_calls) {
                     msgPayload.tool_calls = parsed.choices[0].message.tool_calls;
                   }
-                  sendJSON(res, 200, {
+                  const finalObj = {
                     model: body.model || 'qwen2.5:1.5b',
                     created_at: new Date().toISOString(),
                     message: msgPayload,
                     done: true
-                  });
+                  };
+                  if (sessionId) accumulateChatChunk(sessionId, JSON.stringify(finalObj) + '\n', 'ollama');
+                  finalizeBridgeTask(null);
+                  if (!clientDisconnected && !res.writableEnded) {
+                    sendJSON(res, 200, finalObj);
+                  }
                 } catch (e) {
-                  sendJSON(res, 500, { error: 'Gagal memproses respon bridge: ' + e.message });
+                  if (sessionId) delete dbActiveChatTasks[sessionId];
+                  if (!clientDisconnected && !res.writableEnded) {
+                    sendJSON(res, 500, { error: 'Gagal memproses respon bridge: ' + e.message });
+                  }
                 }
               });
               return;
@@ -11322,22 +11464,23 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                     ? textSafety.extractFallbackConclusionFromUnclosedThought(accumulatedReasoning)
                     : accumulatedReasoning.slice(-800).trim();
                   if (fallback) {
-                    res.write(JSON.stringify({
+                    accumulatedContent += fallback;
+                    writeBridgeNdjson({
                       model: body.model || 'qwen2.5:1.5b',
                       created_at: new Date().toISOString(),
                       message: { role: 'assistant', content: fallback },
                       done: false
-                    }) + '\n');
+                    });
                   }
                 }
                 sentDone = true;
-                res.write(JSON.stringify({
+                writeBridgeNdjson({
                   model: body.model || 'qwen2.5:1.5b',
                   created_at: new Date().toISOString(),
                   message: { role: 'assistant', content: '' },
                   done: true,
                   done_reason: lastFinishReason || 'stop'
-                }) + '\n');
+                });
                 return;
               }
               try {
@@ -11353,12 +11496,12 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   const msgPayload = { role: 'assistant', content: delta };
                   if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
                   if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
-                  res.write(JSON.stringify({
+                  writeBridgeNdjson({
                     model: body.model || 'qwen2.5:1.5b',
                     created_at: new Date().toISOString(),
                     message: msgPayload,
                     done: false
-                  }) + '\n');
+                  });
                 }
               } catch (_) {}
             };
@@ -11373,6 +11516,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             });
 
             bridgeRes.on('end', () => {
+              if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+                delete dbActiveChatTasks[sessionId];
+                return;
+              }
               sseBuffer += bridgeDecoder.end();
               if (sseBuffer && sseBuffer.trim()) {
                 processBridgeLine(sseBuffer);
@@ -11382,38 +11529,43 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   ? textSafety.extractFallbackConclusionFromUnclosedThought(accumulatedReasoning)
                   : accumulatedReasoning.slice(-800).trim();
                 if (fallback) {
-                  res.write(JSON.stringify({
+                  accumulatedContent += fallback;
+                  writeBridgeNdjson({
                     model: body.model || 'qwen2.5:1.5b',
                     created_at: new Date().toISOString(),
                     message: { role: 'assistant', content: fallback },
                     done: false
-                  }) + '\n');
+                  });
                 }
               }
-              if (!res.writableEnded) {
-                if (!sentDone) {
-                  res.write(JSON.stringify({
-                    model: body.model || 'qwen2.5:1.5b',
-                    created_at: new Date().toISOString(),
-                    message: { role: 'assistant', content: '' },
-                    done: true,
-                    done_reason: lastFinishReason || 'incomplete'
-                  }) + '\n');
-                }
-                res.end();
+              if (!sentDone) {
+                writeBridgeNdjson({
+                  model: body.model || 'qwen2.5:1.5b',
+                  created_at: new Date().toISOString(),
+                  message: { role: 'assistant', content: '' },
+                  done: true,
+                  done_reason: lastFinishReason || 'incomplete'
+                });
+              }
+              finalizeBridgeTask(null);
+              if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                try { res.end(); } catch (_) {}
               }
             });
           });
 
           bridgeReq.on('error', (err) => {
-            if (!res.writableEnded) {
+            finalizeBridgeTask(err.message || 'Bridge network error');
+            if (!clientDisconnected && !res.writableEnded) {
               if (isStream) {
-                res.writeHead(200, {
-                  'Content-Type': 'application/x-ndjson; charset=utf-8',
-                  'Cache-Control': 'no-cache',
-                  'Connection': 'keep-alive',
-                  'Access-Control-Allow-Origin': '*'
-                });
+                if (!res.headersSent) {
+                  res.writeHead(200, {
+                    'Content-Type': 'application/x-ndjson; charset=utf-8',
+                    'Cache-Control': 'no-cache',
+                    'Connection': 'keep-alive',
+                    'Access-Control-Allow-Origin': '*'
+                  });
+                }
                 res.write(JSON.stringify({ error: 'Bridge network error: ' + err.message }) + '\n');
                 res.end();
               } else {
@@ -11423,6 +11575,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           });
 
           activeBridgeReq = bridgeReq;
+          if (sessionId && dbActiveChatTasks[sessionId]) {
+            dbActiveChatTasks[sessionId].proxyReq = bridgeReq;
+          }
           bridgeReq.write(postData);
           bridgeReq.end();
         };
@@ -12406,20 +12561,16 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       // Defense-in-depth: Kalibrasi Deduksi Proposisional & Bayesian di Sisi Server (OpenRouter)
       applyServerSideDecisionCalibration(body, 'openrouter');
 
-      // Rekonstruksi ruang keadaan laten (reasoning_content) pada pesan asisten untuk model Beam/Reflection
+      // Rekonstruksi ruang keadaan laten (reasoning_content) & sinkronisasi pesan tool saat tools dihapus
       const isBeamOrReasoningReq = Boolean(body.model && (
         body.model.includes('beam') ||
         body.model.includes('reflection') ||
         body.model.includes('r1')
       ));
-      if (Array.isArray(body.messages) && isBeamOrReasoningReq) {
-        body.messages = body.messages.map(m => {
-          if (m && m.role === 'assistant') {
-            const rawTxt = (typeof m.content === 'string') ? m.content : '';
-            const latentPrior = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${rawTxt.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
-            return { ...m, reasoning_content: latentPrior };
-          }
-          return m;
+      if (Array.isArray(body.messages)) {
+        body.messages = normalizeMessagesForOpenRouter(body.messages, {
+          normalizeTools: !body.tools,
+          includeReasoningPrior: isBeamOrReasoningReq
         });
       }
 

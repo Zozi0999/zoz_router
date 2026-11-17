@@ -103,6 +103,69 @@ function mapOllamaModelToOpenRouter(modelId) {
   return 'openrouter/free';
 }
 
+/**
+ * Normalizes message history for OpenRouter completions: strips non-standard
+ * Ollama image keys, converts image attachments to multimodal parts, and
+ * converts tool turns when target model or request disallows native tools.
+ */
+function normalizeMessagesForOpenRouter(messages, { normalizeTools = false, includeReasoningPrior = false } = {}) {
+  const mapped = (Array.isArray(messages) ? messages : []).map((m) => {
+    if (!m || typeof m !== 'object') return m;
+
+    if (normalizeTools) {
+      if (m.role === 'tool') {
+        const toolText = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
+        return { role: 'user', content: `[DATA HASIL PENELUSURAN ALAT / TOOL]:\n${toolText}` };
+      }
+      if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+        const textContent = m.content || '[Mengeksekusi alat penelusuran otonom]';
+        const baseM = { role: 'assistant', content: textContent };
+        if (includeReasoningPrior) {
+          baseM.reasoning_content = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${String(textContent).slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+        }
+        return baseM;
+      }
+    }
+
+    const imgs = Array.isArray(m.images) ? m.images : (m.image ? [m.image] : []);
+    const cleanMsg = { ...m };
+    delete cleanMsg.images;
+    delete cleanMsg.image;
+
+    if (includeReasoningPrior && cleanMsg.role === 'assistant') {
+      const rawTxt = typeof cleanMsg.content === 'string' ? cleanMsg.content : '';
+      cleanMsg.reasoning_content = cleanMsg.reasoning || cleanMsg.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${rawTxt.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+    }
+
+    if (imgs.length > 0 && cleanMsg.role === 'user' && !Array.isArray(cleanMsg.content)) {
+      const rawContent = typeof cleanMsg.content === 'string' ? cleanMsg.content : '';
+      const textPart = { type: 'text', text: rawContent || 'Analisis gambar ini.' };
+      const imageParts = imgs.map((img) => {
+        let url = img;
+        if (typeof img === 'string' && !img.startsWith('data:image') && !img.startsWith('http://') && !img.startsWith('https://')) {
+          url = `data:image/webp;base64,${img}`;
+        }
+        return { type: 'image_url', image_url: { url } };
+      });
+      cleanMsg.content = [textPart, ...imageParts];
+    }
+
+    return cleanMsg;
+  });
+
+  const normalized = [];
+  for (const msg of mapped) {
+    if (!msg) continue;
+    const prev = normalized[normalized.length - 1];
+    if (prev && prev.role === 'user' && msg.role === 'user' && typeof prev.content === 'string' && typeof msg.content === 'string') {
+      prev.content = `${prev.content}\n\n${msg.content}`;
+    } else {
+      normalized.push(msg);
+    }
+  }
+  return normalized;
+}
+
 // ==================== YOUTUBE LIVE SEARCH (ZERO API KEY) ====================
 const YT_SEARCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const YT_INVIDIOUS = ['https://inv.nadeko.net', 'https://yewtu.be', 'https://invidious.nerdvpn.de'];
@@ -150,6 +213,7 @@ function ytMapVideoRenderer(vr) {
   const ownerNav = ownerRuns && ownerRuns[0] && ownerRuns[0].navigationEndpoint && ownerRuns[0].navigationEndpoint.browseEndpoint;
   const channelPath = ownerNav && ownerNav.canonicalBaseUrl;
   const durationText = ytTextOf(vr.lengthText);
+  const detailedDesc = (vr.detailedMetadataSnippets?.[0]?.snippetText && ytTextOf(vr.detailedMetadataSnippets[0].snippetText)) || ytTextOf(vr.descriptionSnippet) || '';
   return {
     videoId: vr.videoId,
     title,
@@ -159,7 +223,7 @@ function ytMapVideoRenderer(vr) {
     durationSeconds: ytDurationSeconds(durationText),
     viewText: ytTextOf(vr.viewCountText) || ytTextOf(vr.shortViewCountText),
     publishedText: ytTextOf(vr.publishedTimeText),
-    description: ytTextOf(vr.descriptionSnippet).slice(0, 260),
+    description: detailedDesc.slice(0, 600),
     url: `https://www.youtube.com/watch?v=${vr.videoId}`,
     thumbnail: `https://i.ytimg.com/vi/${vr.videoId}/hqdefault.jpg`,
     source: 'YouTube Search'
@@ -1177,51 +1241,10 @@ export default {
             targetModel.includes('r1')
           ));
 
-          // Multimodal Translation & Tool Normalization & Latent Reasoning Preservation:
-          // 1. Konversi skema images Ollama ke OpenRouter multimodal content parts.
-          // 2. Normalisasi pesan role: 'tool' dan assistant tool_calls untuk model yang tidak mendukung native function calling.
-          // 3. Rekonstruksi ruang keadaan laten (reasoning_content) pada pesan asisten untuk model Beam/Reflection agar template Jinja tidak gagal (HTTP 400).
-          const normalizedOrMessages = (body.messages || []).map(m => {
-            if (!m) return m;
-
-            // Jika model tidak mendukung native tools, terjemahkan pesan tool menjadi user turn agar tidak memicu HTTP 400
-            if (isNonToolModel) {
-              if (m.role === 'tool') {
-                const toolText = (typeof m.content === 'string') ? m.content : JSON.stringify(m.content || '');
-                return { role: 'user', content: `[DATA HASIL PENELUSURAN ALAT / TOOL]:\n${toolText}` };
-              }
-              if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-                const textContent = m.content || `[Mengeksekusi alat penelusuran otonom]`;
-                const baseM = { role: 'assistant', content: textContent };
-                if (isBeamOrReasoning) {
-                  baseM.reasoning_content = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${textContent.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
-                }
-                return baseM;
-              }
-            }
-
-            if (m.role === 'assistant' && isBeamOrReasoning) {
-              const rawContent = (typeof m.content === 'string') ? m.content : '';
-              const latentPrior = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${rawContent.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
-              return { ...m, reasoning_content: latentPrior };
-            }
-
-            const imgs = Array.isArray(m.images) ? m.images : (m.image ? [m.image] : []);
-            if (imgs.length > 0 && m.role === 'user') {
-              const rawContent = (typeof m.content === 'string') ? m.content : '';
-              const textPart = { type: 'text', text: rawContent || 'Analisis gambar ini.' };
-              const imageParts = imgs.map(img => {
-                let url = img;
-                if (typeof img === 'string') {
-                  if (!img.startsWith('data:image') && !img.startsWith('http://') && !img.startsWith('https://')) {
-                    url = `data:image/webp;base64,${img}`;
-                  }
-                }
-                return { type: 'image_url', image_url: { url } };
-              });
-              return { ...m, content: [textPart, ...imageParts] };
-            }
-            return m;
+          // Multimodal Translation, Tool Normalization & Latent Reasoning Preservation
+          const normalizedOrMessages = normalizeMessagesForOpenRouter(body.messages, {
+            normalizeTools: isNonToolModel,
+            includeReasoningPrior: isBeamOrReasoning
           });
 
           const isDenseModel = Boolean(targetModel && (
@@ -1776,6 +1799,7 @@ export default {
               reqModel = mapOllamaModelToOpenRouter(reqModel);
             }
             const isNemotronReq = reqModel.toLowerCase().includes('nemotron');
+            const isFreeReq = reqModel.includes(':free') || reqModel.endsWith('/free') || reqModel === 'openrouter/free';
             const isLiquid = reqModel.includes('liquid') || reqModel.includes('lfm-');
             // Hanya model OpenAI o-series dan DeepSeek R1 ketat yang menolak kustomisasi temperature di OpenRouter
             const isStrictReasoning = Boolean(reqModel && (/\/o[1-9]|\b(r1|deepseek-r)\b/i.test(reqModel) || reqModel.toLowerCase().includes('-r1')));
@@ -1785,17 +1809,14 @@ export default {
               reqModel.includes('r1')
             ));
 
-            let messagesReq = body.messages || [];
-            if (isBeamOrReasoningReq && Array.isArray(messagesReq)) {
-              messagesReq = messagesReq.map(m => {
-                if (m && m.role === 'assistant') {
-                  const rawTxt = (typeof m.content === 'string') ? m.content : '';
-                  const latentPrior = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${rawTxt.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
-                  return { ...m, reasoning_content: latentPrior };
-                }
-                return m;
-              });
-            }
+            const cleanTools = (!isNemotronReq && !isFreeReq && Array.isArray(body.tools))
+              ? body.tools.filter(t => t && t.type === 'function' && t.function && t.function.name)
+              : [];
+
+            const messagesReq = normalizeMessagesForOpenRouter(body.messages, {
+              normalizeTools: cleanTools.length === 0,
+              includeReasoningPrior: isBeamOrReasoningReq
+            });
 
             const isDenseModelOr = Boolean(reqModel && (
               reqModel.includes('beam') ||
@@ -1824,12 +1845,9 @@ export default {
             if (!isLiquid && !isStrictReasoning) {
               out.top_p = body.top_p ?? 0.9;
             }
-            if (!isNemotronReq && body.tools && Array.isArray(body.tools) && (!reqModel.includes(':free') && !reqModel.endsWith('/free') && reqModel !== 'openrouter/free')) {
-              const clean = body.tools.filter(t => t && t.type === 'function' && t.function && t.function.name);
-              if (clean.length > 0) {
-                out.tools = clean;
-                if (body.tool_choice) out.tool_choice = body.tool_choice;
-              }
+            if (cleanTools.length > 0) {
+              out.tools = cleanTools;
+              if (body.tool_choice) out.tool_choice = body.tool_choice;
             }
             return out;
           })())
@@ -2696,7 +2714,47 @@ export default {
         }
 
         const ranked = rankEdgeDocumentsMathematically(candidatePool, cleanQuery, profile, nowMs);
-        const results = ranked.slice(0, targetNum).map(it => ({
+        const topEdge = ranked.slice(0, targetNum);
+
+        // Perkaya konten teks halaman teratas (maks 3 URL non-Google-News-RSS) agar AI menerima isi faktual, bukan hanya judul/link
+        const enrichTargets = topEdge
+          .slice(0, 3)
+          .filter(it => it && it.url && /^https?:\/\//i.test(it.url) && !/news\.google\.com\/rss\/articles\//i.test(it.url) && String(it.content || '').length < 400);
+        if (enrichTargets.length > 0) {
+          await Promise.allSettled(enrichTargets.map(async (it) => {
+            try {
+              const pageRes = await fetch(it.url, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36', 'Accept': 'text/html,*/*;q=0.8' },
+                signal: AbortSignal.timeout(2500)
+              });
+              if (!pageRes.ok) return;
+              const ct = (pageRes.headers.get('content-type') || '').toLowerCase();
+              if (!ct.includes('text/html') && !ct.includes('text/plain')) return;
+              const rawHtml = await pageRes.text();
+              const mainMatch = rawHtml.match(/<(?:main|article)\b[^>]*>([\s\S]*?)<\/(?:main|article)>/i);
+              const targetHtml = (mainMatch && mainMatch[1] && mainMatch[1].length >= 250) ? mainMatch[1] : rawHtml;
+              const plain = targetHtml
+                .replace(/<head\b[\s\S]*?<\/head>/gi, ' ')
+                .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+                .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+                .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, ' ')
+                .replace(/<svg\b[\s\S]*?<\/svg>/gi, ' ')
+                .replace(/<(?:nav|header|footer|aside)\b[\s\S]*?<\/(?:nav|header|footer|aside)>/gi, ' ')
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Math.min(65535, Number(dec) || 32)))
+                .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(Math.min(65535, parseInt(hex, 16) || 32)))
+                .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+              if (plain.length > String(it.content || '').length) {
+                it.content = plain.slice(0, 3200);
+                if (!it.snippet || it.snippet.length < 80) it.snippet = plain.slice(0, 320);
+              }
+            } catch (_) {}
+          }));
+        }
+
+        const results = topEdge.map(it => ({
           title: it.title,
           url: it.url,
           domain: it.domain,
@@ -3141,7 +3199,7 @@ export default {
 
           if (isDailymotion || platform === 'all' || platform === 'auto') {
             try {
-              const dmRes = await fetch('https://api.dailymotion.com/videos?search=' + encodeURIComponent(effectiveQuery) + '&fields=id,title,channel,duration,views_total,thumbnail_url,url&limit=' + safeLimit, { signal: AbortSignal.timeout(5000) });
+              const dmRes = await fetch('https://api.dailymotion.com/videos?search=' + encodeURIComponent(effectiveQuery) + '&fields=id,title,description,channel,duration,views_total,thumbnail_url,url&limit=' + safeLimit, { signal: AbortSignal.timeout(5000) });
               if (dmRes.ok) {
                 const dmJson = await dmRes.json();
                 if (Array.isArray(dmJson.list)) {
@@ -3149,6 +3207,7 @@ export default {
                     const dur = parseInt(item.duration, 10);
                     const m = Math.floor(dur / 60);
                     const s = dur % 60;
+                    const cleanDesc = String(item.description || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
                     mapped.push({
                       platform: 'Dailymotion',
                       url: item.url || `https://www.dailymotion.com/video/${item.id}`,
@@ -3156,6 +3215,7 @@ export default {
                       channel: item.channel || 'Dailymotion',
                       duration: dur > 0 ? `${m}:${String(s).padStart(2, '0')}` : '',
                       views: item.views_total ? `${item.views_total} views` : '',
+                      description: cleanDesc.slice(0, 600),
                       thumbnail: item.thumbnail_url || ''
                     });
                   });
@@ -3175,6 +3235,8 @@ export default {
                 channel: v.channel,
                 duration: v.durationText || '',
                 views: v.viewText || '',
+                publishedText: v.publishedText || '',
+                description: v.description || '',
                 thumbnail: v.thumbnail || ''
               })) : [];
               mapped = mapped.concat(ytMapped);
@@ -3188,6 +3250,8 @@ export default {
                 const archJson = await archRes.json();
                 const docs = archJson?.response?.docs || [];
                 docs.forEach(doc => {
+                  const rawDesc = Array.isArray(doc.description) ? doc.description.join(' ') : (doc.description || '');
+                  const cleanDesc = String(rawDesc).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
                   mapped.push({
                     platform: 'Archive.org',
                     videoId: doc.identifier,
@@ -3195,7 +3259,8 @@ export default {
                     title: doc.title || doc.identifier,
                     channel: 'Internet Archive',
                     duration: doc.duration || '',
-                    views: ''
+                    views: '',
+                    description: cleanDesc.slice(0, 600)
                   });
                 });
               }

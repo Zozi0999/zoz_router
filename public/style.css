@@ -1408,7 +1408,10 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  width: 290px;
+  width: 300px;
+  max-width: calc(100vw - 20px);
+  max-height: min(76vh, 620px);
+  overflow-y: auto;
   background: rgba(13, 18, 30, 0.96);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -1418,6 +1421,18 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   z-index: 1050;
   padding: 8px;
   animation: fadeInDown 0.15s ease-out;
+}
+
+@media (max-width: 480px) {
+  .model-options-popup {
+    position: fixed;
+    top: 52px;
+    left: 10px;
+    right: 10px;
+    width: auto;
+    max-width: none;
+    max-height: calc(100dvh - 68px);
+  }
 }
 
 .model-options-header {
@@ -13492,8 +13507,10 @@ body.page-paused *::after {
 .message-bubble.has-mermaid-fullscreen,
 .message-bubble:has(.mermaid-fullscreen),
 .chat-messages:has(.mermaid-fullscreen),
+.chat-messages-container:has(.mermaid-fullscreen),
 .chat-viewport:has(.mermaid-fullscreen),
 .chat-main:has(.mermaid-fullscreen),
+.main-content:has(.mermaid-fullscreen),
 .app-container:has(.mermaid-fullscreen) {
   content-visibility: visible !important;
   contain: none !important;
@@ -20042,6 +20059,663 @@ svg.lucide,
   font-weight: 500;
   cursor: pointer;
 }
+
+/* =========================================================================
+   AI CHAT FRUIT & NATURE THEMES + TOP-BAR THEME PICKER (v20261117_v788)
+   ========================================================================= */
+
+.ai-theme-picker-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.model-options-theme-section {
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.action-item-icon.theme-icon-box {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.action-item-badge.theme-active-badge {
+  background: rgba(16, 185, 129, 0.16);
+  color: #6ee7b7;
+  border: 1px solid rgba(52, 211, 153, 0.35);
+}
+
+.ai-theme-submenu-trigger {
+  align-items: center;
+}
+
+#btnAiChatTheme.is-nature-active {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(52, 211, 153, 0.28);
+}
+
+.ai-theme-chevron {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  flex-shrink: 0;
+  transition: transform 0.18s ease, color 0.18s ease;
+}
+
+#btnAiChatTheme[aria-expanded="true"] .ai-theme-chevron {
+  transform: rotate(180deg);
+  color: #6ee7b7;
+}
+
+.ai-chat-theme-menu {
+  position: static;
+  width: 100%;
+  margin-top: 4px;
+  background: rgba(6, 10, 18, 0.78);
+  border: 1px solid rgba(52, 211, 153, 0.24);
+  border-radius: 10px;
+  padding: 5px;
+  display: none;
+  flex-direction: column;
+  gap: 3px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.ai-chat-theme-menu-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px 6px;
+  font-size: 0.73rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #6ee7b7;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 3px;
+}
+
+.ai-chat-theme-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #e2e8f0;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.ai-chat-theme-option:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ai-chat-theme-option.active {
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(52, 211, 153, 0.42);
+}
+
+.ai-theme-swatch-pair {
+  width: 30px;
+  height: 22px;
+  border-radius: 7px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.ai-theme-opt-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.ai-theme-opt-text strong {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #f8fafc;
+  line-height: 1.25;
+}
+
+.ai-theme-opt-text small {
+  font-size: 0.68rem;
+  color: #94a3b8;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-theme-check {
+  font-size: 0.75rem;
+  color: #34d399;
+  opacity: 0;
+  flex-shrink: 0;
+}
+
+.ai-chat-theme-option.active .ai-theme-check {
+  opacity: 1;
+}
+
+/* Base Design Tokens for Botanical Fruit & Nature AI Chat Container */
+#mainContent.ai-nature-themed {
+  --nature-bg: #051610;
+  --nature-motif-color: rgba(52, 211, 153, 0.12);
+  --nature-motif-opacity: 0.9;
+  --nature-out-bg: #047857;
+  --nature-out-grad: linear-gradient(135deg, #065f46 0%, #059669 100%);
+  --nature-out-border: rgba(110, 231, 183, 0.34);
+  --nature-out-fg: #f0fdf4;
+  --nature-in-bg: #0b2219;
+  --nature-in-border: rgba(52, 211, 153, 0.24);
+  --nature-in-fg: #ecfdf5;
+  --nature-meta-fg: #86efac;
+  --nature-badge-bg: rgba(16, 185, 129, 0.14);
+  --nature-badge-fg: #6ee7b7;
+  --nature-avatar-bg: linear-gradient(135deg, #10b981, #059669);
+  --nature-avatar-user-bg: linear-gradient(135deg, #34d399, #10b981);
+  --nature-avatar-fg: #052e16;
+  --nature-accent: #10b981;
+  --nature-accent-fg: #052e16;
+  --nature-composer-bg: rgba(9, 28, 22, 0.92);
+  --nature-composer-border: rgba(52, 211, 153, 0.3);
+  --nature-composer-fg: #ecfdf5;
+  --nature-composer-placeholder: #86efac;
+  --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M32 34c-6-3-13 1-14 9-1 9 6 19 12 19 2 0 3-1 4-1s2 1 4 1c6 0 13-10 12-19-1-8-8-12-14-9-2 1-2 1-4 0z'/%3E%3Cpath d='M34 33c0-4 2-7 5-8'/%3E%3Cpath d='M35 28c4-3 8-2 9 1-4 2-7 1-9-1z'/%3E%3Ccircle cx='122' cy='38' r='13'/%3E%3Cpath d='M122 25v26M109 38h26M113 29l18 18M131 29l-18 18'/%3E%3Cpath d='M42 110c-5 7-2 18 6 20 8 2 14-6 13-15-1-7-13-13-19-5z'/%3E%3Cpath d='M44 106c-2-3 1-6 4-5 2-3 6-2 6 1 3-1 5 2 3 5'/%3E%3Ccircle cx='128' cy='108' r='4.5'/%3E%3Ccircle cx='138' cy='108' r='4.5'/%3E%3Ccircle cx='133' cy='116' r='4.5'/%3E%3Ccircle cx='124' cy='116' r='4.5'/%3E%3Ccircle cx='142' cy='116' r='4.5'/%3E%3Ccircle cx='133' cy='124' r='4.5'/%3E%3Cpath d='M133 103v-6c3-2 7-2 9 0'/%3E%3Cpath d='M86 64c9-10 24-6 24 6-1 12-16 18-24 10 2-6 4-11 0-16z'/%3E%3Cpath d='M86 80l12-10'/%3E%3Ccircle cx='88' cy='144' r='3'/%3E%3Cpath d='M88 136c3 0 5 3 3 5M96 144c0 3-3 5-5 3M88 152c-3 0-5-3-3-5M80 144c0-3 3-5 5-3'/%3E%3C/g%3E%3C/svg%3E");
+  background-color: var(--nature-bg) !important;
+  position: relative;
+}
+
+#mainContent.ai-nature-themed::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--nature-motif-opacity);
+  background-color: var(--nature-motif-color);
+  -webkit-mask-image: var(--nature-motif-svg);
+  mask-image: var(--nature-motif-svg);
+  -webkit-mask-size: 180px 180px;
+  mask-size: 180px 180px;
+  -webkit-mask-repeat: repeat;
+  mask-repeat: repeat;
+  z-index: 0;
+}
+
+#mainContent.ai-nature-themed > #chatViewport {
+  position: relative;
+  z-index: 1;
+}
+
+#mainContent.ai-nature-themed > footer {
+  position: relative;
+  z-index: 5;
+}
+
+/* Variant 1: Senja Mangga & Jeruk (Warm Citrus Tropis) */
+#mainContent.ai-nature-themed[data-ai-chat-theme="mango-citrus"] {
+  --nature-bg: #1b0f07;
+  --nature-motif-color: rgba(251, 146, 60, 0.14);
+  --nature-out-bg: #c2410c;
+  --nature-out-grad: linear-gradient(135deg, #c2410c 0%, #ea580c 100%);
+  --nature-out-border: rgba(253, 186, 116, 0.42);
+  --nature-out-fg: #fff7ed;
+  --nature-in-bg: #26150b;
+  --nature-in-border: rgba(251, 146, 60, 0.28);
+  --nature-in-fg: #fef3c7;
+  --nature-meta-fg: #fdba74;
+  --nature-badge-bg: rgba(245, 158, 11, 0.16);
+  --nature-badge-fg: #fcd34d;
+  --nature-avatar-bg: linear-gradient(135deg, #f59e0b, #d97706);
+  --nature-avatar-user-bg: linear-gradient(135deg, #fb923c, #ea580c);
+  --nature-avatar-fg: #1c0f06;
+  --nature-accent: #f59e0b;
+  --nature-accent-fg: #090d16;
+  --nature-composer-bg: rgba(38, 21, 11, 0.94);
+  --nature-composer-border: rgba(251, 146, 60, 0.34);
+  --nature-composer-fg: #fffbeb;
+  --nature-composer-placeholder: #fdba74;
+  background-color: #1b0f07 !important;
+  background-image:
+    radial-gradient(ellipse 65% 45% at 15% 15%, rgba(251, 146, 60, 0.16), transparent 65%),
+    radial-gradient(ellipse 55% 45% at 85% 80%, rgba(245, 158, 11, 0.12), transparent 65%),
+    linear-gradient(180deg, #1b0f07 0%, #140b05 100%) !important;
+}
+
+/* Variant 2: Taman Stroberi & Sakura */
+#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] {
+  --nature-bg: #1a0912;
+  --nature-motif-color: rgba(244, 114, 182, 0.14);
+  --nature-out-bg: #be185d;
+  --nature-out-grad: linear-gradient(135deg, #9d174d 0%, #db2777 100%);
+  --nature-out-border: rgba(249, 168, 212, 0.4);
+  --nature-out-fg: #fff1f2;
+  --nature-in-bg: #260d1b;
+  --nature-in-border: rgba(244, 114, 182, 0.28);
+  --nature-in-fg: #fce7f3;
+  --nature-meta-fg: #f9a8d4;
+  --nature-badge-bg: rgba(236, 72, 153, 0.16);
+  --nature-badge-fg: #f9a8d4;
+  --nature-avatar-bg: linear-gradient(135deg, #ec4899, #be185d);
+  --nature-avatar-user-bg: linear-gradient(135deg, #f472b6, #db2777);
+  --nature-avatar-fg: #ffffff;
+  --nature-accent: #db2777;
+  --nature-accent-fg: #ffffff;
+  --nature-composer-bg: rgba(38, 13, 27, 0.94);
+  --nature-composer-border: rgba(244, 114, 182, 0.34);
+  --nature-composer-fg: #fff1f2;
+  --nature-composer-placeholder: #f9a8d4;
+  background-color: #1a0912 !important;
+  background-image:
+    radial-gradient(ellipse 65% 45% at 80% 18%, rgba(244, 114, 182, 0.16), transparent 65%),
+    radial-gradient(ellipse 60% 45% at 20% 82%, rgba(225, 29, 72, 0.12), transparent 65%),
+    linear-gradient(180deg, #1a0912 0%, #11050b 100%) !important;
+}
+
+/* Variant 3: Kebun Apel Pagi (Bright Botanical Leaf Light Mode, WCAG AA >= 4.5:1) */
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] {
+  --nature-bg: #f1f8ef;
+  --nature-motif-color: rgba(22, 163, 74, 0.12);
+  --nature-out-bg: #dcfce7;
+  --nature-out-grad: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+  --nature-out-border: rgba(21, 128, 61, 0.28);
+  --nature-out-fg: #052e16;
+  --nature-in-bg: #ffffff;
+  --nature-in-border: rgba(21, 128, 61, 0.18);
+  --nature-in-fg: #0f172a;
+  --nature-meta-fg: #3f6212;
+  --nature-badge-bg: rgba(22, 163, 74, 0.12);
+  --nature-badge-fg: #166534;
+  --nature-avatar-bg: linear-gradient(135deg, #16a34a, #15803d);
+  --nature-avatar-user-bg: linear-gradient(135deg, #22c55e, #15803d);
+  --nature-avatar-fg: #ffffff;
+  --nature-accent: #15803d;
+  --nature-accent-fg: #ffffff;
+  --nature-composer-bg: #ffffff;
+  --nature-composer-border: rgba(21, 128, 61, 0.24);
+  --nature-composer-fg: #0f172a;
+  --nature-composer-placeholder: #4b5563;
+  background-color: #f1f8ef !important;
+  background-image:
+    radial-gradient(ellipse 65% 45% at 15% 15%, rgba(134, 239, 172, 0.28), transparent 65%),
+    radial-gradient(ellipse 60% 45% at 85% 80%, rgba(254, 240, 138, 0.28), transparent 65%),
+    linear-gradient(180deg, #f4fbf2 0%, #e7f4e4 100%) !important;
+}
+
+/* Variant 4: Hutan Tropis & Anggur */
+#mainContent.ai-nature-themed[data-ai-chat-theme="emerald-forest"] {
+  --nature-bg: #04150f;
+  --nature-motif-color: rgba(52, 211, 153, 0.13);
+  --nature-out-bg: #047857;
+  --nature-out-grad: linear-gradient(135deg, #065f46 0%, #047857 100%);
+  --nature-out-border: rgba(110, 231, 183, 0.36);
+  --nature-out-fg: #ecfdf5;
+  --nature-in-bg: #092118;
+  --nature-in-border: rgba(52, 211, 153, 0.25);
+  --nature-in-fg: #ecfdf5;
+  --nature-meta-fg: #6ee7b7;
+  --nature-badge-bg: rgba(16, 185, 129, 0.16);
+  --nature-badge-fg: #6ee7b7;
+  --nature-avatar-bg: linear-gradient(135deg, #10b981, #047857);
+  --nature-avatar-user-bg: linear-gradient(135deg, #34d399, #059669);
+  --nature-avatar-fg: #052e16;
+  --nature-accent: #10b981;
+  --nature-accent-fg: #052e16;
+  --nature-composer-bg: rgba(9, 33, 24, 0.94);
+  --nature-composer-border: rgba(52, 211, 153, 0.32);
+  --nature-composer-fg: #ecfdf5;
+  --nature-composer-placeholder: #6ee7b7;
+  background-color: #04150f !important;
+  background-image:
+    radial-gradient(ellipse 65% 45% at 25% 20%, rgba(16, 185, 129, 0.16), transparent 65%),
+    radial-gradient(ellipse 55% 40% at 82% 82%, rgba(139, 92, 246, 0.1), transparent 65%),
+    linear-gradient(180deg, #04150f 0%, #030e0a 100%) !important;
+}
+
+/* Variant 5: Aurora Pegunungan & Samudra */
+#mainContent.ai-nature-themed[data-ai-chat-theme="aurora-mountain"] {
+  --nature-bg: #061321;
+  --nature-motif-color: rgba(94, 234, 212, 0.12);
+  --nature-out-bg: #0f766e;
+  --nature-out-grad: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
+  --nature-out-border: rgba(94, 234, 212, 0.38);
+  --nature-out-fg: #f0fdfa;
+  --nature-in-bg: #0b1b2e;
+  --nature-in-border: rgba(56, 189, 248, 0.25);
+  --nature-in-fg: #f1f5f9;
+  --nature-meta-fg: #7dd3fc;
+  --nature-badge-bg: rgba(20, 184, 166, 0.16);
+  --nature-badge-fg: #5eead4;
+  --nature-avatar-bg: linear-gradient(135deg, #14b8a6, #0284c7);
+  --nature-avatar-user-bg: linear-gradient(135deg, #2dd4bf, #0d9488);
+  --nature-avatar-fg: #042f2e;
+  --nature-accent: #14b8a6;
+  --nature-accent-fg: #042f2e;
+  --nature-composer-bg: rgba(11, 27, 46, 0.92);
+  --nature-composer-border: rgba(56, 189, 248, 0.3);
+  --nature-composer-fg: #f0fdfa;
+  --nature-composer-placeholder: #7dd3fc;
+  background-color: #061321 !important;
+  background-image:
+    linear-gradient(125deg, rgba(255, 255, 255, 0.04) 0%, transparent 32%),
+    radial-gradient(ellipse 70% 45% at 50% 10%, rgba(20, 184, 166, 0.22), transparent 65%),
+    linear-gradient(160deg, #042f2e 0%, #082f49 52%, #172554 100%) !important;
+}
+
+/* Welcome Hero Contrast Adaptation for Bright Kebun Apel Pagi */
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #welcomeHero .greeting-welcome {
+  color: #15803d !important;
+  text-shadow: none !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #welcomeHero .greeting-to,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #welcomeHero h2,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #welcomeHero h2 span:last-child {
+  color: #0f172a !important;
+  text-shadow: none !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #welcomeHero h2 span:first-child,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #welcomeHero p {
+  color: #166534 !important;
+  text-shadow: none !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #heroAutoRouterBtn {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border-color: rgba(21, 128, 61, 0.42) !important;
+  box-shadow: 0 3px 12px rgba(21, 128, 61, 0.1) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #heroAutoRouterStatus {
+  color: #3f6212 !important;
+}
+
+/* Message Row & Botanical Bubble Styling */
+#mainContent.ai-nature-themed .messages-list {
+  gap: 16px;
+}
+
+#mainContent.ai-nature-themed .message-row .message-avatar {
+  border-radius: 50%;
+  background: var(--nature-avatar-bg) !important;
+  color: var(--nature-avatar-fg) !important;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.24) !important;
+}
+
+#mainContent.ai-nature-themed .message-row.user .message-avatar {
+  background: var(--nature-avatar-user-bg) !important;
+}
+
+#mainContent.ai-nature-themed .message-row .message-meta {
+  color: var(--nature-meta-fg);
+}
+
+#mainContent.ai-nature-themed .message-row.user .message-meta {
+  color: var(--nature-meta-fg);
+}
+
+#mainContent.ai-nature-themed .message-row .meta-model-badge {
+  background: var(--nature-badge-bg);
+  color: var(--nature-badge-fg);
+  border: 1px solid var(--nature-in-border);
+}
+
+#mainContent.ai-nature-themed .message-row.user .message-bubble {
+  background-color: var(--nature-out-bg) !important;
+  background-image: var(--nature-out-grad) !important;
+  border: 1px solid var(--nature-out-border) !important;
+  color: var(--nature-out-fg) !important;
+  border-radius: 20px 20px 6px 20px !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18) !important;
+  padding: 13px 18px !important;
+}
+
+#mainContent.ai-nature-themed .message-row.assistant .message-bubble {
+  background-color: var(--nature-in-bg) !important;
+  background-image: none !important;
+  border: 1px solid var(--nature-in-border) !important;
+  color: var(--nature-in-fg) !important;
+  border-radius: 20px 20px 20px 6px !important;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.2) !important;
+  padding: 16px 20px !important;
+}
+
+/* Bright Botanical Contrast Safeguards (>= 4.5:1) for apple-orchard */
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble p,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble li,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble h1,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble h2,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble h3,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble h4,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble strong,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble b,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble td,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble th {
+  color: #0f172a !important;
+  border-color: rgba(21, 128, 61, 0.22) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble table th {
+  background: #dcfce7 !important;
+  color: #052e16 !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble table tbody tr:nth-child(even) {
+  background: rgba(21, 128, 61, 0.05) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.user .message-bubble p,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.user .message-bubble {
+  color: #052e16 !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble a {
+  color: #15803d !important;
+  text-decoration: underline;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble blockquote {
+  background: rgba(22, 163, 74, 0.08) !important;
+  border-left: 3px solid #15803d !important;
+  color: #0f172a !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble :not(pre) > code {
+  background: rgba(21, 128, 61, 0.1) !important;
+  color: #052e16 !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble pre,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble .code-block-wrapper {
+  background: #0f172a !important;
+  color: #e2e8f0 !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-bubble pre code {
+  color: #e2e8f0 !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-actions-bar .msg-action-btn {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(21, 128, 61, 0.22) !important;
+  color: #14532d !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-actions-bar .msg-action-btn:hover {
+  background: #ffffff !important;
+  color: #15803d !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .reasoning-block {
+  background: rgba(240, 253, 244, 0.9) !important;
+  border-color: rgba(21, 128, 61, 0.25) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .reasoning-summary {
+  background: rgba(220, 252, 231, 0.55) !important;
+  color: #14532d !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .reasoning-title i {
+  color: #15803d !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .reasoning-badge.thinking {
+  background: rgba(21, 128, 61, 0.14) !important;
+  color: #14532d !important;
+  border-color: rgba(21, 128, 61, 0.3) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .reasoning-badge.done {
+  background: rgba(22, 163, 74, 0.16) !important;
+  color: #14532d !important;
+  border-color: rgba(22, 163, 74, 0.35) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .reasoning-content {
+  border-top-color: rgba(21, 128, 61, 0.18) !important;
+  color: #1e293b !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .msg-sources-section {
+  border-top-color: rgba(21, 128, 61, 0.18) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .msg-sources-title span {
+  color: #14532d !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .msg-sources-title i.fa-earth-americas {
+  color: #15803d !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .sources-toggle-label {
+  background: rgba(21, 128, 61, 0.1) !important;
+  color: #14532d !important;
+  border: 1px solid rgba(21, 128, 61, 0.2) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .msg-source-chip {
+  background: #f8fafc !important;
+  border-color: rgba(21, 128, 61, 0.28) !important;
+  color: #0f172a !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .msg-source-chip:hover {
+  background: #dcfce7 !important;
+  border-color: #15803d !important;
+  color: #052e16 !important;
+  box-shadow: 0 2px 8px rgba(21, 128, 61, 0.18) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .msg-source-chip .source-index {
+  background: rgba(21, 128, 61, 0.16) !important;
+  color: #14532d !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .msg-source-chip .source-title {
+  color: #0f172a !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .msg-source-chip .source-domain {
+  color: #475569 !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .msg-doc-badge {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(21, 128, 61, 0.3) !important;
+  color: #0f172a !important;
+  box-shadow: 0 2px 6px rgba(21, 128, 61, 0.1) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .msg-doc-badge i {
+  color: #15803d !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .msg-doc-badge .msg-doc-size {
+  color: #475569 !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .autonomous-search-status {
+  background: rgba(220, 252, 231, 0.92) !important;
+  border-color: rgba(21, 128, 61, 0.3) !important;
+  color: #14532d !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .ai-file-card {
+  background: #ffffff !important;
+  border-color: rgba(21, 128, 61, 0.28) !important;
+  box-shadow: 0 4px 14px rgba(21, 128, 61, 0.1) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .ai-file-name {
+  color: #0f172a !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .ai-file-meta {
+  color: #475569 !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .scroll-bottom-btn {
+  background: #ffffff !important;
+  border-color: rgba(21, 128, 61, 0.36) !important;
+  color: #15803d !important;
+  box-shadow: 0 6px 18px rgba(21, 128, 61, 0.18) !important;
+}
+
+/* Composer Dock in Fruit & Nature AI Themes */
+#mainContent.ai-nature-themed .composer-box {
+  background: var(--nature-composer-bg) !important;
+  border-color: var(--nature-composer-border) !important;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.26) !important;
+}
+
+#mainContent.ai-nature-themed #promptInput {
+  color: var(--nature-composer-fg) !important;
+}
+
+#mainContent.ai-nature-themed #promptInput::placeholder {
+  color: var(--nature-composer-placeholder) !important;
+}
+
+#mainContent.ai-nature-themed #attachToggleBtn {
+  color: var(--nature-meta-fg) !important;
+}
+
+#mainContent.ai-nature-themed #attachToggleBtn:hover {
+  color: var(--nature-accent) !important;
+  background: rgba(16, 185, 129, 0.12) !important;
+}
+
+#mainContent.ai-nature-themed #sendPromptBtn {
+  border-radius: 50% !important;
+  background-color: var(--nature-accent) !important;
+  background-image: none !important;
+  color: var(--nature-accent-fg) !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.26) !important;
+}
+
+#mainContent.ai-nature-themed #sendPromptBtn:hover {
+  filter: brightness(1.08);
+}
+
+#mainContent.ai-nature-themed .pull-up-new-chat-btn {
+  background: var(--nature-composer-bg) !important;
+  color: var(--nature-composer-fg) !important;
+  border-color: var(--nature-composer-border) !important;
+}
+
 
 
 

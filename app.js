@@ -649,6 +649,19 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     }
   }
 
+  /**
+   * Menutup popup menu titik tiga model beserta submenu tema Chat AI di dalamnya.
+   */
+  function closeModelOptionsMenuPopup() {
+    if (els.modelOptionsMenuPopup) {
+      els.modelOptionsMenuPopup.style.display = 'none';
+      els.modelOptionsMenuPopup.classList.remove('show');
+    }
+    if (typeof AiChatThemeManager !== 'undefined' && typeof AiChatThemeManager.toggleMenu === 'function') {
+      AiChatThemeManager.toggleMenu(false);
+    }
+  }
+
   function isModelFavorite(modelId) {
     if (!modelId || !STATE.favoriteModels) return false;
     return STATE.favoriteModels.includes(modelId);
@@ -1223,6 +1236,11 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     settingsBtn: $('#settingsBtn'),
     settingsModal: $('#settingsModal'),
     modelHubBtn: $('#modelHubBtn'),
+    aiChatThemePickerWrap: $('#aiChatThemePickerWrap'),
+    btnAiChatTheme: $('#btnAiChatTheme'),
+    aiChatThemeMenu: $('#aiChatThemeMenu'),
+    aiChatThemeActiveBadge: $('#aiChatThemeActiveBadge'),
+    aiChatThemeActiveDesc: $('#aiChatThemeActiveDesc'),
     systemPromptModalBtn: $('#systemPromptModalBtn'),
     exportConfirmModal: $('#exportConfirmModal'),
     exportConfirmTitle: $('#exportConfirmTitle'),
@@ -3437,7 +3455,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
             if (topStyle && topStyle.pointerEvents === 'none') continue;
 
             // Abaikan jika topEl adalah modal backdrop, dialog, drawer, atau sticky chrome UI sementara tombol berada di luar overlay tersebut
-            const topOverlay = topEl.closest ? topEl.closest('.modal-backdrop, .modal, .sidebar-backdrop, .lightbox-backdrop, [role="dialog"], .composer-area, #composerContainer, .composer-container, #composerArea, .top-nav, #topNav, #studioAssistantPanel, .toast-container, .sidebar, #sidebar, .model-picker-popover, .dropdown-menu, #aiFileStudioModal') : null;
+            const topOverlay = topEl.closest ? topEl.closest('.modal-backdrop, .modal, .sidebar-backdrop, .lightbox-backdrop, [role="dialog"], .composer-area, #composerContainer, .composer-container, #composerArea, .top-nav, #topNav, #studioAssistantPanel, .toast-container, .sidebar, #sidebar, .model-picker-popover, .model-options-popup, .model-dropdown-menu, .wa-contact-dropdown-menu, .dropdown-menu, #aiFileStudioModal') : null;
             if (topOverlay && !topOverlay.contains(btn)) continue;
 
             const blockerTag = (topEl.tagName || 'div').toLowerCase();
@@ -7727,12 +7745,16 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         const uMatch = seg.match(/Tautan(?:\s*Video)?:\s*(https?:\/\/[^\s\n]+)/i);
         const durMatch = seg.match(/\(([^)]+)\)/);
         const chMatch = seg.match(/oleh\s+([^\n\-]+)/i);
+        const descMatch = seg.match(/Deskripsi:\s*([\s\S]+?)(?=(?:\n\s*Tautan|\n\s*\[\d+\]|$|\[INSTRUKSI))/i);
         if (tMatch && uMatch) {
+          const urlVal = uMatch[1].trim();
+          const matchedSrc = Array.isArray(sources) ? sources.find(s => s && s.url === urlVal) : null;
           videoItems.push({
             title: tMatch[1].trim(),
-            url: uMatch[1].trim(),
-            duration: durMatch ? durMatch[1].trim() : '',
-            channel: chMatch ? chMatch[1].trim() : ''
+            url: urlVal,
+            duration: (durMatch ? durMatch[1].trim() : '') || matchedSrc?.duration || '',
+            channel: (chMatch ? chMatch[1].trim() : '') || matchedSrc?.channel || '',
+            description: (descMatch ? descMatch[1].trim() : '') || matchedSrc?.content || matchedSrc?.description || ''
           });
         }
       }
@@ -7742,20 +7764,25 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             videoItems.push({
               title: s.title || 'Video Rekomendasi',
               url: s.url,
-              duration: '',
-              channel: s.domain || ''
+              duration: s.duration || '',
+              channel: s.channel || s.domain || '',
+              description: s.content || s.description || s.snippet || ''
             });
           }
         }
       }
       if (videoItems.length > 0) {
-        let out = 'Berikut daftar rekomendasi video terkait yang berhasil ditemukan:\n\n';
+        let out = 'Berikut penjelasan dan rekomendasi video yang paling relevan dengan topik pencarian Anda:\n\n';
         videoItems.forEach((v, idx) => {
           const dur = v.duration ? ` *(${v.duration})*` : '';
-          const ch = v.channel ? ` — ${v.channel}` : '';
-          out += `### ${idx + 1}. [${v.title}](${v.url})${dur}${ch}\n${v.url}\n\n`;
+          const ch = v.channel ? ` oleh **${v.channel}**` : '';
+          const cleanDesc = String(v.description || '').replace(/\s+/g, ' ').trim();
+          const summaryLine = cleanDesc.length >= 25
+            ? `Video${ch}${dur} ini mengulas topik **${v.title}**: ${cleanDesc}`
+            : `Video${ch}${dur} ini membahas secara khusus mengenai **${v.title}** yang sesuai dengan topik pencarian Anda.`;
+          out += `### ${idx + 1}. [${v.title}](${v.url})${dur}\n${summaryLine}\nTautan pemutar: ${v.url}\n\n`;
         });
-        out += 'Anda dapat langsung memutar dan menonton video-video di atas langsung di dalam percakapan menggunakan pemutar interaktif.';
+        out += 'Anda dapat memutar video-video di atas secara langsung melalui kartu pemutar interaktif di percakapan ini.';
         return out;
       }
       return 'Maaf, belum ditemukan rekomendasi video yang sesuai untuk kata kunci atau tautan tersebut saat ini. Silakan coba kueri atau judul video lainnya.';
@@ -7791,7 +7818,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         domain: domainName || 'Media Teknologi',
         url: s.url || '',
         pubDate: s.pubDate || '',
-        content: body
+        content: body,
+        snippet: String(s.snippet || '').trim()
       });
       if (articles.length >= 6) break;
     }
@@ -7802,7 +7830,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       for (const seg of segments) {
         const titleMatch = seg.match(/\[\d+\]\s*"([^"]+)"/);
         const urlMatch = seg.match(/Tautan:\s*(https?:\/\/[^\s\n]+)/i);
-        const bodyMatch = seg.match(/Isi Artikel:\s*([\s\S]+?)(?=(?:\n\s*\[\d+\]|$|\[INSTRUKSI))/i) || seg.match(/Ringkasan:\s*([\s\S]+?)(?=(?:\n\s*\[\d+\]|$|\[INSTRUKSI))/i);
+        const bodyMatch = seg.match(/Isi Artikel:\s*([\s\S]+?)(?=(?:\n\s*\[\d+\]|$|\[(?:INSTRUKSI|PANDUAN)))/i) || seg.match(/Ringkasan:\s*([\s\S]+?)(?=(?:\n\s*\[\d+\]|$|\[(?:INSTRUKSI|PANDUAN)))/i);
         if (titleMatch) {
           const t = titleMatch[1].trim();
           const n = norm(t);
@@ -7817,7 +7845,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
               domain: d,
               url: urlMatch ? urlMatch[1] : '',
               pubDate: '',
-              content: bodyMatch ? bodyMatch[1].trim() : ''
+              content: bodyMatch ? bodyMatch[1].trim() : '',
+              snippet: ''
             });
           }
         }
@@ -7832,8 +7861,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             title: s.title,
             domain: s.domain || (s.url ? extractDomainSafe(s.url) : 'Sumber Web'),
             url: s.url || '',
-            pubDate: '',
-            content: s.snippet || s.description || `Dokumen publik dari ${s.domain || 'sumber web'}.`
+            pubDate: s.pubDate || '',
+            content: s.content || s.snippet || s.description || '',
+            snippet: s.snippet || ''
           });
         }
       });
@@ -7845,7 +7875,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return '';
     }
 
-    let out = 'Berikut ekstraksi fakta terverifikasi dari sumber pencarian terkini:\n\n';
+    let out = 'Berikut penjelasan dan sintesis informasi terverifikasi dari hasil penelusuran:\n\n';
 
     articles.forEach((art, idx) => {
       const num = idx + 1;
@@ -7855,27 +7885,55 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
       let text = art.content || '';
       if (norm(text).startsWith(norm(art.title))) {
-        text = text.slice(art.title.length).replace(/^[\s\:\—\-\.\,]+/, '');
+        const afterTitle = text.slice(art.title.length).replace(/^[\s\:\—\-\.\,]+/, '');
+        if (afterTitle.length >= 45) {
+          text = afterTitle;
+        }
       }
 
       if (text.length > 40) {
-        const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+        const sentences = text.match(/(?:[^.!?\n]|[.!?](?!\s|$))+(?:[.!?]+(?=\s|$)|$)/g) || [text];
         const validSentences = sentences
           .map(s => s.trim())
           .filter(s => s.length > 20 && !/^(cookie|subscribe|sign in|privacy policy|terms of service|copyright|advertisement)\b/i.test(s));
 
         if (validSentences.length > 0) {
-          const coreExplanation = validSentences.slice(0, 5).join(' ');
-          out += `${coreExplanation}\n\n`;
+          const coreExplanation = validSentences.slice(0, 6).join(' ');
+          out += `${coreExplanation} [[${num}]](${art.url})\n\n`;
         } else {
-          out += `${text.slice(0, 450).trim()}...\n\n`;
+          out += `${text.slice(0, 520).trim()}... [[${num}]](${art.url})\n\n`;
         }
-      } else if (art.url) {
-        out += `Sumber terverifikasi: [${art.domain || art.url}](${art.url})\n\n`;
+      } else {
+        const contextualSummary = art.snippet && art.snippet.length > 20 ? art.snippet : art.title;
+        out += `Berdasarkan laporan dari **${art.domain || 'sumber terkait'}**${art.pubDate ? ` pada ${art.pubDate}` : ''}, topik utama yang dibahas adalah **${contextualSummary}**. Anda dapat membuka rincian halaman lengkap melalui [${art.domain || 'sumber referensi'}](${art.url}).\n\n`;
       }
     });
 
     return out.trim();
+  }
+
+  // Deteksi apakah jawaban pasca-penelusuran hanya berupa daftar link/URL mentah tanpa penjelasan substantif
+  function isLinkOnlyOrUnexplainedSearchOutput(text) {
+    if (!text || typeof text !== 'string') return true;
+    const raw = text.trim();
+    if (!raw) return true;
+    const hasUrls = /https?:\/\/[^\s)]+/i.test(raw);
+    if (!hasUrls) return false;
+
+    // Hitung prosa penjelas murni di LUAR tautan Markdown [judul/label](url) dan URL mentah
+    // agar daftar link berlabel judul panjang tidak keliru dianggap sebagai penjelasan
+    const proseOnly = raw
+      .replace(/\[[^\]]*\]\((?:https?:\/\/[^\)]+)\)/gi, ' ')
+      .replace(/https?:\/\/[^\s\)\]>]+/gi, ' ')
+      .replace(/(?:^|\n)\s*(?:#{1,6}\s*|\d+\.\s*|[-*•]\s*)/g, ' ')
+      .replace(/\b(?:Sumber\s+Referensi|Sumber\s+Terverifikasi|Daftar\s+(?:Video|Link|Tautan|Sumber)|Tautan\s+(?:Video|Pemutar)|Rekomendasi\s+Video|Berikut\s+(?:adalah\s+)?(?:daftar\s+)?(?:link|tautan|sumber|video)(?:\s+terkait)?|Anda\s+dapat\s+menonton|Klik\s+untuk\s+(?:menonton|membuka))\b[\s:\-]*/gi, ' ')
+      .replace(/[*_`()\[\]{}|#>:—–\-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const proseWords = proseOnly.split(/\s+/).filter(w => w.length >= 3);
+    // Jika memiliki tautan URL tetapi prosa penjelas di luar tautan sangat minim (< 18 kata substantif), berarti hanya memuntahkan link/judul sumber
+    return proseOnly.length < 110 || proseWords.length < 18;
   }
 
   // Zoz Precision Monologue & Scratchpad Stripper (Zero Loss Content Preservation)
@@ -8055,13 +8113,14 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       {
         role: 'system',
         content: `[SPESIFIKASI SINTESIS BUKTI TERVERIFIKASI — UTC ${isoDate}]\n` +
-          `1. Domain klaim dibatasi secara proporsional pada himpunan bukti dokumen di bawah: cantumkan entitas, versi, angka, dan tanggal kalender yang termuat di dalam bukti.\n` +
-          `2. Sajikan analisis teknis terstruktur dalam Bahasa Indonesia menggunakan Markdown (heading, poin rincian isi artikel, dan sitasi tautan sumber).\n` +
-          `3. Jangan mencetak blok tool call atau monolog internal.`
+          `1. Jawab pertanyaan pengguna dengan PENJELASAN YANG MENDALAM, JELAS, DAN LENGKAP dalam Bahasa Indonesia menggunakan korpus bukti di bawah (entitas, konsep, angka, mekanisme, dan fakta).\n` +
+          `2. Jika korpus berupa daftar video, jelaskan topik/isi masing-masing video (berdasarkan judul, deskripsi, kanal, durasi) serta mengapa video tersebut relevan untuk ditonton, lalu sertakan tautan video lengkap agar pemutar chat bekerja.\n` +
+          `3. DILARANG KERAS hanya menampilkan daftar link URL atau daftar sumber saja tanpa uraian penjelasan yang memadai!\n` +
+          `4. Jangan mencetak blok tool call atau monolog internal.`
       },
       {
         role: 'user',
-        content: `Kueri: ${String(question || '').slice(0, 1000)}\n\n[KORPUS BUKTI TERVERIFIKASI]:\n${String(evidenceText || '').slice(0, 16000)}\n\nSusun sintesis faktual berdasarkan korpus bukti di atas.`
+        content: `Kueri: ${String(question || '').slice(0, 1000)}\n\n[KORPUS BUKTI TERVERIFIKASI]:\n${String(evidenceText || '').slice(0, 16000)}\n\nSusun penjelasan faktual yang menyeluruh berdasarkan bukti di atas (bukan hanya daftar link).`
       }
     ];
   }
@@ -8167,8 +8226,20 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   // Proyeksi Subruang Klaim-Bukti Matematis P_E(R): memangkas entitas berversi & koordinat tanggal di luar bukti E
   function verifyAndSanitizeWebDigestion(text, sources, rawToolText) {
     if (!text || (!rawToolText && (!sources || sources.length === 0))) return text;
-    // Lewati proyeksi klaim artikel apabila seluruh sumber merupakan kartu video atau metadata sumber gambar visual
-    if (Array.isArray(sources) && sources.length > 0 && sources.every(s => s && (s.isImageSource || s.domain === 'video' || /youtube\.com|youtu\.be|dailymotion\.com|vimeo\.com|xvideos\.com/i.test(s.url || '')))) {
+    const isImageOnlySources = Array.isArray(sources) && sources.length > 0 && sources.every(s => s && s.isImageSource);
+    const isVideoSources = Array.isArray(sources) && sources.length > 0 && sources.every(s => s && (s.domain === 'YouTube' || s.domain === 'Dailymotion' || s.domain === 'XVIDEOS' || s.domain === 'Archive.org' || s.domain === 'video' || /youtube\.com|youtu\.be|dailymotion\.com|vimeo\.com|xvideos\.com/i.test(s.url || '')));
+    if (isImageOnlySources) {
+      return text;
+    }
+    // Jika output masih hanya berupa tautan / URL mentah tanpa penjelasan isi, sintesis ringkasan terstruktur dari metadata & konten hasil pencarian
+    if (isLinkOnlyOrUnexplainedSearchOutput(text)) {
+      const synth = synthesizeAutonomousWebSummary(rawToolText, sources);
+      if (synth && !isLinkOnlyOrUnexplainedSearchOutput(synth) && synth.trim().length >= 60) {
+        return synth;
+      }
+    }
+    // Lewati proyeksi klaim artikel apabila seluruh sumber merupakan kartu video (judul/kanal/durasi sudah tergrounded oleh rescue & formatter)
+    if (isVideoSources) {
       return text;
     }
 
@@ -8185,16 +8256,19 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             actionTaken: 'Orthogonal Claim-Evidence Subspace Projection P_E(R)'
           });
         }
-        if ((projection.hallucinationRate >= 0.50 && projection.prunedCount >= 2) || !projection.text || projection.text.trim().length < 80) {
+        const origHasExplanation = !isLinkOnlyOrUnexplainedSearchOutput(text);
+        const projHasExplanation = Boolean(projection.text && projection.text.trim().length >= 80 && !isLinkOnlyOrUnexplainedSearchOutput(projection.text));
+        if (!projHasExplanation || (projection.hallucinationRate >= 0.65 && projection.prunedCount >= 3 && !origHasExplanation)) {
           const synth = synthesizeAutonomousWebSummary(rawToolText, sources);
-          if (synth && synth.trim().length >= 40) {
+          if (synth && !isLinkOnlyOrUnexplainedSearchOutput(synth) && synth.trim().length >= 60) {
             return synth;
           }
-          // Lindungi penalaran deduktif model (seperti teori konseptual/aljabar murni):
-          // Jika sintesis web kosong atau irelevan, pertahankan teks model yang substantif.
-          return (projection.text && projection.text.trim().length >= 40) ? projection.text : (text || '');
+          // Lindungi penjelasan substantif model agar tidak terhapus menjadi daftar link mentah
+          if (origHasExplanation && text.trim().length >= 80) {
+            return projection.text && projection.text.trim().length >= 80 ? projection.text : text;
+          }
         }
-        return projection.text;
+        return (projection.text && projection.text.trim().length >= 60) ? projection.text : (text || '');
       }
       return projection.text || text;
     }
@@ -29963,23 +30037,6 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       }
     }
 
-    // Integritas Auto-Start Model: Jika pengguna mengonfigurasi model auto-start,
-    // pastikan model dan provider tidak ter-shadow oleh sisa mode 'auto' atau sesi lama
-    const autoCfg = STATE.autoStartModel || getAutoStartModelConfig();
-    if (autoCfg && autoCfg.enabled && autoCfg.modelId) {
-      const isOR = autoCfg.provider === 'openrouter' || autoCfg.modelId.includes('/');
-      const targetProvider = isOR ? 'openrouter' : 'ollama';
-      if (STATE.mode === 'auto') {
-        STATE.mode = targetProvider;
-        if (isOR) {
-          STATE.settings.openRouterModel = autoCfg.modelId;
-        } else {
-          STATE.settings.ollamaModel = autoCfg.modelId;
-        }
-        updateModelUI();
-      }
-    }
-
     let targetModel = '';
     if (STATE.mode === 'openrouter') {
       targetModel = STATE.settings.openRouterModel || 'openrouter/free';
@@ -31375,9 +31432,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           });
 
           const formattedText = `[HASIL PENELUSURAN TERVERIFIKASI UNTUK "${query}"]:\n` + lines.join('\n\n') +
-            `\n\n[PANDUAN FORMAT SITASI & SUMBER]:\n` +
-            `1. Cantumkan sitasi bernomor [1], [2], dst. pada setiap klaim data/faktual di dalam teks jawaban.\n` +
-            `2. Pada akhir jawaban, buat bagian "Sumber Referensi:" yang mencantumkan nomor [1], [2] beserta judul dan tautan URL asli dari hasil penelusuran di atas agar pengguna dapat langsung mengkliknya.`;
+            `\n\n[PANDUAN SINTESIS & PENJELASAN WAJIB]:\n` +
+            `1. JELASKAN & SINTESIS jawaban secara mendalam, terstruktur, dan langsung menjawab pertanyaan pengguna berdasarkan isi artikel serta bukti fakta di atas (uraikan definisi, mekanisme, poin analisis, tanggal/angka penting, dan detail teknis dalam beberapa paragraf atau poin penjelasan lengkap).\n` +
+            `2. Gunakan sitasi bernomor [1], [2], dst. secara alami pada kalimat klaim Anda (kartu daftar sumber web otomatis ditampilkan oleh antarmuka di bagian bawah pesan).\n` +
+            `3. DILARANG KERAS hanya menampilkan daftar link URL, judul artikel, atau bagian "Sumber Referensi:" saja tanpa penjelasan mendalam yang menjawab pertanyaan pengguna.`;
 
           return cacheAndReturn({
             text: formattedText,
@@ -31747,7 +31805,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             const dur = v.duration ? ` (${v.duration})` : '';
             const ch = v.channel ? ` oleh ${v.channel}` : '';
             const views = v.views ? ` - ${v.views}` : '';
-            return `[${idx + 1}] "${v.title}"${dur}${ch}${views}\n    Tautan Video: ${v.url}`;
+            const pub = v.publishedText ? ` [${v.publishedText}]` : '';
+            const cleanDesc = String(v.description || '').replace(/\s+/g, ' ').trim().slice(0, 600);
+            const descBlock = cleanDesc ? `\n    Deskripsi: ${cleanDesc}` : '';
+            return `[${idx + 1}] "${v.title}"${dur}${ch}${views}${pub}\n    Tautan Video: ${v.url}${descBlock}`;
           });
 
           const srcRef = searchRes.sourceVideoTitle
@@ -31755,7 +31816,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             : (videoUrl ? ` berdasarkan tautan video (${videoUrl})` : '');
 
           const formattedText = `[HASIL PENCARIAN & REKOMENDASI VIDEO TERKAIT${srcRef.toUpperCase()}]:\n` + lines.join('\n\n') +
-            `\n\n[INSTRUKSI ASISTEN]: Berikan rekomendasi video di atas kepada pengguna secara informatif dan sertakan tautan URL lengkapnya. Sistem antarmuka chat Zoz Router akan secara otomatis merender kartu pemutar video interaktif dengan tombol "▶ Putar di Chat" untuk setiap tautan video di atas.`;
+            `\n\n[INSTRUKSI ASISTEN WAJIB]: Berikan penjelasan yang informatif, mendalam, dan terstruktur mengenai setiap video di atas (uraikan topik/materi yang dibahas berdasarkan judul, deskripsi resmi, kanal pembuat, durasi, serta mengapa video tersebut relevan dengan pertanyaan pengguna). Cantumkan tautan URL lengkap setiap video dalam Markdown di dalam penjelasan Anda agar kartu pemutar interaktif "▶ Putar di Chat" dirender otomatis oleh antarmuka. DILARANG KERAS hanya menampilkan daftar link/URL mentah tanpa penjelasan substantif!`;
 
           if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
             BioEndocrine.registerToolSuccess({
@@ -31768,7 +31829,27 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           return cacheAndReturn({
             text: formattedText,
             videos: vids,
-            sources: vids.map(v => ({ title: v.title, url: v.url, domain: v.platform || 'video' })),
+            sources: vids.map(v => {
+              const metaParts = [
+                v.channel ? `Channel: ${v.channel}` : '',
+                v.duration ? `Durasi: ${v.duration}` : '',
+                v.views ? `Tayangan: ${v.views}` : '',
+                v.publishedText ? `Terbit: ${v.publishedText}` : ''
+              ].filter(Boolean).join(' • ');
+              const cleanDesc = String(v.description || '').replace(/\s+/g, ' ').trim();
+              const combined = [metaParts, cleanDesc].filter(Boolean).join(' — ');
+              return {
+                title: v.title,
+                url: v.url,
+                domain: v.platform || 'video',
+                channel: v.channel || '',
+                duration: v.duration || '',
+                views: v.views || '',
+                pubDate: v.publishedText || '',
+                snippet: combined || `${v.platform || 'Video'} oleh ${v.channel || 'Kreator'}`,
+                content: cleanDesc || combined || v.title
+              };
+            }),
             success: true
           });
         }
@@ -32907,7 +32988,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   // untuk backend Ollama dan model Cloud Bridge/OpenRouter yang tidak mendukung native function calling
   function convertToolMessagesToUserRole(messages) {
     if (!Array.isArray(messages)) return [];
-    return messages.map(m => {
+    const mapped = messages.map(m => {
       if (!m) return m;
       if (m.role === 'tool') {
         const toolText = (typeof m.content === 'string') ? m.content : JSON.stringify(m.content || '');
@@ -32928,6 +33009,196 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       }
       return m;
     });
+    // Gabungkan turn user berurutan agar template chat (Gemini, Llama, DeepSeek, Qwen) tetap valid 100%
+    const normalized = [];
+    for (const msg of mapped) {
+      if (!msg) continue;
+      const prev = normalized[normalized.length - 1];
+      if (prev && prev.role === 'user' && msg.role === 'user' && typeof prev.content === 'string' && typeof msg.content === 'string') {
+        prev.content = `${prev.content}\n\n${msg.content}`;
+      } else {
+        normalized.push(msg);
+      }
+    }
+    return normalized;
+  }
+
+  function hasUnconvertedToolMessages(messages) {
+    return Array.isArray(messages) && messages.some(m => m && (m.role === 'tool' || (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0)));
+  }
+
+  /**
+   * Membangun instruksi sintesis dan menyisipkan hasil eksekusi tool (role: 'tool' / inline fallback)
+   * ke dalam conversationChain secara konsisten untuk mesin Ollama maupun OpenRouter.
+   */
+  function buildAutonomousToolDigestionStep({
+    detectedAutonomousCalls,
+    validNativeCalls,
+    toolTaskItems,
+    toolExecResults,
+    toolSummaryList,
+    cleanAssistant,
+    roundToolResponsesText,
+    webSources,
+    autonomousRound,
+    maxAutonomousRounds,
+    circuitBreakerTripped,
+    conversationChain
+  }) {
+    const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(normalizeToolName(c.function.name)));
+    const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web'].includes(normalizeToolName(c.function.name)));
+    const hasExecutedPython = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'execute_python_code');
+    const hasExecutedMemory = detectedAutonomousCalls.some(c => c && c.function && ['save_memory', 'search_memory'].includes(normalizeToolName(c.function.name)));
+    const hasExecutedVideo = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'find_related_videos');
+    const hasExecutedImageSearch = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'search_images');
+    const hasExecutedImageInspect = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'inspect_image');
+    const hasExecutedImagePrepare = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'prepare_image_display');
+    const hasGroundedSearchSources = Boolean(webSources && webSources.length > 0);
+    const isMidImagePipeline = (hasExecutedImageSearch || hasExecutedImageInspect) && !hasExecutedImagePrepare;
+    const isLastRound = circuitBreakerTripped || hasExecutedImagePrepare || (!isMidImagePipeline && (hasBrowsedWeb || hasExecutedVideo)) || (autonomousRound >= maxAutonomousRounds - 1);
+
+    const currentDateObj = new Date();
+    const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const currentIsoDate = currentDateObj.toISOString().slice(0, 10);
+
+    const roundInstruction = isMidImagePipeline
+      ? `[ALUR VERIFIKASI VISUAL AKTIF]:
+${hasExecutedImageSearch ? '1. Pilih 3–6 image_id yang paling cocok secara subjek dari daftar kandidat di atas, lalu panggil inspect_image({"image_id": "..."}) terlebih dahulu (apabila native tool tidak tersedia, keluarkan blok <tool_call>{"name":"inspect_image","arguments":{"image_id":"..."}}</tool_call>).' : '1. Untuk seluruh kandidat yang lolos verifikasi (accessible: true dan usage_status: "allowed"), panggil prepare_image_display({"image_ids": [...], "layout": "collage"|"gallery", "placement": "after_intro"|"within_section", "alt_texts": [...]}) untuk menyajikan banyak contoh foto sekaligus dalam format kolase. Jika semua kandidat ditolak, jawab langsung pertanyaan pengguna secara faktual tanpa mengarang URL gambar.'}`
+      : ((hasExecutedSearch && !hasGroundedSearchSources && !hasBrowsedWeb && !hasExecutedImagePrepare && !hasExecutedVideo)
+      ? `[INSTRUKSI JAWABAN LANGSUNG]:
+Berikan jawaban akhir yang akurat, objektif, terstruktur, dan langsung menjawab inti persoalan sesuai bahasa pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Jangan menyebutkan catatan tool internal, jangan mengeluh bahwa sumber tidak relevan, dan jangan mengarang URL tautan.`
+      : ((isLastRound || hasExecutedImagePrepare || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasBrowsedWeb)
+      ? `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:
+${circuitBreakerTripped
+  ? 'MANDAT JAWABAN DEDUKTIF: Penelusuran selesai. Berikan penjelasan komprehensif, langsung, dan objektif atas pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian atau menyalin catatan sistem internal ini.'
+  : (hasExecutedImagePrepare
+    ? 'MANDAT ANALISIS FAKTIK & PENYAJIAN VISUAL: Susun jawaban akhir dengan format: (1) Penjelasan pembuka yang lugas dan tajam selaras dengan persona Anda, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat, serta (4) Kredit gambar dan tautan halaman sumber.'
+    : (hasBrowsedWeb
+      ? (isLastRound
+        ? 'Susun PENJELASAN LENGKAP dan mendalam yang menjawab pertanyaan pengguna berdasarkan teks halaman web di atas dengan sitasi [1], [2]. DILARANG KERAS hanya menampilkan daftar link tanpa penjelasan isi.'
+        : 'Susun penjelasan lengkap bersitasi [1], [2] jika bukti artikel di atas sudah mencukupi, atau panggil browse_web_page ke URL lain jika memerlukan detail lengkap.')
+      : (hasExecutedVideo
+        ? 'JELASKAN secara mendalam, informatif, dan terstruktur setiap video yang ditemukan di atas (uraikan topik/isi pembahasan video berdasarkan judul, deskripsi resmi, kanal pembuat, durasi, serta mengapa relevan dengan permintaan pengguna). Sertakan tautan URL video lengkap di dalam penjelasan Anda agar kartu pemutar interaktif dirender. DILARANG KERAS hanya menampilkan daftar link/judul tanpa uraian penjelasan!'
+        : (hasExecutedPython && !hasExecutedSearch
+          ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan dan penjelasannya secara presisi dalam Bahasa Indonesia.'
+          : (hasExecutedMemory && !hasExecutedSearch
+            ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab dan menjelaskan secara akurat dalam Bahasa Indonesia.'
+            : 'Susun PENJELASAN KOMPREHENSIF, mendalam, dan langsung menjawab pertanyaan pengguna berdasarkan isi artikel & fakta terverifikasi di atas (uraikan definisi, mekanisme, poin analisis utama, dan detail faktual). Jika cuplikan bukti masih singkat sementara masih ada putaran tool, panggil browse_web_page pada URL paling relevan. DILARANG KERAS hanya mencetak daftar link/URL sumber tanpa penjelasan mendalam!')))))}`
+      : `[HASIL EKSEKUSI TOOL]:
+Jika bukti di atas telah mencukupi, susun jawaban akhir yang menjelaskan hasilnya secara menyeluruh. Jika diperlukan pembacaan halaman lengkap (browse_web_page), panggil fungsi terkait.`));
+
+    const claimConstraint = (hasGroundedSearchSources && !circuitBreakerTripped)
+      ? `BATASAN DOMAIN KLAIM & STANDAR PENJELASAN:
+1. Gunakan entitas, konsep, metrik, dan tanggal rilis yang selaras dengan bukti dokumen/video di atas (tanggal referensi hari ini: ${currentFormattedDate}).
+2. Berikan PENJELASAN SUBSTANTIF yang langsung menjawab pertanyaan pengguna (Markdown rapi: heading, paragraf penjelas, poin analisis). JANGAN PERNAH hanya mencetak daftar tautan sumber / URL tanpa isi penjelasan lengkap!
+3. Jangan memanggil ulang fungsi (${toolSummaryList.map(s => s.split('(')[0]).join(', ') || 'search_web'}) dengan argumen yang sama.`
+      : `MANDAT PENALARAN FAKTUIL & ILMIAH:
+Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunakan penalaran ilmiah serta bukti yang ada. Dilarang keras menyatakan kegagalan pencarian, dilarang hanya mengembalikan tautan mentah, dan dilarang menyalin catatan sistem internal ini.`;
+
+    if (validNativeCalls.length > 0) {
+      conversationChain.push({
+        role: 'assistant',
+        content: cleanAssistant || null,
+        tool_calls: validNativeCalls.map(c => ({
+          id: c.id,
+          type: 'function',
+          function: {
+            name: c.function.name,
+            arguments: (typeof c.function.arguments === 'string') ? c.function.arguments : JSON.stringify(c.function.arguments || {})
+          }
+        }))
+      });
+
+      toolTaskItems.forEach((item, idx) => {
+        const matchedRes = toolExecResults.find(r => r.call === item.call);
+        const callId = item.call.id;
+        const isLastToolReply = idx === toolTaskItems.length - 1;
+        let resultObj = null;
+
+        if (matchedRes && matchedRes.toolExecRes) {
+          const res = matchedRes.toolExecRes;
+          if (res.sources && res.sources.length > 0) {
+            resultObj = {
+              status: 'success',
+              count: res.sources.length,
+              evidence: res.sources.slice(0, 8).map(s => {
+                const fullContent = String(s.content || '').replace(/\s+/g, ' ').trim();
+                const shortSnippet = String(s.snippet || '').replace(/\s+/g, ' ').trim();
+                const bestExcerpt = (fullContent.length > shortSnippet.length ? fullContent : shortSnippet).slice(0, 2200);
+                const entry = {
+                  title: s.title || '',
+                  domain: s.domain || '',
+                  url: s.url || '',
+                  date: s.pubDate || '',
+                  excerpt: bestExcerpt,
+                  snippet: (shortSnippet || bestExcerpt).slice(0, 500)
+                };
+                if (s.channel) entry.channel = s.channel;
+                if (s.duration) entry.duration = s.duration;
+                if (s.views) entry.views = s.views;
+                return entry;
+              })
+            };
+            if (res.text && (hasExecutedVideo || hasBrowsedWeb)) {
+              resultObj.formatted_context = cleanWebExtractedContent(res.text).slice(0, 4500);
+            }
+          } else if (res.text) {
+            resultObj = {
+              status: 'complete',
+              text: cleanWebExtractedContent(res.text).slice(0, 6500)
+            };
+          } else {
+            resultObj = {
+              status: 'complete',
+              data: res
+            };
+          }
+        } else {
+          resultObj = { status: 'complete', message: 'Executed.' };
+        }
+
+        // Sematkan arahan sintesis di dalam pesan tool terakhir agar giliran percakapan tetap mematuhi skema valid (assistant(tool_calls) -> tool -> assistant)
+        if (isLastToolReply && resultObj && typeof resultObj === 'object') {
+          resultObj.synthesis_instruction = `${roundInstruction}\n\n${claimConstraint}`;
+        }
+
+        conversationChain.push({
+          role: 'tool',
+          tool_call_id: callId,
+          name: item.call.function.name,
+          content: JSON.stringify(resultObj)
+        });
+      });
+    } else {
+      if (cleanAssistant && !isModelInternalMonologue(cleanAssistant)) {
+        conversationChain.push({ role: 'assistant', content: cleanAssistant });
+      } else {
+        conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
+      }
+
+      const effectiveToolPayload = (circuitBreakerTripped && (!webSources || webSources.length === 0))
+        ? '[STATUS PENELUSURAN]: Selesai. Lanjutkan dengan sintesis deduktif penuh berdasarkan pengetahuan analitis Anda.'
+        : roundToolResponsesText.substring(0, 12000);
+
+      conversationChain.push({
+        role: 'user',
+        content: `[DATA PENELUSURAN FAKTA]:\n${effectiveToolPayload}\n\n${roundInstruction}\n\n${claimConstraint}\n\nCATATAN INTEGRITAS: JANGAN PERNAH menyalin atau menampilkan teks instruksi/spesifikasi di atas ke pengguna. Tulis penjelasan jawaban akhir secara langsung, mendalam, dan objektif (bukan hanya link sumber).`
+      });
+    }
+
+    return {
+      hasBrowsedWeb,
+      hasExecutedSearch,
+      hasExecutedPython,
+      hasExecutedMemory,
+      hasExecutedVideo,
+      hasExecutedImageSearch,
+      hasExecutedImageInspect,
+      hasExecutedImagePrepare,
+      hasGroundedSearchSources,
+      isMidImagePipeline,
+      isLastRound
+    };
   }
 
   function buildSanitizedMessagesPayload(sessionOrMessages, currentImages = [], engine = 'openrouter', systemContent = '', modelName = '') {
@@ -34138,6 +34409,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       let currentRoundNativeCalls = accumulatedToolCalls;
       const executedToolSignatures = new Set();
       let allAccumulatedToolResponsesText = '';
+      let hadSearchOrVideoToolRound = false;
 
       // Loop tetap dijalankan walau Mode Pencarian Web mati: filter izin di bawah
       while (autonomousRound < maxAutonomousRounds && !streamRenderer.isLoopTerminated) {
@@ -34322,119 +34594,28 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             details: 'Tool loop diselesaikan secara adaptif; beralih ke sintesis deduktif langsung.'
           });
         }
-        const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(normalizeToolName(c.function.name)));
-        const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web'].includes(normalizeToolName(c.function.name)));
-        const hasExecutedPython = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'execute_python_code');
-        const hasExecutedMemory = detectedAutonomousCalls.some(c => c && c.function && ['save_memory', 'search_memory'].includes(normalizeToolName(c.function.name)));
-        const hasExecutedVideo = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'find_related_videos');
-        const hasExecutedImageSearch = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'search_images');
-        const hasExecutedImageInspect = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'inspect_image');
-        const hasExecutedImagePrepare = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'prepare_image_display');
-        const hasGroundedSearchSources = Boolean(webSources && webSources.length > 0);
-        const isMidImagePipeline = (hasExecutedImageSearch || hasExecutedImageInspect) && !hasExecutedImagePrepare;
-        const isLastRound = circuitBreakerTripped || hasExecutedImagePrepare || (!isMidImagePipeline && (hasBrowsedWeb || hasExecutedVideo)) || (autonomousRound >= maxAutonomousRounds - 1);
-        const currentDateObj = new Date();
-        const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-        const currentIsoDate = currentDateObj.toISOString().slice(0, 10);
-        const roundInstruction = isMidImagePipeline
-          ? `[ALUR VERIFIKASI VISUAL AKTIF]:
-${hasExecutedImageSearch ? '1. Pilih 3–6 image_id yang paling cocok secara subjek dari daftar kandidat di atas, lalu panggil inspect_image({"image_id": "..."}) terlebih dahulu (jangan langsung mengklaim gambar tampil).' : '1. Untuk seluruh kandidat yang lolos verifikasi (accessible: true dan usage_status: "allowed"), panggil prepare_image_display({"image_ids": [...], "layout": "collage"|"gallery", "placement": "after_intro"|"within_section", "alt_texts": [...]}) untuk menyajikan banyak contoh foto sekaligus dalam format kolase. Jika semua kandidat ditolak, jawab langsung pertanyaan pengguna secara faktual tanpa mengarang URL gambar.'}`
-          : ((hasExecutedSearch && !hasGroundedSearchSources && !hasBrowsedWeb && !hasExecutedImagePrepare && !hasExecutedVideo)
-          ? `[INSTRUKSI JAWABAN LANGSUNG]:
-Berikan jawaban akhir yang akurat, objektif, dan langsung menjawab inti persoalan sesuai bahasa pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Jangan menyebutkan catatan tool internal, jangan mengeluh bahwa sumber tidak relevan, dan jangan mengarang URL tautan. Jangan memanggil ulang fungsi search_web dengan kueri yang sama.`
-          : ((isLastRound || hasExecutedImagePrepare || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasBrowsedWeb)
-          ? `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:
-${circuitBreakerTripped ? 'MANDAT JAWABAN DEDUKTIF: Penelusuran selesai. Berikan jawaban komprehensif, langsung, dan objektif atas pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian, dilarang mengeluhkan ketiadaan indeks atau dokumen, dan dilarang menyalin catatan sistem internal ini.' : (hasExecutedImagePrepare ? 'MANDAT ANALISIS FAKTIK & PENYAJIAN VISUAL: Susun jawaban akhir dengan format: (1) Penjelasan pembuka yang lugas dan tajam selaras dengan persona Anda, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat, serta (4) Kredit gambar dan tautan halaman sumber.' : (hasBrowsedWeb ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil browse_web_page bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual sesuai bahasa pertanyaan pengguna berdasarkan korpus bukti penelusuran terverifikasi di atas.')))))}`
-          : `[HASIL EKSEKUSI TOOL]:
-Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika diperlukan ekstraksi lanjutan (seperti browse_web_page, inspect_image, prepare_image_display, search_memory, atau execute_python_code), panggil fungsi terkait.`));
-
-        const claimConstraint = (hasGroundedSearchSources && !circuitBreakerTripped)
-          ? `BATASAN DOMAIN KLAIM:
-1. Gunakan entitas, nomor versi, metrik, dan tanggal rilis yang selaras dengan bukti dokumen di atas (tanggal referensi hari ini: ${currentFormattedDate}).
-2. Uraikan rincian teknis secara langsung menggunakan Markdown terstruktur (heading, poin analisis, dan baris baru \\n yang valid bila memakai tabel).
-3. Jangan memanggil ulang fungsi (${toolSummaryList.map(s => s.split('(')[0]).join(', ') || 'search_web'}) yang sudah dieksekusi.`
-          : `MANDAT PENALARAN FAKTUIL & ILMIAH:
-Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggunakan penalaran ilmiah dan basis pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian, dilarang mengeluhkan ketiadaan indeks atau dokumen, dan dilarang menyalin catatan sistem internal ini.`;
-
-        // KEPATUHAN STANDAR OPENAI & OLLAMA TOOL CALL PROTOCOL
-        if (validNativeCalls.length > 0) {
-          // 1. Assistant message mengumumkan pemanggilan tool via array tool_calls
-          conversationChain.push({
-            role: 'assistant',
-            content: cleanAssistant || null,
-            tool_calls: validNativeCalls.map(c => ({
-              id: c.id,
-              type: 'function',
-              function: {
-                name: c.function.name,
-                arguments: (typeof c.function.arguments === 'string') ? c.function.arguments : JSON.stringify(c.function.arguments || {})
-              }
-            }))
-          });
-
-          // 2. Setiap tool call wajib dibalas dengan pesan role: 'tool' dan tool_call_id yang cocok
-          for (const item of toolTaskItems) {
-            const matchedRes = toolExecResults.find(r => r.call === item.call);
-            const callId = item.call.id;
-            let resultPayload = '';
-            if (matchedRes && matchedRes.toolExecRes) {
-              const res = matchedRes.toolExecRes;
-              if (res.sources && res.sources.length > 0) {
-                resultPayload = JSON.stringify({
-                  status: 'success',
-                  count: res.sources.length,
-                  evidence: res.sources.slice(0, 8).map(s => ({
-                    title: s.title || '',
-                    domain: s.domain || '',
-                    url: s.url || '',
-                    date: s.pubDate || '',
-                    snippet: (s.snippet || s.content || '').slice(0, 600)
-                  }))
-                });
-              } else if (res.text) {
-                resultPayload = JSON.stringify({
-                  status: 'complete',
-                  text: cleanWebExtractedContent(res.text).slice(0, 3000)
-                });
-              } else {
-                resultPayload = JSON.stringify({
-                  status: 'complete',
-                  data: res
-                });
-              }
-            } else {
-              resultPayload = JSON.stringify({ status: 'complete', message: 'Executed.' });
-            }
-
-            conversationChain.push({
-              role: 'tool',
-              tool_call_id: callId,
-              name: item.call.function.name,
-              content: resultPayload
-            });
-          }
-
-          // 3. Tambahkan arahan sintesis akhir
-          conversationChain.push({
-            role: 'user',
-            content: `[PANDUAN SINTESIS JAWABAN AKHIR]:\n${roundInstruction}\n\n${claimConstraint}`
-          });
-        } else {
-          // Fallback untuk inline text calls (<tool_call>...</tool_call>)
-          if (cleanAssistant && !isModelInternalMonologue(cleanAssistant)) {
-            conversationChain.push({ role: 'assistant', content: cleanAssistant });
-          } else {
-            conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
-          }
-
-          const effectiveToolPayload = (circuitBreakerTripped && (!webSources || webSources.length === 0))
-            ? '[STATUS PENELUSURAN]: Selesai. Lanjutkan dengan sintesis deduktif penuh berdasarkan pengetahuan analitis Anda.'
-            : roundToolResponsesText.substring(0, 10000);
-
-          conversationChain.push({
-            role: 'user',
-            content: `[DATA PENELUSURAN FAKTA]:\n${effectiveToolPayload}\n\n${roundInstruction}\n\n${claimConstraint}\n\nCATATAN INTEGRITAS: JANGAN PERNAH menyalin atau menampilkan teks instruksi/spesifikasi di atas ke pengguna. Tulis jawaban akhir secara ramah, langsung, dan objektif.`
-          });
+        const {
+          hasBrowsedWeb,
+          hasExecutedSearch,
+          hasExecutedVideo,
+          isMidImagePipeline,
+          isLastRound
+        } = buildAutonomousToolDigestionStep({
+          detectedAutonomousCalls,
+          validNativeCalls,
+          toolTaskItems,
+          toolExecResults,
+          toolSummaryList,
+          cleanAssistant,
+          roundToolResponsesText,
+          webSources,
+          autonomousRound,
+          maxAutonomousRounds,
+          circuitBreakerTripped,
+          conversationChain
+        });
+        if (hasExecutedSearch || hasExecutedVideo || hasBrowsedWeb) {
+          hadSearchOrVideoToolRound = true;
         }
 
         const digestionBody = {
@@ -34455,7 +34636,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             top_p: optSampling.topP
           };
         }
-        if (!isLastRound && (isMidImagePipeline || (!hasBrowsedWeb && !hasExecutedSearch)) && selectedOllamaTools && selectedOllamaTools.length > 0) {
+        if (!isLastRound && (isMidImagePipeline || (!hasBrowsedWeb && !hasExecutedVideo)) && selectedOllamaTools && selectedOllamaTools.length > 0) {
           const availableTools = selectedOllamaTools.filter(t => {
             const tName = normalizeToolName(t?.function?.name || t?.name || '');
             if (isMidImagePipeline) return ['inspect_image', 'prepare_image_display'].includes(tName);
@@ -34466,6 +34647,10 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             digestionBody.tools = availableTools;
           }
         }
+        // Jika tools tidak dikirim pada ronde sintesis akhir, normalisasi pesan tool -> user agar model tidak memicu error skema 400/500
+        if (!digestionBody.tools && hasUnconvertedToolMessages(digestionBody.messages)) {
+          digestionBody.messages = convertToolMessagesToUserRole(digestionBody.messages);
+        }
         if (session?.id) digestionBody.sessionId = session.id + '_digest_' + autonomousRound;
         if (STATE.settings.ollamaApiKey) digestionBody.apiKey = STATE.settings.ollamaApiKey;
         if (isAutoRouterCall && STATE.settings.openRouterKey) {
@@ -34475,6 +34660,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
 
         currentRoundText = '';
         currentRoundNativeCalls = [];
+        doneReason = '';
+        receivedOllamaDone = false;
 
         try {
           let digestionRes = await fetch(chatUrl, {
@@ -34484,7 +34671,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             signal: STATE.abortController?.signal
           });
 
-          if (!digestionRes.ok && digestionBody.tools && (digestionRes.status === 400 || digestionRes.status === 422 || digestionRes.status === 500)) {
+          if (!digestionRes.ok && (digestionBody.tools || hasUnconvertedToolMessages(digestionBody.messages)) && (digestionRes.status === 400 || digestionRes.status === 422 || digestionRes.status === 500)) {
             console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Model returned HTTP ${digestionRes.status} with tools. Retrying without tools and normalizing tool messages...`);
             delete digestionBody.tools;
             if (Array.isArray(digestionBody.messages)) {
@@ -34539,6 +34726,11 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
               if (!dLine.trim()) continue;
               try {
                 const dParsed = JSON.parse(dLine);
+                if (dParsed.done_reason) doneReason = dParsed.done_reason;
+                if (dParsed.done) {
+                  receivedOllamaDone = true;
+                  if (!doneReason) doneReason = 'stop';
+                }
                 const chunk = dParsed.message?.content || dParsed.response || '';
                 const dReasoning = dParsed.message?.reasoning || dParsed.reasoning || '';
                 if (dReasoning) {
@@ -34564,6 +34756,11 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           if (digestionBuffer && digestionBuffer.trim()) {
             try {
               const dParsed = JSON.parse(digestionBuffer.trim());
+              if (dParsed.done_reason) doneReason = dParsed.done_reason;
+              if (dParsed.done) {
+                receivedOllamaDone = true;
+                if (!doneReason) doneReason = 'stop';
+              }
               const chunk = dParsed.message?.content || dParsed.response || '';
               const dReasoning = dParsed.message?.reasoning || dParsed.reasoning || '';
               if (dReasoning) {
@@ -34638,6 +34835,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             });
             fullText = groundedAns || synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
             preambleHtml = '';
+            doneReason = 'stop';
+            receivedOllamaDone = true;
           }
         } catch (epErr) {
           if (epErr && (epErr.name === 'AbortError' || STATE.abortController?.signal?.aborted)) throw epErr;
@@ -34645,12 +34844,12 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         }
       }
 
-      // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah → minta model menyusun jawaban bersih =====
+      // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah / link-only → minta model menyusun jawaban bersih =====
       if (autonomousRound > 0 && !isPureMathSession && !STATE.abortController?.signal?.aborted) {
         const probeText = scrubRawToolCallArtifacts(fullText || '').trim();
-        if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText) || isInternalSystemPayload(probeText)) {
+        if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText) || isInternalSystemPayload(probeText) || (hadSearchOrVideoToolRound && isLinkOnlyOrUnexplainedSearchOutput(probeText))) {
           try {
-            bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyusun jawaban deduktif komprehensif...</span></div>`;
+            bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyusun penjelasan komprehensif dari hasil penelusuran...</span></div>`;
             smartScrollChatToBottom(true);
             const rescueExtra = { endpoint: ep };
             if (session?.id) rescueExtra.sessionId = session.id + '_rescue';
@@ -34671,6 +34870,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             if (rescued) {
               fullText = rescued;
               preambleHtml = '';
+              doneReason = 'stop';
+              receivedOllamaDone = true;
             }
           } catch (rescueErr) {
             if (rescueErr && (rescueErr.name === 'AbortError' || STATE.abortController?.signal?.aborted)) throw rescueErr;
@@ -35005,7 +35206,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
       }
 
       // Jika stream berakhir sebelum sinyal done:true dan tidak menghasilkan tool call, tandai sebagai incomplete agar disambung otomatis
-      const isOllamaStreamIncomplete = Boolean(!receivedOllamaDone && tokenCount > 0 && accumulatedToolCalls.length === 0 && autonomousRound === 0);
+      const isOllamaStreamIncomplete = Boolean(!receivedOllamaDone && tokenCount > 0 && currentRoundNativeCalls.length === 0 && (autonomousRound > 0 || accumulatedToolCalls.length === 0));
 
       // SEAMLESS AUTO-CONTINUATION: Jika output terpotong, sambung otomatis dan perbarui alasan berhenti terkini
       const ollamaContRes = await resolvePostStreamContinuation(assistantRow, {
@@ -36321,6 +36522,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       let currentRoundNativeCalls = accumulatedToolCalls;
       const executedToolSignatures = new Set();
       let allAccumulatedToolResponsesText = '';
+      let hadSearchOrVideoToolRound = false;
 
       // Loop tetap dijalankan walau Mode Pencarian Web mati: filter izin di bawah
       while (autonomousRound < maxAutonomousRounds && !streamRenderer.isLoopTerminated) {
@@ -36505,119 +36707,28 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             details: 'Tool loop diselesaikan secara adaptif; beralih ke sintesis deduktif langsung.'
           });
         }
-        const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(normalizeToolName(c.function.name)));
-        const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web'].includes(normalizeToolName(c.function.name)));
-        const hasExecutedPython = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'execute_python_code');
-        const hasExecutedMemory = detectedAutonomousCalls.some(c => c && c.function && ['save_memory', 'search_memory'].includes(normalizeToolName(c.function.name)));
-        const hasExecutedVideo = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'find_related_videos');
-        const hasExecutedImageSearch = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'search_images');
-        const hasExecutedImageInspect = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'inspect_image');
-        const hasExecutedImagePrepare = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'prepare_image_display');
-        const hasGroundedSearchSources = Boolean(webSources && webSources.length > 0);
-        const isMidImagePipeline = (hasExecutedImageSearch || hasExecutedImageInspect) && !hasExecutedImagePrepare;
-        const isLastRound = circuitBreakerTripped || hasExecutedImagePrepare || (!isMidImagePipeline && (hasBrowsedWeb || hasExecutedVideo)) || (autonomousRound >= maxAutonomousRounds - 1);
-        const currentDateObj = new Date();
-        const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-        const currentIsoDate = currentDateObj.toISOString().slice(0, 10);
-        const roundInstruction = isMidImagePipeline
-          ? `[ALUR VERIFIKASI VISUAL AKTIF]:
-${hasExecutedImageSearch ? '1. Pilih 3–6 image_id yang paling cocok secara subjek dari daftar kandidat di atas, lalu panggil inspect_image({"image_id": "..."}) terlebih dahulu (apabila native tool tidak tersedia, keluarkan blok <tool_call>{"name":"inspect_image","arguments":{"image_id":"..."}}</tool_call>).' : '1. Untuk seluruh kandidat yang lolos verifikasi (accessible: true dan usage_status: "allowed"), panggil prepare_image_display({"image_ids": [...], "layout": "collage"|"gallery", "placement": "after_intro"|"within_section", "alt_texts": [...]}) (atau blok <tool_call> yang setara) untuk menyajikan banyak contoh foto sekaligus dalam format kolase. Jika semua kandidat ditolak, jawab langsung pertanyaan pengguna secara faktual tanpa mengarang URL gambar.'}`
-          : ((hasExecutedSearch && !hasGroundedSearchSources && !hasBrowsedWeb && !hasExecutedImagePrepare && !hasExecutedVideo)
-          ? `[INSTRUKSI JAWABAN LANGSUNG]:
-Berikan jawaban akhir yang akurat, objektif, dan langsung menjawab inti persoalan sesuai bahasa pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Jangan menyebutkan catatan tool internal, jangan mengeluh bahwa sumber tidak relevan, dan jangan mengarang URL tautan. Jangan memanggil ulang fungsi search_web dengan kueri yang sama.`
-          : ((isLastRound || hasExecutedImagePrepare || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasBrowsedWeb)
-          ? `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:
-${circuitBreakerTripped ? 'MANDAT JAWABAN DEDUKTIF: Penelusuran selesai. Berikan jawaban komprehensif, langsung, dan objektif atas pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian, dilarang mengeluhkan ketiadaan indeks atau dokumen, dan dilarang menyalin catatan sistem internal ini.' : (hasExecutedImagePrepare ? 'MANDAT ANALISIS FAKTIK & PENYAJIAN VISUAL: Susun jawaban akhir dengan format: (1) Penjelasan pembuka yang lugas dan tajam selaras dengan persona Anda, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat, serta (4) Kredit gambar dan tautan halaman sumber.' : (hasBrowsedWeb ? (isLastRound ? 'Susun jawaban akhir secara terstruktur dengan sitasi [1], [2] ke URL sumber resmi di atas.' : 'Susun jawaban akhir bersitasi jika bukti sudah mencukupi, atau panggil browse_web_page bila membutuhkan teks lengkap.') : (hasExecutedVideo ? 'Sajikan daftar rekomendasi video di atas beserta tautan URL lengkapnya dalam Markdown agar kartu pemutar video interaktif dirender.' : (hasExecutedPython && !hasExecutedSearch ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan secara presisi dalam Bahasa Indonesia.' : (hasExecutedMemory && !hasExecutedSearch ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab secara akurat dalam Bahasa Indonesia.' : 'Susun analisis faktual sesuai bahasa pertanyaan pengguna berdasarkan korpus bukti penelusuran terverifikasi di atas.')))))}`
-          : `[HASIL EKSEKUSI TOOL]:
-Jika bukti di atas telah mencukupi, susun jawaban akhir secara langsung. Jika diperlukan ekstraksi lanjutan (seperti browse_web_page, inspect_image, prepare_image_display, search_memory, atau execute_python_code), panggil fungsi terkait.`));
-
-        const claimConstraint = (hasGroundedSearchSources && !circuitBreakerTripped)
-          ? `BATASAN DOMAIN KLAIM:
-1. Gunakan entitas, nomor versi, metrik, dan tanggal rilis yang selaras dengan bukti dokumen di atas (tanggal referensi hari ini: ${currentFormattedDate}).
-2. Uraikan rincian teknis secara langsung menggunakan Markdown terstruktur (heading, poin analisis, dan baris baru \\n yang valid bila memakai tabel).
-3. Jangan memanggil ulang fungsi search_web yang sudah dieksekusi.`
-          : `MANDAT PENALARAN FAKTUIL & ILMIAH:
-Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggunakan penalaran ilmiah dan basis pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian, dilarang mengeluhkan ketiadaan indeks atau dokumen, dan dilarang menyalin catatan sistem internal ini.`;
-
-        // KEPATUHAN STANDAR OPENAI & OPENROUTER TOOL CALL PROTOCOL
-        if (validNativeCalls.length > 0) {
-          // 1. Assistant message mengumumkan pemanggilan tool via array tool_calls
-          conversationChain.push({
-            role: 'assistant',
-            content: cleanAssistant || null,
-            tool_calls: validNativeCalls.map(c => ({
-              id: c.id,
-              type: 'function',
-              function: {
-                name: c.function.name,
-                arguments: (typeof c.function.arguments === 'string') ? c.function.arguments : JSON.stringify(c.function.arguments || {})
-              }
-            }))
-          });
-
-          // 2. Setiap tool call wajib dibalas dengan pesan role: 'tool' dan tool_call_id yang cocok
-          for (const item of toolTaskItems) {
-            const matchedRes = toolExecResults.find(r => r.call === item.call);
-            const callId = item.call.id;
-            let resultPayload = '';
-            if (matchedRes && matchedRes.toolExecRes) {
-              const res = matchedRes.toolExecRes;
-              if (res.sources && res.sources.length > 0) {
-                resultPayload = JSON.stringify({
-                  status: 'success',
-                  count: res.sources.length,
-                  evidence: res.sources.slice(0, 8).map(s => ({
-                    title: s.title || '',
-                    domain: s.domain || '',
-                    url: s.url || '',
-                    date: s.pubDate || '',
-                    snippet: (s.snippet || s.content || '').slice(0, 600)
-                  }))
-                });
-              } else if (res.text) {
-                resultPayload = JSON.stringify({
-                  status: 'complete',
-                  text: cleanWebExtractedContent(res.text).slice(0, 3000)
-                });
-              } else {
-                resultPayload = JSON.stringify({
-                  status: 'complete',
-                  data: res
-                });
-              }
-            } else {
-              resultPayload = JSON.stringify({ status: 'complete', message: 'Executed.' });
-            }
-
-            conversationChain.push({
-              role: 'tool',
-              tool_call_id: callId,
-              name: item.call.function.name,
-              content: resultPayload
-            });
-          }
-
-          // 3. Tambahkan arahan sintesis akhir
-          conversationChain.push({
-            role: 'user',
-            content: `[PANDUAN SINTESIS JAWABAN AKHIR]:\n${roundInstruction}\n\n${claimConstraint}`
-          });
-        } else {
-          // Fallback untuk inline text calls (<tool_call>...</tool_call>)
-          if (cleanAssistant && !isModelInternalMonologue(cleanAssistant)) {
-            conversationChain.push({ role: 'assistant', content: cleanAssistant });
-          } else {
-            conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
-          }
-
-          const effectiveToolPayload = (circuitBreakerTripped && (!webSources || webSources.length === 0))
-            ? '[STATUS PENELUSURAN]: Selesai. Lanjutkan dengan sintesis deduktif penuh berdasarkan pengetahuan analitis Anda.'
-            : roundToolResponsesText.substring(0, 10000);
-
-          conversationChain.push({
-            role: 'user',
-            content: `[DATA PENELUSURAN FAKTA]:\n${effectiveToolPayload}\n\n${roundInstruction}\n\n${claimConstraint}\n\nCATATAN INTEGRITAS: JANGAN PERNAH menyalin atau menampilkan teks instruksi/spesifikasi di atas ke pengguna. Tulis jawaban akhir secara ramah, langsung, dan objektif.`
-          });
+        const {
+          hasBrowsedWeb,
+          hasExecutedSearch,
+          hasExecutedVideo,
+          isMidImagePipeline,
+          isLastRound
+        } = buildAutonomousToolDigestionStep({
+          detectedAutonomousCalls,
+          validNativeCalls,
+          toolTaskItems,
+          toolExecResults,
+          toolSummaryList,
+          cleanAssistant,
+          roundToolResponsesText,
+          webSources,
+          autonomousRound,
+          maxAutonomousRounds,
+          circuitBreakerTripped,
+          conversationChain
+        });
+        if (hasExecutedSearch || hasExecutedVideo || hasBrowsedWeb) {
+          hadSearchOrVideoToolRound = true;
         }
 
         // Jalankan panggilan streaming ke model untuk putaran berikutnya
@@ -36641,7 +36752,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           activeDigestionModel === 'openrouter/free' ||
           (STATE.openRouterModels || []).some(m => m.id === activeDigestionModel && (m.cat === 'free' || m.tag === 'Free'))
         );
-        if (!isLastRound && (isMidImagePipeline || (!hasBrowsedWeb && !hasExecutedSearch)) && !isDigestionFree && canDigestionUseTools && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
+        if (!isLastRound && (isMidImagePipeline || (!hasBrowsedWeb && !hasExecutedVideo)) && !isDigestionFree && canDigestionUseTools && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
           const validFunctionTools = selectedAutonomousTools.filter(t => {
             if (!t || t.type !== 'function' || !t.function?.name) return false;
             const tName = normalizeToolName(t.function.name);
@@ -36653,6 +36764,10 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             digestionRequestBody.tools = validFunctionTools;
             digestionRequestBody.tool_choice = 'auto';
           }
+        }
+        // Jika tools tidak dikirim pada ronde sintesis akhir, normalisasi pesan tool -> user agar provider OpenRouter tidak memicu HTTP 400
+        if (!digestionRequestBody.tools && hasUnconvertedToolMessages(digestionRequestBody.messages)) {
+          digestionRequestBody.messages = convertToolMessagesToUserRole(digestionRequestBody.messages);
         }
         if (STATE.settings.useCustomParameters) {
           if (!isDigestionReasoning && STATE.settings.temperature !== null && STATE.settings.temperature !== undefined) {
@@ -36688,6 +36803,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
 
         currentRoundText = '';
         currentRoundNativeCalls = [];
+        finishReason = '';
+        isStreamInterrupted = false;
+        let digestionSseDone = false;
 
         try {
           let digestionRes = await fetch(digestionUrl, {
@@ -36698,7 +36816,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
           });
 
           // Fallback resiliensi: jika model menolak tools di putaran lanjutan (HTTP 400/404/422/500)
-          if (!digestionRes.ok && digestionRequestBody.tools && (digestionRes.status === 400 || digestionRes.status === 404 || digestionRes.status === 422 || digestionRes.status === 500)) {
+          if (!digestionRes.ok && (digestionRequestBody.tools || hasUnconvertedToolMessages(digestionRequestBody.messages)) && (digestionRes.status === 400 || digestionRes.status === 404 || digestionRes.status === 422 || digestionRes.status === 500)) {
             console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Model returned HTTP ${digestionRes.status} with tools. Retrying without tools and normalizing tool messages...`);
             delete digestionRequestBody.tools;
             delete digestionRequestBody.tool_choice;
@@ -36754,9 +36872,16 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
               const dTrimmed = dLine.trim();
               if (!dTrimmed || !dTrimmed.startsWith('data:')) continue;
               const dJson = dTrimmed.replace(/^data:\s*/, '');
-              if (dJson === '[DONE]') break;
+              if (dJson === '[DONE]') {
+                digestionSseDone = true;
+                if (!finishReason) finishReason = 'stop';
+                break;
+              }
               try {
                 const dParsed = JSON.parse(dJson);
+                if (dParsed.choices?.[0]?.finish_reason) {
+                  finishReason = dParsed.choices[0].finish_reason;
+                }
                 const dReasoning = dParsed.choices?.[0]?.delta?.reasoning 
                   || dParsed.choices?.[0]?.delta?.reasoning_content 
                   || dParsed.choices?.[0]?.delta?.thought 
@@ -36807,9 +36932,15 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
 
           if (digestionBuffer && digestionBuffer.trim() && digestionBuffer.trim().startsWith('data:')) {
             const dJson = digestionBuffer.trim().replace(/^data:\s*/, '');
-            if (dJson !== '[DONE]') {
+            if (dJson === '[DONE]') {
+              digestionSseDone = true;
+              if (!finishReason) finishReason = 'stop';
+            } else {
               try {
                 const dParsed = JSON.parse(dJson);
+                if (dParsed.choices?.[0]?.finish_reason) {
+                  finishReason = dParsed.choices[0].finish_reason;
+                }
                 const dReasoning = dParsed.choices?.[0]?.delta?.reasoning 
                   || dParsed.choices?.[0]?.delta?.reasoning_content 
                   || dParsed.choices?.[0]?.delta?.thought 
@@ -36851,6 +36982,9 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
                 }
               } catch (_) {}
             }
+          }
+          if (!digestionSseDone && !finishReason && tokenCount > 0 && currentRoundNativeCalls.length === 0) {
+            isStreamInterrupted = true;
           }
           currentRoundText = digestionRenderer.finish({ render: false });
           fullText = currentRoundText;
@@ -36916,6 +37050,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             });
             fullText = groundedAns || synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
             preambleHtml = '';
+            finishReason = 'stop';
+            isStreamInterrupted = false;
           }
         } catch (epErr) {
           if (epErr && (epErr.name === 'AbortError' || STATE.abortController?.signal?.aborted)) throw epErr;
@@ -36923,12 +37059,12 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         }
       }
 
-      // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah → minta model menyusun jawaban bersih =====
+      // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah / link-only → minta model menyusun jawaban bersih =====
       if (autonomousRound > 0 && !isPureMathSession && !STATE.abortController?.signal?.aborted) {
         const probeText = scrubRawToolCallArtifacts(fullText || '').trim();
-        if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText) || isInternalSystemPayload(probeText)) {
+        if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText) || isInternalSystemPayload(probeText) || (hadSearchOrVideoToolRound && isLinkOnlyOrUnexplainedSearchOutput(probeText))) {
           try {
-            bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyusun jawaban deduktif komprehensif...</span></div>`;
+            bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyusun penjelasan komprehensif dari hasil penelusuran...</span></div>`;
             smartScrollChatToBottom(true);
             const rescueModel = actualModelUsed || modelName;
             const rescueDirect = activeRouteType === 'direct' || (!activeEndpoint || activeEndpoint.includes('openrouter.ai'));
@@ -36957,6 +37093,8 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             if (rescued) {
               fullText = rescued;
               preambleHtml = '';
+              finishReason = 'stop';
+              isStreamInterrupted = false;
             }
           } catch (rescueErr) {
             if (rescueErr && (rescueErr.name === 'AbortError' || STATE.abortController?.signal?.aborted)) throw rescueErr;
@@ -37062,7 +37200,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
             if (webSources && webSources.length > 0) {
               const synth = synthesizeAutonomousWebSummary(allAccumulatedToolResponsesText, webSources);
               if (synth) fullText = synth;
-            } else if (collectedImages && collectedImages.length > 0) {
+            } else if ((collectedImages && collectedImages.length > 0) || (groundedImageDisplays && groundedImageDisplays.length > 0)) {
               fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
             } else if (preambleHtml) {
               fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
@@ -37081,7 +37219,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         preambleHtml = '';
       }
 
-      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && collectedImages.length === 0) {
+      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && collectedImages.length === 0 && groundedImageDisplays.length === 0) {
         if (STATE.abortController?.signal?.aborted) {
           // H3: sama seperti Ollama — jangan simpan gelembung kosong sebagai jawaban.
           assistantRow.remove();
@@ -37091,7 +37229,7 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
         if (isQuizRevision && decisionCalibration && decisionCalibration.remainingOptions && decisionCalibration.remainingOptions.length > 0) {
           const bestAlt = decisionCalibration.remainingOptions[0];
           fullText = `**Jawaban revisi yang tepat: ${bestAlt}**\n\nPilihan sebelumnya telah difalsifikasi ($P=0$). Berdasarkan evaluasi hipotesis alternatif, opsi **${bestAlt}** merupakan kandidat paling tepat untuk kuis ini.`;
-        } else if (collectedImages && collectedImages.length > 0) {
+        } else if ((collectedImages && collectedImages.length > 0) || (groundedImageDisplays && groundedImageDisplays.length > 0)) {
           fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
         } else {
           fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
@@ -37990,6 +38128,70 @@ Sajikan dekonstruksi dan jawaban komprehensif, terstruktur, dan mendalam menggun
     }
 
     return { images: addedImages, docs: addedDocs, skipped };
+  }
+
+  /**
+   * Mengekstrak daftar File valid dari objek DataTransfer (drag & drop)
+   * sekaligus mendeteksi pelepasan folder via webkitGetAsEntry.
+   */
+  function extractDroppedFilesFromDataTransfer(dataTransfer) {
+    if (!dataTransfer) return { files: [], hasFolder: false };
+    const dtItems = dataTransfer.items ? Array.from(dataTransfer.items) : [];
+    const fallbackFiles = dataTransfer.files ? Array.from(dataTransfer.files) : [];
+    if (dtItems.length === 0) {
+      return { files: fallbackFiles, hasFolder: false };
+    }
+    const validFiles = [];
+    let hasFolder = false;
+    for (const item of dtItems) {
+      if (item.kind !== 'file') continue;
+      const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null;
+      if (entry && entry.isDirectory) {
+        hasFolder = true;
+        continue;
+      }
+      const f = item.getAsFile();
+      if (f) validFiles.push(f);
+    }
+    if (validFiles.length > 0) {
+      return { files: validFiles, hasFolder };
+    }
+    if (hasFolder) {
+      return { files: [], hasFolder: true };
+    }
+    return { files: fallbackFiles, hasFolder: false };
+  }
+
+  /**
+   * Menangani hasil drop berkas (termasuk deteksi folder, kartu Img2Img, dan unggahan umum).
+   */
+  function dispatchDroppedFiles(dataTransfer, dropTarget) {
+    const { files: droppedFiles, hasFolder } = extractDroppedFilesFromDataTransfer(dataTransfer);
+    if (droppedFiles.length === 0) {
+      if (hasFolder) {
+        showToast('⚠️ Folder belum dapat dilampirkan langsung via drag & drop. Pilih file di dalamnya.', 'warning');
+        return true;
+      }
+      return false;
+    }
+
+    // Jika pengguna menjatuhkan 1 gambar tepat pada kartu Edit Foto Referensi (Img2Img)
+    if (
+      droppedFiles.length === 1 &&
+      els.photoEditReferenceCard &&
+      els.photoEditReferenceCard.style.display !== 'none' &&
+      dropTarget?.closest?.('#photoEditReferenceCard') &&
+      isImageFile(droppedFiles[0])
+    ) {
+      handlePhotoEditFileSelect({ target: { files: [droppedFiles[0]] } });
+      return true;
+    }
+
+    handleIncomingFiles(droppedFiles, 'drag-drop').catch((err) => {
+      console.warn('Drag & drop upload error:', err);
+      showToast('❌ Gagal memproses file yang dijatuhkan.', 'error');
+    });
+    return true;
   }
 
   async function handleImageUpload(e) {
@@ -42168,6 +42370,7 @@ Aturan:
     if (modalId === 'terminalModal' && typeof TerminalManager !== 'undefined') {
       try {
         sessionStorage.removeItem('zoz_term_modal_open');
+        sessionStorage.removeItem('zoz_term_minimized');
         TerminalManager.hideTerminalContextMenu?.();
         const tab = TerminalManager.getActiveTab?.();
         [tab?.pane1, tab?.pane2].forEach(p => {
@@ -43015,10 +43218,7 @@ Aturan:
       closeMusicModelDropdown();
 
       // Tutup popup menu titik tiga model jika sedang terbuka
-      if (els.modelOptionsMenuPopup) {
-        els.modelOptionsMenuPopup.style.display = 'none';
-        els.modelOptionsMenuPopup.classList.remove('show');
-      }
+      closeModelOptionsMenuPopup();
 
       const menu = els.modelDropdownMenu;
       if (!menu) return;
@@ -43032,7 +43232,7 @@ Aturan:
       AudioEngine.click();
     });
 
-    // Model Options Menu: Tombol Titik Tiga (Kebab) untuk Pin & Auto-Start
+    // Model Options Menu: Tombol Titik Tiga (Kebab) untuk Pin, Auto-Start & Tema Chat AI
     els.btnModelOptionsMenu?.addEventListener('click', (e) => {
       e.stopPropagation();
       hideSlashCommandsMenu();
@@ -43046,10 +43246,12 @@ Aturan:
       if (!popup) return;
       const isVisible = popup.style.display !== 'none' && popup.classList.contains('show');
       if (isVisible) {
-        popup.style.display = 'none';
-        popup.classList.remove('show');
+        closeModelOptionsMenuPopup();
       } else {
         updateModelOptionsMenuUI();
+        if (typeof AiChatThemeManager !== 'undefined' && typeof AiChatThemeManager.applyTheme === 'function') {
+          AiChatThemeManager.applyTheme();
+        }
         popup.style.display = 'block';
         popup.classList.add('show');
       }
@@ -43127,8 +43329,7 @@ Aturan:
 
       if (els.modelOptionsMenuPopup && els.modelOptionsMenuPopup.classList.contains('show')) {
         if (!els.modelOptionsMenuPopup.contains(e.target) && !els.btnModelOptionsMenu?.contains(e.target)) {
-          els.modelOptionsMenuPopup.style.display = 'none';
-          els.modelOptionsMenuPopup.classList.remove('show');
+          closeModelOptionsMenuPopup();
         }
       }
 
@@ -43335,13 +43536,18 @@ Aturan:
 
     // Tangani drag & drop file maupun teks kodingan/laporan langsung ke textarea prompt
     els.promptInput?.addEventListener('drop', (e) => {
-      const droppedFiles = e.dataTransfer?.files;
-      if (droppedFiles && droppedFiles.length > 0) {
+      const hasFileTransfer = Boolean(
+        e.dataTransfer &&
+        ((e.dataTransfer.files && e.dataTransfer.files.length > 0) ||
+          (e.dataTransfer.types && Array.from(e.dataTransfer.types).includes('Files')))
+      );
+      if (hasFileTransfer) {
         e.preventDefault();
         e.stopPropagation();
         document.dispatchEvent(new CustomEvent('zoz:clear-drop-overlay'));
-        handleIncomingFiles(droppedFiles, 'drag-drop').catch(() => {});
-        return;
+        if (dispatchDroppedFiles(e.dataTransfer, e.target)) {
+          return;
+        }
       }
 
       let droppedText = '';
@@ -44545,43 +44751,7 @@ Aturan:
         clearDropState();
 
         if (isBlockingModalOpen()) return;
-
-        // Cek jika ada direktori/folder yang dilepas via Chrome DataTransferItem
-        const dtItems = e.dataTransfer?.items ? Array.from(e.dataTransfer.items) : [];
-        let droppedFiles = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
-        if (dtItems.length > 0) {
-          const validFiles = [];
-          let hasFolder = false;
-          for (const item of dtItems) {
-            if (item.kind !== 'file') continue;
-            const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null;
-            if (entry && entry.isDirectory) {
-              hasFolder = true;
-              continue;
-            }
-            const f = item.getAsFile();
-            if (f) validFiles.push(f);
-          }
-          if (validFiles.length > 0) {
-            droppedFiles = validFiles;
-          } else if (hasFolder) {
-            showToast('⚠️ Folder belum dapat dilampirkan langsung via drag & drop. Pilih file di dalamnya.', 'warning');
-            return;
-          }
-        }
-
-        if (droppedFiles.length === 0) return;
-
-        // Jika pengguna menjatuhkan 1 gambar tepat pada kartu Edit Foto Referensi (Img2Img)
-        if (droppedFiles.length === 1 && els.photoEditReferenceCard && els.photoEditReferenceCard.style.display !== 'none' && e.target?.closest?.('#photoEditReferenceCard') && isImageFile(droppedFiles[0])) {
-          handlePhotoEditFileSelect({ target: { files: [droppedFiles[0]] } });
-          return;
-        }
-
-        handleIncomingFiles(droppedFiles, 'drag-drop').catch((err) => {
-          console.warn('Drag & drop upload error:', err);
-          showToast('❌ Gagal memproses file yang dijatuhkan.', 'error');
-        });
+        dispatchDroppedFiles(e.dataTransfer, e.target);
       });
 
       document.addEventListener('dragend', clearDropState);
@@ -45674,8 +45844,16 @@ Aturan:
         try {
           if (typeof TerminalManager.saveTabsState === 'function') TerminalManager.saveTabsState();
           const isOpen = Boolean(document.getElementById('terminalModal')?.classList.contains('show'));
-          if (isOpen) sessionStorage.setItem('zoz_term_modal_open', '1');
-          else sessionStorage.removeItem('zoz_term_modal_open');
+          const dockEl = document.getElementById('termMinimizedDock');
+          const isDockVisible = Boolean(!isOpen && dockEl && dockEl.style.display && dockEl.style.display !== 'none');
+          if (isOpen) {
+            sessionStorage.setItem('zoz_term_modal_open', '1');
+            sessionStorage.removeItem('zoz_term_minimized');
+          } else {
+            sessionStorage.removeItem('zoz_term_modal_open');
+            if (isDockVisible) sessionStorage.setItem('zoz_term_minimized', '1');
+            else sessionStorage.removeItem('zoz_term_minimized');
+          }
         } catch (_) {}
       }
       savePersistedState({ immediate: true });
@@ -46731,24 +46909,30 @@ Aturan:
       this.loadTabsState();
       this.attachListeners();
       this.loadTheme();
+      this.initRemoteConfigFromUrlOrStorage();
       this.renderTabs();
       const activeTab = this.getActiveTab();
       this.applySplitUI(Boolean(activeTab?.isSplit));
       this.updateAutoEnterUI();
       this.updateShellSelectorUI();
       this.updatePaneHeaders();
-      try {
-        if (sessionStorage.getItem('zoz_term_modal_open') === '1') {
-          const modal = document.getElementById('terminalModal');
-          if (modal && !modal.classList.contains('show')) {
-            this.openTerminal(false);
-          }
-        }
-      } catch (_) {}
-      this.initRemoteConfigFromUrlOrStorage();
+
       await this.detectWindowsBridge(false);
       await this.syncServerCwd();
       await this.reconcileServerSessions();
+
+      try {
+        const modal = document.getElementById('terminalModal');
+        if (sessionStorage.getItem('zoz_term_modal_open') === '1') {
+          if (modal && !modal.classList.contains('show')) {
+            this.openTerminal(false);
+          }
+        } else if (sessionStorage.getItem('zoz_term_minimized') === '1') {
+          if (!modal || !modal.classList.contains('show')) {
+            this.showMinimizedDock();
+          }
+        }
+      } catch (_) {}
     },
 
     async syncServerCwd() {
@@ -46759,7 +46943,8 @@ Aturan:
         const response = await fetch(url, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ command: '', pin: this.remotePin || undefined })
+          body: JSON.stringify({ command: '', pin: this.remotePin || undefined }),
+          signal: AbortSignal.timeout(2500)
         });
         const data = await response.json();
         if (data && data.cwd) {
@@ -46768,10 +46953,15 @@ Aturan:
             : (data.cwd.toLowerCase().endsWith('zoz-router') ? 'C:\\Users\\user' : data.cwd);
           const oldDefault = this.defaultCwd;
           this.defaultCwd = resolvedCwd;
+          const shouldReplaceCwd = (cwdVal, sessionId) => (
+            !cwdVal ||
+            cwdVal === oldDefault ||
+            (!sessionId && cwdVal.toLowerCase().endsWith('zoz-router'))
+          );
           this.tabs.forEach(t => {
-            if (t.pane1 && (!t.pane1.cwd || t.pane1.cwd === oldDefault || t.pane1.cwd.toLowerCase().endsWith('zoz-router'))) t.pane1.cwd = resolvedCwd;
-            if (t.pane2 && (!t.pane2.cwd || t.pane2.cwd === oldDefault || t.pane2.cwd.toLowerCase().endsWith('zoz-router'))) t.pane2.cwd = resolvedCwd;
-            if (!t.cwd || t.cwd === oldDefault || t.cwd.toLowerCase().endsWith('zoz-router')) t.cwd = resolvedCwd;
+            if (t.pane1 && shouldReplaceCwd(t.pane1.cwd, t.pane1.sessionId)) t.pane1.cwd = resolvedCwd;
+            if (t.pane2 && shouldReplaceCwd(t.pane2.cwd, t.pane2.sessionId)) t.pane2.cwd = resolvedCwd;
+            if (shouldReplaceCwd(t.cwd, t.pane1?.sessionId)) t.cwd = resolvedCwd;
           });
           this.updatePaneHeaders();
           this.saveTabsState();
@@ -48188,7 +48378,10 @@ Aturan:
       if (!modal.classList.contains('show')) {
         openModal('terminalModal');
       }
-      try { sessionStorage.setItem('zoz_term_modal_open', '1'); } catch (_) {}
+      try {
+        sessionStorage.setItem('zoz_term_modal_open', '1');
+        sessionStorage.removeItem('zoz_term_minimized');
+      } catch (_) {}
       this.syncMobileViewport();
       const afterOpenSetup = () => {
         this.initActiveTabPanes();
@@ -48223,9 +48416,22 @@ Aturan:
       }
     },
 
+    showMinimizedDock() {
+      const dock = document.getElementById('termMinimizedDock');
+      if (dock) {
+        dock.style.display = 'inline-flex';
+        const sub = document.getElementById('termDockSub');
+        const activeTab = this.getActiveTab();
+        if (sub && activeTab) {
+          sub.textContent = `${activeTab.title} • ${this.isRemoteConnected ? 'WAN ☁️' : 'Lokal ⚡'}`;
+        }
+      }
+    },
+
     minimize() {
       try {
         sessionStorage.removeItem('zoz_term_modal_open');
+        sessionStorage.setItem('zoz_term_minimized', '1');
         this.hideTerminalContextMenu?.();
         const tab = this.getActiveTab();
         [tab?.pane1, tab?.pane2].forEach(p => {
@@ -48238,22 +48444,16 @@ Aturan:
         modal.style.removeProperty('display');
         if (typeof syncBodyModalState === 'function') syncBodyModalState();
       }
-      const dock = document.getElementById('termMinimizedDock');
-      if (dock) {
-        dock.style.display = 'inline-flex';
-        const sub = document.getElementById('termDockSub');
-        const activeTab = this.getActiveTab();
-        if (sub && activeTab) {
-          sub.textContent = `${activeTab.title} • ${this.isRemoteConnected ? 'WAN ☁️' : 'Lokal ⚡'}`;
-        }
-      }
-      showToast('Terminal diminimize ke dok mengambang.', 'info');
+      this.showMinimizedDock();
     },
 
     restoreFromDock() {
       const dock = document.getElementById('termMinimizedDock');
       if (dock) dock.style.display = 'none';
-      try { sessionStorage.setItem('zoz_term_modal_open', '1'); } catch (_) {}
+      try {
+        sessionStorage.setItem('zoz_term_modal_open', '1');
+        sessionStorage.removeItem('zoz_term_minimized');
+      } catch (_) {}
       const modal = document.getElementById('terminalModal');
       if (modal) {
         modal.style.removeProperty('display');
@@ -50178,12 +50378,15 @@ Aturan:
       }
 
       if (chunk && typeof chunk === 'string') {
+        if (chunk.includes('\x1b[2J') || chunk.includes('\x1b[3J') || chunk.includes('\x1bc')) {
+          paneState._recentText = '';
+        }
         const cleanChunk = chunk
           .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
           .replace(/\x1b\[[0-9;?]*[mhlrsuK]/g, '')
           .replace(/\x1b\[[0-9;?]*[@-~]/g, ' ')
           .replace(/\x1b[@-Z\\-_]/g, '')
-          .replace(/[\r\n]+/g, ' ')
+          .replace(/\r\n?/g, '\n')
           .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, '');
         if (cleanChunk) {
           paneState._recentText = ((paneState._recentText || '') + cleanChunk).slice(-3000);
@@ -50211,16 +50414,23 @@ Aturan:
         return;
       }
 
-      const textBuffer = (paneState._recentText || '').replace(/\s+/g, ' ').trim();
-      if (!textBuffer) return;
+      const recentLines = String(paneState._recentText || '')
+        .split('\n')
+        .map(l => l.replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+      if (recentLines.length === 0) return;
 
+      const lastLine = recentLines[recentLines.length - 1];
       // Guard: Never auto-respond if waiting at password prompt
-      if (/(?:password|passphrase|secret key|access token|api key|pin):\s*$/i.test(textBuffer)) return;
+      if (/(?:password|passphrase|secret key|access token|api key|pin):\s*$/i.test(lastLine)) return;
 
-      // Guard: Never auto-respond if waiting at a bare PowerShell prompt without interactive prompt
-      if (/(?:PS [A-Z]:\\[^>]*>\s*$|^[^>]*>\s*$)/i.test(textBuffer) && !/(?:Run this command|permission|allow|accept|approve|proceed|continue|\b[yY]\/[nN]\b|[>❯›→*]\s*1\.)/i.test(textBuffer)) {
+      // Guard: Never auto-respond if active bottom line has returned to a bare shell prompt
+      if (/^(?:PS\s+[A-Z]:\\[^>]*>|[A-Z]:\\[^>]*>|[^@\s]+@[^:\s]+:[^$#]*[$#]|[$#>])$/i.test(lastLine)) {
         return;
       }
+
+      const cleanFull = recentLines.slice(-10).join(' ');
+      const textBuffer = cleanFull.length > 650 ? cleanFull.slice(-650) : cleanFull;
 
       const isCliAffirmativeMenu = (
         /(?:[>❯›→*]\s*(?:1\.|\(?1\)?|\[1\])?\s*(?:Yes|Allow|Accept|Approve|Proceed|Continue|Confirm|Run|Always|Apply|Save|Overwrite|Keep|Create|Update|Execute|Ya|Izinkan|Setujui|Lanjutkan)\b)/i.test(textBuffer) ||
@@ -50557,7 +50767,6 @@ Aturan:
     closeTab(tabId, e) {
       if (e) e.stopPropagation();
       if (this.tabs.length <= 1) {
-        showToast('Minimal satu tab terminal harus tetap terbuka.');
         return;
       }
       const idx = this.tabs.findIndex(t => t.id === tabId);
@@ -52018,6 +52227,7 @@ Aturan:
 
       document.getElementById('btnTermDockClose')?.addEventListener('click', (e) => {
         e.stopPropagation();
+        try { sessionStorage.removeItem('zoz_term_minimized'); } catch (_) {}
         const dock = document.getElementById('termMinimizedDock');
         if (dock) dock.style.display = 'none';
       });
@@ -55858,6 +56068,48 @@ Aturan:
       if (els.chatViewport) els.chatViewport.scrollTop = els.chatViewport.scrollHeight;
     },
 
+    encodeDocDataUrl(doc) {
+      if (!doc || typeof doc !== 'object') return null;
+      if (typeof doc.dataUrl === 'string' && doc.dataUrl.trim()) return doc.dataUrl;
+      const textBody = typeof doc.content === 'string'
+        ? doc.content
+        : (typeof doc.rawContent === 'string' ? doc.rawContent : '');
+      if (!textBody) return null;
+      const mime = doc.mimeType || (/\.md$/i.test(doc.name || '') ? 'text/markdown;charset=utf-8' : 'text/plain;charset=utf-8');
+      try {
+        const bytes = POLL_TEXT_ENCODER.encode(textBody);
+        let binary = '';
+        const chunkSize = 0x8000;
+        for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+          binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+        }
+        return `data:${mime};base64,${btoa(binary)}`;
+      } catch (_) {
+        try {
+          return `data:${mime};base64,${btoa(unescape(encodeURIComponent(textBody)))}`;
+        } catch (__) {
+          return null;
+        }
+      }
+    },
+
+    parseImageDataMeta(imgData, idx = 0) {
+      let mimetype = 'image/jpeg';
+      if (typeof imgData === 'string') {
+        const match = imgData.match(/^data:(image\/[a-z0-9.+-]+)(?:;[^,]*)?,/i);
+        if (match && match[1]) {
+          mimetype = match[1].toLowerCase();
+        }
+      }
+      const subtype = mimetype.split('/')[1] || 'jpeg';
+      const extMap = { jpeg: 'jpg', 'svg+xml': 'svg' };
+      const ext = extMap[subtype] || subtype.replace(/[^a-z0-9]/g, '') || 'jpg';
+      return {
+        mimetype,
+        fileName: `photo_${Date.now()}_${idx}.${ext}`
+      };
+    },
+
     async sendCurrentPrompt(text) {
       const rawText = (text || '').trim();
       const images = [...(STATE.attachedImages || [])];
@@ -55886,6 +56138,8 @@ Aturan:
         for (let i = 0; i < docs.length; i++) {
           const doc = docs[i];
           const docCaption = (i === docs.length - 1 && images.length === 0) ? rawText : '';
+          const docDataUrl = this.encodeDocDataUrl(doc);
+          const docMime = doc.mimeType || (/\.md$/i.test(doc.name || '') ? 'text/markdown' : 'application/octet-stream');
           const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
           const tempMsg = {
             id: tempId,
@@ -55897,9 +56151,9 @@ Aturan:
             media: {
               type: 'document',
               fileName: doc.name,
-              mimetype: doc.mimeType || 'application/octet-stream',
-              data: doc.dataUrl,
-              url: doc.dataUrl,
+              mimetype: docMime,
+              data: docDataUrl,
+              url: docDataUrl,
               caption: docCaption
             }
           };
@@ -55907,6 +56161,9 @@ Aturan:
           AudioEngine.sent?.() || AudioEngine.click();
 
           try {
+            if (!docDataUrl) {
+              throw new Error(`Isi dokumen "${doc.name || 'lampiran'}" kosong atau gagal dibaca.`);
+            }
             const res = await this.waFetch('/api/wa/send', {
               method: 'POST',
               headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
@@ -55915,9 +56172,9 @@ Aturan:
                 text: docCaption,
                 media: {
                   type: 'document',
-                  data: doc.dataUrl,
+                  data: docDataUrl,
                   fileName: doc.name,
-                  mimetype: doc.mimeType || 'application/octet-stream'
+                  mimetype: docMime
                 },
                 userId: this.getUserId(),
                 pin: this.getPin(),
@@ -55937,6 +56194,7 @@ Aturan:
         for (let i = 0; i < images.length; i++) {
           const imgData = images[i];
           const imgCaption = (i === images.length - 1) ? rawText : '';
+          const imgMeta = this.parseImageDataMeta(imgData, i);
           const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
           const tempMsg = {
             id: tempId,
@@ -55947,8 +56205,8 @@ Aturan:
             status: 'sending',
             media: {
               type: 'image',
-              fileName: `photo_${Date.now()}.jpg`,
-              mimetype: 'image/jpeg',
+              fileName: imgMeta.fileName,
+              mimetype: imgMeta.mimetype,
               data: imgData,
               url: imgData,
               caption: imgCaption
@@ -55967,8 +56225,8 @@ Aturan:
                 media: {
                   type: 'image',
                   data: imgData,
-                  fileName: `photo_${Date.now()}.jpg`,
-                  mimetype: 'image/jpeg'
+                  fileName: imgMeta.fileName,
+                  mimetype: imgMeta.mimetype
                 },
                 userId: this.getUserId(),
                 pin: this.getPin(),
@@ -56442,6 +56700,9 @@ Aturan:
           mainContent.classList.remove('wa-chat-themed');
           mainContent.removeAttribute('data-wa-scene');
         }
+      }
+      if (typeof AiChatThemeManager !== 'undefined' && typeof AiChatThemeManager.applyTheme === 'function') {
+        AiChatThemeManager.applyTheme();
       }
     },
 
@@ -57384,6 +57645,7 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     StudioEndocrineDiagnostics.init();
     StudioAutonomousAgent.init();
     WhatsAppController.init();
+    AiChatThemeManager.init();
     JozzMemoryUI.init();
     
     // Initialize Neural Terminal Engine
@@ -57514,6 +57776,170 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     });
   }
 
+  /**
+   * Pengelola tema tampilan Chat AI bernuansa Buah-buahan & Alam dengan persistensi lokal.
+   */
+  const AiChatThemeManager = {
+    STORAGE_KEY: 'zoz_ai_chat_theme',
+    THEMES: {
+      default: 'Standar Cyber Dark',
+      'mango-citrus': 'Senja Mangga & Jeruk',
+      'strawberry-sakura': 'Taman Stroberi & Sakura',
+      'apple-orchard': 'Kebun Apel Pagi',
+      'emerald-forest': 'Hutan Tropis & Anggur',
+      'aurora-mountain': 'Aurora Pegunungan'
+    },
+    THEME_SHORT_LABELS: {
+      default: 'Standar',
+      'mango-citrus': 'Mangga',
+      'strawberry-sakura': 'Stroberi',
+      'apple-orchard': 'Apel',
+      'emerald-forest': 'Hutan',
+      'aurora-mountain': 'Aurora'
+    },
+    LEGACY_MIGRATION: {
+      'wa-classic': 'emerald-forest',
+      'wa-light': 'apple-orchard',
+      'wa-aurora': 'aurora-mountain',
+      'wa-starlight': 'strawberry-sakura',
+      'wa-ocean': 'aurora-mountain'
+    },
+    initialized: false,
+
+    loadTheme() {
+      try {
+        const saved = localStorage.getItem(this.STORAGE_KEY);
+        if (saved && Object.prototype.hasOwnProperty.call(this.THEMES, saved)) {
+          return saved;
+        }
+        if (saved && Object.prototype.hasOwnProperty.call(this.LEGACY_MIGRATION, saved)) {
+          const migrated = this.LEGACY_MIGRATION[saved];
+          localStorage.setItem(this.STORAGE_KEY, migrated);
+          return migrated;
+        }
+      } catch (_) {}
+      return 'default';
+    },
+
+    setTheme(themeId) {
+      const resolved = Object.prototype.hasOwnProperty.call(this.LEGACY_MIGRATION, themeId)
+        ? this.LEGACY_MIGRATION[themeId]
+        : themeId;
+      const normalized = Object.prototype.hasOwnProperty.call(this.THEMES, resolved) ? resolved : 'default';
+      try {
+        localStorage.setItem(this.STORAGE_KEY, normalized);
+      } catch (_) {}
+      this.applyTheme();
+      return normalized;
+    },
+
+    applyTheme() {
+      const theme = this.loadTheme();
+      const mainContent = document.getElementById('mainContent');
+      const isAiMode = typeof STATE === 'undefined' || STATE.chatMode !== 'whatsapp';
+      if (mainContent) {
+        if (isAiMode && theme !== 'default') {
+          mainContent.classList.add('ai-nature-themed');
+          mainContent.setAttribute('data-ai-chat-theme', theme);
+        } else {
+          mainContent.classList.remove('ai-nature-themed');
+          mainContent.removeAttribute('data-ai-chat-theme');
+        }
+      }
+
+      const wrap = els.aiChatThemePickerWrap || document.getElementById('aiChatThemePickerWrap');
+      if (wrap) {
+        wrap.style.display = isAiMode ? 'flex' : 'none';
+      }
+      if (!isAiMode) {
+        this.toggleMenu(false);
+      }
+
+      const themeTitle = this.THEMES[theme] || this.THEMES.default;
+      const shortLabel = this.THEME_SHORT_LABELS[theme] || this.THEME_SHORT_LABELS.default;
+
+      const btn = els.btnAiChatTheme || document.getElementById('btnAiChatTheme');
+      if (btn) {
+        btn.classList.toggle('is-nature-active', theme !== 'default');
+        btn.title = `Tema Chat AI: ${themeTitle}`;
+      }
+
+      const badge = els.aiChatThemeActiveBadge || document.getElementById('aiChatThemeActiveBadge');
+      if (badge) {
+        badge.textContent = shortLabel;
+      }
+
+      const desc = els.aiChatThemeActiveDesc || document.getElementById('aiChatThemeActiveDesc');
+      if (desc) {
+        desc.textContent = `${themeTitle} • Buah & Alam`;
+      }
+
+      const menu = els.aiChatThemeMenu || document.getElementById('aiChatThemeMenu');
+      if (menu) {
+        menu.querySelectorAll('.ai-chat-theme-option').forEach((opt) => {
+          const isMatch = opt.dataset.aiTheme === theme;
+          opt.classList.toggle('active', isMatch);
+          opt.setAttribute('aria-selected', String(isMatch));
+        });
+      }
+    },
+
+    toggleMenu(forceOpen) {
+      const menu = els.aiChatThemeMenu || document.getElementById('aiChatThemeMenu');
+      const btn = els.btnAiChatTheme || document.getElementById('btnAiChatTheme');
+      if (!menu || !btn) return;
+      const isCurrentlyOpen = menu.style.display !== 'none' && menu.style.display !== '';
+      const nextOpen = typeof forceOpen === 'boolean' ? forceOpen : !isCurrentlyOpen;
+      menu.style.display = nextOpen ? 'flex' : 'none';
+      btn.setAttribute('aria-expanded', String(nextOpen));
+      if (nextOpen) {
+        if (els.modelDropdownMenu) els.modelDropdownMenu.style.display = 'none';
+        if (els.waContactDropdownMenu) els.waContactDropdownMenu.style.display = 'none';
+        try {
+          menu.scrollIntoView({ block: 'nearest' });
+        } catch (_) {}
+      }
+    },
+
+    init() {
+      this.applyTheme();
+      if (this.initialized) return;
+      this.initialized = true;
+
+      const btn = els.btnAiChatTheme || document.getElementById('btnAiChatTheme');
+      const menu = els.aiChatThemeMenu || document.getElementById('aiChatThemeMenu');
+      const wrap = els.aiChatThemePickerWrap || document.getElementById('aiChatThemePickerWrap');
+
+      btn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        this.toggleMenu();
+      });
+
+      menu?.querySelectorAll('.ai-chat-theme-option').forEach((opt) => {
+        opt.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+          const chosen = opt.dataset.aiTheme || 'default';
+          this.setTheme(chosen);
+          closeModelOptionsMenuPopup();
+        });
+      });
+
+      document.addEventListener('click', (e) => {
+        if (wrap && !wrap.contains(e.target)) {
+          this.toggleMenu(false);
+        }
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          closeModelOptionsMenuPopup();
+        }
+      });
+    }
+  };
+
   // Expose clean namespace for extension & programmatic workspace control
   window.ZozWorkspace = {
     STATE,
@@ -57576,6 +58002,7 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     handleIncomingFiles,
     appendMessageElement,
     syncLastAssistantRegenButton,
+    AiChatThemeManager,
     WhatsAppController
   };
 
