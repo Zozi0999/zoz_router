@@ -82,7 +82,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://buildings-everywhere-border-framed.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://product-debian-broadcasting-pennsylvania.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -52475,7 +52475,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://buildings-everywhere-border-framed.trycloudflare.com',
+    activeTunnelUrl: 'https://product-debian-broadcasting-pennsylvania.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
