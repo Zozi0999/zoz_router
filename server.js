@@ -56,6 +56,8 @@ try {
 
 // Session store untuk persistent PTY sessions (ConPTY / PseudoConsole)
 const activeTerminalSessions = new Map();
+// Status Auto Enter terisolasi per-jendela/sessionId (tidak pernah bocor ke tab atau panel lain)
+const sessionAutoEnterState = new Map();
 const WORKSPACE_ROOT = (process.env.ZOZ_WORKSPACE_ROOT && fs.existsSync(process.env.ZOZ_WORKSPACE_ROOT))
   ? path.resolve(process.env.ZOZ_WORKSPACE_ROOT)
   : path.resolve(__dirname);
@@ -159,7 +161,7 @@ let cloudflareTunnelPin = (persistedTunnel && persistedTunnel.pin)
   : generateSixDigitPin();
 let cloudflareTunnelStartedAt = (persistedTunnel && persistedTunnel.startedAt) || null;
 let isTunnelIntentionallyStopped = false;
-let globalAutoEnterEnabled = (persistedTunnel && typeof persistedTunnel.autoEnter === 'boolean') ? persistedTunnel.autoEnter : true;
+let globalAutoEnterEnabled = false;
 
 function savePersistedTunnelState() {
   try {
@@ -602,6 +604,9 @@ function destroyTerminalSession(sessionId, session) {
   }
   if (sessionId) {
     activeTerminalSessions.delete(sessionId);
+    if (typeof sessionAutoEnterState !== 'undefined' && sessionAutoEnterState) {
+      sessionAutoEnterState.delete(sessionId);
+    }
   }
 }
 
@@ -784,16 +789,29 @@ function markSessionManualInput(session, rawInput) {
 }
 
 /**
- * Sinkronisasi atomik & idempoten status Auto Enter (0 <-> 1) ke seluruh sesi PTY aktif.
- * Menjamin transisi 0 -> 1 selalu mengaktifkan ulang seluruh latch, timer, dan mengevaluasi
- * prompt yang sedang menunggu di layar saat ini juga.
+ * Menentukan status awal Auto Enter untuk satu sesi PTY baru secara terisolasi per sessionId.
  */
-function syncAutoEnterState(enabled, sourceLabel = 'WS') {
-  const nextState = Boolean(enabled);
-  globalAutoEnterEnabled = nextState;
-  savePersistedTunnelState();
+function resolveInitialSessionAutoEnter(reqUrl, sessionId) {
+  if (reqUrl && reqUrl.searchParams && reqUrl.searchParams.has('autoEnter')) {
+    const raw = reqUrl.searchParams.get('autoEnter');
+    return raw === '1' || raw === 'true';
+  }
+  if (sessionId && typeof sessionAutoEnterState !== 'undefined' && sessionAutoEnterState && sessionAutoEnterState.has(sessionId)) {
+    return Boolean(sessionAutoEnterState.get(sessionId));
+  }
+  return false;
+}
 
-  for (const [id, s] of activeTerminalSessions.entries()) {
+/**
+ * Menerapkan status Auto Enter secara terisolasi HANYA ke sesi/jendela target yang diminta.
+ * Tidak pernah mengubah status Auto Enter pada tab, panel split, atau jendela terminal lain.
+ */
+function syncAutoEnterState(enabled, sourceLabel = 'WS', targetSessionId = null) {
+  const nextState = Boolean(enabled);
+  const sid = (typeof targetSessionId === 'string' && targetSessionId.trim()) ? targetSessionId.trim() : null;
+
+  const applyToSession = (id, s) => {
+    if (!s) return;
     s.autoEnter = nextState;
     if (s._autoEnterRetryTimer) {
       clearTimeout(s._autoEnterRetryTimer);
@@ -809,8 +827,10 @@ function syncAutoEnterState(enabled, sourceLabel = 'WS') {
       });
     }
     const autoPayload = JSON.stringify({ type: 'auto-enter-status', autoEnter: nextState, session: id });
-    for (const client of s.clients) {
-      try { if (!client.writableEnded) client.write(`data: ${autoPayload}\n\n`); } catch (_) {}
+    if (s.clients) {
+      for (const client of s.clients) {
+        try { if (!client.writableEnded) client.write(`data: ${autoPayload}\n\n`); } catch (_) {}
+      }
     }
     if (s.wsClients && s.wsClients.size > 0) {
       const wsFrame = encodeWsFrame(autoPayload);
@@ -818,8 +838,28 @@ function syncAutoEnterState(enabled, sourceLabel = 'WS') {
         try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
       }
     }
+  };
+
+  if (sid) {
+    if (typeof sessionAutoEnterState !== 'undefined' && sessionAutoEnterState) {
+      sessionAutoEnterState.set(sid, nextState);
+    }
+    const targetSession = activeTerminalSessions.get(sid);
+    if (targetSession) {
+      applyToSession(sid, targetSession);
+    }
+    console.log(`[AutoEnter] Updated session "${sid}" autoEnter=${nextState} via ${sourceLabel} (isolated window).`);
+    return nextState;
   }
-  console.log(`[AutoEnter] Synchronized autoEnter=${nextState} across all laptop terminal sessions via ${sourceLabel}.`);
+
+  // Fallback hanya bila pemanggil lawas tidak menyertakan targetSessionId sama sekali
+  for (const [id, s] of activeTerminalSessions.entries()) {
+    if (typeof sessionAutoEnterState !== 'undefined' && sessionAutoEnterState) {
+      sessionAutoEnterState.set(id, nextState);
+    }
+    applyToSession(id, s);
+  }
+  console.log(`[AutoEnter] Synchronized autoEnter=${nextState} across active sessions via ${sourceLabel} (legacy broadcast).`);
   return nextState;
 }
 
@@ -8112,9 +8152,7 @@ async function requestHandler(req, res) {
           useConpty: true
         });
 
-        const autoEnterReq = reqUrl.searchParams.has('autoEnter')
-          ? (reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true')
-          : globalAutoEnterEnabled;
+        const autoEnterReq = resolveInitialSessionAutoEnter(reqUrl, sessionId);
         session = {
           id: sessionId,
           shell: shellType,
@@ -8273,7 +8311,7 @@ async function requestHandler(req, res) {
         return sendJSON(res, 401, { error: pinCheck.error });
       }
       const sessionId = (body.session || 'default').trim();
-      const enabled = syncAutoEnterState(Boolean(body.enabled), 'HTTP');
+      const enabled = syncAutoEnterState(Boolean(body.enabled), 'HTTP', sessionId);
       return sendJSON(res, 200, { success: true, session: sessionId, autoEnter: enabled });
     } catch (e) {
       return sendJSON(res, 500, { error: e.message });
@@ -13193,9 +13231,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
         useConpty: true
       });
 
-      const autoEnterReq = reqUrl.searchParams.has('autoEnter')
-        ? (reqUrl.searchParams.get('autoEnter') === '1' || reqUrl.searchParams.get('autoEnter') === 'true')
-        : globalAutoEnterEnabled;
+      const autoEnterReq = resolveInitialSessionAutoEnter(reqUrl, sessionId);
       session = {
         id: sessionId,
         shell: shellType,
@@ -13350,7 +13386,8 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
         if (str.startsWith('{') && str.endsWith('}')) {
           const parsed = JSON.parse(str);
           if (parsed.type === 'auto-enter') {
-            syncAutoEnterState(Boolean(parsed.enabled), 'WS');
+            const targetSid = (typeof parsed.session === 'string' && parsed.session.trim()) ? parsed.session.trim() : sessionId;
+            syncAutoEnterState(Boolean(parsed.enabled), 'WS', targetSid);
             return;
           } else if (parsed.type === 'resize' && session.pty) {
             const c = Math.max(32, Math.min(300, parseInt(parsed.cols, 10) || cols));

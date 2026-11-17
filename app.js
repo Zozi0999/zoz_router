@@ -18210,6 +18210,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       appendMessageElement(msg.role, textToDisplay, imagesToDisplay, msg.model, msg.stats, idx, msg.sources, msg.docs, false, msg.latency, msg.timestamp || session.updatedAt || session.createdAt, msg);
     });
 
+    syncLastAssistantRegenButton(els.messagesList);
     enhanceCodeBlocks(els.messagesList);
     if (!forceScroll && wasScrolledUp && els.chatViewport) {
       userScrolledUp = true;
@@ -18566,6 +18567,41 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     return true;
   }
 
+  const observedRegenLists = typeof WeakSet === 'function' ? new WeakSet() : null;
+
+  /** Keeps the regenerate ("Ulangi") button visible only on the final assistant output row. */
+  function syncLastAssistantRegenButton(listEl = els?.messagesList) {
+    if (!listEl || typeof listEl.querySelectorAll !== 'function') return;
+    if (observedRegenLists && !observedRegenLists.has(listEl) && typeof MutationObserver === 'function') {
+      observedRegenLists.add(listEl);
+      const observer = new MutationObserver(() => syncLastAssistantRegenButton(listEl));
+      observer.observe(listEl, { childList: true });
+    }
+    const allRows = listEl.querySelectorAll('.message-row:not(.studio-detached-row)');
+    const lastMsgRow = allRows.length > 0 ? allRows[allRows.length - 1] : null;
+    const lastAssistantRow = (lastMsgRow && lastMsgRow.classList.contains('assistant')) ? lastMsgRow : null;
+    listEl.querySelectorAll('.message-row.assistant.is-last-assistant').forEach((prevRow) => {
+      if (prevRow !== lastAssistantRow) {
+        prevRow.classList.remove('is-last-assistant');
+        const prevBtn = prevRow.querySelector('.regen-msg-btn');
+        if (prevBtn) {
+          prevBtn.hidden = true;
+          prevBtn.setAttribute('aria-hidden', 'true');
+          prevBtn.tabIndex = -1;
+        }
+      }
+    });
+    if (lastAssistantRow) {
+      lastAssistantRow.classList.add('is-last-assistant');
+      const lastBtn = lastAssistantRow.querySelector('.regen-msg-btn');
+      if (lastBtn) {
+        lastBtn.hidden = false;
+        lastBtn.setAttribute('aria-hidden', 'false');
+        lastBtn.tabIndex = 0;
+      }
+    }
+  }
+
   function renderSavedImageMessage(msg, idx = -1) {
     const row = document.createElement('div');
     row.className = 'message-row assistant';
@@ -18593,6 +18629,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
 
     attachImageCardListeners(row, msg.prompt, msg.imageUrl || msg.url, msg.model, msg.referenceImage || null);
     els.messagesList.appendChild(row);
+    syncLastAssistantRegenButton(els.messagesList);
   }
 
   function appendMessageElement(role, content, image = null, model = '', stats = null, index = -1, sources = null, docs = null, _legacyUnused = false, latency = null, timestamp = null, extraMeta = null) {
@@ -18778,7 +18815,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         <div class="message-actions-bar">
           ${role === 'user' ? `<button class="msg-action-btn edit-msg-btn" title="${hasText ? 'Edit & Kirim Ulang Prompt' : 'Masukkan Prompt untuk Foto/File'}"><i class="fa-solid fa-pen-to-square"></i> ${hasText ? 'Edit' : 'Masukkan Prompt'}</button>` : ''}
           <button class="msg-action-btn copy-msg-btn" title="Salin Pesan"><i class="fa-solid fa-copy"></i> Salin</button>
-          ${role === 'assistant' ? `<button class="msg-action-btn regen-msg-btn" title="Minta Ulang Output AI" aria-label="Minta Ulang Output AI"><i class="fa-solid fa-rotate-right"></i> Ulangi</button>` : ''}
+          ${role === 'assistant' ? `<button class="msg-action-btn regen-msg-btn" title="Minta Ulang Output AI" aria-label="Minta Ulang Output AI" hidden aria-hidden="true" tabindex="-1"><i class="fa-solid fa-rotate-right"></i> Ulangi</button>` : ''}
         </div>
       </div>
     `;
@@ -19089,12 +19126,15 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     });
 
     if (role === 'assistant') {
-      row.querySelector('.regen-msg-btn')?.addEventListener('click', () => {
+      row.querySelector('.regen-msg-btn')?.addEventListener('click', (e) => {
+        const btn = e.currentTarget;
+        if (!row.classList.contains('is-last-assistant') || btn?.hidden) return;
         regenerateAssistantOutputFromRow(row);
       });
     }
 
     els.messagesList?.appendChild(row);
+    syncLastAssistantRegenButton(els.messagesList);
     const savedVideoIds = (extraMeta && Array.isArray(extraMeta.videoIds)) ? extraMeta.videoIds : [];
     if (hasText || savedVideoIds.length > 0) {
       renderYouTubeCardsForMessage(row, content, savedVideoIds);
@@ -42127,6 +42167,7 @@ Aturan:
     }
     if (modalId === 'terminalModal' && typeof TerminalManager !== 'undefined') {
       try {
+        sessionStorage.removeItem('zoz_term_modal_open');
         TerminalManager.hideTerminalContextMenu?.();
         const tab = TerminalManager.getActiveTab?.();
         [tab?.pane1, tab?.pane2].forEach(p => {
@@ -45457,7 +45498,7 @@ Aturan:
             if (pState) {
               const sId = pState.sessionId || TerminalManager.getEffectiveSessionId(tTab, pNum);
               pState.sessionId = sId;
-              const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${sId}`) || localStorage.getItem('zoz_term_auto_enter_last');
+              const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${sId}`);
               if (savedAuto !== null) {
                 pState.autoEnter = (savedAuto === '1');
                 if (pNum === 1 && tTab) tTab.autoEnter = pState.autoEnter;
@@ -45627,6 +45668,14 @@ Aturan:
           if (currentVal && currentVal !== activeAIFile.rawContent) {
             persistStudioCodeChange(currentVal);
           }
+        } catch (_) {}
+      }
+      if (typeof TerminalManager !== 'undefined') {
+        try {
+          if (typeof TerminalManager.saveTabsState === 'function') TerminalManager.saveTabsState();
+          const isOpen = Boolean(document.getElementById('terminalModal')?.classList.contains('show'));
+          if (isOpen) sessionStorage.setItem('zoz_term_modal_open', '1');
+          else sessionStorage.removeItem('zoz_term_modal_open');
         } catch (_) {}
       }
       savePersistedState({ immediate: true });
@@ -45896,10 +45945,12 @@ Aturan:
       }
       if (killRemotePty && paneState.sessionId) {
         const sid = paneState.sessionId;
+        try { localStorage.removeItem(`zoz_term_auto_enter_${sid}`); } catch (_) {}
         const headers = { 'Content-Type': 'application/json' };
         if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
         fetch(this.getTerminalApiUrl('/api/terminal/kill'), {
           method: 'POST',
+          keepalive: true,
           headers,
           body: JSON.stringify({ session: sid, pin: this.remotePin || undefined })
         }).catch(() => {});
@@ -46398,6 +46449,7 @@ Aturan:
                 showToast(`⚡ Terminal Terhubung ke Windows Sync (${cand})`, 'success');
               }
               this.updatePaneHeaders();
+              this.saveTabsState();
               this.updateSyncButtonUI();
               return true;
             }
@@ -46473,14 +46525,230 @@ Aturan:
       }
     },
 
+    createDefaultPaneState(overrides = {}) {
+      const shell = (overrides.shell && this.shells[overrides.shell]) ? overrides.shell : 'powershell';
+      return {
+        sessionId: (typeof overrides.sessionId === 'string' && overrides.sessionId.trim()) ? overrides.sessionId.trim() : null,
+        shell,
+        cwd: (typeof overrides.cwd === 'string' && overrides.cwd.trim()) ? overrides.cwd.trim() : this.defaultCwd,
+        autoEnter: Boolean(overrides.autoEnter),
+        history: Array.isArray(overrides.history) ? overrides.history.slice(-50) : [],
+        historyIdx: -1,
+        outputHtml: ''
+      };
+    },
+
+    saveTabsState() {
+      try {
+        const serializePane = (p) => ({
+          sessionId: p?.sessionId || null,
+          shell: (p?.shell && this.shells[p.shell]) ? p.shell : 'powershell',
+          cwd: p?.cwd || this.defaultCwd,
+          autoEnter: Boolean(p?.autoEnter),
+          history: Array.isArray(p?.history) ? p.history.slice(-50) : []
+        });
+        const payload = {
+          version: 1,
+          activeTabId: this.activeTabId,
+          tabCounter: this.tabCounter,
+          tabs: (Array.isArray(this.tabs) ? this.tabs : []).map(t => ({
+            id: t.id,
+            title: t.title,
+            shell: (t.shell && this.shells[t.shell]) ? t.shell : 'powershell',
+            cwd: t.cwd || this.defaultCwd,
+            isSplit: Boolean(t.isSplit),
+            activePane: t.activePane === 2 ? 2 : 1,
+            pane1: serializePane(t.pane1),
+            pane2: serializePane(t.pane2)
+          }))
+        };
+        localStorage.setItem('zoz_term_tabs_state_v1', JSON.stringify(payload));
+      } catch (_) {}
+    },
+
+    loadTabsState() {
+      try {
+        // Bersihkan kunci global lawas agar status Auto Enter satu jendela tidak menular ke tab/panel lain
+        localStorage.removeItem('zoz_term_auto_enter_last');
+        const raw = localStorage.getItem('zoz_term_tabs_state_v1');
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+        if (!parsed || !Array.isArray(parsed.tabs) || parsed.tabs.length === 0) return false;
+
+        const restoredTabs = [];
+        let maxCounter = Number(parsed.tabCounter) || 1;
+        parsed.tabs.forEach((rawTab, idx) => {
+          if (!rawTab || typeof rawTab !== 'object') return;
+          const id = (typeof rawTab.id === 'string' && rawTab.id.trim()) ? rawTab.id.trim() : `tab-${idx + 1}`;
+          const numMatch = id.match(/^tab-(\d+)$/i);
+          if (numMatch) {
+            const n = parseInt(numMatch[1], 10);
+            if (Number.isFinite(n) && n > maxCounter) maxCounter = n;
+          }
+          const p1 = this.createDefaultPaneState(rawTab.pane1 || { shell: rawTab.shell, cwd: rawTab.cwd });
+          const p2 = this.createDefaultPaneState(rawTab.pane2 || { shell: 'powershell', cwd: this.defaultCwd });
+          [p1, p2].forEach((p, pIdx) => {
+            const effSid = p.sessionId || this.getEffectiveSessionId({ id }, pIdx + 1);
+            if (effSid) {
+              const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${effSid}`);
+              if (savedAuto !== null) p.autoEnter = (savedAuto === '1');
+            }
+          });
+          restoredTabs.push({
+            id,
+            title: (typeof rawTab.title === 'string' && rawTab.title.trim()) ? rawTab.title.trim() : `Terminal ${idx + 1}`,
+            shell: (rawTab.shell && this.shells[rawTab.shell]) ? rawTab.shell : p1.shell,
+            cwd: (typeof rawTab.cwd === 'string' && rawTab.cwd.trim()) ? rawTab.cwd.trim() : p1.cwd,
+            isSplit: Boolean(rawTab.isSplit),
+            autoEnter: Boolean(p1.autoEnter),
+            activePane: rawTab.activePane === 2 ? 2 : 1,
+            pane1: p1,
+            pane2: p2
+          });
+        });
+
+        if (restoredTabs.length === 0) return false;
+        this.tabs = restoredTabs;
+        this.tabCounter = Math.max(maxCounter, restoredTabs.length);
+        const hasActive = restoredTabs.some(t => t.id === parsed.activeTabId);
+        this.activeTabId = hasActive ? parsed.activeTabId : restoredTabs[0].id;
+        const activeTab = this.getActiveTab();
+        this.activePane = (activeTab && activeTab.activePane === 2) ? 2 : 1;
+        return true;
+      } catch (_) {
+        return false;
+      }
+    },
+
+    async reconcileServerSessions() {
+      if (!this.isWindowsSynced && !this.isRemoteConnected) return false;
+      try {
+        const headers = {};
+        if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
+        const res = await fetch(this.getTerminalApiUrl('/api/terminal/sessions'), {
+          method: 'GET',
+          headers,
+          signal: AbortSignal.timeout(3000)
+        });
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (!data || !Array.isArray(data.sessions)) return false;
+
+        const isMobNs = this.isMobileDevice() || this.isRemoteConnected;
+        const devId = isMobNs ? (localStorage.getItem('zoz_remote_device_id') || '') : '';
+        const nsRe = (isMobNs && devId)
+          ? new RegExp(`^${devId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-(tab-(\\d+))-p([12])(?:-(\\d+))?$`, 'i')
+          : /^(tab-(\d+))-p([12])(?:-(\d+))?$/i;
+
+        let changed = false;
+        const serverById = new Map();
+        data.sessions.forEach(s => { if (s && s.id) serverById.set(s.id, s); });
+
+        // 1. Sinkronkan autoEnter & cwd per-jendela untuk tab yang sudah terdaftar dari penyimpanan lokal
+        this.tabs.forEach(t => {
+          [1, 2].forEach(pNum => {
+            const p = pNum === 2 ? t.pane2 : t.pane1;
+            if (!p) return;
+            const sid = p.sessionId || this.getEffectiveSessionId(t, pNum);
+            const srv = serverById.get(sid);
+            if (srv) {
+              if (!p.sessionId) p.sessionId = sid;
+              if (typeof srv.autoEnter === 'boolean' && p.autoEnter !== srv.autoEnter) {
+                p.autoEnter = srv.autoEnter;
+                if (pNum === 1) t.autoEnter = srv.autoEnter;
+                try { localStorage.setItem(`zoz_term_auto_enter_${sid}`, srv.autoEnter ? '1' : '0'); } catch (_) {}
+                changed = true;
+              }
+              if (srv.cwd && (!p.cwd || p.cwd === this.defaultCwd)) {
+                p.cwd = srv.cwd;
+                if (pNum === 1) t.cwd = srv.cwd;
+              }
+            }
+          });
+        });
+
+        // 2. Pulihkan tab aktif di server yang belum tercatat di daftar tab lokal (mis. setelah refresh sebelum tersimpan)
+        const tabMap = new Map(this.tabs.map(t => [t.id, t]));
+        const orderedServer = [...data.sessions].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+        orderedServer.forEach(s => {
+          if (!s || !s.id) return;
+          const m = s.id.match(nsRe);
+          if (!m) return;
+          const tabId = m[1];
+          const tabNum = parseInt(m[2], 10);
+          const paneNum = parseInt(m[3], 10);
+          let tabObj = tabMap.get(tabId);
+          if (!tabObj) {
+            tabObj = {
+              id: tabId,
+              title: `Terminal ${Number.isFinite(tabNum) ? tabNum : (this.tabs.length + 1)}`,
+              shell: this.shells[s.shell] ? s.shell : 'powershell',
+              cwd: s.cwd || this.defaultCwd,
+              isSplit: paneNum === 2,
+              autoEnter: paneNum === 1 ? Boolean(s.autoEnter) : false,
+              activePane: 1,
+              pane1: this.createDefaultPaneState({ shell: s.shell, cwd: s.cwd || this.defaultCwd }),
+              pane2: this.createDefaultPaneState({ shell: 'powershell', cwd: this.defaultCwd })
+            };
+            this.tabs.push(tabObj);
+            tabMap.set(tabId, tabObj);
+            if (Number.isFinite(tabNum) && tabNum > this.tabCounter) this.tabCounter = tabNum;
+            changed = true;
+          }
+          const targetPane = paneNum === 2 ? tabObj.pane2 : tabObj.pane1;
+          if (paneNum === 2 && !tabObj.isSplit) {
+            tabObj.isSplit = true;
+            changed = true;
+          }
+          if (targetPane && !targetPane.sessionId) {
+            targetPane.sessionId = s.id;
+            if (this.shells[s.shell]) targetPane.shell = s.shell;
+            if (s.cwd) targetPane.cwd = s.cwd;
+            targetPane.autoEnter = Boolean(s.autoEnter);
+            if (paneNum === 1) tabObj.autoEnter = Boolean(s.autoEnter);
+            changed = true;
+          }
+        });
+
+        if (changed) {
+          this.renderTabs();
+          this.applySplitUI(Boolean(this.getActiveTab()?.isSplit));
+          this.updateAutoEnterUI();
+          this.updateShellSelectorUI();
+          this.updatePaneHeaders();
+          this.saveTabsState();
+          if (document.getElementById('terminalModal')?.classList.contains('show')) {
+            this.initActiveTabPanes();
+          }
+        }
+        return true;
+      } catch (_) {
+        return false;
+      }
+    },
+
     async init() {
+      this.loadTabsState();
       this.attachListeners();
       this.loadTheme();
       this.renderTabs();
+      const activeTab = this.getActiveTab();
+      this.applySplitUI(Boolean(activeTab?.isSplit));
+      this.updateAutoEnterUI();
+      this.updateShellSelectorUI();
       this.updatePaneHeaders();
+      try {
+        if (sessionStorage.getItem('zoz_term_modal_open') === '1') {
+          const modal = document.getElementById('terminalModal');
+          if (modal && !modal.classList.contains('show')) {
+            this.openTerminal(false);
+          }
+        }
+      } catch (_) {}
       this.initRemoteConfigFromUrlOrStorage();
       await this.detectWindowsBridge(false);
       await this.syncServerCwd();
+      await this.reconcileServerSessions();
     },
 
     async syncServerCwd() {
@@ -46506,6 +46774,7 @@ Aturan:
             if (!t.cwd || t.cwd === oldDefault || t.cwd.toLowerCase().endsWith('zoz-router')) t.cwd = resolvedCwd;
           });
           this.updatePaneHeaders();
+          this.saveTabsState();
         }
       } catch (_) {}
     },
@@ -46968,11 +47237,12 @@ Aturan:
             const resolvedCwd = (data.cwd.toLowerCase().endsWith('zoz-router') && data.userHome)
               ? data.userHome
               : (data.cwd.toLowerCase().endsWith('zoz-router') ? 'C:\\Users\\user' : data.cwd);
+            const oldDefault = this.defaultCwd;
             this.defaultCwd = resolvedCwd;
             this.tabs.forEach(t => {
-              if (t.pane1) t.pane1.cwd = resolvedCwd;
-              if (t.pane2) t.pane2.cwd = resolvedCwd;
-              t.cwd = resolvedCwd;
+              if (t.pane1 && (!t.pane1.cwd || t.pane1.cwd === oldDefault || t.pane1.cwd.startsWith('/var/task') || t.pane1.cwd === '/' || t.pane1.cwd.toLowerCase().endsWith('zoz-router'))) t.pane1.cwd = resolvedCwd;
+              if (t.pane2 && (!t.pane2.cwd || t.pane2.cwd === oldDefault || t.pane2.cwd.startsWith('/var/task') || t.pane2.cwd === '/' || t.pane2.cwd.toLowerCase().endsWith('zoz-router'))) t.pane2.cwd = resolvedCwd;
+              if (!t.cwd || t.cwd === oldDefault || t.cwd.startsWith('/var/task') || t.cwd === '/' || t.cwd.toLowerCase().endsWith('zoz-router')) t.cwd = resolvedCwd;
             });
           }
 
@@ -47787,10 +48057,12 @@ Aturan:
       this.updateAutoEnterUI();
 
       const sessionId = pane.sessionId || this.getEffectiveSessionId(tab, paneNum);
+      pane.sessionId = sessionId;
       try {
         localStorage.setItem(`zoz_term_auto_enter_${sessionId}`, pane.autoEnter ? '1' : '0');
-        localStorage.setItem('zoz_term_auto_enter_last', pane.autoEnter ? '1' : '0');
+        localStorage.removeItem('zoz_term_auto_enter_last');
       } catch (_) {}
+      this.saveTabsState();
 
       // 1. Sync ke WebSocket server jika terhubung (prioritas utama, 0 latency)
       let syncedViaWs = false;
@@ -47829,6 +48101,7 @@ Aturan:
       const url = this.getTerminalApiUrl('/api/terminal/auto-enter');
       fetch(url, {
         method: 'POST',
+        keepalive: true,
         headers,
         body: JSON.stringify({ session: sessionId, enabled: Boolean(enabled), pin: this.remotePin || undefined })
       }).catch(() => {});
@@ -47915,6 +48188,7 @@ Aturan:
       if (!modal.classList.contains('show')) {
         openModal('terminalModal');
       }
+      try { sessionStorage.setItem('zoz_term_modal_open', '1'); } catch (_) {}
       this.syncMobileViewport();
       const afterOpenSetup = () => {
         this.initActiveTabPanes();
@@ -47951,6 +48225,7 @@ Aturan:
 
     minimize() {
       try {
+        sessionStorage.removeItem('zoz_term_modal_open');
         this.hideTerminalContextMenu?.();
         const tab = this.getActiveTab();
         [tab?.pane1, tab?.pane2].forEach(p => {
@@ -47978,6 +48253,7 @@ Aturan:
     restoreFromDock() {
       const dock = document.getElementById('termMinimizedDock');
       if (dock) dock.style.display = 'none';
+      try { sessionStorage.setItem('zoz_term_modal_open', '1'); } catch (_) {}
       const modal = document.getElementById('terminalModal');
       if (modal) {
         modal.style.removeProperty('display');
@@ -48046,6 +48322,13 @@ Aturan:
           this.connectStream(tab, tab.pane1, 1);
         } else if (tab.pane1?.term && !this.isMobileDevice()) {
           this.sendPtyResize(tab.pane1.sessionId, tab.pane1.term.cols, tab.pane1.term.rows);
+        }
+        if (tab.isSplit && tab.pane2) {
+          if (!tab.pane2.ws && !tab.pane2.eventSource) {
+            this.connectStream(tab, tab.pane2, 2);
+          } else if (tab.pane2.term && !this.isMobileDevice()) {
+            this.sendPtyResize(tab.pane2.sessionId, tab.pane2.term.cols, tab.pane2.term.rows);
+          }
         }
       }
     },
@@ -49374,7 +49657,7 @@ Aturan:
       paneState.sessionId = sessionId;
 
       try {
-        const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${sessionId}`) || localStorage.getItem('zoz_term_auto_enter_last');
+        const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${sessionId}`);
         if (savedAuto !== null) {
           paneState.autoEnter = (savedAuto === '1');
           if (paneNum === 1 && tab) tab.autoEnter = paneState.autoEnter;
@@ -49838,8 +50121,10 @@ Aturan:
           paneState.cwd = msg.cwd;
           if (paneNum === 1) tab.cwd = msg.cwd;
           this.updatePaneHeaders();
+          this.saveTabsState();
         }
         if (typeof msg.autoEnter === 'boolean') {
+          if (msg.session && msg.session !== sessionId) return;
           if (paneState._pendingAutoEnterSync) {
             paneState._pendingAutoEnterSync = false;
             this.sendAutoEnterToServer(sessionId, Boolean(paneState.autoEnter));
@@ -49848,19 +50133,20 @@ Aturan:
             if (paneNum === 1 && tab) tab.autoEnter = msg.autoEnter;
             try {
               localStorage.setItem(`zoz_term_auto_enter_${sessionId}`, msg.autoEnter ? '1' : '0');
-              localStorage.setItem('zoz_term_auto_enter_last', msg.autoEnter ? '1' : '0');
             } catch (_) {}
+            this.saveTabsState();
           }
           this.updateAutoEnterUI();
         }
       } else if (msg.type === 'auto-enter-status') {
         if (typeof msg.autoEnter === 'boolean') {
+          if (msg.session && msg.session !== sessionId) return;
           paneState.autoEnter = msg.autoEnter;
           if (paneNum === 1 && tab) tab.autoEnter = msg.autoEnter;
           try {
             localStorage.setItem(`zoz_term_auto_enter_${sessionId}`, msg.autoEnter ? '1' : '0');
-            localStorage.setItem('zoz_term_auto_enter_last', msg.autoEnter ? '1' : '0');
           } catch (_) {}
+          this.saveTabsState();
           this.updateAutoEnterUI();
         }
       } else if (msg.type === 'exit') {
@@ -50217,6 +50503,9 @@ Aturan:
 
     addTab() {
       this.tabCounter++;
+      while (this.tabs.some(t => t.id === `tab-${this.tabCounter}`)) {
+        this.tabCounter++;
+      }
       const id = `tab-${this.tabCounter}`;
       const newTab = {
         id,
@@ -50226,25 +50515,12 @@ Aturan:
         isSplit: false,
         autoEnter: false,
         activePane: 1,
-        pane1: {
-          shell: 'powershell',
-          cwd: this.defaultCwd,
-          autoEnter: false,
-          history: [],
-          historyIdx: -1,
-          outputHtml: ''
-        },
-        pane2: {
-          shell: 'powershell',
-          cwd: this.defaultCwd,
-          autoEnter: false,
-          history: [],
-          historyIdx: -1,
-          outputHtml: ''
-        }
+        pane1: this.createDefaultPaneState({ shell: 'powershell', cwd: this.defaultCwd, autoEnter: false }),
+        pane2: this.createDefaultPaneState({ shell: 'powershell', cwd: this.defaultCwd, autoEnter: false })
       };
       this.tabs.push(newTab);
       this.renderTabs();
+      this.saveTabsState();
       this.switchTab(id);
       if (typeof AudioEngine !== 'undefined') AudioEngine.click();
     },
@@ -50270,6 +50546,7 @@ Aturan:
       this.updatePaneHeaders();
       this.focusActiveInput();
       this.fitAllPanes();
+      this.saveTabsState();
       const sBar = document.getElementById('termSearchBar');
       if (sBar && sBar.style.display !== 'none') {
         this.runTerminalSearch(document.getElementById('inputTermSearch')?.value || '', true);
@@ -50306,6 +50583,7 @@ Aturan:
       this.updatePaneHeaders();
       this.focusActiveInput();
       this.fitAllPanes();
+      this.saveTabsState();
     },
 
     saveCurrentScreenState() {
@@ -50390,10 +50668,12 @@ Aturan:
       this.updateShellSelectorUI();
       this.updatePaneHeaders();
       this.renderTabs();
+      this.saveTabsState();
 
       if (pane.term) {
         this.destroyPaneResources(pane, { keepTerm: true, killRemotePty: true });
         pane.sessionId = `${tab.id}-p${paneNum}-${Date.now()}`;
+        this.saveTabsState();
         pane.term.write(`\r\n\x1b[36m⚡ Berpindah ke shell: ${this.shells[shellKey].name} [${shellKey}]\x1b[0m\r\n`);
         this.connectStream(tab, pane, paneNum, true);
       } else {
@@ -50471,9 +50751,12 @@ Aturan:
         this.initXtermPane(2);
       } else {
         this.destroyPaneResources(tab.pane2, { keepTerm: false, killRemotePty: true });
+        if (tab.pane2) tab.pane2.autoEnter = false;
         this.setActivePane(1);
       }
+      this.updateAutoEnterUI();
       this.fitAllPanes();
+      this.saveTabsState();
     },
 
     setActivePane(paneNum) {
@@ -50487,6 +50770,7 @@ Aturan:
       this.updateShellSelectorUI();
       this.updateAutoEnterUI();
       this.focusActiveInput();
+      this.saveTabsState();
     },
 
     initScreenWelcome(paneNum) {
@@ -50805,6 +51089,7 @@ Aturan:
       if (trimmed) {
         if (pane.history[pane.history.length - 1] !== trimmed) {
           pane.history.push(trimmed);
+          this.saveTabsState();
         }
         pane.historyIdx = pane.history.length;
       }
@@ -50951,6 +51236,7 @@ Aturan:
           if (paneNum === 1) tab.cwd = data.cwd;
           this.defaultCwd = data.cwd;
           this.updatePaneHeaders();
+          this.saveTabsState();
         }
 
         const stdoutText = data.stdout || (!data.stderr ? data.output : '');
@@ -57288,6 +57574,8 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     normalizeMathematicalTextForInput,
     initPureMathClipboardEngine,
     handleIncomingFiles,
+    appendMessageElement,
+    syncLastAssistantRegenButton,
     WhatsAppController
   };
 
