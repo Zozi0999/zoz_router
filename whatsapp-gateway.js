@@ -2638,12 +2638,12 @@ class WhatsAppGatewayManager {
       }
     }
 
-    // Jika tenant memiliki PIN sendiri dan ada upaya akses yang meminta verifikasi PIN
-    if (gw.hasConfiguredPin() && cleanPin && !gw.verifyPin(cleanPin)) {
+    // Jika tenant memiliki PIN sendiri, wajibkan verifikasi PIN valid pada setiap akses (termasuk saat pin kosong)
+    if (gw.hasConfiguredPin() && !gw.verifyPin(cleanPin)) {
       return {
         success: false,
         status: 403,
-        error: 'PIN Keamanan Akun Anda salah.',
+        error: cleanPin ? 'PIN Keamanan Akun Anda salah.' : 'PIN Keamanan Akun wajib dimasukkan.',
         requiresPin: true,
         userId: targetUid
       };

@@ -17534,6 +17534,30 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     if (e.key === 'Escape') closeAllHistoryDropdowns();
   });
 
+  function cleanupDeletedSessionSideEffects(sessionId) {
+    if (!sessionId) return;
+    if (STATE.isGenerating && STATE.currentSessionId === sessionId) {
+      stopGeneration();
+    }
+    if (!IS_GITHUB_PAGES) {
+      try {
+        fetch(getUniversalApiUrl('/api/chat/stop'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-User-ID': STATE.userId
+          },
+          body: JSON.stringify({ sessionId, userId: STATE.userId })
+        }).catch(() => {});
+      } catch (_) {}
+    }
+    try {
+      if (localStorage.getItem('zoz_last_active_session_id') === sessionId) {
+        localStorage.removeItem('zoz_last_active_session_id');
+      }
+    } catch (_) {}
+  }
+
   async function deleteSession(sessionId, e) {
     if (e) e.stopPropagation();
     const target = STATE.sessions.find(s => s.id === sessionId);
@@ -17547,24 +17571,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       return;
     }
 
-    // Abort active in-flight generation if deleting the current generating session
-    if (STATE.isGenerating && STATE.currentSessionId === sessionId) {
-      stopGeneration();
-    }
-
-    // Hentikan tugas background chat/riset aktif di server agar tidak membangkitkan zombi sesi
-    if (sessionId) {
-      try {
-        fetch(getUniversalApiUrl('/api/chat/stop'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-User-ID': STATE.userId
-          },
-          body: JSON.stringify({ sessionId, userId: STATE.userId })
-        }).catch(() => {});
-      } catch (_) {}
-    }
+    cleanupDeletedSessionSideEffects(sessionId);
 
     STATE.sessions = STATE.sessions.filter(s => s.id !== sessionId);
     await DeviceStorage.deleteSession(sessionId);
@@ -17572,13 +17579,6 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     if (STATE.currentSessionId === sessionId) {
       STATE.currentSessionId = null;
       safeSessionStorage.removeItem('zoz_active_session_id');
-      try { localStorage.removeItem('zoz_last_active_session_id'); } catch (_) {}
-    } else {
-      try {
-        if (localStorage.getItem('zoz_last_active_session_id') === sessionId) {
-          localStorage.removeItem('zoz_last_active_session_id');
-        }
-      } catch (_) {}
     }
 
     // Immediate: penghapusan sesi tak boleh tertunda debounce — kalau tab ditutup
@@ -17834,9 +17834,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     let activeDeleted = false;
 
     for (const sessionId of idsToDelete) {
-      if (STATE.isGenerating && STATE.currentSessionId === sessionId) {
-        stopGeneration();
-      }
+      cleanupDeletedSessionSideEffects(sessionId);
       if (STATE.currentSessionId === sessionId) {
         activeDeleted = true;
       }
@@ -17847,20 +17845,23 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       await DeviceStorage.deleteSession(sessionId);
     }
 
+    let createdFreshSession = false;
     if (activeDeleted) {
+      safeSessionStorage.removeItem('zoz_active_session_id');
       if (STATE.sessions.length > 0) {
         STATE.currentSessionId = STATE.sessions[0].id;
         safeSessionStorage.setItem('zoz_active_session_id', STATE.currentSessionId);
         try { localStorage.setItem('zoz_last_active_session_id', STATE.currentSessionId); } catch (_) {}
       } else {
         createNewSession();
+        createdFreshSession = true;
       }
     }
 
     savePersistedState({ immediate: true });
     exitHistorySelectMode();
-    if (activeDeleted && STATE.currentSessionId) {
-      switchSession(STATE.currentSessionId);
+    if (activeDeleted && !createdFreshSession && STATE.currentSessionId) {
+      await switchSession(STATE.currentSessionId);
     }
     showToast(`🗑️ ${count} percakapan berhasil dihapus`, 'success');
     AudioEngine.click();
@@ -19723,7 +19724,6 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     }
     hideComposerFoldPromptCard();
 
-    showToast(`📄 Seluruh ${doc.lineCount} baris teks otomatis dikonversi ke file markdown [${doc.name}]! Kolom prompt tetap bersih.`, 'info');
     return true;
   }
 
@@ -19897,8 +19897,6 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         autoResizeTextarea(els.promptInput);
         els.promptInput.focus();
       }
-
-      showToast(`📄 Berhasil! Seluruh ${doc.lineCount} baris diubah ke file markdown [${doc.name}]. Kolom prompt bersih.`, 'info');
     }
 
     resetPromptFoldState(false);
@@ -43465,6 +43463,30 @@ Aturan:
       }
     });
 
+    function tryHandleComposerAutoFold(e, textToProcess, fromPaste = false) {
+      if (!textToProcess || !shouldAutoConvertAsDocument(textToProcess)) return false;
+      if (isTextImmuneFromAutoFold(textToProcess)) return false;
+
+      const currentInputText = (els.promptInput ? els.promptInput.value.trim() : '');
+      const alwaysAuto = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
+
+      if (alwaysAuto) {
+        const converted = tryAutoConvertInputToDoc(textToProcess, currentInputText);
+        if (!converted) return false;
+        e.preventDefault();
+        if (els.promptInput) {
+          autoResizeTextarea(els.promptInput);
+          els.promptInput.focus();
+        }
+        return true;
+      }
+
+      const shown = checkAndShowPromptFoldPrompt(textToProcess, true, fromPaste, currentInputText, !fromPaste);
+      if (!shown) return false;
+      e.preventDefault();
+      return true;
+    }
+
     els.promptInput?.addEventListener('paste', async (e) => {
       const items = (e.clipboardData || window.clipboardData)?.items;
       if (items) {
@@ -43503,23 +43525,7 @@ Aturan:
       const isMathNormalized = Boolean(normalizedMathText && normalizedMathText !== pastedText);
       const textToProcess = isMathNormalized ? normalizedMathText : pastedText;
 
-      if (textToProcess && shouldAutoConvertAsDocument(textToProcess)) {
-        e.preventDefault();
-        const currentInputText = (els.promptInput ? els.promptInput.value.trim() : '');
-        const alwaysAuto = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
-        if (alwaysAuto) {
-          const converted = tryAutoConvertInputToDoc(textToProcess, currentInputText);
-          if (converted && els.promptInput) {
-            autoResizeTextarea(els.promptInput);
-            els.promptInput?.focus();
-          }
-          return;
-        }
-
-        // Tampilkan pop-up modal & floating card konfirmasi interaktif
-        checkAndShowPromptFoldPrompt(textToProcess, true, true, currentInputText);
-        return;
-      }
+      if (tryHandleComposerAutoFold(e, textToProcess, true)) return;
 
       // Jika teks matematika dinormalisasi (menghilangkan duplikasi MathML, memperbaiki karakter italic, dsb.)
       if (isMathNormalized && els.promptInput) {
@@ -43558,22 +43564,7 @@ Aturan:
       const isDropNormalized = Boolean(normalizedDropText && normalizedDropText !== droppedText);
       const textToProcess = isDropNormalized ? normalizedDropText : droppedText;
 
-      if (textToProcess && shouldAutoConvertAsDocument(textToProcess)) {
-        e.preventDefault();
-        const currentInputText = (els.promptInput ? els.promptInput.value.trim() : '');
-        const alwaysAuto = localStorage.getItem('zoz_always_auto_fold_prompt') === 'true';
-        if (alwaysAuto) {
-          const converted = tryAutoConvertInputToDoc(textToProcess, currentInputText);
-          if (converted && els.promptInput) {
-            autoResizeTextarea(els.promptInput);
-            els.promptInput?.focus();
-          }
-          return;
-        }
-
-        checkAndShowPromptFoldPrompt(textToProcess, true, false, currentInputText, true);
-        return;
-      }
+      if (tryHandleComposerAutoFold(e, textToProcess, false)) return;
 
       if (isDropNormalized && els.promptInput) {
         e.preventDefault();
@@ -57126,8 +57117,6 @@ Aturan:
           if (typeof autoResizeTextarea === 'function') autoResizeTextarea(els.promptInput);
           els.promptInput.focus();
         }
-
-        showToast(`📄 Rangkuman WhatsApp berhasil dikonversi ke file [${docFileName}]! Kolom prompt tetap bersih.`, 'success');
       });
     },
 

@@ -1018,6 +1018,11 @@ const MIME_TYPES = {
   '.pdf': 'application/pdf',
   '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
+  '.csv': 'text/csv; charset=utf-8',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   '.bin': 'application/octet-stream',
   '.woff2': 'font/woff2',
   '.woff': 'font/woff',
@@ -7618,7 +7623,19 @@ async function requestHandler(req, res) {
           'video/webm': '.webm',
           'video/ogg': '.ogv',
           'application/pdf': '.pdf',
-          'text/plain': '.txt'
+          'text/plain': '.txt',
+          'text/markdown': '.md',
+          'text/x-markdown': '.md',
+          'text/csv': '.csv',
+          'application/csv': '.csv',
+          'application/json': '.json',
+          'text/html': '.html',
+          'text/css': '.css',
+          'application/javascript': '.js',
+          'text/javascript': '.js',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx'
         };
 
         if (MIME_MAP[mime]) {
@@ -7639,6 +7656,12 @@ async function requestHandler(req, res) {
           else if (sub.includes('mp4')) ext = mime.startsWith('audio') ? '.m4a' : '.mp4';
           else if (sub.includes('webm')) ext = mime.startsWith('audio') ? '.weba' : '.webm';
           else if (sub.includes('pdf')) ext = '.pdf';
+          else if (sub.includes('markdown')) ext = '.md';
+          else if (sub.includes('csv')) ext = '.csv';
+          else if (sub.includes('json')) ext = '.json';
+          else if (sub.includes('wordprocessingml')) ext = '.docx';
+          else if (sub.includes('spreadsheetml')) ext = '.xlsx';
+          else if (sub.includes('presentationml')) ext = '.pptx';
           else ext = '.bin';
         }
       } else {
@@ -8889,7 +8912,7 @@ async function requestHandler(req, res) {
       return { success: false, status: 503, error: 'Modul WhatsApp Gateway tidak tersedia.' };
     }
     const uid = reqUrl?.searchParams?.get('userId') || (body && body.userId) || req.headers['x-wa-user-id'] || req.headers['x-user-id'] || req.headers['x-client-id'] || '';
-    const pin = reqUrl?.searchParams?.get('pin') || reqUrl?.searchParams?.get('masterPin') || reqUrl?.searchParams?.get('wa_pin') || (body && (body.pin || body.password || body.currentPin || body.masterPin)) || req.headers['x-wa-pin'] || req.headers['x-terminal-pin'] || extractCookiePin(req) || '';
+    const pin = reqUrl?.searchParams?.get('pin') || reqUrl?.searchParams?.get('masterPin') || reqUrl?.searchParams?.get('wa_pin') || (body && (body.currentPin || body.pin || body.password || body.masterPin)) || req.headers['x-wa-pin'] || req.headers['x-terminal-pin'] || extractCookiePin(req) || '';
     const isLocal = isLocalWaRequest(req);
     const resTenant = waGatewayManager.resolveGateway(uid, pin, isLocal);
     if (resTenant && resTenant.success && resTenant.gateway) {
@@ -9551,8 +9574,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       (waGatewayManager && waGatewayManager.masterGateway && (
         waGatewayManager.masterGateway.verifyPin(body.pin) ||
         waGatewayManager.masterGateway.verifyPin(body.currentPin) ||
-        waGatewayManager.masterGateway.verifyPin(body.masterPin) ||
-        waGatewayManager.masterGateway.verifyPin(body.newPin)
+        waGatewayManager.masterGateway.verifyPin(body.masterPin)
       ))
     );
 
@@ -9650,11 +9672,18 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
     let pin = String(body.pin || body.newPin || req.headers['x-wa-pin'] || reqUrl.searchParams.get('pin') || '').trim();
 
-    // Sinkronkan PIN QR ponsel dengan konfigurasi gateway jika pengguna sudah terautentikasi (misal dari localhost/master)
+    // Inisialisasi PIN awal bila tamu belum memiliki PIN; tolak bila PIN aktif tidak cocok
     if (pin && pin.length >= 4 && pin !== '210560') {
       try {
-        if (!tenant.gateway.verifyPin(pin)) {
+        if (!tenant.gateway.isMaster && !tenant.gateway.hasConfiguredPin()) {
           tenant.gateway.setPin(pin);
+        } else if (!tenant.gateway.verifyPin(pin)) {
+          return sendJSON(res, 403, {
+            success: false,
+            error: 'PIN Keamanan salah. Gunakan PIN aktif atau ubah melalui pengaturan PIN.',
+            requiresPin: true,
+            userId: tenant.userId
+          });
         }
       } catch (err) {
         return sendJSON(res, 400, { success: false, error: err.message });
