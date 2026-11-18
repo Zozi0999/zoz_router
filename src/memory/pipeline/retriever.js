@@ -180,14 +180,15 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
 
     // Resolve episode receipt
     let ep = null;
-    if (m.episode_id) {
-      ep = dbStorage.getEpisodeById(m.episode_id);
+    const epId = m.episode_id || m.episodeId;
+    if (epId) {
+      ep = dbStorage.getEpisodeById(epId, uid);
     }
 
     const primarySignal = Array.from(entry.signals).join('+');
     receipts.push(createMemoryReceipt({
       memoryId: m.id,
-      episodeId: m.episode_id || 'manual',
+      episodeId: epId || 'manual',
       sourceTitle: ep ? ep.source_title : (m.scope === 'global' ? 'Preferensi Global' : `Konteks ${m.scope}`),
       sourceUri: ep ? ep.source_uri : '',
       sourceType: ep ? ep.source_type : 'manual',
@@ -212,7 +213,8 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
 
     if (standardList.length > 0) {
       const lines = standardList.map(m => {
-        const epId = m.episode_id ? `Episode: ${m.episode_id}` : 'Manual';
+        const mEpId = m.episode_id || m.episodeId;
+        const epId = mEpId ? `Episode: ${mEpId}` : 'Manual';
         return `[MEM-${m.id.slice(-6)} | ${epId} | Kategori: ${m.category || 'fact'}]: ${m.content}`;
       });
       blocks.push(`### JOZZ MEMORY CONTEXT (CLICKABLE RECEIPTS ACTIVE):\n[INFORMASI MEMORI & RIWAYAT LINTAS-SESI TERVERIFIKASI]:\n${lines.join('\n')}\n(Gunakan fakta dan riwayat percakapan lintas-sesi di atas secara langsung dan akurat).`);

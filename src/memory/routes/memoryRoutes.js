@@ -61,7 +61,13 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
     return false;
   }
 
-  const userId = validatedUserId || req.headers['x-user-id'] || reqUrl.searchParams.get('userId') || 'default';
+  const hasValidatedUser = typeof validatedUserId === 'string' && validatedUserId.length > 0;
+  const userId = hasValidatedUser
+    ? validatedUserId
+    : (req.headers['x-user-id'] || reqUrl.searchParams.get('userId') || 'default');
+  const getEffectiveUserId = (body) => hasValidatedUser
+    ? userId
+    : ((body && body.userId) || userId || 'default');
 
   try {
     // 1. GET /api/memories/insights
@@ -109,7 +115,7 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
     // 5. POST /api/memories/recall (Scoped Hybrid Recall for chat query)
     if (method === 'POST' && pathname === '/api/memories/recall') {
       const body = await parseJsonBody(req);
-      const effectiveUserId = body.userId || userId || 'default';
+      const effectiveUserId = getEffectiveUserId(body);
       const query = body.query || body.message || '';
       const scope = body.scope || 'global';
       const incognito = Boolean(body.incognito);
@@ -137,7 +143,7 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
     // 6. POST /api/memories/extract-background (Async worker trigger)
     if (method === 'POST' && pathname === '/api/memories/extract-background') {
       const body = await parseJsonBody(req);
-      const effectiveUserId = body.userId || userId || 'default';
+      const effectiveUserId = getEffectiveUserId(body);
       const incognito = Boolean(body.incognito);
       if (!incognito) {
         extractor.triggerAsyncBackgroundExtraction({
@@ -172,7 +178,7 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
     // 8. POST /api/memories (Manual explicit memory creation)
     if (method === 'POST' && (pathname === '/api/memories' || pathname === '/api/memories/')) {
       const body = await parseJsonBody(req);
-      const effectiveUserId = body.userId || userId || 'default';
+      const effectiveUserId = getEffectiveUserId(body);
       const content = body.content || body.fact || '';
       const scope = body.scope || 'global';
 
@@ -192,13 +198,17 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
       return true;
     }
 
-    // 9. PATCH /api/memories/:id (Edit memory)
+    // 9. PATCH /api/memories/:id (Edit memory — scoped by userId)
     if (method === 'PATCH' && pathname.startsWith('/api/memories/')) {
       const memoryId = pathname.replace('/api/memories/', '').trim();
+      if (!memoryId) {
+        sendJson(res, 400, { success: false, error: 'ID memori wajib disertakan.' });
+        return true;
+      }
       const body = await parseJsonBody(req);
-      const updated = dbStorage.updateMemory(memoryId, body);
+      const updated = dbStorage.updateMemory(memoryId, body, userId);
       if (!updated) {
-        sendJson(res, 404, { success: false, error: 'Memori tidak ditemukan.' });
+        sendJson(res, 404, { success: false, error: 'Memori tidak ditemukan atau bukan milik akun Anda.' });
       } else {
         sendJson(res, 200, { success: true, memory: updated });
       }
@@ -219,7 +229,15 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
       }
 
       const memoryId = pathname.replace('/api/memories/', '').trim();
-      dbStorage.deleteMemory(memoryId);
+      if (!memoryId) {
+        sendJson(res, 400, { success: false, error: 'ID memori wajib disertakan.' });
+        return true;
+      }
+      const deleted = dbStorage.deleteMemory(memoryId, userId);
+      if (!deleted) {
+        sendJson(res, 404, { success: false, error: 'Memori tidak ditemukan atau bukan milik akun Anda.' });
+        return true;
+      }
       sendJson(res, 200, { success: true, deletedId: memoryId });
       return true;
     }

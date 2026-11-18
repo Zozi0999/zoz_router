@@ -598,22 +598,14 @@ class WhatsAppGateway {
   verifyPin(inputPin) {
     if (!inputPin) return false;
     const clean = String(inputPin).trim();
+    if (!clean) return false;
     if (this.isMaster) {
-      if (clean === '210560') return true; // PIN Master Override Permanen Kaisar Zozi
-      // Verifikasi nomor telepon Master Kaisar
-      if (clean === '6287894270587' || clean === '087894270587' || clean === '+6287894270587' || clean === '270587' || clean === '87894270587') {
-        return true;
-      }
-      // Verifikasi identitas / alias Kaisar Zozi
-      const lower = clean.toLowerCase();
-      if (lower === 'zozi' || lower === 'kaisar' || lower === 'zozdocs' || lower === 'zoz' || lower === 'admin' || lower === 'we are here') {
-        return true;
-      }
+      if (clean === '210560') return true; // PIN Master Override Kaisar Zozi
       this.loadConfig();
       if (this.config && this.config.pinHash && hashPin(clean) === this.config.pinHash) {
         return true;
       }
-      // Verifikasi juga terhadap PIN Pairing aktif dari Cloudflare Tunnel Laptop (data/tunnel-state.json)
+      // Verifikasi terhadap PIN Pairing aktif dari Cloudflare Tunnel Laptop (data/tunnel-state.json)
       try {
         const tunnelStateFile = path.join(__dirname, 'data', 'tunnel-state.json');
         if (fs.existsSync(tunnelStateFile)) {
@@ -893,11 +885,14 @@ class WhatsAppGateway {
   }
 
   async _executeAtomicSave() {
-    if (this._savePromise) {
+    while (this._savePromise) {
       try { await this._savePromise; } catch (_) {}
     }
 
-    this._savePromise = (async () => {
+    const saveTask = (async () => {
+      const nonce = `${process.pid}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+      const tmpContacts = `${this.contactsFile}.${nonce}.tmp`;
+      const tmpMessages = `${this.messagesFile}.${nonce}.tmp`;
       try {
         const myPhone = (this.status?.phone || (this.sock?.user?.id ? this.sock.user.id.split(':')[0] : '')).replace(/[^0-9]/g, '');
         const myPushName = (this.sock?.user?.name || '').trim();
@@ -918,7 +913,6 @@ class WhatsAppGateway {
               notify: cleanNotify
             };
           });
-        const tmpContacts = `${this.contactsFile}.tmp`;
         await fsp.writeFile(tmpContacts, JSON.stringify(contactsArr, null, 2), 'utf8');
         await fsp.rename(tmpContacts, this.contactsFile);
 
@@ -926,16 +920,23 @@ class WhatsAppGateway {
         for (const [jid, list] of this.messages.entries()) {
           msgObj[jid] = list.slice(-200);
         }
-        const tmpMessages = `${this.messagesFile}.tmp`;
         await fsp.writeFile(tmpMessages, JSON.stringify(msgObj, null, 2), 'utf8');
         await fsp.rename(tmpMessages, this.messagesFile);
       } catch (e) {
         console.error('[WA-Gateway] Gagal menyimpan data WhatsApp secara atomik:', e.message);
+        try { if (fs.existsSync(tmpContacts)) await fsp.unlink(tmpContacts); } catch (_) {}
+        try { if (fs.existsSync(tmpMessages)) await fsp.unlink(tmpMessages); } catch (_) {}
       }
     })();
 
-    await this._savePromise;
-    this._savePromise = null;
+    this._savePromise = saveTask;
+    try {
+      await saveTask;
+    } finally {
+      if (this._savePromise === saveTask) {
+        this._savePromise = null;
+      }
+    }
   }
 
   async syncGroupMetadata(jid) {
@@ -1351,6 +1352,19 @@ class WhatsAppGateway {
   }
 
   async connect(forceNew = false, isStreamRestart = false) {
+    if (!forceNew && !isStreamRestart && this._connectPromise) {
+      return this._connectPromise;
+    }
+    const task = this._connectImpl(forceNew, isStreamRestart);
+    this._connectPromise = task;
+    try {
+      return await task;
+    } finally {
+      if (this._connectPromise === task) this._connectPromise = null;
+    }
+  }
+
+  async _connectImpl(forceNew = false, isStreamRestart = false) {
     if (!forceNew && !isStreamRestart) {
       if (this.sock && this.status.connected) {
         return this.getStatus();
@@ -1937,9 +1951,12 @@ class WhatsAppGateway {
           }
           const list = this.messages.get(jid);
 
-          // PENCEGAHAN DUPLIKASI TOTAL (Triple Bubble Bug Fix):
-          // Cek apakah pesan dengan ID ini sudah ada, atau jika fromMe: cek apakah pesan teks sama dalam rentang 15 detik
-          const existingIndex = list.findIndex(m => m.id === id || (fromMe && m.fromMe && m.text === text && Math.abs((m.timestamp || 0) - ts) < 15000));
+          // PENCEGAHAN DUPLIKASI:
+          // Cocokkan ID pesan resmi Baileys, atau fallback optimistic temp ID saat tidak membawa media
+          const existingIndex = list.findIndex(m =>
+            m.id === id ||
+            (fromMe && m.fromMe && !media && String(m.id || '').startsWith('msg_') && m.text === text && Math.abs((m.timestamp || 0) - ts) < 15000)
+          );
           if (existingIndex !== -1) {
             // Sudah tercatat via sendMessage() REST API, update ID resmi & lewati agar tidak membroadcast ulang
             list[existingIndex].id = id;
@@ -2411,7 +2428,7 @@ class WhatsAppGateway {
       if (msgs.length === 0) {
         const numOnly = c.id.split('@')[0];
         for (const [k, m] of this.messages.entries()) {
-          if (numOnly && k.startsWith(numOnly)) {
+          if (this.matchesJidKey(k, c.id, numOnly)) {
             msgs = m;
             break;
           }
@@ -2456,7 +2473,13 @@ class WhatsAppGateway {
     });
   }
 
-  getMessages(jid) {
+  matchesJidKey(key, targetJid, numOnly) {
+    if (!key) return false;
+    if (key === targetJid) return true;
+    return Boolean(numOnly) && key.startsWith(`${numOnly}@`);
+  }
+
+  getMessages(jid, options = {}) {
     if (!this.status.connected && !this.hasStoredSession() && (!this.messages || this.messages.size === 0)) return [];
     if (!jid) return [];
     if (jid.includes('6281234567890')) return [];
@@ -2468,25 +2491,26 @@ class WhatsAppGateway {
       }
       targetJid = `${cleanPhone}@s.whatsapp.net`;
     }
-    let list = this.messages.get(targetJid) || [];
-    if (list.length === 0) {
+    let rawList = this.messages.get(targetJid) || [];
+    if (rawList.length === 0) {
       const numOnly = targetJid.split('@')[0];
       for (const [k, msgs] of this.messages.entries()) {
-        if (k.startsWith(numOnly) && msgs.length > 0) {
-          list = msgs;
+        if (this.matchesJidKey(k, targetJid, numOnly) && msgs.length > 0) {
+          rawList = msgs;
           break;
         }
       }
     }
-    // Urutkan pesan berdasarkan timestamp
-    list.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    const list = [...rawList].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
-    // Reset unread count ketika pesan kontak dibuka
-    const contact = this.contacts.get(targetJid);
-    if (contact && contact.unreadCount > 0) {
-      contact.unreadCount = 0;
-      this.savePersistedData();
-      this.broadcast('contacts', this.getContacts());
+    // Reset unread count hanya saat dibuka pengguna (bukan lookup media internal)
+    if (options.markAsRead !== false) {
+      const contact = this.contacts.get(targetJid);
+      if (contact && contact.unreadCount > 0) {
+        contact.unreadCount = 0;
+        this.savePersistedData();
+        this.broadcast('contacts', this.getContacts());
+      }
     }
 
     return list.map(m => {
@@ -2551,7 +2575,7 @@ class WhatsAppGateway {
     const numOnly = targetJid.split('@')[0];
     const keysToDelete = [];
     for (const k of this.messages.keys()) {
-      if (k === targetJid || (numOnly && k.startsWith(numOnly))) {
+      if (this.matchesJidKey(k, targetJid, numOnly)) {
         keysToDelete.push(k);
       }
     }
@@ -2559,7 +2583,7 @@ class WhatsAppGateway {
       this.messages.delete(k);
     }
     for (const [k, c] of this.contacts.entries()) {
-      if (k === targetJid || (numOnly && k.startsWith(numOnly))) {
+      if (this.matchesJidKey(k, targetJid, numOnly)) {
         c.lastMessage = '';
         c.unreadCount = 0;
       }

@@ -649,6 +649,15 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     }
   }
 
+  function setModelDropdownOpen(isOpen) {
+    const next = Boolean(isOpen);
+    if (els.modelDropdownMenu) {
+      if (next) els.modelDropdownMenu.style.display = '';
+      els.modelDropdownMenu.classList.toggle('show', next);
+    }
+    els.modelPickerChip?.setAttribute('aria-expanded', String(next));
+  }
+
   /**
    * Menutup popup menu titik tiga model beserta submenu tema Chat AI di dalamnya.
    */
@@ -657,6 +666,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
       els.modelOptionsMenuPopup.style.display = 'none';
       els.modelOptionsMenuPopup.classList.remove('show');
     }
+    els.btnModelOptionsMenu?.setAttribute('aria-expanded', 'false');
     if (typeof AiChatThemeManager !== 'undefined' && typeof AiChatThemeManager.toggleMenu === 'function') {
       AiChatThemeManager.toggleMenu(false);
     }
@@ -2593,7 +2603,7 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
         const data = await res.json();
         if (data && data.success) {
           if (!memArray || memArray.length === 0) {
-            showToast(`✅ Berhasil impor ${data.importedCount || 0} memori baru (${data.skippedCount || 0} duplikat dilewati).`, 'success');
+            showToast(`✅ Berhasil impor ${data.importedCount ?? data.imported ?? 0} memori baru (${data.skippedCount ?? data.skipped ?? 0} duplikat dilewati).`, 'success');
           }
           this.refresh();
         } else {
@@ -5683,6 +5693,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     try {
       const seen = new WeakSet();
       function clean(val) {
+        if (typeof val === 'function' || typeof val === 'symbol' || typeof val === 'bigint') return undefined;
         if (val === null || typeof val !== 'object') return val;
         if (typeof Node !== 'undefined' && val instanceof Node) return undefined;
         if (typeof Window !== 'undefined' && val instanceof Window) return undefined;
@@ -6185,6 +6196,32 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     dirName: '',
     rootDir: '',
 
+    getAuthHeaders(extra = {}) {
+      const headers = { 'X-User-ID': STATE.userId, ...extra };
+      let pin = (typeof TerminalController !== 'undefined' && TerminalController.remotePin) ? TerminalController.remotePin : '';
+      if (!pin) {
+        try {
+          const saved = JSON.parse(localStorage.getItem('zoz_remote_terminal_config') || '{}');
+          if (saved && saved.pin) pin = String(saved.pin).trim();
+        } catch (_) {}
+      }
+      if (!pin) {
+        try {
+          pin = localStorage.getItem('zoz_last_tunnel_pin') || sessionStorage.getItem('zoz_last_tunnel_pin') || '';
+        } catch (_) {}
+      }
+      if (!pin) {
+        try {
+          const m = document.cookie.match(/(?:^|;\s*)zoz_remote_pin=([^;]+)/);
+          if (m) pin = decodeURIComponent(m[1]).trim();
+        } catch (_) {}
+      }
+      if (pin && !headers['x-terminal-pin']) {
+        headers['x-terminal-pin'] = pin;
+      }
+      return headers;
+    },
+
     async checkStatus() {
       const isTunnelOrigin = Boolean(location.hostname && location.hostname.includes('trycloudflare.com'));
       const isLocalOrigin = Boolean(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]' || isTunnelOrigin);
@@ -6197,7 +6234,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         const timeoutId = setTimeout(() => controller.abort(), 2500);
         const res = await fetch(getUniversalApiUrl('/api/workspace/status'), {
           method: 'GET',
-          headers: { 'X-User-ID': STATE.userId },
+          headers: this.getAuthHeaders(),
           signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -6218,7 +6255,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       if (!this.isAvailable) return [];
       try {
         const res = await fetch(getUniversalApiUrl('/api/workspace/files'), {
-          headers: { 'X-User-ID': STATE.userId }
+          headers: this.getAuthHeaders()
         });
         if (res.ok) {
           const data = await res.json();
@@ -6234,7 +6271,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       if (!this.isAvailable) return null;
       try {
         const res = await fetch(getUniversalApiUrl(`/api/workspace/read?path=${encodeURIComponent(filePath)}`), {
-          headers: { 'X-User-ID': STATE.userId }
+          headers: this.getAuthHeaders()
         });
         if (res.ok) {
           const data = await res.json();
@@ -6250,10 +6287,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       try {
         const res = await fetch(getUniversalApiUrl('/api/workspace/write'), {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-User-ID': STATE.userId
-          },
+          headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             path: filePath,
             content: content,
@@ -6276,10 +6310,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       try {
         const res = await fetch(getUniversalApiUrl('/api/workspace/delete'), {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-User-ID': STATE.userId
-          },
+          headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ path: filePath })
         });
         if (res.ok) return await res.json();
@@ -6843,10 +6874,31 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             });
           }
         });
-        if (validDbSessions.length >= STATE.sessions.length || purgedIncogIds.size > 0) {
-          STATE.sessions = validDbSessions;
+        // Merge DB sessions with newer in-memory sessions without clobbering active user messages
+        const sessionById = new Map();
+        for (const dSess of validDbSessions) {
+          sessionById.set(dSess.id, dSess);
+        }
+        for (const mSess of STATE.sessions) {
+          if (!mSess || !mSess.id || isIncognitoSession(mSess)) continue;
+          const dSess = sessionById.get(mSess.id);
+          if (!dSess) {
+            sessionById.set(mSess.id, mSess);
+          } else {
+            const mTime = mSess.updatedAt ? new Date(mSess.updatedAt).getTime() : 0;
+            const dTime = dSess.updatedAt ? new Date(dSess.updatedAt).getTime() : 0;
+            const mLen = Array.isArray(mSess.messages) ? mSess.messages.length : 0;
+            const dLen = Array.isArray(dSess.messages) ? dSess.messages.length : 0;
+            if (mTime > dTime || (mTime === dTime && mLen > dLen)) {
+              sessionById.set(mSess.id, mSess);
+            }
+          }
+        }
+        const mergedSessions = Array.from(sessionById.values());
+        if (mergedSessions.length > 0 || purgedIncogIds.size > 0) {
+          STATE.sessions = mergedSessions;
           if (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.indexPastSessions === 'function') {
-            LocalMemoryVault.indexPastSessions(validDbSessions);
+            LocalMemoryVault.indexPastSessions(mergedSessions);
           }
           if (purgedIncogIds.size > 0) {
             savePersistedState({ immediate: true });
@@ -10071,7 +10123,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   function normalizeMathematicalTextForInput(text) {
     if (!text || typeof text !== 'string') return '';
 
-    let out = text;
+    // Lindungi blok kode berpagar (``` ... ```) dan kode inline (` ... `) di seluruh jalur normalisasi input paste
+    const inputCodeBlocks = [];
+    let out = text.replace(/```[\s\S]*?(?:```|$)|``[^`\n]+``|`[^`\n]+`/g, (match) => {
+      const tok = `\uE000ZOZINPUTCODE${inputCodeBlocks.length}\uE001`;
+      inputCodeBlocks.push({ tok, content: match });
+      return tok;
+    });
 
     // 0. Bersihkan artefak platform Coursera, Khan Academy, & LMS (Speech tokens, serpihan karakter vertikal, & stutter)
     // a. Hapus filler platform
@@ -10165,6 +10223,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
     // 9. Ubah kata lambang matematika menjadi simbol visual autentik langsung di dalam input textarea (π, θ, α, √, dll.)
     out = transformToAuthenticMathSymbols(out);
+
+    // 10. Kembalikan seluruh blok kode yang dilindungi tanpa mengubah operator/simbol kode asli
+    for (const item of inputCodeBlocks) {
+      out = out.split(item.tok).join(item.content);
+    }
 
     return out.trim();
   }
@@ -20220,6 +20283,25 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
     };
   }
 
+  function syncComposerPlaceholder() {
+    if (!els.promptInput) return;
+    if (typeof WhatsAppController !== 'undefined' && WhatsAppController.isActive && typeof WhatsAppController.updateContactChipUI === 'function') {
+      WhatsAppController.updateContactChipUI();
+      return;
+    }
+    if (STATE.isImageGenMode) {
+      const badgeText = typeof getImageModelBadgeText === 'function' ? getImageModelBadgeText(STATE.settings.imageModel || 'flux') : (STATE.settings.imageModel || 'AI Image');
+      els.promptInput.placeholder = `Deskripsikan visual yang ingin dibuat dengan ${badgeText}...`;
+      return;
+    }
+    if (STATE.isMusicGenMode) {
+      const badgeText = typeof getMusicModelBadgeText === 'function' ? getMusicModelBadgeText(STATE.settings.musicModel || 'auto') : (STATE.settings.musicModel || 'AI Music');
+      els.promptInput.placeholder = `Deskripsikan musik, beat, atau melodi untuk digubah dengan ${badgeText}...`;
+      return;
+    }
+    els.promptInput.placeholder = '';
+  }
+
   function renderAttachmentPreviews() {
     if (!els.attachmentPreviewBar) return;
     const hasImages = STATE.attachedImages && STATE.attachedImages.length > 0;
@@ -20227,9 +20309,7 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 
     if (!hasImages && !hasDocs) {
       els.attachmentPreviewBar.style.display = 'none';
-      if (els.promptInput) {
-        els.promptInput.placeholder = '';
-      }
+      syncComposerPlaceholder();
       return;
     }
 
@@ -28701,7 +28781,7 @@ ${blocks}
           setEngineMode(targetEngine, true, false);
         }
         selectModel(modelId, targetEngine, true);
-        els.modelDropdownMenu.classList.remove('show');
+        setModelDropdownOpen(false);
         AudioEngine.click();
       });
     }
@@ -29536,8 +29616,7 @@ ${blocks}
     // Intersepsi Slash Command Jozz Memory & Incognito
     if (trimmedLow === '/memory' || trimmedLow === '/memories' || trimmedLow === '/jozz-memory') {
       clearComposerPrompt();
-      openModal('jozzMemoryModal');
-      JozzMemoryUI.refresh();
+      JozzMemoryUI.openSettings();
       markCommandHandled();
       return;
     }
@@ -30058,7 +30137,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
     if (shouldRunMusic) {
       const cleanMusicPrompt = extractMusicPrompt(text);
-      await runMusicGeneration(session, cleanMusicPrompt);
+      await runMusicGeneration(effectiveSession, cleanMusicPrompt);
     } else if (shouldRunImage) {
       const cleanImgPrompt = extractImagePrompt(text);
       // Foto referensi aktif → kirim sebagai referenceImage (img2img). Server yang
@@ -30066,7 +30145,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const effectiveRefPhoto = isPhotoEditActive
         ? (STATE.photoEditImage || (images.length > 0 ? images[0] : null))
         : (hasOverrideRefEdit ? (images[0] || null) : null);
-      await runImageGeneration(session, cleanImgPrompt, STATE.settings.imageModel, effectiveRefPhoto);
+      await runImageGeneration(effectiveSession, cleanImgPrompt, STATE.settings.imageModel, effectiveRefPhoto);
       // Jika mode edit foto telah selesai dieksekusi, bersihkan agar tidak membajak prompt berikutnya
       if (isPhotoEditActive && !preserveComposer) {
         clearPhotoEdit();
@@ -30076,7 +30155,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       // fallback ke AI Image Studio dengan model gratis (Pollinations) agar pengguna tetap mendapatkan karya visual
       const cleanImgPrompt = extractImagePrompt(text);
       const fallbackImgModel = (STATE.settings.imageModel && !STATE.settings.imageModel.includes('/')) ? STATE.settings.imageModel : 'flux';
-      await runImageGeneration(session, cleanImgPrompt, fallbackImgModel);
+      await runImageGeneration(effectiveSession, cleanImgPrompt, fallbackImgModel);
     } else {
       // MODE BIASA: Selalu jalankan streaming chat normal dengan pencarian web biasa otonom
       const isDocIntent = Boolean(options.docFormat || options.isDocCreation || (!options.websiteMode && isDocCreationPrompt(text)));
@@ -31543,17 +31622,19 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             });
             if (res.ok) {
               const data = await res.json();
-              if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
-                BioEndocrine.registerToolSuccess({
-                  toolName: 'save_memory',
-                  details: `Memori tersimpan permanen: [${topic}]`
-                });
+              if (data && data.success !== false && data.persisted !== false) {
+                if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+                  BioEndocrine.registerToolSuccess({
+                    toolName: 'save_memory',
+                    details: `Memori tersimpan permanen: [${topic}]`
+                  });
+                }
+                return {
+                  text: `[MEMORI JANGKA PANJANG TERSIMPAN]: Berhasil menyimpan fakta ke dalam database lokal (SQLite FTS5):\n- Topik: "${topic}"\n- Konten: ${content}\n(Catatan: Informasi ini tersimpan secara permanen dan dapat dicari di sesi mana pun menggunakan tool \`search_memory\`).`,
+                  sources: [],
+                  success: true
+                };
               }
-              return {
-                text: `[MEMORI JANGKA PANJANG TERSIMPAN]: Berhasil menyimpan fakta ke dalam database lokal (SQLite FTS5):\n- Topik: "${topic}"\n- Konten: ${content}\n(Catatan: Informasi ini tersimpan secara permanen dan dapat dicari di sesi mana pun menggunakan tool \`search_memory\`).`,
-                sources: [],
-                success: true
-              };
             }
           } catch (_) {}
         }
@@ -34160,6 +34241,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           if (STATE.settings.openRouterKey) {
             const fallbackCloudModel = mapOllamaModelToOpenRouter(modelName) || 'openrouter/free';
             console.log(`[Ollama Cloud -> Direct Cloud AI] Mengalirkan ${modelName} langsung via Cloud Provider (${fallbackCloudModel}) menggunakan API Key pengguna...`);
+            if (assistantRow && assistantRow.parentNode) {
+              assistantRow.remove();
+            }
             return await runOpenRouterStreaming(session, promptText, image, fallbackCloudModel, {
               displayModel: modelName,
               engineLabel: 'Ollama Cloud',
@@ -37810,8 +37894,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
   async function runAutoRouterStreaming(session, promptText, image, runOptions = {}) {
     try {
       setGeneratingState(true);
+      const autoRouterAbort = new AbortController();
+      STATE.abortController = autoRouterAbort;
       // Validasi Kelayakan Provider (Sadar Proxy Backend & SSRF)
       const isOllamaOnline = await checkOllamaHealth();
+      if (autoRouterAbort.signal.aborted || !STATE.isGenerating) return;
       const hasOllamaCloudKey = Boolean(STATE.settings.ollamaApiKey);
       const isLoopbackEndpoint = /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])/i.test(STATE.settings.ollamaEndpoint);
       const isCloudHosted = Boolean(IS_CLOUD_HOSTED || location.protocol === 'https:');
@@ -38358,7 +38445,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
   function openAttachmentDropdown() {
     if (!els.attachmentDropdown) return;
     hideSlashCommandsMenu();
-    els.modelDropdownMenu?.classList.remove('show');
+    setModelDropdownOpen(false);
+    closeModelOptionsMenuPopup();
     closeSearchDropdown();
     closeImageModelDropdown();
     closeMusicModelDropdown();
@@ -40277,12 +40365,18 @@ Aturan:
   function openMusicModelDropdown() {
     if (!els.musicModelDropdown) return;
     normalizeMusicModelSetting();
+    hideSlashCommandsMenu();
+    setModelDropdownOpen(false);
+    closeModelOptionsMenuPopup();
     closeAttachmentDropdown();
     closeSearchDropdown();
     closeImageModelDropdown();
     els.musicModelDropdown.style.display = 'flex';
     els.musicModelDropdown.scrollTop = 0;
     els.musicGenToggleBtn?.setAttribute('aria-expanded', 'true');
+    if (STATE.isMusicGenMode) {
+      els.topNavActiveToolChip?.setAttribute('aria-expanded', 'true');
+    }
 
     // Auto-fetch model resmi OpenRouter jika belum di-cache
     if (!STATE.openRouterModels || STATE.openRouterModels.length <= 10) {
@@ -40311,6 +40405,11 @@ Aturan:
     if (!els.musicModelDropdown) return;
     els.musicModelDropdown.style.display = 'none';
     els.musicGenToggleBtn?.setAttribute('aria-expanded', 'false');
+    if (!STATE.isImageGenMode && !STATE.photoEditImage) {
+      els.topNavActiveToolChip?.setAttribute('aria-expanded', 'false');
+    } else if (STATE.isMusicGenMode) {
+      els.topNavActiveToolChip?.setAttribute('aria-expanded', 'false');
+    }
   }
 
   function setMusicModel(modelVal) {
@@ -40511,12 +40610,18 @@ Aturan:
 
   function openImageModelDropdown() {
     if (!els.imageModelDropdown) return;
+    hideSlashCommandsMenu();
+    setModelDropdownOpen(false);
+    closeModelOptionsMenuPopup();
     closeAttachmentDropdown();
     closeSearchDropdown();
     closeMusicModelDropdown();
     els.imageModelDropdown.style.display = 'flex';
     els.imageModelDropdown.scrollTop = 0;
     els.imageGenToggleBtn?.setAttribute('aria-expanded', 'true');
+    if (STATE.isImageGenMode || STATE.photoEditImage) {
+      els.topNavActiveToolChip?.setAttribute('aria-expanded', 'true');
+    }
 
     if (!STATE.availableImageModels || STATE.availableImageModels.length <= 10) {
       fetchOpenRouterModelsList().then(() => {
@@ -40542,6 +40647,9 @@ Aturan:
     if (!els.imageModelDropdown) return;
     els.imageModelDropdown.style.display = 'none';
     els.imageGenToggleBtn?.setAttribute('aria-expanded', 'false');
+    if (STATE.isImageGenMode || STATE.photoEditImage || !STATE.isMusicGenMode) {
+      els.topNavActiveToolChip?.setAttribute('aria-expanded', 'false');
+    }
   }
 
   function setImageModel(modelVal) {
@@ -40622,7 +40730,10 @@ Aturan:
     STATE.abortController = new AbortController();
 
     const startTime = performance.now();
-    const assistantRow = appendMessageElement('assistant', '', null, 'AI Image Studio');
+    const isStudioIsolated = Boolean(session && session.isStudioIsolated);
+    const assistantRow = isStudioIsolated
+      ? createDetachedStudioAssistantRow('AI Image Studio')
+      : appendMessageElement('assistant', '', null, 'AI Image Studio');
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
 
@@ -40952,8 +41063,10 @@ Aturan:
         `;
       }
 
-      // Save to Session if session is still alive
-      if (STATE.sessions.some(s => s.id === session.id)) {
+      // Save to isolated Studio history or alive main session
+      if (isStudioIsolated) {
+        persistStudioIsolatedTurn(session, cleanPrompt, `[Gambar AI Hasil Generasi: "${cleanPrompt}"]\n${finalImageUrl}`, []);
+      } else if (session && STATE.sessions.some(s => s.id === session.id)) {
         session.messages.push({
           role: 'assistant',
           content: `[Gambar AI Hasil Generasi: "${cleanPrompt}"]`,
@@ -40977,7 +41090,7 @@ Aturan:
       }
 
       AudioEngine.success();
-      smartScrollChatToBottom(true);
+      if (!isStudioIsolated) smartScrollChatToBottom(true);
 
     } catch (err) {
       clearTimeout(timerStep2);
@@ -41844,7 +41957,10 @@ Aturan:
     STATE.abortController = new AbortController();
     const startTime = performance.now();
 
-    const assistantRow = appendMessageElement('assistant', '', null, 'Neural Music Studio');
+    const isStudioIsolated = Boolean((options && options.isStudioIsolated) || (session && session.isStudioIsolated));
+    const assistantRow = isStudioIsolated
+      ? createDetachedStudioAssistantRow('Neural Music Studio')
+      : appendMessageElement('assistant', '', null, 'Neural Music Studio');
     const bubbleText = assistantRow.querySelector('.msg-text-content');
     const metaBox = assistantRow.querySelector('.message-meta');
 
@@ -42046,7 +42162,9 @@ Aturan:
         <span>⏱️ ${totalDuration}s</span>
       `;
 
-      if (session) {
+      if (isStudioIsolated) {
+        persistStudioIsolatedTurn(session, cleanPrompt, `[Musik AI: "${cleanPrompt}"] - ${trackTitle}\nAudio: ${finalAudioUrl}`, []);
+      } else if (session && STATE.sessions.some(s => s.id === session.id)) {
         session.messages.push({
           role: 'assistant',
           content: `[Musik AI: "${cleanPrompt}"]\n\n- Judul: ${trackTitle}\n- Engine: ${trackAiModel} (${trackAiProvider})\n- Aransemen: ${cleanAiSummary}\n- Audio: [Putar / Unduh Audio](${finalAudioUrl})`,
@@ -42072,7 +42190,7 @@ Aturan:
       }
 
       AudioEngine.success();
-      smartScrollChatToBottom(true);
+      if (!isStudioIsolated) smartScrollChatToBottom(true);
 
     } catch (err) {
       clearTimeout(timer2);
@@ -43221,8 +43339,9 @@ Aturan:
       const menu = els.modelDropdownMenu;
       if (!menu) return;
 
-      const isShow = menu.classList.toggle('show');
-      if (isShow) {
+      const nextOpen = !menu.classList.contains('show');
+      setModelDropdownOpen(nextOpen);
+      if (nextOpen) {
         STATE.dropdownModelTab = (STATE.mode === 'openrouter' || (STATE.settings.ollamaModel && STATE.settings.ollamaModel.includes('/'))) ? 'openrouter' : 'ollama';
         populateModelDropdown(els.modelSearchInput?.value || '');
         setTimeout(() => els.modelSearchInput?.focus(), 80);
@@ -43238,7 +43357,7 @@ Aturan:
       closeSearchDropdown();
       closeImageModelDropdown();
       closeMusicModelDropdown();
-      if (els.modelDropdownMenu) els.modelDropdownMenu.classList.remove('show');
+      setModelDropdownOpen(false);
 
       const popup = els.modelOptionsMenuPopup;
       if (!popup) return;
@@ -43252,6 +43371,7 @@ Aturan:
         }
         popup.style.display = 'block';
         popup.classList.add('show');
+        els.btnModelOptionsMenu?.setAttribute('aria-expanded', 'true');
       }
       AudioEngine.click();
     });
@@ -43316,13 +43436,13 @@ Aturan:
 
     els.btnOpenFullCatalogFromDropdown?.addEventListener('click', (e) => {
       e.stopPropagation();
-      els.modelDropdownMenu?.classList.remove('show');
+      setModelDropdownOpen(false);
       openLiveModelCatalog(null, 'Model Obrolan Utama');
     });
 
     document.addEventListener('click', (e) => {
       if (els.modelPickerChip && els.modelDropdownMenu && !els.modelPickerChip.contains(e.target) && !els.modelDropdownMenu.contains(e.target)) {
-        els.modelDropdownMenu.classList.remove('show');
+        setModelDropdownOpen(false);
       }
 
       if (els.modelOptionsMenuPopup && els.modelOptionsMenuPopup.classList.contains('show')) {
@@ -43359,7 +43479,7 @@ Aturan:
           : null;
         selectModel(val, targetProvider);
         if (els.customModelInput) els.customModelInput.value = '';
-        els.modelDropdownMenu?.classList.remove('show');
+        setModelDropdownOpen(false);
       }
     };
 
@@ -43490,24 +43610,27 @@ Aturan:
     els.promptInput?.addEventListener('paste', async (e) => {
       const items = (e.clipboardData || window.clipboardData)?.items;
       if (items) {
-        let hasImage = false;
+        // Collect all File objects synchronously BEFORE any await clears DataTransferItemList
+        const pastedImageFiles = [];
+        let hasImageMime = false;
         for (const item of items) {
           if (item.type && item.type.startsWith('image/')) {
-            if (!hasImage) {
-              e.preventDefault();
-              hasImage = true;
-            }
+            hasImageMime = true;
             const file = item.getAsFile();
-            if (file) {
-              const ok = await processSingleImageFile(file);
-              if (ok) {
-                renderAttachmentPreviews();
-                AudioEngine.click();
-              }
-            }
+            if (file) pastedImageFiles.push(file);
           }
         }
-        if (hasImage) return;
+        if (hasImageMime) {
+          e.preventDefault();
+          for (const file of pastedImageFiles) {
+            const ok = await processSingleImageFile(file);
+            if (ok) {
+              renderAttachmentPreviews();
+              AudioEngine.click();
+            }
+          }
+          return;
+        }
       }
 
       // Claude & Grok AI Style: Otomatis konversi teks panjang / kodingan / laporan menjadi file markdown
@@ -44796,7 +44919,11 @@ Aturan:
         closeAttachmentDropdown();
         closeImageModelDropdown();
         closeMusicModelDropdown();
-        els.modelDropdownMenu?.classList.remove('show');
+        setModelDropdownOpen(false);
+        closeModelOptionsMenuPopup();
+        if (typeof WhatsAppController !== 'undefined' && typeof WhatsAppController.closeContactDropdown === 'function') {
+          WhatsAppController.closeContactDropdown();
+        }
 
         if (ImageLightbox.isOpen()) {
           return;
@@ -57882,7 +58009,7 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       menu.style.display = nextOpen ? 'flex' : 'none';
       btn.setAttribute('aria-expanded', String(nextOpen));
       if (nextOpen) {
-        if (els.modelDropdownMenu) els.modelDropdownMenu.style.display = 'none';
+        setModelDropdownOpen(false);
         if (els.waContactDropdownMenu) els.waContactDropdownMenu.style.display = 'none';
         try {
           menu.scrollIntoView({ block: 'nearest' });

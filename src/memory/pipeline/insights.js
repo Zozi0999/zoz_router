@@ -8,7 +8,6 @@ const dbStorage = require('../storage/db');
 
 function generateMemoryInsights(userId, scope = null) {
   const uid = userId || config.DEFAULT_USER_ID;
-  const { db } = dbStorage.initDatabase();
 
   // 1. Memory totals & category distributions
   const allMemories = dbStorage.listMemories(uid, { scope, limit: 200 });
@@ -20,28 +19,8 @@ function generateMemoryInsights(userId, scope = null) {
     categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
   }
 
-  // 2. Active Knowledge Graph Entities & Top Topics
-  let entSql = 'SELECT * FROM entities WHERE user_id = ?';
-  const entParams = [uid];
-  if (scope) {
-    entSql += ' AND (scope = ? OR scope = "global")';
-    entParams.push(scope);
-  }
-  entSql += ' ORDER BY updated_at DESC LIMIT 30';
-
-  const entStmt = db.prepare(entSql);
-  const entities = typeof entStmt.all === 'function' ? entStmt.all(...entParams) : [];
-
-  // 3. Active Temporal Relations (Facts currently holding true)
-  const relStmt = db.prepare(`
-    SELECT r.*, e1.name as source_name, e2.name as target_name 
-    FROM relations r
-    LEFT JOIN entities e1 ON r.source_entity_id = e1.id
-    LEFT JOIN entities e2 ON r.target_entity_id = e2.id
-    WHERE r.user_id = ? AND r.valid_until IS NULL
-    ORDER BY r.valid_from DESC LIMIT 20
-  `);
-  const activeRelations = typeof relStmt.all === 'function' ? relStmt.all(uid) : [];
+  // 2 & 3. Active Knowledge Graph Entities & Temporal Relations (mode-agnostic)
+  const { entities, activeRelations } = dbStorage.getInsightsData(uid, scope);
 
   // 4. Synthesize Work Pattern Summary & Key Recommendations
   const topCategories = Object.entries(categoryCounts)
@@ -50,7 +29,7 @@ function generateMemoryInsights(userId, scope = null) {
 
   const topEntities = entities.slice(0, 10).map(e => ({
     name: e.name,
-    type: e.entity_type,
+    type: e.entity_type || e.entityType || 'concept',
     summary: e.summary,
     scope: e.scope
   }));
@@ -59,9 +38,9 @@ function generateMemoryInsights(userId, scope = null) {
   if (activeRelations.length > 0) {
     activeRelations.slice(0, 4).forEach(r => {
       recommendedReviewTopics.push({
-        topic: `${r.source_name || 'Entitas'} ${r.relation_type} ${r.target_name || ''}`.trim(),
+        topic: `${r.source_name || 'Entitas'} ${r.relation_type || r.relationType} ${r.target_name || ''}`.trim(),
         fact: r.fact,
-        validFrom: r.valid_from
+        validFrom: r.valid_from || r.validFrom
       });
     });
   } else if (allMemories.length > 0) {
@@ -69,7 +48,7 @@ function generateMemoryInsights(userId, scope = null) {
       recommendedReviewTopics.push({
         topic: m.category,
         fact: m.content,
-        validFrom: m.created_at
+        validFrom: m.created_at || m.createdAt
       });
     });
   }

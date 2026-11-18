@@ -12,19 +12,7 @@ const { sanitizeFactCandidate } = require('../pipeline/guardrails');
  */
 function exportMemories(userId, format = 'json') {
   const uid = userId || config.DEFAULT_USER_ID;
-  const { db } = dbStorage.initDatabase();
-
-  const memStmt = db.prepare('SELECT * FROM memories WHERE user_id = ? ORDER BY created_at ASC');
-  const memories = typeof memStmt.all === 'function' ? memStmt.all(uid) : [];
-
-  const entStmt = db.prepare('SELECT * FROM entities WHERE user_id = ? ORDER BY name ASC');
-  const entities = typeof entStmt.all === 'function' ? entStmt.all(uid) : [];
-
-  const relStmt = db.prepare('SELECT * FROM relations WHERE user_id = ? ORDER BY valid_from ASC');
-  const relations = typeof relStmt.all === 'function' ? relStmt.all(uid) : [];
-
-  const epStmt = db.prepare('SELECT * FROM episodes WHERE user_id = ? ORDER BY created_at ASC');
-  const episodes = typeof epStmt.all === 'function' ? epStmt.all(uid) : [];
+  const { memories, entities, relations, episodes } = dbStorage.getExportSnapshot(uid);
 
   if (format === 'md' || format === 'markdown') {
     const lines = [
@@ -145,8 +133,19 @@ function importMemories(userId, rawContent, format = 'json') {
       importedCount++;
     }
   } else {
+    // Unwrap optional JSON { markdown } wrapper sent by frontend clients
+    let effectiveMarkdown = rawContent;
+    if (rawContent.trim().startsWith('{')) {
+      try {
+        const parsedMd = JSON.parse(rawContent);
+        if (parsedMd && typeof (parsedMd.markdown ?? parsedMd.content ?? parsedMd.text) === 'string') {
+          effectiveMarkdown = parsedMd.markdown ?? parsedMd.content ?? parsedMd.text;
+        }
+      } catch (_) {}
+    }
+
     // Markdown parser (parses bullet points `- ...` or `* ...`)
-    const lines = rawContent.split(/\r?\n/);
+    const lines = effectiveMarkdown.split(/\r?\n/);
     let currentCategory = 'general';
 
     for (const line of lines) {
@@ -156,6 +155,8 @@ function importMemories(userId, rawContent, format = 'json') {
         continue;
       }
       if (/^[-*]\s+/.test(trimmed)) {
+        const scopeMatch = trimmed.match(/\*\(Scope:\s*([a-z0-9_-]+)\s*\)\*$/i);
+        const itemScope = scopeMatch ? scopeMatch[1].toLowerCase() : 'global';
         const rawItem = trimmed.replace(/^[-*]\s+/, '').replace(/^\*\*\[[^\]]+\]\*\*\s*/, '').replace(/\*\(Scope:[^)]+\)\*$/, '').trim();
         if (rawItem.length < 5) continue;
 
@@ -176,7 +177,7 @@ function importMemories(userId, rawContent, format = 'json') {
           userId: uid,
           content: sanitized.content,
           category: currentCategory,
-          scope: 'global',
+          scope: itemScope,
           confidence: 1.0
         });
         importedCount++;
@@ -187,7 +188,9 @@ function importMemories(userId, rawContent, format = 'json') {
   return {
     success: true,
     imported: importedCount,
-    skipped: skippedCount
+    skipped: skippedCount,
+    importedCount,
+    skippedCount
   };
 }
 

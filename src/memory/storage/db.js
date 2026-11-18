@@ -302,6 +302,37 @@ function queryRun(stmt, ...params) {
   return null;
 }
 
+function isRecordOwnedBy(record, userId) {
+  if (!record) return false;
+  if (!userId || userId === '*') return true;
+  return (record.userId || record.user_id || config.DEFAULT_USER_ID) === userId;
+}
+
+function normalizeMemoryRow(m) {
+  if (!m) return null;
+  const uid = m.user_id || m.userId || config.DEFAULT_USER_ID;
+  const isAct = m.isActive !== undefined ? (m.isActive ? 1 : 0) : (m.is_active !== undefined ? (m.is_active ? 1 : 0) : 1);
+  const epId = m.episode_id !== undefined ? m.episode_id : (m.episodeId || null);
+  const emb = m.embedding_json !== undefined ? m.embedding_json : (m.embeddingJson || null);
+  const createdAt = m.created_at || m.createdAt || new Date().toISOString();
+  const updatedAt = m.updated_at || m.updatedAt || createdAt;
+  return {
+    ...m,
+    userId: uid,
+    user_id: uid,
+    episodeId: epId,
+    episode_id: epId,
+    embeddingJson: emb,
+    embedding_json: emb,
+    isActive: isAct,
+    is_active: isAct,
+    createdAt,
+    created_at: createdAt,
+    updatedAt,
+    updated_at: updatedAt
+  };
+}
+
 // ==================== EPISODES API ====================
 
 function insertEpisode(episodeData) {
@@ -399,7 +430,7 @@ function findEntityByName(userId, name, scope = 'global') {
   if (instance.mode === 'memory') {
     const target = (name || '').toLowerCase();
     for (const e of memStore.entities.values()) {
-      if ((e.userId === userId || e.userId === 'default') && e.name.toLowerCase() === target && (e.scope === scope || e.scope === 'global')) {
+      if (isRecordOwnedBy(e, userId) && e.name.toLowerCase() === target && (e.scope === scope || e.scope === 'global')) {
         return e;
       }
     }
@@ -530,8 +561,9 @@ function insertMemory(memoryData) {
   const instance = initDatabase();
 
   if (instance.mode === 'memory') {
-    memStore.memories.set(mem.id, mem);
-    return mem;
+    const normalized = normalizeMemoryRow(mem);
+    memStore.memories.set(normalized.id, normalized);
+    return normalized;
   }
 
   const { db } = instance;
@@ -554,33 +586,50 @@ function insertMemory(memoryData) {
   return mem;
 }
 
-function updateMemory(id, { content, category, scope, isActive }) {
+function updateMemory(id, { content, category, scope, isActive }, userId = null) {
   const instance = initDatabase();
 
   if (instance.mode === 'memory') {
     const existing = memStore.memories.get(id);
-    if (!existing) return null;
+    if (!existing || !isRecordOwnedBy(existing, userId)) return null;
 
+    const prevActive = existing.isActive !== undefined ? existing.isActive : existing.is_active;
+    const prevEmb = existing.embeddingJson !== undefined ? existing.embeddingJson : existing.embedding_json;
     const newContent = typeof content === 'string' ? content.trim() : existing.content;
     const newCat = typeof category === 'string' ? category.trim() : existing.category;
     const newScope = typeof scope === 'string' ? scope.trim() : existing.scope;
-    const newActive = typeof isActive !== 'undefined' ? (isActive ? 1 : 0) : existing.is_active;
+    const newActive = typeof isActive !== 'undefined' ? (isActive ? 1 : 0) : prevActive;
     const updatedAt = new Date().toISOString();
 
-    let newEmb = existing.embedding_json;
+    let newEmb = prevEmb;
     if (newContent !== existing.content) {
       const vec = computeFastEmbedding(`${newContent} ${newCat} ${newScope}`);
       newEmb = JSON.stringify(Array.from(vec));
     }
 
-    const updated = { ...existing, content: newContent, category: newCat, scope: newScope, is_active: newActive, is_active_bool: Boolean(newActive), embedding_json: newEmb, updated_at: updatedAt };
+    const updated = normalizeMemoryRow({
+      ...existing,
+      content: newContent,
+      category: newCat,
+      scope: newScope,
+      isActive: newActive,
+      is_active: newActive,
+      is_active_bool: Boolean(newActive),
+      embeddingJson: newEmb,
+      embedding_json: newEmb,
+      updatedAt,
+      updated_at: updatedAt
+    });
     memStore.memories.set(id, updated);
     return updated;
   }
 
   const { db } = instance;
-  const existingStmt = db.prepare('SELECT * FROM memories WHERE id = ? LIMIT 1');
-  const existing = queryGet(existingStmt, id);
+  const scopedOwner = Boolean(userId && userId !== '*');
+  const existingStmt = scopedOwner
+    ? db.prepare('SELECT * FROM memories WHERE id = ? AND user_id = ? LIMIT 1')
+    : db.prepare('SELECT * FROM memories WHERE id = ? LIMIT 1');
+  const existing = scopedOwner ? queryGet(existingStmt, id, userId) : queryGet(existingStmt, id);
   if (!existing) return null;
 
   const newContent = typeof content === 'string' ? content.trim() : existing.content;
@@ -595,12 +644,22 @@ function updateMemory(id, { content, category, scope, isActive }) {
     newEmb = JSON.stringify(Array.from(vec));
   }
 
-  const updateStmt = db.prepare(`
-    UPDATE memories 
-    SET content = ?, category = ?, scope = ?, is_active = ?, embedding_json = ?, updated_at = ?
-    WHERE id = ?
-  `);
-  queryRun(updateStmt, newContent, newCat, newScope, newActive, newEmb, updatedAt, id);
+  const updateStmt = scopedOwner
+    ? db.prepare(`
+        UPDATE memories 
+        SET content = ?, category = ?, scope = ?, is_active = ?, embedding_json = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?
+      `)
+    : db.prepare(`
+        UPDATE memories 
+        SET content = ?, category = ?, scope = ?, is_active = ?, embedding_json = ?, updated_at = ?
+        WHERE id = ?
+      `);
+  if (scopedOwner) {
+    queryRun(updateStmt, newContent, newCat, newScope, newActive, newEmb, updatedAt, id, userId);
+  } else {
+    queryRun(updateStmt, newContent, newCat, newScope, newActive, newEmb, updatedAt, id);
+  }
 
   // Update FTS5
   try {
@@ -615,17 +674,24 @@ function updateMemory(id, { content, category, scope, isActive }) {
   return { ...existing, content: newContent, category: newCat, scope: newScope, is_active: newActive, updated_at: updatedAt };
 }
 
-function deleteMemory(id) {
+function deleteMemory(id, userId = null) {
   const instance = initDatabase();
 
   if (instance.mode === 'memory') {
+    const existing = memStore.memories.get(id);
+    if (!existing || !isRecordOwnedBy(existing, userId)) return false;
     memStore.memories.delete(id);
     return true;
   }
 
   const { db } = instance;
-  const stmt = db.prepare('DELETE FROM memories WHERE id = ?');
-  queryRun(stmt, id);
+  const scopedOwner = Boolean(userId && userId !== '*');
+  const stmt = scopedOwner
+    ? db.prepare('DELETE FROM memories WHERE id = ? AND user_id = ?')
+    : db.prepare('DELETE FROM memories WHERE id = ?');
+  const info = scopedOwner ? queryRun(stmt, id, userId) : queryRun(stmt, id);
+  const removed = Number(info && (info.changes ?? info.rowCount ?? 0)) > 0;
+  if (!removed) return false;
 
   try {
     const delFts = db.prepare('DELETE FROM memories_fts WHERE memory_id = ?');
@@ -685,7 +751,9 @@ function listMemories(userId, { category = null, scope = null, q = null, limit =
   const normCat = category ? (category === 'general_fact' ? 'fact' : category) : null;
 
   if (instance.mode === 'memory') {
-    let list = Array.from(memStore.memories.values()).filter(m => (m.userId === uid || m.user_id === uid));
+    let list = Array.from(memStore.memories.values())
+      .filter(m => isRecordOwnedBy(m, uid))
+      .map(normalizeMemoryRow);
     if (normCat) {
       if (normCat === 'fact') {
         list = list.filter(m => m.category === 'fact' || m.category === 'general_fact' || m.category === 'general');
@@ -736,18 +804,19 @@ function listMemories(userId, { category = null, scope = null, q = null, limit =
 
 function searchMemoriesFTS5(userId, queryText, scope = 'global', limit = 10) {
   const instance = initDatabase();
+  const uid = userId || config.DEFAULT_USER_ID;
   const cleanTokens = (queryText || '').replace(/[^\p{L}\p{N}_]/gu, ' ').trim().split(/\s+/).filter(Boolean).slice(0, 10);
   if (cleanTokens.length === 0) return [];
 
   if (instance.mode === 'memory') {
     const list = Array.from(memStore.memories.values()).filter(m => {
-      const isOwner = (m.userId === userId || m.user_id === userId || m.userId === 'default' || m.user_id === 'default');
+      const isOwner = isRecordOwnedBy(m, uid);
       const isActive = m.isActive !== undefined ? m.isActive : m.is_active;
       const isScope = (m.scope === scope || m.scope === 'global');
       if (!isOwner || !isActive || !isScope) return false;
       const c = (m.content || '').toLowerCase();
       return cleanTokens.some(tok => c.includes(tok.toLowerCase()));
-    });
+    }).map(normalizeMemoryRow);
     return list.slice(0, limit);
   }
 
@@ -760,36 +829,37 @@ function searchMemoriesFTS5(userId, queryText, scope = 'global', limit = 10) {
       FROM memories_fts fts
       JOIN memories m ON m.id = fts.memory_id
       WHERE fts.memories_fts MATCH ? 
-        AND (m.user_id = ? OR m.user_id = 'default')
+        AND m.user_id = ?
         AND m.is_active = 1
         AND (m.scope = ? OR m.scope = 'global')
       ORDER BY fts.rank ASC
       LIMIT ?
     `);
-    return queryAll(stmt, ftsMatch, userId, scope, limit);
+    return queryAll(stmt, ftsMatch, uid, scope, limit);
   } catch (_) {
     // Fallback LIKE search if FTS5 table is disabled
     const stmt = db.prepare(`
       SELECT * FROM memories 
-      WHERE (user_id = ? OR user_id = 'default') AND is_active = 1 AND (scope = ? OR scope = 'global')
+      WHERE user_id = ? AND is_active = 1 AND (scope = ? OR scope = 'global')
         AND (${cleanTokens.map(() => 'content LIKE ?').join(' OR ')})
       ORDER BY created_at DESC LIMIT ?
     `);
     const likeParams = cleanTokens.map(w => `%${w}%`);
-    return queryAll(stmt, userId, scope, ...likeParams, limit);
+    return queryAll(stmt, uid, scope, ...likeParams, limit);
   }
 }
 
 function searchMemoriesVector(userId, queryVec, scope = 'global', limit = 10) {
   const instance = initDatabase();
+  const uid = userId || config.DEFAULT_USER_ID;
 
   if (instance.mode === 'memory') {
     const rows = Array.from(memStore.memories.values()).filter(m => {
-      const isOwner = (m.userId === userId || m.user_id === userId || m.userId === 'default' || m.user_id === 'default');
+      const isOwner = isRecordOwnedBy(m, uid);
       const isActive = m.isActive !== undefined ? m.isActive : m.is_active;
       const isScope = (m.scope === scope || m.scope === 'global');
       return isOwner && isActive && isScope;
-    });
+    }).map(normalizeMemoryRow);
 
     const scored = [];
     for (const row of rows) {
@@ -808,9 +878,9 @@ function searchMemoriesVector(userId, queryVec, scope = 'global', limit = 10) {
   const { db } = instance;
   const stmt = db.prepare(`
     SELECT * FROM memories 
-    WHERE (user_id = ? OR user_id = 'default') AND is_active = 1 AND (scope = ? OR scope = 'global')
+    WHERE user_id = ? AND is_active = 1 AND (scope = ? OR scope = 'global')
   `);
-  const rows = queryAll(stmt, userId, scope);
+  const rows = queryAll(stmt, uid, scope);
   if (!rows || rows.length === 0) return [];
 
   const scored = [];
@@ -825,6 +895,120 @@ function searchMemoriesVector(userId, queryVec, scope = 'global', limit = 10) {
 
   scored.sort((a, b) => b.vector_similarity - a.vector_similarity);
   return scored.slice(0, limit);
+}
+
+function getExportSnapshot(userId) {
+  const instance = initDatabase();
+  const uid = userId || config.DEFAULT_USER_ID;
+
+  if (instance.mode === 'memory' || !instance.db) {
+    const memories = Array.from(memStore.memories.values())
+      .filter(m => isRecordOwnedBy(m, uid))
+      .map(normalizeMemoryRow)
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    const entities = Array.from(memStore.entities.values())
+      .filter(e => isRecordOwnedBy(e, uid))
+      .map(e => ({
+        ...e,
+        user_id: e.user_id || e.userId || uid,
+        entity_type: e.entity_type || e.entityType || 'concept',
+        updated_at: e.updated_at || e.updatedAt || ''
+      }))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    const relations = Array.from(memStore.relations.values())
+      .filter(r => isRecordOwnedBy(r, uid))
+      .map(r => ({
+        ...r,
+        user_id: r.user_id || r.userId || uid,
+        source_entity_id: r.source_entity_id || r.sourceEntityId || '',
+        target_entity_id: r.target_entity_id || r.targetEntityId || '',
+        relation_type: r.relation_type || r.relationType || 'relates_to',
+        valid_from: r.valid_from || r.validFrom || '',
+        valid_until: r.valid_until !== undefined ? r.valid_until : (r.validUntil ?? null),
+        episode_id: r.episode_id !== undefined ? r.episode_id : (r.episodeId ?? null)
+      }))
+      .sort((a, b) => new Date(a.valid_from) - new Date(b.valid_from));
+    const episodes = Array.from(memStore.episodes.values())
+      .filter(ep => isRecordOwnedBy(ep, uid))
+      .map(ep => ({
+        ...ep,
+        user_id: ep.user_id || ep.userId || uid,
+        session_id: ep.session_id || ep.sessionId || 'default',
+        source_type: ep.source_type || ep.sourceType || 'chat',
+        source_title: ep.source_title || ep.sourceTitle || '',
+        source_uri: ep.source_uri || ep.sourceUri || '',
+        raw_snippet: ep.raw_snippet || ep.rawSnippet || '',
+        created_at: ep.created_at || ep.createdAt || ''
+      }))
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    return { memories, entities, relations, episodes };
+  }
+
+  const { db } = instance;
+  return {
+    memories: queryAll(db.prepare('SELECT * FROM memories WHERE user_id = ? ORDER BY created_at ASC'), uid),
+    entities: queryAll(db.prepare('SELECT * FROM entities WHERE user_id = ? ORDER BY name ASC'), uid),
+    relations: queryAll(db.prepare('SELECT * FROM relations WHERE user_id = ? ORDER BY valid_from ASC'), uid),
+    episodes: queryAll(db.prepare('SELECT * FROM episodes WHERE user_id = ? ORDER BY created_at ASC'), uid)
+  };
+}
+
+function getInsightsData(userId, scope = null) {
+  const instance = initDatabase();
+  const uid = userId || config.DEFAULT_USER_ID;
+
+  if (instance.mode === 'memory' || !instance.db) {
+    const entities = Array.from(memStore.entities.values())
+      .filter(e => isRecordOwnedBy(e, uid) && (!scope || e.scope === scope || e.scope === 'global'))
+      .map(e => ({
+        ...e,
+        entity_type: e.entity_type || e.entityType || 'concept',
+        updated_at: e.updated_at || e.updatedAt || ''
+      }))
+      .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+      .slice(0, 30);
+
+    const activeRelations = Array.from(memStore.relations.values())
+      .filter(r => isRecordOwnedBy(r, uid) && !(r.valid_until ?? r.validUntil))
+      .map(r => {
+        const srcId = r.source_entity_id || r.sourceEntityId;
+        const tgtId = r.target_entity_id || r.targetEntityId;
+        const srcEnt = srcId ? memStore.entities.get(srcId) : null;
+        const tgtEnt = tgtId ? memStore.entities.get(tgtId) : null;
+        return {
+          ...r,
+          relation_type: r.relation_type || r.relationType || 'relates_to',
+          valid_from: r.valid_from || r.validFrom || '',
+          source_name: r.source_name || (srcEnt ? srcEnt.name : null),
+          target_name: r.target_name || (tgtEnt ? tgtEnt.name : null)
+        };
+      })
+      .sort((a, b) => new Date(b.valid_from) - new Date(a.valid_from))
+      .slice(0, 20);
+
+    return { entities, activeRelations };
+  }
+
+  const { db } = instance;
+  let entSql = 'SELECT * FROM entities WHERE user_id = ?';
+  const entParams = [uid];
+  if (scope) {
+    entSql += " AND (scope = ? OR scope = 'global')";
+    entParams.push(scope);
+  }
+  entSql += ' ORDER BY updated_at DESC LIMIT 30';
+  const entities = queryAll(db.prepare(entSql), ...entParams);
+
+  const relStmt = db.prepare(`
+    SELECT r.*, e1.name as source_name, e2.name as target_name 
+    FROM relations r
+    LEFT JOIN entities e1 ON r.source_entity_id = e1.id
+    LEFT JOIN entities e2 ON r.target_entity_id = e2.id
+    WHERE r.user_id = ? AND r.valid_until IS NULL
+    ORDER BY r.valid_from DESC LIMIT 20
+  `);
+  const activeRelations = queryAll(relStmt, uid);
+  return { entities, activeRelations };
 }
 
 module.exports = {
@@ -843,5 +1027,7 @@ module.exports = {
   clearAllMemories,
   listMemories,
   searchMemoriesFTS5,
-  searchMemoriesVector
+  searchMemoriesVector,
+  getExportSnapshot,
+  getInsightsData
 };

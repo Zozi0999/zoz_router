@@ -3357,15 +3357,15 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   line-height: 1.45;
 }
 
-.composer-box.image-mode-active {
-  border-color: #FF007F;
-  box-shadow: 0 8px 30px rgba(255, 0, 127, 0.22), inset 0 0 12px rgba(255, 0, 127, 0.08);
+body #mainContent .composer-box.image-mode-active {
+  border-color: #FF007F !important;
+  box-shadow: 0 8px 30px rgba(255, 0, 127, 0.22), inset 0 0 12px rgba(255, 0, 127, 0.08) !important;
   animation: cyberImagePulse 3s infinite ease-in-out;
 }
 
-.composer-box.image-mode-active:focus-within {
-  border-color: #FF2E93;
-  box-shadow: 0 8px 36px rgba(255, 0, 127, 0.32), inset 0 0 16px rgba(255, 0, 127, 0.12);
+body #mainContent .composer-box.image-mode-active:focus-within {
+  border-color: #FF2E93 !important;
+  box-shadow: 0 8px 36px rgba(255, 0, 127, 0.32), inset 0 0 16px rgba(255, 0, 127, 0.12) !important;
 }
 
 @keyframes cyberImagePulse {
@@ -3379,27 +3379,27 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   }
 }
 
-.composer-box.image-mode-active .send-btn {
-  background: linear-gradient(135deg, #FF007F, #9D4EDD);
-  color: #ffffff;
-  border-color: rgba(255, 0, 127, 0.5);
-  box-shadow: 0 0 16px rgba(255, 0, 127, 0.4);
+body #mainContent .composer-box.image-mode-active .send-btn {
+  background: linear-gradient(135deg, #FF007F, #9D4EDD) !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 0, 127, 0.5) !important;
+  box-shadow: 0 0 16px rgba(255, 0, 127, 0.4) !important;
 }
 
-.composer-box.image-mode-active .send-btn:hover {
-  background: linear-gradient(135deg, #FF2E93, #B5179E);
-  box-shadow: 0 0 22px rgba(255, 0, 127, 0.65);
+body #mainContent .composer-box.image-mode-active .send-btn:hover {
+  background: linear-gradient(135deg, #FF2E93, #B5179E) !important;
+  box-shadow: 0 0 22px rgba(255, 0, 127, 0.65) !important;
 }
 
-.composer-box.music-mode-active {
-  border-color: #00FFC2;
-  box-shadow: 0 8px 30px rgba(0, 255, 194, 0.22), inset 0 0 12px rgba(0, 255, 194, 0.08);
+body #mainContent .composer-box.music-mode-active {
+  border-color: #00FFC2 !important;
+  box-shadow: 0 8px 30px rgba(0, 255, 194, 0.22), inset 0 0 12px rgba(0, 255, 194, 0.08) !important;
   animation: cyberMusicPulse 3s infinite ease-in-out;
 }
 
-.composer-box.music-mode-active:focus-within {
-  border-color: #00F0FF;
-  box-shadow: 0 8px 36px rgba(0, 240, 255, 0.32), inset 0 0 16px rgba(0, 240, 255, 0.12);
+body #mainContent .composer-box.music-mode-active:focus-within {
+  border-color: #00F0FF !important;
+  box-shadow: 0 8px 36px rgba(0, 240, 255, 0.32), inset 0 0 16px rgba(0, 240, 255, 0.12) !important;
 }
 
 @keyframes cyberMusicPulse {
@@ -3413,16 +3413,16 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   }
 }
 
-.composer-box.music-mode-active .send-btn {
-  background: linear-gradient(135deg, #00FFC2, #00B4D8);
-  color: #080B10;
-  border-color: rgba(0, 255, 194, 0.6);
-  box-shadow: 0 0 16px rgba(0, 255, 194, 0.45);
+body #mainContent .composer-box.music-mode-active .send-btn {
+  background: linear-gradient(135deg, #00FFC2, #00B4D8) !important;
+  color: #080B10 !important;
+  border-color: rgba(0, 255, 194, 0.6) !important;
+  box-shadow: 0 0 16px rgba(0, 255, 194, 0.45) !important;
 }
 
-.composer-box.music-mode-active .send-btn:hover {
-  background: linear-gradient(135deg, #00F0FF, #00E5FF);
-  box-shadow: 0 0 22px rgba(0, 255, 194, 0.7);
+body #mainContent .composer-box.music-mode-active .send-btn:hover {
+  background: linear-gradient(135deg, #00F0FF, #00E5FF) !important;
+  box-shadow: 0 0 22px rgba(0, 255, 194, 0.7) !important;
 }
 
 .composer-tools-left, .composer-tools-right {
@@ -5881,10 +5881,10 @@ body.mobile-sidebar-open #sidebar.open + .sidebar-backdrop {
   .top-nav {
     background: rgba(10, 14, 24, 0.96) !important;
   }
-  .composer-container {
+  #mainContent:not(.ai-nature-themed):not(.wa-chat-themed) .composer-container {
     background: linear-gradient(180deg, rgba(10, 14, 24, 0) 0%, rgba(10, 14, 24, 0.98) 25%) !important;
   }
-  .composer-box {
+  #mainContent:not(.ai-nature-themed):not(.wa-chat-themed) .composer-box {
     background: rgba(13, 17, 28, 0.95) !important;
   }
 }
@@ -11126,8 +11126,15 @@ body.is-assistant-dragging #aiFileStudioFrame {
   }
   .top-nav-active-tool-wrap .image-model-dropdown-popup,
   .top-nav-active-tool-wrap .music-model-dropdown-popup {
-    left: 0;
+    position: fixed;
+    top: 50px;
+    left: 10px;
+    right: 10px;
+    width: auto;
+    min-width: 0;
     max-width: calc(100vw - 20px);
+    max-height: min(520px, calc(100dvh - 76px));
+    margin: 0 auto;
   }
   .photo-edit-change-photo-btn span,
   .photo-edit-change-model-btn span {
@@ -16889,10 +16896,12 @@ body.mermaid-has-fullscreen {
   }
 
   /* DeepSeek-style 2-row Composer Card */
-  .composer-box {
+  #mainContent:not(.ai-nature-themed) .composer-box {
     background: rgba(13, 16, 26, 0.94) !important;
     border: 1px solid rgba(0, 242, 254, 0.28) !important;
     box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 242, 254, 0.15) !important;
+  }
+  .composer-box {
     padding: 10px 12px !important;
     border-radius: 20px !important;
     display: flex !important;
@@ -20210,7 +20219,8 @@ svg.lucide,
 #mainContent.ai-nature-themed {
   --nature-bg: #051610;
   --nature-motif-color: rgba(52, 211, 153, 0.12);
-  --nature-motif-opacity: 0.9;
+  --nature-motif-opacity: 0.92;
+  --nature-motif-size: 220px 220px;
   --nature-out-bg: #047857;
   --nature-out-grad: linear-gradient(135deg, #065f46 0%, #059669 100%);
   --nature-out-border: rgba(110, 231, 183, 0.34);
@@ -20230,7 +20240,7 @@ svg.lucide,
   --nature-composer-border: rgba(52, 211, 153, 0.3);
   --nature-composer-fg: #ecfdf5;
   --nature-composer-placeholder: #86efac;
-  --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cg fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M32 34c-6-3-13 1-14 9-1 9 6 19 12 19 2 0 3-1 4-1s2 1 4 1c6 0 13-10 12-19-1-8-8-12-14-9-2 1-2 1-4 0z'/%3E%3Cpath d='M34 33c0-4 2-7 5-8'/%3E%3Cpath d='M35 28c4-3 8-2 9 1-4 2-7 1-9-1z'/%3E%3Ccircle cx='122' cy='38' r='13'/%3E%3Cpath d='M122 25v26M109 38h26M113 29l18 18M131 29l-18 18'/%3E%3Cpath d='M42 110c-5 7-2 18 6 20 8 2 14-6 13-15-1-7-13-13-19-5z'/%3E%3Cpath d='M44 106c-2-3 1-6 4-5 2-3 6-2 6 1 3-1 5 2 3 5'/%3E%3Ccircle cx='128' cy='108' r='4.5'/%3E%3Ccircle cx='138' cy='108' r='4.5'/%3E%3Ccircle cx='133' cy='116' r='4.5'/%3E%3Ccircle cx='124' cy='116' r='4.5'/%3E%3Ccircle cx='142' cy='116' r='4.5'/%3E%3Ccircle cx='133' cy='124' r='4.5'/%3E%3Cpath d='M133 103v-6c3-2 7-2 9 0'/%3E%3Cpath d='M86 64c9-10 24-6 24 6-1 12-16 18-24 10 2-6 4-11 0-16z'/%3E%3Cpath d='M86 80l12-10'/%3E%3Ccircle cx='88' cy='144' r='3'/%3E%3Cpath d='M88 136c3 0 5 3 3 5M96 144c0 3-3 5-5 3M88 152c-3 0-5-3-3-5M80 144c0-3 3-5 5-3'/%3E%3C/g%3E%3C/svg%3E");
+  --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M86 64c9-10 24-6 24 6-1 12-16 18-24 10 2-6 4-11 0-16z' fill='%2310b981' fill-opacity='0.24' stroke='%2334d399' stroke-opacity='0.48' stroke-width='1.5'/%3E%3Cpath d='M86 80l12-10' stroke='%236ee7b7' stroke-opacity='0.48' stroke-width='1.4'/%3E%3C/g%3E%3C/svg%3E");
   background-color: var(--nature-bg) !important;
   position: relative;
 }
@@ -20240,14 +20250,11 @@ svg.lucide,
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: var(--nature-motif-opacity);
-  background-color: var(--nature-motif-color);
-  -webkit-mask-image: var(--nature-motif-svg);
-  mask-image: var(--nature-motif-svg);
-  -webkit-mask-size: 180px 180px;
-  mask-size: 180px 180px;
-  -webkit-mask-repeat: repeat;
-  mask-repeat: repeat;
+  opacity: var(--nature-motif-opacity, 0.92);
+  background-color: transparent;
+  background-image: var(--nature-motif-svg);
+  background-size: var(--nature-motif-size, 220px 220px);
+  background-repeat: repeat;
   z-index: 0;
 }
 
@@ -20264,7 +20271,9 @@ svg.lucide,
 /* Variant 1: Senja Mangga & Jeruk (Warm Citrus Tropis) */
 #mainContent.ai-nature-themed[data-ai-chat-theme="mango-citrus"] {
   --nature-bg: #1b0f07;
-  --nature-motif-color: rgba(251, 146, 60, 0.14);
+  --nature-motif-color: rgba(251, 146, 60, 0.22);
+  --nature-motif-opacity: 0.92;
+  --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M38 28c15-6 30 4 27 21-2 15-16 25-26 23-9-2-10-12-5-21 4-8-2-17 4-23z' fill='%23f59e0b' fill-opacity='0.34' stroke='%23fb923c' stroke-opacity='0.68' stroke-width='1.8'/%3E%3Cpath d='M44 35c9-1 15 5 14 14' fill='none' stroke='%23ea580c' stroke-opacity='0.58' stroke-width='1.5'/%3E%3Cpath d='M46 27c1-5 4-8 7-9' fill='none' stroke='%23a16207' stroke-opacity='0.72' stroke-width='1.8'/%3E%3Cpath d='M48 25c7-8 17-7 20 0-5 6-14 6-20 0z' fill='%2322c55e' fill-opacity='0.42' stroke='%234ade80' stroke-opacity='0.68' stroke-width='1.5'/%3E%3Ccircle cx='164' cy='54' r='22' fill='%23fb923c' fill-opacity='0.28' stroke='%23fdba74' stroke-opacity='0.68' stroke-width='2'/%3E%3Ccircle cx='164' cy='54' r='16' fill='%23f59e0b' fill-opacity='0.34' stroke='%23fef3c7' stroke-opacity='0.48' stroke-width='1.2'/%3E%3Cpath d='M164 38v32M148 54h32M153 43l22 22M175 43l-22 22' stroke='%23fef3c7' stroke-opacity='0.48' stroke-width='1.3'/%3E%3Ccircle cx='56' cy='164' r='20' fill='%23ea580c' fill-opacity='0.34' stroke='%23fb923c' stroke-opacity='0.68' stroke-width='1.8'/%3E%3Cpath d='M45 156c2-4 6-7 11-7' fill='none' stroke='%23fed7aa' stroke-opacity='0.52' stroke-width='1.4'/%3E%3Ccircle cx='50' cy='171' r='1.3' fill='%23fde047' fill-opacity='0.65'/%3E%3Ccircle cx='63' cy='163' r='1.3' fill='%23fde047' fill-opacity='0.65'/%3E%3Ccircle cx='58' cy='174' r='1.3' fill='%23fde047' fill-opacity='0.65'/%3E%3Cpath d='M57 143c5-7 15-7 18 0-4 6-13 6-18 0z' fill='%2322c55e' fill-opacity='0.42' stroke='%234ade80' stroke-opacity='0.68' stroke-width='1.5'/%3E%3Cpath d='M154 146c12-4 24 4 21 19-2 12-13 21-22 18-7-2-8-10-4-17 4-6-1-14 5-20z' fill='%23fbbf24' fill-opacity='0.32' stroke='%23f59e0b' stroke-opacity='0.66' stroke-width='1.7'/%3E%3Cpath d='M161 143c5-7 14-6 17 0-4 5-12 5-17 0z' fill='%2316a34a' fill-opacity='0.4' stroke='%234ade80' stroke-opacity='0.65' stroke-width='1.4'/%3E%3Ccircle cx='110' cy='110' r='11' fill='%23a3e635' fill-opacity='0.26' stroke='%23bef264' stroke-opacity='0.58' stroke-width='1.5'/%3E%3Cpath d='M110 99v22M99 110h22' stroke='%23ecfccb' stroke-opacity='0.42' stroke-width='1.2'/%3E%3Ccircle cx='112' cy='46' r='3' fill='%23fde047' fill-opacity='0.52'/%3E%3Cpath d='M112 39c2.5 0 4 2 2.5 4M119 46c0 2.5-2 4-4 2.5M112 53c-2.5 0-4-2-2.5-4M105 46c0-2.5 2-4 4-2.5' fill='none' stroke='%23fef3c7' stroke-opacity='0.5' stroke-width='1.3'/%3E%3C/g%3E%3C/svg%3E");
   --nature-out-bg: #c2410c;
   --nature-out-grad: linear-gradient(135deg, #c2410c 0%, #ea580c 100%);
   --nature-out-border: rgba(253, 186, 116, 0.42);
@@ -20294,7 +20303,9 @@ svg.lucide,
 /* Variant 2: Taman Stroberi & Sakura */
 #mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] {
   --nature-bg: #1a0912;
-  --nature-motif-color: rgba(244, 114, 182, 0.14);
+  --nature-motif-color: rgba(244, 114, 182, 0.22);
+  --nature-motif-opacity: 0.92;
+  --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 36c-12 0-20 8-18 20 2 13 11 26 18 28 7-2 16-15 18-28 2-12-6-20-18-20z' fill='%23f43f5e' fill-opacity='0.38' stroke='%23fb7185' stroke-opacity='0.72' stroke-width='1.8'/%3E%3Cpath d='M50 36c-5-6-13-6-16-1 4 3 10 3 16 1zm0 0c5-6 13-6 16-1-4 3-10 3-16 1zm0 0l-4-9 4 4 4-4-4 9z' fill='%2322c55e' fill-opacity='0.48' stroke='%234ade80' stroke-opacity='0.72' stroke-width='1.3'/%3E%3Ccircle cx='43' cy='47' r='1.3' fill='%23fde047' fill-opacity='0.82'/%3E%3Ccircle cx='50' cy='45' r='1.3' fill='%23fde047' fill-opacity='0.82'/%3E%3Ccircle cx='57' cy='47' r='1.3' fill='%23fde047' fill-opacity='0.82'/%3E%3Ccircle cx='46' cy='57' r='1.3' fill='%23fde047' fill-opacity='0.82'/%3E%3Ccircle cx='54' cy='57' r='1.3' fill='%23fde047' fill-opacity='0.82'/%3E%3Ccircle cx='50' cy='67' r='1.3' fill='%23fde047' fill-opacity='0.82'/%3E%3Cpath d='M164 42c-3-9-9-11-11-3-8-2-12 3-7 10-7 5-6 11 2 12-1 8 5 11 11 5 6 6 12 3 11-5 8-1 9-7 2-12 5-7 1-12-8-7z' fill='%23f9a8d4' fill-opacity='0.38' stroke='%23fbcfe8' stroke-opacity='0.7' stroke-width='1.4'/%3E%3Ccircle cx='164' cy='55' r='4' fill='%23fef08a' fill-opacity='0.78'/%3E%3Cpath d='M166 146c-11 0-18 7-16 18 2 12 10 23 16 25 6-2 14-13 16-25 2-11-5-18-16-18z' fill='%23e11d48' fill-opacity='0.36' stroke='%23fda4af' stroke-opacity='0.7' stroke-width='1.7'/%3E%3Cpath d='M166 146c-4-5-11-5-14-1 3 3 9 3 14 1zm0 0c4-5 11-5 14-1-3 3-9 3-14 1zm0 0l-3-8 3 4 3-4-3 8z' fill='%2322c55e' fill-opacity='0.46' stroke='%234ade80' stroke-opacity='0.7' stroke-width='1.2'/%3E%3Ccircle cx='161' cy='156' r='1.2' fill='%23fde047' fill-opacity='0.8'/%3E%3Ccircle cx='171' cy='156' r='1.2' fill='%23fde047' fill-opacity='0.8'/%3E%3Ccircle cx='166' cy='166' r='1.2' fill='%23fde047' fill-opacity='0.8'/%3E%3Ccircle cx='166' cy='175' r='1.2' fill='%23fde047' fill-opacity='0.8'/%3E%3Cpath d='M56 154c-3-8-8-10-10-2-7-2-10 3-6 9-6 4-5 10 2 11-1 7 4 10 10 4 5 6 11 3 10-4 7-1 8-7 2-11 4-6 1-11-8-7z' fill='%23f472b6' fill-opacity='0.36' stroke='%23fbcfe8' stroke-opacity='0.66' stroke-width='1.3'/%3E%3Ccircle cx='56' cy='165' r='3.5' fill='%23fef08a' fill-opacity='0.76'/%3E%3Cpath d='M110 104c5-7 13-3 11 5-2 7-10 9-14 4 2-3 2-6 3-9z' fill='%23f9a8d4' fill-opacity='0.38' stroke='%23fbcfe8' stroke-opacity='0.6' stroke-width='1.2'/%3E%3Cpath d='M104 122c5-6 12-5 15 1-4 5-11 5-15-1z' fill='%234ade80' fill-opacity='0.32' stroke='%2386efac' stroke-opacity='0.58' stroke-width='1.2'/%3E%3C/g%3E%3C/svg%3E");
   --nature-out-bg: #be185d;
   --nature-out-grad: linear-gradient(135deg, #9d174d 0%, #db2777 100%);
   --nature-out-border: rgba(249, 168, 212, 0.4);
@@ -20324,7 +20335,9 @@ svg.lucide,
 /* Variant 3: Kebun Apel Pagi (Bright Botanical Leaf Light Mode, WCAG AA >= 4.5:1) */
 #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] {
   --nature-bg: #f1f8ef;
-  --nature-motif-color: rgba(22, 163, 74, 0.12);
+  --nature-motif-color: rgba(22, 163, 74, 0.18);
+  --nature-motif-opacity: 0.78;
+  --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 40c-4-4-12-4-16 1-7 7-6 21 0 30 4 7 10 9 14 7 1-1 3-1 4 0 4 2 10 0 14-7 6-9 7-23 0-30-4-5-12-5-16-1z' fill='%23ef4444' fill-opacity='0.28' stroke='%23dc2626' stroke-opacity='0.62' stroke-width='1.8'/%3E%3Cpath d='M40 48c-2 4-2 9 0 13' fill='none' stroke='%23ffffff' stroke-opacity='0.78' stroke-width='1.5'/%3E%3Cpath d='M50 40c0-6 2-10 5-12' fill='none' stroke='%2378350f' stroke-opacity='0.78' stroke-width='1.8'/%3E%3Cpath d='M52 34c5-7 14-7 17-1-4 6-12 6-17 1z' fill='%2322c55e' fill-opacity='0.44' stroke='%2315803d' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Cpath d='M166 42c-4-4-12-4-16 1-7 7-6 21 0 30 4 7 10 9 14 7 1-1 3-1 4 0 4 2 10 0 14-7 6-9 7-23 0-30-4-5-12-5-16-1z' fill='%2322c55e' fill-opacity='0.3' stroke='%2315803d' stroke-opacity='0.65' stroke-width='1.8'/%3E%3Cpath d='M166 42c0-6 2-10 5-12' fill='none' stroke='%2378350f' stroke-opacity='0.78' stroke-width='1.8'/%3E%3Cpath d='M168 36c5-7 14-7 17-1-4 6-12 6-17 1z' fill='%2386efac' fill-opacity='0.6' stroke='%23166534' stroke-opacity='0.65' stroke-width='1.4'/%3E%3Cpath d='M54 152c-3-4-11-4-15 1-6 6-5 19 0 27 4 6 9 8 13 6 1-1 3-1 4 0 4 2 9 0 13-6 5-8 6-21 0-27-4-5-12-5-15-1z' fill='%23fef9c3' fill-opacity='0.78' stroke='%23dc2626' stroke-opacity='0.58' stroke-width='1.8'/%3E%3Cellipse cx='51' cy='166' rx='1.5' ry='2.6' transform='rotate(-15 51 166)' fill='%2378350f' fill-opacity='0.78'/%3E%3Cellipse cx='57' cy='166' rx='1.5' ry='2.6' transform='rotate(15 57 166)' fill='%2378350f' fill-opacity='0.78'/%3E%3Cpath d='M54 152v-8' stroke='%2378350f' stroke-opacity='0.78' stroke-width='1.6'/%3E%3Cpath d='M164 152c-4-4-11-4-15 1-6 6-5 19 0 27 4 6 9 8 13 6 1-1 3-1 4 0 4 2 9 0 13-6 5-8 6-21 0-27-4-5-11-5-15-1z' fill='%23ef4444' fill-opacity='0.26' stroke='%23dc2626' stroke-opacity='0.6' stroke-width='1.7'/%3E%3Cpath d='M164 152c0-5 2-9 5-11' fill='none' stroke='%2378350f' stroke-opacity='0.78' stroke-width='1.6'/%3E%3Cpath d='M166 146c5-6 13-6 15-1-3 5-11 5-15 1z' fill='%2322c55e' fill-opacity='0.44' stroke='%2315803d' stroke-opacity='0.65' stroke-width='1.3'/%3E%3Ccircle cx='110' cy='110' r='3.5' fill='%23facc15' fill-opacity='0.78'/%3E%3Cpath d='M110 101c3 0 5 2 3 5M119 110c0 3-2 5-5 3M110 119c-3 0-5-2-3-5M101 110c0-3 2-5 5-3' fill='%23fbcfe8' fill-opacity='0.52' stroke='%23ec4899' stroke-opacity='0.55' stroke-width='1.2'/%3E%3C/g%3E%3C/svg%3E");
   --nature-out-bg: #dcfce7;
   --nature-out-grad: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
   --nature-out-border: rgba(21, 128, 61, 0.28);
@@ -20354,7 +20367,9 @@ svg.lucide,
 /* Variant 4: Hutan Tropis & Anggur */
 #mainContent.ai-nature-themed[data-ai-chat-theme="emerald-forest"] {
   --nature-bg: #04150f;
-  --nature-motif-color: rgba(52, 211, 153, 0.13);
+  --nature-motif-color: rgba(52, 211, 153, 0.2);
+  --nature-motif-opacity: 0.92;
+  --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 32v-8M50 26c-5-4-11-3-12 2 0 4 4 6 7 4M52 30c6-7 16-6 18 1-5 5-13 5-18-1z' fill='%2310b981' fill-opacity='0.36' stroke='%2334d399' stroke-opacity='0.68' stroke-width='1.5'/%3E%3Ccircle cx='40' cy='42' r='6' fill='%23a855f7' fill-opacity='0.38' stroke='%23d8b4fe' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Ccircle cx='50' cy='42' r='6' fill='%23a855f7' fill-opacity='0.42' stroke='%23d8b4fe' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Ccircle cx='60' cy='42' r='6' fill='%239333ea' fill-opacity='0.38' stroke='%23d8b4fe' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Ccircle cx='45' cy='51' r='6' fill='%239333ea' fill-opacity='0.42' stroke='%23d8b4fe' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Ccircle cx='55' cy='51' r='6' fill='%23a855f7' fill-opacity='0.38' stroke='%23d8b4fe' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Ccircle cx='42' cy='60' r='5.8' fill='%23a855f7' fill-opacity='0.38' stroke='%23d8b4fe' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Ccircle cx='58' cy='60' r='5.8' fill='%239333ea' fill-opacity='0.38' stroke='%23d8b4fe' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Ccircle cx='50' cy='61' r='6' fill='%23c084fc' fill-opacity='0.42' stroke='%23e9d5ff' stroke-opacity='0.72' stroke-width='1.4'/%3E%3Ccircle cx='50' cy='71' r='5.5' fill='%239333ea' fill-opacity='0.42' stroke='%23d8b4fe' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Cpath d='M164 78V32M164 46c-8-7-16-7-20-2M164 46c8-7 16-7 20-2M164 58c-9-7-18-6-22 0M164 58c9-7 18-6 22 0M164 70c-8-6-16-5-19 1M164 70c8-6 16-5 19 1' fill='none' stroke='%2334d399' stroke-opacity='0.68' stroke-width='1.8'/%3E%3Cpath d='M164 32c-5 5-6 12 0 15 6-3 5-10 0-15z' fill='%2310b981' fill-opacity='0.34' stroke='%236ee7b7' stroke-opacity='0.62' stroke-width='1.4'/%3E%3Cpath d='M166 142v-7M168 140c5-6 14-5 16 1-4 5-11 5-16-1z' fill='%2310b981' fill-opacity='0.38' stroke='%236ee7b7' stroke-opacity='0.65' stroke-width='1.4'/%3E%3Ccircle cx='157' cy='151' r='5.5' fill='%2334d399' fill-opacity='0.34' stroke='%236ee7b7' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Ccircle cx='166' cy='151' r='5.5' fill='%2310b981' fill-opacity='0.38' stroke='%236ee7b7' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Ccircle cx='175' cy='151' r='5.5' fill='%2334d399' fill-opacity='0.34' stroke='%236ee7b7' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Ccircle cx='161.5' cy='160' r='5.5' fill='%2310b981' fill-opacity='0.38' stroke='%236ee7b7' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Ccircle cx='170.5' cy='160' r='5.5' fill='%2334d399' fill-opacity='0.34' stroke='%236ee7b7' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Ccircle cx='166' cy='169' r='5.5' fill='%2310b981' fill-opacity='0.38' stroke='%236ee7b7' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Cpath d='M36 178l18-30 18 30h-12l10 14h-32l10-14z' fill='%23059669' fill-opacity='0.32' stroke='%2334d399' stroke-opacity='0.62' stroke-width='1.6'/%3E%3Cpath d='M100 108c9-10 22-6 21 6-1 11-15 16-22 9 2-5 3-10 1-15z' fill='%2310b981' fill-opacity='0.32' stroke='%236ee7b7' stroke-opacity='0.62' stroke-width='1.5'/%3E%3C/g%3E%3C/svg%3E");
   --nature-out-bg: #047857;
   --nature-out-grad: linear-gradient(135deg, #065f46 0%, #047857 100%);
   --nature-out-border: rgba(110, 231, 183, 0.36);
@@ -20384,7 +20399,9 @@ svg.lucide,
 /* Variant 5: Aurora Pegunungan & Samudra */
 #mainContent.ai-nature-themed[data-ai-chat-theme="aurora-mountain"] {
   --nature-bg: #061321;
-  --nature-motif-color: rgba(94, 234, 212, 0.12);
+  --nature-motif-color: rgba(94, 234, 212, 0.2);
+  --nature-motif-opacity: 0.92;
+  --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 72l24-34 16 20 12-14 18 28z' fill='%230ea5e9' fill-opacity='0.26' stroke='%2338bdf8' stroke-opacity='0.65' stroke-width='1.7'/%3E%3Cpath d='M38 49l8-11 8 11-5-2-3 4-3-4z' fill='%23e0f2fe' fill-opacity='0.36'/%3E%3Cpath d='M132 42c10-12 22-12 32 0s22 12 32 0' fill='none' stroke='%232dd4bf' stroke-opacity='0.58' stroke-width='2.6'/%3E%3Cpath d='M136 53c10-10 20-10 30 0s20 10 30 0' fill='none' stroke='%23a78bfa' stroke-opacity='0.48' stroke-width='2.2'/%3E%3Cpath d='M36 178l16-28 16 28h-10l8 12h-28l8-12z' fill='%2314b8a6' fill-opacity='0.32' stroke='%235eead4' stroke-opacity='0.64' stroke-width='1.5'/%3E%3Cpath d='M138 184l22-32 14 18 10-12 16 26z' fill='%230284c7' fill-opacity='0.26' stroke='%237dd3fc' stroke-opacity='0.64' stroke-width='1.6'/%3E%3Cpath d='M104 96c-6 2-9 9-6 15 3 5 10 8 16 5-5 1-9-2-10-7-2-5 0-10 0-13z' fill='%23bae6fd' fill-opacity='0.42' stroke='%23e0f2fe' stroke-opacity='0.62' stroke-width='1.3'/%3E%3Cpath d='M120 82l2 5 5 2-5 2-2 5-2-5-5-2 5-2z' fill='%235eead4' fill-opacity='0.62'/%3E%3Ccircle cx='88' cy='132' r='1.8' fill='%23bae6fd' fill-opacity='0.65'/%3E%3Ccircle cx='182' cy='96' r='2' fill='%2399f6e4' fill-opacity='0.62'/%3E%3C/g%3E%3C/svg%3E");
   --nature-out-bg: #0f766e;
   --nature-out-grad: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
   --nature-out-border: rgba(94, 234, 212, 0.38);
@@ -20675,6 +20692,20 @@ svg.lucide,
 }
 
 /* Composer Dock in Fruit & Nature AI Themes */
+#mainContent.ai-nature-themed .composer-container {
+  background: linear-gradient(180deg, transparent 0%, var(--nature-bg) 72%) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-container {
+  background: linear-gradient(180deg, rgba(241, 248, 239, 0) 0%, rgba(231, 244, 228, 0.92) 68%) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .active-preset-banner {
+  background: rgba(255, 255, 255, 0.92) !important;
+  color: #166534 !important;
+  border-color: rgba(21, 128, 61, 0.28) !important;
+}
+
 #mainContent.ai-nature-themed .composer-box {
   background: var(--nature-composer-bg) !important;
   border-color: var(--nature-composer-border) !important;

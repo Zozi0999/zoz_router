@@ -165,16 +165,36 @@ module.exports = async function handler(req, res) {
 
   const startedAt = Date.now();
   let finished = false;
+  let watchdog = null;
+
+  const cleanupWatchdog = () => {
+    finished = true;
+    if (watchdog) {
+      clearTimeout(watchdog);
+      watchdog = null;
+    }
+    if (typeof res.off === 'function') {
+      res.off('finish', cleanupWatchdog);
+      res.off('close', cleanupWatchdog);
+    } else if (typeof res.removeListener === 'function') {
+      res.removeListener('finish', cleanupWatchdog);
+      res.removeListener('close', cleanupWatchdog);
+    }
+  };
 
   // 4. Pre-emptive Defensive Watchdog (Menembak SEBELUM platform Vercel memotong koneksi)
-  const watchdog = setTimeout(() => {
+  watchdog = setTimeout(() => {
     if (finished) return;
-    finished = true;
+    cleanupWatchdog();
     console.error(`[Vercel Gateway Timeout] ${rawUrl} melampaui batas watchdog ${WATCHDOG_MS}ms (maxDuration terkonfigurasi: ${configuredMaxDuration}s)`);
     if (res.headersSent && isStreamingPath) {
       const resCtype = String(res.getHeader('content-type') || '').toLowerCase();
+      const isSseFrame = !resCtype.includes('application/x-ndjson') && (
+        resCtype.includes('text/event-stream') ||
+        (pathname.includes('openrouter') && !pathname.includes('ollama'))
+      );
       try {
-        if (resCtype.includes('text/event-stream') || pathname.includes('openrouter')) {
+        if (isSseFrame) {
           res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'length' }], zoz_watchdog_timeout: true })}\n\ndata: [DONE]\n\n`);
         } else {
           res.write(`${JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, done_reason: 'length', zoz_watchdog_timeout: true })}\n`);
@@ -202,8 +222,7 @@ module.exports = async function handler(req, res) {
       throw new Error(`server.js tidak mengekspor requestHandler (tipe: ${typeof requestHandler})`);
     }
   } catch (err) {
-    finished = true;
-    clearTimeout(watchdog);
+    cleanupWatchdog();
     console.error('[Vercel Gateway] Gagal memuat engine server.js:', err);
     return sendJson(res, 500, {
       success: false,
@@ -224,7 +243,12 @@ module.exports = async function handler(req, res) {
       details: err && err.message ? err.message : String(err)
     });
   } finally {
-    finished = true;
-    clearTimeout(watchdog);
+    const keepStreamingWatchdog = !finished && isStreamingPath && !res.writableEnded && !res.destroyed;
+    if (keepStreamingWatchdog) {
+      res.once('finish', cleanupWatchdog);
+      res.once('close', cleanupWatchdog);
+    } else {
+      cleanupWatchdog();
+    }
   }
 };

@@ -18,6 +18,7 @@
 
 const https = require('node:https');
 const crypto = require('node:crypto');
+const os = require('node:os');
 const dns = require('node:dns');
 const net = require('node:net');
 const fs = require('node:fs');
@@ -482,17 +483,34 @@ function createImageGroundingService(options = {}) {
     : null;
   let persistentSecret = options.secret || env.ZOZ_IMAGE_PROXY_SECRET || '';
   if (!persistentSecret) {
-    const secretPath = path.join(__dirname, 'data', 'image_proxy.secret');
-    try {
-      if (fs.existsSync(secretPath)) {
-        persistentSecret = fs.readFileSync(secretPath, 'utf8').trim();
-      } else {
-        persistentSecret = crypto.randomBytes(32).toString('hex');
-        fs.mkdirSync(path.dirname(secretPath), { recursive: true });
-        fs.writeFileSync(secretPath, persistentSecret, 'utf8');
+    const secretPaths = [
+      path.join(__dirname, 'data', 'image_proxy.secret'),
+      path.join(os.tmpdir(), 'zoz_image_proxy.secret')
+    ];
+    for (const secretPath of secretPaths) {
+      try {
+        if (fs.existsSync(secretPath)) {
+          const existing = fs.readFileSync(secretPath, 'utf8').trim();
+          if (existing) {
+            persistentSecret = existing;
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+    if (!persistentSecret) {
+      const generatedSecret = crypto.randomBytes(32).toString('hex');
+      for (const secretPath of secretPaths) {
+        try {
+          fs.mkdirSync(path.dirname(secretPath), { recursive: true });
+          fs.writeFileSync(secretPath, generatedSecret, 'utf8');
+          persistentSecret = generatedSecret;
+          break;
+        } catch (_) {}
       }
-    } catch (_) {
-      persistentSecret = crypto.randomBytes(32).toString('hex');
+      if (!persistentSecret) {
+        persistentSecret = generatedSecret;
+      }
     }
   }
   const hmacSecret = persistentSecret;
@@ -1224,6 +1242,7 @@ function createImageGroundingService(options = {}) {
       rawCandidates.push({
         rankScore,
         payload: {
+          _customImageId: Number.isInteger(page.pageid) && page.pageid > 0 ? `img_wmc_${page.pageid}` : null,
           title: cleanTitle,
           description,
           source_name: 'wikimedia_commons',

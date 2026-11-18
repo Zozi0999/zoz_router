@@ -433,11 +433,21 @@ function stopCloudflareTunnel() {
 }
 
 function isRemoteTunnelRequest(req) {
+  if (!req || !req.headers) return false;
   const host = (req.headers.host || '').toLowerCase();
   const cfIp = req.headers['cf-connecting-ip'];
   const cfRay = req.headers['cf-ray'];
   const xfHost = (req.headers['x-forwarded-host'] || '').toLowerCase();
-  if (cfIp || cfRay || host.includes('trycloudflare.com') || xfHost.includes('trycloudflare.com')) {
+  const xfFor = req.headers['x-forwarded-for'];
+  const xfProto = req.headers['x-forwarded-proto'];
+  if (cfIp || cfRay || xfHost || xfFor || xfProto || host.includes('trycloudflare.com')) {
+    return true;
+  }
+  const remoteIp = req.socket?.remoteAddress || req.connection?.remoteAddress || '';
+  if (remoteIp && remoteIp !== '127.0.0.1' && remoteIp !== '::1' && remoteIp !== '::ffff:127.0.0.1') {
+    return true;
+  }
+  if (host && !host.startsWith('localhost:') && host !== 'localhost' && !host.startsWith('127.0.0.1:') && host !== '127.0.0.1' && !host.startsWith('[::1]:') && host !== '[::1]') {
     return true;
   }
   return false;
@@ -468,6 +478,15 @@ function validateRemoteTerminalPin(req, reqUrl, body) {
     };
   }
   return { valid: true };
+}
+
+function requireRemoteHostPin(req, res, reqUrl, body = null) {
+  const pinCheck = validateRemoteTerminalPin(req, reqUrl, body);
+  if (!pinCheck.valid) {
+    sendJSON(res, pinCheck.status || 401, { success: false, error: pinCheck.error });
+    return false;
+  }
+  return true;
 }
 
 function resolveHostShell(shellType) {
@@ -3643,8 +3662,65 @@ function flushChatTaskBuffer(sessionId, provider) {
   }
 }
 
-function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus') {
+function createChatTaskToken() {
+  return crypto.randomBytes(8).toString('hex');
+}
+
+function isTaskCurrent(sessionId, taskToken) {
+  return Boolean(sessionId && taskToken && dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].taskToken === taskToken);
+}
+
+function registerActiveChatTask(sessionId, { userId, model, provider, userPrompt = null, userImages = null }) {
+  if (!sessionId) return null;
+  const prev = dbActiveChatTasks[sessionId];
+  if (prev && prev.status === 'streaming') {
+    try {
+      if (prev.proxyReq && !prev.proxyReq.destroyed) {
+        prev.proxyReq.destroy();
+      }
+    } catch (_) {}
+    delete dbActiveChatTasks[sessionId];
+  }
+  const taskToken = createChatTaskToken();
+  dbActiveChatTasks[sessionId] = {
+    sessionId,
+    taskToken,
+    userId,
+    model,
+    provider,
+    userPrompt,
+    userImages,
+    fullText: '',
+    fullBytes: 0,
+    fullEpoch: 0,
+    rawBuffer: '',
+    status: 'streaming',
+    startedAt: Date.now(),
+    proxyReq: null
+  };
+  return taskToken;
+}
+
+function finalizeStreamingChatTask(sessionId, taskToken, provider = 'ollama') {
+  if (!isTaskCurrent(sessionId, taskToken)) return;
+  const task = dbActiveChatTasks[sessionId];
+  if (task.status === 'aborted') {
+    delete dbActiveChatTasks[sessionId];
+    return;
+  }
+  flushChatTaskBuffer(sessionId, provider);
+  task.status = 'completed';
+  task.completedAt = Date.now();
+  if (task.fullText && task.fullText.trim()) {
+    appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model, {}, task.userId)
+      .catch(err => console.warn('Gagal simpan respons chat ke sesi:', err && err.message));
+  }
+  delete dbActiveChatTasks[sessionId];
+}
+
+function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus', taskToken = null) {
   if (!sessionId || !dbActiveChatTasks[sessionId]) return;
+  if (taskToken && dbActiveChatTasks[sessionId].taskToken !== taskToken) return;
   const task = dbActiveChatTasks[sessionId];
   if (task.status === 'aborted' || task.status === 'completed') return;
   task.status = 'error';
@@ -3658,7 +3734,7 @@ function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus') {
 
   flushChatTaskBuffer(sessionId, task.provider || 'openrouter');
   if (task.fullText && task.fullText.trim()) {
-    appendAssistantMessageToSessionDisk(sessionId, task.fullText + `\n\n*[Respons terputus: ${reason}]*`, task.model)
+    appendAssistantMessageToSessionDisk(sessionId, task.fullText + `\n\n*[Respons terputus: ${reason}]*`, task.model, {}, task.userId)
       .catch(err => console.warn('Gagal simpan respons terputus ke sesi:', err && err.message));
   }
   // Clean up completed/interrupted task
@@ -3760,7 +3836,7 @@ function applyContextIntegrityGuard(messages, userPrompt) {
 // 1. Protokol rantai transisi laten <think>...</think> (disaring bersih dari output oleh createProviderStreamFilter)
 // 2. Isolasi giliran soal diskrit mandiri dari ratusan pesan kuis lama (bebas kontaminasi induction heads)
 // 3. Sanitasi penalti logit & pencegahan routing 'latency' ke sub-model lemah
-function applyServerSideDecisionCalibration(body, provider = 'ollama') {
+function applyServerSideDecisionCalibration(body, provider = 'ollama', authenticatedUserId = null) {
   if (!body || !Array.isArray(body.messages) || body.messages.length === 0) return;
   if (typeof textSafety.computeBayesianDecisionCalibration !== 'function') return;
 
@@ -3876,7 +3952,7 @@ function applyServerSideDecisionCalibration(body, provider = 'ollama') {
     try {
       const memRetriever = require('./src/memory/pipeline/retriever');
       const memQuery = (calib && calib.parentQuestionText) ? `${rawUserText}\n${calib.parentQuestionText}` : rawUserText;
-      const recalled = memRetriever.recallMemories(body.userId || 'default', memQuery, body.scope || 'global');
+      const recalled = memRetriever.recallMemories(authenticatedUserId || 'default', memQuery, body.scope || 'global');
       if (recalled && recalled.systemPromptInjection) {
         const sysMsg = body.messages.find(m => m && m.role === 'system');
         if (sysMsg && typeof sysMsg.content === 'string') {
@@ -7760,7 +7836,14 @@ async function requestHandler(req, res) {
           }
 
           const isDownload = reqUrl.searchParams.has('download') || reqUrl.searchParams.has('dl');
-          const disposition = isDownload ? `attachment; filename="${encodeURIComponent(uploadFilename)}"` : `inline; filename="${encodeURIComponent(uploadFilename)}"`;
+          const activeWebExts = new Set(['.html', '.htm', '.xhtml', '.svg', '.js', '.mjs', '.css', '.xml']);
+          const isActiveWebExt = activeWebExts.has(ext);
+          const effectiveContentType = isActiveWebExt
+            ? 'text/plain; charset=utf-8'
+            : contentType;
+          const disposition = (isDownload || isActiveWebExt)
+            ? `attachment; filename="${encodeURIComponent(uploadFilename)}"`
+            : `inline; filename="${encodeURIComponent(uploadFilename)}"`;
 
           if (isRangeRequest) {
             const chunkSize = (end - start) + 1;
@@ -7768,8 +7851,9 @@ async function requestHandler(req, res) {
               'Content-Range': `bytes ${start}-${end}/${totalSize}`,
               'Accept-Ranges': 'bytes',
               'Content-Length': chunkSize,
-              'Content-Type': contentType,
+              'Content-Type': effectiveContentType,
               'Content-Disposition': disposition,
+              'Content-Security-Policy': "sandbox; default-src 'none'",
               'Cache-Control': 'public, max-age=86400',
               'Access-Control-Allow-Origin': '*',
               'X-Content-Type-Options': 'nosniff',
@@ -7803,9 +7887,10 @@ async function requestHandler(req, res) {
           }
 
           res.writeHead(200, {
-            'Content-Type': contentType,
+            'Content-Type': effectiveContentType,
             'Content-Length': totalSize,
             'Content-Disposition': disposition,
+            'Content-Security-Policy': "sandbox; default-src 'none'",
             'Accept-Ranges': 'bytes',
             'Cache-Control': 'public, max-age=86400',
             'Access-Control-Allow-Origin': '*',
@@ -8096,6 +8181,7 @@ async function requestHandler(req, res) {
     try {
       const body = await safeParseBody(req);
       if (!body) return;
+      if (!requireRemoteHostPin(req, res, reqUrl, body)) return;
       const code = body.code || body.script || body.python || '';
       const timeoutMs = Math.min(Math.max(parseInt(body.timeoutMs || '5000', 10) || 5000, 1000), 10000);
       if (!code || !code.trim()) {
@@ -8256,9 +8342,15 @@ async function requestHandler(req, res) {
               `\x1b[33mKetik perintah shell secara langsung di terminal.\x1b[0m\r\n\r\n`
       })}\n\n`);
       const hb = setInterval(() => {
-        if (!res.writableEnded) res.write(': ping\n\n');
+        if (!res.writableEnded && !res.destroyed) {
+          try { res.write(': ping\n\n'); } catch (_) {}
+        }
       }, 15000);
-      req.on('close', () => clearInterval(hb));
+      const cleanupFallback = () => clearInterval(hb);
+      req.on('close', cleanupFallback);
+      res.on('close', cleanupFallback);
+      req.on('error', cleanupFallback);
+      res.on('error', cleanupFallback);
       return;
     }
 
@@ -8330,8 +8422,14 @@ async function requestHandler(req, res) {
           session.pty = null;
           const payload = `data: ${JSON.stringify({ type: 'exit', exitCode, signal })}\n\n`;
           for (const client of session.clients) {
-            try { if (!client.writableEnded) client.write(payload); } catch (_) {}
+            try {
+              if (!client.writableEnded) {
+                client.write(payload);
+                client.end();
+              }
+            } catch (_) {}
           }
+          session.clients.clear();
           if (session.wsClients && session.wsClients.size > 0) {
             const wsFrame = encodeWsFrame(JSON.stringify({ type: 'exit', exitCode, signal }));
             for (const ws of session.wsClients) {
@@ -8396,8 +8494,9 @@ async function requestHandler(req, res) {
       }
     };
     req.on('close', sseCleanup);
-    req.on('end', sseCleanup);
+    res.on('close', sseCleanup);
     req.on('error', sseCleanup);
+    res.on('error', sseCleanup);
 
     return;
   }
@@ -8847,8 +8946,30 @@ async function requestHandler(req, res) {
   function isSafeWorkspacePath(targetRelPath) {
     if (!targetRelPath || typeof targetRelPath !== 'string') return false;
     const clean = targetRelPath.trim().replace(/^[/\\]+/, '');
-    const resolved = path.resolve(WORKSPACE_ROOT, clean);
-    return resolved.startsWith(WORKSPACE_ROOT);
+    if (!clean) return false;
+    const rootResolved = path.resolve(WORKSPACE_ROOT);
+    const resolved = path.resolve(rootResolved, clean);
+    const normRoot = process.platform === 'win32' ? rootResolved.toLowerCase() : rootResolved;
+    const normResolved = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    const rootPrefix = normRoot.endsWith(path.sep) ? normRoot : normRoot + path.sep;
+    if (normResolved !== normRoot && !normResolved.startsWith(rootPrefix)) {
+      return false;
+    }
+    try {
+      const realRoot = fs.realpathSync(rootResolved);
+      const normRealRoot = process.platform === 'win32' ? realRoot.toLowerCase() : realRoot;
+      const realRootPrefix = normRealRoot.endsWith(path.sep) ? normRealRoot : normRealRoot + path.sep;
+      if (fs.existsSync(resolved)) {
+        const realTarget = fs.realpathSync(resolved);
+        const normRealTarget = process.platform === 'win32' ? realTarget.toLowerCase() : realTarget;
+        if (normRealTarget !== normRealRoot && !normRealTarget.startsWith(realRootPrefix)) {
+          return false;
+        }
+      }
+    } catch (_) {
+      return false;
+    }
+    return true;
   }
 
   function getSafeWorkspaceFullPath(targetRelPath) {
@@ -8940,7 +9061,8 @@ async function requestHandler(req, res) {
   }
 
   if (pathname === '/api/wa/connect' && method === 'POST') {
-    const body = (await safeParseBody(req)) || {};
+    const body = await safeParseBody(req);
+    if (!body) return;
     const tenant = getWaTenant(req, reqUrl, body);
     if (!tenant.success) {
       return sendJSON(res, tenant.status || 403, {
@@ -8966,7 +9088,8 @@ async function requestHandler(req, res) {
   }
 
   if (pathname === '/api/wa/pairing-code' && method === 'POST') {
-    const body = (await safeParseBody(req)) || {};
+    const body = await safeParseBody(req);
+    if (!body) return;
     const tenant = getWaTenant(req, reqUrl, body);
     if (!tenant.success) {
       return sendJSON(res, tenant.status || 403, {
@@ -8988,7 +9111,8 @@ async function requestHandler(req, res) {
   }
 
   if (pathname === '/api/wa/disconnect' && method === 'POST') {
-    const body = (await safeParseBody(req)) || {};
+    const body = await safeParseBody(req);
+    if (!body) return;
     const tenant = getWaTenant(req, reqUrl, body);
     if (!tenant.success) {
       return sendJSON(res, tenant.status || 403, {
@@ -9020,7 +9144,8 @@ async function requestHandler(req, res) {
   }
 
   if (pathname === '/api/wa/contacts' && method === 'POST') {
-    const body = (await safeParseBody(req)) || {};
+    const body = await safeParseBody(req);
+    if (!body) return;
     const tenant = getWaTenant(req, reqUrl, body);
     if (!tenant.success) {
       return sendJSON(res, tenant.status || 403, {
@@ -9075,7 +9200,8 @@ async function requestHandler(req, res) {
   }
 
   if (pathname === '/api/wa/sync-profiles' && method === 'POST') {
-    const body = (await safeParseBody(req)) || {};
+    const body = await safeParseBody(req);
+    if (!body) return;
     const tenant = getWaTenant(req, reqUrl, body);
     if (!tenant || !tenant.success) {
       return sendJSON(res, tenant?.status || 403, {
@@ -9153,7 +9279,7 @@ async function requestHandler(req, res) {
     let existingMsg = null;
     if (tenant.gateway) {
       const msgList = (jid && typeof tenant.gateway.getMessages === 'function')
-        ? tenant.gateway.getMessages(jid)
+        ? tenant.gateway.getMessages(jid, { markAsRead: false })
         : (jid && tenant.gateway.messages ? (tenant.gateway.messages.get(jid) || []) : []);
       existingMsg = msgList.find(m => m.id === msgId) || null;
       if (!existingMsg && tenant.gateway.messages) {
@@ -9243,7 +9369,7 @@ async function requestHandler(req, res) {
     let cloudDocUrl = null;
     if (tenant.gateway) {
       const msgList = (jid && typeof tenant.gateway.getMessages === 'function')
-        ? tenant.gateway.getMessages(jid)
+        ? tenant.gateway.getMessages(jid, { markAsRead: false })
         : (jid && tenant.gateway.messages ? (tenant.gateway.messages.get(jid) || []) : []);
       const cloudRegex = /https?:\/\/(?:[a-zA-Z0-9-]+\.)?(?:wps\.com|live\.com|office\.com|google\.com)\/[^\s<>"']+/i;
       for (const m of msgList) {
@@ -9264,7 +9390,8 @@ async function requestHandler(req, res) {
   }
 
   if (pathname === '/api/wa/send' && method === 'POST') {
-    const body = (await safeParseBody(req)) || {};
+    const body = await safeParseBody(req);
+    if (!body) return;
     const tenant = getWaTenant(req, reqUrl, body);
     if (!tenant.success) {
       return sendJSON(res, tenant.status || 403, {
@@ -9290,7 +9417,8 @@ async function requestHandler(req, res) {
   }
 
   if (pathname === '/api/wa/clear' && method === 'POST') {
-    const body = (await safeParseBody(req)) || {};
+    const body = await safeParseBody(req);
+    if (!body) return;
     const tenant = getWaTenant(req, reqUrl, body);
     if (!tenant.success) {
       return sendJSON(res, tenant.status || 403, {
@@ -9306,7 +9434,8 @@ async function requestHandler(req, res) {
   }
 
   if (pathname === '/api/wa/summarize' && method === 'POST') {
-    const body = (await safeParseBody(req)) || {};
+    const body = await safeParseBody(req);
+    if (!body) return;
     const tenant = getWaTenant(req, reqUrl, body);
     if (!tenant.success) {
       return sendJSON(res, tenant.status || 403, {
@@ -9562,7 +9691,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
   }
 
   if (pathname === '/api/wa/pin' && method === 'POST') {
-    const body = (await safeParseBody(req)) || {};
+    const body = await safeParseBody(req);
+    if (!body) return;
     const tenant = getWaTenant(req, reqUrl, body);
     const isLocal = isLocalWaRequest(req);
     const hasMasterAuth = Boolean(
@@ -9612,9 +9742,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     }
   }
 
-  if ((pathname === '/api/wa/verify-pin' || pathname === '/api/wa/login') && (method === 'POST' || method === 'GET')) {
-    const body = method === 'POST' ? ((await safeParseBody(req)) || {}) : {};
-    const inputPin = String(body.pin || body.password || reqUrl.searchParams.get('pin') || reqUrl.searchParams.get('password') || '').trim();
+  if ((pathname === '/api/wa/verify-pin' || pathname === '/api/wa/login') && method === 'POST') {
+    const body = await safeParseBody(req);
+    if (!body) return;
+    const inputPin = String(body.pin || body.password || '').trim();
     if (!inputPin) {
       return sendJSON(res, 400, { success: false, error: 'PIN tidak boleh kosong.' });
     }
@@ -9659,7 +9790,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
   }
 
   if (pathname === '/api/wa/mobile-link' && (method === 'GET' || method === 'POST')) {
-    const body = method === 'POST' ? ((await safeParseBody(req)) || {}) : {};
+    const body = method === 'POST' ? (await safeParseBody(req)) : {};
+    if (!body) return;
     const tenant = getWaTenant(req, reqUrl, body);
     if (!tenant.success) {
       return sendJSON(res, tenant.status || 403, {
@@ -9768,6 +9900,15 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
   // 1. Workspace Status
   if ((pathname === '/api/workspace/status' || pathname === '/api/workspace') && method === 'GET') {
+    const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
+    if (!pinCheck.valid) {
+      return sendJSON(res, 200, {
+        available: false,
+        canWrite: false,
+        requiresPin: true,
+        platform: 'server-fs'
+      });
+    }
     return sendJSON(res, 200, {
       available: true,
       root: WORKSPACE_ROOT,
@@ -9779,6 +9920,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
   // 2. Workspace Files Tree
   if ((pathname === '/api/workspace/files' || pathname === '/api/workspace/tree') && method === 'GET') {
+    if (!requireRemoteHostPin(req, res, reqUrl)) return;
     try {
       const files = await scanWorkspaceDirectory(WORKSPACE_ROOT);
       return sendJSON(res, 200, {
@@ -9795,6 +9937,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
   // 3. Workspace Read File
   if ((pathname === '/api/workspace/read' || pathname === '/api/workspace/file') && method === 'GET') {
+    if (!requireRemoteHostPin(req, res, reqUrl)) return;
     const targetPath = (reqUrl.searchParams && reqUrl.searchParams.get('path')) ||
                        (reqUrl.searchParams && reqUrl.searchParams.get('name')) ||
                        (reqUrl.query && reqUrl.query.path);
@@ -9831,6 +9974,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
   if ((pathname === '/api/workspace/write' || pathname === '/api/workspace/edit') && method === 'POST') {
     const body = await safeParseBody(req);
     if (!body) return;
+    if (!requireRemoteHostPin(req, res, reqUrl, body)) return;
     const targetPath = body.path || body.name || body.fileName;
     if (!targetPath || typeof targetPath !== 'string') {
       return sendJSON(res, 400, { error: 'Parameter `path` atau `name` diperlukan.' });
@@ -9896,6 +10040,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
   if ((pathname === '/api/workspace/delete' || pathname === '/api/workspace/remove') && method === 'POST') {
     const body = await safeParseBody(req);
     if (!body) return;
+    if (!requireRemoteHostPin(req, res, reqUrl, body)) return;
     const targetPath = body.path || body.name || body.fileName;
     if (!targetPath) {
       return sendJSON(res, 400, { error: 'Parameter `path` diperlukan.' });
@@ -11203,7 +11348,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       const shouldUseCloudBridge = Boolean((isAutoRouterExplicit || (isCloudModelRequested && !rawOllamaKey && rawOrKey)) && ((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (Boolean(rawOrKey) && !isCustomRemoteEndpoint)));
 
       // Defense-in-depth: Kalibrasi Deduksi Proposisional & Bayesian di Sisi Server (Ollama & Cloud Bridge)
-      applyServerSideDecisionCalibration(body, 'ollama');
+      applyServerSideDecisionCalibration(body, 'ollama', reqUserId);
 
       if (shouldUseCloudBridge) {
         // Pure Cloud Architecture Bridge:
@@ -11228,31 +11373,13 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
         sessionId = sanitizeTaskKey(body.sessionId || req.headers['x-session-id'] || null);
         delete body.sessionId;
-        if (sessionId) {
-          if (dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].status === 'streaming') {
-            try {
-              if (dbActiveChatTasks[sessionId].proxyReq && !dbActiveChatTasks[sessionId].proxyReq.destroyed) {
-                dbActiveChatTasks[sessionId].proxyReq.destroy();
-              }
-            } catch (_) {}
-            delete dbActiveChatTasks[sessionId];
-          }
-          dbActiveChatTasks[sessionId] = {
-            sessionId,
-            userId: reqUserId,
-            model: body.model || targetCloudModel,
-            provider: 'ollama',
-            userPrompt: null,
-            userImages: null,
-            fullText: '',
-            fullBytes: 0,
-            fullEpoch: 0,
-            rawBuffer: '',
-            status: 'streaming',
-            startedAt: Date.now(),
-            proxyReq: null
-          };
-        }
+        const bridgeTaskToken = registerActiveChatTask(sessionId, {
+          userId: reqUserId,
+          model: body.model || targetCloudModel,
+          provider: 'ollama',
+          userPrompt: null,
+          userImages: null
+        });
 
         // Multimodal Translation, Tool Normalization & Latent Reasoning Preservation
         const normalizedOrMessages = normalizeMessagesForOpenRouter(body.messages, {
@@ -11314,24 +11441,16 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         };
 
         const finalizeBridgeTask = (errMsg = null) => {
-          if (!sessionId || !dbActiveChatTasks[sessionId]) return;
+          if (!isTaskCurrent(sessionId, bridgeTaskToken)) return;
           if (dbActiveChatTasks[sessionId].status === 'aborted') {
             delete dbActiveChatTasks[sessionId];
             return;
           }
           if (errMsg) {
-            markChatTaskInterrupted(sessionId, errMsg);
+            markChatTaskInterrupted(sessionId, errMsg, bridgeTaskToken);
             return;
           }
-          flushChatTaskBuffer(sessionId, 'ollama');
-          const task = dbActiveChatTasks[sessionId];
-          task.status = 'completed';
-          task.completedAt = Date.now();
-          if (task.fullText && task.fullText.trim()) {
-            appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model)
-              .catch(err => console.warn('Gagal simpan respons bridge ke sesi:', err && err.message));
-          }
-          delete dbActiveChatTasks[sessionId];
+          finalizeStreamingChatTask(sessionId, bridgeTaskToken, 'ollama');
         };
 
         const executeBridgeRequest = (payload, retryCount = 0) => {
@@ -11355,17 +11474,30 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           };
 
           const bridgeReq = https.request(reqOptions, (bridgeRes) => {
-            if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+            if (isTaskCurrent(sessionId, bridgeTaskToken) && dbActiveChatTasks[sessionId].status === 'aborted') {
               delete dbActiveChatTasks[sessionId];
               if (!bridgeReq.destroyed) try { bridgeReq.destroy(); } catch (_) {}
               return;
             }
+            bridgeRes.on('error', (err) => {
+              finalizeBridgeTask(err.message || 'Bridge upstream response error');
+              if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                try {
+                  if (!res.headersSent) {
+                    sendJSON(res, 502, { error: `Bridge response stream error: ${err.message}` });
+                  } else {
+                    if (isStream) res.write(JSON.stringify({ error: `Bridge response stream error: ${err.message}` }) + '\n');
+                    res.end();
+                  }
+                } catch (_) {}
+              }
+            });
             const bStatus = bridgeRes.statusCode || 200;
             if (bStatus >= 400) {
               let errBuf = '';
               bridgeRes.on('data', chunk => errBuf += chunk);
               bridgeRes.on('end', () => {
-                if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+                if (isTaskCurrent(sessionId, bridgeTaskToken) && dbActiveChatTasks[sessionId].status === 'aborted') {
                   delete dbActiveChatTasks[sessionId];
                   return;
                 }
@@ -11394,7 +11526,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                     payload.max_tokens = Math.min(payload.max_tokens || 8192, 8192);
                     return executeBridgeRequest(payload, retryCount + 1);
                   }
-                  if (sessionId) delete dbActiveChatTasks[sessionId];
+                  if (isTaskCurrent(sessionId, bridgeTaskToken)) delete dbActiveChatTasks[sessionId];
                   if (clientDisconnected || res.writableEnded) return;
                   if (isStream) {
                     res.writeHead(200, {
@@ -11409,7 +11541,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                     sendJSON(res, bStatus, { error: msg });
                   }
                 } catch (_) {
-                  if (sessionId) delete dbActiveChatTasks[sessionId];
+                  if (isTaskCurrent(sessionId, bridgeTaskToken)) delete dbActiveChatTasks[sessionId];
                   if (clientDisconnected || res.writableEnded) return;
                   if (isStream) {
                     res.writeHead(200, {
@@ -11441,7 +11573,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               let rawResp = '';
               bridgeRes.on('data', chunk => rawResp += chunk);
               bridgeRes.on('end', () => {
-                if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+                if (isTaskCurrent(sessionId, bridgeTaskToken) && dbActiveChatTasks[sessionId].status === 'aborted') {
                   delete dbActiveChatTasks[sessionId];
                   return;
                 }
@@ -11468,7 +11600,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                     sendJSON(res, 200, finalObj);
                   }
                 } catch (e) {
-                  if (sessionId) delete dbActiveChatTasks[sessionId];
+                  if (isTaskCurrent(sessionId, bridgeTaskToken)) delete dbActiveChatTasks[sessionId];
                   if (!clientDisconnected && !res.writableEnded) {
                     sendJSON(res, 500, { error: 'Gagal memproses respon bridge: ' + e.message });
                   }
@@ -11545,7 +11677,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             });
 
             bridgeRes.on('end', () => {
-              if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+              if (isTaskCurrent(sessionId, bridgeTaskToken) && dbActiveChatTasks[sessionId].status === 'aborted') {
                 delete dbActiveChatTasks[sessionId];
                 return;
               }
@@ -11581,6 +11713,21 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 try { res.end(); } catch (_) {}
               }
             });
+          });
+
+          bridgeReq.on('timeout', () => {
+            if (!bridgeReq.destroyed) try { bridgeReq.destroy(); } catch (_) {}
+            finalizeBridgeTask('Bridge stream timed out (300s)');
+            if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+              try {
+                if (!res.headersSent) {
+                  sendJSON(res, 504, { error: 'Bridge stream timed out (300s)' });
+                } else {
+                  if (isStream) res.write(JSON.stringify({ error: 'Bridge stream timed out (300s)' }) + '\n');
+                  res.end();
+                }
+              } catch (_) {}
+            }
           });
 
           bridgeReq.on('error', (err) => {
@@ -11711,12 +11858,15 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
       }
 
+      let ollamaTaskToken = null;
       if (sessionId) {
         if (dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].status === 'streaming') {
           return sendJSON(res, 429, { error: 'Stream already active for this session' });
         }
+        ollamaTaskToken = createChatTaskToken();
         dbActiveChatTasks[sessionId] = {
           sessionId,
+          taskToken: ollamaTaskToken,
           userId: chatUserId,
           model: body.model || 'Ollama Model',
           provider: 'ollama',
@@ -11804,6 +11954,24 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
           const statusCode = proxyRes.statusCode || 200;
 
+          const clearCurrentOllamaTask = () => {
+            clearOllamaKeepAlive();
+            if (isTaskCurrent(sessionId, ollamaTaskToken)) {
+              delete dbActiveChatTasks[sessionId];
+            }
+          };
+
+          const runFallbackDispatch = async (ep, mdl, auth, localFb, retryCloud, errPrefix) => {
+            try {
+              await dispatchOllamaUpstream(ep, mdl, auth, localFb, retryCloud);
+            } catch (fallbackErr) {
+              clearCurrentOllamaTask();
+              if (!clientDisconnected && !res.writableEnded && !res.destroyed && !res.headersSent) {
+                try { sendJSON(res, 502, { error: `${errPrefix}: ${fallbackErr?.message || fallbackErr}` }); } catch (_) {}
+              }
+            }
+          };
+
           // If upstream returned error (HTTP >= 400)
           if (statusCode >= 400) {
             let errData = '';
@@ -11811,72 +11979,84 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               if (!clientDisconnected) errData += chunk;
             });
             proxyRes.on('end', async () => {
-              // Auto-retry tanpa tools atau tanpa think jika model lokal tidak mendukung parameter tersebut
-              if (((Array.isArray(body.tools) && body.tools.length > 0 && /tool/i.test(errData)) || (body.think && /think/i.test(errData))) && (statusCode === 400 || statusCode === 422 || statusCode === 500) && !res.headersSent && !clientDisconnected) {
-                if (/tool/i.test(errData)) {
-                  delete body.tools;
-                  delete body.tool_choice;
-                }
-                if (/think/i.test(errData)) {
-                  delete body.think;
-                }
-                return dispatchOllamaUpstream(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback, canRetryCloud);
-              }
-
-              // Jika percobaan -cloud/:cloud pada daemon lokal mengembalikan 404 (model belum ditarik/tidak tersedia di relay),
-              // jatuhkan secara terkendali ke model lokal yang terinstal di /api/tags
-              if (statusCode === 404 && /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])/i.test(targetEndpoint || '') && !res.headersSent && (!clientDisconnected || sessionId)) {
-                const installedModels = (localDaemonTagsCache && Array.isArray(localDaemonTagsCache.tags) && localDaemonTagsCache.tags.length > 0)
-                  ? localDaemonTagsCache.tags
-                  : await fetchLocalOllamaTags();
-                const fallbackLocal = installedModels.find(m => m.name !== targetModel && (m.name.includes('glm-5.3-flash') || m.name.includes('nemotron') || m.name.includes('llama3.2') || m.name.includes('qwen')));
-                if (fallbackLocal && fallbackLocal.name !== targetModel) {
-                  console.warn(`[Ollama Local Relay] Model ${targetModel} not found (404). Falling back to installed model ${fallbackLocal.name}...`);
-                  return dispatchOllamaUpstream(targetEndpoint, fallbackLocal.name, targetAuthKey, false, false);
-                }
-              }
-
-              // Multi-Tier Fallback: Jika https://ollama.com mengembalikan HTTP >= 400 (misal 401/403/404/429/500),
-              // otomatis alihkan ke daemon Cloud Relay lokal (http://127.0.0.1:11434) tanpa menggagalkan permintaan pengguna!
-              if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
-                const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
-                console.warn(`[Ollama Cloud Failover] Upstream ${targetEndpoint} (${targetModel}) returned HTTP ${statusCode}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
-                return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false, false);
-              }
-
-              if (sessionId) {
-                delete dbActiveChatTasks[sessionId];
-              }
-              if (clientDisconnected || res.writableEnded || res.destroyed) return;
               try {
+                // Auto-retry tanpa tools atau tanpa think jika model lokal tidak mendukung parameter tersebut
+                if (((Array.isArray(body.tools) && body.tools.length > 0 && /tool/i.test(errData)) || (body.think && /think/i.test(errData))) && (statusCode === 400 || statusCode === 422 || statusCode === 500) && !res.headersSent && !clientDisconnected) {
+                  if (/tool/i.test(errData)) {
+                    delete body.tools;
+                    delete body.tool_choice;
+                  }
+                  if (/think/i.test(errData)) {
+                    delete body.think;
+                  }
+                  return await runFallbackDispatch(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback, canRetryCloud, 'Ollama auto-retry failed');
+                }
+
+                // Jika percobaan -cloud/:cloud pada daemon lokal mengembalikan 404 (model belum ditarik/tidak tersedia di relay),
+                // jatuhkan secara terkendali ke model lokal yang terinstal di /api/tags
+                if (statusCode === 404 && /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])/i.test(targetEndpoint || '') && !res.headersSent && (!clientDisconnected || sessionId)) {
+                  const installedModels = (localDaemonTagsCache && Array.isArray(localDaemonTagsCache.tags) && localDaemonTagsCache.tags.length > 0)
+                    ? localDaemonTagsCache.tags
+                    : await fetchLocalOllamaTags();
+                  const fallbackLocal = installedModels.find(m => m.name !== targetModel && (m.name.includes('glm-5.3-flash') || m.name.includes('nemotron') || m.name.includes('llama3.2') || m.name.includes('qwen')));
+                  if (fallbackLocal && fallbackLocal.name !== targetModel) {
+                    console.warn(`[Ollama Local Relay] Model ${targetModel} not found (404). Falling back to installed model ${fallbackLocal.name}...`);
+                    return await runFallbackDispatch(targetEndpoint, fallbackLocal.name, targetAuthKey, false, false, 'Ollama local fallback failed');
+                  }
+                }
+
+                // Multi-Tier Fallback: Jika https://ollama.com mengembalikan HTTP >= 400 (misal 401/403/404/429/500),
+                // otomatis alihkan ke daemon Cloud Relay lokal (http://127.0.0.1:11434) tanpa menggagalkan permintaan pengguna!
+                if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
+                  const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+                  console.warn(`[Ollama Cloud Failover] Upstream ${targetEndpoint} (${targetModel}) returned HTTP ${statusCode}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
+                  return await runFallbackDispatch('http://127.0.0.1:11434', localManifestModel, null, false, false, 'Ollama cloud failover failed');
+                }
+
+                clearCurrentOllamaTask();
+                if (clientDisconnected || res.writableEnded || res.destroyed) return;
                 let parsedErr = null;
-                try { parsedErr = JSON.parse(errData); } catch (e) {}
+                try {
+                  parsedErr = JSON.parse(errData);
+                } catch (_) {
+                  parsedErr = null;
+                }
                 const errMsg = parsedErr?.error?.message || parsedErr?.error || errData || `Ollama error [${statusCode}]`;
                 return sendJSON(res, statusCode, { error: errMsg, details: parsedErr || errData });
-              } catch (e) {}
+              } catch (endErr) {
+                clearCurrentOllamaTask();
+                if (!clientDisconnected && !res.writableEnded && !res.destroyed && !res.headersSent) {
+                  try { sendJSON(res, 502, { error: `Ollama error handler failed: ${endErr?.message || endErr}` }); } catch (_) {}
+                }
+              }
             });
             proxyRes.on('error', async (err) => {
-              if (canRetryCloud && targetEndpoint.includes('ollama.com') && !res.headersSent && (!clientDisconnected || sessionId)) {
-                console.warn(`[Ollama Cloud Retry] Network glitch on ${targetEndpoint}: ${err.message}. Retrying once...`);
-                return dispatchOllamaUpstream(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback, false);
-              }
-              if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
-                const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
-                return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false, false);
-              }
-              if (sessionId) {
-                delete dbActiveChatTasks[sessionId];
-              }
-              if (clientDisconnected || res.writableEnded || res.destroyed) return;
-              if (!res.headersSent) {
-                sendJSON(res, 502, { error: `Ollama upstream error stream interrupted: ${err.message}` });
+              try {
+                if (canRetryCloud && targetEndpoint.includes('ollama.com') && !res.headersSent && (!clientDisconnected || sessionId)) {
+                  console.warn(`[Ollama Cloud Retry] Network glitch on ${targetEndpoint}: ${err.message}. Retrying once...`);
+                  return await runFallbackDispatch(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback, false, 'Ollama cloud retry failed');
+                }
+                if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
+                  const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+                  return await runFallbackDispatch('http://127.0.0.1:11434', localManifestModel, null, false, false, 'Ollama local fallback failed');
+                }
+                clearCurrentOllamaTask();
+                if (clientDisconnected || res.writableEnded || res.destroyed) return;
+                if (!res.headersSent) {
+                  sendJSON(res, 502, { error: `Ollama upstream error stream interrupted: ${err.message}` });
+                }
+              } catch (errHandlerErr) {
+                clearCurrentOllamaTask();
+                if (!clientDisconnected && !res.writableEnded && !res.destroyed && !res.headersSent) {
+                  try { sendJSON(res, 502, { error: `Ollama upstream error recovery failed: ${errHandlerErr?.message || errHandlerErr}` }); } catch (_) {}
+                }
               }
             });
             return;
           }
 
-          // Upstream returned 200 OK -> Send headers matching client stream mode!
-          const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
+          // Upstream returned 200 OK -> Send headers matching Ollama NDJSON / JSON mode!
+          const contentType = isStream ? 'application/x-ndjson; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
           const reasoningFilter = textSafety.createProviderStreamFilter('ollama', isStream ? 'stream' : 'json', { userPrompt });
           if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
             try {
@@ -11956,16 +12136,27 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
                     try { if (sTail) res.write(sTail); res.end(); } catch (_) {}
                   }
+                  finalizeStreamingChatTask(sessionId, ollamaTaskToken, 'ollama');
                 });
-                splicedRes.on('error', () => {
+                splicedRes.on('error', (sErr) => {
                   clearOllamaKeepAlive();
+                  markChatTaskInterrupted(sessionId, sErr?.message || 'Spliced stream interrupted', ollamaTaskToken);
                   if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
                     try { res.end(); } catch (_) {}
                   }
                 });
               });
-              splicedReq.on('error', () => {
+              splicedReq.on('timeout', () => {
                 clearOllamaKeepAlive();
+                if (!splicedReq.destroyed) try { splicedReq.destroy(); } catch (_) {}
+                markChatTaskInterrupted(sessionId, 'Spliced Ollama stream timed out', ollamaTaskToken);
+                if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                  try { res.end(); } catch (_) {}
+                }
+              });
+              splicedReq.on('error', (sReqErr) => {
+                clearOllamaKeepAlive();
+                markChatTaskInterrupted(sessionId, sReqErr?.message || 'Spliced Ollama connection error', ollamaTaskToken);
                 if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
                   try { res.end(); } catch (_) {}
                 }
@@ -12014,31 +12205,13 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             }
 
             // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
-            if (sessionId && dbActiveChatTasks[sessionId]) {
-              if (dbActiveChatTasks[sessionId].status === 'aborted') {
-                // Jangan timpa status aborted dan jangan simpan ulang
-                delete dbActiveChatTasks[sessionId];
-                return;
-              }
-              flushChatTaskBuffer(sessionId, 'ollama');
-              const task = dbActiveChatTasks[sessionId];
-              task.status = 'completed';
-              task.completedAt = Date.now();
-              if (task.fullText && task.fullText.trim()) {
-                appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model)
-                  .catch(err => console.warn('Gagal simpan respons chat ke sesi:', err && err.message));
-              }
-              // Clean up completed task
-              delete dbActiveChatTasks[sessionId];
-            }
+            finalizeStreamingChatTask(sessionId, ollamaTaskToken, 'ollama');
           });
 
           proxyRes.on('error', (err) => {
             clearOllamaKeepAlive();
             if (hasSplicedRefusal) return;
-            if (sessionId && dbActiveChatTasks[sessionId]) {
-              markChatTaskInterrupted(sessionId, err.message || 'Ollama stream interrupted');
-            }
+            markChatTaskInterrupted(sessionId, err.message || 'Ollama stream interrupted', ollamaTaskToken);
             if (clientDisconnected || res.writableEnded || res.destroyed) return;
             try {
               if (!res.headersSent) {
@@ -12050,7 +12223,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           });
         });
 
-        if (sessionId && dbActiveChatTasks[sessionId]) {
+        if (isTaskCurrent(sessionId, ollamaTaskToken)) {
           dbActiveChatTasks[sessionId].proxyReq = proxyReq;
         }
 
@@ -12059,12 +12232,12 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           if (hasSplicedRefusal) return;
           if (!proxyReq.destroyed) proxyReq.destroy();
           if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
-            const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
-            return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
+            try {
+              const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+              return await dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false);
+            } catch (_) {}
           }
-          if (sessionId && dbActiveChatTasks[sessionId]) {
-            markChatTaskInterrupted(sessionId, 'Ollama stream timed out (120s)');
-          }
+          markChatTaskInterrupted(sessionId, 'Ollama stream timed out (120s)', ollamaTaskToken);
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
             if (!res.headersSent) {
@@ -12082,17 +12255,19 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           clearOllamaKeepAlive();
           if (hasSplicedRefusal) return;
           if (canRetryCloud && targetEndpoint.includes('ollama.com') && !res.headersSent && (!clientDisconnected || sessionId)) {
-            console.warn(`[Ollama Cloud Retry] Network error on ${targetEndpoint}: ${err.message}. Retrying once with fresh connection...`);
-            return dispatchOllamaUpstream(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback, false);
+            try {
+              console.warn(`[Ollama Cloud Retry] Network error on ${targetEndpoint}: ${err.message}. Retrying once with fresh connection...`);
+              return await dispatchOllamaUpstream(targetEndpoint, targetModel, targetAuthKey, allowLocalFallback, false);
+            } catch (_) {}
           }
           if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
-            const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
-            console.warn(`[Ollama Cloud Failover] Network error on ${targetEndpoint}: ${err.message}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
-            return dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false, false);
+            try {
+              const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
+              console.warn(`[Ollama Cloud Failover] Network error on ${targetEndpoint}: ${err.message}. Falling back to local daemon (127.0.0.1:11434) with model ${localManifestModel}...`);
+              return await dispatchOllamaUpstream('http://127.0.0.1:11434', localManifestModel, null, false, false);
+            } catch (_) {}
           }
-          if (sessionId && dbActiveChatTasks[sessionId]) {
-            markChatTaskInterrupted(sessionId, err.message || 'Ollama connection error');
-          }
+          markChatTaskInterrupted(sessionId, err.message || 'Ollama connection error', ollamaTaskToken);
           // If client closed or socket was destroyed on abort, suppress write-after-end errors
           if (clientDisconnected || res.writableEnded || res.destroyed) {
             return;
@@ -12115,7 +12290,26 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
       const isCloudTarget = Boolean(rawOllamaKey || isCloudModelRequested || (customEndpoint && customEndpoint.includes('ollama.com')));
       const allowLocalFallback = !isServerlessChat && !isCloudTarget;
-      dispatchOllamaUpstream(customEndpoint, body.model, rawOllamaKey, allowLocalFallback, true);
+      dispatchOllamaUpstream(customEndpoint, body.model, rawOllamaKey, allowLocalFallback, true).catch((err) => {
+        clearOllamaKeepAlive();
+        if (isTaskCurrent(sessionId, ollamaTaskToken)) {
+          try {
+            if (dbActiveChatTasks[sessionId].proxyReq && !dbActiveChatTasks[sessionId].proxyReq.destroyed) {
+              dbActiveChatTasks[sessionId].proxyReq.destroy();
+            }
+          } catch (_) {}
+          delete dbActiveChatTasks[sessionId];
+        }
+        if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+          try {
+            if (!res.headersSent) {
+              sendJSON(res, 500, { error: err?.message || String(err) });
+            } else {
+              res.end();
+            }
+          } catch (_) {}
+        }
+      });
     } catch (err) {
       // Pembersihan aman jika terjadi throw sinkron (ERR_INVALID_CHAR, payload error, socket write error)
       if (sessionId && dbActiveChatTasks[sessionId]) {
@@ -12482,31 +12676,13 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       delete body.sessionId;
       delete body.userId; // Cegah error Pydantic / upstream validation di OpenRouter
 
-      if (sessionId) {
-        if (dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].status === 'streaming') {
-          try {
-            if (dbActiveChatTasks[sessionId].proxyReq && !dbActiveChatTasks[sessionId].proxyReq.destroyed) {
-              dbActiveChatTasks[sessionId].proxyReq.destroy();
-            }
-          } catch (_) {}
-          delete dbActiveChatTasks[sessionId];
-        }
-        dbActiveChatTasks[sessionId] = {
-          sessionId,
-          userId: chatUserId,
-          model: body.model || 'OpenRouter Model',
-          provider: 'openrouter',
-          userPrompt: userPrompt || null,
-          userImages: userImages || null,
-          fullText: '',
-          fullBytes: 0,
-          fullEpoch: 0,
-          rawBuffer: '',
-          status: 'streaming',
-          startedAt: Date.now(),
-          proxyReq: null
-        };
-      }
+      const orTaskToken = registerActiveChatTask(sessionId, {
+        userId: chatUserId,
+        model: body.model || 'OpenRouter Model',
+        provider: 'openrouter',
+        userPrompt: userPrompt || null,
+        userImages: userImages || null
+      });
 
       // Defense-in-depth: Normalisasi model jika format tanpa slash (misal format Ollama gemma4:31b) dikirim ke OpenRouter
       if (body.model && !body.model.includes('/')) {
@@ -12588,7 +12764,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       }
 
       // Defense-in-depth: Kalibrasi Deduksi Proposisional & Bayesian di Sisi Server (OpenRouter)
-      applyServerSideDecisionCalibration(body, 'openrouter');
+      applyServerSideDecisionCalibration(body, 'openrouter', chatUserId);
 
       // Rekonstruksi ruang keadaan laten (reasoning_content) & sinkronisasi pesan tool saat tools dihapus
       const isBeamOrReasoningReq = Boolean(body.model && (
@@ -12663,12 +12839,12 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       });
 
       proxyReq = https.request(options, (proxyRes) => {
-        if (sessionId && dbActiveChatTasks[sessionId]) {
+        if (isTaskCurrent(sessionId, orTaskToken)) {
           dbActiveChatTasks[sessionId].proxyReq = proxyReq;
         }
 
         // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
-        if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+        if (isTaskCurrent(sessionId, orTaskToken) && dbActiveChatTasks[sessionId].status === 'aborted') {
           clearKeepAlive();
           if (!proxyReq.destroyed) proxyReq.destroy();
           // Clean up aborted task
@@ -12687,7 +12863,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         // If OpenRouter returned non-200 (e.g. 401 Unauthorized, 402 Payment Required, 429 Rate Limit)
         if (statusCode !== 200) {
           clearKeepAlive();
-          if (sessionId && dbActiveChatTasks[sessionId]) {
+          if (isTaskCurrent(sessionId, orTaskToken)) {
             dbActiveChatTasks[sessionId].status = 'error';
           }
           let errData = '';
@@ -12695,7 +12871,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             if (!clientDisconnected) errData += chunk;
           });
           proxyRes.on('end', () => {
-            if (sessionId) {
+            if (isTaskCurrent(sessionId, orTaskToken)) {
               delete dbActiveChatTasks[sessionId];
             }
             if (clientDisconnected || res.writableEnded || res.destroyed) return;
@@ -12707,7 +12883,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             } catch (e) {}
           });
           proxyRes.on('error', (err) => {
-            if (sessionId) {
+            if (isTaskCurrent(sessionId, orTaskToken)) {
               delete dbActiveChatTasks[sessionId];
             }
             if (clientDisconnected || res.writableEnded || res.destroyed) return;
@@ -12801,31 +12977,13 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           }
 
           // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
-          if (sessionId && dbActiveChatTasks[sessionId]) {
-            if (dbActiveChatTasks[sessionId].status === 'aborted') {
-              // Jangan timpa status aborted dan jangan simpan ulang
-              delete dbActiveChatTasks[sessionId];
-              return;
-            }
-            flushChatTaskBuffer(sessionId, 'openrouter');
-            const task = dbActiveChatTasks[sessionId];
-            task.status = 'completed';
-            task.completedAt = Date.now();
-            if (task.fullText && task.fullText.trim()) {
-              appendAssistantMessageToSessionDisk(sessionId, task.fullText, task.model)
-                .catch(err => console.warn('Gagal simpan respons chat ke sesi:', err && err.message));
-            }
-            // Clean up completed task
-            delete dbActiveChatTasks[sessionId];
-          }
+          finalizeStreamingChatTask(sessionId, orTaskToken, 'openrouter');
         });
 
         proxyRes.on('error', (err) => {
           clearKeepAlive();
           if (horocycleHalted) return;
-          if (sessionId && dbActiveChatTasks[sessionId]) {
-            markChatTaskInterrupted(sessionId, err.message || 'OpenRouter stream interrupted');
-          }
+          markChatTaskInterrupted(sessionId, err.message || 'OpenRouter stream interrupted', orTaskToken);
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
             if (!res.headersSent) {
@@ -12840,16 +12998,14 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         });
       });
 
-      if (sessionId && dbActiveChatTasks[sessionId]) {
+      if (isTaskCurrent(sessionId, orTaskToken)) {
         dbActiveChatTasks[sessionId].proxyReq = proxyReq;
       }
 
       proxyReq.on('timeout', () => {
         clearKeepAlive();
         if (horocycleHalted) return;
-        if (sessionId && dbActiveChatTasks[sessionId]) {
-          markChatTaskInterrupted(sessionId, 'OpenRouter stream timed out (300s)');
-        }
+        markChatTaskInterrupted(sessionId, 'OpenRouter stream timed out (300s)', orTaskToken);
         if (!proxyReq.destroyed) proxyReq.destroy();
         if (clientDisconnected || res.writableEnded || res.destroyed) return;
         try {
@@ -12868,9 +13024,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       proxyReq.on('error', (err) => {
         clearKeepAlive();
         if (horocycleHalted) return;
-        if (sessionId && dbActiveChatTasks[sessionId]) {
-          markChatTaskInterrupted(sessionId, err.message || 'OpenRouter connection error');
-        }
+        markChatTaskInterrupted(sessionId, err.message || 'OpenRouter connection error', orTaskToken);
         // If client disconnected or socket was intentionally aborted, suppress error write-after-end
         if (clientDisconnected || res.writableEnded || res.destroyed) {
           return;
@@ -12891,7 +13045,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       proxyReq.end();
     } catch (err) {
       // Pembersihan aman jika terjadi throw sinkron (ERR_INVALID_CHAR, payload error, socket write error)
-      if (sessionId && dbActiveChatTasks[sessionId]) {
+      if (isTaskCurrent(sessionId, orTaskToken)) {
         try {
           if (dbActiveChatTasks[sessionId].proxyReq && !dbActiveChatTasks[sessionId].proxyReq.destroyed) {
             dbActiveChatTasks[sessionId].proxyReq.destroy();
@@ -12981,15 +13135,11 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     };
 
     const task = dbActiveChatTasks[sid];
-    if (task && (task.status === 'streaming' || task.status === 'completed')) {
-      // PRIVACY ENFORCEMENT: If task belongs to another user, deny access!
+    if (task) {
+      // PRIVACY ENFORCEMENT: Never expose another user's task regardless of status!
       if (task.userId && task.userId !== statusUserId) {
         return sendJSON(res, 200, { active: false, status: 'none', sessionId: sid });
       }
-      return sendJSON(res, 200, buildTaskStatusPayload(task));
-    }
-
-    if (task) {
       return sendJSON(res, 200, buildTaskStatusPayload(task));
     }
 

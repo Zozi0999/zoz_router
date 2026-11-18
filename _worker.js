@@ -1033,27 +1033,72 @@ export default {
         'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Origin': '*'
       };
+      const resolveMemUid = (body = null) => (
+        request.headers.get('x-user-id') ||
+        url.searchParams.get('userId') ||
+        (body && body.userId) ||
+        'default'
+      );
+      const getMemOwner = (m) => (m && (m.userId || m.user_id)) || 'default';
 
       if (request.method === 'GET' && url.pathname === '/api/memories/insights') {
-        const allItems = Array.from(memMap.values());
+        const uid = resolveMemUid();
+        const scope = url.searchParams.get('scope') || null;
+        const userItems = Array.from(memMap.values()).filter(m =>
+          m && getMemOwner(m) === uid && (!scope || m.scope === scope || m.scope === 'global')
+        );
+        const categoryDistribution = {};
+        for (const item of userItems) {
+          const cat = item.category || 'general';
+          categoryDistribution[cat] = (categoryDistribution[cat] || 0) + 1;
+        }
+        const topCategories = Object.entries(categoryDistribution)
+          .sort((a, b) => b[1] - a[1])
+          .map(([category, count]) => ({ category, count }));
+        const insightPayload = {
+          userId: uid,
+          totalMemories: userItems.length,
+          categoryDistribution,
+          topCategories,
+          topEntities: [],
+          activeRelationsCount: 0,
+          activeRelations: [],
+          recommendedReviewTopics: userItems.slice(0, 3).map(m => ({
+            topic: m.category || 'general',
+            fact: m.content,
+            validFrom: m.created_at || m.updated_at || ''
+          })),
+          generatedAt: new Date().toISOString()
+        };
         return new Response(JSON.stringify({
           success: true,
-          data: {
-            totalMemories: allItems.length,
-            activeRelations: 0,
-            categories: {},
-            recentEpisodes: []
-          }
+          data: insightPayload,
+          insights: insightPayload
         }), { status: 200, headers: jsonHeaders });
       }
 
       if (request.method === 'POST' && url.pathname === '/api/memories/recall') {
         let body = {};
         try { body = await request.json(); } catch (_) {}
-        const uid = body.userId || request.headers.get('x-user-id') || 'default';
+        if (Boolean(body.incognito)) {
+          return new Response(JSON.stringify({
+            success: true,
+            incognito: true,
+            memories: [],
+            receipts: [],
+            systemPromptInjection: ''
+          }), { status: 200, headers: jsonHeaders });
+        }
+        const uid = resolveMemUid(body);
+        const targetScope = body.scope || 'global';
         const q = String(body.query || body.message || '').toLowerCase();
         const qTokens = [...new Set(q.replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length >= 3))];
-        const userMemories = Array.from(memMap.values()).filter(m => m && (m.userId === uid || m.userId === 'default'));
+        const userMemories = Array.from(memMap.values()).filter(m => {
+          if (!m || getMemOwner(m) !== uid) return false;
+          const active = m.isActive !== undefined ? m.isActive : (m.is_active !== undefined ? m.is_active : 1);
+          if (!active) return false;
+          return !targetScope || targetScope === 'global' || m.scope === targetScope || m.scope === 'global';
+        });
         const scored = [];
         for (const m of userMemories) {
           const text = String(m.content || '').toLowerCase();
@@ -1074,7 +1119,7 @@ export default {
         }
         return new Response(JSON.stringify({
           success: true,
-          incognito: Boolean(body.incognito),
+          incognito: false,
           memories: top,
           receipts: [],
           systemPromptInjection
@@ -1084,60 +1129,113 @@ export default {
       if (request.method === 'POST' && url.pathname === '/api/memories/extract-background') {
         let body = {};
         try { body = await request.json(); } catch (_) {}
-        const uid = body.userId || request.headers.get('x-user-id') || 'default';
+        const uid = resolveMemUid(body);
+        const incognito = Boolean(body.incognito);
         const nowIso = new Date().toISOString();
-        if (body.errorLesson && body.errorLesson.content) {
-          const id = body.errorLesson.id || `lesson_${Date.now()}`;
-          memMap.set(id, { ...body.errorLesson, id, userId: uid, category: 'error_lesson', updated_at: nowIso });
+        if (!incognito) {
+          if (body.errorLesson && body.errorLesson.content) {
+            const id = body.errorLesson.id || `lesson_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+            memMap.set(id, { ...body.errorLesson, id, userId: uid, user_id: uid, category: 'error_lesson', updated_at: nowIso });
+          }
+          if (body.episodicSummary && body.episodicSummary.content) {
+            const id = body.episodicSummary.id || `ep_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+            memMap.set(id, { ...body.episodicSummary, id, userId: uid, user_id: uid, category: 'episodic_context', updated_at: nowIso });
+          }
+          if (body.preferenceMemory && body.preferenceMemory.content) {
+            const id = body.preferenceMemory.id || `pref_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+            memMap.set(id, { ...body.preferenceMemory, id, userId: uid, user_id: uid, category: 'preference', updated_at: nowIso });
+          }
         }
-        if (body.episodicSummary && body.episodicSummary.content) {
-          const id = body.episodicSummary.id || `ep_${Date.now()}`;
-          memMap.set(id, { ...body.episodicSummary, id, userId: uid, category: 'episodic_context', updated_at: nowIso });
-        }
-        if (body.preferenceMemory && body.preferenceMemory.content) {
-          const id = body.preferenceMemory.id || `pref_${Date.now()}`;
-          memMap.set(id, { ...body.preferenceMemory, id, userId: uid, category: 'preference', updated_at: nowIso });
-        }
-        return new Response(JSON.stringify({ success: true, queued: true }), { status: 200, headers: jsonHeaders });
+        return new Response(JSON.stringify({ success: true, queued: !incognito }), { status: 200, headers: jsonHeaders });
       }
 
       if (request.method === 'GET' && (url.pathname === '/api/memories' || url.pathname === '/api/memories/')) {
-        const uid = request.headers.get('x-user-id') || url.searchParams.get('userId') || 'default';
-        const list = Array.from(memMap.values()).filter(m => m && (m.userId === uid || m.userId === 'default'));
+        const uid = resolveMemUid();
+        const catFilter = url.searchParams.get('category') || null;
+        const scopeFilter = url.searchParams.get('scope') || null;
+        const qFilter = (url.searchParams.get('q') || '').trim().toLowerCase();
+        let list = Array.from(memMap.values()).filter(m => m && getMemOwner(m) === uid);
+        if (catFilter) list = list.filter(m => m.category === catFilter);
+        if (scopeFilter) list = list.filter(m => m.scope === scopeFilter || m.scope === 'global');
+        if (qFilter) list = list.filter(m => String(m.content || '').toLowerCase().includes(qFilter));
         return new Response(JSON.stringify({ success: true, count: list.length, memories: list }), { status: 200, headers: jsonHeaders });
       }
 
       if (request.method === 'POST' && (url.pathname === '/api/memories' || url.pathname === '/api/memories/')) {
         let body = {};
         try { body = await request.json(); } catch (_) {}
-        const uid = body.userId || request.headers.get('x-user-id') || 'default';
-        const id = body.id || `mem_${Date.now()}`;
+        const uid = resolveMemUid(body);
+        const content = String(body.content || body.fact || '').trim();
+        if (!content) {
+          return new Response(JSON.stringify({ success: false, error: 'Isi memori (content) wajib diisi.' }), { status: 400, headers: jsonHeaders });
+        }
+        const id = body.id || `mem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const nowIso = new Date().toISOString();
         const item = {
           id,
           userId: uid,
           user_id: uid,
-          content: body.content || body.fact || '',
+          content,
           category: body.category || 'preference',
           scope: body.scope || 'global',
           confidence: 1.0,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          isActive: 1,
+          is_active: 1,
+          created_at: nowIso,
+          updated_at: nowIso
         };
-        if (item.content) memMap.set(id, item);
+        memMap.set(id, item);
         return new Response(JSON.stringify({ success: true, memory: item }), { status: 201, headers: jsonHeaders });
       }
 
-      if (request.method === 'DELETE') {
+      if (request.method === 'PATCH' && url.pathname.startsWith('/api/memories/')) {
         const memId = url.pathname.replace('/api/memories/', '').trim();
-        if (memId && memId !== '/api/memories') {
-          memMap.delete(memId);
-        } else {
-          memMap.clear();
+        if (!memId) {
+          return new Response(JSON.stringify({ success: false, error: 'ID memori wajib disertakan.' }), { status: 400, headers: jsonHeaders });
         }
-        return new Response(JSON.stringify({ success: true }), { status: 200, headers: jsonHeaders });
+        const uid = resolveMemUid();
+        const existing = memMap.get(memId);
+        if (!existing || getMemOwner(existing) !== uid) {
+          return new Response(JSON.stringify({ success: false, error: 'Memori tidak ditemukan atau bukan milik akun Anda.' }), { status: 404, headers: jsonHeaders });
+        }
+        let body = {};
+        try { body = await request.json(); } catch (_) {}
+        const updated = {
+          ...existing,
+          content: typeof body.content === 'string' ? body.content.trim() : existing.content,
+          category: typeof body.category === 'string' ? body.category.trim() : existing.category,
+          scope: typeof body.scope === 'string' ? body.scope.trim() : existing.scope,
+          updated_at: new Date().toISOString()
+        };
+        if (typeof body.isActive !== 'undefined') {
+          updated.isActive = body.isActive ? 1 : 0;
+          updated.is_active = updated.isActive;
+        }
+        memMap.set(memId, updated);
+        return new Response(JSON.stringify({ success: true, memory: updated }), { status: 200, headers: jsonHeaders });
       }
 
-      return new Response(JSON.stringify({ success: true, memories: [] }), { status: 200, headers: jsonHeaders });
+      if (request.method === 'DELETE') {
+        const uid = resolveMemUid();
+        if (url.pathname === '/api/memories' || url.pathname === '/api/memories/') {
+          if (url.searchParams.get('confirm') !== 'true') {
+            return new Response(JSON.stringify({ success: false, error: 'Harap sertakan parameter ?confirm=true untuk konfirmasi penghapusan seluruh memori.' }), { status: 400, headers: jsonHeaders });
+          }
+          for (const [k, v] of memMap.entries()) {
+            if (getMemOwner(v) === uid) memMap.delete(k);
+          }
+          return new Response(JSON.stringify({ success: true, message: 'Seluruh memori pengguna di edge vault telah dihapus.' }), { status: 200, headers: jsonHeaders });
+        }
+        const memId = url.pathname.replace('/api/memories/', '').trim();
+        const existing = memId ? memMap.get(memId) : null;
+        if (!existing || getMemOwner(existing) !== uid) {
+          return new Response(JSON.stringify({ success: false, error: 'Memori tidak ditemukan atau bukan milik akun Anda.' }), { status: 404, headers: jsonHeaders });
+        }
+        memMap.delete(memId);
+        return new Response(JSON.stringify({ success: true, deletedId: memId }), { status: 200, headers: jsonHeaders });
+      }
+
+      return new Response(JSON.stringify({ success: false, error: 'Endpoint memori tidak ditemukan di edge worker.' }), { status: 404, headers: jsonHeaders });
     }
 
     // Fast Diagnostic Probe Ping (Zero-Dependency)
@@ -1198,15 +1296,14 @@ export default {
 
         const targetEndpoint = body.endpoint || 'https://ollama.com';
         let cleanEndpoint = (targetEndpoint || 'https://ollama.com').trim();
+        const isLoopback = !cleanEndpoint || cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1');
         // Pada Cloudflare Edge, jika endpoint loopback dikirim oleh browser, alihkan ke Ollama Cloud
-        if (cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1') || !cleanEndpoint) {
+        if (isLoopback) {
           cleanEndpoint = 'https://ollama.com';
         }
         if (!cleanEndpoint.startsWith('http://') && !cleanEndpoint.startsWith('https://')) {
           cleanEndpoint = 'https://' + cleanEndpoint;
         }
-
-        const isLoopback = cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1');
         const isCloudModel = Boolean(
           body.model === 'beam' ||
           (body.model && body.model.includes(':cloud')) ||
@@ -1802,7 +1899,7 @@ export default {
             const isFreeReq = reqModel.includes(':free') || reqModel.endsWith('/free') || reqModel === 'openrouter/free';
             const isLiquid = reqModel.includes('liquid') || reqModel.includes('lfm-');
             // Hanya model OpenAI o-series dan DeepSeek R1 ketat yang menolak kustomisasi temperature di OpenRouter
-            const isStrictReasoning = Boolean(reqModel && (/\/o[1-9]|\b(r1|deepseek-r)\b/i.test(reqModel) || reqModel.toLowerCase().includes('-r1')));
+            const isStrictReasoning = Boolean(reqModel && !isNemotronReq && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(reqModel) || reqModel.toLowerCase().includes('reasoning') || reqModel.toLowerCase().includes('-r1')));
             const isBeamOrReasoningReq = Boolean(reqModel && (
               reqModel.includes('beam') ||
               reqModel.includes('reflection') ||
@@ -3015,8 +3112,7 @@ export default {
         let clean = target;
         if (!/^https?:\/\//i.test(clean)) clean = 'https://' + clean;
         const parsed = new URL(clean);
-        const host = parsed.hostname.toLowerCase();
-        if (/^(?:localhost|127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|0\.0\.0\.0|169\.254\.)/.test(host) || host.endsWith('.local') || host.endsWith('.internal')) {
+        if (!['http:', 'https:'].includes(parsed.protocol) || isPrivateHostname(parsed.hostname)) {
           return new Response(JSON.stringify({ success: false, error: 'Akses ke host lokal / intranet diblokir (SSRF Protection).' }), {
             status: 200,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
@@ -3024,16 +3120,40 @@ export default {
         }
 
         const extRe = /\.(?:mp4|m4v|webm|ogv|mov|mkv|m3u8)(?:$|[?#])/i;
-        const resp = await fetch(clean, {
-          method: 'GET',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,video/*;q=0.9,*/*;q=0.5',
-            'Range': 'bytes=0-524287'
-          },
-          redirect: 'follow',
-          signal: AbortSignal.timeout(9000)
-        });
+        let currentProbeUrl = clean;
+        let resp = null;
+        for (let hop = 0; hop <= 3; hop++) {
+          const hopParsed = new URL(currentProbeUrl);
+          if (!['http:', 'https:'].includes(hopParsed.protocol) || isPrivateHostname(hopParsed.hostname)) {
+            return new Response(JSON.stringify({ success: false, error: 'Redirect ke host lokal / intranet diblokir (SSRF Protection).' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+            });
+          }
+          resp = await fetch(currentProbeUrl, {
+            method: 'GET',
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,video/*;q=0.9,*/*;q=0.5',
+              'Range': 'bytes=0-524287'
+            },
+            redirect: 'manual',
+            signal: AbortSignal.timeout(9000)
+          });
+          if (resp.status >= 300 && resp.status < 400) {
+            const loc = resp.headers.get('location');
+            if (!loc) break;
+            currentProbeUrl = new URL(loc, currentProbeUrl).toString();
+            continue;
+          }
+          break;
+        }
+        if (resp && resp.status >= 300 && resp.status < 400) {
+          return new Response(JSON.stringify({ success: false, error: 'Terlalu banyak redirect pada target probe.', url: clean }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
 
         if (!resp.ok && resp.status !== 206) {
           return new Response(JSON.stringify({ success: false, error: `HTTP ${resp.status}`, url: clean }), {
@@ -3043,7 +3163,7 @@ export default {
         }
 
         const ctype = String(resp.headers.get('content-type') || '').toLowerCase();
-        const finalUrl = resp.url || clean;
+        const finalUrl = currentProbeUrl || resp.url || clean;
         const finalParsed = new URL(finalUrl);
 
         if (/^video\//.test(ctype) || /mpegurl|application\/ogg/.test(ctype) || (/octet-stream/.test(ctype) && extRe.test(finalParsed.pathname))) {
@@ -3709,12 +3829,13 @@ export default {
           topic = content.split(/\s+/).slice(0, 4).join('_').replace(/[^\p{L}\p{N}_]/gu, '').toLowerCase() || 'catatan';
         }
         return new Response(JSON.stringify({
-          success: true,
-          message: `Berhasil menyimpan memori tentang: "${topic}"`,
+          success: false,
+          persisted: false,
+          error: '[Cloudflare Stateless] Penyimpanan memori SQLite jangka panjang hanya aktif saat terhubung ke backend Node lokal (server.js). Gunakan memori browser.',
           topic,
           engine: 'cloudflare-stateless'
         }), {
-          status: 200,
+          status: 501,
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
         });
       } catch (e) {
