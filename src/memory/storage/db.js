@@ -593,21 +593,25 @@ function insertMemory(memoryData) {
 
 function updateMemory(id, { content, category, scope, isActive }, userId = null) {
   const instance = initDatabase();
+  const scopedOwner = Boolean(userId && userId !== '*');
 
   if (instance.mode === 'memory') {
     const existing = memStore.memories.get(id);
-    if (!existing || !isRecordOwnedBy(existing, userId)) return null;
+    if (!existing || (scopedOwner && !isRecordOwnedBy(existing, userId))) return null;
 
     const prevActive = existing.isActive !== undefined ? existing.isActive : existing.is_active;
     const prevEmb = existing.embeddingJson !== undefined ? existing.embeddingJson : existing.embedding_json;
-    const newContent = typeof content === 'string' ? content.trim() : existing.content;
-    const newCat = typeof category === 'string' ? category.trim() : existing.category;
-    const newScope = typeof scope === 'string' ? scope.trim() : existing.scope;
+    const trimmedContent = typeof content === 'string' ? content.trim() : '';
+    const trimmedCat = typeof category === 'string' ? category.trim() : '';
+    const trimmedScope = typeof scope === 'string' ? scope.trim() : '';
+    const newContent = trimmedContent || existing.content;
+    const newCat = trimmedCat || existing.category;
+    const newScope = trimmedScope || existing.scope;
     const newActive = typeof isActive !== 'undefined' ? (isActive ? 1 : 0) : prevActive;
     const updatedAt = new Date().toISOString();
 
     let newEmb = prevEmb;
-    if (newContent !== existing.content) {
+    if (newContent !== existing.content || newCat !== existing.category || newScope !== existing.scope) {
       const vec = computeFastEmbedding(`${newContent} ${newCat} ${newScope}`);
       newEmb = JSON.stringify(Array.from(vec));
     }
@@ -630,21 +634,23 @@ function updateMemory(id, { content, category, scope, isActive }, userId = null)
   }
 
   const { db } = instance;
-  const scopedOwner = Boolean(userId && userId !== '*');
   const existingStmt = scopedOwner
     ? db.prepare('SELECT * FROM memories WHERE id = ? AND user_id = ? LIMIT 1')
     : db.prepare('SELECT * FROM memories WHERE id = ? LIMIT 1');
   const existing = scopedOwner ? queryGet(existingStmt, id, userId) : queryGet(existingStmt, id);
   if (!existing) return null;
 
-  const newContent = typeof content === 'string' ? content.trim() : existing.content;
-  const newCat = typeof category === 'string' ? category.trim() : existing.category;
-  const newScope = typeof scope === 'string' ? scope.trim() : existing.scope;
+  const trimmedContent = typeof content === 'string' ? content.trim() : '';
+  const trimmedCat = typeof category === 'string' ? category.trim() : '';
+  const trimmedScope = typeof scope === 'string' ? scope.trim() : '';
+  const newContent = trimmedContent || existing.content;
+  const newCat = trimmedCat || existing.category;
+  const newScope = trimmedScope || existing.scope;
   const newActive = typeof isActive !== 'undefined' ? (isActive ? 1 : 0) : existing.is_active;
   const updatedAt = new Date().toISOString();
 
   let newEmb = existing.embedding_json;
-  if (newContent !== existing.content) {
+  if (newContent !== existing.content || newCat !== existing.category || newScope !== existing.scope) {
     const vec = computeFastEmbedding(`${newContent} ${newCat} ${newScope}`);
     newEmb = JSON.stringify(Array.from(vec));
   }
@@ -681,16 +687,16 @@ function updateMemory(id, { content, category, scope, isActive }, userId = null)
 
 function deleteMemory(id, userId = null) {
   const instance = initDatabase();
+  const scopedOwner = Boolean(userId && userId !== '*');
 
   if (instance.mode === 'memory') {
     const existing = memStore.memories.get(id);
-    if (!existing || !isRecordOwnedBy(existing, userId)) return false;
+    if (!existing || (scopedOwner && !isRecordOwnedBy(existing, userId))) return false;
     memStore.memories.delete(id);
     return true;
   }
 
   const { db } = instance;
-  const scopedOwner = Boolean(userId && userId !== '*');
   const stmt = scopedOwner
     ? db.prepare('DELETE FROM memories WHERE id = ? AND user_id = ?')
     : db.prepare('DELETE FROM memories WHERE id = ?');
@@ -749,10 +755,11 @@ function clearAllMemories(userId) {
   }
 }
 
-function listMemories(userId, { category = null, scope = null, q = null, limit = 50 } = {}) {
+function listMemories(userId, { category = null, scope = null, q = null, limit = 50, allowLargeLimit = false } = {}) {
   const instance = initDatabase();
   const uid = userId || config.DEFAULT_USER_ID;
-  const safeLimit = Math.max(1, Math.min(parseInt(limit, 10) || 50, 200));
+  const maxCap = allowLargeLimit ? 5000 : 200;
+  const safeLimit = Math.max(1, Math.min(parseInt(limit, 10) || 50, maxCap));
   const normCat = category ? (category === 'general_fact' ? 'fact' : category) : null;
 
   if (instance.mode === 'memory') {

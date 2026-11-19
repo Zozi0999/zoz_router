@@ -1499,7 +1499,7 @@ export default {
           const decoder = new TextDecoder();
           const encoder = new TextEncoder();
 
-          (async () => {
+          const pumpPromise = (async () => {
             let buffer = '';
             let accumulatedContent = '';
             let accumulatedReasoning = '';
@@ -1605,9 +1605,13 @@ export default {
                 } catch (_) {}
               }
             } finally {
+              try { await reader.cancel(); } catch (_) {}
               try { await writer.close(); } catch (_) {}
             }
           })();
+          if (ctx && typeof ctx.waitUntil === 'function') {
+            ctx.waitUntil(pumpPromise);
+          }
 
           return new Response(readable, {
             status: 200,
@@ -4262,7 +4266,7 @@ export default {
           });
         }
 
-        const edgeUnsplashKey = String((env && env.UNSPLASH_ACCESS_KEY) || '6D3jZXR5oFhk-iV-7pQwA68CkbGUve_SHz-fzESK0Rw').trim();
+        const edgeUnsplashKey = String((env && env.UNSPLASH_ACCESS_KEY) || '').trim();
         const wantsOnlyWmc = Array.isArray(sources) && sources.length > 0 && !sources.some((s) => String(s).toLowerCase().includes('unsplash'));
         if (edgeUnsplashKey && !wantsOnlyWmc) {
           try {
@@ -4526,8 +4530,20 @@ export default {
             continue;
           }
           const alt = String(alt_texts[idx] || cand.title || `Visual terverifikasi ${idx + 1}`).trim();
-          const tokenPayload = JSON.stringify({ id: cand.image_id, u: verifiedMediaUrl, ts: Date.now() });
-          const token = btoa(unescape(encodeURIComponent(tokenPayload))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+          const tokenPayload = JSON.stringify({ id: cand.image_id, u: verifiedMediaUrl, ts: Date.now(), exp: Date.now() + 6 * 3600 * 1000 });
+          const payloadB64 = btoa(unescape(encodeURIComponent(tokenPayload))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+          let token = payloadB64;
+          try {
+            const secretStr = String((env && (env.IMAGE_TOKEN_SECRET || env.OPENROUTER_API_KEY || env.TUNNEL_GATEWAY_URL)) || TUNNEL_GATEWAY_URL || 'zoz-edge-asset-v1');
+            const keyData = new TextEncoder().encode(secretStr);
+            const cryptoKey = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+            const sigBuf = await crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(payloadB64));
+            const sigBytes = new Uint8Array(sigBuf);
+            let sigBin = '';
+            for (let si = 0; si < sigBytes.length; si++) sigBin += String.fromCharCode(sigBytes[si]);
+            const sigB64 = btoa(sigBin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            token = `edge.${payloadB64}.${sigB64}`;
+          } catch (_) {}
           const asset_ref = cand.source_name === 'unsplash' ? verifiedMediaUrl : `/api/tools/image-asset/${token}`;
           display_items.push({
             image_id: cand.image_id,
@@ -4606,6 +4622,57 @@ export default {
     if (url.pathname.startsWith('/api/tools/image-asset/') && request.method === 'GET') {
       try {
         const rawToken = decodeURIComponent(url.pathname.replace(/^\/api\/tools\/image-asset\//, ''));
+        // A0. Token Cloudflare Edge bertanda tangan HMAC-SHA256 (edge.<payload>.<sig>)
+        if (rawToken.startsWith('edge.')) {
+          const parts = rawToken.split('.');
+          if (parts.length !== 3 || !parts[1] || !parts[2]) {
+            return new Response('Invalid token', { status: 403 });
+          }
+          const [, payloadPart, sigPart] = parts;
+          try {
+            const secretStr = String((env && (env.IMAGE_TOKEN_SECRET || env.OPENROUTER_API_KEY || env.TUNNEL_GATEWAY_URL)) || TUNNEL_GATEWAY_URL || 'zoz-edge-asset-v1');
+            const cryptoKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(secretStr), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+            let sigB64 = sigPart.replace(/-/g, '+').replace(/_/g, '/');
+            while (sigB64.length % 4) sigB64 += '=';
+            const sigBin = atob(sigB64);
+            const sigBytes = new Uint8Array(sigBin.length);
+            for (let si = 0; si < sigBin.length; si++) sigBytes[si] = sigBin.charCodeAt(si);
+            const isValidSig = await crypto.subtle.verify('HMAC', cryptoKey, sigBytes, new TextEncoder().encode(payloadPart));
+            if (!isValidSig) {
+              return new Response('Invalid signature', { status: 403 });
+            }
+            let b64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+            while (b64.length % 4) b64 += '=';
+            const decodedEdge = JSON.parse(decodeURIComponent(escape(atob(b64))));
+            if (!decodedEdge || (decodedEdge.exp && Date.now() > decodedEdge.exp) || (decodedEdge.ts && Date.now() - decodedEdge.ts > 6 * 3600 * 1000)) {
+              return new Response('Token expired', { status: 410 });
+            }
+            let targetAssetUrl = null;
+            if (decodedEdge.id) {
+              const hydrated = await resolveEdgeCandidateById(decodedEdge.id);
+              targetAssetUrl = hydrated ? (hydrated.preview_url || hydrated.image_url) : null;
+            }
+            if (!targetAssetUrl && (decodedEdge.u || decodedEdge.url)) {
+              targetAssetUrl = decodedEdge.u || decodedEdge.url;
+            }
+            if (targetAssetUrl) {
+              const u = new URL(targetAssetUrl);
+              if (isSafeRasterAssetUrl(u)) {
+                const upRes = await fetch(targetAssetUrl, {
+                  headers: { 'User-Agent': 'ZozRouter/1.0 (Cloudflare Edge Visual Proxy; https://z21.zozdocs.com)' },
+                  redirect: 'manual',
+                  signal: AbortSignal.timeout(7000)
+                });
+                const safeResp = buildSafeImageProxyResponse(upRes);
+                if (safeResp) return safeResp;
+              }
+            }
+          } catch (_) {
+            return new Response('Invalid token', { status: 403 });
+          }
+          return new Response('Asset unavailable', { status: 404 });
+        }
+
         // A. Token dari laptop server (membawa signature tanda titik '.')
         if (rawToken.includes('.')) {
           const tunnelBase = TUNNEL_GATEWAY_URL;
@@ -4617,7 +4684,7 @@ export default {
             const safeLaptopResp = buildSafeImageProxyResponse(laptopRes);
             if (safeLaptopResp) return safeLaptopResp;
           }
-          // Hanya gunakan fallback CDN jika kandidat terdaftar di Edge cache (bukan payload JSON token mentah tanpa verifikasi signature)
+          // Hanya gunakan fallback CDN jika kandidat terdaftar di Edge cache (bukan URL mentah dari payload tak terverifikasi)
           try {
             const payloadB64 = rawToken.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
             const padded = payloadB64 + '='.repeat((4 - (payloadB64.length % 4)) % 4);
@@ -4642,7 +4709,7 @@ export default {
           } catch (_) {}
         }
 
-        // B. Token Cloudflare Edge (wajib tervalidasi terhadap kandidat Edge atau raster URL aman)
+        // B. Token tanpa signature: HANYA izinkan jika ID kandidat tercatat di Edge cache (tolak arbitrary decoded.u/url)
         let decoded = null;
         try {
           let b64 = rawToken.replace(/-/g, '+').replace(/_/g, '/');
@@ -4651,12 +4718,9 @@ export default {
         } catch (_) {}
 
         let targetAssetUrl = null;
-        if (decoded && decoded.id) {
+        if (decoded && decoded.id && (!decoded.ts || Date.now() - decoded.ts <= 6 * 3600 * 1000)) {
           const hydrated = await resolveEdgeCandidateById(decoded.id);
           targetAssetUrl = hydrated ? (hydrated.preview_url || hydrated.image_url) : null;
-        }
-        if (!targetAssetUrl && decoded && (decoded.u || decoded.url)) {
-          targetAssetUrl = decoded.u || decoded.url;
         }
 
         if (targetAssetUrl) {

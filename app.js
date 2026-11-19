@@ -90,16 +90,33 @@
     return s.includes('.trycloudflare.com') && /^https?:\/\/[a-z0-9-]+\.trycloudflare\.com(?::\d+)?$/i.test(s);
   }
 
+  function isLocalOrLanHostname(hostname) {
+    const h = String(hostname || '').toLowerCase().trim();
+    if (!h) return false;
+    if (h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1' || h.endsWith('.local')) return true;
+    if (/^(?:192\.168\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(h)) return true;
+    return false;
+  }
+
   function getActiveTunnelUrl() {
     try {
-      if (isValidTunnelUrl(ACTIVE_CLOUDFLARE_TUNNEL)) {
-        try {
-          localStorage.setItem('zoz_last_tunnel_url', ACTIVE_CLOUDFLARE_TUNNEL);
-          localStorage.setItem('zoz_wa_api_url', ACTIVE_CLOUDFLARE_TUNNEL);
-        } catch (_) {}
-        return ACTIVE_CLOUDFLARE_TUNNEL;
+      const healed = (typeof window !== 'undefined' && window.__ZOZ_HEALED_TUNNEL_URL__)
+        ? String(window.__ZOZ_HEALED_TUNNEL_URL__).trim()
+        : '';
+      if (isValidTunnelUrl(healed)) {
+        return healed.replace(/\/+$/, '');
       }
       const saved = localStorage.getItem('zoz_last_tunnel_url') || localStorage.getItem('zoz_wa_api_url') || '';
+      if (isValidTunnelUrl(ACTIVE_CLOUDFLARE_TUNNEL)) {
+        const cleanConst = ACTIVE_CLOUDFLARE_TUNNEL.replace(/\/+$/, '');
+        if (!isValidTunnelUrl(saved)) {
+          try {
+            localStorage.setItem('zoz_last_tunnel_url', cleanConst);
+            localStorage.setItem('zoz_wa_api_url', cleanConst);
+          } catch (_) {}
+        }
+        return cleanConst;
+      }
       if (isValidTunnelUrl(saved)) {
         return saved.replace(/\/+$/, '');
       }
@@ -198,25 +215,65 @@
   }
 
   // Otonomi Pemulihan Tunnel: Menyelidiki apakah Pages Edge telah men-deploy URL tunnel baru saat terjadi Failed to fetch
-  async function refreshActiveTunnelFromRemote() {
-    try {
-      const res = await fetch('/app.js?_t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const text = await res.text();
-        const match = text.match(/const ACTIVE_CLOUDFLARE_TUNNEL = '(https:\/\/[a-z0-9-]+\.trycloudflare\.com)';/);
-        if (match && match[1] && match[1] !== ACTIVE_CLOUDFLARE_TUNNEL) {
-          console.log('[Tunnel Auto-Healing] Menemukan URL tunnel baru dari deploy edge:', match[1]);
-          localStorage.setItem('zoz_last_tunnel_url', match[1]);
-          localStorage.setItem('zoz_wa_api_url', match[1]);
-          if (typeof showToast === 'function') {
-            showToast('Menyinkronkan tunnel server laptop baru... Memuat ulang.', 'info');
+  let _lastEdgeTunnelRefreshAt = 0;
+  let _edgeTunnelRefreshPromise = null;
+  async function refreshActiveTunnelFromRemote(opts = {}) {
+    const now = Date.now();
+    if (_edgeTunnelRefreshPromise) return _edgeTunnelRefreshPromise;
+    if (!opts.force && _lastEdgeTunnelRefreshAt && (now - _lastEdgeTunnelRefreshAt) < 30000) {
+      return (typeof window !== 'undefined' && window.__ZOZ_HEALED_TUNNEL_URL__) || null;
+    }
+    _lastEdgeTunnelRefreshAt = now;
+    _edgeTunnelRefreshPromise = (async () => {
+      try {
+        const res = await fetch('/app.js?_t=' + Date.now(), { cache: 'no-store' });
+        if (res.ok) {
+          const text = await res.text();
+          const match = text.match(/const ACTIVE_CLOUDFLARE_TUNNEL = '(https:\/\/[a-z0-9-]+\.trycloudflare\.com)';/);
+          if (match && match[1] && isValidTunnelUrl(match[1])) {
+            const freshUrl = match[1].replace(/\/+$/, '');
+            const isLocalOrigin = typeof window !== 'undefined' && window.location && isLocalOrLanHostname(window.location.hostname);
+            const isDisconnected = (() => {
+              try { return localStorage.getItem('zoz_remote_disconnected') === '1'; } catch (_) { return false; }
+            })();
+            if (typeof window !== 'undefined') {
+              window.__ZOZ_HEALED_TUNNEL_URL__ = freshUrl;
+            }
+            try {
+              localStorage.setItem('zoz_last_tunnel_url', freshUrl);
+              localStorage.setItem('zoz_wa_api_url', freshUrl);
+              if (!isLocalOrigin && !isDisconnected) {
+                const rawTermCfg = localStorage.getItem('zoz_remote_terminal_config');
+                let parsedCfg = {};
+                try { parsedCfg = rawTermCfg ? JSON.parse(rawTermCfg) : {}; } catch (_) { parsedCfg = {}; }
+                const existingHost = String((parsedCfg && parsedCfg.remoteHost) || '').trim();
+                const canUpdateHost = !existingHost || /\.trycloudflare\.com/i.test(existingHost);
+                const storedPin = (parsedCfg && parsedCfg.pin) || localStorage.getItem('zoz_last_tunnel_pin') || sessionStorage.getItem('zoz_last_tunnel_pin') || '';
+                if (canUpdateHost && (rawTermCfg || storedPin)) {
+                  localStorage.setItem('zoz_term_bridge_url', freshUrl);
+                  localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
+                    remoteHost: freshUrl,
+                    pin: String(storedPin || '').trim()
+                  }));
+                }
+              }
+            } catch (_) {}
+            if (freshUrl !== ACTIVE_CLOUDFLARE_TUNNEL && !opts.silentNoReload) {
+              console.log('[Tunnel Auto-Healing] Menemukan URL tunnel baru dari deploy edge:', freshUrl);
+              if (typeof showToast === 'function') {
+                showToast('Menyinkronkan tunnel server laptop baru... Memuat ulang.', 'info');
+              }
+              setTimeout(() => window.location.reload(true), 1200);
+            }
+            return freshUrl;
           }
-          setTimeout(() => window.location.reload(true), 1200);
-          return match[1];
         }
-      }
-    } catch (_) {}
-    return null;
+      } catch (_) {}
+      return null;
+    })().finally(() => {
+      _edgeTunnelRefreshPromise = null;
+    });
+    return _edgeTunnelRefreshPromise;
   }
 
   const extractDomainSafe = (url) => {
@@ -6425,6 +6482,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const cleanSession = (typeof sanitizeSessionForCloning === 'function')
         ? sanitizeSessionForCloning(session)
         : session;
+      // Simpan ke IndexedDB lokal terlebih dahulu agar tidak hilang bila tab ditutup saat jaringan lambat
+      await ChatDB.saveSession(cleanSession);
       if (this.isDeviceBackendAvailable) {
         try {
           const res = await fetch(getUniversalApiUrl('/api/sessions'), {
@@ -6438,6 +6497,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           });
           if (res.ok) {
             const data = await res.json().catch(() => null);
+            let mediaUrlsUpdated = false;
             if (data && data.session && Array.isArray(data.session.messages)) {
               data.session.messages.forEach((srvMsg, idx) => {
                 if (session.messages && session.messages[idx] && srvMsg.images) {
@@ -6446,9 +6506,16 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
                   if (hasUploads) {
                     session.messages[idx].images = srvImgs;
                     session.messages[idx].image = srvImgs[0];
+                    mediaUrlsUpdated = true;
                   }
                 }
               });
+            }
+            if (mediaUrlsUpdated) {
+              const refreshedClean = (typeof sanitizeSessionForCloning === 'function')
+                ? sanitizeSessionForCloning(session)
+                : session;
+              await ChatDB.saveSession(refreshedClean);
             }
           } else {
             console.warn('[DeviceStorage] save gagal:', res.status);
@@ -6457,8 +6524,6 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           console.warn('DeviceStorage saveSession failed:', e.message);
         }
       }
-      // Also save in local ChatDB vault
-      await ChatDB.saveSession(cleanSession);
     },
 
     async updateSessionMetadata(id, patch) {
@@ -6843,12 +6908,15 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           }
         });
         if (validDbSessions.length !== dbSessions.length) {
-          // saveAllSessions() tak lagi mem-clear store, jadi sesi asing/lazy/incognito yang
-          // tersaring harus dihapus eksplisit agar tidak "bangkit" dari vault lokal.
+          // Hanya hapus sesi korup/lazy/incognito/subtask; JANGAN hapus sesi sah milik userId lain di IndexedDB
           await ChatDB.saveAllSessions(validDbSessions);
           const validIds = new Set(validDbSessions.map(s => s.id));
           for (const s of dbSessions) {
-            if (!validIds.has(s.id)) await ChatDB.deleteSession(s.id);
+            if (!s || !s.id || validIds.has(s.id)) continue;
+            const isForeignUserRecord = Boolean(s.userId && s.userId !== STATE.userId && !isIncognitoSession(s) && !s._isLazyDisk);
+            if (!isForeignUserRecord) {
+              await ChatDB.deleteSession(s.id);
+            }
           }
         }
         let didRestoreAnyImage = false;
@@ -7519,10 +7587,15 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const persistableSessions = STATE.sessions.filter(s => s && !isIncognitoSession(s));
       const dirtySessions = persistableSessions.filter(s =>
         s.id !== STATE.currentSessionId && lastPersistedSessionMeta.get(s.id) !== s.updatedAt);
+      const snapshotMeta = persistableSessions.map(s => [s.id, s.updatedAt]);
       if (dirtySessions.length) {
-        ChatDB.saveAllSessions(dirtySessions);
+        Promise.resolve(ChatDB.saveAllSessions(dirtySessions)).then(() => {
+          snapshotMeta.forEach(([sid, ts]) => lastPersistedSessionMeta.set(sid, ts));
+        }).catch(() => {});
+      } else if (STATE.currentSessionId) {
+        const cur = persistableSessions.find(s => s.id === STATE.currentSessionId);
+        if (cur) lastPersistedSessionMeta.set(cur.id, cur.updatedAt);
       }
-      lastPersistedSessionMeta = new Map(persistableSessions.map(s => [s.id, s.updatedAt]));
 
       // Mirror lightweight summaries to localStorage (TANPA sesi Incognito).
       if (localStorageMirrorBroken) return;
@@ -8334,16 +8407,21 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     return text;
   }
 
-  function fastSanitizeHtml(dirtyHtml) {
+  function fastSanitizeHtml(dirtyHtml, opts = {}) {
     if (!dirtyHtml || typeof dirtyHtml !== 'string') return '';
+    const allowSvgSafe = Boolean(opts && opts.allowSvgSafe);
     if (typeof document !== 'undefined' && document.createElement) {
       try {
         const tpl = document.createElement('template');
         tpl.innerHTML = dirtyHtml;
         const forbiddenTags = new Set([
-          'script', 'style', 'iframe', 'object', 'embed', 'form', 'base', 'meta', 'link',
-          'foreignobject', 'animate', 'animatemotion', 'animatetransform', 'set', 'use', 'handler', 'listener'
+          'script', 'iframe', 'object', 'embed', 'form', 'base', 'meta', 'link', 'template',
+          'animate', 'animatemotion', 'animatetransform', 'set', 'use', 'handler', 'listener'
         ]);
+        if (!allowSvgSafe) {
+          forbiddenTags.add('style');
+          forbiddenTags.add('foreignobject');
+        }
         const uriAttrs = new Set(['href', 'src', 'xlink:href', 'action', 'formaction', 'poster', 'background']);
         const toRemove = [];
         const walk = (node) => {
@@ -8355,6 +8433,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
               if (forbiddenTags.has(tag)) {
                 toRemove.push(child);
               } else {
+                if (allowSvgSafe && tag === 'style') {
+                  const cssText = String(child.textContent || '');
+                  if (/@import|expression\s*\(|javascript:|vbscript:|behavior\s*:/i.test(cssText)) {
+                    child.textContent = cssText.replace(/@import[^;]*;?/gi, '').replace(/expression\s*\([^)]*\)/gi, '').replace(/(?:javascript|vbscript):/gi, '');
+                  }
+                }
                 const attrs = child.attributes;
                 for (let i = attrs.length - 1; i >= 0; i--) {
                   const attr = attrs[i];
@@ -8365,7 +8449,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
                   }
                   if (uriAttrs.has(nameLower)) {
                     const normalized = String(attr.value || '').replace(/[\u0000-\u0020]+/g, '').toLowerCase();
-                    if (/^(?:javascript|vbscript|data:text\/html|data:image\/svg\+xml)/i.test(normalized)) {
+                    if (/^(?:javascript|vbscript|data:text\/html|data:application\/xhtml\+xml|data:image\/svg\+xml)/i.test(normalized)) {
                       child.setAttribute(attr.name, '#');
                     }
                   }
@@ -8381,8 +8465,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         return tpl.innerHTML;
       } catch (_) {}
     }
+    const stripTagRe = allowSvgSafe
+      ? /<(script|iframe|object|embed|form|base|meta|link|template)\b[^>]*>[\s\S]*?(?:<\/\1>|$)/gi
+      : /<(script|style|iframe|object|embed|form|foreignobject|base|meta|link|template)\b[^>]*>[\s\S]*?(?:<\/\1>|$)/gi;
     return dirtyHtml
-      .replace(/<(script|style|iframe|object|embed|form|foreignobject|base|meta|link)\b[^>]*>[\s\S]*?(?:<\/\1>|$)/gi, '')
+      .replace(stripTagRe, '')
       .replace(/<[^>]*\son[a-z]+\s*=/gi, '<span data-blocked=');
   }
 
@@ -10419,6 +10506,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // - Tag HTML apa pun (<[^>]+>)
     const mathProtectedBlocks = [];
     const protectedBlocks = [];
+    const citNonce = Math.random().toString(36).slice(2, 10);
+    const mathTokenPrefix = `\uE000ZOZM_${citNonce}_`;
+    const blockTokenPrefix = `\uE002ZOZB_${citNonce}_`;
     const protectMathElementsForCitations = (sourceHtml) => {
       const openRe = /<(span|div)\b[^>]*class=["'][^"']*\b(?:katex-display|katex|zoz-math-formula)\b[^"']*["'][^>]*>/gi;
       const outParts = [];
@@ -10442,7 +10532,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         }
         if (endIdx !== -1) {
           outParts.push(sourceHtml.slice(cursor, match.index));
-          const placeholder = `\uE000ZOZCITMATH${mathProtectedBlocks.length}\uE001`;
+          const placeholder = `${mathTokenPrefix}${mathProtectedBlocks.length}\uE001`;
           mathProtectedBlocks.push(sourceHtml.slice(match.index, endIdx));
           outParts.push(placeholder);
           cursor = endIdx;
@@ -10454,9 +10544,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     };
 
     let protectedHtml = protectMathElementsForCitations(html);
-    const tagPattern = /(<(?:pre|code|a|script|style|math)\b[^>]*>[\s\S]*?<\/(?:pre|code|a|script|style|math)>|<[^>]+>)/gi;
+    const tagPattern = /(<(pre|code|a|script|style|math)\b[^>]*>[\s\S]*?<\/\2>|<[^>]+>)/gi;
     protectedHtml = protectedHtml.replace(tagPattern, (match) => {
-      const placeholder = `<<<ZOZ_PROTECTED_BLOCK_${protectedBlocks.length}>>>`;
+      const placeholder = `${blockTokenPrefix}${protectedBlocks.length}\uE003`;
       protectedBlocks.push(match);
       return placeholder;
     });
@@ -10487,9 +10577,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
     // 3. Pertahankan pergantian baris antar butir daftar referensi bernomor ([1] ... [2] ...)
     // tanpa membungkusnya ke dalam balok berborder, lalu biarkan seluruh [N] dirender seragam sebagai badge nomor.
-    protectedHtml = protectedHtml.replace(/\r?\n(?=\s*(?:[-*•]\s*)?\[\d+\]\s+[^\n]*<<<ZOZ_PROTECTED_BLOCK_\d+>>>)/g, (nl, offset, fullStr) => {
+    const blockLineRe = new RegExp(`\\r?\\n(?=\\s*(?:[-*•]\\s*)?\\[\\d+\\]\\s+[^\\n]*${blockTokenPrefix}\\d+\\uE003)`, 'g');
+    const blockMatchRe = new RegExp(`${blockTokenPrefix}(\\d+)\\uE003`, 'g');
+    protectedHtml = protectedHtml.replace(blockLineRe, (nl, offset, fullStr) => {
       const restOfLine = fullStr.slice(offset + nl.length).split(/\r?\n/, 1)[0] || '';
-      const blockMatches = restOfLine.matchAll(/<<<ZOZ_PROTECTED_BLOCK_(\d+)>>>/g);
+      const blockMatches = restOfLine.matchAll(blockMatchRe);
       for (const bm of blockMatches) {
         const blk = protectedBlocks[parseInt(bm[1], 10)] || '';
         if (/^<a\b/i.test(blk)) {
@@ -10548,11 +10640,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     });
 
     // 5. Pulihkan seluruh blok yang dilindungi
-    let restoredHtml = protectedHtml.replace(/<<<ZOZ_PROTECTED_BLOCK_(\d+)>>>/g, (_, idx) => {
+    let restoredHtml = protectedHtml.replace(blockMatchRe, (_, idx) => {
       return protectedBlocks[parseInt(idx, 10)] || '';
     });
     if (mathProtectedBlocks.length > 0) {
-      restoredHtml = restoredHtml.replace(/\uE000ZOZCITMATH(\d+)\uE001/g, (_, idx) => {
+      const mathRestoreRe = new RegExp(`${mathTokenPrefix}(\\d+)\\uE001`, 'g');
+      restoredHtml = restoredHtml.replace(mathRestoreRe, (_, idx) => {
         return mathProtectedBlocks[parseInt(idx, 10)] || '';
       });
     }
@@ -10759,7 +10852,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur']
       });
     }
-    return fastSanitizeHtml(svgMarkup);
+    return fastSanitizeHtml(svgMarkup, { allowSvgSafe: true });
   }
 
   function initMermaidEngine() {
@@ -20309,20 +20402,24 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
     return cleanName || 'berkas.svg';
   }
 
-  function getFileIconClass(name) {
+  function getFileIconClass(name = '') {
     const ext = (String(name || '').split('.').pop() || '').toLowerCase();
     const map = {
       html: 'fa-brands fa-html5', htm: 'fa-brands fa-html5',
       css: 'fa-brands fa-css3-alt', js: 'fa-brands fa-js', mjs: 'fa-brands fa-js', jsx: 'fa-brands fa-react', tsx: 'fa-brands fa-react',
-      ts: 'fa-solid fa-code', py: 'fa-brands fa-python',
+      ts: 'fa-solid fa-code', py: 'fa-brands fa-python', c: 'fa-solid fa-file-code', cpp: 'fa-solid fa-file-code',
       bat: 'fa-solid fa-terminal', cmd: 'fa-solid fa-terminal', ps1: 'fa-solid fa-terminal',
       sh: 'fa-solid fa-terminal', bash: 'fa-solid fa-terminal',
       json: 'fa-solid fa-braces', yaml: 'fa-solid fa-gears', yml: 'fa-solid fa-gears',
       xml: 'fa-solid fa-code', sql: 'fa-solid fa-database',
       md: 'fa-brands fa-markdown', markdown: 'fa-brands fa-markdown',
-      txt: 'fa-solid fa-file-lines', log: 'fa-solid fa-file-lines', csv: 'fa-solid fa-table',
+      txt: 'fa-solid fa-file-lines', log: 'fa-solid fa-file-lines',
+      csv: 'fa-solid fa-file-excel', xls: 'fa-solid fa-file-excel', xlsx: 'fa-solid fa-file-excel',
+      ppt: 'fa-solid fa-file-powerpoint', pptx: 'fa-solid fa-file-powerpoint',
+      doc: 'fa-solid fa-file-word', docx: 'fa-solid fa-file-word', pdf: 'fa-solid fa-file-pdf',
+      zip: 'fa-solid fa-file-zipper', rar: 'fa-solid fa-file-zipper', '7z': 'fa-solid fa-file-zipper', tar: 'fa-solid fa-file-zipper', gz: 'fa-solid fa-file-zipper',
+      png: 'fa-solid fa-file-image', jpg: 'fa-solid fa-file-image', jpeg: 'fa-solid fa-file-image', gif: 'fa-solid fa-file-image', webp: 'fa-solid fa-file-image',
       php: 'fa-brands fa-php', java: 'fa-brands fa-java', go: 'fa-solid fa-microchip',
-      docx: 'fa-solid fa-file-word', pdf: 'fa-solid fa-file-pdf',
       svg: 'fa-solid fa-diagram-project', mermaid: 'fa-solid fa-diagram-project', mmd: 'fa-solid fa-diagram-project'
     };
     return map[ext] || 'fa-solid fa-file-code';
@@ -38942,48 +39039,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
   }
 
-  function getFileIconClass(fileName = '') {
-    const ext = fileName.split('.').pop().toLowerCase();
-    switch (ext) {
-      case 'pdf': return 'fa-solid fa-file-pdf';
-      case 'doc':
-      case 'docx': return 'fa-solid fa-file-word';
-      case 'xls':
-      case 'xlsx':
-      case 'csv': return 'fa-solid fa-file-excel';
-      case 'ppt':
-      case 'pptx': return 'fa-solid fa-file-powerpoint';
-      case 'js':
-      case 'ts':
-      case 'jsx':
-      case 'tsx':
-      case 'html':
-      case 'css':
-      case 'py':
-      case 'java':
-      case 'c':
-      case 'cpp':
-      case 'json':
-      case 'xml':
-      case 'yaml':
-      case 'yml':
-      case 'sql': return 'fa-solid fa-file-code';
-      case 'md':
-      case 'markdown': return 'fa-brands fa-markdown';
-      case 'zip':
-      case 'rar':
-      case '7z':
-      case 'tar':
-      case 'gz': return 'fa-solid fa-file-zipper';
-      case 'png':
-      case 'jpg':
-      case 'jpeg':
-      case 'gif':
-      case 'webp':
-      case 'svg': return 'fa-solid fa-file-image';
-      default: return 'fa-solid fa-file-lines';
-    }
-  }
+  // getFileIconClass unified at single top-level declaration above
 
   function downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
@@ -46101,7 +46157,7 @@ Aturan:
     tabs: [
       {
         id: 'tab-1',
-        title: 'Terminal 1',
+        title: 'PowerShell',
         shell: 'powershell',
         cwd: 'C:\\Users\\user',
         isSplit: false,
@@ -46358,12 +46414,21 @@ Aturan:
         try { localStorage.removeItem(`zoz_term_auto_enter_${sid}`); } catch (_) {}
         const headers = { 'Content-Type': 'application/json' };
         if (this.remotePin) headers['x-terminal-pin'] = this.remotePin;
-        fetch(this.getTerminalApiUrl('/api/terminal/kill'), {
-          method: 'POST',
-          keepalive: true,
-          headers,
-          body: JSON.stringify({ session: sid, pin: this.remotePin || undefined })
-        }).catch(() => {});
+        if (!this._pendingKills) this._pendingKills = new Map();
+        const killPromise = Promise.race([
+          fetch(this.getTerminalApiUrl('/api/terminal/kill'), {
+            method: 'POST',
+            keepalive: true,
+            headers,
+            body: JSON.stringify({ session: sid, pin: this.remotePin || undefined })
+          }).catch(() => {}),
+          new Promise(r => setTimeout(r, 1500))
+        ]).finally(() => {
+          if (this._pendingKills && this._pendingKills.get(sid) === killPromise) {
+            this._pendingKills.delete(sid);
+          }
+        });
+        this._pendingKills.set(sid, killPromise);
       }
 
       if (!keepTerm) {
@@ -46985,8 +47050,10 @@ Aturan:
         } catch (_) {}
       }
 
-      this.bridgeUrl = '';
-      this.isWindowsSynced = false;
+      if (!this.isRemoteConnected && !this._isConnectingRemote && !this.remoteHost) {
+        this.bridgeUrl = '';
+        this.isWindowsSynced = false;
+      }
       this.bridgeProbed = true;
       if (forceToast) {
         showToast('Bridge lokal tidak terdeteksi. Jalankan "start.bat" di folder zoz-router pada Windows Anda.', 'info');
@@ -47066,6 +47133,36 @@ Aturan:
       };
     },
 
+    isGenericTerminalTitle(title) {
+      if (!title || typeof title !== 'string') return true;
+      const t = title.trim();
+      return !t || /^(?:Terminal|Jendela|Tab)\s*\d*$/i.test(t);
+    },
+
+    isProfileTerminalTitle(title) {
+      if (this.isGenericTerminalTitle(title)) return true;
+      const t = String(title || '').trim();
+      const shellNames = Object.values(this.shells || {}).map(s => s && s.name).filter(Boolean);
+      if (shellNames.includes(t)) return true;
+      const parts = t.split(' • ').map(s => s.trim());
+      return parts.length === 2 && shellNames.includes(parts[0]) && shellNames.includes(parts[1]);
+    },
+
+    getTabProfileTitle(tabOrShell) {
+      if (typeof tabOrShell === 'string') {
+        return (this.shells[tabOrShell] && this.shells[tabOrShell].name) || this.shells.powershell.name;
+      }
+      const tab = tabOrShell || {};
+      const p1Shell = (tab.pane1 && this.shells[tab.pane1.shell])
+        ? tab.pane1.shell
+        : ((tab.shell && this.shells[tab.shell]) ? tab.shell : 'powershell');
+      const p1Name = this.shells[p1Shell]?.name || 'PowerShell';
+      if (tab.isSplit && tab.pane2 && tab.pane2.shell && this.shells[tab.pane2.shell] && tab.pane2.shell !== p1Shell) {
+        return `${p1Name} • ${this.shells[tab.pane2.shell].name}`;
+      }
+      return p1Name;
+    },
+
     saveTabsState() {
       try {
         const serializePane = (p) => ({
@@ -47122,10 +47219,14 @@ Aturan:
               if (savedAuto !== null) p.autoEnter = (savedAuto === '1');
             }
           });
+          const resolvedShell = (rawTab.shell && this.shells[rawTab.shell]) ? rawTab.shell : p1.shell;
+          const rawTitle = (typeof rawTab.title === 'string') ? rawTab.title.trim() : '';
           restoredTabs.push({
             id,
-            title: (typeof rawTab.title === 'string' && rawTab.title.trim()) ? rawTab.title.trim() : `Terminal ${idx + 1}`,
-            shell: (rawTab.shell && this.shells[rawTab.shell]) ? rawTab.shell : p1.shell,
+            title: this.isGenericTerminalTitle(rawTitle)
+              ? this.getTabProfileTitle({ shell: resolvedShell, isSplit: Boolean(rawTab.isSplit), pane1: p1, pane2: p2 })
+              : rawTitle,
+            shell: resolvedShell,
             cwd: (typeof rawTab.cwd === 'string' && rawTab.cwd.trim()) ? rawTab.cwd.trim() : p1.cwd,
             isSplit: Boolean(rawTab.isSplit),
             autoEnter: Boolean(p1.autoEnter),
@@ -47198,6 +47299,7 @@ Aturan:
         // 2. Pulihkan tab aktif di server yang belum tercatat di daftar tab lokal (mis. setelah refresh sebelum tersimpan)
         const tabMap = new Map(this.tabs.map(t => [t.id, t]));
         const orderedServer = [...data.sessions].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+        const reconciledTabs = new Set();
         orderedServer.forEach(s => {
           if (!s || !s.id) return;
           const m = s.id.match(nsRe);
@@ -47207,16 +47309,17 @@ Aturan:
           const paneNum = parseInt(m[3], 10);
           let tabObj = tabMap.get(tabId);
           if (!tabObj) {
+            const resolvedShell = this.shells[s.shell] ? s.shell : 'powershell';
             tabObj = {
               id: tabId,
-              title: `Terminal ${Number.isFinite(tabNum) ? tabNum : (this.tabs.length + 1)}`,
-              shell: this.shells[s.shell] ? s.shell : 'powershell',
+              title: this.getTabProfileTitle(resolvedShell),
+              shell: resolvedShell,
               cwd: s.cwd || this.defaultCwd,
               isSplit: paneNum === 2,
               autoEnter: paneNum === 1 ? Boolean(s.autoEnter) : false,
               activePane: 1,
-              pane1: this.createDefaultPaneState({ shell: s.shell, cwd: s.cwd || this.defaultCwd }),
-              pane2: this.createDefaultPaneState({ shell: 'powershell', cwd: this.defaultCwd })
+              pane1: this.createDefaultPaneState({ shell: paneNum === 1 ? resolvedShell : 'powershell', cwd: s.cwd || this.defaultCwd }),
+              pane2: this.createDefaultPaneState({ shell: paneNum === 2 ? resolvedShell : 'powershell', cwd: paneNum === 2 ? (s.cwd || this.defaultCwd) : this.defaultCwd })
             };
             this.tabs.push(tabObj);
             tabMap.set(tabId, tabObj);
@@ -47233,8 +47336,24 @@ Aturan:
             if (this.shells[s.shell]) targetPane.shell = s.shell;
             if (s.cwd) targetPane.cwd = s.cwd;
             targetPane.autoEnter = Boolean(s.autoEnter);
-            if (paneNum === 1) tabObj.autoEnter = Boolean(s.autoEnter);
+            if (paneNum === 1) {
+              tabObj.autoEnter = Boolean(s.autoEnter);
+              if (this.shells[s.shell]) tabObj.shell = s.shell;
+            }
             changed = true;
+          }
+          reconciledTabs.add(tabObj);
+        });
+        reconciledTabs.forEach(tabObj => {
+          if (tabObj.pane1 && this.shells[tabObj.pane1.shell]) {
+            tabObj.shell = tabObj.pane1.shell;
+          }
+          if (this.isProfileTerminalTitle(tabObj.title)) {
+            const nextTitle = this.getTabProfileTitle(tabObj);
+            if (tabObj.title !== nextTitle) {
+              tabObj.title = nextTitle;
+              changed = true;
+            }
           }
         });
 
@@ -47259,17 +47378,12 @@ Aturan:
       this.loadTabsState();
       this.attachListeners();
       this.loadTheme();
-      this.initRemoteConfigFromUrlOrStorage();
       this.renderTabs();
       const activeTab = this.getActiveTab();
       this.applySplitUI(Boolean(activeTab?.isSplit));
       this.updateAutoEnterUI();
       this.updateShellSelectorUI();
       this.updatePaneHeaders();
-
-      await this.detectWindowsBridge(false);
-      await this.syncServerCwd();
-      await this.reconcileServerSessions();
 
       try {
         const modal = document.getElementById('terminalModal');
@@ -47283,6 +47397,13 @@ Aturan:
           }
         }
       } catch (_) {}
+
+      await this.initRemoteConfigFromUrlOrStorage();
+      if (!this.isRemoteConnected) {
+        await this.detectWindowsBridge(false);
+      }
+      await this.syncServerCwd();
+      await this.reconcileServerSessions();
     },
 
     async syncServerCwd() {
@@ -47319,7 +47440,64 @@ Aturan:
       } catch (_) {}
     },
 
-    initRemoteConfigFromUrlOrStorage() {
+    getStoredRemoteHostCandidates(explicitHost = '') {
+      const candidates = [];
+      const addHost = (raw) => {
+        if (!raw || typeof raw !== 'string') return;
+        const norm = this.normalizeRemoteHost(raw);
+        if (norm.httpUrl && /^https?:\/\//i.test(norm.httpUrl) && !candidates.includes(norm.httpUrl)) {
+          candidates.push(norm.httpUrl);
+        }
+      };
+      const isTryCloudflare = (u) => typeof u === 'string' && /\.trycloudflare\.com/i.test(u);
+      const activeTunnel = (typeof getActiveTunnelUrl === 'function')
+        ? getActiveTunnelUrl()
+        : (typeof ACTIVE_CLOUDFLARE_TUNNEL === 'string' ? ACTIVE_CLOUDFLARE_TUNNEL : '');
+
+      if (explicitHost && isTryCloudflare(explicitHost) && activeTunnel && this.normalizeRemoteHost(explicitHost).httpUrl !== this.normalizeRemoteHost(activeTunnel).httpUrl) {
+        addHost(activeTunnel);
+        addHost(explicitHost);
+      } else {
+        addHost(explicitHost);
+      }
+      if (typeof window !== 'undefined' && window.location && (window.location.host.includes('trycloudflare.com') || window.location.host.includes('.loca.lt') || window.location.host.includes('.ngrok.io'))) {
+        addHost(window.location.origin);
+      }
+      addHost(activeTunnel);
+      try {
+        const saved = JSON.parse(localStorage.getItem('zoz_remote_terminal_config') || '{}');
+        if (saved && saved.remoteHost) addHost(saved.remoteHost);
+      } catch (_) {}
+      try { addHost(localStorage.getItem('zoz_last_tunnel_url') || ''); } catch (_) {}
+      try { addHost(localStorage.getItem('zoz_term_bridge_url') || ''); } catch (_) {}
+      try { addHost(localStorage.getItem('zoz_wa_api_url') || ''); } catch (_) {}
+      return candidates;
+    },
+
+    getStoredRemotePinCandidates(explicitPin = '') {
+      const pins = [];
+      const addPin = (raw) => {
+        const s = raw ? String(raw).trim() : '';
+        if (s && s !== '------' && !pins.includes(s)) pins.push(s);
+      };
+      addPin(explicitPin);
+      addPin(this.remotePin);
+      try {
+        const saved = JSON.parse(localStorage.getItem('zoz_remote_terminal_config') || '{}');
+        if (saved && saved.pin) addPin(saved.pin);
+      } catch (_) {}
+      try { addPin(localStorage.getItem('zoz_last_tunnel_pin') || ''); } catch (_) {}
+      try { addPin(sessionStorage.getItem('zoz_last_tunnel_pin') || ''); } catch (_) {}
+      try {
+        const m = document.cookie.match(/(?:^|;\s*)zoz_remote_pin=([^;]+)/);
+        if (m) addPin(decodeURIComponent(m[1]));
+      } catch (_) {}
+      try { addPin(localStorage.getItem('zoz_wa_pin') || ''); } catch (_) {}
+      try { addPin(localStorage.getItem('zoz_wa_mobile_pin') || ''); } catch (_) {}
+      return pins;
+    },
+
+    async initRemoteConfigFromUrlOrStorage() {
       const params = new URLSearchParams(window.location.search);
       const qHost = params.get('remote_host');
       const qPin = params.get('pin');
@@ -47360,19 +47538,18 @@ Aturan:
             document.cookie = `zoz_remote_pin=${encodeURIComponent(this.remotePin)}; Path=/; Max-Age=31536000; SameSite=Lax`;
           }
         } catch (_) {}
+        try { localStorage.removeItem('zoz_remote_disconnected'); } catch (_) {}
         cleanUrlParams();
-        this.connectRemoteTerminal(this.remoteHost, this.remotePin, true);
+        await this.connectRemoteTerminal(this.remoteHost, this.remotePin, true);
         setTimeout(() => {
           this.openTerminal(false);
         }, 120);
-        return;
+        return true;
       }
 
       // Deteksi otomatis jika peramban membuka URL tunnel Cloudflare secara langsung di HP
       if (!qHost && (window.location.host.includes('trycloudflare.com') || window.location.host.includes('.loca.lt') || window.location.host.includes('.ngrok.io'))) {
         const norm = this.normalizeRemoteHost(window.location.origin);
-        this.remoteHost = norm.httpUrl;
-        this.bridgeUrl = norm.httpUrl;
         let savedPin = qPin ? qPin.trim() : '';
         if (!savedPin) {
           try {
@@ -47395,8 +47572,11 @@ Aturan:
         }
 
         if (savedPin) {
+          this.remoteHost = norm.httpUrl;
+          this.bridgeUrl = norm.httpUrl;
           this.remotePin = savedPin;
           try {
+            localStorage.removeItem('zoz_remote_disconnected');
             localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
               remoteHost: this.remoteHost,
               pin: this.remotePin
@@ -47404,20 +47584,22 @@ Aturan:
             localStorage.setItem('zoz_last_tunnel_url', this.remoteHost);
             localStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
             sessionStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
-            document.cookie = `zoz_remote_pin=${encodeURIComponent(this.remotePin)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+            document.cookie = `zoz_remote_pin=${encodeURIComponent(this.remotePin)}; Path=/; Max-Age=2592000; SameSite=Lax${window.location.protocol === 'https:' ? '; Secure' : ''}`;
           } catch (_) {}
           cleanUrlParams();
-          this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
+          const ok = await this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
           if (qPin || qMode === 'terminal') {
             setTimeout(() => {
               this.openTerminal(false);
             }, 120);
           }
-          return;
+          return ok;
         } else {
           // Bila belum ada PIN di storage lokal, query /api/terminal/tunnel-info secara mandiri
           this.requestTunnelApi('/api/terminal/tunnel-info').then(data => {
             if (data && data.pin) {
+              this.remoteHost = norm.httpUrl;
+              this.bridgeUrl = norm.httpUrl;
               this.remotePin = String(data.pin).trim();
               try {
                 localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
@@ -47427,7 +47609,7 @@ Aturan:
                 localStorage.setItem('zoz_last_tunnel_url', this.remoteHost);
                 localStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
                 sessionStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
-                document.cookie = `zoz_remote_pin=${encodeURIComponent(this.remotePin)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+                document.cookie = `zoz_remote_pin=${encodeURIComponent(this.remotePin)}; Path=/; Max-Age=2592000; SameSite=Lax${window.location.protocol === 'https:' ? '; Secure' : ''}`;
               } catch (_) {}
               this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
               if (qMode === 'terminal') {
@@ -47437,22 +47619,36 @@ Aturan:
               }
             }
           }).catch(() => {});
+          return false;
         }
       }
 
+      // Hormati pemutusan manual pengguna & hindari membajak localhost/LAN ke WAN tunnel
+      const isDisconnectedByUser = (() => {
+        try { return localStorage.getItem('zoz_remote_disconnected') === '1'; } catch (_) { return false; }
+      })();
+      if (isDisconnectedByUser) return false;
+
+      const isLocalOrLan = typeof window !== 'undefined' && window.location && isLocalOrLanHostname(window.location.hostname);
+      if (isLocalOrLan) return false;
+
+      let saved = {};
       try {
-        const saved = JSON.parse(localStorage.getItem('zoz_remote_terminal_config') || '{}');
-        if (saved && saved.remoteHost) {
-          const norm = this.normalizeRemoteHost(saved.remoteHost);
-          this.remoteHost = norm.httpUrl;
-          this.remotePin = saved.pin || localStorage.getItem('zoz_last_tunnel_pin') || getCookiePin() || '';
-          this.bridgeUrl = norm.httpUrl;
-          // Auto-reconnect quietly on application launch
-          if (this.remotePin) {
-            this.connectRemoteTerminal(this.remoteHost, this.remotePin, false);
-          }
-        }
+        saved = JSON.parse(localStorage.getItem('zoz_remote_terminal_config') || '{}') || {};
       } catch (_) {}
+      const hostCandidates = this.getStoredRemoteHostCandidates(saved.remoteHost || '');
+      const pinCandidates = this.getStoredRemotePinCandidates(saved.pin || '');
+      const initialPin = pinCandidates[0] || '';
+      // HANYA auto-connect jika pengguna benar-benar sudah memiliki PIN pairing tersimpan di perangkat ini
+      if (hostCandidates.length > 0 && initialPin) {
+        const ok = await this.connectRemoteTerminal(hostCandidates[0], initialPin, false);
+        if (!ok) {
+          this.remoteHost = '';
+          this.bridgeUrl = '';
+        }
+        return ok;
+      }
+      return false;
     },
 
     checkAndPromptRemoteIfMobileOrUnreachable() {
@@ -47607,15 +47803,20 @@ Aturan:
       this.remotePingMs = null;
       if (forceWipeStorage) {
         try {
+          localStorage.setItem('zoz_remote_disconnected', '1');
           localStorage.removeItem('zoz_remote_terminal_config');
           localStorage.removeItem('zoz_term_bridge_url');
           localStorage.removeItem('zoz_last_tunnel_url');
           localStorage.removeItem('zoz_last_tunnel_pin');
+          localStorage.removeItem('zoz_wa_api_url');
+          localStorage.removeItem('zoz_wa_pin');
+          localStorage.removeItem('zoz_wa_mobile_pin');
           sessionStorage.removeItem('zoz_last_tunnel_pin');
           document.cookie = 'zoz_remote_pin=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT;';
         } catch (_) {}
         this.remoteHost = '';
         this.remotePin = '';
+        this.bridgeUrl = '';
         showToast('Konfigurasi remote dihapus. Kembali ke mode lokal.', 'info');
       } else {
         showToast('Koneksi remote diputus sementara. Alamat URL & PIN tetap tersimpan.', 'info');
@@ -47711,13 +47912,15 @@ Aturan:
       }
     },
 
-    async connectRemoteTerminal(httpHost, pin, notify = true) {
+    async connectRemoteTerminal(httpHost, pin, notify = true, opts = {}) {
       const norm = this.normalizeRemoteHost(httpHost);
       const activeTab = this.getActiveTab();
       const p1 = activeTab?.pane1;
+      const forceProbe = Boolean(opts && opts.forceProbe);
+      const skipEdgeRefresh = Boolean(opts && opts.skipEdgeRefresh);
 
       // Guard: Jika sudah terhubung dengan host & PIN yang sama dan socket aktif, pertahankan!
-      if (this.isRemoteConnected && this.remoteHost === norm.httpUrl && this.remotePin === pin && p1?.ws?.readyState === WebSocket.OPEN) {
+      if (!forceProbe && this.isRemoteConnected && this.remoteHost === norm.httpUrl && this.remotePin === pin && p1?.ws?.readyState === WebSocket.OPEN) {
         return true;
       }
 
@@ -47725,101 +47928,173 @@ Aturan:
         return false;
       }
       this._isConnectingRemote = true;
-      const testUrl = `${norm.httpUrl}/api/ping`;
+      if (notify) {
+        try { localStorage.removeItem('zoz_remote_disconnected'); } catch (_) {}
+      }
 
       try {
-        const headers = pin ? { 'x-terminal-pin': pin } : {};
-        const res = await fetch(testUrl, {
-          method: 'GET',
-          headers,
-          signal: AbortSignal.timeout(6000)
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.isRemote && !data.authenticated) {
-            if (notify) showToast('PIN keamanan remote salah atau ditolak server.', 'error');
-            return false;
-          }
+        const storedHostQueue = this.getStoredRemoteHostCandidates(norm.httpUrl || '');
+        const hostQueue = (notify || forceProbe)
+          ? [...new Set([norm.httpUrl, ...storedHostQueue].filter(Boolean))]
+          : storedHostQueue;
+        const pinQueue = notify
+          ? (pin ? [String(pin).trim()] : this.getStoredRemotePinCandidates(''))
+          : this.getStoredRemotePinCandidates(pin);
 
-          this.remoteHost = norm.httpUrl;
-          this.remotePin = pin;
-          this.isRemoteConnected = true;
-          this.bridgeUrl = norm.httpUrl;
-          this.isWindowsSynced = true;
+        let connectedResult = null;
+        let sawAuthReject = false;
+        let sawNetworkError = false;
+        let lastErr = null;
 
-          try {
-            localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
-              remoteHost: this.remoteHost,
-              pin: this.remotePin
-            }));
-            localStorage.setItem('zoz_term_bridge_url', this.remoteHost);
-            if (this.remotePin && typeof WhatsAppController !== 'undefined') {
-              localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
-              localStorage.setItem('zoz_wa_pin', this.remotePin);
-              localStorage.setItem('zoz_wa_mobile_pin', this.remotePin);
-              if (this.remoteHost && this.remoteHost.includes('trycloudflare.com')) {
-                WhatsAppController.activeTunnelUrl = this.remoteHost;
-                WhatsAppController.apiBaseUrl = this.remoteHost;
-                localStorage.setItem('zoz_wa_api_url', this.remoteHost);
+        const probeHostWithPins = async (targetHost) => {
+          const cleanHost = String(targetHost || '').replace(/\/+$/, '');
+          if (!cleanHost || pinQueue.length === 0) return null;
+          for (const candPin of pinQueue) {
+            try {
+              const headers = candPin ? { 'x-terminal-pin': candPin } : {};
+              const res = await fetch(`${cleanHost}/api/ping`, {
+                method: 'GET',
+                headers,
+                signal: AbortSignal.timeout(4500)
+              });
+              if (res.ok) {
+                const data = await res.json();
+                if (!data.isRemote || data.authenticated) {
+                  return { host: cleanHost, pin: candPin, data };
+                }
+                sawAuthReject = true;
+              } else if (res.status === 401 || res.status === 403) {
+                sawAuthReject = true;
+              } else {
+                // HTTP 5xx (e.g. Cloudflare 530/502/503 tunnel mati) -> langsung hentikan probe pada host mati ini
+                sawNetworkError = true;
+                return null;
               }
-              WhatsAppController.userId = 'usr_kaisar_master';
-              WhatsAppController.pin = this.remotePin;
-              WhatsAppController.isMaster = true;
-              WhatsAppController.updateSecurityUI({ isMaster: true, hasPin: true });
-              WhatsAppController.fetchStatus(true).then(() => {
-                WhatsAppController.fetchContacts();
-                WhatsAppController.initSSE();
-              }).catch(() => {});
-            }
-          } catch (_) {}
-
-          if (data.cwd) {
-            const resolvedCwd = (data.cwd.toLowerCase().endsWith('zoz-router') && data.userHome)
-              ? data.userHome
-              : (data.cwd.toLowerCase().endsWith('zoz-router') ? 'C:\\Users\\user' : data.cwd);
-            const oldDefault = this.defaultCwd;
-            this.defaultCwd = resolvedCwd;
-            this.tabs.forEach(t => {
-              if (t.pane1 && (!t.pane1.cwd || t.pane1.cwd === oldDefault || t.pane1.cwd.startsWith('/var/task') || t.pane1.cwd === '/' || t.pane1.cwd.toLowerCase().endsWith('zoz-router'))) t.pane1.cwd = resolvedCwd;
-              if (t.pane2 && (!t.pane2.cwd || t.pane2.cwd === oldDefault || t.pane2.cwd.startsWith('/var/task') || t.pane2.cwd === '/' || t.pane2.cwd.toLowerCase().endsWith('zoz-router'))) t.pane2.cwd = resolvedCwd;
-              if (!t.cwd || t.cwd === oldDefault || t.cwd.startsWith('/var/task') || t.cwd === '/' || t.cwd.toLowerCase().endsWith('zoz-router')) t.cwd = resolvedCwd;
-            });
-          }
-
-          const keybar = document.getElementById('termMobileTouchKeybar');
-          if (keybar) keybar.style.display = 'grid';
-
-          this.startRemotePingProbe();
-          this.updateSyncButtonUI();
-          this.updatePaneHeaders();
-          this.updateMobileBannerUI();
-
-          // Sesi PTY Mandiri & Terisolasi (Termux Mobile Architecture):
-          // Hanya sambungkan stream WebSocket jika modal terminal sedang terbuka agar tidak membebani tampilan awal.
-          const termModalOpen = document.getElementById('terminalModal')?.classList.contains('show');
-          const tab = this.getActiveTab();
-          if (tab) {
-            if (tab.pane1) {
-              tab.pane1.sessionId = this.getEffectiveSessionId(tab, 1);
-              tab.pane1.isFallbackMode = false;
-              if (termModalOpen) {
-                this.connectStream(tab, tab.pane1, 1);
-              }
-            }
-            if (tab.isSplit && tab.pane2) {
-              tab.pane2.sessionId = this.getEffectiveSessionId(tab, 2);
-              tab.pane2.isFallbackMode = false;
-              if (termModalOpen) {
-                this.connectStream(tab, tab.pane2, 2);
-              }
+            } catch (err) {
+              sawNetworkError = true;
+              lastErr = err;
+              return null;
             }
           }
+          return null;
+        };
 
-          if (notify) {
-            showToast('⚡ Terhubung: Sesi Windows PowerShell Mandiri Aktif!', 'success');
-          }
-          return true;
+        for (const candHost of hostQueue) {
+          connectedResult = await probeHostWithPins(candHost);
+          if (connectedResult) break;
         }
+
+        if (!connectedResult && !skipEdgeRefresh && sawNetworkError && typeof refreshActiveTunnelFromRemote === 'function') {
+          const isNonLocalOrigin = typeof window !== 'undefined' && window.location && !isLocalOrLanHostname(window.location.hostname);
+          if (isNonLocalOrigin) {
+            const freshEdgeHost = await refreshActiveTunnelFromRemote({ silentNoReload: true });
+            const freshNorm = freshEdgeHost ? this.normalizeRemoteHost(freshEdgeHost).httpUrl : '';
+            if (freshNorm && !hostQueue.includes(freshNorm)) {
+              connectedResult = await probeHostWithPins(freshNorm);
+            }
+          }
+        }
+
+        if (!connectedResult) {
+          if (notify) {
+            if (sawAuthReject && !sawNetworkError) {
+              showToast('PIN keamanan remote salah atau ditolak server.', 'error');
+            } else {
+              showToast(`Gagal koneksi remote: ${(lastErr && lastErr.message) || 'Pastikan URL tunnel laptop aktif.'}`, 'error');
+            }
+          }
+          return false;
+        }
+
+        const workingHost = connectedResult.host;
+        const workingPin = connectedResult.pin || pin || '';
+        const data = connectedResult.data || {};
+
+        this.remoteHost = workingHost;
+        this.remotePin = workingPin;
+        this.isRemoteConnected = true;
+        this.bridgeUrl = workingHost;
+        this.isWindowsSynced = true;
+        this._remotePingFailCount = 0;
+
+        try {
+          localStorage.setItem('zoz_remote_terminal_config', JSON.stringify({
+            remoteHost: this.remoteHost,
+            pin: this.remotePin
+          }));
+          localStorage.setItem('zoz_term_bridge_url', this.remoteHost);
+          localStorage.setItem('zoz_last_tunnel_url', this.remoteHost);
+          if (this.remotePin) {
+            localStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
+            sessionStorage.setItem('zoz_last_tunnel_pin', this.remotePin);
+            document.cookie = `zoz_remote_pin=${encodeURIComponent(this.remotePin)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+          }
+          if (this.remotePin && typeof WhatsAppController !== 'undefined') {
+            localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
+            localStorage.setItem('zoz_wa_pin', this.remotePin);
+            localStorage.setItem('zoz_wa_mobile_pin', this.remotePin);
+            if (this.remoteHost && this.remoteHost.includes('trycloudflare.com')) {
+              WhatsAppController.activeTunnelUrl = this.remoteHost;
+              WhatsAppController.apiBaseUrl = this.remoteHost;
+              localStorage.setItem('zoz_wa_api_url', this.remoteHost);
+            }
+            WhatsAppController.userId = 'usr_kaisar_master';
+            WhatsAppController.pin = this.remotePin;
+            WhatsAppController.isMaster = true;
+            WhatsAppController.updateSecurityUI({ isMaster: true, hasPin: true });
+            WhatsAppController.fetchStatus(true).then(() => {
+              WhatsAppController.fetchContacts();
+              WhatsAppController.initSSE();
+            }).catch(() => {});
+          }
+        } catch (_) {}
+
+        if (data.cwd) {
+          const resolvedCwd = (data.cwd.toLowerCase().endsWith('zoz-router') && data.userHome)
+            ? data.userHome
+            : (data.cwd.toLowerCase().endsWith('zoz-router') ? 'C:\\Users\\user' : data.cwd);
+          const oldDefault = this.defaultCwd;
+          this.defaultCwd = resolvedCwd;
+          this.tabs.forEach(t => {
+            if (t.pane1 && (!t.pane1.cwd || t.pane1.cwd === oldDefault || t.pane1.cwd.startsWith('/var/task') || t.pane1.cwd === '/' || t.pane1.cwd.toLowerCase().endsWith('zoz-router'))) t.pane1.cwd = resolvedCwd;
+            if (t.pane2 && (!t.pane2.cwd || t.pane2.cwd === oldDefault || t.pane2.cwd.startsWith('/var/task') || t.pane2.cwd === '/' || t.pane2.cwd.toLowerCase().endsWith('zoz-router'))) t.pane2.cwd = resolvedCwd;
+            if (!t.cwd || t.cwd === oldDefault || t.cwd.startsWith('/var/task') || t.cwd === '/' || t.cwd.toLowerCase().endsWith('zoz-router')) t.cwd = resolvedCwd;
+          });
+        }
+
+        const keybar = document.getElementById('termMobileTouchKeybar');
+        if (keybar) keybar.style.display = 'grid';
+
+        this.startRemotePingProbe();
+        this.updateSyncButtonUI();
+        this.updatePaneHeaders();
+        this.updateMobileBannerUI();
+
+        // Sesi PTY Mandiri & Terisolasi (Termux Mobile Architecture):
+        // Hanya sambungkan stream WebSocket jika modal terminal sedang terbuka agar tidak membebani tampilan awal.
+        const termModalOpen = document.getElementById('terminalModal')?.classList.contains('show');
+        const tab = this.getActiveTab();
+        if (tab) {
+          if (tab.pane1) {
+            tab.pane1.sessionId = this.getEffectiveSessionId(tab, 1);
+            tab.pane1.isFallbackMode = false;
+            if (termModalOpen) {
+              this.connectStream(tab, tab.pane1, 1);
+            }
+          }
+          if (tab.isSplit && tab.pane2) {
+            tab.pane2.sessionId = this.getEffectiveSessionId(tab, 2);
+            tab.pane2.isFallbackMode = false;
+            if (termModalOpen) {
+              this.connectStream(tab, tab.pane2, 2);
+            }
+          }
+        }
+
+        if (notify) {
+          showToast('⚡ Terhubung: Sesi Windows PowerShell Mandiri Aktif!', 'success');
+        }
+        return true;
       } catch (err) {
         if (notify) showToast(`Gagal koneksi remote: ${err.message}`, 'error');
         return false;
@@ -47833,10 +48108,27 @@ Aturan:
         clearInterval(this.remotePingTimer);
         this.remotePingTimer = null;
       }
+      this._remotePingFailCount = 0;
+      this._lastAutoHealAttemptAt = 0;
       const doProbe = async () => {
-        if (!this.isRemoteConnected || !this.remoteHost) return;
+        if (!this.isRemoteConnected || !this.remoteHost || this._pingProbeInFlight) return;
+        this._pingProbeInFlight = true;
         const t0 = performance.now();
         const effectivePin = this.remotePin || localStorage.getItem('zoz_last_tunnel_pin') || '';
+        const triggerAutoHeal = async () => {
+          this._remotePingFailCount = (this._remotePingFailCount || 0) + 1;
+          this.updateRemoteStatusUI(false);
+          const now = Date.now();
+          const healCooldownMs = Math.min(30000 * Math.max(1, Math.min(4, this._remotePingFailCount - 1)), 120000);
+          if (this._remotePingFailCount >= 2 && !this._isConnectingRemote && (now - (this._lastAutoHealAttemptAt || 0)) >= healCooldownMs) {
+            this._lastAutoHealAttemptAt = now;
+            const freshEdgeHost = (typeof refreshActiveTunnelFromRemote === 'function')
+              ? await refreshActiveTunnelFromRemote({ silentNoReload: true })
+              : null;
+            const latestHost = freshEdgeHost || ((typeof getActiveTunnelUrl === 'function') ? getActiveTunnelUrl() : '') || this.remoteHost;
+            await this.connectRemoteTerminal(latestHost, this.remotePin, false, { forceProbe: true, skipEdgeRefresh: true });
+          }
+        };
         try {
           const res = await fetch(`${this.remoteHost}/api/ping`, {
             method: 'GET',
@@ -47844,6 +48136,13 @@ Aturan:
             signal: AbortSignal.timeout(4500)
           });
           if (res.ok) {
+            const pingData = await res.json().catch(() => null);
+            if (pingData && pingData.isRemote && !pingData.authenticated) {
+              await triggerAutoHeal();
+              return;
+            }
+            this._remotePingFailCount = 0;
+            this._lastAutoHealAttemptAt = 0;
             this.remotePingMs = Math.round(performance.now() - t0);
             this.updateRemoteStatusUI(true);
             const termModalOpen = document.getElementById('terminalModal')?.classList.contains('show');
@@ -47858,10 +48157,12 @@ Aturan:
               });
             }
           } else {
-            this.updateRemoteStatusUI(false);
+            await triggerAutoHeal();
           }
         } catch (_) {
-          this.updateRemoteStatusUI(false);
+          await triggerAutoHeal();
+        } finally {
+          this._pingProbeInFlight = false;
         }
       };
 
@@ -48530,13 +48831,14 @@ Aturan:
         el.style.fontSize = `${this.fontSize}px`;
       });
       this.tabs.forEach(tab => {
+        const isActiveTab = tab.id === this.activeTabId;
         if (tab.pane1?.term) {
           tab.pane1.term.options.fontSize = this.fontSize;
-          this.fitPane(tab.pane1, true);
+          if (isActiveTab) this.fitPane(tab.pane1, true);
         }
         if (tab.pane2?.term) {
           tab.pane2.term.options.fontSize = this.fontSize;
-          this.fitPane(tab.pane2, true);
+          if (isActiveTab && tab.isSplit) this.fitPane(tab.pane2, true);
         }
       });
       if (persist) {
@@ -50214,6 +50516,22 @@ Aturan:
       const sessionId = paneState.sessionId || this.getEffectiveSessionId(tab, paneNum);
       paneState.sessionId = sessionId;
 
+      if (this._pendingKills && this._pendingKills.has(sessionId)) {
+        const pendingKill = this._pendingKills.get(sessionId);
+        if (!paneState._waitingKillPromise) {
+          paneState._waitingKillPromise = pendingKill;
+          pendingKill.finally(() => {
+            if (paneState._waitingKillPromise === pendingKill) {
+              paneState._waitingKillPromise = null;
+              if (this.tabs.includes(tab) && (!paneState.ws || paneState.ws.readyState === WebSocket.CLOSED)) {
+                this.connectStream(tab, paneState, paneNum, true);
+              }
+            }
+          });
+        }
+        return;
+      }
+
       try {
         const savedAuto = localStorage.getItem(`zoz_term_auto_enter_${sessionId}`);
         if (savedAuto !== null) {
@@ -50944,6 +51262,7 @@ Aturan:
       if (modal && !modal.classList.contains('show')) return;
       const term = paneState.term;
       const container = paneState.screenContainer;
+      if (!container.isConnected || (container.clientWidth === 0 && container.clientHeight === 0)) return;
       const isMobile = this.isMobileDevice();
 
       if (paneState._isRemoteResizing) return;
@@ -51067,22 +51386,24 @@ Aturan:
       }
     },
 
-    addTab() {
-      this.tabCounter++;
-      while (this.tabs.some(t => t.id === `tab-${this.tabCounter}`)) {
-        this.tabCounter++;
+    addTab(preferredShell = 'powershell') {
+      const shellKey = (preferredShell && this.shells[preferredShell]) ? preferredShell : 'powershell';
+      let slot = 1;
+      while (this.tabs.some(t => t.id === `tab-${slot}`)) {
+        slot++;
       }
-      const id = `tab-${this.tabCounter}`;
+      this.tabCounter = Math.max(slot, this.tabs.length + 1);
+      const id = `tab-${slot}`;
       const newTab = {
         id,
-        title: `Terminal ${this.tabCounter}`,
-        shell: 'powershell',
+        title: this.getTabProfileTitle(shellKey),
+        shell: shellKey,
         cwd: this.defaultCwd,
         isSplit: false,
         autoEnter: false,
         activePane: 1,
-        pane1: this.createDefaultPaneState({ shell: 'powershell', cwd: this.defaultCwd, autoEnter: false }),
-        pane2: this.createDefaultPaneState({ shell: 'powershell', cwd: this.defaultCwd, autoEnter: false })
+        pane1: this.createDefaultPaneState({ shell: shellKey, cwd: this.defaultCwd, autoEnter: false }),
+        pane2: this.createDefaultPaneState({ shell: shellKey, cwd: this.defaultCwd, autoEnter: false })
       };
       this.tabs.push(newTab);
       this.renderTabs();
@@ -51215,10 +51536,12 @@ Aturan:
       list.innerHTML = this.tabs.map(tab => {
         const isActive = tab.id === this.activeTabId;
         const shellConf = this.shells[tab.shell] || this.shells.powershell;
+        const displayTitle = this.isGenericTerminalTitle(tab.title) ? this.getTabProfileTitle(tab) : tab.title;
+        tab.title = displayTitle;
         return `
           <div class="terminal-tab-item ${isActive ? 'active' : ''}" data-tab-id="${tab.id}">
             <span class="tab-shell-icon">${shellConf.icon}</span>
-            <span class="tab-title">${escapeHtml(tab.title)}</span>
+            <span class="tab-title">${escapeHtml(displayTitle)}</span>
             <button class="tab-close-btn" data-close-tab="${tab.id}" title="Tutup Tab" type="button">&times;</button>
           </div>
         `;
@@ -51231,6 +51554,7 @@ Aturan:
       const pane = this.getPaneState(paneNum);
       pane.shell = shellKey;
       if (paneNum === 1) tab.shell = shellKey;
+      if (tab && this.isProfileTerminalTitle(tab.title)) tab.title = this.getTabProfileTitle(tab);
       
       this.updateShellSelectorUI();
       this.updatePaneHeaders();
@@ -51321,6 +51645,10 @@ Aturan:
         if (tab.pane2) tab.pane2.autoEnter = false;
         this.setActivePane(1);
       }
+      if (this.isProfileTerminalTitle(tab.title)) {
+        tab.title = this.getTabProfileTitle(tab);
+      }
+      this.renderTabs();
       this.updateAutoEnterUI();
       this.fitAllPanes();
       this.saveTabsState();
@@ -53169,26 +53497,39 @@ Aturan:
     },
 
     getUserId() {
-      this.isMaster = true;
-      try {
-        localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
-      } catch (_) {}
-      return 'usr_kaisar_master';
+      const isLocal = typeof window !== 'undefined' && window.location && isLocalOrLanHostname(window.location.hostname);
+      const storedUid = localStorage.getItem('zoz_wa_user_id');
+      if (storedUid) {
+        this.userId = storedUid;
+        this.isMaster = (storedUid === 'usr_kaisar_master');
+        return storedUid;
+      }
+      if (isLocal) {
+        this.isMaster = true;
+        this.userId = 'usr_kaisar_master';
+        try { localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master'); } catch (_) {}
+        return 'usr_kaisar_master';
+      }
+      const anonUid = 'usr_guest_' + Math.random().toString(36).slice(2, 10);
+      this.userId = anonUid;
+      this.isMaster = false;
+      try { localStorage.setItem('zoz_wa_user_id', anonUid); } catch (_) {}
+      return anonUid;
     },
 
     getPin() {
-      if (this.pin && this.isKnownMasterCredential(this.pin)) return this.pin;
-      const stored = localStorage.getItem('zoz_wa_pin') || localStorage.getItem('zoz_wa_mobile_pin');
-      if (stored && this.isKnownMasterCredential(stored)) {
+      if (this.pin) return this.pin;
+      const stored = localStorage.getItem('zoz_wa_pin') || localStorage.getItem('zoz_wa_mobile_pin') || localStorage.getItem('zoz_last_tunnel_pin') || '';
+      if (stored) {
         this.pin = stored;
         return stored;
       }
-      this.pin = '210560';
-      try {
-        localStorage.setItem('zoz_wa_pin', '210560');
-        localStorage.setItem('zoz_wa_mobile_pin', '210560');
-      } catch (_) {}
-      return '210560';
+      const isLocal = typeof window !== 'undefined' && window.location && isLocalOrLanHostname(window.location.hostname);
+      if (isLocal) {
+        this.pin = '210560';
+        return '210560';
+      }
+      return '';
     },
 
     getAuthHeaders(customHeaders = {}) {
@@ -54109,6 +54450,10 @@ Aturan:
     },
 
     initSSE() {
+      if (this._sseReconnectTimer) {
+        clearTimeout(this._sseReconnectTimer);
+        this._sseReconnectTimer = null;
+      }
       if (this.sse) {
         try { this.sse.close(); } catch (_) {}
         this.sse = null;
@@ -54153,7 +54498,10 @@ Aturan:
             } else if (parsed.event === 'message_revoked') {
               const rJid = parsed.data?.jid;
               const rMsgId = parsed.data?.msgId;
-              const bubbleEl = els.messagesList?.querySelector(`[data-msg-id="${rMsgId}"]`);
+              const safeMsgIdSel = (typeof CSS !== 'undefined' && typeof CSS.escape === 'function')
+                ? CSS.escape(String(rMsgId || ''))
+                : String(rMsgId || '').replace(/["\\]/g, '\\$&');
+              const bubbleEl = els.messagesList?.querySelector(`[data-msg-id="${safeMsgIdSel}"]`);
               if (bubbleEl) {
                 const textEl = bubbleEl.querySelector('.wa-bubble-text');
                 if (textEl) {
@@ -54178,7 +54526,10 @@ Aturan:
               if (targetMsg) {
                 targetMsg.reaction = emoji;
               }
-              const bubbleEl = els.messagesList?.querySelector(`[data-msg-id="${rMsgId}"]`);
+              const safeReactMsgIdSel = (typeof CSS !== 'undefined' && typeof CSS.escape === 'function')
+                ? CSS.escape(String(rMsgId || ''))
+                : String(rMsgId || '').replace(/["\\]/g, '\\$&');
+              const bubbleEl = els.messagesList?.querySelector(`[data-msg-id="${safeReactMsgIdSel}"]`);
               if (bubbleEl) {
                 let badge = bubbleEl.querySelector('.wa-bubble-reaction-badge');
                 if (emoji) {
@@ -54203,7 +54554,11 @@ Aturan:
           this.sseReconnectAttempts++;
           if (this.sseReconnectAttempts <= this.maxSseAttempts) {
             const delay = Math.min(10000 * Math.pow(2, this.sseReconnectAttempts - 1), 60000);
-            setTimeout(() => this.initSSE(), delay);
+            if (this._sseReconnectTimer) clearTimeout(this._sseReconnectTimer);
+            this._sseReconnectTimer = setTimeout(() => {
+              this._sseReconnectTimer = null;
+              this.initSSE();
+            }, delay);
           }
         };
       } catch (err) {
@@ -54218,12 +54573,8 @@ Aturan:
         const q = `?t=${Date.now()}&userId=${encodeURIComponent(this.getUserId())}&pin=${encodeURIComponent(this.getPin())}`;
         let res = await this.waFetch('/api/wa/status' + q, { cache: 'no-store' }, 1);
         const data = await res.json().catch(() => null);
-        if (data) {
-          localStorage.setItem('zoz_wa_user_id', 'usr_kaisar_master');
-          localStorage.setItem('zoz_wa_pin', '210560');
-          this.userId = 'usr_kaisar_master';
-          this.pin = '210560';
-          this.isMaster = true;
+        if (data && data.success) {
+          this.isMaster = Boolean(data.isMaster);
           this.updateSecurityUI({ isMaster: this.isMaster, hasPin: data.hasPin });
           if (data.success) {
             this.handleStatusUpdate(data);

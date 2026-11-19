@@ -214,15 +214,6 @@ function triggerAsyncBackgroundExtraction({
       if (resolvedErrorLesson && resolvedErrorLesson.content) {
         const sanitizedLesson = sanitizeFactCandidate(resolvedErrorLesson.content);
         if (sanitizedLesson.accepted) {
-          const epLesson = dbStorage.insertEpisode({
-            userId,
-            sessionId,
-            turnIndex,
-            sourceType: 'chat_error_correction',
-            sourceTitle: `Koreksi Kesalahan Sesi: ${(sanitizedLesson.content || sessionTitle || sessionId).slice(0, 42)}`,
-            sourceUri: `/chat/${sessionId}`,
-            rawSnippet: sanitizedLesson.content.slice(0, 800)
-          });
           const existingLessons = dbStorage.listMemories(userId, { category: 'error_lesson', limit: 40 });
           const qProbe = (resolvedErrorLesson.questionText || '').toLowerCase().slice(0, 90);
           const dupLesson = qProbe.length >= 15
@@ -231,6 +222,15 @@ function triggerAsyncBackgroundExtraction({
           if (dupLesson) {
             dbStorage.updateMemory(dupLesson.id, { content: sanitizedLesson.content, category: 'error_lesson', scope }, userId);
           } else {
+            const epLesson = dbStorage.insertEpisode({
+              userId,
+              sessionId,
+              turnIndex,
+              sourceType: 'chat_error_correction',
+              sourceTitle: `Koreksi Kesalahan Sesi: ${(sanitizedLesson.content || sessionTitle || sessionId).slice(0, 42)}`,
+              sourceUri: `/chat/${sessionId}`,
+              rawSnippet: sanitizedLesson.content.slice(0, 800)
+            });
             dbStorage.insertMemory({
               userId,
               content: sanitizedLesson.content,
@@ -347,6 +347,17 @@ function triggerAsyncBackgroundExtraction({
       const sanitized = sanitizeFactCandidate(candidateSnippet);
       if (!sanitized.accepted) return;
 
+      // Distill valid sentences first so we never create orphaned episodes
+      const sentences = candidateSnippet.split(/[.\n;]+/).map(s => s.trim()).filter(s => s.length >= 10);
+      const acceptedSentences = [];
+      for (const sent of sentences) {
+        if (!declarativeClues.test(sent) && !temporalReplacementClues.test(sent)) continue;
+        const cleanSent = sanitizeFactCandidate(sent);
+        if (!cleanSent.accepted) continue;
+        acceptedSentences.push(cleanSent);
+      }
+      if (acceptedSentences.length === 0) return;
+
       // Create episode trace for receipts using PII-redacted snippet
       const ep = dbStorage.insertEpisode({
         userId,
@@ -358,12 +369,7 @@ function triggerAsyncBackgroundExtraction({
         rawSnippet: sanitized.content
       });
 
-      // Distill sentences
-      const sentences = candidateSnippet.split(/[.\n;]+/).map(s => s.trim()).filter(s => s.length >= 10);
-      for (const sent of sentences) {
-        if (!declarativeClues.test(sent) && !temporalReplacementClues.test(sent)) continue;
-        const cleanSent = sanitizeFactCandidate(sent);
-        if (!cleanSent.accepted) continue;
+      for (const cleanSent of acceptedSentences) {
 
         let category = 'fact';
         if (/\b(?:menggunakan|memakai|stack|bahasa|framework|db|database)\b/i.test(cleanSent.content)) {

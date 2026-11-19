@@ -380,16 +380,38 @@ class WhatsAppGateway {
     return null;
   }
 
-  saveRawMediaData() {
-    try {
-      if (!this.rawMediaFile) return;
-      const obj = {};
-      const entries = Array.from(this.rawMessages.entries()).slice(-600);
-      for (const [id, msg] of entries) {
-        obj[id] = msg;
+  saveRawMediaData(immediate = false) {
+    if (!this.rawMediaFile) return;
+    const doWrite = async () => {
+      try {
+        const obj = {};
+        const entries = Array.from(this.rawMessages.entries()).slice(-600);
+        for (const [id, msg] of entries) {
+          obj[id] = msg;
+        }
+        const payload = JSON.stringify(obj);
+        const tmpFile = `${this.rawMediaFile}.tmp.${process.pid}.${Date.now()}`;
+        await fs.promises.writeFile(tmpFile, payload, 'utf8');
+        try {
+          await fs.promises.rename(tmpFile, this.rawMediaFile);
+        } catch (_) {
+          await fs.promises.writeFile(this.rawMediaFile, payload, 'utf8');
+          try { await fs.promises.unlink(tmpFile); } catch (_) {}
+        }
+      } catch (_) {}
+    };
+    if (immediate) {
+      if (this._rawMediaSaveTimer) {
+        clearTimeout(this._rawMediaSaveTimer);
+        this._rawMediaSaveTimer = null;
       }
-      fs.writeFileSync(this.rawMediaFile, JSON.stringify(obj), 'utf8');
-    } catch (_) {}
+      return doWrite();
+    }
+    if (this._rawMediaSaveTimer) return;
+    this._rawMediaSaveTimer = setTimeout(() => {
+      this._rawMediaSaveTimer = null;
+      doWrite().catch(() => {});
+    }, 1500);
   }
 
   async downloadAndSaveMedia(msg, messageItem) {
@@ -754,6 +776,19 @@ class WhatsAppGateway {
     }
 
     try {
+      if (this.rawMediaFile && fs.existsSync(this.rawMediaFile)) {
+        const rawMap = JSON.parse(fs.readFileSync(this.rawMediaFile, 'utf8'));
+        if (rawMap && typeof rawMap === 'object') {
+          for (const [mid, rmsg] of Object.entries(rawMap)) {
+            this.rawMessages.set(mid, rmsg);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[WA-Gateway] Gagal memuat wa-raw-media.json:', e.message);
+    }
+
+    try {
       if (fs.existsSync(this.messagesFile)) {
         const raw = JSON.parse(fs.readFileSync(this.messagesFile, 'utf8'));
         const uploadsDir = this.uploadsDir;
@@ -903,35 +938,33 @@ class WhatsAppGateway {
     } catch (e) {
       console.warn('[WA-Gateway] Gagal memuat wa-messages.json:', e.message);
     }
-
-    try {
-      if (this.rawMediaFile && fs.existsSync(this.rawMediaFile)) {
-        const rawMap = JSON.parse(fs.readFileSync(this.rawMediaFile, 'utf8'));
-        if (rawMap && typeof rawMap === 'object') {
-          for (const [mid, rmsg] of Object.entries(rawMap)) {
-            this.rawMessages.set(mid, rmsg);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('[WA-Gateway] Gagal memuat wa-raw-media.json:', e.message);
-    }
   }
 
   savePersistedData(immediate = false) {
+    if (!this._pendingSaveResolvers) this._pendingSaveResolvers = [];
+    const flushResolvers = () => {
+      const list = this._pendingSaveResolvers.splice(0, this._pendingSaveResolvers.length);
+      for (const fn of list) {
+        try { fn(); } catch (_) {}
+      }
+    };
     if (immediate) {
       if (this._saveTimer) {
         clearTimeout(this._saveTimer);
         this._saveTimer = null;
       }
-      return this._executeAtomicSave();
+      return this._executeAtomicSave().finally(flushResolvers);
     }
-    if (this._saveTimer) return Promise.resolve();
     return new Promise((resolve) => {
+      this._pendingSaveResolvers.push(resolve);
+      if (this._saveTimer) return;
       this._saveTimer = setTimeout(async () => {
         this._saveTimer = null;
-        await this._executeAtomicSave();
-        resolve();
+        try {
+          await this._executeAtomicSave();
+        } finally {
+          flushResolvers();
+        }
       }, 1000);
     });
   }
@@ -2800,20 +2833,29 @@ class WhatsAppGatewayManager {
       if (this.sessions.size >= 60) {
         let oldestKey = null;
         let oldestTs = Infinity;
+        let fallbackKey = null;
+        let fallbackTs = Infinity;
         for (const [k, v] of this.sessions.entries()) {
-          if (v && !v.isMaster && !v.status?.connected && !v.status?.connecting && !v.hasConfiguredPin()) {
+          if (v && !v.isMaster && !v.status?.connected && !v.status?.connecting) {
             const ts = v.lastAccessedAt || v.createdAt || 0;
-            if (ts < oldestTs) {
-              oldestTs = ts;
-              oldestKey = k;
+            if (!v.hasConfiguredPin()) {
+              if (ts < oldestTs) {
+                oldestTs = ts;
+                oldestKey = k;
+              }
+            } else if (ts < fallbackTs) {
+              fallbackTs = ts;
+              fallbackKey = k;
             }
           }
         }
-        if (oldestKey) {
-          const evicted = this.sessions.get(oldestKey);
+        const evictKey = oldestKey || fallbackKey;
+        if (evictKey) {
+          const evicted = this.sessions.get(evictKey);
           if (evicted) {
             if (evicted.reconnectTimer) { clearTimeout(evicted.reconnectTimer); evicted.reconnectTimer = null; }
             if (evicted._saveTimer) { clearTimeout(evicted._saveTimer); evicted._saveTimer = null; }
+            if (evicted._rawMediaSaveTimer) { clearTimeout(evicted._rawMediaSaveTimer); evicted._rawMediaSaveTimer = null; }
             if (evicted.sseHeartbeatTimer) { clearInterval(evicted.sseHeartbeatTimer); evicted.sseHeartbeatTimer = null; }
             if (evicted.pingInterval) { clearInterval(evicted.pingInterval); evicted.pingInterval = null; }
             if (evicted.sseClients) {
@@ -2821,7 +2863,7 @@ class WhatsAppGatewayManager {
               evicted.sseClients.clear();
             }
           }
-          this.sessions.delete(oldestKey);
+          this.sessions.delete(evictKey);
         }
       }
       gw = new WhatsAppGateway(targetUid, { isMaster: false });

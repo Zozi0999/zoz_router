@@ -35,7 +35,7 @@
       }
     });
     try {
-      var currentVer = 'v20261119_tmwmyn15n';
+      var currentVer = 'v20261119_v798';
       var savedVer = localStorage.getItem('__zoz_ver__');
       if (savedVer !== currentVer) {
         localStorage.setItem('__zoz_ver__', currentVer);
@@ -49,7 +49,7 @@
         }
       }
     } catch (_) {}
-    window.__ZOZ_VERSION__ = 'v20261119_tmwmyn15n';
+    window.__ZOZ_VERSION__ = 'v20261119_v798';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png?v=20261112_v765">
@@ -109,8 +109,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261117_v788">
-  <link rel="stylesheet" href="style.css?v=20261117_v788">
+  <link rel="preload" as="style" href="style.css?v=20261119_v798">
+  <link rel="stylesheet" href="style.css?v=20261119_v798">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -1058,7 +1058,7 @@
 
         <!-- BEGIN: BottomTaskbarPromptDock (Animated expandable/collapsible dock) -->
         <div class="w-full px-4 transition-all duration-300 ease-in-out overflow-visible max-h-none opacity-100 transform translate-y-0 max-w-2xl mx-auto prompt-dock-wrapper" id="promptDockWrapper">
-          <div class="glass-panel rounded-2xl shadow-2xl border border-teal-500/20 hover:border-teal-500/35 transition-all duration-300 focus-within:border-teal-400/50 focus-within:ring-1 focus-within:ring-teal-400/20 py-2 px-3 relative composer-box">
+          <div class="rounded-3xl transition-all duration-300 py-2 px-3 relative composer-box">
             <!-- Slash Commands / Quick Tools Autocomplete Menu -->
             <div class="slash-commands-menu" id="slashCommandsMenu" style="display: none;" role="listbox" aria-label="Skills">
               <div class="slash-menu-header">
@@ -2784,7 +2784,7 @@
         <div class="terminal-tabs-list" id="termTabList">
           <div class="terminal-tab-item active" data-tab-id="tab-1">
             <span class="tab-shell-icon">🪟</span>
-            <span class="tab-title">Terminal 1</span>
+            <span class="tab-title">PowerShell</span>
             <button class="tab-close-btn" data-close-tab="tab-1" title="Tutup Tab" type="button">&times;</button>
           </div>
         </div>
@@ -3672,8 +3672,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression & Bayesian calibration engine (must load before app.js) -->
-  <script src="text-safety.js?v=20261117_v788" defer></script>
+  <script src="text-safety.js?v=20261119_v798" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=v20261119_tmwmyn15n" defer></script>
+  <script src="app.js?v=v20261119_v798" defer></script>
 </body>
 </html>

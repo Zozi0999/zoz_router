@@ -189,7 +189,7 @@ function savePersistedTunnelState() {
 // Fungsi ini menulis ulang konstanta URL tunnel lalu commit + push (memicu redeploy Pages).
 // Nonaktifkan dengan env ZOZ_AUTO_TUNNEL_SYNC=0.
 const EDGE_TUNNEL_SYNC_TARGETS = [
-  { file: '_worker.js', patterns: [/(const TUNNEL_GATEWAY_URL = ')https:\/\/[a-z0-9-]+\.trycloudflare\.com(')/] },
+  { file: '_worker.js', patterns: [/(TUNNEL_GATEWAY_URL\s*=\s*(?:String\(\(env\s*&&\s*env\.TUNNEL_GATEWAY_URL\)\s*\|\|\s*)?')https:\/\/[a-z0-9-]+\.trycloudflare\.com(')/] },
   { file: 'app.js', patterns: [/(const ACTIVE_CLOUDFLARE_TUNNEL = ')https:\/\/[a-z0-9-]+\.trycloudflare\.com(')/, /(activeTunnelUrl: ')https:\/\/[a-z0-9-]+\.trycloudflare\.com(')/] },
   { file: path.join('public', 'app.js'), patterns: [/(const ACTIVE_CLOUDFLARE_TUNNEL = ')https:\/\/[a-z0-9-]+\.trycloudflare\.com(')/, /(activeTunnelUrl: ')https:\/\/[a-z0-9-]+\.trycloudflare\.com(')/] }
 ];
@@ -472,10 +472,39 @@ function constantTimePinEqual(a, b) {
   }
 }
 
+const remotePinFailTracker = new Map(); // ip -> { count, resetAt }
+
+function getRemoteClientIp(req) {
+  const cfIp = req && req.headers && (req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']);
+  if (cfIp) return String(cfIp).split(',')[0].trim();
+  return String((req && req.socket && req.socket.remoteAddress) || 'unknown');
+}
+
+function buildRemotePinCookie(req, pinValue) {
+  const proto = String((req && req.headers && req.headers['x-forwarded-proto']) || '').toLowerCase();
+  const isHttps = proto === 'https' || Boolean(req && req.socket && req.socket.encrypted) || isRemoteTunnelRequest(req);
+  const secureFlag = isHttps ? '; Secure' : '';
+  return `zoz_remote_pin=${encodeURIComponent(pinValue)}; Path=/; Max-Age=2592000; SameSite=Lax${secureFlag}`;
+}
+
 function validateRemoteTerminalPin(req, reqUrl, body) {
   if (!isRemoteTunnelRequest(req)) {
     return { valid: true };
   }
+  const clientIp = getRemoteClientIp(req);
+  const now = Date.now();
+  const tracker = remotePinFailTracker.get(clientIp);
+  if (tracker && tracker.resetAt > now && tracker.count >= 25) {
+    return {
+      valid: false,
+      status: 429,
+      error: 'Terlalu banyak percobaan PIN salah. Tunggu beberapa menit sebelum mencoba lagi.'
+    };
+  }
+  if (tracker && tracker.resetAt <= now) {
+    remotePinFailTracker.delete(clientIp);
+  }
+
   const clientPin = (reqUrl && reqUrl.searchParams && reqUrl.searchParams.get('pin')) ||
                     (req && req.headers && req.headers['x-terminal-pin']) ||
                     (body && body.pin) ||
@@ -491,12 +520,22 @@ function validateRemoteTerminalPin(req, reqUrl, body) {
     waGatewayManager.masterGateway.verifyPin(cleanPin)
   );
   if (!cleanPin || (!matchedTunnelPin && !isMasterPinValid)) {
+    if (cleanPin) {
+      const cur = remotePinFailTracker.get(clientIp);
+      if (!cur || cur.resetAt <= now) {
+        if (remotePinFailTracker.size > 500) remotePinFailTracker.clear();
+        remotePinFailTracker.set(clientIp, { count: 1, resetAt: now + 5 * 60 * 1000 });
+      } else {
+        cur.count += 1;
+      }
+    }
     return {
       valid: false,
       status: 401,
       error: 'PIN autentikasi remote tidak valid. Masukkan PIN 6-digit dari laptop host.'
     };
   }
+  remotePinFailTracker.delete(clientIp);
   return { valid: true, matchedTunnelPin };
 }
 
@@ -1537,17 +1576,32 @@ function isPrivateOrReservedIPv6(ip) {
 // privat/loopback/metadata (rebinding, *.nip.io, DNS penyerang lolos). Fungsi ini
 // me-resolve dulu pakai dns.resolve4/resolve6 (bypass /etc/hosts) dan MENOLAK
 // bila ada SATU PUN hasil privat/reserved. Hasil:
-// - URL tak terurai / protokol non-http → lolos (validasi string di bawah menangani)
-// - literal IP → lolos (isPrivateHost sudah memeriksa angkanya)
-// - DNS gagal (ENOTFOUND dst) → lolos (biarkan koneksi gagal alami dengan pesannya)
-// - me-resolve ke IP privat/reserved → DITOLAK
+function createPinnedLookup(ips) {
+  if (!Array.isArray(ips) || ips.length === 0) return undefined;
+  const primaryIp = String(ips[0]).trim();
+  const primaryFamily = net.isIP(primaryIp) || 4;
+  return (_hostname, opts, cb) => {
+    const callback = typeof opts === 'function' ? opts : cb;
+    if (opts && typeof opts === 'object' && opts.all) {
+      return callback(null, ips.map(ip => ({ address: ip, family: net.isIP(ip) || 4 })));
+    }
+    return callback(null, primaryIp, primaryFamily);
+  };
+}
+
+// Guard SSRF anti DNS-rebinding (fail-closed):
+// - input kosong / non-http(s) / DNS gagal / resolve ke IP privat → DITOLAK
 // Returns { ok: boolean, msg?: string, ips?: string[] } where ips are pinned IPv4/IPv6 addresses
 async function assertResolvesPublic(rawUrl) {
   try {
-    if (!rawUrl || typeof rawUrl !== 'string') return { ok: true };
+    if (!rawUrl || typeof rawUrl !== 'string' || !rawUrl.trim()) {
+      return { ok: false, msg: 'URL tujuan kosong atau tidak valid.' };
+    }
     const asUrl = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(rawUrl.trim()) ? rawUrl.trim() : 'http://' + rawUrl.trim();
     const u = new URL(asUrl);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: true };
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      return { ok: false, msg: `Akses diblokir (SSRF): protokol ${u.protocol} tidak diizinkan.` };
+    }
     const host = u.hostname.replace(/^\[/, '').replace(/\]$/, '');
     if (!host) return { ok: false, msg: 'Hostname kosong.' };
     if (net.isIP(host)) {
@@ -1560,11 +1614,16 @@ async function assertResolvesPublic(rawUrl) {
       return { ok: false, msg: `Akses diblokir (SSRF): hostname intranet single-label (${host}) tidak diizinkan.` };
     }
 
-    // Jalankan dns.resolve4, dns.resolve6, dan dns.lookup secara paralel agar entri /etc/hosts maupun DNS publik terperiksa
+    const withTimeout = (promise, ms) => Promise.race([
+      promise,
+      new Promise((resolve) => setTimeout(() => resolve([]), ms))
+    ]);
+
+    // Jalankan dns.resolve4, dns.resolve6, dan dns.lookup secara paralel (timeout 3s) agar entri /etc/hosts maupun DNS publik terperiksa
     const [ipv4Addrs, ipv6Addrs, lookupAddrs] = await Promise.all([
-      dns.promises.resolve4(host).catch(() => []),
-      dns.promises.resolve6(host).catch(() => []),
-      dns.promises.lookup(host, { all: true }).then(list => Array.isArray(list) ? list.map(x => x && x.address).filter(Boolean) : []).catch(() => [])
+      withTimeout(dns.promises.resolve4(host).catch(() => []), 3000),
+      withTimeout(dns.promises.resolve6(host).catch(() => []), 3000),
+      withTimeout(dns.promises.lookup(host, { all: true }).then(list => Array.isArray(list) ? list.map(x => x && x.address).filter(Boolean) : []).catch(() => []), 3000)
     ]);
 
     const allIps = Array.from(new Set([
@@ -1579,12 +1638,10 @@ async function assertResolvesPublic(rawUrl) {
     for (const ip of allIps) {
       const ipStr = String(ip).trim();
       if (!ipStr) continue;
-      // Check both IPv4 and IPv6 private/reserved ranges
       if (isPrivateOrReservedIPv4(ipStr) || isPrivateOrReservedIPv6(ipStr) || isPrivateHost(ipStr, undefined)) {
         return { ok: false, msg: `Akses diblokir (SSRF/DNS-rebinding): hostname me-resolve ke IP privat/reserved ${ipStr}.` };
       }
     }
-    // Return pinned IPs for callers that want to enforce IP pinning on subsequent connections
     return { ok: true, ips: allIps };
   } catch (_) {
     return { ok: false, msg: 'Akses diblokir (SSRF): gagal memverifikasi resolusi DNS tujuan.' };
@@ -1853,7 +1910,9 @@ function downloadImageBuffer(imageUrl, timeoutMs = 35000, redirectCount = 0) {
       }
 
       const client = parsed.protocol === 'https:' ? https : http;
+      const pinnedLookup = createPinnedLookup(verdict.ips);
       const req = client.get(parsed.toString(), {
+        ...(pinnedLookup ? { lookup: pinnedLookup } : {}),
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
           'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
@@ -2425,11 +2484,13 @@ function probeVideoUrl(targetUrl, redirectCount = 0) {
         let settled = false;
         const done = (v) => { if (!settled) { settled = true; resolve(v); } };
 
+        const pinnedLookup = createPinnedLookup(verdict.ips);
         const req = client.request({
           hostname: parsed.hostname,
           port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
           path: parsed.pathname + parsed.search,
           method: 'GET',
+          ...(pinnedLookup ? { lookup: pinnedLookup } : {}),
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,video/*;q=0.9,*/*;q=0.5',
@@ -5940,77 +6001,88 @@ const LIVE_WEB_QUERY_CACHE = new Map();
 const LIVE_WEB_CACHE_TTL_MS = 5 * 60 * 1000;
 
 function fetchHttpsHtmlSafe(urlStr, customHeaders = {}, timeoutMs = 4500, redirectDepth = 0) {
-  return new Promise((resolve) => {
-    if (redirectDepth > 3) return resolve({ status: 0, body: '' });
-    try {
-      const parsedTarget = new URL(urlStr);
-      if (parsedTarget.protocol !== 'https:' && parsedTarget.protocol !== 'http:') {
-        return resolve({ status: 0, body: '' });
-      }
-      if (isPrivateHost(parsedTarget.hostname, parsedTarget.port)) {
-        return resolve({ status: 0, body: '' });
-      }
-      let settled = false;
-      const done = (val) => {
-        if (!settled) {
-          settled = true;
-          resolve(val);
+  if (redirectDepth > 3) return Promise.resolve({ status: 0, body: '' });
+  return assertResolvesPublic(urlStr).then((verdict) => {
+    if (!verdict.ok) return { status: 0, body: '' };
+    return new Promise((resolve) => {
+      try {
+        const parsedTarget = new URL(urlStr);
+        if (parsedTarget.protocol !== 'https:' && parsedTarget.protocol !== 'http:') {
+          return resolve({ status: 0, body: '' });
         }
-      };
-      const req = https.get(urlStr, {
-        headers: {
-          'Accept-Encoding': 'gzip, deflate',
-          ...customHeaders
-        },
-        timeout: timeoutMs
-      }, (res) => {
-        const status = res.statusCode || 0;
-        if (status >= 300 && status < 400 && res.headers && res.headers.location) {
-          res.resume();
-          try {
-            const nextUrl = new URL(res.headers.location, urlStr);
-            if ((nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:') || isPrivateHost(nextUrl.hostname, nextUrl.port)) {
+        if (isPrivateHost(parsedTarget.hostname, parsedTarget.port)) {
+          return resolve({ status: 0, body: '' });
+        }
+        let settled = false;
+        const done = (val) => {
+          if (!settled) {
+            settled = true;
+            resolve(val);
+          }
+        };
+        const client = parsedTarget.protocol === 'https:' ? https : http;
+        const pinnedLookup = createPinnedLookup(verdict.ips);
+        const req = client.get(urlStr, {
+          ...(pinnedLookup ? { lookup: pinnedLookup } : {}),
+          headers: {
+            'Accept-Encoding': 'gzip, deflate',
+            ...customHeaders
+          },
+          timeout: timeoutMs
+        }, (res) => {
+          const status = res.statusCode || 0;
+          if (status >= 300 && status < 400 && res.headers && res.headers.location) {
+            res.resume();
+            try {
+              const nextUrl = new URL(res.headers.location, urlStr);
+              if ((nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:') || isPrivateHost(nextUrl.hostname, nextUrl.port)) {
+                return done({ status: 0, body: '' });
+              }
+              return done(fetchHttpsHtmlSafe(nextUrl.href, customHeaders, timeoutMs, redirectDepth + 1));
+            } catch (_) {
               return done({ status: 0, body: '' });
             }
-            return done(fetchHttpsHtmlSafe(nextUrl.href, customHeaders, timeoutMs, redirectDepth + 1));
-          } catch (_) {
-            return done({ status: 0, body: '' });
           }
-        }
-        const enc = String((res.headers && res.headers['content-encoding']) || '').toLowerCase();
-        let stream = res;
-        if (enc.includes('gzip')) {
-          const gunzip = zlib.createGunzip();
-          res.on('error', () => { try { gunzip.destroy(); } catch (_) {} done({ status: 0, body: '' }); });
-          stream = res.pipe(gunzip);
-        } else if (enc.includes('deflate')) {
-          const inflate = zlib.createInflate();
-          res.on('error', () => { try { inflate.destroy(); } catch (_) {} done({ status: 0, body: '' }); });
-          stream = res.pipe(inflate);
-        }
-        const chunks = [];
-        let totalBytes = 0;
-        const maxBytes = 320000;
-        stream.on('data', (chunk) => {
-          if (totalBytes < maxBytes) {
-            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-            totalBytes += chunk.length;
-            if (totalBytes >= maxBytes) {
-              try { req.destroy(); } catch (_) {}
-              done({ status, body: Buffer.concat(chunks).toString('utf8') });
+          const enc = String((res.headers && res.headers['content-encoding']) || '').toLowerCase();
+          let stream = res;
+          let decoderStream = null;
+          if (enc.includes('gzip')) {
+            decoderStream = zlib.createGunzip();
+            res.on('error', () => { try { decoderStream.destroy(); } catch (_) {} done({ status: 0, body: '' }); });
+            stream = res.pipe(decoderStream);
+          } else if (enc.includes('deflate')) {
+            decoderStream = zlib.createInflate();
+            res.on('error', () => { try { decoderStream.destroy(); } catch (_) {} done({ status: 0, body: '' }); });
+            stream = res.pipe(decoderStream);
+          }
+          const chunks = [];
+          let totalBytes = 0;
+          const maxBytes = 320000;
+          stream.on('data', (chunk) => {
+            if (totalBytes < maxBytes) {
+              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+              totalBytes += chunk.length;
+              if (totalBytes >= maxBytes) {
+                try { if (decoderStream) decoderStream.destroy(); } catch (_) {}
+                try { req.destroy(); } catch (_) {}
+                done({ status, body: Buffer.concat(chunks).toString('utf8') });
+              }
             }
-          }
+          });
+          stream.on('end', () => {
+            done({ status, body: Buffer.concat(chunks).toString('utf8') });
+          });
+          stream.on('error', () => {
+            try { if (decoderStream) decoderStream.destroy(); } catch (_) {}
+            done({ status, body: chunks.length ? Buffer.concat(chunks).toString('utf8') : '' });
+          });
         });
-        stream.on('end', () => {
-          done({ status, body: Buffer.concat(chunks).toString('utf8') });
-        });
-        stream.on('error', () => resolve({ status, body: chunks.length ? Buffer.concat(chunks).toString('utf8') : '' }));
-      });
-      req.on('timeout', () => { req.destroy(); resolve({ status: 0, body: '' }); });
-      req.on('error', () => resolve({ status: 0, body: '' }));
-    } catch (_) {
-      resolve({ status: 0, body: '' });
-    }
+        req.on('timeout', () => { try { req.destroy(); } catch (_) {} done({ status: 0, body: '' }); });
+        req.on('error', () => done({ status: 0, body: '' }));
+      } catch (_) {
+        resolve({ status: 0, body: '' });
+      }
+    });
   });
 }
 
@@ -7513,7 +7585,7 @@ async function requestHandler(req, res) {
     const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
     if (isRemote && pinCheck.valid && pinCheck.matchedTunnelPin) {
       try {
-        res.setHeader('Set-Cookie', `zoz_remote_pin=${encodeURIComponent(cloudflareTunnelPin)}; Path=/; Max-Age=31536000; SameSite=Lax`);
+        res.setHeader('Set-Cookie', buildRemotePinCookie(req, cloudflareTunnelPin));
       } catch (_) {}
     }
     const exposeHostPaths = !isRemote || pinCheck.valid;
@@ -8016,6 +8088,12 @@ async function requestHandler(req, res) {
       decodedUploadPath = decodeURIComponent(pathname);
     } catch (_) {}
     const uploadFilename = path.basename(decodedUploadPath);
+    if (uploadFilename.startsWith('wa_') && isRemoteTunnelRequest(req)) {
+      const waPinCheck = validateRemoteTerminalPin(req, reqUrl, null);
+      if (!waPinCheck.valid) {
+        return sendJSON(res, waPinCheck.status || 401, { error: 'Autentikasi PIN diperlukan untuk mengakses media WhatsApp.' });
+      }
+    }
     const resolvedUploadDir = path.resolve(UPLOADS_DIR);
     const resolvedUploadFile = path.resolve(UPLOADS_DIR, uploadFilename);
     if (!resolvedUploadFile.startsWith(resolvedUploadDir + path.sep)) {
@@ -8463,7 +8541,7 @@ async function requestHandler(req, res) {
     }
     if (isRemote && pinCheck.valid && pinCheck.matchedTunnelPin) {
       try {
-        res.setHeader('Set-Cookie', `zoz_remote_pin=${encodeURIComponent(cloudflareTunnelPin)}; Path=/; Max-Age=31536000; SameSite=Lax`);
+        res.setHeader('Set-Cookie', buildRemotePinCookie(req, cloudflareTunnelPin));
       } catch (_) {}
     }
     return sendJSON(res, 200, {
@@ -8481,9 +8559,11 @@ async function requestHandler(req, res) {
   if (pathname === '/api/terminal/tunnel-start' && method === 'POST') {
     const isRemote = isRemoteTunnelRequest(req);
     if (isRemote) {
-      const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
+      let startBody = null;
+      try { startBody = await readJSONBody(req); } catch (_) {}
+      const pinCheck = validateRemoteTerminalPin(req, reqUrl, startBody);
       if (!pinCheck.valid) {
-        return sendJSON(res, 401, { error: 'Akses ditolak: Hanya host lokal atau klien dengan PIN valid yang dapat memulai tunnel.' });
+        return sendJSON(res, pinCheck.status || 401, { error: 'Akses ditolak: Hanya host lokal atau klien dengan PIN valid yang dapat memulai tunnel.' });
       }
     }
     const result = await startCloudflareTunnel(null, true);
@@ -8493,9 +8573,11 @@ async function requestHandler(req, res) {
   if (pathname === '/api/terminal/tunnel-stop' && method === 'POST') {
     const isRemote = isRemoteTunnelRequest(req);
     if (isRemote) {
-      const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
+      let stopBody = null;
+      try { stopBody = await readJSONBody(req); } catch (_) {}
+      const pinCheck = validateRemoteTerminalPin(req, reqUrl, stopBody);
       if (!pinCheck.valid) {
-        return sendJSON(res, 401, { error: 'Akses ditolak: Hanya host lokal atau klien dengan PIN valid yang dapat mematikan tunnel.' });
+        return sendJSON(res, pinCheck.status || 401, { error: 'Akses ditolak: Hanya host lokal atau klien dengan PIN valid yang dapat mematikan tunnel.' });
       }
     }
     const result = stopCloudflareTunnel();
@@ -10395,16 +10477,21 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         return sendJSON(res, 400, { success: false, error: 'Parameter `prompt` diperlukan untuk menghasilkan atau mengedit gambar.' });
       }
 
-      // Resolusi URL foto referensi lokal (/uploads/...) ke data URI base64 jika ada
+      // Resolusi URL foto referensi lokal (/uploads/...) ke data URI base64 jika ada (hanya jika lokal atau terautentikasi PIN & <= 25 MB)
       let resolvedRefDataUrl = referenceImage;
-      if (typeof referenceImage === 'string' && referenceImage.startsWith('/uploads/')) {
-        const localRefPath = path.join(UPLOADS_DIR, path.basename(referenceImage));
+      const allowImageEditUploadRead = !isRemoteTunnelRequest(req) || validateRemoteTerminalPin(req, reqUrl, body).valid;
+      if (allowImageEditUploadRead && typeof referenceImage === 'string' && referenceImage.startsWith('/uploads/')) {
+        const refFile = path.basename(referenceImage);
+        const localRefPath = path.join(UPLOADS_DIR, refFile);
         if (fs.existsSync(localRefPath)) {
           try {
-            const refBuffer = fs.readFileSync(localRefPath);
-            const ext = path.extname(localRefPath).toLowerCase().replace('.', '');
-            const mime = ext === 'png' ? 'image/png' : (ext === 'webp' ? 'image/webp' : 'image/jpeg');
-            resolvedRefDataUrl = `data:${mime};base64,${refBuffer.toString('base64')}`;
+            const refStat = fs.statSync(localRefPath);
+            if (refStat.isFile() && refStat.size <= 25 * 1024 * 1024) {
+              const refBuffer = fs.readFileSync(localRefPath);
+              const ext = path.extname(localRefPath).toLowerCase().replace('.', '');
+              const mime = ext === 'png' ? 'image/png' : (ext === 'webp' ? 'image/webp' : 'image/jpeg');
+              resolvedRefDataUrl = `data:${mime};base64,${refBuffer.toString('base64')}`;
+            }
           } catch (_) {}
         }
       }
@@ -11622,6 +11709,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           userPrompt: null,
           userImages: null
         });
+        if (sessionId && !bridgeTaskToken) {
+          return sendJSON(res, 429, { error: 'Sesi chat sedang aktif digunakan oleh permintaan lain.' });
+        }
 
         // Multimodal Translation, Tool Normalization & Latent Reasoning Preservation
         const normalizedOrMessages = normalizeMessagesForOpenRouter(body.messages, {
@@ -11676,7 +11766,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
         const writeBridgeNdjson = (obj) => {
           const line = JSON.stringify(obj) + '\n';
-          if (sessionId) accumulateChatChunk(sessionId, line, 'ollama');
+          if (isTaskCurrent(sessionId, bridgeTaskToken)) accumulateChatChunk(sessionId, line, 'ollama');
           if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
             try { res.write(line); } catch (_) {}
           }
@@ -11836,7 +11926,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                     message: msgPayload,
                     done: true
                   };
-                  if (sessionId) accumulateChatChunk(sessionId, JSON.stringify(finalObj) + '\n', 'ollama');
+                  if (isTaskCurrent(sessionId, bridgeTaskToken)) accumulateChatChunk(sessionId, JSON.stringify(finalObj) + '\n', 'ollama');
                   finalizeBridgeTask(null);
                   if (!clientDisconnected && !res.writableEnded) {
                     sendJSON(res, 200, finalObj);
@@ -12156,7 +12246,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           targetModel = targetModel.replace(/(?:[:-]cloud)$/i, '');
         }
         body.model = targetModel;
-        if (sessionId && dbActiveChatTasks[sessionId]) {
+        if (isTaskCurrent(sessionId, ollamaTaskToken)) {
           dbActiveChatTasks[sessionId].model = targetModel;
           dbActiveChatTasks[sessionId].status = 'streaming';
         }
@@ -12178,12 +12268,12 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           headers: proxyHeaders,
           timeout: 300000
         }, (proxyRes) => {
-          if (sessionId && dbActiveChatTasks[sessionId]) {
+          if (isTaskCurrent(sessionId, ollamaTaskToken)) {
             dbActiveChatTasks[sessionId].proxyReq = proxyReq;
           }
 
           // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
-          if (sessionId && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+          if (isTaskCurrent(sessionId, ollamaTaskToken) && dbActiveChatTasks[sessionId]?.status === 'aborted') {
             if (!proxyReq.destroyed) proxyReq.destroy();
             delete dbActiveChatTasks[sessionId];
             return;
@@ -12364,7 +12454,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               const splicedHeaders = { ...proxyHeaders, 'Content-Length': Buffer.byteLength(splicedData) };
               const splicedFilter = textSafety.createProviderStreamFilter('ollama', 'stream', { userPrompt, bypassPreambleStrip: true });
               const splicedReq = client.request(ollamaUrl.toString(), { method: 'POST', headers: splicedHeaders, timeout: 300000 }, (splicedRes) => {
-                if (sessionId && dbActiveChatTasks[sessionId]) {
+                if (isTaskCurrent(sessionId, ollamaTaskToken)) {
                   dbActiveChatTasks[sessionId].proxyReq = splicedReq;
                 }
                 if (splicedRes.statusCode >= 400) {
@@ -12378,7 +12468,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 }
                 splicedRes.on('data', sChunk => {
                   const sSafe = splicedFilter.push(sChunk);
-                  if (sessionId && sSafe) accumulateChatChunk(sessionId, sSafe, 'ollama');
+                  if (isTaskCurrent(sessionId, ollamaTaskToken) && sSafe) accumulateChatChunk(sessionId, sSafe, 'ollama');
                   if (!clientDisconnected && !res.writableEnded && !res.destroyed && sSafe) {
                     try { res.write(sSafe); } catch (_) {}
                   }
@@ -12386,7 +12476,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 splicedRes.on('end', () => {
                   clearOllamaKeepAlive();
                   const sTail = splicedFilter.end();
-                  if (sessionId && sTail) accumulateChatChunk(sessionId, sTail, 'ollama');
+                  if (isTaskCurrent(sessionId, ollamaTaskToken) && sTail) accumulateChatChunk(sessionId, sTail, 'ollama');
                   if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
                     try { if (sTail) res.write(sTail); res.end(); } catch (_) {}
                   }
@@ -12416,7 +12506,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 }
               });
               proxyReq = splicedReq;
-              if (sessionId && dbActiveChatTasks[sessionId]) {
+              if (isTaskCurrent(sessionId, ollamaTaskToken)) {
                 dbActiveChatTasks[sessionId].proxyReq = splicedReq;
               }
               splicedReq.write(splicedData);
@@ -12930,6 +13020,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         userPrompt: userPrompt || null,
         userImages: userImages || null
       });
+      if (sessionId && !orTaskToken) {
+        return sendJSON(res, 429, { error: 'Sesi chat sedang aktif digunakan oleh permintaan lain.' });
+      }
 
       // Defense-in-depth: Normalisasi model jika format tanpa slash (misal format Ollama gemma4:31b) dikirim ke OpenRouter
       if (body.model && !body.model.includes('/')) {
@@ -12984,8 +13077,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         if (body.top_p !== undefined && !isNemotron) delete body.top_p;
       }
 
-      // Defense-in-depth: Resolusi gambar lokal (/uploads/) menjadi Base64 data URL agar OpenRouter tidak merejeksi private IP
-      if (Array.isArray(body.messages)) {
+      // Defense-in-depth: Resolusi gambar lokal (/uploads/) menjadi Base64 data URL (dengan guard akses & batas 25 MB)
+      const allowOrUploadRead = !isRemoteTunnelRequest(req) || validateRemoteTerminalPin(req, reqUrl, body).valid;
+      if (allowOrUploadRead && Array.isArray(body.messages)) {
         for (const msg of body.messages) {
           if (Array.isArray(msg.content)) {
             for (const part of msg.content) {
@@ -12993,14 +13087,17 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 const imgUrl = part.image_url.url;
                 const uploadMatch = imgUrl.match(/(?:\/uploads\/|^uploads\/)([a-zA-Z0-9_.-]+)$/);
                 if (uploadMatch) {
-                  const filename = uploadMatch[1];
+                  const filename = path.basename(uploadMatch[1]);
                   const localPath = path.join(UPLOADS_DIR, filename);
                   if (fs.existsSync(localPath)) {
                     try {
-                      const ext = path.extname(filename).toLowerCase().replace('.', '') || 'png';
-                      const mime = (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' : (ext === 'webp' ? 'image/webp' : 'image/png');
-                      const b64 = fs.readFileSync(localPath).toString('base64');
-                      part.image_url.url = `data:${mime};base64,${b64}`;
+                      const st = fs.statSync(localPath);
+                      if (st.isFile() && st.size <= 25 * 1024 * 1024) {
+                        const ext = path.extname(filename).toLowerCase().replace('.', '') || 'png';
+                        const mime = (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' : (ext === 'webp' ? 'image/webp' : 'image/png');
+                        const b64 = fs.readFileSync(localPath).toString('base64');
+                        part.image_url.url = `data:${mime};base64,${b64}`;
+                      }
                     } catch (_) {}
                   }
                 }
@@ -13189,7 +13286,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           }
 
           // Background task menerima frame yang sama setelah reasoning dihapus.
-          if (sessionId && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'openrouter');
+          if (isTaskCurrent(sessionId, orTaskToken) && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'openrouter');
 
           if (clientDisconnected || res.writableEnded || res.destroyed) {
             if (!sessionId && proxyReq && !proxyReq.destroyed) proxyReq.destroy();
@@ -13198,16 +13295,21 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           try {
             if (!safeChunk) return;
             const flushed = res.write(safeChunk);
-            // Resilient backpressure: pause only if client buffer is congested, with automatic 150ms resume safety
-            if (flushed === false && typeof proxyRes.pause === 'function') {
+            // Resilient backpressure: pause only if client buffer is congested, deduplicated drain listener
+            if (flushed === false && typeof proxyRes.pause === 'function' && !proxyRes._zozWaitingDrain) {
+              proxyRes._zozWaitingDrain = true;
               proxyRes.pause();
-              const resumeTimer = setTimeout(() => {
-                try { if (typeof proxyRes.resume === 'function') proxyRes.resume(); } catch (_) {}
-              }, 150);
-              res.once('drain', () => {
+              const onDrain = () => {
+                if (!proxyRes._zozWaitingDrain) return;
+                proxyRes._zozWaitingDrain = false;
                 clearTimeout(resumeTimer);
                 try { if (typeof proxyRes.resume === 'function') proxyRes.resume(); } catch (_) {}
-              });
+              };
+              const resumeTimer = setTimeout(() => {
+                try { res.removeListener('drain', onDrain); } catch (_) {}
+                onDrain();
+              }, 150);
+              res.once('drain', onDrain);
             }
           } catch (e) {}
         });
@@ -13215,7 +13317,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         proxyRes.on('end', () => {
           clearKeepAlive();
           const safeTail = reasoningFilter.end();
-          if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'openrouter');
+          if (isTaskCurrent(sessionId, orTaskToken) && safeTail) accumulateChatChunk(sessionId, safeTail, 'openrouter');
           if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
             try {
               if (safeTail) res.write(safeTail);
@@ -13462,9 +13564,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
   if (safePath === '/index.html' && isRemoteTunnelRequest(req)) {
     const qPin = reqUrl && reqUrl.searchParams && reqUrl.searchParams.get('pin');
-    if (qPin && String(qPin).trim() === String(cloudflareTunnelPin).trim()) {
+    if (qPin && constantTimePinEqual(String(qPin).trim(), String(cloudflareTunnelPin).trim())) {
       try {
-        res.setHeader('Set-Cookie', `zoz_remote_pin=${encodeURIComponent(cloudflareTunnelPin)}; Path=/; Max-Age=31536000; SameSite=Lax`);
+        res.setHeader('Set-Cookie', buildRemotePinCookie(req, cloudflareTunnelPin));
       } catch (_) {}
     }
   }
@@ -13823,6 +13925,11 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
     return;
   }
 
+  const earlyWsSocketError = () => {
+    try { socket.destroy(); } catch (_) {}
+  };
+  socket.on('error', earlyWsSocketError);
+
   const digest = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
   try {
     socket.setNoDelay(true);
@@ -14060,6 +14167,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       }
     }
   };
+  socket.removeListener('error', earlyWsSocketError);
   socket.on('close', cleanup);
   socket.on('end', cleanup);
   socket.on('error', cleanup);

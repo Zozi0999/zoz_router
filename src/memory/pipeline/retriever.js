@@ -132,7 +132,7 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
 
   // 4B. Counterfactual Error-Lesson Matching (High-Priority P(H_falsified) = 0 Signal)
   const queryTokens = extractContentTokens(q);
-  const allRecent = dbStorage.listMemories(uid, { scope, limit: 60 })
+  const allRecent = dbStorage.listMemories(uid, { scope: targetScope, limit: 60 })
     .filter(m => m && m.is_active !== 0 && m.isActive !== 0 && m.is_active !== false);
   if (queryTokens.length >= 2) {
     const errorLessons = allRecent.filter(m => m && (m.category === 'error_lesson' || String(m.content || '').startsWith('[KOREKSI KESALAHAN TERVERIFIKASI]')));

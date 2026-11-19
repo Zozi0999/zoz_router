@@ -223,7 +223,7 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
       return true;
     }
 
-    // 9. PATCH /api/memories/:id (Edit memory — scoped by userId + PII guarded)
+    // 9. PATCH /api/memories/:id (Edit memory — scoped by userId + guardrails)
     if (method === 'PATCH' && pathname.startsWith('/api/memories/')) {
       const memoryId = pathname.replace('/api/memories/', '').trim();
       if (!memoryId) {
@@ -231,10 +231,25 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
         return true;
       }
       const body = await parseJsonBody(req);
+      const patchPayload = {};
       if (typeof body.content === 'string') {
-        body.content = guardrails.redactPII(body.content);
+        const sanitized = guardrails.sanitizeFactCandidate(body.content);
+        if (!sanitized.accepted || !sanitized.content || !sanitized.content.trim()) {
+          sendJson(res, 400, { success: false, error: sanitized.reason || 'Konten memori tidak valid atau kosong.' });
+          return true;
+        }
+        patchPayload.content = sanitized.content;
       }
-      const updated = dbStorage.updateMemory(memoryId, body, userId);
+      if (typeof body.category === 'string' && body.category.trim()) {
+        patchPayload.category = body.category.trim();
+      }
+      if (typeof body.scope === 'string' && body.scope.trim()) {
+        patchPayload.scope = body.scope.trim();
+      }
+      if (typeof body.isActive !== 'undefined') {
+        patchPayload.isActive = Boolean(body.isActive);
+      }
+      const updated = dbStorage.updateMemory(memoryId, patchPayload, userId);
       if (!updated) {
         sendJson(res, 404, { success: false, error: 'Memori tidak ditemukan atau bukan milik akun Anda.' });
       } else {
@@ -271,11 +286,8 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
     }
   } catch (err) {
     console.warn('[Jozz Memory Route Handler Warning]:', err);
-    if (method === 'GET') {
-      sendJson(res, 200, { success: true, count: 0, memories: [], warning: err.message });
-      return true;
-    }
-    sendJson(res, 400, { success: false, error: err.message });
+    const statusCode = method === 'GET' ? 500 : 400;
+    sendJson(res, statusCode, { success: false, error: err.message });
     return true;
   }
 

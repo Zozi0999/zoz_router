@@ -90,7 +90,7 @@ function importMemories(userId, rawContent, format = 'json') {
   let importedCount = 0;
   let skippedCount = 0;
 
-  const existingMemories = dbStorage.listMemories(uid, { limit: 500 });
+  const existingMemories = dbStorage.listMemories(uid, { limit: 5000, allowLargeLimit: true });
   const existingSet = new Set(existingMemories.map(m => m.content.toLowerCase().trim()));
 
   if (format === 'json') {
@@ -151,6 +151,9 @@ function importMemories(userId, rawContent, format = 'json') {
 
     for (const line of lines) {
       const trimmed = line.trim();
+      if (/^##\s*2\./.test(trimmed) || /^##\s+.*Relasi\s+Graf/i.test(trimmed)) {
+        break;
+      }
       if (trimmed.startsWith('### Kategori:')) {
         currentCategory = trimmed.replace('### Kategori:', '').toLowerCase().trim();
         continue;

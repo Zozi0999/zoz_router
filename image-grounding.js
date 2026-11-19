@@ -1275,7 +1275,7 @@ function createImageGroundingService(options = {}) {
 
   // 2. Unsplash (Official REST API — Memerlukan UNSPLASH_ACCESS_KEY)
   async function searchUnsplash({ query, limit, per_page, orientation, safe_search, preTranslatedQuery }) {
-    const accessKey = String(env.UNSPLASH_ACCESS_KEY || '6D3jZXR5oFhk-iV-7pQwA68CkbGUve_SHz-fzESK0Rw').trim();
+    const accessKey = String(env.UNSPLASH_ACCESS_KEY || '').trim();
     if (!accessKey) {
       return {
         images: [],
@@ -1682,7 +1682,7 @@ function createImageGroundingService(options = {}) {
     } else {
       // Utamakan API resmi Unsplash (per_page: 3) jika kredensial UNSPLASH_ACCESS_KEY tersedia,
       // dengan fallback otomatis ke Wikimedia Commons bila kuota habis atau hasil kosong.
-      const effectiveUnsplashKey = String(env.UNSPLASH_ACCESS_KEY || '6D3jZXR5oFhk-iV-7pQwA68CkbGUve_SHz-fzESK0Rw').trim();
+      const effectiveUnsplashKey = String(env.UNSPLASH_ACCESS_KEY || '').trim();
       if (effectiveUnsplashKey) {
         targetSources = ['unsplash'];
       } else {
@@ -2027,7 +2027,7 @@ function createImageGroundingService(options = {}) {
   }
 
   async function triggerUnsplashDownloadPing(candidate) {
-    const accessKey = String(env.UNSPLASH_ACCESS_KEY || '6D3jZXR5oFhk-iV-7pQwA68CkbGUve_SHz-fzESK0Rw').trim();
+    const accessKey = String(env.UNSPLASH_ACCESS_KEY || '').trim();
     if (!accessKey || !candidate._unsplashDownloadLocation) return;
     if (pingedUnsplashIds.has(candidate.image_id)) return;
     if (pingedUnsplashIds.size > 1000) pingedUnsplashIds.clear();
@@ -2232,13 +2232,16 @@ function createImageGroundingService(options = {}) {
       return;
     }
 
+    const isHeadReq = String(method).toUpperCase() === 'HEAD';
     const allowRule = getMediaRuleForSource(entry.source_name);
     const upstream = await secureHttpsFetch(entry.url, {
       allowRule,
       headers: {
-        Accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,*/*;q=0.1'
+        Accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,*/*;q=0.1',
+        ...(isHeadReq ? { Range: 'bytes=0-4095' } : {})
       },
       maxBytes: MAX_ASSET_STREAM_BYTES,
+      stopAfterBytes: isHeadReq ? 4096 : null,
       timeoutMs: DEFAULT_TIMEOUT_MS
     });
 
@@ -2267,15 +2270,27 @@ function createImageGroundingService(options = {}) {
       : 'public, max-age=3600, stale-while-revalidate=7200';
 
     if (res.headersSent || res.writableEnded) return;
-    res.writeHead(200, {
+    let headContentLength = null;
+    if (isHeadReq && upstream.headers) {
+      const cr = String(upstream.headers['content-range'] || '');
+      const crMatch = cr.match(/\/(\d+)$/);
+      if (crMatch) headContentLength = crMatch[1];
+      else if (upstream.headers['content-length'] && !upstream.truncated) headContentLength = String(upstream.headers['content-length']);
+    }
+    const respHeaders = {
       'Content-Type': sniffed.mimeType,
-      'Content-Length': String(upstream.buffer.length),
       'X-Content-Type-Options': 'nosniff',
       'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'",
       'Cross-Origin-Resource-Policy': 'cross-origin',
       'Cache-Control': cacheHeader
-    });
-    if (String(method).toUpperCase() === 'HEAD') {
+    };
+    if (!isHeadReq) {
+      respHeaders['Content-Length'] = String(upstream.buffer.length);
+    } else if (headContentLength) {
+      respHeaders['Content-Length'] = headContentLength;
+    }
+    res.writeHead(200, respHeaders);
+    if (isHeadReq) {
       res.end();
       return;
     }

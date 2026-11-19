@@ -2376,7 +2376,8 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 }
 
 .message-content-box {
-  max-width: 82%;
+  max-width: min(92%, 860px);
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -2384,7 +2385,8 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 }
 
 .message-row.user .message-content-box {
-  max-width: 70%;
+  max-width: 74%;
+  flex: 0 1 auto;
   align-items: flex-end;
   margin-left: auto;
 }
@@ -2486,26 +2488,27 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 }
 
 .message-row.user .message-bubble {
-  background: linear-gradient(135deg, rgba(0, 240, 255, 0.14), rgba(0, 255, 194, 0.08));
-  border: 1.5px solid var(--neon-cyan);
-  color: #FFF;
-  border-top-right-radius: 4px;
-  border-radius: 18px 18px 4px 18px;
-  box-shadow: 0 4px 18px rgba(0, 240, 255, 0.16);
+  background: rgba(255, 255, 255, 0.065);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: none;
+  color: #F8FAFC;
+  border-radius: 22px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.14);
   width: fit-content;
   max-width: 100%;
   margin-left: auto;
   text-align: left;
   font-family: var(--font-reading);
-  font-size: 1.12rem;
+  font-size: 1.08rem;
   line-height: 1.62;
-  padding: 13px 18px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  padding: 12px 18px;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .message-row.user .message-bubble:hover {
-  border-color: #00F0FF;
-  box-shadow: 0 4px 22px rgba(0, 240, 255, 0.28);
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
 }
 
 .message-row.user .message-actions-bar {
@@ -2514,11 +2517,12 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 }
 
 .message-row.assistant .message-bubble {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
   color: #F1F5F9;
-  padding: 18px 22px;
-  border-top-left-radius: 4px;
+  padding: 4px 2px 6px 0;
   min-width: 0;
   max-width: 100%;
 }
@@ -2913,7 +2917,7 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 .composer-container {
   flex-shrink: 0;
   padding: 10px 20px 14px;
-  background: linear-gradient(180deg, transparent 0%, var(--bg-core) 30%);
+  background: linear-gradient(180deg, transparent 0%, rgba(7, 8, 12, 0.34) 100%);
   position: relative;
   z-index: 60;
 }
@@ -3068,22 +3072,24 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   padding-bottom: 12px;
 }
 
-/* Composer Box (DeepSeek Vertical Card Architecture) */
+/* Composer Box (Floating Translucent Borderless Glass Dock) */
 .composer-box {
   position: relative;
   max-width: 920px;
   width: 100% !important;
   margin: 0 auto;
-  background: rgba(13, 16, 26, 0.95) !important;
-  border: 1.5px solid rgba(0, 240, 255, 0.35) !important;
-  border-radius: 20px !important;
-  padding: 10px 14px !important;
+  background: rgba(255, 255, 255, 0.055) !important;
+  backdrop-filter: blur(14px) saturate(130%);
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
+  border: none !important;
+  border-radius: 24px !important;
+  padding: 11px 16px !important;
   display: flex !important;
   flex-direction: column !important;
   align-items: stretch !important;
   gap: 8px !important;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 242, 254, 0.12) !important;
-  transition: border-color 0.25s, box-shadow 0.25s;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+  transition: background 0.22s ease, box-shadow 0.22s ease;
 }
 
 /* Inner input flow: wrap into full-width textarea on top, toolbar on bottom */
@@ -3284,20 +3290,23 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   display: none !important;
 }
 
-.composer-box:hover {
-  border-color: rgba(0, 240, 255, 0.75);
-  box-shadow: 0 8px 28px rgba(0, 240, 255, 0.16);
+.composer-box:not(.studio-composer-box):hover {
+  background: rgba(255, 255, 255, 0.075) !important;
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
 }
 
-.composer-box:focus-within {
-  border-color: var(--neon-cyan);
-  box-shadow: 0 8px 28px rgba(0, 240, 255, 0.25), 0 0 14px rgba(0, 240, 255, 0.2);
+.composer-box:not(.studio-composer-box):focus-within {
+  background: rgba(255, 255, 255, 0.09) !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.16) !important;
 }
 
-.composer-box.drag-file-over {
-  border-color: #2dd4bf !important;
+.composer-box.drag-file-over,
+#mainContent .composer-box.drag-file-over,
+#mainContent.ai-nature-themed .composer-box.drag-file-over,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box.drag-file-over {
+  border: 1.5px solid #2dd4bf !important;
   box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.45), 0 12px 36px rgba(45, 212, 191, 0.28) !important;
-  background: rgba(15, 28, 36, 0.96) !important;
+  background: rgba(15, 28, 36, 0.92) !important;
 }
 
 .global-file-drop-overlay {
@@ -3357,15 +3366,19 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   line-height: 1.45;
 }
 
-body #mainContent .composer-box.image-mode-active {
-  border-color: #FF007F !important;
-  box-shadow: 0 8px 30px rgba(255, 0, 127, 0.22), inset 0 0 12px rgba(255, 0, 127, 0.08) !important;
+body #mainContent .composer-box.image-mode-active,
+body #mainContent.ai-nature-themed .composer-box.image-mode-active,
+body #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box.image-mode-active {
+  border: 1.5px solid #FF007F !important;
+  box-shadow: 0 8px 30px rgba(255, 0, 127, 0.24), inset 0 0 12px rgba(255, 0, 127, 0.1) !important;
   animation: cyberImagePulse 3s infinite ease-in-out;
 }
 
-body #mainContent .composer-box.image-mode-active:focus-within {
-  border-color: #FF2E93 !important;
-  box-shadow: 0 8px 36px rgba(255, 0, 127, 0.32), inset 0 0 16px rgba(255, 0, 127, 0.12) !important;
+body #mainContent .composer-box.image-mode-active:focus-within,
+body #mainContent.ai-nature-themed .composer-box.image-mode-active:focus-within,
+body #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box.image-mode-active:focus-within {
+  border: 1.5px solid #FF2E93 !important;
+  box-shadow: 0 8px 36px rgba(255, 0, 127, 0.34), inset 0 0 16px rgba(255, 0, 127, 0.14) !important;
 }
 
 @keyframes cyberImagePulse {
@@ -3391,15 +3404,19 @@ body #mainContent .composer-box.image-mode-active .send-btn:hover {
   box-shadow: 0 0 22px rgba(255, 0, 127, 0.65) !important;
 }
 
-body #mainContent .composer-box.music-mode-active {
-  border-color: #00FFC2 !important;
-  box-shadow: 0 8px 30px rgba(0, 255, 194, 0.22), inset 0 0 12px rgba(0, 255, 194, 0.08) !important;
+body #mainContent .composer-box.music-mode-active,
+body #mainContent.ai-nature-themed .composer-box.music-mode-active,
+body #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box.music-mode-active {
+  border: 1.5px solid #00FFC2 !important;
+  box-shadow: 0 8px 30px rgba(0, 255, 194, 0.24), inset 0 0 12px rgba(0, 255, 194, 0.1) !important;
   animation: cyberMusicPulse 3s infinite ease-in-out;
 }
 
-body #mainContent .composer-box.music-mode-active:focus-within {
-  border-color: #00F0FF !important;
-  box-shadow: 0 8px 36px rgba(0, 240, 255, 0.32), inset 0 0 16px rgba(0, 240, 255, 0.12) !important;
+body #mainContent .composer-box.music-mode-active:focus-within,
+body #mainContent.ai-nature-themed .composer-box.music-mode-active:focus-within,
+body #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box.music-mode-active:focus-within {
+  border: 1.5px solid #00F0FF !important;
+  box-shadow: 0 8px 36px rgba(0, 240, 255, 0.34), inset 0 0 16px rgba(0, 240, 255, 0.14) !important;
 }
 
 @keyframes cyberMusicPulse {
@@ -5642,21 +5659,22 @@ body.mobile-sidebar-open #sidebar.open + .sidebar-backdrop {
     max-width: 100%;
     margin-left: auto;
     font-family: var(--font-reading);
-    font-size: 1.12rem;
+    font-size: 1.08rem;
     line-height: 1.6;
-    padding: 12px 16px;
-    border-radius: 20px 20px 4px 20px;
-    background: linear-gradient(135deg, rgba(0, 240, 255, 0.16), rgba(0, 255, 194, 0.08));
-    border: 1.5px solid var(--neon-cyan);
-    box-shadow: 0 4px 18px rgba(0, 240, 255, 0.18);
+    padding: 11px 16px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
     color: #FFFFFF;
   }
 
   .message-row.assistant .message-bubble {
-    background: rgba(14, 18, 28, 0.94);
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-radius: 16px 16px 16px 4px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 2px 2px 6px 0;
   }
 
   .message-meta {
@@ -5882,10 +5900,20 @@ body.mobile-sidebar-open #sidebar.open + .sidebar-backdrop {
     background: rgba(10, 14, 24, 0.96) !important;
   }
   #mainContent:not(.ai-nature-themed):not(.wa-chat-themed) .composer-container {
-    background: linear-gradient(180deg, rgba(10, 14, 24, 0) 0%, rgba(10, 14, 24, 0.98) 25%) !important;
+    background: linear-gradient(180deg, rgba(10, 14, 24, 0) 0%, rgba(10, 14, 24, 0.45) 100%) !important;
   }
-  #mainContent:not(.wa-chat-themed) .composer-box {
-    background: rgba(13, 17, 28, 0.95) !important;
+  #mainContent:not(.wa-chat-themed) .composer-box:not(.studio-composer-box),
+  #mainContent:not(.wa-chat-themed) .composer-box:not(.studio-composer-box):hover,
+  #mainContent:not(.wa-chat-themed) .composer-box:not(.studio-composer-box):focus-within {
+    background: rgba(18, 22, 34, 0.68) !important;
+    border: none !important;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.09) !important;
+  }
+  #mainContent.wa-chat-themed .composer-box:not(.studio-composer-box),
+  #mainContent.wa-chat-themed .composer-box:not(.studio-composer-box):hover,
+  #mainContent.wa-chat-themed .composer-box:not(.studio-composer-box):focus-within {
+    background: rgba(18, 22, 34, 0.72) !important;
+    border: none !important;
   }
 }
 
@@ -16887,15 +16915,17 @@ body.mermaid-has-fullscreen {
     padding-right: 8px !important;
   }
 
-  /* DeepSeek-style 2-row Composer Card */
-  .composer-box {
-    background: rgba(13, 16, 26, 0.94) !important;
-    border: 1px solid rgba(0, 242, 254, 0.28) !important;
-    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 242, 254, 0.15) !important;
+  /* Floating Translucent Borderless Composer Dock (Mobile — preserve .studio-composer-box styling) */
+  .composer-box:not(.studio-composer-box),
+  .composer-box:not(.studio-composer-box):hover,
+  .composer-box:not(.studio-composer-box):focus-within {
+    background: rgba(18, 22, 34, 0.68) !important;
+    border: none !important;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.09) !important;
   }
-  .composer-box {
-    padding: 10px 12px !important;
-    border-radius: 20px !important;
+  .composer-box:not(.studio-composer-box) {
+    padding: 10px 14px !important;
+    border-radius: 24px !important;
     display: flex !important;
     flex-direction: column !important;
     align-items: stretch !important;
@@ -20307,19 +20337,100 @@ svg.lucide,
     linear-gradient(160deg, #06181a 0%, #091827 52%, #0d1329 100%) !important;
 }
 
-/* Keep default ZOZ chat bubble & composer legibility cleanly separated from patterned/light wallpapers (no theme tinting on UI!) */
+/* Floating borderless typography & translucent dock blending directly into themed wallpapers */
 #mainContent.ai-nature-themed .message-row.user .message-bubble {
-  background: linear-gradient(135deg, rgba(10, 22, 32, 0.95), rgba(11, 19, 30, 0.97)) !important;
-  border: 1.5px solid var(--neon-cyan) !important;
+  background: rgba(255, 255, 255, 0.085) !important;
+  border: none !important;
   color: #F8FAFC !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32) !important;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18) !important;
 }
 
 #mainContent.ai-nature-themed .message-row.assistant .message-bubble {
-  background: rgba(13, 15, 23, 0.95) !important;
-  border: 1px solid #1e2438 !important;
-  color: #F1F5F9 !important;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28) !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  color: #F8FAFC !important;
+  box-shadow: none !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.42);
+}
+
+/* High-contrast floating ink on light apple-orchard canvas */
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble p,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble li,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h1,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h2,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h3,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h4,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h5,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h6,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble strong,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble b,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble em,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble del,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble blockquote,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .katex,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble table td {
+  color: #0f172a !important;
+  text-shadow: none !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble hr,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h1 {
+  border-color: rgba(15, 23, 42, 0.16) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble table th {
+  background: rgba(15, 23, 42, 0.08) !important;
+  color: #0f172a !important;
+  border-color: rgba(15, 23, 42, 0.16) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble table td {
+  border-color: rgba(15, 23, 42, 0.12) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble table tbody tr:nth-child(even) {
+  background: rgba(15, 23, 42, 0.04) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .reasoning-block {
+  background: rgba(15, 23, 42, 0.055) !important;
+  border-color: rgba(15, 23, 42, 0.14) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .reasoning-block summary,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .reasoning-content,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .reasoning-badge {
+  color: #1e293b !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble a {
+  color: #0369a1 !important;
+}
+
+/* Preserve light text inside embedded dark media/code cards on light apple-orchard canvas */
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .youtube-preview-card,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .youtube-preview-card h4,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .youtube-preview-card p,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .youtube-preview-card strong,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .youtube-preview-card a,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .code-block-wrapper,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .code-block-wrapper pre,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .code-block-wrapper code {
+  color: #f1f5f9 !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble :not(pre) > code {
+  background: rgba(15, 23, 42, 0.08) !important;
+  color: #0f172a !important;
+  border-color: rgba(15, 23, 42, 0.14) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.user .message-bubble {
+  background: rgba(15, 23, 42, 0.075) !important;
+  color: #0f172a !important;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06) !important;
 }
 
 /* Only canvas-floating typography adjusts contrast on light apple-orchard canvas; interactive pills/UI stay neutral */
@@ -20370,14 +20481,62 @@ svg.lucide,
   border-color: rgba(0, 240, 255, 0.3) !important;
 }
 
-/* Subtle bottom blend so themed wallpaper remains visible behind the default dark composer dock */
+/* Seamless translucent composer dock over themed wallpapers */
 #mainContent.ai-nature-themed .composer-container {
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, var(--nature-bottom-fade, rgba(7, 8, 12, 0.42)) 90%) !important;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, var(--nature-bottom-fade, rgba(7, 8, 12, 0.24)) 100%) !important;
 }
 
-#mainContent.ai-nature-themed .composer-box {
-  background: rgba(13, 16, 26, 0.95) !important;
-  border-color: rgba(0, 240, 255, 0.35) !important;
+#mainContent.ai-nature-themed .composer-box:not(.studio-composer-box) {
+  background: rgba(12, 16, 26, 0.42) !important;
+  border: none !important;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+}
+
+#mainContent.ai-nature-themed .composer-box:not(.studio-composer-box):hover {
+  background: rgba(12, 16, 26, 0.5) !important;
+}
+
+#mainContent.ai-nature-themed .composer-box:not(.studio-composer-box):focus-within {
+  background: rgba(12, 16, 26, 0.58) !important;
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.16) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box:not(.studio-composer-box) {
+  background: rgba(255, 255, 255, 0.58) !important;
+  border: none !important;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box:not(.studio-composer-box):hover,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box:not(.studio-composer-box):focus-within {
+  background: rgba(255, 255, 255, 0.72) !important;
+  box-shadow: 0 10px 32px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
+}
+
+@media (max-width: 768px) {
+  #mainContent.ai-nature-themed .composer-box:not(.studio-composer-box) {
+    background: rgba(12, 16, 26, 0.74) !important;
+  }
+  #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box:not(.studio-composer-box) {
+    background: rgba(255, 255, 255, 0.84) !important;
+  }
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box #promptInput {
+  color: #0f172a !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box #promptInput::placeholder {
+  color: #475569 !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box .composer-btn:not(.active):not(.recording):not([class*="mode-"]) {
+  color: #334155 !important;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box .composer-btn:not(.active):not(.recording):not([class*="mode-"]):hover {
+  background: rgba(15, 23, 42, 0.1) !important;
+  color: #0f172a !important;
 }
 
 
