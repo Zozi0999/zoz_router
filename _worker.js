@@ -17,9 +17,9 @@ function isPrivateHostname(hostname) {
   if (/^198\.51\.100\./.test(h)) return true; // 198.51.100.0/24 TEST-NET-2 (RFC 5737)
   if (/^203\.0\.113\./.test(h)) return true; // 203.0.113.0/24 TEST-NET-3 (RFC 5737)
   if (/^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\./.test(h)) return true; // 224.0.0.0/4 multicast & 240.0.0.0/4 reserved (RFC 1112)
-  if (/^fc00:|^fe80:/i.test(h)) return true; // IPv6 Unique Local & Link-Local
+  if (/^f[cd][0-9a-f]{2}:|^fe[89ab][0-9a-f]:/i.test(h)) return true; // IPv6 Unique Local (fc00::/7, incl. fd00::/8) & Link-Local (fe80::/10)
   if (h.startsWith('::ffff:')) return true; // Block all IPv4-mapped IPv6
-  if (h.startsWith('::7f00:') || h.startsWith('::a9fe:') || h.startsWith('::c0a8:') || h.startsWith('::0a')) return true; // Block mapped hex variants
+  if (/^::(?:7f[0-9a-f]{0,2}:|a9fe:|c0a8:|0?a[0-9a-f]{0,2}:|ac1[0-9a-f]:)/i.test(h)) return true; // Block IPv4-compatible hex variants (incl. ::a00:1)
   if (h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.localhost')) return true;
 
   // Proteksi DNS Rebinding & Subdomain Private IP Tunnel
@@ -881,9 +881,14 @@ function envKeyAllowed(request, env) {
     return true;
   }
 
-  // 2. Proteksi lintas-asal browser
-  const sfs = request.headers.get('sec-fetch-site');
-  if (sfs && sfs !== 'same-origin' && sfs !== 'none') return false;
+  // 2. Proteksi lintas-asal browser (wajib ada Sec-Fetch-Site: same-origin / same-site kecuali diizinkan eksplisit)
+  const sfs = (request.headers.get('sec-fetch-site') || '').toLowerCase();
+  const allowNonBrowser = Boolean(env && (env.ZOX_ALLOW_NON_BROWSER === '1' || env.ZOX_ALLOW_CURL === '1'));
+  if (!sfs) {
+    if (!allowNonBrowser) return false;
+  } else if (sfs !== 'same-origin' && sfs !== 'same-site' && sfs !== 'none') {
+    return false;
+  }
 
   let reqHost = '';
   try {
@@ -942,7 +947,7 @@ export default {
     // yang diteruskan ke TUNNEL_GATEWAY_URL (server laptop).
     // Pemanggilan AI & API Key (OpenRouter, Ollama Cloud, Search Web, Models, Sessions)
     // BERJALAN 100% MANDIRI DI CLOUDFLARE EDGE TANPA PERNAH BERGANTUNG PADA LAPTOP!
-    const TUNNEL_GATEWAY_URL = 'https://product-debian-broadcasting-pennsylvania.trycloudflare.com';
+    const TUNNEL_GATEWAY_URL = 'https://irrigation-symbol-pictures-crew.trycloudflare.com';
     let reqBodyBytes = null;
 
     const isLaptopOnlyRoute = url.pathname.startsWith('/api/terminal') ||
@@ -1286,13 +1291,15 @@ export default {
         }
         const authHeaderVal = request.headers.get('Authorization') || request.headers.get('authorization') || '';
         const bearerKey = authHeaderVal.startsWith('Bearer ') ? authHeaderVal.slice(7).trim() : authHeaderVal.trim();
-        const rawOllamaKey = sanitizeOllamaApiKey(
+        const clientOllamaKey = sanitizeOllamaApiKey(
           (body.ollamaApiKey && !String(body.ollamaApiKey).startsWith('sk-or-')) ? String(body.ollamaApiKey) :
           (request.headers.get('x-ollama-key') && !String(request.headers.get('x-ollama-key')).startsWith('sk-or-') ? String(request.headers.get('x-ollama-key')) :
           (request.headers.get('x-api-key') && !String(request.headers.get('x-api-key')).startsWith('sk-or-') ? String(request.headers.get('x-api-key')) :
           ((body.apiKey && !String(body.apiKey).startsWith('sk-or-')) ? String(body.apiKey) :
           (bearerKey && !bearerKey.startsWith('sk-or-') ? bearerKey : null))))
-        ) || (envKeyAllowed(request, env) ? sanitizeOllamaApiKey(env?.OLLAMA_API_KEY) : null);
+        );
+        const envOllamaKey = envKeyAllowed(request, env) ? sanitizeOllamaApiKey(env?.OLLAMA_API_KEY) : null;
+        const rawOllamaKey = clientOllamaKey || envOllamaKey;
 
         const targetEndpoint = body.endpoint || 'https://ollama.com';
         let cleanEndpoint = (targetEndpoint || 'https://ollama.com').trim();
@@ -1614,9 +1621,12 @@ export default {
           'Content-Type': 'application/json',
           'User-Agent': 'ZozRouter/1.0 (Windows NT 10.0; Win64; x64)'
         };
-        if (rawOllamaKey) {
-          headers['Authorization'] = `Bearer ${rawOllamaKey}`;
-          headers['x-ollama-key'] = rawOllamaKey;
+        const targetHostLower = (parsedBase.hostname || '').toLowerCase();
+        const isOfficialOllamaHost = targetHostLower === 'ollama.com' || targetHostLower === 'api.ollama.com' || targetHostLower.endsWith('.ollama.com');
+        const effectiveOllamaKey = clientOllamaKey || (isOfficialOllamaHost ? envOllamaKey : null);
+        if (effectiveOllamaKey) {
+          headers['Authorization'] = `Bearer ${effectiveOllamaKey}`;
+          headers['x-ollama-key'] = effectiveOllamaKey;
         }
 
         const resolvedModel = body.model || 'llama3.2:3b';
@@ -1663,6 +1673,7 @@ export default {
           method: 'POST',
           headers,
           body: JSON.stringify(outBody),
+          redirect: 'manual',
           signal: request.signal
         });
 
@@ -1750,7 +1761,7 @@ export default {
 
         let res = null;
         try {
-          res = await fetch(targetUrl.toString(), { headers, signal: AbortSignal.timeout(5000) });
+          res = await fetch(targetUrl.toString(), { headers, redirect: 'manual', signal: AbortSignal.timeout(5000) });
         } catch (_) {}
 
         if (res && res.ok) {
@@ -1783,7 +1794,7 @@ export default {
           } else {
             v1Url.pathname = (v1Path ? v1Path : '') + '/v1/models';
           }
-          const v1Res = await fetch(v1Url.toString(), { headers, signal: AbortSignal.timeout(3500) }).catch(() => null);
+          const v1Res = await fetch(v1Url.toString(), { headers, redirect: 'manual', signal: AbortSignal.timeout(3500) }).catch(() => null);
           if (v1Res && v1Res.ok) {
             const v1Text = await v1Res.text();
             const v1Parsed = JSON.parse(v1Text);
@@ -3274,7 +3285,8 @@ export default {
         }
         if (!effectiveQuery) effectiveQuery = 'popular trending videos';
 
-        const safeLimit = Math.min(Math.max(limit, 1), 10);
+        const parsedLim = Number(limit);
+        const safeLimit = Math.min(Math.max(Number.isFinite(parsedLim) ? parsedLim : 6, 1), 10);
         let mapped = [];
 
         const isAdult = /porn|sex|hentai|creampie|squirt|cunt|pussy|tits|blowjob|anal|milf|jav|boobs|nsfw|xxx|slut/i.test(effectiveQuery) ||
@@ -3406,6 +3418,92 @@ export default {
         });
       }
     }
+
+    // Helper implementasi tool pencarian sumber web, ekstraksi konten URL, & rangkuman sumber di Cloudflare Edge
+    const searchWebSources = async ({ query = '', sources = [], max_results = 5 }) => {
+      const cleanQ = String(query || '').trim();
+      if (!cleanQ) return { success: false, error: 'Parameter query wajib diisi.', results: [] };
+      const cap = Math.min(Math.max(Number.isFinite(Number(max_results)) ? Number(max_results) : 5, 1), 10);
+      const domainMap = {
+        github: 'github.com',
+        bloomberg: 'bloomberg.com',
+        reddit: 'reddit.com',
+        x: 'x.com',
+        twitter: 'x.com',
+        cnn: 'cnn.com',
+        cna: 'cna.al',
+        arxiv: 'arxiv.org'
+      };
+      const siteFilters = (Array.isArray(sources) ? sources : [])
+        .map(s => domainMap[String(s || '').toLowerCase()] || String(s || '').replace(/[^a-z0-9.-]/gi, ''))
+        .filter(Boolean);
+      const effectiveQ = siteFilters.length > 0
+        ? `${cleanQ} (${siteFilters.map(d => `site:${d}`).join(' OR ')})`
+        : cleanQ;
+      const ddgRes = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(effectiveQ)}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36' },
+        signal: AbortSignal.timeout(8000)
+      });
+      const html = ddgRes.ok ? await ddgRes.text() : '';
+      const results = [];
+      const linkRe = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+      let m;
+      while ((m = linkRe.exec(html)) !== null && results.length < cap) {
+        let rawHref = m[1];
+        const uddg = rawHref.match(/[?&]uddg=([^&]+)/);
+        if (uddg) {
+          try { rawHref = decodeURIComponent(uddg[1]); } catch (_) {}
+        }
+        const title = m[2].replace(/<[^>]+>/g, '').trim();
+        if (/^https?:\/\//i.test(rawHref)) {
+          results.push({ title: title || rawHref, url: rawHref });
+        }
+      }
+      return { success: true, query: cleanQ, count: results.length, results };
+    };
+
+    const fetchUrlContent = async ({ url: targetUrl = '', extract_mode = 'full_text' }) => {
+      const cleanUrl = String(targetUrl || '').trim();
+      if (!cleanUrl) return { success: false, error: 'Parameter url wajib diisi.' };
+      let parsed;
+      try { parsed = new URL(cleanUrl); } catch (_) { return { success: false, error: 'URL tidak valid.' }; }
+      if (!['http:', 'https:'].includes(parsed.protocol) || isPrivateHostname(parsed.hostname)) {
+        return { success: false, error: 'Target URL privat atau tidak diizinkan.' };
+      }
+      const res = await fetch(parsed.toString(), {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(9000)
+      });
+      if (!res.ok) return { success: false, status: res.status, error: `HTTP ${res.status}` };
+      const rawHtml = await res.text();
+      const text = rawHtml
+        .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const maxLen = extract_mode === 'summary' ? 2500 : 12000;
+      return { success: true, url: parsed.toString(), content: text.slice(0, maxLen) };
+    };
+
+    const summarizeSources = async ({ query = '', urls = [] }) => {
+      const validUrls = (Array.isArray(urls) ? urls : []).slice(0, 5);
+      const items = [];
+      for (const u of validUrls) {
+        try {
+          const item = await fetchUrlContent({ url: u, extract_mode: 'summary' });
+          if (item && item.success) items.push({ url: u, excerpt: item.content });
+        } catch (_) {}
+      }
+      return {
+        success: true,
+        query,
+        sourcesCount: items.length,
+        sources: items,
+        summary: items.map((it, idx) => `[${idx + 1}] ${it.url}:\n${it.excerpt}`).join('\n\n')
+      };
+    };
 
     // 1. Search Web Sources Tool API (Whitelisted Sources: GitHub, Bloomberg, Reddit, X, CNN, CNA Albania, arXiv)
     if (url.pathname === '/api/tools/search-web-sources' && (request.method === 'GET' || request.method === 'POST')) {
@@ -3729,14 +3827,31 @@ export default {
           }
         } catch (_) {}
 
-        // 2. Fallback direct fetch jika Jina gagal
+        // 2. Fallback direct fetch jika Jina gagal (dengan proteksi redirect manual terhadap SSRF)
         if (!content) {
           try {
-            const directRes = await fetch(cleanTarget, {
-              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-              signal: AbortSignal.timeout(10000)
-            });
-            if (directRes.ok) {
+            let currentFetchUrl = cleanTarget;
+            let directRes = null;
+            for (let hop = 0; hop < 4; hop++) {
+              const hopRes = await fetch(currentFetchUrl, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+                redirect: 'manual',
+                signal: AbortSignal.timeout(10000)
+              });
+              if ([301, 302, 303, 307, 308].includes(hopRes.status)) {
+                const loc = hopRes.headers.get('location');
+                if (!loc) break;
+                const nextUrl = new URL(loc, currentFetchUrl);
+                if (!['http:', 'https:'].includes(nextUrl.protocol) || isPrivateHostname(nextUrl.hostname)) {
+                  break;
+                }
+                currentFetchUrl = nextUrl.toString();
+                continue;
+              }
+              directRes = hopRes;
+              break;
+            }
+            if (directRes && directRes.ok) {
               const directCtype = String(directRes.headers.get('content-type') || '').toLowerCase();
               const isNonTextMime = /^(?:image|audio|video)\/|application\/(?:pdf|octet-stream|zip|x-gzip|msword|vnd\.openxmlformats-)/.test(directCtype);
               if (isNonTextMime) {
@@ -4044,8 +4159,32 @@ export default {
 
     const isAllowedEdgeCdnHost = (hostname) => {
       const h = String(hostname || '').toLowerCase();
-      const ALLOWED_CDN = ['upload.wikimedia.org', 'thumb.wikimedia.org', 'images.unsplash.com', 'images.pexels.com', 'pixabay.com'];
+      const ALLOWED_CDN = ['upload.wikimedia.org', 'thumb.wikimedia.org', 'images.unsplash.com', 'images.pexels.com', 'cdn.pixabay.com'];
       return ALLOWED_CDN.some((d) => h === d || h.endsWith(`.${d}`));
+    };
+
+    const isSafeRasterAssetUrl = (u) => {
+      if (!u || u.protocol !== 'https:' || !isAllowedEdgeCdnHost(u.hostname)) return false;
+      if (/\.(?:svg|svgz|html?|xhtml|xml|js|mjs|php)(?:$|\?)/i.test(u.pathname || '')) return false;
+      return true;
+    };
+
+    const buildSafeImageProxyResponse = (upRes) => {
+      if (!upRes || !upRes.ok) return null;
+      const rawCtype = String(upRes.headers.get('content-type') || '').toLowerCase().split(';')[0].trim();
+      const SAFE_RASTER_MIMES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
+      if (!SAFE_RASTER_MIMES.has(rawCtype)) return null;
+      return new Response(upRes.body, {
+        status: 200,
+        headers: {
+          'Content-Type': rawCtype === 'image/jpg' ? 'image/jpeg' : rawCtype,
+          'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'none'; script-src 'none'; sandbox",
+          'Cross-Origin-Resource-Policy': 'cross-origin',
+          'Cache-Control': 'public, max-age=86400, stale-while-revalidate=172800',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
     };
 
     const readEdgeJsonBody = async () => {
@@ -4451,44 +4590,35 @@ export default {
             signal: AbortSignal.timeout(6000)
           }).catch(() => null);
           if (laptopRes && laptopRes.ok) {
-            return new Response(laptopRes.body, {
-              status: 200,
-              headers: {
-                'Content-Type': laptopRes.headers.get('content-type') || 'image/jpeg',
-                'Cache-Control': 'public, max-age=86400, stale-while-revalidate=172800',
-                'Access-Control-Allow-Origin': '*'
-              }
-            });
+            const safeLaptopResp = buildSafeImageProxyResponse(laptopRes);
+            if (safeLaptopResp) return safeLaptopResp;
           }
-          // Jika tunnel sedang offline tetapi payload JSON token membawa URL CDN terizinkan, alirkan dari CDN terverifikasi
+          // Hanya gunakan fallback CDN jika kandidat terdaftar di Edge cache (bukan payload JSON token mentah tanpa verifikasi signature)
           try {
             const payloadB64 = rawToken.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
             const padded = payloadB64 + '='.repeat((4 - (payloadB64.length % 4)) % 4);
             const parsedOriginToken = JSON.parse(decodeURIComponent(escape(atob(padded))));
-            const originTargetUrl = parsedOriginToken?.u || parsedOriginToken?.url;
-            if (originTargetUrl && (!parsedOriginToken.exp || Date.now() <= parsedOriginToken.exp)) {
-              const u = new URL(originTargetUrl);
-              if (u.protocol === 'https:' && isAllowedEdgeCdnHost(u.hostname)) {
-                const upRes = await fetch(originTargetUrl, {
-                  headers: { 'User-Agent': 'ZozRouter/1.0 (Cloudflare Edge Visual Proxy; https://z21.zozdocs.com)' },
-                  signal: AbortSignal.timeout(7000)
-                }).catch(() => null);
-                if (upRes && upRes.ok) {
-                  return new Response(upRes.body, {
-                    status: 200,
-                    headers: {
-                      'Content-Type': upRes.headers.get('content-type') || 'image/jpeg',
-                      'Cache-Control': 'public, max-age=86400, stale-while-revalidate=172800',
-                      'Access-Control-Allow-Origin': '*'
-                    }
-                  });
+            const candidateId = parsedOriginToken?.id;
+            if (candidateId && (!parsedOriginToken.exp || Date.now() <= parsedOriginToken.exp)) {
+              const hydrated = await resolveEdgeCandidateById(candidateId);
+              const originTargetUrl = hydrated ? (hydrated.preview_url || hydrated.image_url) : null;
+              if (originTargetUrl) {
+                const u = new URL(originTargetUrl);
+                if (isSafeRasterAssetUrl(u)) {
+                  const upRes = await fetch(originTargetUrl, {
+                    headers: { 'User-Agent': 'ZozRouter/1.0 (Cloudflare Edge Visual Proxy; https://z21.zozdocs.com)' },
+                    redirect: 'manual',
+                    signal: AbortSignal.timeout(7000)
+                  }).catch(() => null);
+                  const safeResp = buildSafeImageProxyResponse(upRes);
+                  if (safeResp) return safeResp;
                 }
               }
             }
           } catch (_) {}
         }
 
-        // B. Token Cloudflare Edge
+        // B. Token Cloudflare Edge (wajib tervalidasi terhadap kandidat Edge atau raster URL aman)
         let decoded = null;
         try {
           let b64 = rawToken.replace(/-/g, '+').replace(/_/g, '/');
@@ -4496,29 +4626,25 @@ export default {
           decoded = JSON.parse(decodeURIComponent(escape(atob(b64))));
         } catch (_) {}
 
-        let targetAssetUrl = decoded && (decoded.u || decoded.url);
-        if (!targetAssetUrl && decoded && decoded.id) {
+        let targetAssetUrl = null;
+        if (decoded && decoded.id) {
           const hydrated = await resolveEdgeCandidateById(decoded.id);
           targetAssetUrl = hydrated ? (hydrated.preview_url || hydrated.image_url) : null;
+        }
+        if (!targetAssetUrl && decoded && (decoded.u || decoded.url)) {
+          targetAssetUrl = decoded.u || decoded.url;
         }
 
         if (targetAssetUrl) {
           const u = new URL(targetAssetUrl);
-          if (u.protocol === 'https:' && isAllowedEdgeCdnHost(u.hostname)) {
+          if (isSafeRasterAssetUrl(u)) {
             const upRes = await fetch(targetAssetUrl, {
               headers: { 'User-Agent': 'ZozRouter/1.0 (Cloudflare Edge Visual Proxy; https://z21.zozdocs.com)' },
+              redirect: 'manual',
               signal: AbortSignal.timeout(7000)
             });
-            if (upRes.ok) {
-              return new Response(upRes.body, {
-                status: 200,
-                headers: {
-                  'Content-Type': upRes.headers.get('content-type') || 'image/jpeg',
-                  'Cache-Control': 'public, max-age=86400, stale-while-revalidate=172800',
-                  'Access-Control-Allow-Origin': '*'
-                }
-              });
-            }
+            const safeResp = buildSafeImageProxyResponse(upRes);
+            if (safeResp) return safeResp;
           }
         }
 

@@ -82,7 +82,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://product-debian-broadcasting-pennsylvania.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://irrigation-symbol-pictures-crew.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -8331,16 +8331,18 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   function fastSanitizeHtml(dirtyHtml) {
     if (!dirtyHtml || typeof dirtyHtml !== 'string') return '';
     let clean = dirtyHtml
-      .replace(/<script\b[\s\S]*?<\/script>/gi, '')
-      .replace(/<style\b[\s\S]*?<\/style>/gi, '')
-      .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, '')
-      .replace(/<object\b[\s\S]*?<\/object>/gi, '')
-      .replace(/<embed\b[\s\S]*?<\/embed>/gi, '')
-      .replace(/<form\b[\s\S]*?<\/form>/gi, '');
-    // Hapus atribut event handler (on...) HANYA di dalam tag HTML pembuka agar teks persamaan seperti "only=1" di luar atribut tetap aman
+      .replace(/<script\b[^>]*>[\s\S]*?(?:<\/script>|$)/gi, '')
+      .replace(/<style\b[^>]*>[\s\S]*?(?:<\/style>|$)/gi, '')
+      .replace(/<iframe\b[^>]*>[\s\S]*?(?:<\/iframe>|$)/gi, '')
+      .replace(/<object\b[^>]*>[\s\S]*?(?:<\/object>|$)/gi, '')
+      .replace(/<embed\b[^>]*>[\s\S]*?(?:<\/embed>|$)/gi, '')
+      .replace(/<form\b[^>]*>[\s\S]*?(?:<\/form>|$)/gi, '');
+    // Hapus atribut event handler (on...) dan skema javascript:/data:text/html di dalam tag HTML pembuka (termasuk pemisah '/')
     return clean.replace(/<([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*?)>/g, (fullTag, tagName, attrs) => {
-      if (!attrs || !/\bon\w+\s*=/i.test(attrs)) return fullTag;
-      const sanitizedAttrs = attrs.replace(/\s+on[a-z]+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
+      if (!attrs) return fullTag;
+      const sanitizedAttrs = attrs
+        .replace(/(?:[\s/]+)on[a-z]+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '')
+        .replace(/(\b(?:href|src|xlink:href|action|formaction)\s*=\s*)(?:'\s*(?:javascript|vbscript|data\s*:\s*text\/html)[^']*'|"\s*(?:javascript|vbscript|data\s*:\s*text\/html)[^"]*"|(?:javascript|vbscript|data\s*:\s*text\/html)[^\s>]*)/gi, '$1"#"');
       return `<${tagName}${sanitizedAttrs}>`;
     });
   }
@@ -10467,9 +10469,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         const badges = [];
         for (let i = startN; i <= endN; i++) {
           const src = getSourceForNumber(String(i));
-          if (src && src.url) {
-            const tooltip = (src.title ? src.title + ' — ' : '') + (src.domain || src.url);
-            badges.push(`<a href="${escapeHtml(src.url)}" target="_blank" rel="noopener noreferrer" class="citation-ref-badge" title="${escapeHtml(tooltip)}">[${i}]</a>`);
+          const safeHref = (src && src.url && /^https?:\/\//i.test(String(src.url).trim())) ? String(src.url).trim() : '';
+          if (safeHref) {
+            const tooltip = (src.title ? src.title + ' — ' : '') + (src.domain || safeHref);
+            badges.push(`<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer" class="citation-ref-badge" title="${escapeHtml(tooltip)}">[${i}]</a>`);
           } else {
             badges.push(`[${i}]`);
           }
@@ -10484,9 +10487,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const parts = numsGroup.split(/\s*,\s*/);
       const badges = parts.map(numStr => {
         const src = getSourceForNumber(numStr);
-        if (src && src.url) {
-          const tooltip = (src.title ? src.title + ' — ' : '') + (src.domain || src.url);
-          return `<a href="${escapeHtml(src.url)}" target="_blank" rel="noopener noreferrer" class="citation-ref-badge" title="${escapeHtml(tooltip)}">[${numStr}]</a>`;
+        const safeHref = (src && src.url && /^https?:\/\//i.test(String(src.url).trim())) ? String(src.url).trim() : '';
+        if (safeHref) {
+          const tooltip = (src.title ? src.title + ' — ' : '') + (src.domain || safeHref);
+          return `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer" class="citation-ref-badge" title="${escapeHtml(tooltip)}">[${numStr}]</a>`;
         }
         return `[${numStr}]`;
       });
@@ -10496,9 +10500,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // C. Sitasi Tunggal [1], [2], [4] atau beruntun [2][4]
     protectedHtml = protectedHtml.replace(/\[(\d+)\]/g, (match, numStr) => {
       const src = getSourceForNumber(numStr);
-      if (src && src.url) {
-        const tooltip = (src.title ? src.title + ' — ' : '') + (src.domain || src.url);
-        return `<a href="${escapeHtml(src.url)}" target="_blank" rel="noopener noreferrer" class="citation-ref-badge" title="${escapeHtml(tooltip)}">[${numStr}]</a>`;
+      const safeHref = (src && src.url && /^https?:\/\//i.test(String(src.url).trim())) ? String(src.url).trim() : '';
+      if (safeHref) {
+        const tooltip = (src.title ? src.title + ' — ' : '') + (src.domain || safeHref);
+        return `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer" class="citation-ref-badge" title="${escapeHtml(tooltip)}">[${numStr}]</a>`;
       }
       return match;
     });
@@ -10706,13 +10711,20 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   }
 
   // ==================== AUTONOMOUS DOCUMENT COMPILER & MERMAID DIAGRAM ENGINE ====================
+  function sanitizeSvgFragment(svgMarkup) {
+    if (!svgMarkup || typeof svgMarkup !== 'string') return '';
+    return fastSanitizeHtml(svgMarkup)
+      .replace(/<script\b[^>]*>[\s\S]*?(?:<\/script>|$)/gi, '')
+      .replace(/(?:[\s/]+)on[a-z]+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
+  }
+
   function initMermaidEngine() {
     if (typeof window.mermaid !== 'undefined' && typeof window.mermaid.initialize === 'function') {
       try {
         window.mermaid.initialize({
           startOnLoad: false,
           theme: 'dark',
-          securityLevel: 'loose',
+          securityLevel: 'antiscript',
           fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
           flowchart: {
             useMaxWidth: false,
@@ -12407,12 +12419,17 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       scrollTop = viewport.scrollTop;
     });
 
-    window.addEventListener('mouseup', () => {
+    const handleMermaidWindowMouseUp = () => {
+      if (!card.isConnected) {
+        window.removeEventListener('mouseup', handleMermaidWindowMouseUp);
+        return;
+      }
       if (isPanning) {
         isPanning = false;
         viewport.classList.remove('panning');
       }
-    });
+    };
+    window.addEventListener('mouseup', handleMermaidWindowMouseUp);
 
     viewport.addEventListener('mousemove', (e) => {
       if (!isPanning) return;
@@ -12453,6 +12470,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     });
 
     const escMermaidFullscreen = (e) => {
+      if (!card.isConnected) {
+        window.removeEventListener('keydown', escMermaidFullscreen);
+        return;
+      }
       if (e.key === 'Escape' && card.classList.contains('mermaid-fullscreen')) {
         const fsBtn = toolbar.querySelector('[data-action="fullscreen"]');
         if (fsBtn) fsBtn.click();
@@ -12636,7 +12657,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           initMermaidEngine();
           window.mermaid.render(diagramId, cleanCode).then((result) => {
             if (result && result.svg) {
-              stage.innerHTML = result.svg;
+              stage.innerHTML = sanitizeSvgFragment(result.svg);
               const svgNode = stage.querySelector('svg');
               finalizeMountedSvg(svgNode);
             }
@@ -12646,7 +12667,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             if (aggressiveCode && aggressiveCode !== cleanCode) {
               window.mermaid.render(diagramId + '_clean', aggressiveCode).then((res2) => {
                 if (res2 && res2.svg) {
-                  stage.innerHTML = res2.svg;
+                  stage.innerHTML = sanitizeSvgFragment(res2.svg);
                   const svgNode = stage.querySelector('svg');
                   finalizeMountedSvg(svgNode);
                   return;
@@ -22841,22 +22862,23 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
 
     function expandSvgOffscreenAndSerialize(svgMarkup) {
       if (!svgMarkup || typeof document === 'undefined' || !document.body) return svgMarkup;
+      const safeSvgInput = sanitizeSvgFragment(svgMarkup);
       try {
         const holder = document.createElement('div');
         holder.className = 'mermaid-svg-stage';
         holder.style.cssText = 'position:fixed;left:-99999px;top:-99999px;visibility:hidden;pointer-events:none;width:1600px;';
-        holder.innerHTML = svgMarkup;
+        holder.innerHTML = safeSvgInput;
         document.body.appendChild(holder);
         const svgEl = holder.querySelector('svg');
-        let finalSvg = svgMarkup;
+        let finalSvg = safeSvgInput;
         if (svgEl) {
           expandMermaidSvgBoundsAndLabels(svgEl);
-          finalSvg = new XMLSerializer().serializeToString(svgEl);
+          finalSvg = sanitizeSvgFragment(new XMLSerializer().serializeToString(svgEl));
         }
         holder.remove();
         return finalSvg;
       } catch (_) {
-        return svgMarkup;
+        return safeSvgInput;
       }
     }
 
@@ -23086,7 +23108,7 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
           window.mermaid.initialize({
             startOnLoad: false,
             theme: 'dark',
-            securityLevel: 'loose',
+            securityLevel: 'antiscript',
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
             themeVariables: {
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
@@ -26124,13 +26146,16 @@ ${organicBlock}
           <i class="fa-solid fa-chevron-down sources-toggle-chevron"></i>
         </button>
         <div class="msg-sources-grid">
-          ${sources.map((s, i) => `
-            <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="msg-source-chip" title="${escapeHtml((s.title || '') + (s.snippet ? ' - ' + s.snippet : ''))}">
+          ${sources.map((s, i) => {
+            const safeSourceUrl = (s && s.url && /^https?:\/\//i.test(String(s.url).trim())) ? escapeHtml(String(s.url).trim()) : '#';
+            return `
+            <a href="${safeSourceUrl}" target="_blank" rel="noopener noreferrer" class="msg-source-chip" title="${escapeHtml((s.title || '') + (s.snippet ? ' - ' + s.snippet : ''))}">
               <span class="source-index">${i + 1}</span>
               <span class="source-title">${escapeHtml(s.title || s.domain || 'Sumber Web')}</span>
               <span class="source-domain">${escapeHtml(s.domain || '')}</span>
             </a>
-          `).join('')}
+          `;
+          }).join('')}
         </div>
       </div>
     `;
@@ -26590,7 +26615,8 @@ ${blocks}
   function buildDirectVideoPreviewCardHtml(videoUrl, opts = {}) {
     if (!videoUrl) return '';
     const safeUrl = escapeHtml(videoUrl);
-    const openUrl = escapeHtml(opts.openUrl || videoUrl);
+    const rawOpen = String(opts.openUrl || videoUrl || '').trim();
+    const openUrl = /^https?:\/\//i.test(rawOpen) ? escapeHtml(rawOpen) : '#';
     let fileName = opts.title || 'Video Kustom';
     let host = opts.site || '';
     try {
@@ -34329,11 +34355,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, { ...runOptions, userPrompt: promptText, getSources: () => webSources });
 
       let deadAirTimer = null;
+      let deadAirTimedOut = false;
       let ollamaUsage = null;
       const resetDeadAirWatchdog = () => {
         if (deadAirTimer) clearTimeout(deadAirTimer);
         deadAirTimer = setTimeout(() => {
           console.warn(`[Ollama Dead-Air] Model ${modelName} tidak mengirim token selama 120 detik (stalled). Menghentikan stream reader.`);
+          deadAirTimedOut = true;
           try {
             STATE.abortController?.abort('DEAD_AIR_TIMEOUT');
           } catch (_) {}
@@ -35328,7 +35356,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       return true;
 
     } catch (err) {
-      const isUserAborted = (err && (err.name === 'AbortError' || err === 'USER_ABORT' || err.message === 'USER_ABORT' || String(err).includes('USER_ABORT'))) || STATE.abortController?.signal?.aborted || !STATE.isGenerating;
+      const abortReason = STATE.abortController?.signal?.reason;
+      const isDeadAirAbort = Boolean((typeof deadAirTimedOut !== 'undefined' && deadAirTimedOut) || abortReason === 'DEAD_AIR_TIMEOUT' || (err && String(err.message || err).includes('DEAD_AIR_TIMEOUT')));
+      const isUserAborted = !isDeadAirAbort && ((err && (err.name === 'AbortError' || err === 'USER_ABORT' || err.message === 'USER_ABORT' || String(err).includes('USER_ABORT'))) || STATE.abortController?.signal?.aborted || !STATE.isGenerating || Boolean(STATE.userStoppedGeneration));
       if (isUserAborted) {
         // render:false → baris di bawah langsung mengganti innerHTML (atau baris
         // dihapus), jadi render dari finish hanya akan dibuang.
@@ -37592,7 +37622,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       return true;
 
     } catch (err) {
-      const isUserAborted = (err && (err.name === 'AbortError' || err === 'USER_ABORT' || err.message === 'USER_ABORT' || String(err).includes('USER_ABORT'))) || STATE.abortController?.signal?.aborted || !STATE.isGenerating;
+      const abortReason = STATE.abortController?.signal?.reason;
+      const isDeadAirAbort = Boolean((typeof deadAirTimedOut !== 'undefined' && deadAirTimedOut) || abortReason === 'DEAD_AIR_TIMEOUT' || (err && String(err.message || err).includes('DEAD_AIR_TIMEOUT')));
+      const isUserAborted = !isDeadAirAbort && ((err && (err.name === 'AbortError' || err === 'USER_ABORT' || err.message === 'USER_ABORT' || String(err).includes('USER_ABORT'))) || STATE.abortController?.signal?.aborted || !STATE.isGenerating || Boolean(STATE.userStoppedGeneration));
       if (isUserAborted) {
         // render:false → baris di bawah langsung mengganti innerHTML (atau baris
         // dihapus), jadi render dari finish hanya akan dibuang.
@@ -38014,7 +38046,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       if (topCandidate.provider === 'ollama') {
         const ollamaOk = await runOllamaStreaming(session, promptText, image, topCandidate.modelId, { ...runOptions, autoFallback: Boolean(fallbackCandidate) });
-        if (!ollamaOk && fallbackCandidate) {
+        if (!ollamaOk && fallbackCandidate && !STATE.userStoppedGeneration && STATE.isGenerating) {
           console.warn(`Auto-Router: Ollama "${topCandidate.modelId}" gagal, beralih ke "${fallbackCandidate.modelId}" (${fallbackCandidate.provider})...`);
           showToast(`🔀 Auto-Router: Beralih ke model cadangan "${fallbackCandidate.modelId}"...`, 'info');
           if (fallbackCandidate.provider === 'openrouter') {
@@ -38025,7 +38057,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       } else {
         const orOk = await runOpenRouterStreaming(session, promptText, image, topCandidate.modelId, { ...runOptions, autoFallback: Boolean(fallbackCandidate) });
-        if (!orOk && fallbackCandidate) {
+        if (!orOk && fallbackCandidate && !STATE.userStoppedGeneration && STATE.isGenerating) {
           console.warn(`Auto-Router: OpenRouter "${topCandidate.modelId}" gagal, beralih ke "${fallbackCandidate.modelId}" (${fallbackCandidate.provider})...`);
           showToast(`🔀 Auto-Router: Beralih ke model cadangan "${fallbackCandidate.modelId}"...`, 'info');
           if (fallbackCandidate.provider === 'ollama') {
@@ -38042,6 +38074,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
   function setGeneratingState(isGen) {
     STATE.isGenerating = isGen;
+    if (isGen) {
+      STATE.userStoppedGeneration = false;
+    }
     if (els.sendPromptBtn) {
       els.sendPromptBtn.style.display = isGen ? 'none' : 'flex';
     }
@@ -38081,8 +38116,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         body: JSON.stringify({ sessionId: activeSession.id, userId: STATE.userId })
       }).catch(() => {});
     }
+    STATE.userStoppedGeneration = true;
     if (STATE.abortController) {
-      STATE.abortController.abort();
+      STATE.abortController.abort('USER_ABORT');
     }
     setGeneratingState(false);
   }
@@ -52803,7 +52839,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://product-debian-broadcasting-pennsylvania.trycloudflare.com',
+    activeTunnelUrl: 'https://irrigation-symbol-pictures-crew.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -53175,6 +53211,7 @@ Aturan:
       const modal = document.getElementById('modalWaLocalhostOnly');
       if (modal) {
         modal.style.display = 'flex';
+        modal.classList.add('show');
       }
     },
 
@@ -54455,7 +54492,7 @@ Aturan:
         if (data && data.success && data.code) {
           if (els.waPairingCodeDisplay) els.waPairingCodeDisplay.textContent = data.code;
           if (els.waPairingCodeBox) els.waPairingCodeBox.style.display = 'block';
-          if (els.waStatusText) els.waStatusText.innerHTML = `🔑 Masukkan kode <b>${data.code}</b> di HP Anda`;
+          if (els.waStatusText) els.waStatusText.innerHTML = `🔑 Masukkan kode <b>${escapeHtml(data.code)}</b> di HP Anda`;
           showToast(`Kode Pairing WhatsApp: ${data.code}. Masukkan pada WhatsApp di HP Anda.`, 'success');
           this.startStatusPolling(60000);
         } else {
@@ -55495,6 +55532,7 @@ Aturan:
         </div>
       `;
       modal.style.display = 'flex';
+      modal.classList.add('show');
       AudioEngine.click?.();
 
       // Deteksi tautan WPS / Office Cloud
@@ -55544,8 +55582,11 @@ Aturan:
         };
       }
 
-      const cloudBtnHtml = cloudDocUrl ? `
-        <a href="${cloudDocUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-color: rgba(56, 189, 248, 0.4); color: #38bdf8; text-decoration: none; border-radius: 10px; background: rgba(56, 189, 248, 0.08); margin-bottom: 8px;">
+      const safeCloudDocUrl = (cloudDocUrl && /^https?:\/\//i.test(String(cloudDocUrl).trim()))
+        ? escapeHtml(String(cloudDocUrl).trim())
+        : '';
+      const cloudBtnHtml = safeCloudDocUrl ? `
+        <a href="${safeCloudDocUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-color: rgba(56, 189, 248, 0.4); color: #38bdf8; text-decoration: none; border-radius: 10px; background: rgba(56, 189, 248, 0.08); margin-bottom: 8px;">
           <div style="display: flex; align-items: center; gap: 10px;">
             <i class="fa-solid fa-cloud-arrow-up" style="font-size: 1.2rem; color: #38bdf8;"></i>
             <div>
@@ -55573,7 +55614,7 @@ Aturan:
                 File PDF ini diterima melalui sesi WhatsApp Anda. Klik tombol unduh di bawah untuk membaca dokumen secara lengkap.
               </p>
               ${cloudBtnHtml}
-              <button type="button" class="btn btn-primary" onclick="WhatsAppController.downloadDocument('${escapeHtml(fileName)}', '', '${escapeHtml(msgId)}')" style="background: #25D366; border-color: #25D366; color: #052e16; font-weight: 600; padding: 10px 24px; border-radius: 8px; width: 100%;">
+              <button type="button" class="btn btn-primary btn-wa-doc-dl-trigger" data-dl-url="" style="background: #25D366; border-color: #25D366; color: #052e16; font-weight: 600; padding: 10px 24px; border-radius: 8px; width: 100%;">
                 <i class="fa-solid fa-download"></i> Unduh & Buka PDF
               </button>
             </div>
@@ -55618,7 +55659,7 @@ Aturan:
                 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.85rem; opacity: 0.7;"></i>
               </a>` : ''}
 
-              <button type="button" class="btn btn-outline" onclick="WhatsAppController.downloadDocument('${escapeHtml(fileName)}', '${escapeHtml(url || '')}', '${escapeHtml(msgId)}')" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-color: rgba(37, 211, 102, 0.4); color: #25D366; text-decoration: none; border-radius: 10px; background: rgba(37, 211, 102, 0.08); text-align: left;">
+              <button type="button" class="btn btn-outline btn-wa-doc-dl-trigger" data-dl-url="${escapeHtml(url || '')}" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-color: rgba(37, 211, 102, 0.4); color: #25D366; text-decoration: none; border-radius: 10px; background: rgba(37, 211, 102, 0.08); text-align: left;">
                 <div style="display: flex; align-items: center; gap: 10px;">
                   <i class="fa-solid fa-download" style="font-size: 1.1rem;"></i>
                   <div>
@@ -55642,12 +55683,17 @@ Aturan:
               Berkas lampiran dari WhatsApp. Klik tombol unduh di bawah untuk menyimpan berkas ini ke perangkat Anda.
             </p>
             ${cloudBtnHtml}
-            <button type="button" class="btn btn-primary" onclick="WhatsAppController.downloadDocument('${escapeHtml(fileName)}', '${escapeHtml(url || '')}', '${escapeHtml(msgId)}')" style="background: #25D366; border-color: #25D366; color: #052e16; font-weight: 600; padding: 10px 24px; border-radius: 8px; width: 100%;">
+            <button type="button" class="btn btn-primary btn-wa-doc-dl-trigger" data-dl-url="${escapeHtml(url || '')}" style="background: #25D366; border-color: #25D366; color: #052e16; font-weight: 600; padding: 10px 24px; border-radius: 8px; width: 100%;">
               <i class="fa-solid fa-download"></i> Unduh Berkas
             </button>
           </div>
         `;
       }
+      bodyEl.querySelectorAll('.btn-wa-doc-dl-trigger').forEach(btn => {
+        btn.addEventListener('click', () => {
+          this.downloadDocument(fileName, btn.getAttribute('data-dl-url') || '', msgId);
+        });
+      });
     },
 
     async downloadDocument(fileName, url, msgId) {
@@ -57302,7 +57348,7 @@ Aturan:
       if (!md) return '';
       if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
         try {
-          return marked.parse(md);
+          return sanitizeHtmlSafe(marked.parse(md));
         } catch (_) {}
       }
       const lines = String(md).split('\n');
@@ -57348,6 +57394,7 @@ Aturan:
       // Buka modal secara instan 0ms tanpa menunggu respons jaringan
       if (modal) {
         modal.style.display = 'flex';
+        modal.classList.add('show');
       }
 
       const {
@@ -57650,17 +57697,17 @@ Gunakan format Markdown lengkap dengan struktur berikut:
           localLines.push('### 📌 Ringkasan Cepat Chat WhatsApp');
           localLines.push(`- **Chat yang Dipilih**: ${validJids.map(j => {
             const c = (this.contacts || []).find(item => item.id === j);
-            return `**${c ? (c.name || c.phone) : j}**`;
+            return `**${escapeHtml(c ? (c.name || c.phone) : j)}**`;
           }).join(', ')}`);
           localLines.push(`- **Status Privasi**: 🔒 Hanya pesan dari nomor yang disetujui yang dimuat.`);
-          if (focusTopic) localLines.push(`- **Fokus Pencarian**: *"${focusTopic}"*`);
+          if (focusTopic) localLines.push(`- **Fokus Pencarian**: *"${escapeHtml(focusTopic)}"*`);
           localLines.push('');
           localLines.push('---');
           localLines.push('> *Koneksi ke backend utama sedang sinkronisasi. Berikut data nomor yang telah disetujui:*');
           validJids.forEach(j => {
             const c = (this.contacts || []).find(item => item.id === j);
             if (c) {
-              localLines.push(`- **${c.name || c.phone || j}**: Pesan terakhir: *"${c.lastMessage || 'Tidak ada pesan'}"* ${c.hasFile ? '(🔴 Memuat berkas)' : ''}`);
+              localLines.push(`- **${escapeHtml(c.name || c.phone || j)}**: Pesan terakhir: *"${escapeHtml(c.lastMessage || 'Tidak ada pesan')}"* ${c.hasFile ? '(🔴 Memuat berkas)' : ''}`);
             }
           });
           localFallbackSummary = localLines.join('\n');
