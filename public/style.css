@@ -1338,30 +1338,48 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   gap: 10px;
 }
 
-/* Model Picker Chip */
+/* Model Picker Combo Pill (Unified Glass Capsule) */
 .model-picker-container {
   position: relative;
 }
 
 .model-picker-combo-btn-group {
   display: inline-flex;
-  align-items: center;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: var(--radius-md, 8px);
-  transition: all 0.2s ease;
+  align-items: stretch;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 999px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
   position: relative;
+  overflow: hidden;
 }
 
-.model-picker-combo-btn-group:hover {
+.model-picker-combo-btn-group:hover,
+.model-picker-combo-btn-group:focus-within {
   border-color: rgba(45, 212, 191, 0.35);
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(20, 29, 48, 0.85);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.model-picker-combo-btn-group .model-picker-chip {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 999px 0 0 999px !important;
+  box-shadow: none !important;
+  padding: 5px 8px 5px 11px;
+}
+
+.model-picker-combo-btn-group .model-picker-chip:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: none !important;
 }
 
 .model-picker-divider {
   width: 1px;
-  height: 16px;
-  background: rgba(255, 255, 255, 0.12);
+  height: 14px;
+  align-self: center;
+  background: rgba(255, 255, 255, 0.11);
   flex-shrink: 0;
 }
 
@@ -1369,67 +1387,79 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   background: transparent;
   border: none;
   color: #94a3b8;
-  padding: 5px 8px;
+  width: 28px;
+  padding: 0 8px 0 6px;
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
-  border-top-right-radius: 8px;
-  border-bottom-right-radius: 8px;
+  font-size: 12.5px;
+  border-radius: 0 999px 999px 0;
   transition: color 0.15s ease, background 0.15s ease;
+  flex-shrink: 0;
 }
 
 .model-kebab-btn:hover {
-  color: #38bdf8 !important;
+  color: #e2e8f0 !important;
   background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.model-kebab-btn[aria-expanded="true"] {
+  color: #38bdf8 !important;
+  background: rgba(56, 189, 248, 0.14) !important;
 }
 
 .model-chip-status-badges {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  margin: 0 2px;
+  margin: 0 1px;
 }
 
 .chip-status-icon-bolt {
   color: #fbbf24;
-  font-size: 10px;
-  animation: pulse 2s infinite ease-in-out;
+  font-size: 9.5px;
+  opacity: 0.92;
 }
 
 .chip-status-icon-pin {
   color: #2dd4bf;
-  font-size: 10px;
+  font-size: 9.5px;
+  opacity: 0.92;
 }
 
-/* Model Options Popup Menu */
+/* Model Options Popup Menu (Modern Linear / Raycast Popover) */
 .model-options-popup {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 8px);
   right: 0;
-  width: 300px;
-  max-width: calc(100vw - 20px);
+  width: 312px;
+  max-width: calc(100vw - 24px);
   max-height: min(76vh, 620px);
   overflow-y: auto;
-  background: rgba(13, 18, 30, 0.96);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(56, 189, 248, 0.25);
-  border-radius: 12px;
-  box-shadow: 0 14px 38px -6px rgba(0, 0, 0, 0.75), 0 0 20px rgba(56, 189, 248, 0.12);
+  overscroll-behavior: contain;
+  background: linear-gradient(180deg, rgba(16, 21, 34, 0.98) 0%, rgba(11, 15, 25, 0.99) 100%);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  box-shadow:
+    0 22px 50px -12px rgba(0, 0, 0, 0.88),
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
   z-index: 1050;
-  padding: 8px;
-  animation: fadeInDown 0.15s ease-out;
+  padding: 10px;
+  transform-origin: top right;
+  animation: fadeInDown 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (max-width: 480px) {
   .model-options-popup {
     position: fixed;
     top: 52px;
-    left: 10px;
-    right: 10px;
-    width: auto;
+    right: 12px;
+    left: auto;
+    width: min(312px, calc(100vw - 24px));
     max-width: none;
     max-height: calc(100dvh - 68px);
   }
@@ -1438,22 +1468,25 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 .model-options-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px 10px 10px;
+  gap: 10px;
+  padding: 8px 10px 11px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   margin-bottom: 6px;
 }
 
 .model-options-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: rgba(45, 212, 191, 0.12);
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.16), rgba(56, 189, 248, 0.12));
   border: 1px solid rgba(45, 212, 191, 0.25);
+  color: #2dd4bf;
+  font-size: 0.88rem;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .model-options-header-info {
@@ -1461,12 +1494,14 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   flex-direction: column;
   overflow: hidden;
   flex: 1;
+  min-width: 0;
 }
 
 .model-options-name {
   font-weight: 700;
-  font-size: 0.82rem;
+  font-size: 0.84rem;
   color: #f8fafc;
+  letter-spacing: -0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1476,83 +1511,108 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 2px;
+  margin-top: 3px;
+  flex-wrap: wrap;
 }
 
 .model-options-engine-badge {
-  font-size: 0.62rem;
-  padding: 1px 5px;
-  border-radius: 3px;
+  font-size: 0.6rem;
+  padding: 1.5px 6px;
+  border-radius: 999px;
   font-weight: 700;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  background: rgba(0, 240, 255, 0.15);
-  color: var(--neon-cyan, #00f0ff);
-  border: 1px solid rgba(0, 240, 255, 0.3);
+  background: rgba(0, 240, 255, 0.12);
+  color: var(--neon-cyan, #38bdf8);
+  border: 1px solid rgba(0, 240, 255, 0.26);
+}
+
+.model-options-status-text {
+  font-size: 0.68rem;
+  color: #94a3b8;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .model-options-menu-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .model-options-action-item {
   width: 100%;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 9px 10px;
+  border-radius: 11px;
   background: transparent;
   border: 1px solid transparent;
   cursor: pointer;
   text-align: left;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, transform 0.12s ease;
   user-select: none;
 }
 
 .model-options-action-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.055);
 }
 
-.model-options-action-item.active-pin {
-  background: rgba(45, 212, 191, 0.08);
-  border-color: rgba(45, 212, 191, 0.3);
+.model-options-action-item:active {
+  transform: scale(0.99);
 }
 
+.model-options-action-item.active-pin,
 .model-options-action-item.active-autostart {
-  background: rgba(245, 158, 11, 0.08);
-  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(255, 255, 255, 0.035);
+  border-color: transparent;
+}
+
+.model-options-action-item.active-pin:hover,
+.model-options-action-item.active-autostart:hover {
+  background: rgba(255, 255, 255, 0.065);
 }
 
 .action-item-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 12px;
   flex-shrink: 0;
-  margin-top: 2px;
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 .action-item-icon.pin-icon-box {
+  color: #64748b;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.model-options-action-item.active-pin .action-item-icon.pin-icon-box {
   color: #2dd4bf;
-  background: rgba(45, 212, 191, 0.1);
+  background: rgba(45, 212, 191, 0.14);
 }
 
 .action-item-icon.rocket-icon-box {
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.1);
+  color: #64748b;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.model-options-action-item.active-autostart .action-item-icon.rocket-icon-box {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.14);
 }
 
 .action-item-content {
   display: flex;
   flex-direction: column;
   flex: 1;
-  overflow: hidden;
+  min-width: 0;
 }
 
 .action-item-title-row {
@@ -1566,54 +1626,98 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   font-size: 0.8rem;
   font-weight: 600;
   color: #f1f5f9;
+  line-height: 1.25;
 }
 
 .action-item-desc {
-  font-size: 0.68rem;
-  color: #94a3b8;
+  font-size: 0.67rem;
+  color: #7c8ba1;
   margin-top: 2px;
   line-height: 1.3;
 }
 
 .action-item-badge {
   font-size: 0.62rem;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 4px;
-  letter-spacing: 0.3px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.01em;
 }
 
-.action-item-badge.pinned-badge {
-  background: rgba(45, 212, 191, 0.2);
-  color: #2dd4bf;
-  border: 1px solid rgba(45, 212, 191, 0.4);
-}
-
+.action-item-badge.pinned-badge,
 .action-item-badge.autostart-badge {
-  background: rgba(245, 158, 11, 0.2);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.4);
+  display: none !important;
+}
+
+/* Modern Toggle Switch inside Model Options */
+.model-opt-switch {
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.11);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  position: relative;
+  flex-shrink: 0;
+  transition: background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+}
+
+.model-opt-switch-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #94a3b8;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.model-options-action-item.active-pin .model-opt-switch {
+  background: rgba(45, 212, 191, 0.28);
+  border-color: rgba(45, 212, 191, 0.65);
+}
+
+.model-options-action-item.active-pin .model-opt-switch-thumb {
+  transform: translateX(14px);
+  background: #2dd4bf;
+  box-shadow: 0 0 8px rgba(45, 212, 191, 0.5);
+}
+
+.model-options-action-item.active-autostart .model-opt-switch {
+  background: rgba(245, 158, 11, 0.28);
+  border-color: rgba(245, 158, 11, 0.65);
+}
+
+.model-options-action-item.active-autostart .model-opt-switch-thumb {
+  transform: translateX(14px);
+  background: #fbbf24;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
 }
 
 .model-options-footer {
   margin-top: 6px;
-  padding: 6px 10px;
-  background: rgba(0, 0, 0, 0.25);
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 8px 10px 3px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0;
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
 .model-options-footer-text {
-  font-size: 0.72rem;
-  color: #94a3b8;
+  font-size: 0.69rem;
+  color: #7c8ba1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-options-footer-text strong {
-  color: #38bdf8;
+  color: #cbd5e1;
   font-family: var(--font-code);
+  font-weight: 600;
 }
 
 /* Badges for dropdown rows */
@@ -3301,9 +3405,7 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 }
 
 .composer-box.drag-file-over,
-#mainContent .composer-box.drag-file-over,
-#mainContent.ai-nature-themed .composer-box.drag-file-over,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box.drag-file-over {
+#mainContent .composer-box.drag-file-over {
   border: 1.5px solid #2dd4bf !important;
   box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.45), 0 12px 36px rgba(45, 212, 191, 0.28) !important;
   background: rgba(15, 28, 36, 0.92) !important;
@@ -3366,17 +3468,13 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   line-height: 1.45;
 }
 
-body #mainContent .composer-box.image-mode-active,
-body #mainContent.ai-nature-themed .composer-box.image-mode-active,
-body #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box.image-mode-active {
+body #mainContent .composer-box.image-mode-active {
   border: 1.5px solid #FF007F !important;
   box-shadow: 0 8px 30px rgba(255, 0, 127, 0.24), inset 0 0 12px rgba(255, 0, 127, 0.1) !important;
   animation: cyberImagePulse 3s infinite ease-in-out;
 }
 
-body #mainContent .composer-box.image-mode-active:focus-within,
-body #mainContent.ai-nature-themed .composer-box.image-mode-active:focus-within,
-body #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box.image-mode-active:focus-within {
+body #mainContent .composer-box.image-mode-active:focus-within {
   border: 1.5px solid #FF2E93 !important;
   box-shadow: 0 8px 36px rgba(255, 0, 127, 0.34), inset 0 0 16px rgba(255, 0, 127, 0.14) !important;
 }
@@ -3404,17 +3502,13 @@ body #mainContent .composer-box.image-mode-active .send-btn:hover {
   box-shadow: 0 0 22px rgba(255, 0, 127, 0.65) !important;
 }
 
-body #mainContent .composer-box.music-mode-active,
-body #mainContent.ai-nature-themed .composer-box.music-mode-active,
-body #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box.music-mode-active {
+body #mainContent .composer-box.music-mode-active {
   border: 1.5px solid #00FFC2 !important;
   box-shadow: 0 8px 30px rgba(0, 255, 194, 0.24), inset 0 0 12px rgba(0, 255, 194, 0.1) !important;
   animation: cyberMusicPulse 3s infinite ease-in-out;
 }
 
-body #mainContent .composer-box.music-mode-active:focus-within,
-body #mainContent.ai-nature-themed .composer-box.music-mode-active:focus-within,
-body #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box.music-mode-active:focus-within {
+body #mainContent .composer-box.music-mode-active:focus-within {
   border: 1.5px solid #00F0FF !important;
   box-shadow: 0 8px 36px rgba(0, 240, 255, 0.34), inset 0 0 16px rgba(0, 240, 255, 0.14) !important;
 }
@@ -16870,8 +16964,12 @@ body.mermaid-has-fullscreen {
 
   .model-picker-chip {
     max-width: 155px !important;
-    padding-left: 8px !important;
-    padding-right: 8px !important;
+    padding: 4px 7px 4px 9px !important;
+  }
+
+  .model-kebab-btn {
+    width: 26px !important;
+    padding: 0 7px 0 5px !important;
   }
 
   .model-picker-chip .current-model-name {
@@ -20103,8 +20201,8 @@ svg.lucide,
 }
 
 .model-options-theme-section {
-  margin-top: 2px;
-  padding-top: 4px;
+  margin-top: 4px;
+  padding-top: 6px;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
@@ -20113,10 +20211,17 @@ svg.lucide,
   background: rgba(16, 185, 129, 0.12);
 }
 
+.ai-theme-trigger-trail {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
 .action-item-badge.theme-active-badge {
-  background: rgba(16, 185, 129, 0.16);
-  color: #6ee7b7;
-  border: 1px solid rgba(52, 211, 153, 0.35);
+  background: rgba(255, 255, 255, 0.07);
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .ai-theme-submenu-trigger {
@@ -20124,13 +20229,19 @@ svg.lucide,
 }
 
 #btnAiChatTheme.is-nature-active {
-  background: rgba(16, 185, 129, 0.08);
+  background: rgba(16, 185, 129, 0.07);
+  border-color: transparent;
+}
+
+#btnAiChatTheme.is-nature-active .action-item-badge.theme-active-badge {
+  background: rgba(16, 185, 129, 0.16);
+  color: #6ee7b7;
   border-color: rgba(52, 211, 153, 0.28);
 }
 
 .ai-theme-chevron {
-  font-size: 0.7rem;
-  color: #94a3b8;
+  font-size: 0.68rem;
+  color: #7c8ba1;
   flex-shrink: 0;
   transition: transform 0.18s ease, color 0.18s ease;
 }
@@ -20143,14 +20254,14 @@ svg.lucide,
 .ai-chat-theme-menu {
   position: static;
   width: 100%;
-  margin-top: 4px;
-  background: rgba(6, 10, 18, 0.78);
-  border: 1px solid rgba(52, 211, 153, 0.24);
-  border-radius: 10px;
+  margin-top: 5px;
+  background: rgba(7, 10, 18, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
   padding: 5px;
   display: none;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
@@ -20238,11 +20349,11 @@ svg.lucide,
 }
 
 /* Wallpaper-Only Botanical Fruit & Nature Backdrop for AI Chat Container
-   (Preserves default high-contrast ZOZ UI surfaces & text for effortless chat readability) */
+   (All themes keep exact default ZOZ conversation output, code blocks, typography, and composer styling) */
 #mainContent.ai-nature-themed {
   --nature-bg: #08120e;
-  --nature-bottom-fade: rgba(8, 18, 14, 0.42);
-  --nature-motif-opacity: 0.24;
+  --nature-bottom-fade: rgba(8, 18, 14, 0.34);
+  --nature-motif-opacity: 0.075;
   --nature-motif-size: 220px 220px;
   --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M86 64c9-10 24-6 24 6-1 12-16 18-24 10 2-6 4-11 0-16z' fill='%2310b981' fill-opacity='0.24' stroke='%2334d399' stroke-opacity='0.48' stroke-width='1.5'/%3E%3Cpath d='M86 80l12-10' stroke='%236ee7b7' stroke-opacity='0.48' stroke-width='1.4'/%3E%3C/g%3E%3C/svg%3E");
   background-color: var(--nature-bg) !important;
@@ -20254,7 +20365,7 @@ svg.lucide,
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: var(--nature-motif-opacity, 0.24);
+  opacity: var(--nature-motif-opacity, 0.075);
   background-color: transparent;
   background-image: var(--nature-motif-svg);
   background-size: var(--nature-motif-size, 220px 220px);
@@ -20272,11 +20383,11 @@ svg.lucide,
   z-index: 210;
 }
 
-/* Variant 1: Senja Mangga & Jeruk (Muted Backdrop Only) */
+/* Variant 1: Senja Mangga & Jeruk (Subtle Backdrop Only) */
 #mainContent.ai-nature-themed[data-ai-chat-theme="mango-citrus"] {
   --nature-bg: #120c08;
-  --nature-bottom-fade: rgba(14, 9, 6, 0.42);
-  --nature-motif-opacity: 0.24;
+  --nature-bottom-fade: rgba(14, 9, 6, 0.34);
+  --nature-motif-opacity: 0.075;
   --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M38 28c15-6 30 4 27 21-2 15-16 25-26 23-9-2-10-12-5-21 4-8-2-17 4-23z' fill='%23f59e0b' fill-opacity='0.28' stroke='%23fb923c' stroke-opacity='0.58' stroke-width='1.6'/%3E%3Cpath d='M44 35c9-1 15 5 14 14' fill='none' stroke='%23ea580c' stroke-opacity='0.48' stroke-width='1.4'/%3E%3Cpath d='M46 27c1-5 4-8 7-9' fill='none' stroke='%23a16207' stroke-opacity='0.6' stroke-width='1.6'/%3E%3Cpath d='M48 25c7-8 17-7 20 0-5 6-14 6-20 0z' fill='%2322c55e' fill-opacity='0.34' stroke='%234ade80' stroke-opacity='0.56' stroke-width='1.4'/%3E%3Ccircle cx='164' cy='54' r='22' fill='%23fb923c' fill-opacity='0.22' stroke='%23fdba74' stroke-opacity='0.55' stroke-width='1.8'/%3E%3Ccircle cx='164' cy='54' r='16' fill='%23f59e0b' fill-opacity='0.26' stroke='%23fef3c7' stroke-opacity='0.38' stroke-width='1.1'/%3E%3Cpath d='M164 38v32M148 54h32M153 43l22 22M175 43l-22 22' stroke='%23fef3c7' stroke-opacity='0.38' stroke-width='1.2'/%3E%3Ccircle cx='56' cy='164' r='20' fill='%23ea580c' fill-opacity='0.26' stroke='%23fb923c' stroke-opacity='0.55' stroke-width='1.6'/%3E%3Cpath d='M45 156c2-4 6-7 11-7' fill='none' stroke='%23fed7aa' stroke-opacity='0.42' stroke-width='1.3'/%3E%3Ccircle cx='50' cy='171' r='1.2' fill='%23fde047' fill-opacity='0.5'/%3E%3Ccircle cx='63' cy='163' r='1.2' fill='%23fde047' fill-opacity='0.5'/%3E%3Ccircle cx='58' cy='174' r='1.2' fill='%23fde047' fill-opacity='0.5'/%3E%3Cpath d='M57 143c5-7 15-7 18 0-4 6-13 6-18 0z' fill='%2322c55e' fill-opacity='0.34' stroke='%234ade80' stroke-opacity='0.56' stroke-width='1.4'/%3E%3Cpath d='M154 146c12-4 24 4 21 19-2 12-13 21-22 18-7-2-8-10-4-17 4-6-1-14 5-20z' fill='%23fbbf24' fill-opacity='0.25' stroke='%23f59e0b' stroke-opacity='0.54' stroke-width='1.5'/%3E%3Cpath d='M161 143c5-7 14-6 17 0-4 5-12 5-17 0z' fill='%2316a34a' fill-opacity='0.32' stroke='%234ade80' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='110' cy='110' r='11' fill='%23a3e635' fill-opacity='0.2' stroke='%23bef264' stroke-opacity='0.48' stroke-width='1.4'/%3E%3Cpath d='M110 99v22M99 110h22' stroke='%23ecfccb' stroke-opacity='0.35' stroke-width='1.1'/%3E%3Ccircle cx='112' cy='46' r='2.8' fill='%23fde047' fill-opacity='0.42'/%3E%3Cpath d='M112 39c2.5 0 4 2 2.5 4M119 46c0 2.5-2 4-4 2.5M112 53c-2.5 0-4-2-2.5-4M105 46c0-2.5 2-4 4-2.5' fill='none' stroke='%23fef3c7' stroke-opacity='0.4' stroke-width='1.2'/%3E%3C/g%3E%3C/svg%3E");
   background-color: #120c08 !important;
   background-image:
@@ -20285,11 +20396,11 @@ svg.lucide,
     linear-gradient(180deg, #130d09 0%, #0b0806 100%) !important;
 }
 
-/* Variant 2: Taman Stroberi & Sakura (Muted Backdrop Only) */
+/* Variant 2: Taman Stroberi & Sakura (Subtle Backdrop Only) */
 #mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] {
   --nature-bg: #12090e;
-  --nature-bottom-fade: rgba(14, 7, 11, 0.42);
-  --nature-motif-opacity: 0.24;
+  --nature-bottom-fade: rgba(14, 7, 11, 0.34);
+  --nature-motif-opacity: 0.075;
   --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 36c-12 0-20 8-18 20 2 13 11 26 18 28 7-2 16-15 18-28 2-12-6-20-18-20z' fill='%23f43f5e' fill-opacity='0.28' stroke='%23fb7185' stroke-opacity='0.58' stroke-width='1.6'/%3E%3Cpath d='M50 36c-5-6-13-6-16-1 4 3 10 3 16 1zm0 0c5-6 13-6 16-1-4 3-10 3-16 1zm0 0l-4-9 4 4 4-4-4 9z' fill='%2322c55e' fill-opacity='0.36' stroke='%234ade80' stroke-opacity='0.58' stroke-width='1.2'/%3E%3Ccircle cx='43' cy='47' r='1.2' fill='%23fde047' fill-opacity='0.6'/%3E%3Ccircle cx='50' cy='45' r='1.2' fill='%23fde047' fill-opacity='0.6'/%3E%3Ccircle cx='57' cy='47' r='1.2' fill='%23fde047' fill-opacity='0.6'/%3E%3Ccircle cx='46' cy='57' r='1.2' fill='%23fde047' fill-opacity='0.6'/%3E%3Ccircle cx='54' cy='57' r='1.2' fill='%23fde047' fill-opacity='0.6'/%3E%3Ccircle cx='50' cy='67' r='1.2' fill='%23fde047' fill-opacity='0.6'/%3E%3Cpath d='M164 42c-3-9-9-11-11-3-8-2-12 3-7 10-7 5-6 11 2 12-1 8 5 11 11 5 6 6 12 3 11-5 8-1 9-7 2-12 5-7 1-12-8-7z' fill='%23f9a8d4' fill-opacity='0.28' stroke='%23fbcfe8' stroke-opacity='0.55' stroke-width='1.3'/%3E%3Ccircle cx='164' cy='55' r='3.6' fill='%23fef08a' fill-opacity='0.56'/%3E%3Cpath d='M166 146c-11 0-18 7-16 18 2 12 10 23 16 25 6-2 14-13 16-25 2-11-5-18-16-18z' fill='%23e11d48' fill-opacity='0.28' stroke='%23fda4af' stroke-opacity='0.56' stroke-width='1.5'/%3E%3Cpath d='M166 146c-4-5-11-5-14-1 3 3 9 3 14 1zm0 0c4-5 11-5 14-1-3 3-9 3-14 1zm0 0l-3-8 3 4 3-4-3 8z' fill='%2322c55e' fill-opacity='0.34' stroke='%234ade80' stroke-opacity='0.55' stroke-width='1.1'/%3E%3Ccircle cx='161' cy='156' r='1.1' fill='%23fde047' fill-opacity='0.58'/%3E%3Ccircle cx='171' cy='156' r='1.1' fill='%23fde047' fill-opacity='0.58'/%3E%3Ccircle cx='166' cy='166' r='1.1' fill='%23fde047' fill-opacity='0.58'/%3E%3Ccircle cx='166' cy='175' r='1.1' fill='%23fde047' fill-opacity='0.58'/%3E%3Cpath d='M56 154c-3-8-8-10-10-2-7-2-10 3-6 9-6 4-5 10 2 11-1 7 4 10 10 4 5 6 11 3 10-4 7-1 8-7 2-11 4-6 1-11-8-7z' fill='%23f472b6' fill-opacity='0.26' stroke='%23fbcfe8' stroke-opacity='0.52' stroke-width='1.2'/%3E%3Ccircle cx='56' cy='165' r='3.2' fill='%23fef08a' fill-opacity='0.55'/%3E%3Cpath d='M110 104c5-7 13-3 11 5-2 7-10 9-14 4 2-3 2-6 3-9z' fill='%23f9a8d4' fill-opacity='0.28' stroke='%23fbcfe8' stroke-opacity='0.48' stroke-width='1.1'/%3E%3Cpath d='M104 122c5-6 12-5 15 1-4 5-11 5-15-1z' fill='%234ade80' fill-opacity='0.24' stroke='%2386efac' stroke-opacity='0.48' stroke-width='1.1'/%3E%3C/g%3E%3C/svg%3E");
   background-color: #12090e !important;
   background-image:
@@ -20298,24 +20409,24 @@ svg.lucide,
     linear-gradient(180deg, #13090f 0%, #0b0509 100%) !important;
 }
 
-/* Variant 3: Kebun Apel Pagi (Soft Garden Wallpaper Only) */
+/* Variant 3: Kebun Apel Zamrud (Dark Orchard Backdrop Only) */
 #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] {
-  --nature-bg: #e7f0e5;
-  --nature-bottom-fade: rgba(219, 232, 216, 0.45);
-  --nature-motif-opacity: 0.3;
-  --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 40c-4-4-12-4-16 1-7 7-6 21 0 30 4 7 10 9 14 7 1-1 3-1 4 0 4 2 10 0 14-7 6-9 7-23 0-30-4-5-12-5-16-1z' fill='%23ef4444' fill-opacity='0.24' stroke='%23dc2626' stroke-opacity='0.52' stroke-width='1.6'/%3E%3Cpath d='M40 48c-2 4-2 9 0 13' fill='none' stroke='%23ffffff' stroke-opacity='0.68' stroke-width='1.4'/%3E%3Cpath d='M50 40c0-6 2-10 5-12' fill='none' stroke='%2378350f' stroke-opacity='0.65' stroke-width='1.6'/%3E%3Cpath d='M52 34c5-7 14-7 17-1-4 6-12 6-17 1z' fill='%2322c55e' fill-opacity='0.36' stroke='%2315803d' stroke-opacity='0.56' stroke-width='1.3'/%3E%3Cpath d='M166 42c-4-4-12-4-16 1-7 7-6 21 0 30 4 7 10 9 14 7 1-1 3-1 4 0 4 2 10 0 14-7 6-9 7-23 0-30-4-5-12-5-16-1z' fill='%2322c55e' fill-opacity='0.24' stroke='%2315803d' stroke-opacity='0.54' stroke-width='1.6'/%3E%3Cpath d='M166 42c0-6 2-10 5-12' fill='none' stroke='%2378350f' stroke-opacity='0.65' stroke-width='1.6'/%3E%3Cpath d='M168 36c5-7 14-7 17-1-4 6-12 6-17 1z' fill='%2386efac' fill-opacity='0.48' stroke='%23166534' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Cpath d='M54 152c-3-4-11-4-15 1-6 6-5 19 0 27 4 6 9 8 13 6 1-1 3-1 4 0 4 2 9 0 13-6 5-8 6-21 0-27-4-5-12-5-15-1z' fill='%23fef9c3' fill-opacity='0.68' stroke='%23dc2626' stroke-opacity='0.48' stroke-width='1.6'/%3E%3Cellipse cx='51' cy='166' rx='1.4' ry='2.4' transform='rotate(-15 51 166)' fill='%2378350f' fill-opacity='0.65'/%3E%3Cellipse cx='57' cy='166' rx='1.4' ry='2.4' transform='rotate(15 57 166)' fill='%2378350f' fill-opacity='0.65'/%3E%3Cpath d='M54 152v-8' stroke='%2378350f' stroke-opacity='0.65' stroke-width='1.5'/%3E%3Cpath d='M164 152c-4-4-11-4-15 1-6 6-5 19 0 27 4 6 9 8 13 6 1-1 3-1 4 0 4 2 9 0 13-6 5-8 6-21 0-27-4-5-11-5-15-1z' fill='%23ef4444' fill-opacity='0.22' stroke='%23dc2626' stroke-opacity='0.5' stroke-width='1.5'/%3E%3Cpath d='M164 152c0-5 2-9 5-11' fill='none' stroke='%2378350f' stroke-opacity='0.65' stroke-width='1.5'/%3E%3Cpath d='M166 146c5-6 13-6 15-1-3 5-11 5-15 1z' fill='%2322c55e' fill-opacity='0.36' stroke='%2315803d' stroke-opacity='0.54' stroke-width='1.2'/%3E%3Ccircle cx='110' cy='110' r='3.2' fill='%23facc15' fill-opacity='0.64'/%3E%3Cpath d='M110 101c3 0 5 2 3 5M119 110c0 3-2 5-5 3M110 119c-3 0-5-2-3-5M101 110c0-3 2-5 5-3' fill='%23fbcfe8' fill-opacity='0.44' stroke='%23ec4899' stroke-opacity='0.46' stroke-width='1.1'/%3E%3C/g%3E%3C/svg%3E");
-  background-color: #e7f0e5 !important;
+  --nature-bg: #07130c;
+  --nature-bottom-fade: rgba(5, 14, 9, 0.34);
+  --nature-motif-opacity: 0.08;
+  --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 40c-4-4-12-4-16 1-7 7-6 21 0 30 4 7 10 9 14 7 1-1 3-1 4 0 4 2 10 0 14-7 6-9 7-23 0-30-4-5-12-5-16-1z' fill='%23ef4444' fill-opacity='0.24' stroke='%23f87171' stroke-opacity='0.52' stroke-width='1.6'/%3E%3Cpath d='M40 48c-2 4-2 9 0 13' fill='none' stroke='%23fecaca' stroke-opacity='0.52' stroke-width='1.4'/%3E%3Cpath d='M50 40c0-6 2-10 5-12' fill='none' stroke='%23a16207' stroke-opacity='0.65' stroke-width='1.6'/%3E%3Cpath d='M52 34c5-7 14-7 17-1-4 6-12 6-17 1z' fill='%2322c55e' fill-opacity='0.34' stroke='%234ade80' stroke-opacity='0.56' stroke-width='1.3'/%3E%3Cpath d='M166 42c-4-4-12-4-16 1-7 7-6 21 0 30 4 7 10 9 14 7 1-1 3-1 4 0 4 2 10 0 14-7 6-9 7-23 0-30-4-5-12-5-16-1z' fill='%2322c55e' fill-opacity='0.24' stroke='%234ade80' stroke-opacity='0.54' stroke-width='1.6'/%3E%3Cpath d='M166 42c0-6 2-10 5-12' fill='none' stroke='%23a16207' stroke-opacity='0.65' stroke-width='1.6'/%3E%3Cpath d='M168 36c5-7 14-7 17-1-4 6-12 6-17 1z' fill='%2386efac' fill-opacity='0.36' stroke='%234ade80' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Cpath d='M54 152c-3-4-11-4-15 1-6 6-5 19 0 27 4 6 9 8 13 6 1-1 3-1 4 0 4 2 9 0 13-6 5-8 6-21 0-27-4-5-12-5-15-1z' fill='%23fef08a' fill-opacity='0.26' stroke='%23f87171' stroke-opacity='0.48' stroke-width='1.6'/%3E%3Cellipse cx='51' cy='166' rx='1.4' ry='2.4' transform='rotate(-15 51 166)' fill='%23fde047' fill-opacity='0.65'/%3E%3Cellipse cx='57' cy='166' rx='1.4' ry='2.4' transform='rotate(15 57 166)' fill='%23fde047' fill-opacity='0.65'/%3E%3Cpath d='M54 152v-8' stroke='%23a16207' stroke-opacity='0.65' stroke-width='1.5'/%3E%3Cpath d='M164 152c-4-4-11-4-15 1-6 6-5 19 0 27 4 6 9 8 13 6 1-1 3-1 4 0 4 2 9 0 13-6 5-8 6-21 0-27-4-5-11-5-15-1z' fill='%23ef4444' fill-opacity='0.22' stroke='%23f87171' stroke-opacity='0.5' stroke-width='1.5'/%3E%3Cpath d='M164 152c0-5 2-9 5-11' fill='none' stroke='%23a16207' stroke-opacity='0.65' stroke-width='1.5'/%3E%3Cpath d='M166 146c5-6 13-6 15-1-3 5-11 5-15 1z' fill='%2322c55e' fill-opacity='0.34' stroke='%234ade80' stroke-opacity='0.54' stroke-width='1.2'/%3E%3Ccircle cx='110' cy='110' r='3.2' fill='%23facc15' fill-opacity='0.6'/%3E%3Cpath d='M110 101c3 0 5 2 3 5M119 110c0 3-2 5-5 3M110 119c-3 0-5-2-3-5M101 110c0-3 2-5 5-3' fill='%23fbcfe8' fill-opacity='0.38' stroke='%23f472b6' stroke-opacity='0.46' stroke-width='1.1'/%3E%3C/g%3E%3C/svg%3E");
+  background-color: #07130c !important;
   background-image:
-    radial-gradient(ellipse 65% 45% at 15% 15%, rgba(167, 243, 208, 0.24), transparent 65%),
-    radial-gradient(ellipse 60% 45% at 85% 80%, rgba(254, 240, 138, 0.2), transparent 65%),
-    linear-gradient(180deg, #ebf3e8 0%, #dce8d9 100%) !important;
+    radial-gradient(ellipse 65% 45% at 15% 15%, rgba(74, 222, 128, 0.08), transparent 65%),
+    radial-gradient(ellipse 60% 45% at 85% 80%, rgba(248, 113, 113, 0.06), transparent 65%),
+    linear-gradient(180deg, #08150e 0%, #050c08 100%) !important;
 }
 
-/* Variant 4: Hutan Tropis & Anggur (Muted Backdrop Only) */
+/* Variant 4: Hutan Tropis & Anggur (Subtle Backdrop Only) */
 #mainContent.ai-nature-themed[data-ai-chat-theme="emerald-forest"] {
   --nature-bg: #07120e;
-  --nature-bottom-fade: rgba(5, 13, 10, 0.42);
-  --nature-motif-opacity: 0.24;
+  --nature-bottom-fade: rgba(5, 13, 10, 0.34);
+  --nature-motif-opacity: 0.075;
   --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 32v-8M50 26c-5-4-11-3-12 2 0 4 4 6 7 4M52 30c6-7 16-6 18 1-5 5-13 5-18-1z' fill='%2310b981' fill-opacity='0.28' stroke='%2334d399' stroke-opacity='0.54' stroke-width='1.4'/%3E%3Ccircle cx='40' cy='42' r='6' fill='%23a855f7' fill-opacity='0.28' stroke='%23d8b4fe' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='50' cy='42' r='6' fill='%23a855f7' fill-opacity='0.32' stroke='%23d8b4fe' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='60' cy='42' r='6' fill='%239333ea' fill-opacity='0.28' stroke='%23d8b4fe' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='45' cy='51' r='6' fill='%239333ea' fill-opacity='0.32' stroke='%23d8b4fe' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='55' cy='51' r='6' fill='%23a855f7' fill-opacity='0.28' stroke='%23d8b4fe' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='42' cy='60' r='5.8' fill='%23a855f7' fill-opacity='0.28' stroke='%23d8b4fe' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='58' cy='60' r='5.8' fill='%239333ea' fill-opacity='0.28' stroke='%23d8b4fe' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='50' cy='61' r='6' fill='%23c084fc' fill-opacity='0.32' stroke='%23e9d5ff' stroke-opacity='0.56' stroke-width='1.3'/%3E%3Ccircle cx='50' cy='71' r='5.5' fill='%239333ea' fill-opacity='0.32' stroke='%23d8b4fe' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Cpath d='M164 78V32M164 46c-8-7-16-7-20-2M164 46c8-7 16-7 20-2M164 58c-9-7-18-6-22 0M164 58c9-7 18-6 22 0M164 70c-8-6-16-5-19 1M164 70c8-6 16-5 19 1' fill='none' stroke='%2334d399' stroke-opacity='0.54' stroke-width='1.6'/%3E%3Cpath d='M164 32c-5 5-6 12 0 15 6-3 5-10 0-15z' fill='%2310b981' fill-opacity='0.28' stroke='%236ee7b7' stroke-opacity='0.52' stroke-width='1.3'/%3E%3Cpath d='M166 142v-7M168 140c5-6 14-5 16 1-4 5-11 5-16-1z' fill='%2310b981' fill-opacity='0.3' stroke='%236ee7b7' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='157' cy='151' r='5.5' fill='%2334d399' fill-opacity='0.26' stroke='%236ee7b7' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='166' cy='151' r='5.5' fill='%2310b981' fill-opacity='0.3' stroke='%236ee7b7' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='175' cy='151' r='5.5' fill='%2334d399' fill-opacity='0.26' stroke='%236ee7b7' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='161.5' cy='160' r='5.5' fill='%2310b981' fill-opacity='0.3' stroke='%236ee7b7' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='170.5' cy='160' r='5.5' fill='%2334d399' fill-opacity='0.26' stroke='%236ee7b7' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Ccircle cx='166' cy='169' r='5.5' fill='%2310b981' fill-opacity='0.3' stroke='%236ee7b7' stroke-opacity='0.54' stroke-width='1.3'/%3E%3Cpath d='M36 178l18-30 18 30h-12l10 14h-32l10-14z' fill='%23059669' fill-opacity='0.26' stroke='%2334d399' stroke-opacity='0.52' stroke-width='1.5'/%3E%3Cpath d='M100 108c9-10 22-6 21 6-1 11-15 16-22 9 2-5 3-10 1-15z' fill='%2310b981' fill-opacity='0.26' stroke='%236ee7b7' stroke-opacity='0.52' stroke-width='1.4'/%3E%3C/g%3E%3C/svg%3E");
   background-color: #07120e !important;
   background-image:
@@ -20324,11 +20435,11 @@ svg.lucide,
     linear-gradient(180deg, #07120e 0%, #040b08 100%) !important;
 }
 
-/* Variant 5: Aurora Pegunungan & Samudra (Muted Backdrop Only) */
+/* Variant 5: Aurora Pegunungan & Samudra (Subtle Backdrop Only) */
 #mainContent.ai-nature-themed[data-ai-chat-theme="aurora-mountain"] {
   --nature-bg: #08101c;
-  --nature-bottom-fade: rgba(6, 12, 22, 0.42);
-  --nature-motif-opacity: 0.24;
+  --nature-bottom-fade: rgba(6, 12, 22, 0.34);
+  --nature-motif-opacity: 0.075;
   --nature-motif-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 72l24-34 16 20 12-14 18 28z' fill='%230ea5e9' fill-opacity='0.22' stroke='%2338bdf8' stroke-opacity='0.54' stroke-width='1.5'/%3E%3Cpath d='M38 49l8-11 8 11-5-2-3 4-3-4z' fill='%23e0f2fe' fill-opacity='0.28'/%3E%3Cpath d='M132 42c10-12 22-12 32 0s22 12 32 0' fill='none' stroke='%232dd4bf' stroke-opacity='0.48' stroke-width='2.2'/%3E%3Cpath d='M136 53c10-10 20-10 30 0s20 10 30 0' fill='none' stroke='%23a78bfa' stroke-opacity='0.4' stroke-width='1.9'/%3E%3Cpath d='M36 178l16-28 16 28h-10l8 12h-28l8-12z' fill='%2314b8a6' fill-opacity='0.26' stroke='%235eead4' stroke-opacity='0.54' stroke-width='1.4'/%3E%3Cpath d='M138 184l22-32 14 18 10-12 16 26z' fill='%230284c7' fill-opacity='0.22' stroke='%237dd3fc' stroke-opacity='0.54' stroke-width='1.5'/%3E%3Cpath d='M104 96c-6 2-9 9-6 15 3 5 10 8 16 5-5 1-9-2-10-7-2-5 0-10 0-13z' fill='%23bae6fd' fill-opacity='0.34' stroke='%23e0f2fe' stroke-opacity='0.52' stroke-width='1.2'/%3E%3Cpath d='M120 82l2 5 5 2-5 2-2 5-2-5-5-2 5-2z' fill='%235eead4' fill-opacity='0.52'/%3E%3Ccircle cx='88' cy='132' r='1.6' fill='%23bae6fd' fill-opacity='0.52'/%3E%3Ccircle cx='182' cy='96' r='1.8' fill='%2399f6e4' fill-opacity='0.5'/%3E%3C/g%3E%3C/svg%3E");
   background-color: #08101c !important;
   background-image:
@@ -20337,206 +20448,9 @@ svg.lucide,
     linear-gradient(160deg, #06181a 0%, #091827 52%, #0d1329 100%) !important;
 }
 
-/* Floating borderless typography & translucent dock blending directly into themed wallpapers */
-#mainContent.ai-nature-themed .message-row.user .message-bubble {
-  background: rgba(255, 255, 255, 0.085) !important;
-  border: none !important;
-  color: #F8FAFC !important;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18) !important;
-}
-
-#mainContent.ai-nature-themed .message-row.assistant .message-bubble {
-  background: transparent !important;
-  border: none !important;
-  border-radius: 0 !important;
-  color: #F8FAFC !important;
-  box-shadow: none !important;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.42);
-}
-
-/* High-contrast floating ink on light apple-orchard canvas */
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble p,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble li,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h1,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h2,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h3,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h4,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h5,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h6,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble strong,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble b,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble em,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble del,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble blockquote,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .katex,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble table td {
-  color: #0f172a !important;
-  text-shadow: none !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble hr,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble h1 {
-  border-color: rgba(15, 23, 42, 0.16) !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble table th {
-  background: rgba(15, 23, 42, 0.08) !important;
-  color: #0f172a !important;
-  border-color: rgba(15, 23, 42, 0.16) !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble table td {
-  border-color: rgba(15, 23, 42, 0.12) !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble table tbody tr:nth-child(even) {
-  background: rgba(15, 23, 42, 0.04) !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .reasoning-block {
-  background: rgba(15, 23, 42, 0.055) !important;
-  border-color: rgba(15, 23, 42, 0.14) !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .reasoning-block summary,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .reasoning-content,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .reasoning-badge {
-  color: #1e293b !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble a {
-  color: #0369a1 !important;
-}
-
-/* Preserve light text inside embedded dark media/code cards on light apple-orchard canvas */
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .youtube-preview-card,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .youtube-preview-card h4,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .youtube-preview-card p,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .youtube-preview-card strong,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .youtube-preview-card a,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .code-block-wrapper,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .code-block-wrapper pre,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble .code-block-wrapper code {
-  color: #f1f5f9 !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.assistant .message-bubble :not(pre) > code {
-  background: rgba(15, 23, 42, 0.08) !important;
-  color: #0f172a !important;
-  border-color: rgba(15, 23, 42, 0.14) !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.user .message-bubble {
-  background: rgba(15, 23, 42, 0.075) !important;
-  color: #0f172a !important;
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06) !important;
-}
-
-/* Only canvas-floating typography adjusts contrast on light apple-orchard canvas; interactive pills/UI stay neutral */
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #welcomeHero .greeting-welcome,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #welcomeHero .greeting-to,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #welcomeHero h2,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #welcomeHero h2 span,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #welcomeHero p,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #heroAutoRouterStatus {
-  color: #1e293b !important;
-  -webkit-text-fill-color: #1e293b !important;
-  background: none !important;
-  text-shadow: none !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] #heroAutoRouterBtn {
-  background: rgba(13, 16, 26, 0.92) !important;
-  color: #e2e8f0 !important;
-  border-color: rgba(30, 41, 59, 0.35) !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row .message-meta {
-  color: #334155 !important;
-  font-weight: 500;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row.user .message-meta {
-  color: #0f172a !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-row .meta-model-badge {
-  background: rgba(13, 16, 26, 0.9) !important;
-  color: var(--neon-cyan) !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-actions-bar .msg-action-btn {
-  color: #334155 !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .message-actions-bar .msg-action-btn:hover {
-  background: rgba(15, 23, 42, 0.08) !important;
-  color: #0f172a !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .autonomous-search-status {
-  background: rgba(13, 16, 26, 0.92) !important;
-  color: #e2e8f0 !important;
-  border-color: rgba(0, 240, 255, 0.3) !important;
-}
-
-/* Seamless translucent composer dock over themed wallpapers */
+/* Subtle bottom blend so themed backdrop remains clean behind the untouched default composer dock */
 #mainContent.ai-nature-themed .composer-container {
   background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, var(--nature-bottom-fade, rgba(7, 8, 12, 0.24)) 100%) !important;
-}
-
-#mainContent.ai-nature-themed .composer-box:not(.studio-composer-box) {
-  background: rgba(12, 16, 26, 0.42) !important;
-  border: none !important;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
-}
-
-#mainContent.ai-nature-themed .composer-box:not(.studio-composer-box):hover {
-  background: rgba(12, 16, 26, 0.5) !important;
-}
-
-#mainContent.ai-nature-themed .composer-box:not(.studio-composer-box):focus-within {
-  background: rgba(12, 16, 26, 0.58) !important;
-  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.16) !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box:not(.studio-composer-box) {
-  background: rgba(255, 255, 255, 0.58) !important;
-  border: none !important;
-  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box:not(.studio-composer-box):hover,
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box:not(.studio-composer-box):focus-within {
-  background: rgba(255, 255, 255, 0.72) !important;
-  box-shadow: 0 10px 32px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
-}
-
-@media (max-width: 768px) {
-  #mainContent.ai-nature-themed .composer-box:not(.studio-composer-box) {
-    background: rgba(12, 16, 26, 0.74) !important;
-  }
-  #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box:not(.studio-composer-box) {
-    background: rgba(255, 255, 255, 0.84) !important;
-  }
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box #promptInput {
-  color: #0f172a !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box #promptInput::placeholder {
-  color: #475569 !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box .composer-btn:not(.active):not(.recording):not([class*="mode-"]) {
-  color: #334155 !important;
-}
-
-#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-box .composer-btn:not(.active):not(.recording):not([class*="mode-"]):hover {
-  background: rgba(15, 23, 42, 0.1) !important;
-  color: #0f172a !important;
 }
 
 

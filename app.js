@@ -649,56 +649,63 @@ Execute exhaustive first-principles reasoning. Examine all theoretical, technica
     }
     if (els.modelOptionsActiveEngine) {
       els.modelOptionsActiveEngine.textContent = activeEngine;
-      els.modelOptionsActiveEngine.style.background = isOR ? 'rgba(255, 82, 0, 0.15)' : 'rgba(0, 240, 255, 0.15)';
-      els.modelOptionsActiveEngine.style.color = isOR ? 'var(--neon-amber, #ff5200)' : 'var(--neon-cyan, #00f0ff)';
-      els.modelOptionsActiveEngine.style.borderColor = isOR ? 'rgba(255, 82, 0, 0.3)' : 'rgba(0, 240, 255, 0.3)';
+      els.modelOptionsActiveEngine.style.background = isOR ? 'rgba(255, 82, 0, 0.14)' : 'rgba(56, 189, 248, 0.14)';
+      els.modelOptionsActiveEngine.style.color = isOR ? '#fb923c' : '#38bdf8';
+      els.modelOptionsActiveEngine.style.borderColor = isOR ? 'rgba(255, 82, 0, 0.28)' : 'rgba(56, 189, 248, 0.28)';
     }
 
     const isPinned = isModelPinned(activeRaw);
     const isAutoStart = isModelAutoStart(activeRaw);
 
-    // Update status badge header
+    // Update status badge header (teks bersih tanpa emoji berlebihan)
     if (els.modelOptionsActiveStatusBadge) {
-      let badges = [];
-      if (isPinned) badges.push('📌 Tersemat');
-      if (isAutoStart) badges.push('⚡ Auto-Start');
-      els.modelOptionsActiveStatusBadge.textContent = badges.join(' • ');
+      const badges = [];
+      if (isPinned) badges.push('Tersemat');
+      if (isAutoStart) badges.push('Auto-Start');
+      els.modelOptionsActiveStatusBadge.textContent = badges.length > 0 ? badges.join(' • ') : 'Model Aktif';
     }
 
-    // Update Tombol Pin
+    // Update Toggle Pin
     if (els.btnTogglePinCurrentModel) {
       els.btnTogglePinCurrentModel.classList.toggle('active-pin', isPinned);
+      els.btnTogglePinCurrentModel.setAttribute('aria-pressed', String(isPinned));
       if (els.textPinModelTitle) {
-        els.textPinModelTitle.textContent = isPinned ? 'Lepas Sematan Model' : 'Sematkan Model Ini';
+        els.textPinModelTitle.textContent = 'Sematkan di Daftar Atas';
       }
       if (els.badgePinModel) {
-        els.badgePinModel.style.display = isPinned ? 'inline-block' : 'none';
+        els.badgePinModel.style.display = 'none';
       }
       if (els.iconPinCurrentModel) {
-        els.iconPinCurrentModel.className = isPinned ? 'fa-solid fa-thumbtack text-teal-400' : 'fa-solid fa-thumbtack';
+        els.iconPinCurrentModel.className = 'fa-solid fa-thumbtack';
       }
     }
 
-    // Update Tombol Auto-Start
+    // Update Toggle Auto-Start
     if (els.btnToggleAutoStartCurrentModel) {
       els.btnToggleAutoStartCurrentModel.classList.toggle('active-autostart', isAutoStart);
+      els.btnToggleAutoStartCurrentModel.setAttribute('aria-pressed', String(isAutoStart));
       if (els.textAutoStartModelTitle) {
-        els.textAutoStartModelTitle.textContent = isAutoStart ? 'Nonaktifkan Auto-Start' : 'Jadikan Auto-Start saat Masuk';
+        els.textAutoStartModelTitle.textContent = 'Auto-Start Saat Masuk';
       }
       if (els.badgeAutoStartModel) {
-        els.badgeAutoStartModel.style.display = isAutoStart ? 'inline-block' : 'none';
+        els.badgeAutoStartModel.style.display = 'none';
       }
       if (els.iconAutoStartCurrentModel) {
-        els.iconAutoStartCurrentModel.className = isAutoStart ? 'fa-solid fa-bolt text-amber-400' : 'fa-solid fa-rocket';
+        els.iconAutoStartCurrentModel.className = 'fa-solid fa-bolt';
       }
     }
 
-    // Update Footer Info
+    // Update Footer Info: hanya tampil jika ada model LAIN yang disetel sebagai Auto-Start (hindari duplikasi)
+    const footerInfo = document.getElementById('modelOptionsFooterInfo');
+    const curCfg = STATE.autoStartModel || getAutoStartModelConfig();
+    const hasDifferentAutoStart = Boolean(curCfg && curCfg.enabled && curCfg.modelId && curCfg.modelId !== activeRaw);
+    if (footerInfo) {
+      footerInfo.style.display = hasDifferentAutoStart ? 'flex' : 'none';
+    }
     if (els.modelOptionsAutoStartTarget) {
-      const curCfg = STATE.autoStartModel || getAutoStartModelConfig();
       if (curCfg && curCfg.enabled && curCfg.modelId) {
         els.modelOptionsAutoStartTarget.textContent = `${curCfg.modelId} (${curCfg.provider.toUpperCase()})`;
-        els.modelOptionsAutoStartTarget.style.color = '#38bdf8';
+        els.modelOptionsAutoStartTarget.style.color = '#cbd5e1';
       } else {
         els.modelOptionsAutoStartTarget.textContent = 'Belum Diatur';
         els.modelOptionsAutoStartTarget.style.color = '#94a3b8';
@@ -12696,9 +12703,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         }
       } else if (action === 'copy-code') {
         copyTextToClipboard(cleanCode, () => {
-          showToast('Kode sumber diagram Mermaid berhasil disalin!');
+          btn.innerHTML = '<i class="fa-solid fa-check" style="color:var(--neon-teal);"></i> <span style="color:var(--neon-teal);">Disalin!</span>';
           AudioEngine.snap();
-        });
+          setTimeout(() => {
+            btn.innerHTML = '<i class="fa-solid fa-clipboard"></i> <span>Salin</span>';
+          }, 1800);
+        }, '');
       } else if (action === 'toggle-download-menu') {
         const menu = toolbar.querySelector('.mermaid-dropdown-menu');
         if (menu) {
@@ -12842,12 +12852,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
                 e.stopPropagation();
                 copyTextToClipboard(cleanCode, () => {
                   copyBtn.innerHTML = '<i class="fa-solid fa-check" style="color:var(--neon-teal);"></i> <span style="color:var(--neon-teal);">Disalin!</span>';
-                  showToast('Teks sumber berhasil disalin!');
                   AudioEngine.snap();
                   setTimeout(() => {
                     copyBtn.innerHTML = '<i class="fa-solid fa-clipboard"></i> Salin Teks / Sumber';
                   }, 2000);
-                });
+                }, '');
               });
             }
             const viewBtn = stage.querySelector('.mermaid-err-view-btn');
@@ -13048,7 +13057,6 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         const setCopiedState = () => {
           copyBtn.innerHTML = '<i class="fa-solid fa-check" style="color:var(--neon-teal);"></i> <span class="copy-text" style="color:var(--neon-teal);">Disalin!</span>';
           copyBtn.classList.add('copied');
-          showToast(`Kode ${lang} berhasil disalin ke clipboard!`);
           AudioEngine.snap();
           setTimeout(() => {
             copyBtn.innerHTML = '<i class="fa-solid fa-clipboard"></i> <span class="copy-text">Salin Kode</span>';
@@ -13056,7 +13064,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           }, 2000);
         };
 
-        copyTextToClipboard(codeText, setCopiedState);
+        copyTextToClipboard(codeText, setCopiedState, '');
       });
 
       pre.insertBefore(header, pre.firstChild);
@@ -19416,12 +19424,11 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         const origHtml = copyBtn.innerHTML;
         copyBtn.innerHTML = '<i class="fa-solid fa-check" style="color:var(--neon-teal);"></i> <span style="color:var(--neon-teal);">Disalin!</span>';
         copyBtn.classList.add('copied');
-        showToast('Pesan disalin ke clipboard!');
         setTimeout(() => {
           copyBtn.innerHTML = origHtml;
           copyBtn.classList.remove('copied');
         }, 2000);
-      }, 'Pesan disalin ke clipboard!');
+      }, '');
     });
 
     if (role === 'assistant') {
@@ -22023,7 +22030,9 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
         if (act === 'download-html') {
           downloadAIFile(file, 'html');
         } else if (act === 'copy-code') {
-          copyTextToClipboard(file.rawContent || file.content || '', null, 'Kode disalin ke clipboard!');
+          copyTextToClipboard(file.rawContent || file.content || '', () => {
+            AudioEngine.snap();
+          }, '');
         } else if (act === 'download-zip') {
           downloadAIFileAsZip(file);
         }
@@ -22031,8 +22040,15 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
     });
 
     // Share button
-    card.querySelector('.canvas-card-share-btn')?.addEventListener('click', () => {
-      copyTextToClipboard(file.rawContent || file.content || '', null, 'Kode disalin ke clipboard!');
+    const cardShareBtn = card.querySelector('.canvas-card-share-btn');
+    cardShareBtn?.addEventListener('click', () => {
+      copyTextToClipboard(file.rawContent || file.content || '', () => {
+        cardShareBtn.innerHTML = '<i class="fa-solid fa-check" style="color:var(--neon-teal);"></i>';
+        AudioEngine.snap();
+        setTimeout(() => {
+          cardShareBtn.innerHTML = '<i class="fa-solid fa-share-nodes"></i>';
+        }, 1800);
+      }, '');
     });
 
     // Reload button
@@ -27213,7 +27229,14 @@ ${blocks}
   }
   els.aiFileStudioCopyBtn?.addEventListener('click', () => {
     if (!activeAIFile) return;
-    copyTextToClipboard(activeAIFile.rawContent || activeAIFile.content || '', null, 'Kode file disalin ke clipboard!');
+    const btn = els.aiFileStudioCopyBtn;
+    copyTextToClipboard(activeAIFile.rawContent || activeAIFile.content || '', () => {
+      btn.innerHTML = '<i class="fa-solid fa-check" style="color:var(--neon-teal);"></i>';
+      AudioEngine.snap();
+      setTimeout(() => {
+        btn.innerHTML = '<i class="fa-solid fa-copy"></i>';
+      }, 1800);
+    }, '');
   });
   els.aiFileStudioSaveDiskBtn?.addEventListener('click', async () => {
     if (!activeAIFile) return;
@@ -58514,7 +58537,7 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       default: 'Standar Cyber Dark',
       'mango-citrus': 'Senja Mangga & Jeruk',
       'strawberry-sakura': 'Taman Stroberi & Sakura',
-      'apple-orchard': 'Kebun Apel Pagi',
+      'apple-orchard': 'Kebun Apel Zamrud',
       'emerald-forest': 'Hutan Tropis & Anggur',
       'aurora-mountain': 'Aurora Pegunungan'
     },
