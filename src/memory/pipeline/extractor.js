@@ -89,7 +89,7 @@ function captureExplicitMemory(userId, factText, scope = 'global', metadata = {}
     sourceType: metadata.sourceType || 'manual',
     sourceTitle: metadata.sourceTitle || 'Instruksi Pengguna Langsung',
     sourceUri: metadata.sourceUri || '',
-    rawSnippet: actualText
+    rawSnippet: cleanContent
   });
 
   // Categorize
@@ -219,9 +219,9 @@ function triggerAsyncBackgroundExtraction({
             sessionId,
             turnIndex,
             sourceType: 'chat_error_correction',
-            sourceTitle: `Koreksi Kesalahan Sesi: ${(resolvedErrorLesson.questionText || sessionTitle || sessionId).slice(0, 42)}`,
+            sourceTitle: `Koreksi Kesalahan Sesi: ${(sanitizedLesson.content || sessionTitle || sessionId).slice(0, 42)}`,
             sourceUri: `/chat/${sessionId}`,
-            rawSnippet: resolvedErrorLesson.content.slice(0, 800)
+            rawSnippet: sanitizedLesson.content.slice(0, 800)
           });
           const existingLessons = dbStorage.listMemories(userId, { category: 'error_lesson', limit: 40 });
           const qProbe = (resolvedErrorLesson.questionText || '').toLowerCase().slice(0, 90);
@@ -229,7 +229,7 @@ function triggerAsyncBackgroundExtraction({
             ? existingLessons.find(m => (m.content || '').toLowerCase().includes(qProbe))
             : null;
           if (dupLesson) {
-            dbStorage.updateMemory(dupLesson.id, { content: sanitizedLesson.content, category: 'error_lesson', scope });
+            dbStorage.updateMemory(dupLesson.id, { content: sanitizedLesson.content, category: 'error_lesson', scope }, userId);
           } else {
             dbStorage.insertMemory({
               userId,
@@ -295,7 +295,7 @@ function triggerAsyncBackgroundExtraction({
             ? existingEps.find(m => (m.content || '').toLowerCase().includes(qKey))
             : null;
           if (dupEp) {
-            dbStorage.updateMemory(dupEp.id, { content: sanitizedEp.content, category: 'episodic_context', scope });
+            dbStorage.updateMemory(dupEp.id, { content: sanitizedEp.content, category: 'episodic_context', scope }, userId);
           } else {
             const epTrace = dbStorage.insertEpisode({
               userId,
@@ -347,15 +347,15 @@ function triggerAsyncBackgroundExtraction({
       const sanitized = sanitizeFactCandidate(candidateSnippet);
       if (!sanitized.accepted) return;
 
-      // Create episode trace for receipts
+      // Create episode trace for receipts using PII-redacted snippet
       const ep = dbStorage.insertEpisode({
         userId,
         sessionId,
         turnIndex,
         sourceType: 'chat',
-        sourceTitle: `Sesi Chat: ${candidateSnippet.slice(0, 32)}...`,
+        sourceTitle: `Sesi Chat: ${sanitized.content.slice(0, 32)}...`,
         sourceUri: `/chat/${sessionId}`,
-        rawSnippet: candidateSnippet
+        rawSnippet: sanitized.content
       });
 
       // Distill sentences
@@ -366,11 +366,11 @@ function triggerAsyncBackgroundExtraction({
         if (!cleanSent.accepted) continue;
 
         let category = 'fact';
-        if (/\b(?:menggunakan|memakai|stack|bahasa|framework|db|database)\b/i.test(sent)) {
+        if (/\b(?:menggunakan|memakai|stack|bahasa|framework|db|database)\b/i.test(cleanSent.content)) {
           category = 'technical_stack';
-        } else if (/\b(?:proyek|project|fitur|roadmap)\b/i.test(sent)) {
+        } else if (/\b(?:proyek|project|fitur|roadmap)\b/i.test(cleanSent.content)) {
           category = 'project_context';
-        } else if (/\b(?:suka|preferensi|lebih\s+memilih)\b/i.test(sent)) {
+        } else if (/\b(?:suka|preferensi|lebih\s+memilih)\b/i.test(cleanSent.content)) {
           category = 'preference';
         }
 
@@ -385,8 +385,8 @@ function triggerAsyncBackgroundExtraction({
         });
 
         // Entity & Relational Graph Extraction (e.g. "Welin kusuma adalah teman zozi")
-        const copulaRelationMatch = sent.match(/\b([a-zA-Z0-9_\-\s]{2,32})\s+(?:adalah|merupakan|ialah)\s+([a-zA-Z0-9_\-\s]{2,64})/i);
-        if (copulaRelationMatch) {
+        const copulaRelationMatch = cleanSent.content.match(/\b([a-zA-Z0-9_\-\s]{2,32})\s+(?:adalah|merupakan|ialah)\s+([a-zA-Z0-9_\-\s]{2,64})/i);
+        if (copulaRelationMatch && !cleanSent.content.includes('[REDACTED_')) {
           const subjName = copulaRelationMatch[1].trim();
           const objFact = copulaRelationMatch[2].trim();
           if (subjName.length >= 3 && objFact.length >= 3) {
@@ -405,8 +405,8 @@ function triggerAsyncBackgroundExtraction({
 
         // Temporal Relation Graph Resolution:
         // E.g. "Kami sekarang beralih dari REST ke GraphQL"
-        if (temporalReplacementClues.test(sent)) {
-          const matchSwitch = sent.match(/(?:dari|sebelumnya)\s+([a-zA-Z0-9_\-\.]+)\s+(?:ke|menjadi)\s+([a-zA-Z0-9_\-\.]+)/i);
+        if (temporalReplacementClues.test(cleanSent.content) && !cleanSent.content.includes('[REDACTED_')) {
+          const matchSwitch = cleanSent.content.match(/(?:dari|sebelumnya)\s+([a-zA-Z0-9_\-\.]+)\s+(?:ke|menjadi)\s+([a-zA-Z0-9_\-\.]+)/i);
           if (matchSwitch) {
             const oldTech = matchSwitch[1].trim();
             const newTech = matchSwitch[2].trim();
@@ -414,11 +414,11 @@ function triggerAsyncBackgroundExtraction({
             const oldEnt = dbStorage.upsertEntity({ userId, name: oldTech, entityType: 'tech', scope });
             const newEnt = dbStorage.upsertEntity({ userId, name: newTech, entityType: 'tech', scope });
 
-            // Mark old relation invalid & add new relation
+            // Mark old relation invalid & add new relation (newEnt replaces oldEnt)
             dbStorage.addRelation({
               userId,
-              sourceEntityId: oldEnt.id,
-              targetEntityId: newEnt.id,
+              sourceEntityId: newEnt.id,
+              targetEntityId: oldEnt.id,
               relationType: 'replaces',
               fact: cleanSent.content,
               episodeId: ep.id

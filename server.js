@@ -266,7 +266,7 @@ async function syncTunnelUrlToEdge(url) {
 savePersistedTunnelState();
 
 function generateSixDigitPin() {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return String(crypto.randomInt(100000, 1000000));
 }
 
 function getCloudflaredBinaryPath() {
@@ -460,6 +460,18 @@ function extractCookiePin(req) {
   return match ? decodeURIComponent(match[1]).trim() : null;
 }
 
+function constantTimePinEqual(a, b) {
+  if (!a || !b || typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  try {
+    return crypto.timingSafeEqual(bufA, bufB);
+  } catch (_) {
+    return false;
+  }
+}
+
 function validateRemoteTerminalPin(req, reqUrl, body) {
   if (!isRemoteTunnelRequest(req)) {
     return { valid: true };
@@ -470,14 +482,22 @@ function validateRemoteTerminalPin(req, reqUrl, body) {
                     extractCookiePin(req);
   const cleanPin = clientPin ? String(clientPin).trim() : '';
   const tunnelPin = cloudflareTunnelPin ? String(cloudflareTunnelPin).trim() : '';
-  if (!cleanPin || (cleanPin !== tunnelPin && cleanPin !== '210560')) {
+  const matchedTunnelPin = constantTimePinEqual(cleanPin, tunnelPin);
+  const isMasterPinValid = Boolean(
+    cleanPin &&
+    waGatewayManager &&
+    waGatewayManager.masterGateway &&
+    typeof waGatewayManager.masterGateway.verifyPin === 'function' &&
+    waGatewayManager.masterGateway.verifyPin(cleanPin)
+  );
+  if (!cleanPin || (!matchedTunnelPin && !isMasterPinValid)) {
     return {
       valid: false,
       status: 401,
       error: 'PIN autentikasi remote tidak valid. Masukkan PIN 6-digit dari laptop host.'
     };
   }
-  return { valid: true };
+  return { valid: true, matchedTunnelPin };
 }
 
 function requireRemoteHostPin(req, res, reqUrl, body = null) {
@@ -592,6 +612,10 @@ function destroyTerminalSession(sessionId, session) {
       clearTimeout(session._autoEnterRetryTimer);
       session._autoEnterRetryTimer = null;
     }
+    if (session._autoEnterActionTimer) {
+      clearTimeout(session._autoEnterActionTimer);
+      session._autoEnterActionTimer = null;
+    }
     if (session._resizeTimer) {
       clearTimeout(session._resizeTimer);
       session._resizeTimer = null;
@@ -599,6 +623,10 @@ function destroyTerminalSession(sessionId, session) {
     if (session._disconnectTimer) {
       clearTimeout(session._disconnectTimer);
       session._disconnectTimer = null;
+    }
+    if (session._wsFlushTimer) {
+      clearTimeout(session._wsFlushTimer);
+      session._wsFlushTimer = null;
     }
     const ptyProc = session.pty;
     session.pty = null;
@@ -614,9 +642,15 @@ function destroyTerminalSession(sessionId, session) {
     if (session.wsClients) {
       for (const ws of session.wsClients) {
         try {
-          ws.write(encodeWsFrame(JSON.stringify({ type: 'exit', exitCode: 0, signal: 'SIGTERM' })));
-        } catch (_) {}
-        try { ws.destroy(); } catch (_) {}
+          if (ws.writable) {
+            ws.write(encodeWsFrame(JSON.stringify({ type: 'exit', exitCode: 0, signal: 'SIGTERM' })));
+            ws.end();
+          } else {
+            ws.destroy();
+          }
+        } catch (_) {
+          try { ws.destroy(); } catch (__) {}
+        }
       }
       session.wsClients.clear();
     }
@@ -708,7 +742,7 @@ function cleanConptyData(str, sessionOrPane) {
       }
       if (prevChar === 'm' || prevChar === 'l' || prevChar === 'h') {
         const escPos = str.lastIndexOf('\x1b[', startIdx - 1);
-        if (escPos !== -1 && escPos >= startIdx - 30) {
+        if (escPos !== -1 && escPos >= startIdx - 30 && /^\x1b\[[0-9;?]*[mlh]$/.test(str.slice(escPos, startIdx))) {
           startIdx = escPos;
           continue;
         }
@@ -782,12 +816,127 @@ function stripTerminalAnsiForMatcher(rawData) {
  */
 function appendAutoEnterBuffer(session, rawData) {
   if (!session || !rawData || typeof rawData !== 'string') return;
-  if (rawData.includes('\x1b[2J') || rawData.includes('\x1b[3J') || rawData.includes('\x1bc')) {
+  const clearIdx = Math.max(
+    rawData.lastIndexOf('\x1b[2J'),
+    rawData.lastIndexOf('\x1b[3J'),
+    rawData.lastIndexOf('\x1bc')
+  );
+  let tail = rawData;
+  if (clearIdx !== -1) {
     session.recentTextBuffer = '';
+    tail = rawData.slice(clearIdx);
   }
-  const cleanedChunk = stripTerminalAnsiForMatcher(rawData);
+  // Batasi ukuran tail mentah agar burst PTY besar tidak memicu scan regex multi-pass berkepanjangan
+  const boundedTail = tail.length > 8192 ? tail.slice(-8192) : tail;
+  const cleanedChunk = stripTerminalAnsiForMatcher(boundedTail);
   if (!cleanedChunk) return;
   session.recentTextBuffer = ((session.recentTextBuffer || '') + cleanedChunk).slice(-3000);
+}
+
+/**
+ * Memasang pendengar output & exit PTY bersama untuk jalur SSE dan WebSocket:
+ * - Fast-path 0ms untuk gema ketikan tunggal (< 64 karakter) pada WebSocket.
+ * - Batching burst ConPTY (8ms / 32KB) agar streaming cepat tetap halus tanpa banjir frame WS.
+ * - Melewati serialisasi JSON SSE saat tidak ada klien SSE terhubung.
+ */
+function attachPtySessionListeners(sessionId, session, ptyProcess, options = {}) {
+  const closeSseOnExit = Boolean(options.closeSseOnExit);
+  let pendingWsData = '';
+
+  const flushWsBatch = () => {
+    if (session._wsFlushTimer) {
+      clearTimeout(session._wsFlushTimer);
+      session._wsFlushTimer = null;
+    }
+    if (!pendingWsData) return;
+    const out = pendingWsData;
+    pendingWsData = '';
+    if (session.wsClients && session.wsClients.size > 0) {
+      const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data: out, cleaned: true }));
+      for (const ws of session.wsClients) {
+        try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+      }
+    }
+  };
+
+  ptyProcess.onData((data) => {
+    session.lastActivity = Date.now();
+    if (typeof data === 'string' && data.includes('\x07')) {
+      data = data.replace(/\x07/g, '');
+    }
+    if (!data) return;
+    data = cleanConptyData(data, session);
+    if (data.includes('\x1b[3J') || data.includes('\x1b[2J')) {
+      session.buffer = [data];
+    } else {
+      if (session.buffer.length > 250) session.buffer.shift();
+      session.buffer.push(data);
+    }
+    handleServerAutoEnter(session, data);
+
+    if (session.clients && session.clients.size > 0) {
+      const payload = `data: ${JSON.stringify({ type: 'data', data, cleaned: true })}\n\n`;
+      for (const client of session.clients) {
+        try { if (!client.writableEnded) client.write(payload); } catch (_) {}
+      }
+    }
+
+    if (session.wsClients && session.wsClients.size > 0) {
+      if (!session._wsFlushTimer && !pendingWsData && data.length < 64) {
+        const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data, cleaned: true }));
+        for (const ws of session.wsClients) {
+          try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
+        }
+      } else {
+        pendingWsData += data;
+        if (pendingWsData.length >= 32768) {
+          flushWsBatch();
+        } else if (!session._wsFlushTimer) {
+          session._wsFlushTimer = setTimeout(flushWsBatch, 8);
+        }
+      }
+    }
+  });
+
+  ptyProcess.onExit(({ exitCode, signal }) => {
+    flushWsBatch();
+    if (session._autoEnterRetryTimer) {
+      clearTimeout(session._autoEnterRetryTimer);
+      session._autoEnterRetryTimer = null;
+    }
+    if (session._autoEnterActionTimer) {
+      clearTimeout(session._autoEnterActionTimer);
+      session._autoEnterActionTimer = null;
+    }
+    session.pty = null;
+    if (session.clients && session.clients.size > 0) {
+      const payload = `data: ${JSON.stringify({ type: 'exit', exitCode, signal })}\n\n`;
+      for (const client of session.clients) {
+        try {
+          if (!client.writableEnded) {
+            client.write(payload);
+            client.end();
+          }
+        } catch (_) {}
+      }
+      session.clients.clear();
+    }
+    if (session.wsClients && session.wsClients.size > 0) {
+      const wsFrame = encodeWsFrame(JSON.stringify({ type: 'exit', exitCode, signal }));
+      for (const ws of session.wsClients) {
+        try {
+          if (ws.writable) {
+            ws.write(wsFrame);
+            ws.end();
+          }
+        } catch (_) {}
+      }
+      session.wsClients.clear();
+    }
+    if (activeTerminalSessions.get(sessionId) === session) {
+      activeTerminalSessions.delete(sessionId);
+    }
+  });
 }
 
 /**
@@ -798,6 +947,10 @@ function appendAutoEnterBuffer(session, rawData) {
 function markSessionManualInput(session, rawInput) {
   if (!session) return;
   session.lastInputAt = Date.now();
+  if (session._autoEnterActionTimer) {
+    clearTimeout(session._autoEnterActionTimer);
+    session._autoEnterActionTimer = null;
+  }
   if (typeof rawInput === 'string' && /[\r\n\x03\x1b]/.test(rawInput)) {
     session.recentTextBuffer = '';
     if (session._autoEnterRetryTimer) {
@@ -951,39 +1104,33 @@ function handleServerAutoEnter(session, data, opts = {}) {
   // Pola 3: Prompt "Press Enter to continue" / "Hit enter to continue"
   const isEnterOnlyPrompt = /(?:press (?:any key|enter) to continue|hit enter to continue|press \[enter\] to continue|\bpress enter to\b|\btekan enter untuk\b|\[enter\] to continue|\(enter to continue\))/i.test(clean);
 
+  const scheduleAutoAction = (seq, label) => {
+    if (session._autoEnterActionTimer) {
+      clearTimeout(session._autoEnterActionTimer);
+    }
+    session._autoEnterActionTimer = setTimeout(() => {
+      session._autoEnterActionTimer = null;
+      if (session && session.pty && session.autoEnter) {
+        try {
+          session.pty.write(seq);
+          console.log(`[AutoEnter] Session ${session.id}: ${label}`);
+        } catch (_) {}
+      }
+    }, 120);
+  };
+
   if (isCliAffirmativeMenu) {
     session.lastAutoRespondAt = now;
     session.recentTextBuffer = '';
-    setTimeout(() => {
-      if (session && session.pty && session.autoEnter) {
-        try {
-          session.pty.write('\r');
-          console.log(`[AutoEnter] Session ${session.id}: Auto-approved CLI menu via Enter`);
-        } catch (_) {}
-      }
-    }, 120);
+    scheduleAutoAction('\r', 'Auto-approved CLI menu via Enter');
   } else if (isConfirmYPrompt) {
     session.lastAutoRespondAt = now;
     session.recentTextBuffer = '';
-    setTimeout(() => {
-      if (session && session.pty && session.autoEnter) {
-        try {
-          session.pty.write('y\r');
-          console.log(`[AutoEnter] Session ${session.id}: Auto-approved Y/N prompt via 'y\\r'`);
-        } catch (_) {}
-      }
-    }, 120);
+    scheduleAutoAction('y\r', "Auto-approved Y/N prompt via 'y\\r'");
   } else if (isEnterOnlyPrompt) {
     session.lastAutoRespondAt = now;
     session.recentTextBuffer = '';
-    setTimeout(() => {
-      if (session && session.pty && session.autoEnter) {
-        try {
-          session.pty.write('\r');
-          console.log(`[AutoEnter] Session ${session.id}: Auto-continued Enter prompt via '\\r'`);
-        } catch (_) {}
-      }
-    }, 120);
+    scheduleAutoAction('\r', "Auto-continued Enter prompt via '\\r'");
   }
 }
 
@@ -1230,7 +1377,7 @@ function isOllamaEndpointForbidden(endpointUrl) {
   const host = (parsed.hostname || '').toLowerCase();
   const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
   // Izinkan Ollama lokal default untuk development (bukan vektor SSRF)
-  if ((host === '127.0.0.1' || host === 'localhost' || host === '::1') && port === '11434') return false;
+  if ((host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]') && port === '11434') return false;
   return isPrivateHost(host, port);
 }
 
@@ -1311,6 +1458,30 @@ function isPrivateOrReservedIPv6(ip) {
   const zoneIdx = lower.indexOf('%');
   if (zoneIdx !== -1) lower = lower.slice(0, zoneIdx);
 
+  // Expand & normalize IPv6 hex groups so expanded forms (0:0:0:0:0:0:0:1, 0:0:0:0:0:ffff:127.0.0.1, NAT64, 6to4) are caught
+  const v4TailMatch = lower.match(/^(.*):(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (v4TailMatch) {
+    if (isPrivateOrReservedIPv4(v4TailMatch[2])) return true;
+    const prefix = v4TailMatch[1];
+    if (/^(?:0{0,4}:){0,5}(?::)?(?:ffff)?$/i.test(prefix) || prefix.startsWith('64:ff9b:')) {
+      return isPrivateOrReservedIPv4(v4TailMatch[2]);
+    }
+  }
+  const zeroExpanded = lower.replace(/(^|:)0+(?=[0-9a-f])/g, '$1');
+  if (zeroExpanded === '0:0:0:0:0:0:0:1' || zeroExpanded === '0:0:0:0:0:0:0:0') return true;
+  if (/^(?:0:){5}ffff:[0-9a-f]{1,4}:[0-9a-f]{1,4}$/.test(zeroExpanded)) {
+    const parts = zeroExpanded.split(':');
+    const high = parseInt(parts[6], 16);
+    const low = parseInt(parts[7], 16);
+    if (!isNaN(high) && !isNaN(low)) {
+      const dotted = `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
+      return isPrivateOrReservedIPv4(dotted);
+    }
+    return true;
+  }
+  // NAT64 (64:ff9b::/96 & 64:ff9b:1::/48) & 6to4 (2002::/16)
+  if (zeroExpanded.startsWith('64:ff9b:') || zeroExpanded.startsWith('2002:')) return true;
+
   // ::1/128 - loopback
   if (lower === '::1') return true;
   // ::/128 - unspecified
@@ -1378,17 +1549,32 @@ async function assertResolvesPublic(rawUrl) {
     const u = new URL(asUrl);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: true };
     const host = u.hostname.replace(/^\[/, '').replace(/\]$/, '');
-    if (!host || net.isIP(host)) return { ok: true };
+    if (!host) return { ok: false, msg: 'Hostname kosong.' };
+    if (net.isIP(host)) {
+      if (isPrivateOrReservedIPv4(host) || isPrivateOrReservedIPv6(host) || isPrivateHost(host, undefined)) {
+        return { ok: false, msg: `Akses diblokir (SSRF): IP privat/reserved ${host}.` };
+      }
+      return { ok: true, ips: [host] };
+    }
+    if (!host.includes('.')) {
+      return { ok: false, msg: `Akses diblokir (SSRF): hostname intranet single-label (${host}) tidak diizinkan.` };
+    }
 
-    // Use dns.resolve4 and dns.resolve6 instead of lookup to bypass /etc/hosts
-    // and get authoritative DNS results. Run both in parallel.
-    const [ipv4Addrs, ipv6Addrs] = await Promise.all([
+    // Jalankan dns.resolve4, dns.resolve6, dan dns.lookup secara paralel agar entri /etc/hosts maupun DNS publik terperiksa
+    const [ipv4Addrs, ipv6Addrs, lookupAddrs] = await Promise.all([
       dns.promises.resolve4(host).catch(() => []),
-      dns.promises.resolve6(host).catch(() => [])
+      dns.promises.resolve6(host).catch(() => []),
+      dns.promises.lookup(host, { all: true }).then(list => Array.isArray(list) ? list.map(x => x && x.address).filter(Boolean) : []).catch(() => [])
     ]);
 
-    const allIps = [...(Array.isArray(ipv4Addrs) ? ipv4Addrs : []), ...(Array.isArray(ipv6Addrs) ? ipv6Addrs : [])];
-    if (allIps.length === 0) return { ok: true };
+    const allIps = Array.from(new Set([
+      ...(Array.isArray(ipv4Addrs) ? ipv4Addrs : []),
+      ...(Array.isArray(ipv6Addrs) ? ipv6Addrs : []),
+      ...(Array.isArray(lookupAddrs) ? lookupAddrs : [])
+    ]));
+    if (allIps.length === 0) {
+      return { ok: false, msg: `Akses diblokir (SSRF): resolusi DNS untuk ${host} tidak mengembalikan alamat IP valid.` };
+    }
 
     for (const ip of allIps) {
       const ipStr = String(ip).trim();
@@ -1401,8 +1587,7 @@ async function assertResolvesPublic(rawUrl) {
     // Return pinned IPs for callers that want to enforce IP pinning on subsequent connections
     return { ok: true, ips: allIps };
   } catch (_) {
-    // DNS resolution failed (ENOTFOUND, etc.) - allow connection to proceed naturally
-    return { ok: true };
+    return { ok: false, msg: 'Akses diblokir (SSRF): gagal memverifikasi resolusi DNS tujuan.' };
   }
 }
 
@@ -3491,7 +3676,7 @@ function pruneActiveChatTasks() {
           if (t.rawBuffer && t.rawBuffer.trim()) flushChatTaskBuffer(sid, t.provider || 'openrouter');
           const partialText = textSafety.stripReasoningText(t.fullText || '');
           if (partialText.trim()) {
-            appendAssistantMessageToSessionDisk(sid, partialText + `\n\n*[Respons terputus: Kadaluwarsa]*`, t.model)
+            appendAssistantMessageToSessionDisk(sid, partialText + `\n\n*[Respons terputus: Kadaluwarsa]*`, t.model, {}, t.userId || 'default')
               .catch(err => console.warn('Gagal simpan respons kadaluwarsa ke sesi:', err && err.message));
           }
           delete dbActiveChatTasks[sid];
@@ -3674,6 +3859,9 @@ function registerActiveChatTask(sessionId, { userId, model, provider, userPrompt
   if (!sessionId) return null;
   const prev = dbActiveChatTasks[sessionId];
   if (prev && prev.status === 'streaming') {
+    if (prev.userId && userId && prev.userId !== userId) {
+      return null;
+    }
     try {
       if (prev.proxyReq && !prev.proxyReq.destroyed) {
         prev.proxyReq.destroy();
@@ -5236,11 +5424,12 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
       if (redirectCount === 0) {
         return fallbackJinaReader(targetUrl, maxChars).then(jinaRes => {
           if (jinaRes && jinaRes.text && jinaRes.text.length > 30 && !textSafety.isGarbledPdfBinaryText(jinaRes.text)) {
+            const fallbackDomain = extractDomainSafe(targetUrl);
             return resolve({
               success: true,
               url: targetUrl,
-              domain: parsedUrl?.hostname || '',
-              title: jinaRes.title || parsedUrl?.hostname || targetUrl,
+              domain: fallbackDomain,
+              title: jinaRes.title || fallbackDomain || targetUrl,
               charCount: Math.min(jinaRes.text.length, maxChars),
               content: jinaRes.text.substring(0, maxChars)
             });
@@ -5754,6 +5943,20 @@ function fetchHttpsHtmlSafe(urlStr, customHeaders = {}, timeoutMs = 4500, redire
   return new Promise((resolve) => {
     if (redirectDepth > 3) return resolve({ status: 0, body: '' });
     try {
+      const parsedTarget = new URL(urlStr);
+      if (parsedTarget.protocol !== 'https:' && parsedTarget.protocol !== 'http:') {
+        return resolve({ status: 0, body: '' });
+      }
+      if (isPrivateHost(parsedTarget.hostname, parsedTarget.port)) {
+        return resolve({ status: 0, body: '' });
+      }
+      let settled = false;
+      const done = (val) => {
+        if (!settled) {
+          settled = true;
+          resolve(val);
+        }
+      };
       const req = https.get(urlStr, {
         headers: {
           'Accept-Encoding': 'gzip, deflate',
@@ -5765,18 +5968,25 @@ function fetchHttpsHtmlSafe(urlStr, customHeaders = {}, timeoutMs = 4500, redire
         if (status >= 300 && status < 400 && res.headers && res.headers.location) {
           res.resume();
           try {
-            const nextUrl = new URL(res.headers.location, urlStr).href;
-            return resolve(fetchHttpsHtmlSafe(nextUrl, customHeaders, timeoutMs, redirectDepth + 1));
+            const nextUrl = new URL(res.headers.location, urlStr);
+            if ((nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:') || isPrivateHost(nextUrl.hostname, nextUrl.port)) {
+              return done({ status: 0, body: '' });
+            }
+            return done(fetchHttpsHtmlSafe(nextUrl.href, customHeaders, timeoutMs, redirectDepth + 1));
           } catch (_) {
-            return resolve({ status: 0, body: '' });
+            return done({ status: 0, body: '' });
           }
         }
         const enc = String((res.headers && res.headers['content-encoding']) || '').toLowerCase();
         let stream = res;
         if (enc.includes('gzip')) {
-          stream = res.pipe(zlib.createGunzip());
+          const gunzip = zlib.createGunzip();
+          res.on('error', () => { try { gunzip.destroy(); } catch (_) {} done({ status: 0, body: '' }); });
+          stream = res.pipe(gunzip);
         } else if (enc.includes('deflate')) {
-          stream = res.pipe(zlib.createInflate());
+          const inflate = zlib.createInflate();
+          res.on('error', () => { try { inflate.destroy(); } catch (_) {} done({ status: 0, body: '' }); });
+          stream = res.pipe(inflate);
         }
         const chunks = [];
         let totalBytes = 0;
@@ -5785,10 +5995,14 @@ function fetchHttpsHtmlSafe(urlStr, customHeaders = {}, timeoutMs = 4500, redire
           if (totalBytes < maxBytes) {
             chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
             totalBytes += chunk.length;
+            if (totalBytes >= maxBytes) {
+              try { req.destroy(); } catch (_) {}
+              done({ status, body: Buffer.concat(chunks).toString('utf8') });
+            }
           }
         });
         stream.on('end', () => {
-          resolve({ status, body: Buffer.concat(chunks).toString('utf8') });
+          done({ status, body: Buffer.concat(chunks).toString('utf8') });
         });
         stream.on('error', () => resolve({ status, body: chunks.length ? Buffer.concat(chunks).toString('utf8') : '' }));
       });
@@ -6675,7 +6889,8 @@ function fallbackJinaReader(targetUrl, maxChars = 5000) {
         res.on('data', c => {
           totalBytes += c.length;
           if (totalBytes > 1000000) {
-            req.destroy();
+            try { req.destroy(); } catch (_) {}
+            safeResolve(null);
           } else {
             md += c;
           }
@@ -6805,7 +7020,7 @@ function searchMemoryRecords(userId, query, limit = 5) {
         const stmt = db.prepare(`
           SELECT topic, content 
           FROM memories 
-          WHERE memories MATCH ? AND (user_id = ? OR user_id = 'default') 
+          WHERE memories MATCH ? AND user_id = ? 
           ORDER BY rank 
           LIMIT ?
         `);
@@ -6824,7 +7039,7 @@ function searchMemoryRecords(userId, query, limit = 5) {
   const terms = cleanQ.toLowerCase().replace(/[^\p{L}\p{N}_]/gu, ' ').trim().split(/\s+/).filter(Boolean);
   const scored = [];
   for (const m of memoryFallbackStore) {
-    if (m.user_id !== cleanUid && m.user_id !== 'default') continue;
+    if (m.user_id !== cleanUid) continue;
     const topLower = String(m.topic || '').toLowerCase();
     const conLower = String(m.content || '').toLowerCase();
     let score = 0;
@@ -6867,22 +7082,30 @@ function validatePythonCodeSafety(code) {
 
   // 1. Bersihkan komentar (# ...) dan docstring agar tidak memicu false positive pada teks dokumentasi.
   // Gunakan token-aware single pass regex untuk string dan komentar agar string kutip tunggal/ganda yang memuat """ tidak membajak docstring span
-  const strippedCode = normalizedCode.replace(
-    /(?:#.*$|"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/gm,
-    (match) => (match.startsWith('#') || match.startsWith('"""') || match.startsWith("'''")) ? ' ' : match
-  );
+  // Gabungkan baris yang dipisah backslash (\ + newline) agar import multi-baris tidak membobol regex
+  const strippedCode = normalizedCode
+    .replace(
+      /(?:#.*$|"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/gm,
+      (match) => (match.startsWith('#') || match.startsWith('"""') || match.startsWith("'''")) ? ' ' : match
+    )
+    .replace(/\\\r?\n/g, ' ');
 
   const blockedModules = [
     'os', 'sys', 'shutil', 'subprocess', 'socket', 'pty', 'ctypes', 'winreg',
     'multiprocessing', 'urllib', 'http', 'requests', 'pathlib', 'importlib',
     'pickle', 'shelve', 'marshal', 'webbrowser', 'signal', 'tempfile',
-    'nt', 'posix', '_winapi', '_posixsubprocess', 'builtins', 'io', 'codecs',
-    'glob', 'asyncio', 'ssl', 'ftplib', 'smtplib', 'imaplib', 'poplib'
+    'nt', 'posix', '_winapi', '_posixsubprocess', 'builtins', 'io', '_io', 'codecs',
+    'glob', 'asyncio', 'ssl', 'ftplib', 'smtplib', 'imaplib', 'poplib',
+    'linecache', 'fileinput', 'runpy', 'inspect', 'traceback', 'code', 'codeop',
+    'zipimport', 'pkgutil', 'gc', 'fcntl', 'resource', 'mmap', 'tarfile', 'zipfile',
+    'operator', 'pdb', 'bdb', 'timeit', 'doctest', 'pydoc', 'logging',
+    'platform', 'uuid', 'site', '_frozen_importlib', '_frozen_importlib_external',
+    '_imp', 'sysconfig', 'distutils', 'venv', 'ensurepip', 'tokenize', 'modulefinder'
   ];
   const blockedPattern = blockedModules.join('|');
 
   // Pola A: import modul (misal: "import os", "import math, shutil", "import sys as s")
-  const importRegex = new RegExp(`\\bimport\\s+[^\\n;]*\\b(?:${blockedPattern})\\b`, 'i');
+  const importRegex = new RegExp(`\\bimport\\s+[\\s\\S]*?\\b(?:${blockedPattern})\\b`, 'i');
   if (importRegex.test(strippedCode)) {
     return { safe: false, reason: 'Impor modul sistem/jaringan terlarang terdeteksi pada pernyataan `import`.' };
   }
@@ -6899,8 +7122,8 @@ function validatePythonCodeSafety(code) {
     return { safe: false, reason: 'Fungsi eksekusi dinamis atau refleksi runtime (__import__, eval, exec, compile, breakpoint, getattr, globals, vars, load_module) diblokir.' };
   }
 
-  // Pola D: Dunder reflection sandbox escape (__subclasses__, __builtins__, __globals__, __bases__, __base__, __loader__, __spec__, dll)
-  const dunderReflectionRegex = /\b(?:__subclasses__|__builtins__|__globals__|__bases__|__base__|__mro__|__loader__|__spec__)\b/i;
+  // Pola D: Dunder & frame reflection sandbox escape
+  const dunderReflectionRegex = /\b(?:__subclasses__|__builtins__|__globals__|__bases__|__base__|__mro__|__loader__|__spec__|__dict__|__class__|mro|gi_frame|cr_frame|ag_frame|f_builtins|f_globals|f_locals|f_back|tb_frame)\b/i;
   if (dunderReflectionRegex.test(strippedCode)) {
     return { safe: false, reason: 'Refleksi hierarki objek internal (__subclasses__, __builtins__, __globals__, __base__, __loader__, __spec__) diblokir.' };
   }
@@ -7078,6 +7301,23 @@ function executePythonSandbox(code, timeoutMs = 5000) {
   });
 }
 
+// OpenRouter Models In-Memory Optimization & CDN Cache (module-scoped to avoid sync disk I/O per request)
+const OPENROUTER_MODELS_CACHE_FILE = path.join(DATA_DIR, 'openrouter-models-cache.json');
+const OPENROUTER_MODELS_CACHE_TTL = 10 * 60 * 1000; // 10 menit
+let cachedOpenRouterModelsPayload = null;
+let cachedOpenRouterModelsAt = 0;
+
+try {
+  if (fs.existsSync(OPENROUTER_MODELS_CACHE_FILE)) {
+    const stat = fs.statSync(OPENROUTER_MODELS_CACHE_FILE);
+    const saved = JSON.parse(fs.readFileSync(OPENROUTER_MODELS_CACHE_FILE, 'utf8'));
+    if (saved && Array.isArray(saved.data) && saved.data.length > 0) {
+      cachedOpenRouterModelsPayload = saved;
+      cachedOpenRouterModelsAt = stat.mtimeMs || 0;
+    }
+  }
+} catch (_) {}
+
 // Main HTTP Request Handler & Server
 async function requestHandler(req, res) {
   if (!req) return;
@@ -7118,13 +7358,10 @@ async function requestHandler(req, res) {
                                  pathname === '/api/storage-mode' ||
                                  pathname === '/api/youtube-info' ||
                                  pathname === '/api/video-probe' ||
-                                 pathname.startsWith('/api/tools/') ||
-                                 pathname.startsWith('/api/memories') ||
+                                 (pathname.startsWith('/api/tools/') && pathname !== '/api/tools/execute-code') ||
                                  pathname === '/api/extract-web' ||
                                  pathname === '/api/read-url' ||
-                                 pathname === '/api/scrape-url' ||
-                                 pathname.startsWith('/api/terminal/') ||
-                                 pathname.startsWith('/api/wa/');
+                                 pathname === '/api/scrape-url';
 
   if (pathname.startsWith('/api') && !isExemptCrossOriginPath && process.env.ZOX_ALLOW_CROSS_ORIGIN !== '1') {
     let crossSite = false;
@@ -7139,6 +7376,7 @@ async function requestHandler(req, res) {
       try {
         const originUrl = new URL(req.headers.origin);
         const originHost = originUrl.host.toLowerCase();
+        const originHostname = originUrl.hostname.toLowerCase();
         const forwardHost = (req.headers['x-forwarded-host'] || '').toLowerCase();
         const reqHost = (req.headers.host || '').toLowerCase();
         const isTrusted = (originHost === reqHost) ||
@@ -7146,14 +7384,12 @@ async function requestHandler(req, res) {
                           (customDomain && originHost === customDomain) ||
                           (isCloudflare && secFetchSite !== 'cross-site') ||
                           originHost === 'zoz-router.vercel.app' ||
-                          originHost.endsWith('.vercel.app') ||
-                          originHost.endsWith('localhost') ||
-                          originHost.startsWith('127.0.0.1') ||
-                          originHost.startsWith('[::1]') ||
-                          originHost.includes('zozdocs.com') ||
-                          originHost.endsWith('pages.dev') ||
-                          originHost.endsWith('.trycloudflare.com') ||
-                          reqHost.endsWith('.trycloudflare.com');
+                          originHostname === 'localhost' ||
+                          originHostname === '127.0.0.1' ||
+                          originHostname === '::1' ||
+                          originHostname === '[::1]' ||
+                          originHostname === 'zozdocs.com' ||
+                          originHostname.endsWith('.zozdocs.com');
         crossSite = !isTrusted;
       } catch (_) {
         crossSite = true;
@@ -7190,6 +7426,7 @@ async function requestHandler(req, res) {
   const identityResult = resolveRequestIdentity(req, reqUrl);
   if (identityResult.error) {
     const isPublicUtility = (
+      !pathname.startsWith('/api/') ||
       pathname === '/api' || pathname === '/api/' ||
       pathname === '/api/health' ||
       pathname === '/api/storage-mode' ||
@@ -7274,20 +7511,21 @@ async function requestHandler(req, res) {
   if (pathname === '/api/ping' && method === 'GET') {
     const isRemote = isRemoteTunnelRequest(req);
     const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
-    if (isRemote && pinCheck.valid) {
+    if (isRemote && pinCheck.valid && pinCheck.matchedTunnelPin) {
       try {
         res.setHeader('Set-Cookie', `zoz_remote_pin=${encodeURIComponent(cloudflareTunnelPin)}; Path=/; Max-Age=31536000; SameSite=Lax`);
       } catch (_) {}
     }
+    const exposeHostPaths = !isRemote || pinCheck.valid;
     return sendJSON(res, 200, {
       ok: true,
       status: 'healthy',
       time: new Date().toISOString(),
       node: process.version,
       platform: process.platform,
-      cwd: DEFAULT_TERMINAL_CWD,
-      userHome: USER_HOME,
-      workspaceRoot: WORKSPACE_ROOT,
+      cwd: exposeHostPaths ? DEFAULT_TERMINAL_CWD : undefined,
+      userHome: exposeHostPaths ? USER_HOME : undefined,
+      workspaceRoot: exposeHostPaths ? WORKSPACE_ROOT : undefined,
       mode: 'standalone-engine',
       uptime: process.uptime(),
       memoryRssMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
@@ -7321,7 +7559,7 @@ async function requestHandler(req, res) {
       // kosong bisa "mencuri" seluruh sesi default/ (pemindahan permanen).
       const legacyAdoptMarker = path.join(SESSIONS_DIR, '.legacy_adopted');
       const legacyAlreadyAdopted = fs.existsSync(legacyAdoptMarker);
-      if (!userDirHasSessions && reqUserId !== 'default' && !legacyAlreadyAdopted) {
+      if (!isRemoteTunnelRequest(req) && !userDirHasSessions && reqUserId !== 'default' && !legacyAlreadyAdopted) {
         const legacyDir = path.join(SESSIONS_DIR, 'default');
         if (fs.existsSync(legacyDir)) {
           const legacyFiles = fs.readdirSync(legacyDir).filter(f => f.endsWith('.json'));
@@ -7909,8 +8147,10 @@ async function requestHandler(req, res) {
               try { res.destroy(); } catch (_) {}
             }
           });
-          req.on('close', () => {
-            try { stream.destroy(); } catch (_) {}
+          res.on('close', () => {
+            if (!res.writableEnded) {
+              try { stream.destroy(); } catch (_) {}
+            }
           });
           res.on('error', (err) => {
             console.error('[Upload Response Error]:', err?.message || err);
@@ -8081,7 +8321,12 @@ async function requestHandler(req, res) {
 
   // 4. Streaming Proxy Aset Gambar Terverifikasi (HMAC-signed token + CSP + nosniff)
   if (pathname.startsWith('/api/tools/image-asset/') && (method === 'GET' || method === 'HEAD')) {
-    const rawToken = decodeURIComponent(pathname.slice('/api/tools/image-asset/'.length));
+    let rawToken = '';
+    try {
+      rawToken = decodeURIComponent(pathname.slice('/api/tools/image-asset/'.length));
+    } catch (_) {
+      return sendJSON(res, 400, { error: 'Token aset gambar tidak valid (URI malformed).' });
+    }
     return await imageGroundingService.serveVerifiedImageAsset(rawToken, res, method);
   }
 
@@ -8216,7 +8461,7 @@ async function requestHandler(req, res) {
       cloudflareTunnelActive = true;
       savePersistedTunnelState();
     }
-    if (isRemote && pinCheck.valid) {
+    if (isRemote && pinCheck.valid && pinCheck.matchedTunnelPin) {
       try {
         res.setHeader('Set-Cookie', `zoz_remote_pin=${encodeURIComponent(cloudflareTunnelPin)}; Path=/; Max-Age=31536000; SameSite=Lax`);
       } catch (_) {}
@@ -8225,7 +8470,7 @@ async function requestHandler(req, res) {
       active: isActive,
       tunnelUrl: effectiveUrl,
       wssUrl: effectiveUrl ? effectiveUrl.replace(/^http/i, 'ws') : '',
-      pin: (!isRemote || pinCheck.valid) ? cloudflareTunnelPin : undefined,
+      pin: !isRemote ? cloudflareTunnelPin : undefined,
       requiresPin: isRemote && !pinCheck.valid,
       authenticated: !isRemote || pinCheck.valid,
       startedAt: cloudflareTunnelStartedAt,
@@ -8313,9 +8558,9 @@ async function requestHandler(req, res) {
     while ((reqCwd.startsWith('"') && reqCwd.endsWith('"')) || (reqCwd.startsWith("'") && reqCwd.endsWith("'"))) {
       reqCwd = reqCwd.slice(1, -1).trim();
     }
-    const targetCwd = (reqCwd && fs.existsSync(reqCwd) && path.resolve(reqCwd).toLowerCase() !== WORKSPACE_ROOT.toLowerCase()) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
-    const cols = Math.max(32, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
-    const rows = Math.max(8, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
+    const targetCwd = (reqCwd && fs.existsSync(reqCwd)) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
+    const cols = Math.max(32, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10) || 100));
+    const rows = Math.max(8, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10) || 28));
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -8388,56 +8633,7 @@ async function requestHandler(req, res) {
           lastInputAt: Date.now()
         };
 
-        ptyProcess.onData((data) => {
-          session.lastActivity = Date.now();
-          if (typeof data === 'string' && data.includes('\x07')) {
-            data = data.replace(/\x07/g, '');
-          }
-          if (!data) return;
-          data = cleanConptyData(data, session);
-          if (data.includes('\x1b[3J') || data.includes('\x1b[2J')) {
-            session.buffer = [data];
-          } else {
-            if (session.buffer.length > 250) session.buffer.shift();
-            session.buffer.push(data);
-          }
-          handleServerAutoEnter(session, data);
-          const payload = `data: ${JSON.stringify({ type: 'data', data, cleaned: true })}\n\n`;
-          for (const client of session.clients) {
-            try { if (!client.writableEnded) client.write(payload); } catch (_) {}
-          }
-          if (session.wsClients && session.wsClients.size > 0) {
-            const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data, cleaned: true }));
-            for (const ws of session.wsClients) {
-              try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
-            }
-          }
-        });
-
-        ptyProcess.onExit(({ exitCode, signal }) => {
-          if (session._autoEnterRetryTimer) {
-            clearTimeout(session._autoEnterRetryTimer);
-            session._autoEnterRetryTimer = null;
-          }
-          session.pty = null;
-          const payload = `data: ${JSON.stringify({ type: 'exit', exitCode, signal })}\n\n`;
-          for (const client of session.clients) {
-            try {
-              if (!client.writableEnded) {
-                client.write(payload);
-                client.end();
-              }
-            } catch (_) {}
-          }
-          session.clients.clear();
-          if (session.wsClients && session.wsClients.size > 0) {
-            const wsFrame = encodeWsFrame(JSON.stringify({ type: 'exit', exitCode, signal }));
-            for (const ws of session.wsClients) {
-              try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
-            }
-          }
-          activeTerminalSessions.delete(sessionId);
-        });
+        attachPtySessionListeners(sessionId, session, ptyProcess, { closeSseOnExit: true });
 
         activeTerminalSessions.set(sessionId, session);
       } catch (spawnErr) {
@@ -8476,8 +8672,8 @@ async function requestHandler(req, res) {
     }
 
     const heartbeat = setInterval(() => {
-      if (!res.writableEnded) {
-        res.write(': heartbeat\n\n');
+      if (!res.writableEnded && !res.destroyed) {
+        try { res.write(': heartbeat\n\n'); } catch (_) {}
       }
     }, 20000);
 
@@ -8579,8 +8775,8 @@ async function requestHandler(req, res) {
         return sendJSON(res, 401, { error: pinCheck.error });
       }
       const sessionId = (body.session || 'default').trim();
-      const cols = Math.max(32, Math.min(400, parseInt(body.cols || '100', 10)));
-      const rows = Math.max(8, Math.min(200, parseInt(body.rows || '28', 10)));
+      const cols = Math.max(32, Math.min(400, parseInt(body.cols || '100', 10) || 100));
+      const rows = Math.max(8, Math.min(200, parseInt(body.rows || '28', 10) || 28));
       const session = activeTerminalSessions.get(sessionId);
       if (session && session.pty && typeof session.pty.resize === 'function') {
         try {
@@ -8959,8 +9155,14 @@ async function requestHandler(req, res) {
       const realRoot = fs.realpathSync(rootResolved);
       const normRealRoot = process.platform === 'win32' ? realRoot.toLowerCase() : realRoot;
       const realRootPrefix = normRealRoot.endsWith(path.sep) ? normRealRoot : normRealRoot + path.sep;
-      if (fs.existsSync(resolved)) {
-        const realTarget = fs.realpathSync(resolved);
+      let checkTarget = resolved;
+      while (!fs.existsSync(checkTarget)) {
+        const parent = path.dirname(checkTarget);
+        if (!parent || parent === checkTarget) break;
+        checkTarget = parent;
+      }
+      if (fs.existsSync(checkTarget)) {
+        const realTarget = fs.realpathSync(checkTarget);
         const normRealTarget = process.platform === 'win32' ? realTarget.toLowerCase() : realTarget;
         if (normRealTarget !== normRealRoot && !normRealTarget.startsWith(realRootPrefix)) {
           return false;
@@ -9019,8 +9221,8 @@ async function requestHandler(req, res) {
     const remoteIp = req.socket?.remoteAddress || req.connection?.remoteAddress || '';
     const isLoopbackIp = remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp === '::ffff:127.0.0.1';
     const host = (req.headers['host'] || '').toLowerCase();
-    const isLocalHost = host.startsWith('localhost:') || host === 'localhost' || host.startsWith('127.0.0.1:') || host === '127.0.0.1';
-    const isTunnel = Boolean(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-host'] || req.headers['x-forwarded-proto']);
+    const isLocalHost = host.startsWith('localhost:') || host === 'localhost' || host.startsWith('127.0.0.1:') || host === '127.0.0.1' || host.startsWith('[::1]:') || host === '[::1]';
+    const isTunnel = Boolean(req.headers['cf-connecting-ip'] || req.headers['cf-ray'] || req.headers['x-forwarded-for'] || req.headers['x-forwarded-host'] || req.headers['x-forwarded-proto']);
     return isLoopbackIp && isLocalHost && !isTunnel;
   }
 
@@ -9260,22 +9462,7 @@ async function requestHandler(req, res) {
     const savedFilename = `wa_${safeMsgId}_${cleanFileName}`;
     const filePath = path.join(UPLOADS_DIR, savedFilename);
 
-    // 0. Cek apakah ada berkas di UPLOADS_DIR yang cocok dengan ID pesan ini (toleran terhadap spasi/perbedaan nama)
-    try {
-      if (fs.existsSync(UPLOADS_DIR)) {
-        const diskFiles = fs.readdirSync(UPLOADS_DIR);
-        const matching = diskFiles.find(f => f.startsWith(`wa_${safeMsgId}_`));
-        if (matching) {
-          return sendJSON(res, 200, { success: true, url: `/uploads/${matching}`, ready: true });
-        }
-      }
-    } catch (_) {}
-
-    if (fs.existsSync(filePath)) {
-      return sendJSON(res, 200, { success: true, url: `/uploads/${savedFilename}`, ready: true });
-    }
-
-    // 1. Cek apakah di memori pesan kontak sudah tercatat URL berkas ini
+    // 0. Pastikan pesan milik tenant yang memanggil (atau Master) sebelum mencocokkan berkas di UPLOADS_DIR
     let existingMsg = null;
     if (tenant.gateway) {
       const msgList = (jid && typeof tenant.gateway.getMessages === 'function')
@@ -9283,6 +9470,36 @@ async function requestHandler(req, res) {
         : (jid && tenant.gateway.messages ? (tenant.gateway.messages.get(jid) || []) : []);
       existingMsg = msgList.find(m => m.id === msgId) || null;
       if (!existingMsg && tenant.gateway.messages) {
+        for (const list of tenant.gateway.messages.values()) {
+          const found = list.find(m => m.id === msgId);
+          if (found) {
+            existingMsg = found;
+            break;
+          }
+        }
+      }
+    }
+
+    const canCheckUploads = Boolean(tenant.isMaster || existingMsg || (tenant.gateway?.rawMessages && tenant.gateway.rawMessages.has(msgId)));
+    if (canCheckUploads) {
+      try {
+        if (fs.existsSync(UPLOADS_DIR)) {
+          const diskFiles = fs.readdirSync(UPLOADS_DIR);
+          const matching = diskFiles.find(f => f.startsWith(`wa_${safeMsgId}_`));
+          if (matching) {
+            return sendJSON(res, 200, { success: true, url: `/uploads/${matching}`, ready: true });
+          }
+        }
+      } catch (_) {}
+
+      if (fs.existsSync(filePath)) {
+        return sendJSON(res, 200, { success: true, url: `/uploads/${savedFilename}`, ready: true });
+      }
+    }
+
+    // 1. Cek apakah di memori pesan kontak sudah tercatat URL berkas ini
+    if (tenant.gateway) {
+      if (!existingMsg) {
         for (const list of tenant.gateway.messages.values()) {
           const found = list.find(m => m.id === msgId);
           if (found) { existingMsg = found; break; }
@@ -9336,12 +9553,12 @@ async function requestHandler(req, res) {
         while (waited < 4000) {
           await new Promise(r => setTimeout(r, 250));
           waited += 250;
-          if (fs.existsSync(filePath)) {
+          if (canCheckUploads && fs.existsSync(filePath)) {
             const url = `/uploads/${savedFilename}`;
             syncResolvedMediaToMessage(url);
             return sendJSON(res, 200, { success: true, url, ready: true });
           }
-          if (fs.existsSync(UPLOADS_DIR)) {
+          if (canCheckUploads && fs.existsSync(UPLOADS_DIR)) {
             const diskFiles = fs.readdirSync(UPLOADS_DIR);
             const matching = diskFiles.find(f => f.startsWith(`wa_${safeMsgId}_`));
             if (matching) {
@@ -9472,7 +9689,7 @@ async function requestHandler(req, res) {
         isGroup: jid.endsWith('@g.us')
       };
 
-      const msgs = tenant.gateway.getMessages(jid) || [];
+      const msgs = tenant.gateway.getMessages(jid, { markAsRead: false }) || [];
       const recentMsgs = msgs.slice(-80);
       totalMessagesCount += recentMsgs.length;
 
@@ -9649,6 +9866,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           skipEnrichment: true
         });
 
+        llmPromise.catch(() => {});
         // Batas waktu LLM di server adalah 8 detik agar client tidak pernah timeout
         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('LLM summary timeout')), 8000));
         const rawLlmResult = await Promise.race([llmPromise, timeoutPromise]);
@@ -9695,17 +9913,24 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     if (!body) return;
     const tenant = getWaTenant(req, reqUrl, body);
     const isLocal = isLocalWaRequest(req);
+    const requestedUid = String(body.userId || reqUrl.searchParams.get('userId') || req.headers['x-wa-user-id'] || '').trim();
+    const isMasterTarget = !requestedUid ||
+      requestedUid === 'usr_kaisar_master' ||
+      requestedUid === 'usr_e465zuklwesa' ||
+      requestedUid === 'master' ||
+      requestedUid === 'kaisar' ||
+      requestedUid === 'zozi' ||
+      Boolean(tenant && tenant.isMaster);
     const hasMasterAuth = Boolean(
-      tenant.isMaster ||
-      isLocal ||
-      body.masterPin === '210560' ||
-      body.currentPin === '210560' ||
-      (body.pin && String(body.pin).trim() === '210560') ||
-      (waGatewayManager && waGatewayManager.masterGateway && (
-        waGatewayManager.masterGateway.verifyPin(body.pin) ||
-        waGatewayManager.masterGateway.verifyPin(body.currentPin) ||
-        waGatewayManager.masterGateway.verifyPin(body.masterPin)
-      ))
+      isMasterTarget && (
+        tenant.isMaster ||
+        isLocal ||
+        (waGatewayManager && waGatewayManager.masterGateway && (
+          waGatewayManager.masterGateway.verifyPin(body.pin) ||
+          waGatewayManager.masterGateway.verifyPin(body.currentPin) ||
+          waGatewayManager.masterGateway.verifyPin(body.masterPin)
+        ))
+      )
     );
 
     if (!tenant.success && !hasMasterAuth) {
@@ -9721,7 +9946,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       return sendJSON(res, 400, { success: false, error: 'PIN baru wajib diisi.' });
     }
     try {
-      if (hasMasterAuth) {
+      if (hasMasterAuth && isMasterTarget) {
         waGatewayManager.masterGateway.setPin(pinCandidate);
         return sendJSON(res, 200, {
           success: true,
@@ -9729,6 +9954,16 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           userId: 'usr_kaisar_master',
           isMaster: true
         });
+      }
+      if (tenant.gateway.hasConfiguredPin() && !isLocal) {
+        const curPin = String(body.currentPin || req.headers['x-wa-pin'] || '').trim();
+        if (!curPin || !tenant.gateway.verifyPin(curPin)) {
+          return sendJSON(res, 403, {
+            success: false,
+            requiresPin: true,
+            error: 'PIN saat ini wajib diverifikasi sebelum mengganti PIN.'
+          });
+        }
       }
       tenant.gateway.setPin(pinCandidate);
       return sendJSON(res, 200, {
@@ -9750,7 +9985,6 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       return sendJSON(res, 400, { success: false, error: 'PIN tidak boleh kosong.' });
     }
     const isMaster = Boolean(
-      inputPin === '210560' ||
       (cloudflareTunnelPin && inputPin === String(cloudflareTunnelPin).trim()) ||
       (waGatewayManager && waGatewayManager.masterGateway && waGatewayManager.masterGateway.verifyPin(inputPin))
     );
@@ -9768,9 +10002,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       });
     }
 
-    // Cek apakah PIN cocok untuk tenant guest tertentu
+    // Cek apakah PIN cocok untuk tenant guest tertentu (wajib sudah punya PIN terkonfigurasi)
     const tenant = getWaTenant(req, reqUrl, body);
-    if (tenant && tenant.gateway && tenant.gateway.verifyPin(inputPin)) {
+    if (tenant && tenant.gateway && tenant.gateway.hasConfiguredPin() && tenant.gateway.verifyPin(inputPin)) {
       return sendJSON(res, 200, {
         success: true,
         isMaster: false,
@@ -9785,7 +10019,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     return sendJSON(res, 401, {
       success: false,
       isMaster: false,
-      error: 'PIN Keamanan tidak cocok. Gunakan PIN Master (210560) atau PIN Tunnel untuk membuka sesi Master.'
+      error: 'PIN Keamanan tidak cocok. Gunakan PIN Master atau PIN Tunnel yang aktif untuk membuka sesi.'
     });
   }
 
@@ -9804,10 +10038,26 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
     let pin = String(body.pin || body.newPin || req.headers['x-wa-pin'] || reqUrl.searchParams.get('pin') || '').trim();
 
-    // Inisialisasi PIN awal bila tamu belum memiliki PIN; tolak bila PIN aktif tidak cocok
-    if (pin && pin.length >= 4 && pin !== '210560') {
+    // Inisialisasi PIN awal HANYA pada POST bila tamu belum memiliki PIN; tolak bila PIN tidak valid
+    if (!tenant.gateway.isMaster) {
+      if (!pin || pin.length < 4) {
+        return sendJSON(res, 400, {
+          success: false,
+          requiresPinCreation: !tenant.gateway.hasConfiguredPin(),
+          error: 'Harap buat atau masukkan PIN keamanan (minimal 4 digit) terlebih dahulu sebelum mendapatkan Kode QR Tautan Handphone.',
+          userId: tenant.userId
+        });
+      }
       try {
-        if (!tenant.gateway.isMaster && !tenant.gateway.hasConfiguredPin()) {
+        if (!tenant.gateway.hasConfiguredPin()) {
+          if (method !== 'POST') {
+            return sendJSON(res, 400, {
+              success: false,
+              requiresPinCreation: true,
+              error: 'Inisialisasi PIN baru wajib menggunakan metode POST.',
+              userId: tenant.userId
+            });
+          }
           tenant.gateway.setPin(pin);
         } else if (!tenant.gateway.verifyPin(pin)) {
           return sendJSON(res, 403, {
@@ -9823,17 +10073,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     }
 
     if (!pin && tenant.isMaster) {
-      pin = '210560';
-    }
-
-    // MANDAT KAISAR: Pengguna wajib membuat / memiliki PIN sebelum QR tautan ponsel diterbitkan
-    if (!pin && !tenant.gateway.isMaster) {
-      return sendJSON(res, 400, {
-        success: false,
-        requiresPinCreation: true,
-        error: 'Harap buat atau masukkan PIN keamanan (4-6 digit) terlebih dahulu sebelum mendapatkan Kode QR Tautan Handphone.',
-        userId: tenant.userId
-      });
+      pin = cloudflareTunnelPin || '210560';
     }
 
     const host = req.headers['x-forwarded-host'] || req.headers['host'] || 'z21.zozdocs.com';
@@ -11270,6 +11510,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
   // Ollama: Start Background Service
   if (pathname === '/api/ollama/start' && method === 'POST') {
+    if (!requireRemoteHostPin(req, res, reqUrl)) return;
     const isUp = await checkOllamaPortOpen(1000);
     if (isUp) {
       return sendJSON(res, 200, { status: 'already_running', message: 'Ollama sudah aktif pada 127.0.0.1:11434' });
@@ -11285,6 +11526,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
   // Ollama Cloud: Chat Completion (Streaming Proxy)
   if (pathname === '/api/ollama/chat' && method === 'POST') {
     let sessionId = null; // M20: di-hoist agar catch di bawah bisa membersihkan task map
+    let ollamaTaskToken = null;
     const body = await safeParseBody(req);
     if (!body) return;
     try {
@@ -11425,9 +11667,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         let clientDisconnected = false;
 
         res.on('close', () => {
-          if (res.writableEnded) return;
+          if (res.writableEnded && !res.__zozWatchdogTimedOut) return;
           clientDisconnected = true;
-          if (!sessionId && activeBridgeReq && !activeBridgeReq.destroyed) {
+          if ((!sessionId || res.__zozWatchdogTimedOut) && activeBridgeReq && !activeBridgeReq.destroyed) {
             try { activeBridgeReq.destroy(); } catch (_) {}
           }
         });
@@ -11836,12 +12078,13 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
           // 2. Sanitasi seluruh array msg.images menjadi string Base64 murni tanpa scheme/path
           if (Array.isArray(msg.images)) {
+            const allowServerUploadRead = isTrustedOllamaEndpoint(customEndpoint) && (!isRemoteTunnelRequest(req) || validateRemoteTerminalPin(req, reqUrl, body).valid);
             msg.images = msg.images.map(img => {
               if (typeof img === 'string') {
                 if (img.startsWith('data:image')) {
                   return img.replace(/^data:image\/[a-z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
                 }
-                const uploadMatch = img.match(/(?:\/uploads\/|^uploads\/)([a-zA-Z0-9_.-]+)$/);
+                const uploadMatch = allowServerUploadRead ? img.match(/(?:\/uploads\/|^uploads\/)([a-zA-Z0-9_.-]+)$/) : null;
                 if (uploadMatch) {
                   const filename = uploadMatch[1];
                   const localPath = path.join(UPLOADS_DIR, filename);
@@ -11858,7 +12101,6 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
       }
 
-      let ollamaTaskToken = null;
       if (sessionId) {
         if (dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].status === 'streaming') {
           return sendJSON(res, 429, { error: 'Stream already active for this session' });
@@ -11898,11 +12140,11 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
       res.on('close', () => {
         clearOllamaKeepAlive();
-        if (res.writableEnded) return; // penyelesaian normal, bukan disconnect klien
+        if (res.writableEnded && !res.__zozWatchdogTimedOut) return; // penyelesaian normal, bukan disconnect klien
         clientDisconnected = true;
-        // JANGAN hancurkan proxyReq jika sessionId ada! Biarkan server menyelesaikan generasi LLM di latar belakang
+        // JANGAN hancurkan proxyReq jika sessionId ada (kecuali dihentikan oleh gateway watchdog)! Biarkan server menyelesaikan generasi LLM di latar belakang
         // layaknya di Claude AI agar jawaban tersimpan utuh ke disk sesi saat pengguna menutup peramban/aplikasi.
-        if (!sessionId && proxyReq && !proxyReq.destroyed) {
+        if ((!sessionId || res.__zozWatchdogTimedOut) && proxyReq && !proxyReq.destroyed) {
           proxyReq.destroy();
         }
       });
@@ -12090,7 +12332,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             if (proxyReq && !proxyReq.destroyed) {
               try { proxyReq.setTimeout(300000); } catch (_) {}
             }
-            if (hasSplicedRefusal || horocycleHalted) return;
+            if (hasSplicedRefusal) return;
             const safeChunk = reasoningFilter.push(chunk);
             const gateDiag = reasoningFilter.getGateDiagnostics ? reasoningFilter.getGateDiagnostics() : null;
 
@@ -12122,6 +12364,18 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               const splicedHeaders = { ...proxyHeaders, 'Content-Length': Buffer.byteLength(splicedData) };
               const splicedFilter = textSafety.createProviderStreamFilter('ollama', 'stream', { userPrompt, bypassPreambleStrip: true });
               const splicedReq = client.request(ollamaUrl.toString(), { method: 'POST', headers: splicedHeaders, timeout: 300000 }, (splicedRes) => {
+                if (sessionId && dbActiveChatTasks[sessionId]) {
+                  dbActiveChatTasks[sessionId].proxyReq = splicedReq;
+                }
+                if (splicedRes.statusCode >= 400) {
+                  splicedRes.resume();
+                  clearOllamaKeepAlive();
+                  markChatTaskInterrupted(sessionId, `Spliced Ollama HTTP ${splicedRes.statusCode}`, ollamaTaskToken);
+                  if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                    try { res.end(); } catch (_) {}
+                  }
+                  return;
+                }
                 splicedRes.on('data', sChunk => {
                   const sSafe = splicedFilter.push(sChunk);
                   if (sessionId && sSafe) accumulateChatChunk(sessionId, sSafe, 'ollama');
@@ -12161,6 +12415,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   try { res.end(); } catch (_) {}
                 }
               });
+              proxyReq = splicedReq;
+              if (sessionId && dbActiveChatTasks[sessionId]) {
+                dbActiveChatTasks[sessionId].proxyReq = splicedReq;
+              }
               splicedReq.write(splicedData);
               splicedReq.end();
               return;
@@ -12182,12 +12440,16 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             try {
               if (!safeChunk) return;
               const flushed = res.write(safeChunk);
-              // M27: hormati backpressure — klien lambat yang berhenti membaca
-              // (tapi socket tetap terbuka) menghentikan sementara upstream alih-alih
-              // menumpuk token tak terbatas di memori proses.
+              // M27: hormati backpressure dengan 150ms safety resume agar stream latar belakang tidak pernah deadlock saat klien putus sebelum drain
               if (flushed === false && typeof proxyRes.pause === 'function') {
                 proxyRes.pause();
-                res.once('drain', () => { try { proxyRes.resume(); } catch (_) {} });
+                const resumeTimer = setTimeout(() => {
+                  try { if (typeof proxyRes.resume === 'function') proxyRes.resume(); } catch (_) {}
+                }, 150);
+                res.once('drain', () => {
+                  clearTimeout(resumeTimer);
+                  try { if (typeof proxyRes.resume === 'function') proxyRes.resume(); } catch (_) {}
+                });
               }
             } catch (e) {}
           });
@@ -12312,7 +12574,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       });
     } catch (err) {
       // Pembersihan aman jika terjadi throw sinkron (ERR_INVALID_CHAR, payload error, socket write error)
-      if (sessionId && dbActiveChatTasks[sessionId]) {
+      if (sessionId && isTaskCurrent(sessionId, ollamaTaskToken)) {
         try {
           if (dbActiveChatTasks[sessionId].proxyReq && !dbActiveChatTasks[sessionId].proxyReq.destroyed) {
             dbActiveChatTasks[sessionId].proxyReq.destroy();
@@ -12324,22 +12586,6 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     }
     return;
   }
-
-  // OpenRouter Models In-Memory Optimization & CDN Cache
-  const OPENROUTER_MODELS_CACHE_FILE = path.join(DATA_DIR, 'openrouter-models-cache.json');
-  const OPENROUTER_MODELS_CACHE_TTL = 10 * 60 * 1000; // 10 menit
-  let cachedOpenRouterModelsPayload = null;
-  let cachedOpenRouterModelsAt = 0;
-
-  try {
-    if (fs.existsSync(OPENROUTER_MODELS_CACHE_FILE)) {
-      const saved = JSON.parse(fs.readFileSync(OPENROUTER_MODELS_CACHE_FILE, 'utf8'));
-      if (saved && Array.isArray(saved.data) && saved.data.length > 0) {
-        cachedOpenRouterModelsPayload = saved;
-        cachedOpenRouterModelsAt = Date.now();
-      }
-    }
-  } catch (_) {}
 
   // OpenRouter: Get Model List (Optimized & Compacted)
   if (pathname === '/api/openrouter/models' && method === 'GET') {
@@ -12615,6 +12861,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
   // OpenRouter: Chat Completion (Streaming Proxy)
   if (pathname === '/api/openrouter/chat' && method === 'POST') {
     let sessionId = null; // M20: di-hoist agar catch di bawah bisa membersihkan task map
+    let orTaskToken = null;
     const body = await safeParseBody(req);
     if (!body) return;
     try {
@@ -12676,7 +12923,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       delete body.sessionId;
       delete body.userId; // Cegah error Pydantic / upstream validation di OpenRouter
 
-      const orTaskToken = registerActiveChatTask(sessionId, {
+      orTaskToken = registerActiveChatTask(sessionId, {
         userId: chatUserId,
         model: body.model || 'OpenRouter Model',
         provider: 'openrouter',
@@ -12829,11 +13076,11 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
       res.on('close', () => {
         clearKeepAlive();
-        if (res.writableEnded) return; // penyelesaian normal, bukan disconnect klien
+        if (res.writableEnded && !res.__zozWatchdogTimedOut) return; // penyelesaian normal, bukan disconnect klien
         clientDisconnected = true;
-        // JANGAN hancurkan proxyReq jika sessionId ada! Biarkan server menyelesaikan generasi LLM di latar belakang
+        // JANGAN hancurkan proxyReq jika sessionId ada (kecuali dihentikan oleh gateway watchdog)! Biarkan server menyelesaikan generasi LLM di latar belakang
         // layaknya di Claude AI agar jawaban tersimpan utuh ke disk sesi saat pengguna menutup peramban/aplikasi.
-        if (!sessionId && proxyReq && !proxyReq.destroyed) {
+        if ((!sessionId || res.__zozWatchdogTimedOut) && proxyReq && !proxyReq.destroyed) {
           proxyReq.destroy();
         }
       });
@@ -12982,7 +13229,6 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
         proxyRes.on('error', (err) => {
           clearKeepAlive();
-          if (horocycleHalted) return;
           markChatTaskInterrupted(sessionId, err.message || 'OpenRouter stream interrupted', orTaskToken);
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
@@ -13004,7 +13250,6 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
       proxyReq.on('timeout', () => {
         clearKeepAlive();
-        if (horocycleHalted) return;
         markChatTaskInterrupted(sessionId, 'OpenRouter stream timed out (300s)', orTaskToken);
         if (!proxyReq.destroyed) proxyReq.destroy();
         if (clientDisconnected || res.writableEnded || res.destroyed) return;
@@ -13023,7 +13268,6 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
       proxyReq.on('error', (err) => {
         clearKeepAlive();
-        if (horocycleHalted) return;
         markChatTaskInterrupted(sessionId, err.message || 'OpenRouter connection error', orTaskToken);
         // If client disconnected or socket was intentionally aborted, suppress error write-after-end
         if (clientDisconnected || res.writableEnded || res.destroyed) {
@@ -13170,7 +13414,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           }
           // Simpan potongan yang sudah terlanjur dibuat
           if (task.fullText && task.fullText.trim()) {
-            appendAssistantMessageToSessionDisk(sid, task.fullText + '\n\n*[Respons dihentikan oleh pengguna]*', task.model)
+            appendAssistantMessageToSessionDisk(sid, task.fullText + '\n\n*[Respons dihentikan oleh pengguna]*', task.model, {}, task.userId || stopUserId)
               .catch(err => console.warn('Gagal simpan respons terhenti ke sesi:', err && err.message));
           }
           // Buang task dari map AGAR polling /api/chat/status tidak terus
@@ -13414,6 +13658,7 @@ function processWsStream(socket, chunk, onMessage) {
   while (offset + 2 <= buf.length) {
     const firstByte = buf[offset];
     const secondByte = buf[offset + 1];
+    const isFin = (firstByte & 0x80) !== 0;
     const opcode = firstByte & 0x0f;
     const isMasked = (secondByte & 0x80) !== 0;
     let payloadLen = secondByte & 0x7f;
@@ -13428,6 +13673,8 @@ function processWsStream(socket, chunk, onMessage) {
       const bigLen = buf.readBigUInt64BE(offset + 2);
       if (bigLen > BigInt(MAX_WS_PAYLOAD_BYTES)) {
         socket._wsBuffer = null;
+        socket._wsFragChunks = null;
+        socket._wsFragBytes = 0;
         onMessage({ type: 'error', reason: 'ws-frame-too-large' });
         return;
       }
@@ -13437,6 +13684,8 @@ function processWsStream(socket, chunk, onMessage) {
 
     if (payloadLen > MAX_WS_PAYLOAD_BYTES) {
       socket._wsBuffer = null;
+      socket._wsFragChunks = null;
+      socket._wsFragBytes = 0;
       onMessage({ type: 'error', reason: 'ws-frame-too-large' });
       return;
     }
@@ -13465,18 +13714,52 @@ function processWsStream(socket, chunk, onMessage) {
     }
 
     if (opcode === 0x08) {
+      socket._wsBuffer = null;
+      socket._wsFragChunks = null;
+      socket._wsFragBytes = 0;
       onMessage({ type: 'close' });
+      return;
     } else if (opcode === 0x09) {
-      const pong = Buffer.from([0x8a, 0x00]);
+      // RFC 6455 §5.5.3: Echo ping payload (control frames max 125 bytes)
+      const echoLen = Math.min(payload.length, 125);
+      const pong = Buffer.allocUnsafe(2 + echoLen);
+      pong[0] = 0x8a;
+      pong[1] = echoLen;
+      if (echoLen > 0) payload.copy(pong, 2, 0, echoLen);
       onMessage({ type: 'ping', pong });
     } else if (opcode === 0x0a) {
       onMessage({ type: 'pong' });
     } else if (opcode === 0x01 || opcode === 0x02) {
-      onMessage({ type: 'data', payload: payload.toString('utf8') });
+      if (isFin) {
+        socket._wsFragChunks = null;
+        socket._wsFragBytes = 0;
+        onMessage({ type: 'data', payload: payload.toString('utf8') });
+      } else {
+        socket._wsFragChunks = [Buffer.from(payload)];
+        socket._wsFragBytes = payload.length;
+      }
+    } else if (opcode === 0x00 && Array.isArray(socket._wsFragChunks)) {
+      socket._wsFragBytes = (socket._wsFragBytes || 0) + payload.length;
+      if (socket._wsFragBytes > MAX_WS_PAYLOAD_BYTES) {
+        socket._wsBuffer = null;
+        socket._wsFragChunks = null;
+        socket._wsFragBytes = 0;
+        onMessage({ type: 'error', reason: 'ws-frame-too-large' });
+        return;
+      }
+      socket._wsFragChunks.push(Buffer.from(payload));
+      if (isFin) {
+        const merged = Buffer.concat(socket._wsFragChunks);
+        socket._wsFragChunks = null;
+        socket._wsFragBytes = 0;
+        onMessage({ type: 'data', payload: merged.toString('utf8') });
+      }
     }
   }
 
-  socket._wsBuffer = (offset > 0) ? buf.slice(offset) : buf;
+  if (!socket.destroyed) {
+    socket._wsBuffer = (offset > 0) ? buf.slice(offset) : buf;
+  }
 }
 
 function handleTerminalWebSocketUpgrade(req, socket, head) {
@@ -13491,6 +13774,38 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
   if (reqUrl.pathname !== '/api/terminal/ws') {
     socket.destroy();
     return;
+  }
+
+  // Validasi Origin WebSocket untuk mencegah Cross-Site WebSocket Hijacking (CSWSH) pada mesin lokal
+  if (req.headers.origin && process.env.ZOX_ALLOW_CROSS_ORIGIN !== '1') {
+    try {
+      const originUrl = new URL(req.headers.origin);
+      const originHost = originUrl.host.toLowerCase();
+      const originHostname = originUrl.hostname.toLowerCase();
+      const reqHost = (req.headers.host || '').toLowerCase();
+      const forwardHost = (req.headers['x-forwarded-host'] || '').toLowerCase();
+      const customDomain = (process.env.ZOX_CUSTOM_DOMAIN || '').toLowerCase().trim();
+      const isTrustedWsOrigin = (originHost === reqHost) ||
+                                (forwardHost && originHost === forwardHost) ||
+                                (customDomain && originHost === customDomain) ||
+                                originHost === 'zoz-router.vercel.app' ||
+                                originHostname === 'localhost' ||
+                                originHostname === '127.0.0.1' ||
+                                originHostname === '::1' ||
+                                originHostname === '[::1]' ||
+                                originHostname === 'zozdocs.com' ||
+                                originHostname.endsWith('.zozdocs.com');
+      if (!isTrustedWsOrigin) {
+        try {
+          socket.write('HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nCross-Origin WebSocket Rejected');
+        } catch (_) {}
+        socket.destroy();
+        return;
+      }
+    } catch (_) {
+      socket.destroy();
+      return;
+    }
   }
 
   const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
@@ -13529,20 +13844,25 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
   while ((reqCwd.startsWith('"') && reqCwd.endsWith('"')) || (reqCwd.startsWith("'") && reqCwd.endsWith("'"))) {
     reqCwd = reqCwd.slice(1, -1).trim();
   }
-  const targetCwd = (reqCwd && fs.existsSync(reqCwd) && path.resolve(reqCwd).toLowerCase() !== WORKSPACE_ROOT.toLowerCase()) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
-  const cols = Math.max(32, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10)));
-  const rows = Math.max(8, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10)));
+  const targetCwd = (reqCwd && fs.existsSync(reqCwd)) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
+  const cols = Math.max(32, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10) || 100));
+  const rows = Math.max(8, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10) || 28));
 
   let session = activeTerminalSessions.get(sessionId);
   if (!session || !session.pty) {
     if (!nodePty) {
+      socket.on('error', () => {});
       try {
         socket.write(encodeWsFrame(JSON.stringify({ type: 'connected', session: sessionId, shell: shellType, cwd: targetCwd })));
         socket.write(encodeWsFrame(JSON.stringify({
           type: 'data',
           data: `\r\n\x1b[36m⚡ [ZOZ NEURAL TERMINAL // CLOUD RUNTIME]\x1b[0m\r\n\x1b[90mMode Command-Exec siap menerima perintah.\x1b[0m\r\n\r\n`
         })));
-      } catch (_) {}
+        socket.write(encodeWsFrame(JSON.stringify({ type: 'fallback', session: sessionId, shell: shellType, cwd: targetCwd })));
+        socket.end();
+      } catch (_) {
+        try { socket.destroy(); } catch (__) {}
+      }
       return;
     }
 
@@ -13578,74 +13898,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
         lastInputAt: Date.now()
       };
 
-      let pendingWsData = '';
-      let wsFlushScheduled = false;
-      const flushWsBatch = () => {
-        wsFlushScheduled = false;
-        if (!pendingWsData) return;
-        const out = pendingWsData;
-        pendingWsData = '';
-        if (session.wsClients && session.wsClients.size > 0) {
-          const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data: out, cleaned: true }));
-          for (const ws of session.wsClients) {
-            try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
-          }
-        }
-      };
-
-      ptyProcess.onData((data) => {
-        session.lastActivity = Date.now();
-        if (typeof data === 'string' && data.includes('\x07')) {
-          data = data.replace(/\x07/g, '');
-        }
-        if (!data) return;
-        data = cleanConptyData(data, session);
-        if (data.includes('\x1b[3J') || data.includes('\x1b[2J')) {
-          session.buffer = [data];
-        } else {
-          if (session.buffer.length > 250) session.buffer.shift();
-          session.buffer.push(data);
-        }
-        handleServerAutoEnter(session, data);
-        const payload = `data: ${JSON.stringify({ type: 'data', data, cleaned: true })}\n\n`;
-        for (const client of session.clients) {
-          try { if (!client.writableEnded) client.write(payload); } catch (_) {}
-        }
-        if (session.wsClients && session.wsClients.size > 0) {
-          if (!wsFlushScheduled && data.length < 32) {
-            // Interactive keystroke fast-path: Zero-latency immediate transmission!
-            const wsFrame = encodeWsFrame(JSON.stringify({ type: 'data', data, cleaned: true }));
-            for (const ws of session.wsClients) {
-              try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
-            }
-          } else {
-            pendingWsData += data;
-            if (!wsFlushScheduled) {
-              wsFlushScheduled = true;
-              setImmediate(flushWsBatch);
-            }
-          }
-        }
-      });
-
-      ptyProcess.onExit(({ exitCode, signal }) => {
-        if (session._autoEnterRetryTimer) {
-          clearTimeout(session._autoEnterRetryTimer);
-          session._autoEnterRetryTimer = null;
-        }
-        session.pty = null;
-        const payload = `data: ${JSON.stringify({ type: 'exit', exitCode, signal })}\n\n`;
-        for (const client of session.clients) {
-          try { if (!client.writableEnded) client.write(payload); } catch (_) {}
-        }
-        if (session.wsClients && session.wsClients.size > 0) {
-          const wsFrame = encodeWsFrame(JSON.stringify({ type: 'exit', exitCode, signal }));
-          for (const ws of session.wsClients) {
-            try { if (ws.writable) ws.write(wsFrame); } catch (_) {}
-          }
-        }
-        activeTerminalSessions.delete(sessionId);
-      });
+      attachPtySessionListeners(sessionId, session, ptyProcess);
 
       activeTerminalSessions.set(sessionId, session);
     } catch (spawnErr) {
@@ -13812,7 +14065,18 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
   socket.on('error', cleanup);
 }
 
-const server = http.createServer(requestHandler);
+const server = http.createServer((req, res) => {
+  Promise.resolve(requestHandler(req, res)).catch((err) => {
+    console.error('[HTTP RequestHandler Unhandled Error]:', err && err.stack ? err.stack : err);
+    try {
+      if (res && !res.headersSent && !res.writableEnded) {
+        sendJSON(res, 500, { error: 'Internal Server Error' });
+      } else if (res && !res.writableEnded) {
+        res.end();
+      }
+    } catch (_) {}
+  });
+});
 server.on('upgrade', handleTerminalWebSocketUpgrade);
 
 server.on('error', (err) => {

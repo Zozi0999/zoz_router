@@ -6880,7 +6880,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           sessionById.set(dSess.id, dSess);
         }
         for (const mSess of STATE.sessions) {
-          if (!mSess || !mSess.id || isIncognitoSession(mSess)) continue;
+          if (!mSess || !mSess.id) continue;
+          if (isIncognitoSession(mSess)) {
+            sessionById.set(mSess.id, mSess);
+            continue;
+          }
           const dSess = sessionById.get(mSess.id);
           if (!dSess) {
             sessionById.set(mSess.id, mSess);
@@ -6904,8 +6908,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             savePersistedState({ immediate: true });
           }
           renderChatHistory();
-          if (STATE.currentSessionId) renderCurrentSession(false);
-        } else if (didRestoreAnyImage && STATE.currentSessionId) {
+          if (STATE.currentSessionId && !STATE.isGenerating && !STATE.isSending) renderCurrentSession(false);
+        } else if (didRestoreAnyImage && STATE.currentSessionId && !STATE.isGenerating && !STATE.isSending) {
           renderCurrentSession(false);
         }
       }
@@ -6988,7 +6992,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
                   delete activeSess._isLazyDisk;
                   activeSess.userId = STATE.userId;
                   await ChatDB.saveSession(activeSess);
-                  renderCurrentSession(false);
+                  if (!STATE.isGenerating && !STATE.isSending) {
+                    renderCurrentSession(false);
+                  }
                   renderChatHistory();
                 }
               }
@@ -8330,21 +8336,54 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
   function fastSanitizeHtml(dirtyHtml) {
     if (!dirtyHtml || typeof dirtyHtml !== 'string') return '';
-    let clean = dirtyHtml
-      .replace(/<script\b[^>]*>[\s\S]*?(?:<\/script>|$)/gi, '')
-      .replace(/<style\b[^>]*>[\s\S]*?(?:<\/style>|$)/gi, '')
-      .replace(/<iframe\b[^>]*>[\s\S]*?(?:<\/iframe>|$)/gi, '')
-      .replace(/<object\b[^>]*>[\s\S]*?(?:<\/object>|$)/gi, '')
-      .replace(/<embed\b[^>]*>[\s\S]*?(?:<\/embed>|$)/gi, '')
-      .replace(/<form\b[^>]*>[\s\S]*?(?:<\/form>|$)/gi, '');
-    // Hapus atribut event handler (on...) dan skema javascript:/data:text/html di dalam tag HTML pembuka (termasuk pemisah '/')
-    return clean.replace(/<([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*?)>/g, (fullTag, tagName, attrs) => {
-      if (!attrs) return fullTag;
-      const sanitizedAttrs = attrs
-        .replace(/(?:[\s/]+)on[a-z]+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '')
-        .replace(/(\b(?:href|src|xlink:href|action|formaction)\s*=\s*)(?:'\s*(?:javascript|vbscript|data\s*:\s*text\/html)[^']*'|"\s*(?:javascript|vbscript|data\s*:\s*text\/html)[^"]*"|(?:javascript|vbscript|data\s*:\s*text\/html)[^\s>]*)/gi, '$1"#"');
-      return `<${tagName}${sanitizedAttrs}>`;
-    });
+    if (typeof document !== 'undefined' && document.createElement) {
+      try {
+        const tpl = document.createElement('template');
+        tpl.innerHTML = dirtyHtml;
+        const forbiddenTags = new Set([
+          'script', 'style', 'iframe', 'object', 'embed', 'form', 'base', 'meta', 'link',
+          'foreignobject', 'animate', 'animatemotion', 'animatetransform', 'set', 'use', 'handler', 'listener'
+        ]);
+        const uriAttrs = new Set(['href', 'src', 'xlink:href', 'action', 'formaction', 'poster', 'background']);
+        const toRemove = [];
+        const walk = (node) => {
+          let child = node.firstChild;
+          while (child) {
+            const next = child.nextSibling;
+            if (child.nodeType === 1) {
+              const tag = (child.localName || child.nodeName || '').toLowerCase();
+              if (forbiddenTags.has(tag)) {
+                toRemove.push(child);
+              } else {
+                const attrs = child.attributes;
+                for (let i = attrs.length - 1; i >= 0; i--) {
+                  const attr = attrs[i];
+                  const nameLower = attr.name.toLowerCase();
+                  if (nameLower.startsWith('on') || nameLower === 'srcdoc') {
+                    child.removeAttribute(attr.name);
+                    continue;
+                  }
+                  if (uriAttrs.has(nameLower)) {
+                    const normalized = String(attr.value || '').replace(/[\u0000-\u0020]+/g, '').toLowerCase();
+                    if (/^(?:javascript|vbscript|data:text\/html|data:image\/svg\+xml)/i.test(normalized)) {
+                      child.setAttribute(attr.name, '#');
+                    }
+                  }
+                }
+                walk(child);
+              }
+            }
+            child = next;
+          }
+        };
+        walk(tpl.content);
+        for (const el of toRemove) el.remove();
+        return tpl.innerHTML;
+      } catch (_) {}
+    }
+    return dirtyHtml
+      .replace(/<(script|style|iframe|object|embed|form|foreignobject|base|meta|link)\b[^>]*>[\s\S]*?(?:<\/\1>|$)/gi, '')
+      .replace(/<[^>]*\son[a-z]+\s*=/gi, '<span data-blocked=');
   }
 
   // Bungkus dokumen HTML utuh (<!DOCTYPE html... / <html...) un-fenced menjadi satu blok ```html utuh
@@ -10713,9 +10752,14 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   // ==================== AUTONOMOUS DOCUMENT COMPILER & MERMAID DIAGRAM ENGINE ====================
   function sanitizeSvgFragment(svgMarkup) {
     if (!svgMarkup || typeof svgMarkup !== 'string') return '';
-    return fastSanitizeHtml(svgMarkup)
-      .replace(/<script\b[^>]*>[\s\S]*?(?:<\/script>|$)/gi, '')
-      .replace(/(?:[\s/]+)on[a-z]+\s*=\s*(?:'[^']*'|"[^"]*"|[^\s>]+)/gi, '');
+    if (window.DOMPurify) {
+      return DOMPurify.sanitize(svgMarkup, {
+        USE_PROFILES: { svg: true, svgFilters: true, html: true },
+        FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'animate', 'set', 'use'],
+        FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur']
+      });
+    }
+    return fastSanitizeHtml(svgMarkup);
   }
 
   function initMermaidEngine() {
@@ -12929,7 +12973,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   // ==================== UNIVERSAL CHAT IMAGE ENHANCER (Lightbox & Zoom) ====================
   function enhanceChatImages(container = document) {
     if (!container) return;
-    const images = container.querySelectorAll('.msg-text-content img, .message-bubble img');
+    const isBubbleOrContent = typeof container.matches === 'function' && container.matches('.msg-text-content, .message-bubble');
+    const images = isBubbleOrContent
+      ? container.querySelectorAll('img')
+      : container.querySelectorAll('.msg-text-content img, .message-bubble img');
     images.forEach(img => {
       if (img.classList.contains('chat-zoomable-img') || img.classList.contains('image-result-img')) return;
       img.classList.add('chat-zoomable-img');
@@ -14855,7 +14902,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
     const updateAgentHud = (statusMsg) => {
       if (directBtn) {
-        directBtn.innerHTML = `<i class="fa-solid fa-bolt fa-bounce" style="color:var(--neon-cyan); margin-right:4px;"></i> <span>Melanjutkan kode &bull; ${statusMsg}</span>`;
+        directBtn.innerHTML = `<i class="fa-solid fa-bolt fa-bounce" style="color:var(--neon-cyan); margin-right:4px;"></i> <span>Melanjutkan kode &bull; ${escapeHtml(statusMsg)}</span>`;
         directBtn.disabled = true;
         directBtn.style.background = 'rgba(0, 242, 254, 0.18)';
         directBtn.style.borderColor = 'var(--neon-cyan)';
@@ -25076,7 +25123,7 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
       if (targetMessages.length === 0) {
         if (locallyMutated) {
           savePersistedState();
-          renderChatMessages(session);
+          renderCurrentSession(false);
         }
         return { cleanedCount };
       }
@@ -25086,7 +25133,7 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
         // Fallback pembersihan heuristik lokal jika API key tidak tersedia
         scrubScatteredCodeFromSession(session);
         savePersistedState();
-        renderChatMessages(session);
+        renderCurrentSession(false);
         return { cleanedCount: targetMessages.length };
       }
 
@@ -25150,7 +25197,7 @@ ${msg.content.slice(0, 3000)}
       }
 
       savePersistedState();
-      renderChatMessages(session);
+      renderCurrentSession(false);
       renderChatHistory(els.searchHistoryInput?.value || '');
       return { cleanedCount };
     }
@@ -29560,8 +29607,19 @@ ${blocks}
         }
       }
       if (refreshed) {
-        appendUserMessageToChat(rawText);
-        appendAssistantMessageToChat('🔄 **Pratinjau Browser Dimuat Ulang**\n\nHalaman website pada pratinjau live telah dimuat ulang secara instan dengan kode terbaru.');
+        const activeSess = ensureActiveSession(rawText);
+        if (activeSess) {
+          const nowIso = new Date().toISOString();
+          const uMsg = { role: 'user', content: rawText, timestamp: nowIso };
+          const aText = '🔄 **Pratinjau Browser Dimuat Ulang**\n\nHalaman website pada pratinjau live telah dimuat ulang secara instan dengan kode terbaru.';
+          const aMsg = { role: 'assistant', content: aText, model: 'Website Studio', timestamp: nowIso };
+          activeSess.messages.push(uMsg, aMsg);
+          activeSess.updatedAt = nowIso;
+          appendMessageElement('user', rawText, null, 'Anda', null, activeSess.messages.length - 2, null, null, false, null, nowIso, uMsg);
+          appendMessageElement('assistant', aText, null, 'Website Studio', null, activeSess.messages.length - 1, null, null, false, null, nowIso, aMsg);
+          savePersistedState();
+          smartScrollChatToBottom(true);
+        }
         showToast('Pratinjau browser website dimuat ulang.', 'success');
         AudioEngine.click();
         markCommandHandled();
@@ -35148,7 +35206,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (groundedImageDisplays.length === 0 && visualSpecOllama && !wantsFile && !isDocRequest && !isStudioIsolated && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
           const existingGeneratedHtml = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
-          bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari 3 foto relevan untuk "${visualSpecOllama.englishQuery}"...</span></div>`;
+          bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari 3 foto relevan untuk "${escapeHtml(visualSpecOllama.englishQuery)}"...</span></div>`;
           smartScrollChatToBottom(true);
           const autoImgSearch = await executeAutonomousWebTool('search_images', {
             query: visualSpecOllama.englishQuery,
@@ -37368,7 +37426,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (groundedImageDisplays.length === 0 && visualSpecOpenRouter && !wantsFile && !isDocRequest && !isStudioIsolated && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
           const existingGeneratedHtml = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
-          bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari 3 foto relevan untuk "${visualSpecOpenRouter.englishQuery}"...</span></div>`;
+          bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari 3 foto relevan untuk "${escapeHtml(visualSpecOpenRouter.englishQuery)}"...</span></div>`;
           smartScrollChatToBottom(true);
           const autoImgSearch = await executeAutonomousWebTool('search_images', {
             query: visualSpecOpenRouter.englishQuery,
@@ -38046,9 +38104,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       if (topCandidate.provider === 'ollama') {
         const ollamaOk = await runOllamaStreaming(session, promptText, image, topCandidate.modelId, { ...runOptions, autoFallback: Boolean(fallbackCandidate) });
-        if (!ollamaOk && fallbackCandidate && !STATE.userStoppedGeneration && STATE.isGenerating) {
+        if (!ollamaOk && fallbackCandidate && !STATE.userStoppedGeneration) {
           console.warn(`Auto-Router: Ollama "${topCandidate.modelId}" gagal, beralih ke "${fallbackCandidate.modelId}" (${fallbackCandidate.provider})...`);
           showToast(`🔀 Auto-Router: Beralih ke model cadangan "${fallbackCandidate.modelId}"...`, 'info');
+          setGeneratingState(true);
           if (fallbackCandidate.provider === 'openrouter') {
             await runOpenRouterStreaming(session, promptText, image, fallbackCandidate.modelId, runOptions);
           } else {
@@ -38057,9 +38116,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       } else {
         const orOk = await runOpenRouterStreaming(session, promptText, image, topCandidate.modelId, { ...runOptions, autoFallback: Boolean(fallbackCandidate) });
-        if (!orOk && fallbackCandidate && !STATE.userStoppedGeneration && STATE.isGenerating) {
+        if (!orOk && fallbackCandidate && !STATE.userStoppedGeneration) {
           console.warn(`Auto-Router: OpenRouter "${topCandidate.modelId}" gagal, beralih ke "${fallbackCandidate.modelId}" (${fallbackCandidate.provider})...`);
           showToast(`🔀 Auto-Router: Beralih ke model cadangan "${fallbackCandidate.modelId}"...`, 'info');
+          setGeneratingState(true);
           if (fallbackCandidate.provider === 'ollama') {
             await runOllamaStreaming(session, promptText, image, fallbackCandidate.modelId, runOptions);
           } else {
@@ -42445,7 +42505,11 @@ Aturan:
       md += `### ${sender}\n\n${content}\n\n---\n\n`;
     });
 
-    const cleanTitle = sanitizeReportFilename(session.title || 'chat');
+    const cleanTitle = String(session.title || 'chat')
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 64) || 'chat';
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -43510,9 +43574,9 @@ Aturan:
     const applyCustomModel = () => {
       const val = els.customModelInput ? els.customModelInput.value.trim() : '';
       if (val) {
-        const targetProvider = (STATE.dropdownModelTab === 'openrouter' || STATE.dropdownModelTab === 'ollama')
-          ? STATE.dropdownModelTab
-          : null;
+        const targetProvider = val.includes('/')
+          ? 'openrouter'
+          : ((STATE.dropdownModelTab === 'ollama' || val.includes(':')) ? 'ollama' : (STATE.dropdownModelTab === 'openrouter' ? 'openrouter' : null));
         selectModel(val, targetProvider);
         if (els.customModelInput) els.customModelInput.value = '';
         setModelDropdownOpen(false);
@@ -46086,7 +46150,7 @@ Aturan:
 
     xtermThemes: {
       'aura-api': {
-        background: 'transparent',
+        background: '#000000',
         foreground: '#fdf2f2',
         cursor: '#ef4444',
         cursorAccent: '#120707',
@@ -46101,7 +46165,7 @@ Aturan:
         white: '#cbd5e1', brightWhite: '#f1f5f9'
       },
       'aura-es': {
-        background: 'transparent',
+        background: '#000000',
         foreground: '#eaf6ff',
         cursor: '#38bdf8',
         cursorAccent: '#050b14',
@@ -46260,9 +46324,23 @@ Aturan:
         clearTimeout(paneState._stabilityTimer);
         paneState._stabilityTimer = null;
       }
+      if (paneState._autoRespondTimer) {
+        clearTimeout(paneState._autoRespondTimer);
+        paneState._autoRespondTimer = null;
+      }
+      if (paneState._desktopResizeTimer) {
+        clearTimeout(paneState._desktopResizeTimer);
+        paneState._desktopResizeTimer = null;
+      }
       if (paneState._touchInertiaRaf) {
         cancelAnimationFrame(paneState._touchInertiaRaf);
         paneState._touchInertiaRaf = null;
+      }
+      this._cancelPaneWriteBatch(paneState);
+      paneState._wsFailCount = 0;
+      paneState._pendingBuffer = '';
+      if (paneState.sessionId && this._inputQueues) {
+        this._inputQueues.delete(paneState.sessionId);
       }
       if (paneState.eventSource) {
         try { paneState.eventSource.close(); } catch (_) {}
@@ -46309,6 +46387,124 @@ Aturan:
         paneState.sessionId = null;
         paneState.ptyCols = 0;
         paneState.ptyRows = 0;
+      }
+    },
+
+    _cancelPaneWriteBatch(paneState) {
+      if (!paneState) return;
+      if (paneState._writeRafId) {
+        cancelAnimationFrame(paneState._writeRafId);
+        paneState._writeRafId = null;
+      }
+      if (paneState._uiSyncRafId) {
+        cancelAnimationFrame(paneState._uiSyncRafId);
+        paneState._uiSyncRafId = null;
+      }
+      paneState._pendingWriteChunks = null;
+      paneState._pendingWriteBytes = 0;
+      paneState._pendingWriteHasClear = false;
+      paneState._uiSyncInit = false;
+      paneState._uiSyncClear = false;
+    },
+
+    _schedulePaneUiSync(paneState, opts = {}) {
+      if (!paneState || !paneState.term) return;
+      if (opts.isInit) paneState._uiSyncInit = true;
+      if (opts.isScreenClear) paneState._uiSyncClear = true;
+      if (paneState._uiSyncRafId) return;
+
+      paneState._uiSyncRafId = requestAnimationFrame(() => {
+        paneState._uiSyncRafId = null;
+        const needInit = Boolean(paneState._uiSyncInit);
+        const needClear = Boolean(paneState._uiSyncClear);
+        paneState._uiSyncInit = false;
+        paneState._uiSyncClear = false;
+        const currentTerm = paneState.term;
+        if (!currentTerm) return;
+
+        if (needInit || needClear) {
+          paneState._userScrolledUp = false;
+        }
+        if (needClear && paneState.screenContainer) {
+          paneState.screenContainer.scrollTop = 0;
+        }
+        if (this.isMobileDevice()) {
+          this.syncMobileScreenPosition(paneState);
+          return;
+        }
+        if (needInit || needClear) {
+          try { currentTerm.scrollToBottom(); } catch (_) {}
+          if (paneState.updateScrollUI) paneState.updateScrollUI();
+        } else if (!paneState._userScrolledUp) {
+          try { currentTerm.scrollToBottom(); } catch (_) {}
+        }
+      });
+    },
+
+    _flushPaneWriteQueue(paneState) {
+      if (paneState && paneState._writeRafId) {
+        cancelAnimationFrame(paneState._writeRafId);
+        paneState._writeRafId = null;
+      }
+      if (!paneState || !paneState.term || !paneState._pendingWriteChunks || paneState._pendingWriteChunks.length === 0) {
+        if (paneState) {
+          paneState._pendingWriteChunks = null;
+          paneState._pendingWriteBytes = 0;
+          paneState._pendingWriteHasClear = false;
+        }
+        return;
+      }
+      const chunks = paneState._pendingWriteChunks;
+      const needClear = Boolean(paneState._pendingWriteHasClear);
+      paneState._pendingWriteChunks = null;
+      paneState._pendingWriteBytes = 0;
+      paneState._pendingWriteHasClear = false;
+      paneState._lastWriteFlushAt = performance.now();
+
+      const batch = chunks.length === 1 ? chunks[0] : chunks.join('');
+      paneState.term.write(batch, () => {
+        this._schedulePaneUiSync(paneState, { isScreenClear: needClear });
+      });
+    },
+
+    _enqueuePaneWrite(paneState, cleanData, opts = {}) {
+      if (!paneState || !paneState.term || typeof cleanData !== 'string') return;
+      const isInit = Boolean(opts.isInit);
+      const isScreenClear = Boolean(opts.isScreenClear);
+      const now = performance.now();
+
+      if (isInit) {
+        this._cancelPaneWriteBatch(paneState);
+        try { paneState.term.reset(); } catch (_) {}
+        paneState._userScrolledUp = false;
+        paneState._lastWriteFlushAt = now;
+        paneState.term.write(cleanData, () => {
+          this._schedulePaneUiSync(paneState, { isInit: true, isScreenClear });
+        });
+        return;
+      }
+
+      // Fast-path 0ms untuk gema ketikan tunggal saat kanal output tidak sedang burst
+      const hasPending = Boolean(paneState._writeRafId || (paneState._pendingWriteChunks && paneState._pendingWriteChunks.length > 0));
+      if (!hasPending && cleanData.length < 128 && (now - (paneState._lastWriteFlushAt || 0)) >= 12) {
+        paneState._lastWriteFlushAt = now;
+        paneState.term.write(cleanData, () => {
+          this._schedulePaneUiSync(paneState, { isScreenClear });
+        });
+        return;
+      }
+
+      if (!paneState._pendingWriteChunks) paneState._pendingWriteChunks = [];
+      paneState._pendingWriteChunks.push(cleanData);
+      paneState._pendingWriteBytes = (paneState._pendingWriteBytes || 0) + cleanData.length;
+      if (isScreenClear) paneState._pendingWriteHasClear = true;
+
+      if (paneState._pendingWriteBytes >= 65536) {
+        this._flushPaneWriteQueue(paneState);
+        return;
+      }
+      if (!paneState._writeRafId) {
+        paneState._writeRafId = requestAnimationFrame(() => this._flushPaneWriteQueue(paneState));
       }
     },
 
@@ -48802,8 +48998,9 @@ Aturan:
         fontFamily: '"JetBrains Mono", Cascadia Code, Fira Code, Consolas, "Courier New", monospace',
         fontSize: this.fontSize,
         lineHeight: 1.2,
-        scrollback: 5000,
-        allowTransparency: true,
+        scrollback: 2500,
+        allowTransparency: false,
+        fastScrollModifier: 'alt',
         convertEol: false,
         bellStyle: 'none',
         rightClickSelectsWord: false
@@ -49053,7 +49250,7 @@ Aturan:
         //    Menghitung batas kata aktif dengan mengabaikan spasi ekor (oldText.replace(/\s+$/, '')),
         //    sehingga koreksi Gboard seperti 'bai ' -> 'baik ' atau 'tidak ' -> 'tidak?' terkirim 100% utuh!
         term.textarea.addEventListener('input', (e) => {
-          const rawVal = (term.textarea.value || '').replace(/[\u200B\uFEFF\u00A0]/g, ' ');
+          const rawVal = (term.textarea.value || '').replace(/[\u200B\uFEFF]/g, '').replace(/\u00A0/g, ' ');
           const oldText = paneState._imeBuffer || '';
 
           if (e && e.inputType === 'insertFromPaste') {
@@ -49087,11 +49284,15 @@ Aturan:
                 const effStart = Math.max(lcp, activeWordStart);
                 const delCount = Math.max(0, oldText.length - effStart);
                 if (delCount > 0) emitMobileBackspace(delCount);
-                const insertText = cleanVal.slice(effStart);
+                const cleanTrimRight = cleanVal.replace(/\s+$/, '');
+                const cleanWordStart = cleanTrimRight.lastIndexOf(' ') + 1;
+                const insertStart = (effStart === lcp) ? lcp : Math.min(cleanVal.length, cleanWordStart);
+                const insertText = cleanVal.slice(insertStart);
                 if (insertText.length > 0) emitMobileText(insertText);
               }
             }
-            const enteredCmd = (paneState._imeBuffer || cleanVal || '').trim().toLowerCase();
+            paneState._imeBuffer = cleanVal;
+            const enteredCmd = (cleanVal || oldText || '').trim().toLowerCase();
             this.resetImeLine(paneState);
             const now = Date.now();
             if (!paneState._lastEnterSentAt || (now - paneState._lastEnterSentAt) >= 120) {
@@ -49128,14 +49329,9 @@ Aturan:
           const now = Date.now();
           paneState._lastDataEmitAt = now;
 
-          // Selalu jangkar terminal ke dasar dan pulihkan status scroll setiap kali pengguna mengetik
+          // Jangkar scroll di rAF berikutnya agar ketikan langsung dipancarkan ke PTY tanpa blocked layout reflow
           paneState._userScrolledUp = false;
-          if (this.isMobileDevice()) {
-            this.syncMobileScreenPosition(paneState);
-          } else {
-            try { term.scrollToBottom(); } catch (_) {}
-          }
-          if (paneState.updateScrollUI) paneState.updateScrollUI();
+          this._schedulePaneUiSync(paneState);
 
           // 2. Fast-Path A: Penambahan murni di akhir kursor (Append Delta)
           if (val.startsWith(oldText)) {
@@ -49652,16 +49848,24 @@ Aturan:
       }
 
       // Scroll State & Floating 'Scroll to Bottom' Manager
+      let cachedBottomBtn = null;
       const updateScrollUI = () => {
-        const bottomBtn = document.getElementById('btnTermScrollBottom');
-        if (!bottomBtn) return;
-        if (paneState._lastScreenClearAt && (Date.now() - paneState._lastScreenClearAt) < 1500) {
-          bottomBtn.style.display = 'none';
-          return;
+        const activeTab = this.getActiveTab();
+        const activePaneState = activeTab ? (this.activePane === 2 ? activeTab.pane2 : activeTab.pane1) : null;
+        if (activePaneState && activePaneState !== paneState) return;
+        if (!cachedBottomBtn || !cachedBottomBtn.isConnected) {
+          cachedBottomBtn = document.getElementById('btnTermScrollBottom');
         }
-        if (term && term.buffer && term.buffer.active) {
-          const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
-          bottomBtn.style.display = linesFromBottom > 1 ? 'inline-flex' : 'none';
+        if (!cachedBottomBtn) return;
+        let nextDisplay = 'none';
+        if (!(paneState._lastScreenClearAt && (Date.now() - paneState._lastScreenClearAt) < 1500)) {
+          if (term && term.buffer && term.buffer.active) {
+            const linesFromBottom = term.buffer.active.baseY - term.buffer.active.viewportY;
+            if (linesFromBottom > 1) nextDisplay = 'inline-flex';
+          }
+        }
+        if (cachedBottomBtn.style.display !== nextDisplay) {
+          cachedBottomBtn.style.display = nextDisplay;
         }
       };
       paneState.updateScrollUI = updateScrollUI;
@@ -50078,19 +50282,22 @@ Aturan:
       try {
         let wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         let wsHost = window.location.host;
+        const targetBaseUrl = (this.isRemoteConnected && this.remoteHost)
+          ? this.remoteHost
+          : ((this.isWindowsSynced && this.bridgeUrl) ? this.bridgeUrl : '');
 
-        if (this.isRemoteConnected && this.remoteHost) {
+        if (targetBaseUrl) {
           try {
-            const u = new URL(this.remoteHost);
+            const u = new URL(targetBaseUrl);
             wsProto = u.protocol === 'https:' ? 'wss:' : 'ws:';
             wsHost = u.host;
           } catch (_) {
-            if (this.remoteHost.startsWith('https://')) {
+            if (targetBaseUrl.startsWith('https://')) {
               wsProto = 'wss:';
-              wsHost = this.remoteHost.replace(/^https:\/\//, '').split('/')[0];
-            } else if (this.remoteHost.startsWith('http://')) {
+              wsHost = targetBaseUrl.replace(/^https:\/\//, '').split('/')[0];
+            } else if (targetBaseUrl.startsWith('http://')) {
               wsProto = 'ws:';
-              wsHost = this.remoteHost.replace(/^http:\/\//, '').split('/')[0];
+              wsHost = targetBaseUrl.replace(/^http:\/\//, '').split('/')[0];
             }
           }
         }
@@ -50151,6 +50358,8 @@ Aturan:
             paneState._stabilityTimer = null;
           }
           if (!wsConnected && !ws._manualClose) {
+            ws._manualClose = true;
+            paneState.ws = null;
             paneState._wsFailCount = (paneState._wsFailCount || 0) + 1;
             if ((this.isRemoteConnected || this.isWindowsSynced) && paneState._wsFailCount < 3) {
               if (statusLabel) statusLabel.textContent = '☁️ Menyambung ulang…';
@@ -50165,6 +50374,7 @@ Aturan:
             } else {
               this.connectSseStream(tab, paneState, paneNum, queryParams, statusLabel, statusDot, sessionId);
             }
+            try { ws.close(); } catch (_) {}
           }
         };
 
@@ -50207,6 +50417,7 @@ Aturan:
       paneState.eventSource = es;
 
       es.onmessage = (event) => {
+        if (paneState.eventSource !== es) return;
         try {
           const msg = JSON.parse(event.data);
           this._handleStreamMessage(tab, paneState, paneNum, msg, statusLabel, statusDot, sessionId);
@@ -50214,7 +50425,10 @@ Aturan:
       };
 
       es.onerror = () => {
+        if (paneState.eventSource !== es) return;
         if (this.isRemoteConnected || this.isWindowsSynced) {
+          try { es.close(); } catch (_) {}
+          paneState.eventSource = null;
           if (statusLabel) statusLabel.textContent = '☁️ Menyambung ulang…';
           if (statusDot) statusDot.className = 'pane-status-dot connecting';
           if (!paneState._reconnectTimer) {
@@ -50225,6 +50439,8 @@ Aturan:
           }
           return;
         }
+        try { es.close(); } catch (_) {}
+        paneState.eventSource = null;
         if (!this.isWindowsSynced && (IS_CLOUD_HOSTED || paneState.isFallbackMode)) {
           paneState.isFallbackMode = true;
           if (statusLabel) statusLabel.textContent = 'Aktif (Cloud Linux)';
@@ -50233,17 +50449,6 @@ Aturan:
           if (paneState.term && !paneState._promptRendered) {
             paneState._promptRendered = true;
             paneState.term.write(`\r\n\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
-          }
-          return;
-        }
-        if (this.isWindowsSynced) {
-          paneState.isFallbackMode = true;
-          if (statusLabel) statusLabel.textContent = 'Aktif (Win Exec ⚡)';
-          if (statusDot) statusDot.className = 'pane-status-dot online';
-          const conf = this.shells[paneState.shell] || this.shells.powershell;
-          if (paneState.term && !paneState._promptRendered) {
-            paneState._promptRendered = true;
-            paneState.term.write(`\r\n\x1b[32m⚡ [WINDOWS BRIDGE EXEC MODE AKTIF]\x1b[0m\r\n\x1b[90m(Perintah dieksekusi langsung pada Windows lokal via ${this.bridgeUrl})\x1b[0m\r\n\x1b[36m${conf.prompt.replace('{cwd}', paneState.cwd)}\x1b[0m `);
           }
           return;
         }
@@ -50327,7 +50532,7 @@ Aturan:
           }
           if (prevChar === 'm' || prevChar === 'l' || prevChar === 'h') {
             const escPos = str.lastIndexOf('\x1b[', startIdx - 1);
-            if (escPos !== -1 && escPos >= startIdx - 30) {
+            if (escPos !== -1 && escPos >= startIdx - 30 && /^\x1b\[[0-9;?]*[mlh]$/.test(str.slice(escPos, startIdx))) {
               startIdx = escPos;
               continue;
             }
@@ -50382,10 +50587,6 @@ Aturan:
       if (msg.type === 'data' || msg.type === 'init') {
         paneState._hasReceivedData = true;
         if (currentTerm && typeof msg.data === 'string') {
-          if (msg.type === 'init') {
-            try { currentTerm.reset(); } catch (_) {}
-            paneState._userScrolledUp = false;
-          }
           let cleanData = msg.data.includes('\x07') ? msg.data.replace(/\x07/g, '') : msg.data;
           if (!msg.cleaned) {
             cleanData = this.cleanConptyData(cleanData, paneState);
@@ -50401,20 +50602,9 @@ Aturan:
             paneState._lastScreenClearAt = Date.now();
             paneState._userScrolledUp = false;
           }
-          currentTerm.write(cleanData, () => {
-            if (isScreenClear && paneState.screenContainer) {
-              paneState.screenContainer.scrollTop = 0;
-            }
-            if (this.isMobileDevice()) {
-              this.syncMobileScreenPosition(paneState);
-            }
-            if (msg.type === 'init' || isScreenClear) {
-              paneState._userScrolledUp = false;
-              try { currentTerm.scrollToBottom(); } catch (_) {}
-              if (paneState.updateScrollUI) paneState.updateScrollUI();
-            } else if (!paneState._userScrolledUp) {
-              try { currentTerm.scrollToBottom(); } catch (_) {}
-            }
+          this._enqueuePaneWrite(paneState, cleanData, {
+            isInit: msg.type === 'init',
+            isScreenClear
           });
 
           this.handleAutoRespond(tab, paneState, paneNum, msg.data);
@@ -50505,7 +50695,16 @@ Aturan:
         }
       } else if (msg.type === 'exit') {
         if (currentTerm) {
+          this._flushPaneWriteQueue(paneState);
           currentTerm.write(`\r\n\x1b[33m[Proses shell keluar dengan kode ${msg.exitCode || 0}]\x1b[0m\r\n`);
+        }
+        if (paneState.ws) {
+          try { paneState.ws._manualClose = true; paneState.ws.close(); } catch (_) {}
+          paneState.ws = null;
+        }
+        if (paneState.eventSource) {
+          try { paneState.eventSource.close(); } catch (_) {}
+          paneState.eventSource = null;
         }
         if (statusLabel) statusLabel.textContent = 'Selesai';
         if (statusDot) statusDot.className = 'pane-status-dot offline';
@@ -50639,9 +50838,18 @@ Aturan:
 
     sendPtyInput(sessionId, data) {
       if (!data) return;
-      const tab = this.getActiveTab();
-      // Fast-path: Prioritaskan WebSocket pane aktif secara langsung
-      const targetPane = (this.activePane === 2 ? tab?.pane2 : tab?.pane1) || tab?.pane1;
+      // Cari pane dengan sessionId yang cocok persis di seluruh tab agar input tidak pernah nyasar ke pane lain!
+      let targetPane = null;
+      if (sessionId && Array.isArray(this.tabs)) {
+        for (const t of this.tabs) {
+          if (t?.pane1?.sessionId === sessionId) { targetPane = t.pane1; break; }
+          if (t?.pane2?.sessionId === sessionId) { targetPane = t.pane2; break; }
+        }
+      }
+      if (!targetPane && !sessionId) {
+        const tab = this.getActiveTab();
+        targetPane = (this.activePane === 2 ? tab?.pane2 : tab?.pane1) || tab?.pane1;
+      }
       if (targetPane && typeof data === 'string' && /[\r\n\x03\x1b]/.test(data)) {
         targetPane._recentText = '';
       }
@@ -50651,14 +50859,8 @@ Aturan:
           return;
         } catch (_) {}
       }
-      const anyWsPane = [tab?.pane1, tab?.pane2].find(p => p && p.ws && p.ws.readyState === WebSocket.OPEN);
-      if (anyWsPane && anyWsPane.ws) {
-        try {
-          anyWsPane.ws.send(JSON.stringify({ type: 'input', session: anyWsPane.sessionId || sessionId, data }));
-          return;
-        } catch (_) {}
-      }
 
+      if (!sessionId) return;
       if (!this._inputQueues) this._inputQueues = new Map();
       let q = this._inputQueues.get(sessionId);
       if (!q) {
@@ -50910,6 +51112,7 @@ Aturan:
       this.updatePaneHeaders();
       this.focusActiveInput();
       this.fitAllPanes();
+      this.getPaneState(this.activePane)?.updateScrollUI?.();
       this.saveTabsState();
       const sBar = document.getElementById('termSearchBar');
       if (sBar && sBar.style.display !== 'none') {
@@ -50946,6 +51149,7 @@ Aturan:
       this.updatePaneHeaders();
       this.focusActiveInput();
       this.fitAllPanes();
+      this.getPaneState(this.activePane)?.updateScrollUI?.();
       this.saveTabsState();
     },
 
@@ -51375,6 +51579,7 @@ Aturan:
     clearActiveScreen() {
       const pane = this.getPaneState(this.activePane);
       if (pane && pane.term) {
+        this._cancelPaneWriteBatch(pane);
         pane._lastScreenClearAt = Date.now();
         pane._userScrolledUp = false;
         try {
@@ -52289,24 +52494,6 @@ Aturan:
           });
         }
 
-      // QR Scanner event handlers
-      document.getElementById('btnTermScanQr')?.addEventListener('click', () => this.openQrScannerModal());
-      document.getElementById('btnTermOpenQrScanner')?.addEventListener('click', () => this.openQrScannerModal());
-      document.getElementById('btnTermCloseQrScanner')?.addEventListener('click', () => this.closeQrScannerModal());
-      document.getElementById('btnTermToggleTorch')?.addEventListener('click', () => this.toggleTorch());
-      document.getElementById('inputTermQrFile')?.addEventListener('change', (e) => {
-        const file = e.target.files && e.target.files[0];
-        if (file) this.handleQrFileSelection(file);
-      });
-      const qrScannerModal = document.getElementById('termQrScannerModal');
-      if (qrScannerModal) {
-        qrScannerModal.addEventListener('click', (e) => {
-          if (e.target === qrScannerModal) {
-            this.closeQrScannerModal();
-          }
-        });
-      }
-
         const input = document.getElementById(`termCliInput${num}`);
         if (input) {
           input.addEventListener('keydown', (e) => {
@@ -52338,6 +52525,24 @@ Aturan:
           sendBtn.addEventListener('click', () => this.executeInput(num));
         }
       });
+
+      // QR Scanner event handlers (dipasang sekali di luar loop pane [1, 2])
+      document.getElementById('btnTermScanQr')?.addEventListener('click', () => this.openQrScannerModal());
+      document.getElementById('btnTermOpenQrScanner')?.addEventListener('click', () => this.openQrScannerModal());
+      document.getElementById('btnTermCloseQrScanner')?.addEventListener('click', () => this.closeQrScannerModal());
+      document.getElementById('btnTermToggleTorch')?.addEventListener('click', () => this.toggleTorch());
+      document.getElementById('inputTermQrFile')?.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (file) this.handleQrFileSelection(file);
+      });
+      const qrScannerModal = document.getElementById('termQrScannerModal');
+      if (qrScannerModal) {
+        qrScannerModal.addEventListener('click', (e) => {
+          if (e.target === qrScannerModal) {
+            this.closeQrScannerModal();
+          }
+        });
+      }
 
       const chipsBar = document.getElementById('termQuickChipsBar');
       if (chipsBar) {
@@ -52596,8 +52801,7 @@ Aturan:
         isMouseActive: Boolean(
           term && (
             (term._core && term._core._coreMouseService && term._core._coreMouseService.areMouseEventsActive) ||
-            (term.modes && term.modes.mouseTrackingMode && term.modes.mouseTrackingMode !== 'none') ||
-            (term.buffer && term.buffer.active && term.buffer.active.type === 'alternate')
+            (term.modes && term.modes.mouseTrackingMode && term.modes.mouseTrackingMode !== 'none')
           )
         )
       };
@@ -52637,12 +52841,13 @@ Aturan:
         }
       }
 
-      // 4. Audit Layar Hitam Blank / Missing Prompt Trap (Screenshot 6 & 7)
+      // 4. Audit Layar Hitam Blank / Missing Prompt Trap (periksa baris viewport aktual, bukan baris scrollback teratas)
       let isBlankScreen = false;
       if (term.buffer && term.buffer.active && term.buffer.active.length > 0) {
-        const checkLines = Math.min(term.rows || 20, term.buffer.active.length);
+        const startRow = Math.max(0, term.buffer.active.viewportY || term.buffer.active.baseY || 0);
+        const endRow = Math.min(term.buffer.active.length, startRow + (term.rows || 20));
         let hasVisibleChar = false;
-        for (let i = 0; i < checkLines; i++) {
+        for (let i = startRow; i < endRow; i++) {
           const line = term.buffer.active.getLine(i);
           if (line && line.translateToString(true).trim().length > 0) {
             hasVisibleChar = true;
@@ -52719,7 +52924,12 @@ Aturan:
         pane.ptyCols = safeCols;
         pane.ptyRows = safeRows;
         pane._stableRows = safeRows;
-        term.resize(safeCols, safeRows);
+        pane._isRemoteResizing = true;
+        try {
+          term.resize(safeCols, safeRows);
+        } finally {
+          setTimeout(() => { pane._isRemoteResizing = false; }, 120);
+        }
         if (isMobile) {
           TerminalManager.syncMobileViewport();
           TerminalManager.syncMobileScreenPosition(pane);
@@ -52749,25 +52959,28 @@ Aturan:
         TerminalManager.sendPtyInput(pane.sessionId, `\x1b[<65;${col};${row}M`.repeat(3));
       }
 
-      // D. Pemurnian IME Textarea & Reset Transduser Virtual Keyboard
-      TerminalManager.resetImeLine(pane);
-      pane._lastEmittedChar = '';
-      pane._lastEmitTime = 0;
-      if (term.textarea) {
-        try {
-          term.textarea.value = '';
-          term.textarea.blur();
-          setTimeout(() => {
-            try {
-              term.focus();
-              term.textarea.focus({ preventScroll: true });
-            } catch (_) {}
-          }, 35);
-        } catch (_) {}
+      // D. Pemurnian IME Textarea & Reset Transduser Virtual Keyboard (hindari blur/wipe saat auto-watch silent ketika mengetik)
+      const isActivelyTyping = Boolean(options.silent && term.textarea && (term.textarea.value || '').length > 0);
+      if (!isActivelyTyping) {
+        TerminalManager.resetImeLine(pane);
+        pane._lastEmittedChar = '';
+        pane._lastEmitTime = 0;
+        if (term.textarea && !options.silent) {
+          try {
+            term.textarea.value = '';
+            term.textarea.blur();
+            setTimeout(() => {
+              try {
+                term.focus();
+                term.textarea.focus({ preventScroll: true });
+              } catch (_) {}
+            }, 35);
+          } catch (_) {}
+        }
       }
 
-      // E. Pemulihan Layar Blank Pekat (Missing Host Prompt)
-      if (diag.isBlankScreen && pane.sessionId) {
+      // E. Pemulihan Layar Blank Pekat (Missing Host Prompt — hanya saat eksplisit atau benar-benar kosong tanpa mengetik)
+      if (diag.isBlankScreen && pane.sessionId && !options.silent) {
         setTimeout(() => {
           if (pane.sessionId) {
             TerminalManager.sendPtyInput(pane.sessionId, '\r');
@@ -52819,6 +53032,8 @@ Aturan:
       this._autoWatchTimer = setInterval(() => {
         const modal = document.getElementById('terminalModal');
         if (!modal || !modal.classList.contains('show')) return;
+        const activePane = TerminalManager.getPaneState(TerminalManager.activePane || 1);
+        if (activePane?.term?.textarea && (activePane.term.textarea.value || '').length > 0) return;
         const diag = this.diagnose(TerminalManager.activePane || 1);
         if (diag.score < 70 || diag.isBlankScreen) {
           this.healAll({ silent: true, noRedraw: true });

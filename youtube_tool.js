@@ -159,9 +159,9 @@ const ALLOWED_HOSTS = new Set([
   'music.youtube.com'
 ]);
 
-// Regex YouTube komprehensif (watch, shorts, live, embed, /v/, playlist)
-const YOUTUBE_URL_REGEX = /(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[^\s]*)?/gi;
-const PLAYLIST_URL_REGEX = /(?:https?:\/\/)?(?:www\.|m\.)?youtube\.com\/playlist\?(?:.*&)?list=([a-zA-Z0-9_-]+)/i;
+// Regex YouTube komprehensif (watch, shorts, live, embed, /v/, playlist — linear-time tanpa greedy .*)
+const YOUTUBE_URL_REGEX = /(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com\/(?:watch\?(?:[^\s&]*&)*v=|shorts\/|live\/|embed\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})(?:[^\s]*)?/gi;
+const PLAYLIST_URL_REGEX = /(?:https?:\/\/)?(?:www\.|m\.)?youtube\.com\/playlist\?(?:[^\s&]*&)*list=([a-zA-Z0-9_-]+)/i;
 
 /**
  * In-Memory LRU Cache dengan Time-To-Live (TTL)
@@ -232,37 +232,76 @@ function httpsGetWithRetry(targetUrl, timeoutMs = 8000, maxRetries = 2, backoffM
           'Accept': 'application/json, text/html, */*'
         }
       }, (res) => {
-        // Handle redirect 301/302
-        if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
-          return resolve(httpsGetWithRetry(res.headers.location, timeoutMs, maxRetries - 1, backoffMs));
+        // Handle redirect 301/302/303/307/308 secara aman
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+          res.resume();
+          if (maxRetries <= 0) {
+            return reject(new Error('Terlalu banyak pengalihan (redirect) saat menghubungi YouTube.'));
+          }
+          try {
+            const resolvedUrl = new URL(res.headers.location, targetUrl);
+            const host = resolvedUrl.hostname.toLowerCase();
+            const isAllowedHost = host === 'youtube.com' || host.endsWith('.youtube.com') ||
+                                  host === 'youtu.be' || host.endsWith('.ytimg.com') ||
+                                  host.endsWith('.googlevideo.com') || host.endsWith('.google.com');
+            if (resolvedUrl.protocol !== 'https:' || !isAllowedHost) {
+              return reject(new Error(`Redirect ke host tidak diizinkan: ${host}`));
+            }
+            return resolve(httpsGetWithRetry(resolvedUrl.toString(), timeoutMs, maxRetries - 1, backoffMs));
+          } catch (urlErr) {
+            return reject(urlErr);
+          }
         }
 
         // Retry jika terkena rate limit (429) atau server error (500, 502, 503, 504)
         if ((res.statusCode === 429 || (res.statusCode >= 500 && res.statusCode <= 504)) && attempt <= maxRetries) {
+          res.resume();
           const delay = backoffMs * Math.pow(2, attempt - 1);
           return setTimeout(executeRequest, delay);
         }
 
         let body = '';
-        res.on('data', chunk => { body += chunk; });
-        res.on('end', () => resolve({ statusCode: res.statusCode, body, headers: res.headers }));
+        let totalBytes = 0;
+        let resDone = false;
+        const finishRes = (err) => {
+          if (resDone) return;
+          resDone = true;
+          if (err) {
+            if (attempt <= maxRetries) return setTimeout(executeRequest, backoffMs * attempt);
+            return reject(err);
+          }
+          resolve({ statusCode: res.statusCode, body, headers: res.headers });
+        };
+        res.on('data', chunk => {
+          totalBytes += chunk.length;
+          if (totalBytes > 2 * 1024 * 1024) {
+            try { req.destroy(); } catch (_) {}
+            return finishRes(new Error('YouTube response exceeds 2MB cap'));
+          }
+          body += chunk;
+        });
+        res.on('error', (err) => finishRes(err));
+        res.on('end', () => finishRes(null));
       });
 
-      req.on('timeout', () => {
-        req.destroy();
-        if (attempt <= maxRetries) {
-          setTimeout(executeRequest, backoffMs * attempt);
-        } else {
-          reject(new Error(`Timeout setelah ${timeoutMs}ms`));
-        }
-      });
-
-      req.on('error', (err) => {
+      let attemptSettled = false;
+      const retryOrFail = (err) => {
+        if (attemptSettled) return;
+        attemptSettled = true;
         if (attempt <= maxRetries) {
           setTimeout(executeRequest, backoffMs * attempt);
         } else {
           reject(err);
         }
+      };
+
+      req.on('timeout', () => {
+        try { req.destroy(); } catch (_) {}
+        retryOrFail(new Error(`Timeout setelah ${timeoutMs}ms`));
+      });
+
+      req.on('error', (err) => {
+        retryOrFail(err);
       });
     }
 
@@ -408,8 +447,9 @@ async function enrichPromptWithYouTube(prompt) {
   const ids = extractYouTubeVideoIds(prompt);
   if (ids.length === 0) return prompt;
 
-  // Eksekusi paralel asinkron (konkuren) untuk semua tautan
-  const results = await Promise.all(ids.map(id => getYouTubeInfo(id)));
+  // Batasi maksimal 5 tautan per prompt agar tidak memicu fork yt-dlp berlebihan
+  const cappedIds = ids.slice(0, 5);
+  const results = await Promise.all(cappedIds.map(id => getYouTubeInfo(id)));
   const validVideos = results.filter(r => r && r.success);
   if (validVideos.length === 0) return prompt;
 

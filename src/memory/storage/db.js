@@ -303,8 +303,7 @@ function queryRun(stmt, ...params) {
 }
 
 function isRecordOwnedBy(record, userId) {
-  if (!record) return false;
-  if (!userId || userId === '*') return true;
+  if (!record || !userId || userId === '*') return false;
   return (record.userId || record.user_id || config.DEFAULT_USER_ID) === userId;
 }
 
@@ -452,7 +451,10 @@ function addRelation(relationData, { resolveConflict = true } = {}) {
     if (resolveConflict) {
       const now = new Date().toISOString();
       for (const r of memStore.relations.values()) {
-        if (r.userId === rel.userId && r.sourceEntityId === rel.sourceEntityId && r.targetEntityId === rel.targetEntityId && r.relationType === rel.relationType && !r.validUntil) {
+        if (r.userId !== rel.userId || r.validUntil) continue;
+        if (r.sourceEntityId === rel.sourceEntityId && r.relationType === rel.relationType) {
+          r.validUntil = now;
+        } else if (rel.relationType === 'replaces' && (r.targetEntityId === rel.targetEntityId || r.sourceEntityId === rel.targetEntityId)) {
           r.validUntil = now;
         }
       }
@@ -466,9 +468,12 @@ function addRelation(relationData, { resolveConflict = true } = {}) {
   if (resolveConflict) {
     const activeStmt = db.prepare(`
       SELECT id FROM relations 
-      WHERE user_id = ? AND source_entity_id = ? AND target_entity_id = ? AND relation_type = ? AND valid_until IS NULL
+      WHERE user_id = ? AND (
+        (source_entity_id = ? AND relation_type = ?)
+        OR (? = 'replaces' AND (target_entity_id = ? OR source_entity_id = ?))
+      ) AND valid_until IS NULL
     `);
-    const activeRows = queryAll(activeStmt, rel.userId, rel.sourceEntityId, rel.targetEntityId, rel.relationType);
+    const activeRows = queryAll(activeStmt, rel.userId, rel.sourceEntityId, rel.relationType, rel.relationType, rel.targetEntityId, rel.targetEntityId);
     if (activeRows && activeRows.length > 0) {
       const now = new Date().toISOString();
       const expireStmt = db.prepare('UPDATE relations SET valid_until = ? WHERE id = ?');
@@ -752,7 +757,7 @@ function listMemories(userId, { category = null, scope = null, q = null, limit =
 
   if (instance.mode === 'memory') {
     let list = Array.from(memStore.memories.values())
-      .filter(m => isRecordOwnedBy(m, uid))
+      .filter(m => isRecordOwnedBy(m, uid) && m.is_active !== 0 && m.isActive !== 0 && m.is_active !== false)
       .map(normalizeMemoryRow);
     if (normCat) {
       if (normCat === 'fact') {
@@ -773,7 +778,7 @@ function listMemories(userId, { category = null, scope = null, q = null, limit =
   }
 
   const { db } = instance;
-  let sql = 'SELECT * FROM memories WHERE user_id = ?';
+  let sql = 'SELECT * FROM memories WHERE user_id = ? AND is_active = 1';
   const params = [uid];
 
   if (normCat) {
@@ -879,6 +884,8 @@ function searchMemoriesVector(userId, queryVec, scope = 'global', limit = 10) {
   const stmt = db.prepare(`
     SELECT * FROM memories 
     WHERE user_id = ? AND is_active = 1 AND (scope = ? OR scope = 'global')
+    ORDER BY updated_at DESC
+    LIMIT 1000
   `);
   const rows = queryAll(stmt, uid, scope);
   if (!rows || rows.length === 0) return [];

@@ -769,7 +769,7 @@ function createImageGroundingService(options = {}) {
               truncatedIntentionally = true;
               res.destroy();
               return done({
-                ok: true,
+                ok: status >= 200 && status < 300,
                 status,
                 headers: resHeaders,
                 buffer: Buffer.concat(chunks),
@@ -789,7 +789,9 @@ function createImageGroundingService(options = {}) {
             chunks.push(chunk);
           });
 
+          let streamEndedCleanly = false;
           res.on('end', () => {
+            streamEndedCleanly = true;
             done({
               ok: status >= 200 && status < 300,
               status,
@@ -801,14 +803,16 @@ function createImageGroundingService(options = {}) {
           });
 
           res.on('close', () => {
-            if (truncatedIntentionally) return;
+            if (truncatedIntentionally || streamEndedCleanly) return;
             done({
-              ok: status >= 200 && status < 300 && chunks.length > 0,
+              ok: false,
               status,
+              code: 'incomplete_stream',
+              error: 'Aliran respons terputus sebelum seluruh byte diterima.',
               headers: resHeaders,
               buffer: Buffer.concat(chunks),
               finalUrl: verified.normalizedUrl,
-              truncated: false
+              truncated: true
             });
           });
 
@@ -1848,7 +1852,7 @@ function createImageGroundingService(options = {}) {
       _categories: categories,
       _mediaCategory: 'documentary_photo',
       _requiresProxy: true
-    }, cleanTitle || '');
+    }, '');
   }
 
   /**
@@ -2262,6 +2266,7 @@ function createImageGroundingService(options = {}) {
       ? 'private, max-age=3600'
       : 'public, max-age=3600, stale-while-revalidate=7200';
 
+    if (res.headersSent || res.writableEnded) return;
     res.writeHead(200, {
       'Content-Type': sniffed.mimeType,
       'Content-Length': String(upstream.buffer.length),

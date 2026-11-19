@@ -107,6 +107,7 @@ function importMemories(userId, rawContent, format = 'json') {
         ? parsed.memories 
         : (Array.isArray(parsed) ? parsed : []));
     for (const item of items) {
+      if (!item || typeof item !== 'object') continue;
       const content = item.content || item.fact || item.text;
       if (!content) continue;
 

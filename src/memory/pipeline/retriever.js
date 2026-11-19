@@ -132,7 +132,8 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
 
   // 4B. Counterfactual Error-Lesson Matching (High-Priority P(H_falsified) = 0 Signal)
   const queryTokens = extractContentTokens(q);
-  const allRecent = dbStorage.listMemories(uid, { limit: 60 });
+  const allRecent = dbStorage.listMemories(uid, { scope, limit: 60 })
+    .filter(m => m && m.is_active !== 0 && m.isActive !== 0 && m.is_active !== false);
   if (queryTokens.length >= 2) {
     const errorLessons = allRecent.filter(m => m && (m.category === 'error_lesson' || String(m.content || '').startsWith('[KOREKSI KESALAHAN TERVERIFIKASI]')));
     errorLessons.forEach((lesson) => {
@@ -161,7 +162,8 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
   const coreMemories = allRecent.filter(m => m && (m.category === 'fact' || m.category === 'preference' || m.category === 'project_context'));
   coreMemories.forEach((coreMem, idx) => {
     const sim = computeTokenOverlapScore(queryTokens, coreMem.content || '');
-    const priorWeight = isExplicitCrossSessionRecall ? 1.8 : 0.8;
+    if (!isExplicitCrossSessionRecall && sim <= 0 && idx >= 5) return;
+    const priorWeight = isExplicitCrossSessionRecall ? 1.8 : (sim > 0 ? 0.8 : 0.35);
     addRank({ ...coreMem }, idx + 1, priorWeight + sim * 1.5, 'core_fact');
   });
 
@@ -189,10 +191,10 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
     receipts.push(createMemoryReceipt({
       memoryId: m.id,
       episodeId: epId || 'manual',
-      sourceTitle: ep ? ep.source_title : (m.scope === 'global' ? 'Preferensi Global' : `Konteks ${m.scope}`),
-      sourceUri: ep ? ep.source_uri : '',
-      sourceType: ep ? ep.source_type : 'manual',
-      rawSnippet: ep ? ep.raw_snippet : m.content,
+      sourceTitle: ep ? (ep.source_title || ep.sourceTitle || 'Sesi Chat') : (m.scope === 'global' ? 'Preferensi Global' : `Konteks ${m.scope}`),
+      sourceUri: ep ? (ep.source_uri || ep.sourceUri || '') : '',
+      sourceType: ep ? (ep.source_type || ep.sourceType || 'manual') : 'manual',
+      rawSnippet: ep ? (ep.raw_snippet || ep.rawSnippet || m.content) : m.content,
       relevanceScore: entry.score,
       matchedSignal: primarySignal
     }));

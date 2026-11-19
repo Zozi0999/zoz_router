@@ -43,7 +43,7 @@
     'certainly', 'here', 'happy', 'help', 'great', 'question', 'let', 'us', 'discuss', 'of', 'course'
   ]);
 
-  const CASUAL_GREETING_ONLY_REGEX = /^(?:\s*(?:halo+|hai+|hi+|hello+|hey+|p|ping|tes|test|selamat\s+(?:pagi|siang|sore|malam)|assalamu'?alaikum|permisi|bro|gan|kak|min|bos|apa\s+kabar|gimana\s+kabarnya|makasih|terima\s+kasih|thanks|thank\s+you|oke|ok|sip|mantap|keren)\s*[!?.~,]*)+$/i;
+  const CASUAL_GREETING_ONLY_REGEX = /^\s*(?:halo+|hai+|hi+|hello+|hey+|p|ping|tes|test|selamat\s+(?:pagi|siang|sore|malam)|assalamu'?alaikum|permisi|bro|gan|kak|min|bos|apa\s+kabar|gimana\s+kabarnya|makasih|terima\s+kasih|thanks|thank\s+you|oke|ok|sip|mantap|keren)(?:[!?.~,]*\s+(?:halo+|hai+|hi+|hello+|hey+|p|ping|tes|test|selamat\s+(?:pagi|siang|sore|malam)|assalamu'?alaikum|permisi|bro|gan|kak|min|bos|apa\s+kabar|gimana\s+kabarnya|makasih|terima\s+kasih|thanks|thank\s+you|oke|ok|sip|mantap|keren))*[!?.~,\s]*$/i;
 
   // Klausa pengantar berentropi rendah (dapat muncul berurutan di awal respons)
   const SINGLE_PREAMBLE_SENTENCE_REGEX = /^(?:\s*(?:(?:halo|hai|hi|hello|selamat\s+(?:pagi|siang|sore|malam))[!,.:\s]+|(?:wah[,.\s]+)?(?:pertanyaan|permintaan|topik|ide)\s+yang\s+(?:sangat\s+)?(?:bagus|menarik|hebat|luar\s+biasa|keren|tepat|kritis)[^.!?\n]*[.!?\n]+|(?:tentu(?:\s+saja)?|baik(?:lah)?|pasti|oke|siap|dengan\s+senang\s+hati|sure|certainly|of\s+course|great|absolutely)[,!.\s]+(?:(?:saya\s+(?:akan|bisa|dapat)|mari\s+kita|berikut\s+(?:ini\s+)?(?:adalah\s+)?|here\s+(?:is|are)\s+|let's\s+|i\s+(?:will|can)\s+)[^\n:.!?]*[:.!?]+\s*)?|(?:berikut\s+(?:ini\s+)?(?:adalah\s+)?(?:penjelasan|analisis|jawaban|ulasan|ringkasan|pembahasan|rincian|uraian|kode|implementasi|daftar|langkah|rumus)[^\n:.!?]*[:.!?]+\s*)|(?:here\s+(?:is|are)\s+(?:the|an?|your)?\s*(?:explanation|analysis|answer|overview|summary|breakdown|code|implementation|guide|list|steps|formula)[^\n:.!?]*[:.!?]+\s*)|(?:sebagai\s+(?:asisten\s+ai|model\s+bahasa|ai)[^,\n]*,\s*saya\s+akan\s+[^\n:.!?]*[:.!?]+\s*)))+/i;
@@ -1106,8 +1106,8 @@
             if (item && typeof item === 'object') {
               const ans = item.correct_option_text || item.correct_option || item.answer;
               const explanation = (item.options_analysis && ans && item.options_analysis[ans]) || '';
-              if (ans) {
-                parts.push(`**Jawaban yang tepat (${k}):** $${ans.replace(/^\$+|\$+$/g, '')}$` + (explanation ? `\n\n${explanation}` : ''));
+              if (ans !== undefined && ans !== null && String(ans).trim()) {
+                parts.push(`**Jawaban yang tepat (${k}):** $${String(ans).replace(/^\$+|\$+$/g, '')}$` + (explanation ? `\n\n${explanation}` : ''));
               }
             }
           }
@@ -1156,18 +1156,19 @@
     let emittedVisibleChars = 0;
 
     const OPEN_REGEX = /<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|\[(?:thought|reasoning)\]/i;
-    const CLOSE_REGEX = /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)>|\[\/(?:thought|reasoning)\]/i;
+    const CLOSE_REGEX = /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|\[\/(?:thought|reasoning)\]/i;
     const OPEN_PREFIXES = ['<think', '<thought', '<thinking', '<reasoning', '<ant_thought', '<thought_process', '[thought]', '[reasoning]'];
     const CLOSE_TAGS = ['</think>', '</thought>', '</thinking>', '</reasoning>', '</ant_thought>', '</thought_process>', '[/thought]', '[/reasoning]'];
 
     function findPartialTagTailIndex(s, closingMode) {
-      const minPos = Math.max(0, s.length - 36);
+      const minPos = Math.max(0, s.length - 128);
       for (let i = minPos; i < s.length; i++) {
         const ch = s[i];
         if (ch !== '<' && ch !== '[') continue;
         const tail = s.slice(i).toLowerCase();
         if (closingMode) {
-          if (CLOSE_TAGS.some(tag => tag.startsWith(tail))) return i;
+          const normalizedTail = tail.replace(/\s+>$/, '>');
+          if (CLOSE_TAGS.some(tag => tag.startsWith(normalizedTail) || (tag.startsWith(tail.trimEnd()) && !tail.includes('>')))) return i;
         } else {
           if (OPEN_PREFIXES.some(pref => pref.startsWith(tail) || (pref.startsWith('<') && tail.startsWith(pref) && !tail.includes('>')))) {
             return i;
@@ -1319,8 +1320,13 @@
 
     function decodeChunk(chunk, final = false) {
       const isBuffer = typeof Buffer !== 'undefined' && Buffer.isBuffer(chunk);
-      if (decoder && isBuffer) return decoder.decode(chunk, { stream: !final });
+      const isView = !isBuffer && chunk && (ArrayBuffer.isView(chunk) || chunk instanceof ArrayBuffer);
+      if (decoder && (isBuffer || isView)) return decoder.decode(chunk, { stream: !final });
       if (isBuffer) return chunk.toString('utf8');
+      if (isView) {
+        const u8 = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk.buffer || chunk, chunk.byteOffset || 0, chunk.byteLength || 0);
+        return typeof Buffer !== 'undefined' ? Buffer.from(u8).toString('utf8') : new TextDecoder().decode(u8);
+      }
       if (final && decoder) return decoder.decode();
       return String(chunk || '');
     }
@@ -1358,7 +1364,7 @@
           let prefixFrame = '';
           const flushed = finishTagStrippers();
           if (flushed) {
-            prefixFrame = 'data: ' + JSON.stringify({ choices: [{ index: 0, delta: { content: flushed } }] }) + eol;
+            prefixFrame = 'data: ' + JSON.stringify({ choices: [{ index: 0, delta: { content: flushed } }] }) + eol + eol;
           }
           return prefixFrame + 'data: [DONE]' + eol;
         }
@@ -1392,7 +1398,9 @@
     }
 
     function end() {
-      let output = decodeChunk(typeof Buffer !== 'undefined' ? Buffer.alloc(0) : '', true);
+      const flushedUtf8 = decodeChunk(typeof Buffer !== 'undefined' ? Buffer.alloc(0) : new Uint8Array(0), true);
+      if (flushedUtf8) buffer += flushedUtf8;
+      let output = '';
       if (mode === 'json') {
         if (buffer.trim()) output += cleanJson(buffer, false);
         buffer = '';
@@ -1408,7 +1416,7 @@
         buffer = '';
       }
       const leftover = finishTagStrippers();
-      if (leftover) {
+      if (leftover && mode === 'stream') {
         if (isJsonSequence) {
           output += JSON.stringify({ message: { role: 'assistant', content: leftover }, done: false }) + '\n';
         } else if (isOpenRouter) {
@@ -1749,7 +1757,8 @@
   // DIBLOKIR TOTAL dan model diperintahkan memfalsifikasi jawaban lama (P(h_prev) = 0)
   // serta mengevaluasi sisa opsi alternatif.
   // ============================================================================
-  const QUIZ_REVISION_EXACT_REGEX = /^(?:\s*(?:ganti|ubah|tukar|pilihkan\s+(?:yang\s+)?lain|coba\s+(?:yang\s+)?lain|bukan\s+(?:itu|yang\s+ini|yang\s+tadi)|salah\b|opsi\s+lain|jawaban\s+lain|alternatif\s+lain|jawaban\s+kedua|nomor\s+lain|ganti\s+(?:opsi|jawaban|pilihan)|bukan\s+[A-Fa-f]|change\s+(?:the\s+)?answer|try\s+another|pick\s+another|switch\s+(?:to|answer)|not\s+that|wrong|incorrect)\s*[!?.~,"'`]*)+$/i;
+  const QUIZ_REVISION_TOKEN_SRC = '(?:ganti|ubah|tukar|pilihkan\\s+(?:yang\\s+)?lain|coba\\s+(?:yang\\s+)?lain|bukan\\s+(?:itu|yang\\s+ini|yang\\s+tadi)|salah\\b|masih\\s+salah|opsi\\s+lain|jawaban\\s+lain|alternatif\\s+lain|jawaban\\s+kedua|nomor\\s+lain|ganti\\s+(?:opsi|jawaban|pilihan)|bukan\\s+[A-Fa-f]|change\\s+(?:the\\s+)?answer|try\\s+another|pick\\s+another|switch\\s+(?:to|answer)|not\\s+that|wrong|incorrect)';
+  const QUIZ_REVISION_EXACT_REGEX = new RegExp('^\\s*' + QUIZ_REVISION_TOKEN_SRC + '(?:(?:\\s+|[!?.~,"\'`]+\\s*)' + QUIZ_REVISION_TOKEN_SRC + ')*\\s*[!?.~,"\'`]*$', 'i');
 
   const QUIZ_FAILURE_FEEDBACK_REGEX = /\b(?:anda\s+)?(?:tidak|belum)\s+lulus\b|\b(?:gagal|failed|fail|not\s+passing|re-?take|retake)\b|\b(?:your\s+score|skor(?:\s+anda)?|score|nilai(?:\s+saya)?|passing(?:\s+grade|\s+score)?)\s*(?:is|:|=|adalah)?\s*"?\s*\d{1,3}\s*%/i;
 
@@ -1788,7 +1797,6 @@
 
     if (isOriginalQuizQuestion) return false;
 
-    const QUIZ_REVISION_EXACT_REGEX = /^(?:\s*(?:ganti|ubah|tukar|pilihkan\s+(?:yang\s+)?lain|coba\s+(?:yang\s+)?lain|bukan\s+(?:itu|yang\s+ini|yang\s+tadi)|salah\b|masih\s+salah|opsi\s+lain|jawaban\s+lain|alternatif\s+lain|jawaban\s+kedua|nomor\s+lain|ganti\s+(?:opsi|jawaban|pilihan)|bukan\s+[A-Fa-f]|change\s+(?:the\s+)?answer|try\s+another|pick\s+another|switch\s+(?:to|answer)|not\s+that|wrong|incorrect)\s*[!?.~,"'`]*)+$/i;
     const QUIZ_FAILURE_FEEDBACK_REGEX = /\b(?:anda\s+)?(?:tidak|belum)\s+lulus\b|\b(?:gagal|failed|fail|not\s+passing|re-?take|retake)\b|\b(?:your\s+score|skor(?:\s+anda)?|score|nilai(?:\s+saya)?|passing(?:\s+grade|\s+score)?)\s*(?:is|:|=|adalah)?\s*"?\s*\d{1,3}\s*%/i;
     const QUIZ_REVISION_PHRASE_REGEX = /\b(?:ganti\s+(?:jawabannya|jawaban|opsi|pilihan)|coba\s+ganti|salah\s+ganti|masih\s+salah|bukan\s+itu|jawaban\s+(?:lain|kedua|baru|yang\s+benar|berikutnya)|pilih\s+(?:yang\s+)?lain|opsi\s+lain|alternatif\s+lain|jawaban\s+salah|salah\s+(?:jawabannya|opsinya|pilihannya)|koreksi\s+(?:jawabannya|pilihan)|revisi\s+jawaban|change\s+(?:the\s+)?answer|switch\s+(?:the\s+)?option|try\s+another\s+option|wrong\s+answer)\b/i;
     const LMS_QUIZ_FEEDBACK_REGEX = /\b(?:not\s+quite|that'?s\s+not\s+(?:quite\s+)?right|incorrect|almost(?:,\s+but)?|try\s+again|consider\s+the|think\s+about|pikirkan\s+kembali|kurang\s+tepat|belum\s+tepat)\b/i;

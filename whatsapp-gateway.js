@@ -20,6 +20,11 @@ const fsp = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 
+const IS_VERCEL_ENV = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const SHARED_DATA_DIR = IS_VERCEL_ENV
+  ? path.join('/tmp', 'data')
+  : (process.env.ZOZ_DATA_DIR ? path.resolve(process.env.ZOZ_DATA_DIR) : path.join(__dirname, 'data'));
+
 function sanitizeUserId(userId) {
   if (!userId || typeof userId !== 'string') return 'anonymous';
   const clean = userId.trim();
@@ -32,6 +37,14 @@ function sanitizeUserId(userId) {
 function hashPin(pin) {
   if (!pin) return '';
   return crypto.createHash('sha256').update(String(pin).trim()).digest('hex');
+}
+
+function safeCompareStr(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 /**
@@ -74,14 +87,14 @@ class WhatsAppGateway {
     this.sock = null;
 
     if (this.isMaster) {
-      this.baseDir = path.join(__dirname, 'data');
+      this.baseDir = SHARED_DATA_DIR;
       this.authDir = path.join(this.baseDir, 'wa-auth');
       this.contactsFile = path.join(this.baseDir, 'wa-contacts.json');
       this.messagesFile = path.join(this.baseDir, 'wa-messages.json');
       this.rawMediaFile = path.join(this.baseDir, 'wa-raw-media.json');
       this.configFile = path.join(this.baseDir, 'wa-master-config.json');
     } else {
-      this.baseDir = path.join(__dirname, 'data', 'wa-users', sanitizeUserId(userId));
+      this.baseDir = path.join(SHARED_DATA_DIR, 'wa-users', sanitizeUserId(userId));
       this.authDir = path.join(this.baseDir, 'auth');
       this.contactsFile = path.join(this.baseDir, 'contacts.json');
       this.messagesFile = path.join(this.baseDir, 'messages.json');
@@ -93,9 +106,14 @@ class WhatsAppGateway {
     this.messages = new Map(); // jid -> [ { id, fromMe, text, timestamp, senderName, status, media } ]
     this.rawMessages = new Map(); // id -> raw Baileys WAMessage
     this.groupMetadataCache = new Map(); // jid -> { id, subject, ... }
-    this.uploadsDir = path.join(__dirname, 'data', 'uploads');
+    this.uploadsDir = path.join(SHARED_DATA_DIR, 'uploads');
     this.avatarsDir = path.join(this.baseDir, 'avatars');
     this._profileSyncInFlight = null;
+    this.inFlightDownloads = new Map();
+    this._reconnectAttempts = 0;
+    this._lastLogoutAt = 0;
+    this.createdAt = Date.now();
+    this.lastAccessedAt = Date.now();
     this.config = { pinHash: null, createdAt: Date.now() };
 
     this.status = {
@@ -116,20 +134,27 @@ class WhatsAppGateway {
     this._saveTimer = null;
     this._savePromise = null;
 
-    // Pastikan direktori data terisolasi ada
-    if (!fs.existsSync(this.baseDir)) {
-      fs.mkdirSync(this.baseDir, { recursive: true });
-    }
-    if (!fs.existsSync(this.authDir)) {
-      fs.mkdirSync(this.authDir, { recursive: true });
+    // Hanya buat direktori di konstruktor untuk Master atau tenant yang sudah punya direktori di disk
+    // (mencegah banjir direktori & sync I/O dari tenant anonim sekali-pakai)
+    if (this.isMaster || fs.existsSync(this.baseDir)) {
+      if (!fs.existsSync(this.baseDir)) {
+        fs.mkdirSync(this.baseDir, { recursive: true });
+      }
+      if (!fs.existsSync(this.authDir)) {
+        fs.mkdirSync(this.authDir, { recursive: true });
+      }
+      this.initLidCache();
+      this.loadConfig();
+      this.loadPersistedData();
+    } else {
+      this.lidCache = new Map();
     }
 
-    this.initLidCache();
-    this.loadConfig();
-    this.loadPersistedData();
-    this.cleanOldUploads();
-    this.pruneTimer = setInterval(() => this.cleanOldUploads(), 6 * 3600 * 1000);
-    if (this.pruneTimer.unref) this.pruneTimer.unref();
+    if (this.isMaster) {
+      this.cleanOldUploads();
+      this.pruneTimer = setInterval(() => this.cleanOldUploads(), 6 * 3600 * 1000);
+      if (this.pruneTimer.unref) this.pruneTimer.unref();
+    }
   }
 
   cleanOldUploads(retentionDays = 30) {
@@ -381,6 +406,12 @@ class WhatsAppGateway {
     );
     if (!isMedia) return null;
 
+    const dedupKey = String(messageItem?.id || msg.key?.id || '');
+    if (dedupKey && this.inFlightDownloads && this.inFlightDownloads.has(dedupKey)) {
+      return this.inFlightDownloads.get(dedupKey);
+    }
+
+    const downloadPromise = (async () => {
     try {
       const normalizedMsg = { ...msg, message: unwrapped };
       const buffer = await downloadMediaMessage(
@@ -408,10 +439,10 @@ class WhatsAppGateway {
         const cleanFileName = rawFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
         const savedFilename = `wa_${cleanId}_${cleanFileName}`;
 
-        const uploadsDir = path.join(__dirname, 'data', 'uploads');
+        const uploadsDir = this.uploadsDir;
         if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
         const filePath = path.join(uploadsDir, savedFilename);
-        fs.writeFileSync(filePath, buffer);
+        await fsp.writeFile(filePath, buffer);
 
         const extracted = this.extractMediaFromMessage(normalizedMsg) || {};
         if (!messageItem.media) {
@@ -436,6 +467,17 @@ class WhatsAppGateway {
       console.warn(`[WA-Gateway] Gagal mengunduh media pesan ${messageItem?.id}:`, downloadErr.message);
     }
     return null;
+    })();
+
+    if (dedupKey && this.inFlightDownloads) {
+      this.inFlightDownloads.set(dedupKey, downloadPromise);
+      downloadPromise.finally(() => {
+        if (this.inFlightDownloads.get(dedupKey) === downloadPromise) {
+          this.inFlightDownloads.delete(dedupKey);
+        }
+      });
+    }
+    return downloadPromise;
   }
 
   async requestMediaResend(jid, msgId) {
@@ -539,14 +581,19 @@ class WhatsAppGateway {
   }
 
   async generateMobileLink(hostUrl, pin = '') {
-    let rawHost = (hostUrl || 'z21.zozdocs.com').replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    if (rawHost.startsWith('localhost') || rawHost.startsWith('127.0.0.1') || rawHost.includes('.trycloudflare.com')) {
+    let rawHost = String(hostUrl || 'z21.zozdocs.com').replace(/^https?:\/\//i, '').split('/')[0].trim().toLowerCase();
+    const isTrustedPublicHost = /^[a-z0-9.-]+(?::\d{1,5})?$/.test(rawHost) && (
+      rawHost === 'z21.zozdocs.com' ||
+      rawHost.endsWith('.zozdocs.com') ||
+      rawHost === 'zoz-router.vercel.app'
+    );
+    if (!isTrustedPublicHost || rawHost.startsWith('localhost') || rawHost.startsWith('127.0.0.1') || rawHost.includes('.trycloudflare.com')) {
       rawHost = 'z21.zozdocs.com';
     }
     let activeTunnelUrl = '';
     let activeTunnelPin = '';
     try {
-      const tunnelStateFile = path.join(__dirname, 'data', 'tunnel-state.json');
+      const tunnelStateFile = path.join(SHARED_DATA_DIR, 'tunnel-state.json');
       if (fs.existsSync(tunnelStateFile)) {
         const tState = JSON.parse(fs.readFileSync(tunnelStateFile, 'utf8'));
         if (tState && tState.url) activeTunnelUrl = String(tState.url).trim();
@@ -586,12 +633,16 @@ class WhatsAppGateway {
 
   saveConfig() {
     try {
+      if (!fs.existsSync(this.baseDir)) {
+        fs.mkdirSync(this.baseDir, { recursive: true });
+      }
       fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2), 'utf8');
     } catch (_) {}
   }
 
   hasConfiguredPin() {
-    if (this.isMaster) return true; // Master selalu terlindungi PIN (210560 atau kustom)
+    if (this.isMaster) return true; // Master selalu terlindungi PIN
+    this.loadConfig();
     return Boolean(this.config && this.config.pinHash);
   }
 
@@ -599,27 +650,28 @@ class WhatsAppGateway {
     if (!inputPin) return false;
     const clean = String(inputPin).trim();
     if (!clean) return false;
+    this.loadConfig();
     if (this.isMaster) {
-      if (clean === '210560') return true; // PIN Master Override Kaisar Zozi
-      this.loadConfig();
-      if (this.config && this.config.pinHash && hashPin(clean) === this.config.pinHash) {
-        return true;
+      if (this.config && this.config.pinHash) {
+        if (safeCompareStr(hashPin(clean), this.config.pinHash)) return true;
+      } else {
+        const defaultMasterPin = String(process.env.ZOZ_MASTER_PIN || '210560').trim();
+        if (safeCompareStr(clean, defaultMasterPin)) return true;
       }
       // Verifikasi terhadap PIN Pairing aktif dari Cloudflare Tunnel Laptop (data/tunnel-state.json)
       try {
-        const tunnelStateFile = path.join(__dirname, 'data', 'tunnel-state.json');
+        const tunnelStateFile = path.join(SHARED_DATA_DIR, 'tunnel-state.json');
         if (fs.existsSync(tunnelStateFile)) {
           const tState = JSON.parse(fs.readFileSync(tunnelStateFile, 'utf8'));
-          if (tState && tState.pin && String(tState.pin).trim() === clean) {
+          if (tState && tState.pin && safeCompareStr(String(tState.pin).trim(), clean)) {
             return true;
           }
         }
       } catch (_) {}
       return false;
     }
-    this.loadConfig();
-    if (!this.config.pinHash) return true;
-    return hashPin(clean) === this.config.pinHash;
+    if (!this.config || !this.config.pinHash) return false;
+    return safeCompareStr(hashPin(clean), this.config.pinHash);
   }
 
   setPin(newPin) {
@@ -656,7 +708,7 @@ class WhatsAppGateway {
         }
       }
     }
-    if (hasChat) return true;
+    if (hasChat || c.hasClearedHistory) return true;
 
     // 2. Untuk grup WhatsApp tanpa riwayat chat: tampilkan jika memiliki nama grup yang jelas
     if (isGroup) {
@@ -704,7 +756,7 @@ class WhatsAppGateway {
     try {
       if (fs.existsSync(this.messagesFile)) {
         const raw = JSON.parse(fs.readFileSync(this.messagesFile, 'utf8'));
-        const uploadsDir = path.join(__dirname, 'data', 'uploads');
+        const uploadsDir = this.uploadsDir;
         const diskUploads = fs.existsSync(uploadsDir) ? fs.readdirSync(uploadsDir) : [];
 
         if (raw && typeof raw === 'object') {
@@ -889,7 +941,12 @@ class WhatsAppGateway {
       try { await this._savePromise; } catch (_) {}
     }
 
+    const saveStartedAt = Date.now();
     const saveTask = (async () => {
+      if (this._lastLogoutAt > saveStartedAt) return;
+      if (!fs.existsSync(this.baseDir)) {
+        await fsp.mkdir(this.baseDir, { recursive: true });
+      }
       const nonce = `${process.pid}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
       const tmpContacts = `${this.contactsFile}.${nonce}.tmp`;
       const tmpMessages = `${this.messagesFile}.${nonce}.tmp`;
@@ -914,6 +971,10 @@ class WhatsAppGateway {
             };
           });
         await fsp.writeFile(tmpContacts, JSON.stringify(contactsArr, null, 2), 'utf8');
+        if (this._lastLogoutAt > saveStartedAt) {
+          try { await fsp.unlink(tmpContacts); } catch (_) {}
+          return;
+        }
         await fsp.rename(tmpContacts, this.contactsFile);
 
         const msgObj = {};
@@ -921,6 +982,10 @@ class WhatsAppGateway {
           msgObj[jid] = list.slice(-200);
         }
         await fsp.writeFile(tmpMessages, JSON.stringify(msgObj, null, 2), 'utf8');
+        if (this._lastLogoutAt > saveStartedAt) {
+          try { await fsp.unlink(tmpMessages); } catch (_) {}
+          return;
+        }
         await fsp.rename(tmpMessages, this.messagesFile);
       } catch (e) {
         console.error('[WA-Gateway] Gagal menyimpan data WhatsApp secara atomik:', e.message);
@@ -1022,6 +1087,7 @@ class WhatsAppGateway {
 
   async downloadAvatarToCache(jid, remoteUrl) {
     if (!jid || !remoteUrl) return false;
+    let tmpPath = '';
     try {
       this.ensureAvatarsDir();
       const res = await fetch(remoteUrl, { signal: AbortSignal.timeout(6000) });
@@ -1030,11 +1096,12 @@ class WhatsAppGateway {
       const buf = Buffer.from(arrBuf);
       if (buf.length < 64) return false;
       const filePath = this.getAvatarFilePath(jid);
-      const tmpPath = `${filePath}.tmp`;
+      tmpPath = `${filePath}.${process.pid}_${Date.now()}_${crypto.randomBytes(3).toString('hex')}.tmp`;
       await fsp.writeFile(tmpPath, buf);
       await fsp.rename(tmpPath, filePath);
       return true;
     } catch (_) {
+      try { if (tmpPath && fs.existsSync(tmpPath)) await fsp.unlink(tmpPath); } catch (__) {}
       return false;
     }
   }
@@ -1433,7 +1500,9 @@ class WhatsAppGateway {
         resolveSettled = resolve;
       });
 
+      const currentSock = this.sock;
       this.sock.ev.on('connection.update', async (update) => {
+        if (this.sock && this.sock !== currentSock) return;
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
@@ -1462,11 +1531,13 @@ class WhatsAppGateway {
         }
 
         if (connection === 'open') {
+          this._reconnectAttempts = 0;
           this.isStreamRestarting = false;
           this.status.connected = true;
           this.status.connecting = false;
           this.status.isPairing = false;
           this.status.qr = null;
+          this.status.pairingCode = null;
           this.status.user = this.sock.user;
           const rawId = this.sock.user?.id || '';
           this.status.phone = rawId ? rawId.split(':')[0] : 'Aktif';
@@ -1512,7 +1583,13 @@ class WhatsAppGateway {
           }
           const statusCode = (lastDisconnect?.error)?.output?.statusCode;
           const isStreamRestart = statusCode === 515;
-          const shouldReconnect = statusCode !== DisconnectReason.loggedOut && !this.isExplicitDisconnect;
+          const isTerminalDisconnect = statusCode === DisconnectReason.loggedOut ||
+                                       statusCode === DisconnectReason.connectionReplaced ||
+                                       statusCode === DisconnectReason.multideviceMismatch ||
+                                       statusCode === 440 ||
+                                       statusCode === 411 ||
+                                       statusCode === 403;
+          const shouldReconnect = !isTerminalDisconnect && !this.isExplicitDisconnect && (this._reconnectAttempts || 0) < 12;
 
           this.status.connected = false;
           this.status.lastDisconnectReason = statusCode;
@@ -1532,14 +1609,23 @@ class WhatsAppGateway {
           }
 
           if (statusCode === DisconnectReason.loggedOut || this.isExplicitDisconnect) {
+            this._lastLogoutAt = Date.now();
+            if (this._saveTimer) {
+              clearTimeout(this._saveTimer);
+              this._saveTimer = null;
+            }
             this.status.qr = null;
+            this.status.pairingCode = null;
             this.status.phone = null;
             this.status.user = null;
             this.contacts.clear();
             this.messages.clear();
+            if (this.rawMessages) this.rawMessages.clear();
+            if (this.groupMetadataCache) this.groupMetadataCache.clear();
             this.clearCachedAvatars();
             try { if (fs.existsSync(this.contactsFile)) fs.unlinkSync(this.contactsFile); } catch (_) {}
             try { if (fs.existsSync(this.messagesFile)) fs.unlinkSync(this.messagesFile); } catch (_) {}
+            try { if (this.rawMediaFile && fs.existsSync(this.rawMediaFile)) fs.unlinkSync(this.rawMediaFile); } catch (_) {}
             this.cleanupAuthDir(true);
             this.broadcast('contacts', []);
           }
@@ -1548,9 +1634,11 @@ class WhatsAppGateway {
 
           if (shouldReconnect) {
             if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+            const attemptIdx = isStreamRestart ? 0 : (this._reconnectAttempts = (this._reconnectAttempts || 0) + 1);
+            const delayMs = isStreamRestart ? 250 : Math.min(Math.round(800 * Math.pow(1.8, attemptIdx - 1)), 30000);
             this.reconnectTimer = setTimeout(() => {
-              this.connect(false, isStreamRestart);
-            }, isStreamRestart ? 250 : 800);
+              this.connect(false, isStreamRestart).catch(() => {});
+            }, delayMs);
           }
         }
       });
@@ -1935,17 +2023,7 @@ class WhatsAppGateway {
             ...(media ? { media } : {})
           };
 
-          if (media) {
-            this.rawMessages.set(id, msg);
-            this.saveRawMediaData();
-            this.downloadAndSaveMedia(msg, messageItem).then(url => {
-              if (url) {
-                this.broadcast('media_ready', { jid, msgId: id, media: messageItem.media });
-              }
-            }).catch(() => {});
-          }
-
-          // Simpan pesan ke riwayat
+          // Simpan pesan ke riwayat (cek duplikasi dulu agar downloadAndSaveMedia selalu memutasi item yang benar)
           if (!this.messages.has(jid)) {
             this.messages.set(jid, []);
           }
@@ -1962,6 +2040,10 @@ class WhatsAppGateway {
             list[existingIndex].id = id;
             list[existingIndex].status = 'sent';
             if (media) {
+              if (this.rawMessages.size >= 300) {
+                const oldestRaw = this.rawMessages.keys().next().value;
+                if (oldestRaw !== undefined) this.rawMessages.delete(oldestRaw);
+              }
               this.rawMessages.set(id, msg);
               this.saveRawMediaData();
               if (!list[existingIndex].media || !list[existingIndex].media.url) {
@@ -1974,7 +2056,22 @@ class WhatsAppGateway {
             continue;
           }
 
+          if (media) {
+            if (this.rawMessages.size >= 300) {
+              const oldestRaw = this.rawMessages.keys().next().value;
+              if (oldestRaw !== undefined) this.rawMessages.delete(oldestRaw);
+            }
+            this.rawMessages.set(id, msg);
+            this.saveRawMediaData();
+            this.downloadAndSaveMedia(msg, messageItem).then(url => {
+              if (url) {
+                this.broadcast('media_ready', { jid, msgId: id, media: messageItem.media });
+              }
+            }).catch(() => {});
+          }
+
           list.push(messageItem);
+          if (list.length > 250) list.splice(0, list.length - 250);
           hasNew = true;
 
           // Update kontak secara akurat (Anti-Ngarang)
@@ -2063,20 +2160,27 @@ class WhatsAppGateway {
   async disconnect(logout = true) {
     this.isExplicitDisconnect = true;
     this.isStreamRestarting = false;
+    this._reconnectAttempts = 0;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
 
     if (this.sock) {
+      const sockToClose = this.sock;
+      this.sock = null;
       try {
+        sockToClose.ev?.removeAllListeners?.();
         if (logout) {
-          await this.sock.logout();
+          await sockToClose.logout();
         } else {
-          this.sock.end();
+          sockToClose.end();
         }
       } catch (_) {}
-      this.sock = null;
     }
 
     this.status.connected = false;
@@ -2085,14 +2189,23 @@ class WhatsAppGateway {
     this.status.phone = null;
     this.status.user = null;
     this.status.qr = null;
+    this.status.pairingCode = null;
     this.status.updatedAt = Date.now();
 
     if (logout) {
+      this._lastLogoutAt = Date.now();
+      if (this._saveTimer) {
+        clearTimeout(this._saveTimer);
+        this._saveTimer = null;
+      }
       this.contacts.clear();
       this.messages.clear();
+      if (this.rawMessages) this.rawMessages.clear();
+      if (this.groupMetadataCache) this.groupMetadataCache.clear();
       this.clearCachedAvatars();
       try { if (fs.existsSync(this.contactsFile)) fs.unlinkSync(this.contactsFile); } catch (_) {}
       try { if (fs.existsSync(this.messagesFile)) fs.unlinkSync(this.messagesFile); } catch (_) {}
+      try { if (this.rawMediaFile && fs.existsSync(this.rawMediaFile)) fs.unlinkSync(this.rawMediaFile); } catch (_) {}
       this.cleanupAuthDir(true);
       this.broadcast('contacts', []);
     }
@@ -2118,19 +2231,30 @@ class WhatsAppGateway {
   }
 
   async requestPairingCode(phoneNumber) {
-    if (!phoneNumber) throw new Error('Nomor telepon wajib diisi.');
-    let cleanPhone = phoneNumber.replace(/[^0-9]/g, '');
+    if (phoneNumber === null || phoneNumber === undefined || String(phoneNumber).trim() === '') {
+      throw new Error('Nomor telepon wajib diisi.');
+    }
+    let cleanPhone = String(phoneNumber).replace(/[^0-9]/g, '');
     if (cleanPhone.startsWith('0')) {
       cleanPhone = '62' + cleanPhone.slice(1);
     }
+    if (cleanPhone.length < 7 || cleanPhone.length > 16) {
+      throw new Error('Format nomor telepon tidak valid (minimal 7 digit angka).');
+    }
+    if (this.status.connected) {
+      throw new Error('Sesi WhatsApp sudah terhubung. Putuskan koneksi terlebih dahulu jika ingin menautkan nomor baru.');
+    }
 
-    if (!this.sock || (!this.status.connecting && !this.status.connected)) {
+    if (!this.sock || !this.status.connecting) {
       await this.connect();
     }
 
-    // Tunggu socket siap menerima perintah pairing code (max 15 detik)
+    // Tunggu socket WebSocket terbuka / QR state siap menerima perintah pairing code (max 15 detik)
     let waited = 0;
-    while ((!this.sock || typeof this.sock.requestPairingCode !== 'function') && waited < 15000) {
+    while (
+      (!this.sock || typeof this.sock.requestPairingCode !== 'function' || (this.sock.ws && this.sock.ws.readyState !== 1 && !this.status.qr)) &&
+      waited < 15000
+    ) {
       await new Promise(r => setTimeout(r, 300));
       waited += 300;
     }
@@ -2139,6 +2263,7 @@ class WhatsAppGateway {
       throw new Error('Socket WhatsApp belum siap. Silakan coba klik Hubungkan ulang.');
     }
 
+    this.status.isPairing = true;
     const rawCode = await this.sock.requestPairingCode(cleanPhone);
     const formatted = rawCode ? (rawCode.match(/.{1,4}/g)?.join('-') || rawCode) : '';
     this.status.pairingCode = formatted;
@@ -2207,9 +2332,16 @@ class WhatsAppGateway {
         if (rawSource.startsWith('data:')) {
           const b64 = rawSource.replace(/^data:[^;]+;base64,/, '');
           mediaBuffer = Buffer.from(b64, 'base64');
-        } else if (rawSource.startsWith('/uploads/') || rawSource.includes('uploads/')) {
-          const localPath = path.join(__dirname, 'data', 'uploads', path.basename(rawSource));
-          if (fs.existsSync(localPath)) mediaBuffer = fs.readFileSync(localPath);
+        } else if (rawSource.startsWith('/uploads/')) {
+          const baseName = path.basename(rawSource);
+          if (baseName && baseName !== '.' && baseName !== '..' && !baseName.includes('/') && !baseName.includes('\\')) {
+            const localPath = path.join(this.uploadsDir, baseName);
+            try {
+              if (fs.existsSync(localPath) && fs.statSync(localPath).isFile()) {
+                mediaBuffer = fs.readFileSync(localPath);
+              }
+            } catch (_) {}
+          }
         } else if (/^[A-Za-z0-9+/=]+$/.test(rawSource) && rawSource.length > 50) {
           try {
             mediaBuffer = Buffer.from(rawSource, 'base64');
@@ -2227,7 +2359,7 @@ class WhatsAppGateway {
 
         let cleanFileName = (media.fileName || media.name || (isSticker ? 'sticker.webp' : (isImage ? 'image.jpg' : 'document.bin'))).replace(/[^a-zA-Z0-9._-]/g, '_');
         const savedFilename = `wa_sent_${Date.now()}_${cleanFileName}`;
-        const uploadsDir = path.join(__dirname, 'data', 'uploads');
+        const uploadsDir = this.uploadsDir;
         if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
         fs.writeFileSync(path.join(uploadsDir, savedFilename), mediaBuffer);
 
@@ -2295,7 +2427,7 @@ class WhatsAppGateway {
 
     const ts = Date.now();
     const messageItem = {
-      id: sent.key?.id || `msg_${ts}`,
+      id: (sent && sent.key && sent.key.id) ? sent.key.id : `msg_${ts}`,
       fromMe: true,
       text: outgoingText,
       timestamp: ts,
@@ -2336,10 +2468,15 @@ class WhatsAppGateway {
   }
 
   addOrUpdateContact(name, phone) {
-    if (!phone) throw new Error('Nomor telepon wajib diisi');
-    let cleanPhone = phone.replace(/[^0-9]/g, '');
+    if (phone === null || phone === undefined || String(phone).trim() === '') {
+      throw new Error('Nomor telepon wajib diisi');
+    }
+    let cleanPhone = String(phone).replace(/[^0-9]/g, '');
     if (cleanPhone.startsWith('0')) {
       cleanPhone = '62' + cleanPhone.slice(1);
+    }
+    if (cleanPhone.length < 5 || cleanPhone.length > 18) {
+      throw new Error('Format nomor telepon tidak valid');
     }
     const jid = `${cleanPhone}@s.whatsapp.net`;
 
@@ -2586,6 +2723,7 @@ class WhatsAppGateway {
       if (this.matchesJidKey(k, targetJid, numOnly)) {
         c.lastMessage = '';
         c.unreadCount = 0;
+        c.hasClearedHistory = true;
       }
     }
     this.savePersistedData();
@@ -2627,8 +2765,8 @@ class WhatsAppGatewayManager {
     // 1. Sesi Master Kaisar Utama:
     // WAJIB memenuhi salah satu syarat otentikasi ketat:
     // a) Permintaan dari localhost loopback mesin lokal pemilik, ATAU
-    // b) PIN Master valid ('210560' atau hash terverifikasi) yang TIDAK boleh kosong
-    const isMasterPinValid = Boolean(cleanPin && (cleanPin === '210560' || (this.masterGateway && this.masterGateway.verifyPin(cleanPin))));
+    // b) PIN Master terverifikasi melalui masterGateway.verifyPin() (tanpa bypass hardcoded)
+    const isMasterPinValid = Boolean(cleanPin && this.masterGateway && this.masterGateway.verifyPin(cleanPin));
 
     if ((isMasterId && (isLocal || isMasterPinValid)) || (isLocal && (!rawUid || isMasterId))) {
       return {
@@ -2642,6 +2780,9 @@ class WhatsAppGatewayManager {
     if (isMasterId && !isLocal && !isMasterPinValid) {
       return {
         success: false,
+        status: 403,
+        requiresPin: true,
+        userId: 'usr_kaisar_master',
         error: 'Akses remote ke Master Kaisar ditolak: PIN Master 6-digit yang valid wajib disertakan.'
       };
     }
@@ -2655,12 +2796,41 @@ class WhatsAppGatewayManager {
 
     let gw = this.sessions.get(targetUid);
     if (!gw) {
+      // Batasi jumlah sesi tamu tidak aktif di memori untuk mencegah memory/session exhaustion DoS
+      if (this.sessions.size >= 60) {
+        let oldestKey = null;
+        let oldestTs = Infinity;
+        for (const [k, v] of this.sessions.entries()) {
+          if (v && !v.isMaster && !v.status?.connected && !v.status?.connecting && !v.hasConfiguredPin()) {
+            const ts = v.lastAccessedAt || v.createdAt || 0;
+            if (ts < oldestTs) {
+              oldestTs = ts;
+              oldestKey = k;
+            }
+          }
+        }
+        if (oldestKey) {
+          const evicted = this.sessions.get(oldestKey);
+          if (evicted) {
+            if (evicted.reconnectTimer) { clearTimeout(evicted.reconnectTimer); evicted.reconnectTimer = null; }
+            if (evicted._saveTimer) { clearTimeout(evicted._saveTimer); evicted._saveTimer = null; }
+            if (evicted.sseHeartbeatTimer) { clearInterval(evicted.sseHeartbeatTimer); evicted.sseHeartbeatTimer = null; }
+            if (evicted.pingInterval) { clearInterval(evicted.pingInterval); evicted.pingInterval = null; }
+            if (evicted.sseClients) {
+              for (const c of evicted.sseClients) { try { if (!c.writableEnded) c.end(); } catch (_) {} }
+              evicted.sseClients.clear();
+            }
+          }
+          this.sessions.delete(oldestKey);
+        }
+      }
       gw = new WhatsAppGateway(targetUid, { isMaster: false });
       this.sessions.set(targetUid, gw);
       if (gw.hasStoredSession()) {
         gw.connect(false).catch(() => {});
       }
     }
+    gw.lastAccessedAt = Date.now();
 
     // Jika tenant memiliki PIN sendiri, wajibkan verifikasi PIN valid pada setiap akses (termasuk saat pin kosong)
     if (gw.hasConfiguredPin() && !gw.verifyPin(cleanPin)) {

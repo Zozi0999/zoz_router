@@ -6,6 +6,7 @@
 const dbStorage = require('../storage/db');
 const retriever = require('../pipeline/retriever');
 const extractor = require('../pipeline/extractor');
+const guardrails = require('../pipeline/guardrails');
 const insights = require('../pipeline/insights');
 const porter = require('../sovereignty/porter');
 
@@ -21,32 +22,52 @@ function sendJson(res, statusCode, data) {
 function parseJsonBody(req) {
   return new Promise((resolve) => {
     let body = '';
+    let settled = false;
+    const done = (val) => {
+      if (!settled) {
+        settled = true;
+        resolve(val);
+      }
+    };
     req.on('data', chunk => {
       body += chunk;
       if (body.length > 5 * 1024 * 1024) { // 5MB limit
-        req.destroy();
+        done({});
+        try { req.destroy(); } catch (_) {}
       }
     });
     req.on('end', () => {
       try {
-        resolve(body ? JSON.parse(body) : {});
+        done(body ? JSON.parse(body) : {});
       } catch (_) {
-        resolve({});
+        done({});
       }
     });
-    req.on('error', () => resolve({}));
+    req.on('error', () => done({}));
+    req.on('close', () => done({}));
   });
 }
 
 function parseRawBody(req) {
   return new Promise((resolve) => {
     let body = '';
+    let settled = false;
+    const done = (val) => {
+      if (!settled) {
+        settled = true;
+        resolve(val);
+      }
+    };
     req.on('data', chunk => {
       body += chunk;
-      if (body.length > 10 * 1024 * 1024) req.destroy();
+      if (body.length > 10 * 1024 * 1024) {
+        done('');
+        try { req.destroy(); } catch (_) {}
+      }
     });
-    req.on('end', () => resolve(body || ''));
-    req.on('error', () => resolve(''));
+    req.on('end', () => done(body || ''));
+    req.on('error', () => done(''));
+    req.on('close', () => done(''));
   });
 }
 
@@ -61,13 +82,17 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
     return false;
   }
 
-  const hasValidatedUser = typeof validatedUserId === 'string' && validatedUserId.length > 0;
+  const sanitizeUid = (raw) => {
+    const clean = String(raw || '').trim();
+    return (clean && clean !== '*') ? clean : 'default';
+  };
+  const hasValidatedUser = typeof validatedUserId === 'string' && validatedUserId.length > 0 && validatedUserId !== '*';
   const userId = hasValidatedUser
     ? validatedUserId
-    : (req.headers['x-user-id'] || reqUrl.searchParams.get('userId') || 'default');
+    : sanitizeUid(req.headers['x-user-id'] || reqUrl.searchParams.get('userId') || 'default');
   const getEffectiveUserId = (body) => hasValidatedUser
     ? userId
-    : ((body && body.userId) || userId || 'default');
+    : sanitizeUid((body && body.userId) || userId || 'default');
 
   try {
     // 1. GET /api/memories/insights
@@ -198,7 +223,7 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
       return true;
     }
 
-    // 9. PATCH /api/memories/:id (Edit memory — scoped by userId)
+    // 9. PATCH /api/memories/:id (Edit memory — scoped by userId + PII guarded)
     if (method === 'PATCH' && pathname.startsWith('/api/memories/')) {
       const memoryId = pathname.replace('/api/memories/', '').trim();
       if (!memoryId) {
@@ -206,6 +231,9 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
         return true;
       }
       const body = await parseJsonBody(req);
+      if (typeof body.content === 'string') {
+        body.content = guardrails.redactPII(body.content);
+      }
       const updated = dbStorage.updateMemory(memoryId, body, userId);
       if (!updated) {
         sendJson(res, 404, { success: false, error: 'Memori tidak ditemukan atau bukan milik akun Anda.' });

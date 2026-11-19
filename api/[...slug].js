@@ -16,8 +16,10 @@
  *    Mendukung respons real-time Server-Sent Events tanpa buffering proxy.
  */
 
-// Izinkan request lintas-asal dari domain Vercel / frontend secara default di Serverless
-process.env.ZOX_ALLOW_CROSS_ORIGIN = '1';
+// Pertahankan kebijakan lintas-asal dari environment (jangan paksa '1' secara membabi buta)
+if (typeof process.env.ZOX_ALLOW_CROSS_ORIGIN === 'undefined') {
+  process.env.ZOX_ALLOW_CROSS_ORIGIN = '0';
+}
 
 // 1. Perhitungan Dinamis Watchdog Berdasarkan Environment Variable & vercel.json
 let configuredMaxDuration = 60;
@@ -103,14 +105,31 @@ module.exports = async function handler(req, res) {
     return res.end();
   }
 
-  // 0. Pulihkan Path Asli jika di-rewrite oleh Vercel
+  // 0. Pulihkan Path Asli HANYA jika URL di-rewrite ke endpoint catch-all (/api/index atau /api/[...slug])
+  const curPathOnly = String(req.url || '').split('?')[0];
+  const needsPathRestore = !curPathOnly ||
+    curPathOnly === '/api' ||
+    curPathOnly === '/api/' ||
+    curPathOnly === '/api/index' ||
+    curPathOnly === '/api/index.js' ||
+    curPathOnly.includes('[...slug]');
+
   let origPath = '';
-  if (req.headers && req.headers['x-matched-path'] && req.headers['x-matched-path'].startsWith('/api')) {
-    origPath = req.headers['x-matched-path'];
-  } else if (req.query && (req.query.path || req.query.slug)) {
-    const rawSlug = req.query.path || req.query.slug;
-    const parts = Array.isArray(rawSlug) ? rawSlug : String(rawSlug).split('/');
-    origPath = '/api/' + parts.filter(Boolean).join('/');
+  if (needsPathRestore) {
+    const matchedPath = req.headers && req.headers['x-matched-path'];
+    if (
+      matchedPath &&
+      matchedPath.startsWith('/api/') &&
+      matchedPath !== '/api/index' &&
+      matchedPath !== '/api/index.js' &&
+      !matchedPath.includes('[...slug]')
+    ) {
+      origPath = matchedPath;
+    } else if (req.query && (req.query.slug || req.query.path)) {
+      const rawSlug = req.query.slug || req.query.path;
+      const parts = Array.isArray(rawSlug) ? rawSlug : String(rawSlug).split('/');
+      origPath = '/api/' + parts.filter(Boolean).join('/');
+    }
   }
 
   if (origPath) {
@@ -186,6 +205,7 @@ module.exports = async function handler(req, res) {
   watchdog = setTimeout(() => {
     if (finished) return;
     cleanupWatchdog();
+    res.__zozWatchdogTimedOut = true;
     console.error(`[Vercel Gateway Timeout] ${rawUrl} melampaui batas watchdog ${WATCHDOG_MS}ms (maxDuration terkonfigurasi: ${configuredMaxDuration}s)`);
     if (res.headersSent && isStreamingPath) {
       const resCtype = String(res.getHeader('content-type') || '').toLowerCase();
@@ -201,6 +221,7 @@ module.exports = async function handler(req, res) {
         }
       } catch (_) {}
       try { res.end(); } catch (_) {}
+      try { if (typeof res.emit === 'function') res.emit('close'); } catch (_) {}
       return;
     }
     sendJson(res, 504, {
@@ -243,8 +264,8 @@ module.exports = async function handler(req, res) {
       details: err && err.message ? err.message : String(err)
     });
   } finally {
-    const keepStreamingWatchdog = !finished && isStreamingPath && !res.writableEnded && !res.destroyed;
-    if (keepStreamingWatchdog) {
+    const keepPendingWatchdog = !finished && !res.writableEnded && !res.destroyed;
+    if (keepPendingWatchdog) {
       res.once('finish', cleanupWatchdog);
       res.once('close', cleanupWatchdog);
     } else {

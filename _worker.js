@@ -17,8 +17,11 @@ function isPrivateHostname(hostname) {
   if (/^198\.51\.100\./.test(h)) return true; // 198.51.100.0/24 TEST-NET-2 (RFC 5737)
   if (/^203\.0\.113\./.test(h)) return true; // 203.0.113.0/24 TEST-NET-3 (RFC 5737)
   if (/^(22[4-9]|23[0-9]|24[0-9]|25[0-5])\./.test(h)) return true; // 224.0.0.0/4 multicast & 240.0.0.0/4 reserved (RFC 1112)
-  if (/^f[cd][0-9a-f]{2}:|^fe[89ab][0-9a-f]:/i.test(h)) return true; // IPv6 Unique Local (fc00::/7, incl. fd00::/8) & Link-Local (fe80::/10)
-  if (h.startsWith('::ffff:')) return true; // Block all IPv4-mapped IPv6
+  if (/^f[cd][0-9a-f]{0,2}:|^fe[89ab][0-9a-f]{0,2}:/i.test(h)) return true; // IPv6 Unique Local (fc00::/7, incl. fd00::/8) & Link-Local (fe80::/10)
+  const zeroNorm = h.replace(/(^|:)0+(?=[0-9a-f])/g, '$1');
+  if (zeroNorm === '0:0:0:0:0:0:0:1' || zeroNorm === '0:0:0:0:0:0:0:0') return true;
+  if (h.startsWith('::ffff:') || /^(?:0:){5}ffff:/i.test(zeroNorm)) return true; // Block all IPv4-mapped IPv6 (short & expanded)
+  if (zeroNorm.startsWith('64:ff9b:') || zeroNorm.startsWith('2002:')) return true; // NAT64 & 6to4
   if (/^::(?:7f[0-9a-f]{0,2}:|a9fe:|c0a8:|0?a[0-9a-f]{0,2}:|ac1[0-9a-f]:)/i.test(h)) return true; // Block IPv4-compatible hex variants (incl. ::a00:1)
   if (h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.localhost')) return true;
 
@@ -927,7 +930,7 @@ function envKeyAllowed(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     // Handle CORS preflight
@@ -947,7 +950,7 @@ export default {
     // yang diteruskan ke TUNNEL_GATEWAY_URL (server laptop).
     // Pemanggilan AI & API Key (OpenRouter, Ollama Cloud, Search Web, Models, Sessions)
     // BERJALAN 100% MANDIRI DI CLOUDFLARE EDGE TANPA PERNAH BERGANTUNG PADA LAPTOP!
-    const TUNNEL_GATEWAY_URL = 'https://irrigation-symbol-pictures-crew.trycloudflare.com';
+    const TUNNEL_GATEWAY_URL = String((env && env.TUNNEL_GATEWAY_URL) || 'https://irrigation-symbol-pictures-crew.trycloudflare.com').replace(/\/+$/, '');
     let reqBodyBytes = null;
 
     const isLaptopOnlyRoute = url.pathname.startsWith('/api/terminal') ||
@@ -1137,18 +1140,27 @@ export default {
         const uid = resolveMemUid(body);
         const incognito = Boolean(body.incognito);
         const nowIso = new Date().toISOString();
+        const putScopedEdgeMem = (rawId, prefix, payloadObj) => {
+          const existing = rawId ? memMap.get(rawId) : null;
+          const safeId = (rawId && (!existing || getMemOwner(existing) === uid))
+            ? rawId
+            : `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          if (memMap.size >= 500 && !memMap.has(safeId)) {
+            const oldestKey = memMap.keys().next().value;
+            if (oldestKey !== undefined) memMap.delete(oldestKey);
+          }
+          const safeContent = String(payloadObj.content || '').slice(0, 2000);
+          memMap.set(safeId, { ...payloadObj, content: safeContent, id: safeId, userId: uid, user_id: uid, updated_at: nowIso });
+        };
         if (!incognito) {
           if (body.errorLesson && body.errorLesson.content) {
-            const id = body.errorLesson.id || `lesson_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-            memMap.set(id, { ...body.errorLesson, id, userId: uid, user_id: uid, category: 'error_lesson', updated_at: nowIso });
+            putScopedEdgeMem(body.errorLesson.id, 'lesson', { ...body.errorLesson, category: 'error_lesson' });
           }
           if (body.episodicSummary && body.episodicSummary.content) {
-            const id = body.episodicSummary.id || `ep_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-            memMap.set(id, { ...body.episodicSummary, id, userId: uid, user_id: uid, category: 'episodic_context', updated_at: nowIso });
+            putScopedEdgeMem(body.episodicSummary.id, 'ep', { ...body.episodicSummary, category: 'episodic_context' });
           }
           if (body.preferenceMemory && body.preferenceMemory.content) {
-            const id = body.preferenceMemory.id || `pref_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-            memMap.set(id, { ...body.preferenceMemory, id, userId: uid, user_id: uid, category: 'preference', updated_at: nowIso });
+            putScopedEdgeMem(body.preferenceMemory.id, 'pref', { ...body.preferenceMemory, category: 'preference' });
           }
         }
         return new Response(JSON.stringify({ success: true, queued: !incognito }), { status: 200, headers: jsonHeaders });
@@ -1170,11 +1182,19 @@ export default {
         let body = {};
         try { body = await request.json(); } catch (_) {}
         const uid = resolveMemUid(body);
-        const content = String(body.content || body.fact || '').trim();
+        const content = String(body.content || body.fact || '').trim().slice(0, 2000);
         if (!content) {
           return new Response(JSON.stringify({ success: false, error: 'Isi memori (content) wajib diisi.' }), { status: 400, headers: jsonHeaders });
         }
+        const existingById = body.id ? memMap.get(body.id) : null;
+        if (existingById && getMemOwner(existingById) !== uid) {
+          return new Response(JSON.stringify({ success: false, error: 'ID memori sudah dimiliki akun lain.' }), { status: 403, headers: jsonHeaders });
+        }
         const id = body.id || `mem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        if (memMap.size >= 500 && !memMap.has(id)) {
+          const oldestKey = memMap.keys().next().value;
+          if (oldestKey !== undefined) memMap.delete(oldestKey);
+        }
         const nowIso = new Date().toISOString();
         const item = {
           id,
@@ -1585,7 +1605,7 @@ export default {
                 } catch (_) {}
               }
             } finally {
-              await writer.close();
+              try { await writer.close(); } catch (_) {}
             }
           })();
 
@@ -2831,7 +2851,10 @@ export default {
         if (enrichTargets.length > 0) {
           await Promise.allSettled(enrichTargets.map(async (it) => {
             try {
+              const parsedItUrl = new URL(it.url);
+              if (isPrivateHostname(parsedItUrl.hostname)) return;
               const pageRes = await fetch(it.url, {
+                redirect: 'manual',
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36', 'Accept': 'text/html,*/*;q=0.8' },
                 signal: AbortSignal.timeout(2500)
               });
@@ -4056,6 +4079,7 @@ export default {
         licLower.includes('cc by') ||
         licLower.includes('cc-by') ||
         licLower.includes('attribution') ||
+        licLower.includes('unsplash license') ||
         licLower.includes('free art license') ||
         licLower.includes('gfdl')
       ) {
@@ -4656,11 +4680,17 @@ export default {
         }).catch(() => null);
 
         if (fallbackRes && fallbackRes.ok) {
+          const ct = String(fallbackRes.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+          if (!ct.startsWith('image/') || ct.includes('svg')) {
+            return new Response('Unsupported media type', { status: 415 });
+          }
           return new Response(fallbackRes.body, {
             status: 200,
             headers: {
-              'Content-Type': fallbackRes.headers.get('content-type') || 'image/jpeg',
+              'Content-Type': ct,
               'Cache-Control': 'public, max-age=86400',
+              'X-Content-Type-Options': 'nosniff',
+              'Content-Security-Policy': "default-src 'none'; sandbox",
               'Access-Control-Allow-Origin': '*'
             }
           });
