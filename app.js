@@ -82,7 +82,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://irrigation-symbol-pictures-crew.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://deal-cant-indicates-advanced.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -53405,7 +53405,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://irrigation-symbol-pictures-crew.trycloudflare.com',
+    activeTunnelUrl: 'https://deal-cant-indicates-advanced.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
