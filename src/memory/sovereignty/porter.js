@@ -26,6 +26,7 @@ function exportMemories(userId, format = 'json') {
 
     const grouped = {};
     for (const m of memories) {
+      if (m && (m.is_active === 0 || m.is_active === false)) continue;
       const cat = m.category || 'general';
       if (!grouped[cat]) grouped[cat] = [];
       grouped[cat].push(m);
@@ -34,7 +35,8 @@ function exportMemories(userId, format = 'json') {
     for (const [cat, items] of Object.entries(grouped)) {
       lines.push(`### Kategori: ${cat.toUpperCase()}`);
       for (const item of items) {
-        lines.push(`- **[${item.id}]** ${item.content} *(Scope: ${item.scope || 'global'})*`);
+        const singleLineContent = String(item.content || '').replace(/\r?\n+/g, ' ').replace(/\s+/g, ' ').trim();
+        lines.push(`- **[${item.id}]** ${singleLineContent} *(Scope: ${item.scope || 'global'})*`);
       }
       lines.push('');
     }
@@ -108,6 +110,10 @@ function importMemories(userId, rawContent, format = 'json') {
         : (Array.isArray(parsed) ? parsed : []));
     for (const item of items) {
       if (!item || typeof item !== 'object') continue;
+      if (item.is_active === 0 || item.is_active === false || item.isActive === false) {
+        skippedCount++;
+        continue;
+      }
       const content = item.content || item.fact || item.text;
       if (!content) continue;
 

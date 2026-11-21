@@ -1,6 +1,6 @@
 function isPrivateHostname(hostname) {
   if (!hostname) return true;
-  const h = String(hostname).toLowerCase().replace(/^\[|\]$/g, '');
+  const h = String(hostname).toLowerCase().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
   if (['localhost','127.0.0.1','::1','0.0.0.0','::','0'].includes(h)) return true;
   // Blokir format integer/hex decimal IP murni (misal 2130706433 atau 0x7f000001)
   if (/^(?:0x[0-9a-f]+|\d+)$/i.test(h)) return true;
@@ -987,6 +987,9 @@ export default {
 
       try {
         const upstream = await fetch(targetUrl, fetchInit);
+        if (upstream.status === 101 || upstream.webSocket) {
+          return upstream;
+        }
         const resHeaders = new Headers(upstream.headers);
         resHeaders.set('Access-Control-Allow-Origin', '*');
         resHeaders.set('Access-Control-Allow-Private-Network', 'true');
@@ -1214,22 +1217,24 @@ export default {
       }
 
       if (request.method === 'PATCH' && url.pathname.startsWith('/api/memories/')) {
-        const memId = url.pathname.replace('/api/memories/', '').trim();
+        const rawMemId = url.pathname.replace('/api/memories/', '').trim();
+        let memId = rawMemId;
+        try { memId = decodeURIComponent(rawMemId); } catch (_) {}
         if (!memId) {
           return new Response(JSON.stringify({ success: false, error: 'ID memori wajib disertakan.' }), { status: 400, headers: jsonHeaders });
         }
-        const uid = resolveMemUid();
+        let body = {};
+        try { body = await request.json(); } catch (_) {}
+        const uid = resolveMemUid(body.userId || '');
         const existing = memMap.get(memId);
         if (!existing || getMemOwner(existing) !== uid) {
           return new Response(JSON.stringify({ success: false, error: 'Memori tidak ditemukan atau bukan milik akun Anda.' }), { status: 404, headers: jsonHeaders });
         }
-        let body = {};
-        try { body = await request.json(); } catch (_) {}
         const updated = {
           ...existing,
-          content: typeof body.content === 'string' ? body.content.trim() : existing.content,
-          category: typeof body.category === 'string' ? body.category.trim() : existing.category,
-          scope: typeof body.scope === 'string' ? body.scope.trim() : existing.scope,
+          content: typeof body.content === 'string' ? body.content.trim().slice(0, 2000) : existing.content,
+          category: typeof body.category === 'string' ? body.category.trim().slice(0, 64) : existing.category,
+          scope: typeof body.scope === 'string' ? body.scope.trim().slice(0, 64) : existing.scope,
           updated_at: new Date().toISOString()
         };
         if (typeof body.isActive !== 'undefined') {
@@ -1251,7 +1256,9 @@ export default {
           }
           return new Response(JSON.stringify({ success: true, message: 'Seluruh memori pengguna di edge vault telah dihapus.' }), { status: 200, headers: jsonHeaders });
         }
-        const memId = url.pathname.replace('/api/memories/', '').trim();
+        const rawDelId = url.pathname.replace('/api/memories/', '').trim();
+        let memId = rawDelId;
+        try { memId = decodeURIComponent(rawDelId); } catch (_) {}
         const existing = memId ? memMap.get(memId) : null;
         if (!existing || getMemOwner(existing) !== uid) {
           return new Response(JSON.stringify({ success: false, error: 'Memori tidak ditemukan atau bukan milik akun Anda.' }), { status: 404, headers: jsonHeaders });
@@ -1919,6 +1926,7 @@ export default {
 
         const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
+          signal: request.signal,
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${apiKey}`,
@@ -1990,6 +1998,8 @@ export default {
         newHeaders.delete('content-length');
         newHeaders.delete('transfer-encoding');
         newHeaders.set('Access-Control-Allow-Origin', '*');
+        newHeaders.set('Cache-Control', 'no-cache, no-transform');
+        newHeaders.set('X-Accel-Buffering', 'no');
         return new Response(res.body, {
           status: res.status,
           headers: newHeaders
@@ -2449,11 +2459,11 @@ export default {
           const body = await request.json().catch(() => ({}));
           prompt = body.prompt || body.q || '';
           musicModel = body.musicModel || body.model || musicModel;
-          openRouterKey = body.openRouterKey || body.apiKey || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-openrouter-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
+          openRouterKey = body.openRouterKey || body.apiKey || (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
         } else {
           prompt = url.searchParams.get('prompt') || url.searchParams.get('q') || '';
           musicModel = url.searchParams.get('musicModel') || url.searchParams.get('model') || musicModel;
-          openRouterKey = (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-openrouter-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
+          openRouterKey = (request.headers.get('Authorization') ? request.headers.get('Authorization').replace(/^Bearer\s+/i, '') : null) || request.headers.get('x-openrouter-key') || request.headers.get('x-api-key') || (envKeyAllowed(request, env) ? env?.OPENROUTER_API_KEY : null);
         }
 
         if (openRouterKey) {
@@ -2498,7 +2508,7 @@ export default {
         if (!orRes.ok || orData.error) {
           const msg = typeof orData.error === 'object' ? (orData.error.message || JSON.stringify(orData.error)) : (orData.error || `HTTP ${orRes.status}`);
           return new Response(JSON.stringify({ success: false, error: msg }), {
-            status: orRes.status || 500,
+            status: orRes.ok ? 502 : (orRes.status || 500),
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
           });
         }
@@ -2522,6 +2532,18 @@ export default {
             status: 502,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
           });
+        }
+
+        const existingDataPrefix = audioBase64.match(/^data:(audio\/[a-z0-9.+-]+);base64,(.+)$/i);
+        if (existingDataPrefix) {
+          audioMime = existingDataPrefix[1].toLowerCase();
+          audioBase64 = existingDataPrefix[2];
+        } else if (audioBase64.startsWith('SUQz') || audioBase64.startsWith('//u') || audioBase64.startsWith('//s')) {
+          audioMime = 'audio/mpeg';
+        } else if (audioBase64.startsWith('T2dnUw')) {
+          audioMime = 'audio/ogg';
+        } else if (audioBase64.startsWith('fLaC') || audioBase64.startsWith('ZkxhQw')) {
+          audioMime = 'audio/flac';
         }
 
         const dataUrl = `data:${audioMime};base64,${audioBase64}`;
@@ -3476,7 +3498,7 @@ export default {
       const linkRe = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
       let m;
       while ((m = linkRe.exec(html)) !== null && results.length < cap) {
-        let rawHref = m[1];
+        let rawHref = String(m[1] || '').replace(/&amp;/gi, '&');
         const uddg = rawHref.match(/[?&]uddg=([^&]+)/);
         if (uddg) {
           try { rawHref = decodeURIComponent(uddg[1]); } catch (_) {}
@@ -3492,18 +3514,61 @@ export default {
     const fetchUrlContent = async ({ url: targetUrl = '', extract_mode = 'full_text' }) => {
       const cleanUrl = String(targetUrl || '').trim();
       if (!cleanUrl) return { success: false, error: 'Parameter url wajib diisi.' };
-      let parsed;
-      try { parsed = new URL(cleanUrl); } catch (_) { return { success: false, error: 'URL tidak valid.' }; }
-      if (!['http:', 'https:'].includes(parsed.protocol) || isPrivateHostname(parsed.hostname)) {
+      let currentUrl;
+      try { currentUrl = new URL(cleanUrl); } catch (_) { return { success: false, error: 'URL tidak valid.' }; }
+      if (!['http:', 'https:'].includes(currentUrl.protocol) || isPrivateHostname(currentUrl.hostname)) {
         return { success: false, error: 'Target URL privat atau tidak diizinkan.' };
       }
-      const res = await fetch(parsed.toString(), {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-        redirect: 'manual',
-        signal: AbortSignal.timeout(9000)
-      });
-      if (!res.ok) return { success: false, status: res.status, error: `HTTP ${res.status}` };
-      const rawHtml = await res.text();
+      let res = null;
+      for (let hop = 0; hop <= 4; hop++) {
+        res = await fetch(currentUrl.toString(), {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          redirect: 'manual',
+          signal: AbortSignal.timeout(9000)
+        });
+        if ([301, 302, 303, 307, 308].includes(res.status) && res.headers.get('location')) {
+          const loc = res.headers.get('location');
+          try { await res.body?.cancel(); } catch (_) {}
+          if (hop >= 4) return { success: false, status: res.status, error: 'Terlalu banyak redirect.' };
+          let nextUrl;
+          try { nextUrl = new URL(loc, currentUrl); } catch (_) { return { success: false, error: 'Redirect URL tidak valid.' }; }
+          if (!['http:', 'https:'].includes(nextUrl.protocol) || isPrivateHostname(nextUrl.hostname)) {
+            return { success: false, error: 'Redirect ke target URL privat diblokir.' };
+          }
+          currentUrl = nextUrl;
+          continue;
+        }
+        break;
+      }
+      if (!res || !res.ok) {
+        try { await res?.body?.cancel(); } catch (_) {}
+        return { success: false, status: res ? res.status : 502, error: `HTTP ${res ? res.status : 502}` };
+      }
+      const ctype = String(res.headers.get('content-type') || '').toLowerCase();
+      if (ctype && !/(?:text\/|json|xml|html|xhtml)/i.test(ctype)) {
+        try { await res.body?.cancel(); } catch (_) {}
+        return { success: false, error: `Tipe konten non-teks tidak didukung (${ctype.split(';')[0]}).` };
+      }
+      let rawHtml = '';
+      if (res.body && typeof res.body.getReader === 'function') {
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let bytesRead = 0;
+        const maxBytes = 1024 * 1024;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          bytesRead += value ? value.byteLength : 0;
+          rawHtml += dec.decode(value, { stream: true });
+          if (bytesRead >= maxBytes) {
+            try { await reader.cancel(); } catch (_) {}
+            break;
+          }
+        }
+        rawHtml += dec.decode();
+      } else {
+        rawHtml = await res.text();
+      }
       const text = rawHtml
         .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
         .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
@@ -3511,7 +3576,7 @@ export default {
         .replace(/\s+/g, ' ')
         .trim();
       const maxLen = extract_mode === 'summary' ? 2500 : 12000;
-      return { success: true, url: parsed.toString(), content: text.slice(0, maxLen) };
+      return { success: true, url: currentUrl.toString(), content: text.slice(0, maxLen) };
     };
 
     const summarizeSources = async ({ query = '', urls = [] }) => {
@@ -3713,8 +3778,15 @@ export default {
           });
         }
 
-        // Intersep khusus untuk URL YouTube agar mengekstrak metadata mendalam, deskripsi, & transkrip via YouTube InnerTube
-        const ytMatch = cleanTarget.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|v\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+        // Intersep khusus untuk URL YouTube resmi saja (cegah pembajakan URL non-YouTube yang memuat /live/ atau /shorts/)
+        let isOfficialYtHost = false;
+        try {
+          const parsedYtHost = new URL(cleanTarget).hostname.toLowerCase();
+          isOfficialYtHost = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be', 'www.youtu.be'].includes(parsedYtHost);
+        } catch (_) {}
+        const ytMatch = isOfficialYtHost
+          ? cleanTarget.match(/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|v\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/i)
+          : null;
         if (ytMatch && ytMatch[1]) {
           const vidId = ytMatch[1];
           try {
@@ -3733,6 +3805,7 @@ export default {
               const innerData = await innerRes.json();
               const details = innerData.videoDetails || {};
               let ytTitle = details.title || '';
+              if (ytTitle) {
               let ytChannel = details.author || 'YouTube Creator';
               let ytDesc = details.shortDescription || '';
               let transcript = '';
@@ -3797,6 +3870,7 @@ export default {
                 status: 200,
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
               });
+              }
             }
           } catch (_) {}
 
@@ -4692,7 +4766,8 @@ export default {
             const candidateId = parsedOriginToken?.id;
             if (candidateId && (!parsedOriginToken.exp || Date.now() <= parsedOriginToken.exp)) {
               const hydrated = await resolveEdgeCandidateById(candidateId);
-              const originTargetUrl = hydrated ? (hydrated.preview_url || hydrated.image_url) : null;
+              const licCheckA = hydrated ? evaluateEdgeLicenseStatus(hydrated.license_name) : { usage_status: 'unknown' };
+              const originTargetUrl = (hydrated && licCheckA.usage_status === 'allowed') ? (hydrated.preview_url || hydrated.image_url) : null;
               if (originTargetUrl) {
                 const u = new URL(originTargetUrl);
                 if (isSafeRasterAssetUrl(u)) {
@@ -4709,7 +4784,7 @@ export default {
           } catch (_) {}
         }
 
-        // B. Token tanpa signature: HANYA izinkan jika ID kandidat tercatat di Edge cache (tolak arbitrary decoded.u/url)
+        // B. Token tanpa signature: HANYA izinkan jika ID kandidat tercatat di Edge cache & lolos verifikasi lisensi
         let decoded = null;
         try {
           let b64 = rawToken.replace(/-/g, '+').replace(/_/g, '/');
@@ -4720,7 +4795,8 @@ export default {
         let targetAssetUrl = null;
         if (decoded && decoded.id && (!decoded.ts || Date.now() - decoded.ts <= 6 * 3600 * 1000)) {
           const hydrated = await resolveEdgeCandidateById(decoded.id);
-          targetAssetUrl = hydrated ? (hydrated.preview_url || hydrated.image_url) : null;
+          const licCheckB = hydrated ? evaluateEdgeLicenseStatus(hydrated.license_name) : { usage_status: 'unknown' };
+          targetAssetUrl = (hydrated && licCheckB.usage_status === 'allowed') ? (hydrated.preview_url || hydrated.image_url) : null;
         }
 
         if (targetAssetUrl) {
@@ -4768,7 +4844,18 @@ export default {
 
     // Default static assets (Cloudflare Pages) atau 404 response (Standalone Worker)
     if (env && env.ASSETS && typeof env.ASSETS.fetch === 'function') {
-      return env.ASSETS.fetch(request);
+      const assetRes = await env.ASSETS.fetch(request);
+      const assetCt = String(assetRes.headers.get('content-type') || '').toLowerCase();
+      if (url.pathname === '/' || url.pathname.endsWith('.html') || assetCt.includes('text/html')) {
+        const noCacheHeaders = new Headers(assetRes.headers);
+        noCacheHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return new Response(assetRes.body, {
+          status: assetRes.status,
+          statusText: assetRes.statusText,
+          headers: noCacheHeaders
+        });
+      }
+      return assetRes;
     }
     return new Response(JSON.stringify({
       status: 404,

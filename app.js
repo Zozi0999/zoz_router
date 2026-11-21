@@ -302,7 +302,12 @@
            trimmed.startsWith('[SPESIFIKASI SINTESIS BUKTI') ||
            trimmed.startsWith('[ALUR VERIFIKASI VISUAL AKTIF]') ||
            trimmed.startsWith('[HASIL EKSEKUSI TOOL]') ||
+           trimmed.startsWith('[LIVE PULSE WHATSAPP') ||
+           trimmed.startsWith('[KONTEKS KOMUNIKASI LOKAL') ||
+           trimmed.startsWith('[HASIL RAG DINAMIS') ||
+           trimmed.startsWith('[DIREKTIF PERSONA ') ||
            trimmed.startsWith('BATASAN DOMAIN KLAIM:') ||
+           trimmed.startsWith('BATASAN ANALISIS KOMUNIKASI') ||
            trimmed.startsWith('[Pencarian selesai') ||
            lower.includes('pencarian selesai:') ||
            trimmed.startsWith('[STATUS PENELUSURAN') ||
@@ -597,6 +602,9 @@
 
   function updateModelOptionsMenuUI() {
     if (!els.modelOptionsMenuPopup) return;
+    if (typeof ZozPersonaController !== 'undefined' && typeof ZozPersonaController.syncUI === 'function') {
+      ZozPersonaController.syncUI();
+    }
     const isOR = STATE.mode === 'openrouter';
     const activeRaw = isOR ? STATE.settings.openRouterModel : STATE.settings.ollamaModel;
     const activeEngine = isOR ? 'OpenRouter' : 'Ollama';
@@ -856,6 +864,12 @@
       systemPrompt: '',
       customSystemPrompt: '',
       activePreset: 'default',
+      personaMode: 'formal', // 'off' (Matikan Persona) | 'formal' (Non-Custom: AI Formal tunggal) | 'custom' (Custom Persona)
+      personaLastActiveMode: 'formal', // 'formal' | 'custom' (diingat saat Persona dimatikan lalu dinyalakan ulang)
+      personaCustomTitle: '',
+      personaCustomTone: 'professional', // 'professional' | 'analytical' | 'concise' | 'flexible'
+      personaCustomPrompt: '',
+      personaCustomProfiles: [],
       autoPolicy: 'cloud_first',
       youtubeSearchTool: false, // Tool pencarian YouTube (toggle dari menu Lampiran / Composer)
       localWorkspaceEnabled: false,
@@ -1287,6 +1301,48 @@
     aiChatThemeMenu: $('#aiChatThemeMenu'),
     aiChatThemeActiveBadge: $('#aiChatThemeActiveBadge'),
     aiChatThemeActiveDesc: $('#aiChatThemeActiveDesc'),
+    btnComposerPersonaMenu: $('#btnComposerPersonaMenu'),
+    zozPersonaComposerIcon: $('#zozPersonaComposerIcon'),
+    zozPersonaComposerLabel: $('#zozPersonaComposerLabel'),
+    zozPersonaComposerDot: $('#zozPersonaComposerDot'),
+    btnModelOptPersonaMenu: $('#btnModelOptPersonaMenu'),
+    iconModelOptPersona: $('#iconModelOptPersona'),
+    modelOptPersonaDesc: $('#modelOptPersonaDesc'),
+    modelOptPersonaBadge: $('#modelOptPersonaBadge'),
+    zozPersonaModal: $('#zozPersonaModal'),
+    zozPersonaModalHeaderEmblem: $('#zozPersonaModalHeaderEmblem'),
+    zozPersonaModalHeaderIcon: $('#zozPersonaModalHeaderIcon'),
+    zozPersonaLivePill: $('#zozPersonaLivePill'),
+    btnTogglePersonaPower: $('#btnTogglePersonaPower'),
+    zozPersonaPowerLabel: $('#zozPersonaPowerLabel'),
+    zozPersonaOffBanner: $('#zozPersonaOffBanner'),
+    btnPersonaTabFormal: $('#btnPersonaTabFormal'),
+    btnPersonaTabCustom: $('#btnPersonaTabCustom'),
+    zozPersonaPaneFormal: $('#zozPersonaPaneFormal'),
+    zozPersonaPaneCustom: $('#zozPersonaPaneCustom'),
+    zozFormalActiveBadge: $('#zozFormalActiveBadge'),
+    zozCustomPersonaTitleInput: $('#zozCustomPersonaTitleInput'),
+    zozCustomPersonaToneGroup: $('#zozCustomPersonaToneGroup'),
+    zozCustomPersonaPromptInput: $('#zozCustomPersonaPromptInput'),
+    zozCustomPersonaCharCount: $('#zozCustomPersonaCharCount'),
+    btnClearCustomPersonaInput: $('#btnClearCustomPersonaInput'),
+    zozCustomPersonaHelperChips: $('#zozCustomPersonaHelperChips'),
+    zozCustomSavedCount: $('#zozCustomSavedCount'),
+    btnSaveCustomPersonaProfile: $('#btnSaveCustomPersonaProfile'),
+    zozCustomSavedProfilesList: $('#zozCustomSavedProfilesList'),
+    btnDisablePersona: $('#btnDisablePersona'),
+    zozDisablePersonaBtnLabel: $('#zozDisablePersonaBtnLabel'),
+    btnApplyPersonaConfig: $('#btnApplyPersonaConfig'),
+    zozApplyPersonaBtnLabel: $('#zozApplyPersonaBtnLabel'),
+    tabBtnPersonaStudio: $('#tabBtnPersonaStudio'),
+    settingsPersonaOverviewIcon: $('#settingsPersonaOverviewIcon'),
+    settingsPersonaStatusBadge: $('#settingsPersonaStatusBadge'),
+    btnSettingsQuickOff: $('#btnSettingsQuickOff'),
+    btnSettingsQuickFormal: $('#btnSettingsQuickFormal'),
+    btnSettingsQuickCustom: $('#btnSettingsQuickCustom'),
+    settingsCustomPersonaCardTitle: $('#settingsCustomPersonaCardTitle'),
+    settingsCustomPersonaCardDesc: $('#settingsCustomPersonaCardDesc'),
+    btnOpenPersonaStudioFromSettings: $('#btnOpenPersonaStudioFromSettings'),
     exportConfirmModal: $('#exportConfirmModal'),
     exportConfirmTitle: $('#exportConfirmTitle'),
     exportConfirmMsgCount: $('#exportConfirmMsgCount'),
@@ -6406,7 +6462,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         if (res.ok) {
           const data = await res.json();
           const list = Array.isArray(data.sessions) ? data.sessions : [];
-          return list.filter(s => s && s.id && !/_(?:digest_\d+|rescue|epistemic|temp)\b/i.test(s.id) && !/__studio_/i.test(s.id));
+          return list.filter(s => s && s.id && !/_(?:digest_\d+|cont_\d+(?:_\d+)?|continue_\d+|retry_\d+|synth_\d+|fb|rescue|epistemic|temp)\b/i.test(s.id) && !/__studio_/i.test(s.id));
         }
       } catch (e) {
         console.warn('DeviceStorage getSessionsList failed:', e.message);
@@ -6463,15 +6519,30 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       await ChatDB.saveSession(cleanSession);
       if (this.isDeviceBackendAvailable) {
         try {
-          const res = await fetch(getUniversalApiUrl('/api/sessions'), {
+          const payloadStr = JSON.stringify({ ...cleanSession, userId: STATE.userId });
+          const payloadBytes = (typeof TextEncoder !== 'undefined')
+            ? new TextEncoder().encode(payloadStr).length
+            : (typeof Blob !== 'undefined' ? new Blob([payloadStr]).size : payloadStr.length * 2);
+          const useKeepalive = payloadBytes <= 60000;
+          const postOpts = {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'X-User-ID': STATE.userId
             },
-            body: JSON.stringify({ ...cleanSession, userId: STATE.userId }),
-            keepalive: true
-          });
+            body: payloadStr
+          };
+          let res;
+          try {
+            // Fetch Standard rejects keepalive requests > 64 KiB (65,536 UTF-8 bytes) with TypeError: Failed to fetch
+            res = await fetch(getUniversalApiUrl('/api/sessions'), useKeepalive ? { ...postOpts, keepalive: true } : postOpts);
+          } catch (keepaliveErr) {
+            if (useKeepalive) {
+              res = await fetch(getUniversalApiUrl('/api/sessions'), postOpts);
+            } else {
+              throw keepaliveErr;
+            }
+          }
           if (res.ok) {
             const data = await res.json().catch(() => null);
             let mediaUrlsUpdated = false;
@@ -6691,10 +6762,33 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         }
       } catch (_) {}
 
-      // Persona dihapus total — bersihkan seluruh residu preset/systemPrompt lama dari penyimpanan lokal
+      // Bersihkan residu preset legacy; normalisasi konfigurasi Persona Baru ('off' | 'formal' | 'custom')
       STATE.settings.systemPrompt = '';
       STATE.settings.customSystemPrompt = '';
       STATE.settings.activePreset = 'default';
+      STATE.settings.personaMode = ['off', 'formal', 'custom'].includes(STATE.settings.personaMode)
+        ? STATE.settings.personaMode
+        : 'formal';
+      STATE.settings.personaLastActiveMode = (STATE.settings.personaLastActiveMode === 'custom') ? 'custom' : 'formal';
+      STATE.settings.personaCustomTitle = sanitizeCustomPersonaField(STATE.settings.personaCustomTitle || '', 80);
+      STATE.settings.personaCustomTone = ['professional', 'analytical', 'concise', 'flexible'].includes(STATE.settings.personaCustomTone)
+        ? STATE.settings.personaCustomTone
+        : 'professional';
+      STATE.settings.personaCustomPrompt = sanitizeCustomPersonaField(STATE.settings.personaCustomPrompt || '', 4000);
+      if (!Array.isArray(STATE.settings.personaCustomProfiles)) {
+        STATE.settings.personaCustomProfiles = [];
+      } else {
+        STATE.settings.personaCustomProfiles = STATE.settings.personaCustomProfiles
+          .filter(p => p && typeof p === 'object' && (p.title || p.prompt))
+          .slice(0, 10)
+          .map((p, i) => ({
+            id: String(p.id || `cp_${i + 1}`).slice(0, 48),
+            title: sanitizeCustomPersonaField(String(p.title || 'Persona Custom'), 80) || 'Persona Custom',
+            tone: ['professional', 'analytical', 'concise', 'flexible'].includes(p.tone) ? p.tone : 'professional',
+            prompt: sanitizeCustomPersonaField(String(p.prompt || ''), 4000),
+            updatedAt: p.updatedAt || new Date().toISOString()
+          }));
+      }
 
       // Pastikan endpoint Ollama terdefinisi (mendukung penuh Cloud https://ollama.com maupun Daemon Lokal/LAN 127.0.0.1:11434)
       const isPublicHostEnv = Boolean(typeof location !== 'undefined' && location.hostname && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) && !location.hostname.includes('trycloudflare.com'));
@@ -6851,7 +6945,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           if (s._isLazyDisk) return false;
           if (isIncognitoSession(s)) return false;
           if (s.userId && s.userId !== STATE.userId) return false;
-          if (/_(?:digest_\d+|rescue|epistemic|temp)\b/i.test(s.id) || /__studio_/i.test(s.id)) return false;
+          if (/_(?:digest_\d+|cont_\d+(?:_\d+)?|continue_\d+|retry_\d+|synth_\d+|fb|rescue|epistemic|temp)\b/i.test(s.id) || /__studio_/i.test(s.id)) return false;
           return true;
         });
         if (purgedIncogIds.size > 0) {
@@ -6960,8 +7054,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         if (Array.isArray(diskList) && diskList.length > 0) {
           let hasNewSessions = false;
           for (const diskItem of diskList) {
-            // Defense-in-depth: Jangan impor session subtask sementara / digestion / rescue / studio / incognito
-            if (!diskItem || !diskItem.id || isIncognitoSession(diskItem) || /_(?:digest_\d+|rescue|epistemic|temp)\b/i.test(diskItem.id) || /__studio_/i.test(diskItem.id)) {
+            // Defense-in-depth: Jangan impor session subtask sementara / digestion / continuation / rescue / studio / incognito
+            if (!diskItem || !diskItem.id || isIncognitoSession(diskItem) || /_(?:digest_\d+|cont_\d+(?:_\d+)?|continue_\d+|retry_\d+|synth_\d+|fb|rescue|epistemic|temp)\b/i.test(diskItem.id) || /__studio_/i.test(diskItem.id)) {
               if (diskItem && diskItem.id && isIncognitoSession(diskItem)) {
                 DeviceStorage.deleteSession(diskItem.id).catch(() => {});
               }
@@ -7024,6 +7118,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
                 const diskTime = full.updatedAt ? new Date(full.updatedAt).getTime() : 0;
                 const memTime = activeSess.updatedAt ? new Date(activeSess.updatedAt).getTime() : 0;
+                const isDiskFresh = !memTime || diskTime >= memTime;
                 const isDiskImageDisplaysChanged = Boolean(
                   diskLast && memLast &&
                   JSON.stringify(diskLast.imageDisplays || null) !== JSON.stringify(memLast.imageDisplays || null)
@@ -7032,15 +7127,31 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
                   diskLast && memLast && (diskLast.content !== memLast.content || isDiskImageDisplaysChanged)
                 );
 
-                const hasCorruptedMemImages = Boolean(
-                  Array.isArray(activeSess.messages) &&
-                  activeSess.messages.some(m => {
-                    const imgs = Array.isArray(m.images) ? m.images : (m.image ? [m.image] : []);
-                    return imgs.some(img => typeof img === 'string' && (img === '[data:image]' || img.startsWith('[data:image')));
-                  })
-                );
+                // Perbaiki lampiran gambar korup di memori secara in-place bila disk punya gambar valid (tanpa menimpa teks lebih baru)
+                let repairedImagesInPlace = false;
+                if (Array.isArray(activeSess.messages) && Array.isArray(full.messages)) {
+                  activeSess.messages.forEach((mMsg, idx) => {
+                    const dMsg = full.messages[idx];
+                    if (!mMsg || !dMsg) return;
+                    const mImgs = Array.isArray(mMsg.images) ? mMsg.images : (mMsg.image ? [mMsg.image] : []);
+                    const hasCorrupt = mImgs.some(img => typeof img === 'string' && (img === '[data:image]' || img.startsWith('[data:image')));
+                    if (!hasCorrupt) return;
+                    const dImgs = Array.isArray(dMsg.images) ? dMsg.images : (dMsg.image ? [dMsg.image] : []);
+                    const validDImgs = dImgs.filter(img => typeof img === 'string' && img && img !== '[data:image]' && !img.startsWith('[data:image'));
+                    if (validDImgs.length > 0) {
+                      mMsg.images = validDImgs;
+                      mMsg.image = validDImgs[0];
+                      repairedImagesInPlace = true;
+                    }
+                  });
+                }
 
-                if (activeSess._isLazyDisk || diskPlanChanged || diskLen > memLen || diskTime > memTime || isDiskContentChanged || hasCorruptedMemImages || (diskLast && diskLast.backgroundCompleted)) {
+                const shouldHydrateActiveFromDisk = Boolean(
+                  activeSess._isLazyDisk ||
+                  (diskLen > memLen) ||
+                  (diskLen === memLen && isDiskFresh && (diskTime > memTime || isDiskContentChanged))
+                );
+                if (shouldHydrateActiveFromDisk) {
                   // Multimodal Preservation: Pertahankan lampiran gambar di memori jika versi disk belum menyimpannya
                   if (Array.isArray(activeSess.messages) && Array.isArray(full.messages)) {
                     preserveMultimodalImages(full.messages, activeSess.messages);
@@ -7053,6 +7164,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
                   activeSess.userId = STATE.userId;
                   await ChatDB.saveSession(activeSess);
                   if (!STATE.isGenerating && !STATE.isSending) {
+                    renderCurrentSession(false);
+                  }
+                  renderChatHistory();
+                } else if (repairedImagesInPlace || diskPlanChanged) {
+                  await ChatDB.saveSession(activeSess);
+                  if (repairedImagesInPlace && !STATE.isGenerating && !STATE.isSending) {
                     renderCurrentSession(false);
                   }
                   renderChatHistory();
@@ -7390,6 +7507,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           pollBufferText = '';
           pollFullBytes = 0;
           pollEpoch = 0;
+          if (!STATE.isSending) setGeneratingState(false);
           return;
         }
 
@@ -7829,7 +7947,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     els.toastContainer.innerHTML = '';
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    const icon = type === 'error' ? 'fa-triangle-exclamation' : 'fa-circle-check';
+    const icon = (type === 'error' || type === 'warning') ? 'fa-triangle-exclamation' : 'fa-circle-check';
     toast.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${escapeHtml(message)}</span>`;
     toast.onclick = () => toast.remove();
     els.toastContainer.appendChild(toast);
@@ -8312,9 +8430,17 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       ? ZozTextSafety.extractNegativeFormattingConstraints(question)
       : { noTable: false, noCode: false, isExhaustive: false, directive: '' };
     const hasSubstantiveEvidence = evidenceText && !evidenceText.includes('tidak menemukan dokumen') && !evidenceText.includes('tidak memberikan fakta spesifik') && evidenceText.length > 80;
+    const rescuePersonaDirective = (!isPureMath && typeof getEffectivePersonaSystemDirective === 'function')
+      ? getEffectivePersonaSystemDirective()
+      : '';
+    const personaPrefix = rescuePersonaDirective ? `${rescuePersonaDirective}\n\n` : '';
+    const langInstruction = (typeof STATE !== 'undefined' && STATE.settings?.personaMode === 'custom')
+      ? 'sesuai bahasa dan gaya direktif persona di atas (atau bahasa pertanyaan pengguna)'
+      : 'dalam Bahasa Indonesia (atau bahasa yang digunakan pengguna)';
 
     if (!hasSubstantiveEvidence) {
       const extraDirectives = [];
+      if (rescuePersonaDirective) extraDirectives.push(rescuePersonaDirective);
       if (entityResolution && entityResolution.directive) extraDirectives.push(entityResolution.directive);
       if (formattingConstraints && formattingConstraints.directive) extraDirectives.push(formattingConstraints.directive);
       const prefixNotes = extraDirectives.length > 0 ? `${extraDirectives.join('\n\n')}\n\n` : '';
@@ -8323,7 +8449,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         {
           role: 'system',
           content: `${prefixNotes}### MANDAT JAWABAN DEDUKTIF & ANALISIS KOMPREHENSIF (UTC ${isoDate})\n` +
-            `1. Jawab pertanyaan pengguna secara langsung, menyeluruh, terstruktur, dan mendalam dalam Bahasa Indonesia.\n` +
+            `1. Jawab pertanyaan pengguna secara langsung, menyeluruh, terstruktur, dan mendalam ${langInstruction}.\n` +
             `2. DILARANG KERAS mengeluhkan ketiadaan indeks atau dokumen, dilarang menolak menjawab, dilarang mencetak catatan diagnostik atau penanda status sistem internal, dan dilarang menyebutkan kendala pencarian internal.\n` +
             `3. Sajikan ide, solusi, penjelasan konsep, atau analisis mendalam menggunakan Markdown yang rapi (heading, poin bernomor/bullet).\n` +
             (formattingConstraints.noTable ? `4. BATASAN FORMAT: Pengguna secara tegas melarang tabel ("tanpa tabel"). DILARANG KERAS membuat tabel Markdown.` : '')
@@ -8338,8 +8464,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     return [
       {
         role: 'system',
-        content: `[SPESIFIKASI SINTESIS BUKTI TERVERIFIKASI — UTC ${isoDate}]\n` +
-          `1. Jawab pertanyaan pengguna dengan PENJELASAN YANG MENDALAM, JELAS, DAN LENGKAP dalam Bahasa Indonesia menggunakan korpus bukti di bawah (entitas, konsep, angka, mekanisme, dan fakta).\n` +
+        content: `${personaPrefix}[SPESIFIKASI SINTESIS BUKTI TERVERIFIKASI — UTC ${isoDate}]\n` +
+          `1. Jawab pertanyaan pengguna dengan PENJELASAN YANG MENDALAM, JELAS, DAN LENGKAP ${langInstruction} menggunakan korpus bukti di bawah (entitas, konsep, angka, mekanisme, dan fakta).\n` +
           `2. Jika korpus berupa daftar video, jelaskan topik/isi masing-masing video (berdasarkan judul, deskripsi, kanal, durasi) serta mengapa video tersebut relevan untuk ditonton, lalu sertakan tautan video lengkap agar pemutar chat bekerja.\n` +
           `3. DILARANG KERAS hanya menampilkan daftar link URL atau daftar sumber saja tanpa uraian penjelasan yang memadai!\n` +
           `4. Jangan mencetak blok tool call atau monolog internal.`
@@ -15136,13 +15262,14 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     const file = options.file || (options.targetCard && options.targetCard._aiFile) || (row && row._aiFile) || null;
     const activeContPlan = (typeof getActivePlanMode === 'function') ? getActivePlanMode(session) : 'zoz';
     const rawIncompleteSaved = (row && row.dataset && row.dataset.rawIncompleteText) || '';
+    const webMarkerRe = /<<<ZOZ_(?:FILE|EDIT|MODIFY)|<!DOCTYPE\s+html|<html\b/i;
     const isWebContinue = Boolean(
       options.isWebsite ||
       options.isWebContinue ||
-      activeContPlan === 'z21' ||
       (file && /\.(?:html?|jsx|tsx)$/i.test(file.name || '')) ||
       (row && row.dataset && row.dataset.rawIncompleteIsWeb === '1') ||
-      (rawIncompleteSaved && /<<<ZOZ_(?:FILE|EDIT|MODIFY)|<!DOCTYPE\s+html|<html\b/i.test(rawIncompleteSaved))
+      (rawIncompleteSaved && webMarkerRe.test(rawIncompleteSaved)) ||
+      (options.previousText && webMarkerRe.test(options.previousText))
     );
 
     let rawBaseText = rawIncompleteSaved || options.previousText || '';
@@ -15263,7 +15390,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         currentAccumulated = safeAssistantText(stitchContinuationChunk(effectiveBase, appended));
 
         // Re-ekstrak file dan sinkronkan pratinjau kartu canvas secara langsung
-        const shouldExtractCont = Boolean(isWebContinue || activeContPlan === 'z21');
+        const shouldExtractCont = Boolean(isWebContinue);
         const reExtracted = extractGeneratedFiles(currentAccumulated, shouldExtractCont, contRunOptions);
         const curPrimary = reExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || reExtracted.files[0];
         if (options.targetCard && reExtracted.files.length > 0 && curPrimary) {
@@ -15301,7 +15428,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       }
 
       // Re-ekstrak status akhir secara objektif
-      const finalExtracted = extractGeneratedFiles(currentAccumulated, Boolean(isWebContinue || activeContPlan === 'z21'), contRunOptions);
+      const finalExtracted = extractGeneratedFiles(currentAccumulated, Boolean(isWebContinue), contRunOptions);
       const finalPrimary = finalExtracted.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f.name || '')) || finalExtracted.files[0];
       if (!isActuallyComplete && finalPrimary) {
         let finalHtml = finalPrimary.rawContent || finalPrimary.content || '';
@@ -15475,6 +15602,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       AudioEngine.click();
       return {
         text: currentAccumulated,
+        cleanText: finalPersistedContent,
+        completed: Boolean(isActuallyComplete && !isStillIncomplete),
         isStillIncomplete,
         finishReason: lastContFinishReason || (isActuallyComplete ? 'stop' : null)
       };
@@ -15548,6 +15677,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     } = ctx;
 
     let finalText = initialText;
+    let cleanFinalText = initialText;
     let stillFileIncomplete = Boolean(isFileIncomplete);
     let effectiveFinishReason = finishReason;
     let continued = false;
@@ -15571,14 +15701,16 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         }
         if (contResult && typeof contResult.text === 'string') {
           finalText = contResult.text;
+          cleanFinalText = (typeof contResult.cleanText === 'string') ? contResult.cleanText : contResult.text;
           stillFileIncomplete = Boolean(contResult.isStillIncomplete);
-          effectiveFinishReason = contResult.finishReason || 'stop';
+          effectiveFinishReason = contResult.finishReason ?? (contResult.completed ? 'stop' : null);
           continued = true;
-        } else if (assistantRow?.dataset?.fullContent) {
-          finalText = assistantRow.dataset.fullContent;
-          stillFileIncomplete = Boolean(extractGeneratedFiles(finalText, true).hasIncompleteFile);
+        } else if (assistantRow?.dataset?.rawIncompleteText || assistantRow?.dataset?.fullContent) {
+          const fallbackRaw = assistantRow.dataset.rawIncompleteText || assistantRow.dataset.fullContent;
+          finalText = fallbackRaw;
+          cleanFinalText = assistantRow.dataset.fullContent || fallbackRaw;
+          stillFileIncomplete = Boolean(assistantRow.dataset.rawIncompleteText) || Boolean(extractGeneratedFiles(fallbackRaw, Boolean(isWebTask)).hasIncompleteFile);
           effectiveFinishReason = null;
-          continued = true;
         }
       } catch (autoContErr) {
         console.warn(`[${engineLabel} Seamless Auto-Continuation Notice]:`, autoContErr);
@@ -15597,7 +15729,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         { isWebsite: isWebTask }
       );
     }
-    return { text: finalText, stillTruncated, continued };
+    return { text: finalText, cleanText: cleanFinalText, stillTruncated, continued };
   }
 
   async function streamContinuationOpenRouter(session, modelName, promptInstruction, bubbleText, currentFullText, options = {}) {
@@ -15638,6 +15770,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const curModel = candidateModels[c];
       const supportsSystem = doesModelSupportSystemRole(curModel);
       const messagesPayload = [];
+      const contPersonaDir = (!isPureMathCont && typeof getEffectivePersonaSystemDirective === 'function')
+        ? getEffectivePersonaSystemDirective(session, options)
+        : '';
+      if (supportsSystem && contPersonaDir) {
+        messagesPayload.push({ role: 'system', content: contPersonaDir });
+      }
       let hasAssistantTail = false;
       if (historyMessages.length > 0 && historyMessages[historyMessages.length - 1].role === 'assistant') {
         hasAssistantTail = true;
@@ -15655,6 +15793,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         }
         messagesPayload.push({ role: m.role, content });
       });
+
+      if (!supportsSystem && contPersonaDir) {
+        const firstUserCont = messagesPayload.find(m => m && m.role === 'user' && typeof m.content === 'string');
+        if (firstUserCont && !firstUserCont.content.startsWith('[Instruksi Sistem & Konteks:')) {
+          firstUserCont.content = `[Instruksi Sistem & Konteks:\n${contPersonaDir}]\n\n${firstUserCont.content}`;
+        }
+      }
 
       if (!hasAssistantTail && effectiveTail) {
         if (messagesPayload.some(m => m.role === 'user')) {
@@ -15690,10 +15835,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         if (STATE.settings.openRouterKey) {
           headers['Authorization'] = `Bearer ${STATE.settings.openRouterKey}`;
         }
-        const isolatedContSessionId = session?.id ? `${session.id}_cont_${Date.now()}_${c}` : null;
-        if (!isDirect && isolatedContSessionId) {
-          headers['X-Session-ID'] = isolatedContSessionId;
-        }
+        // Jangan kirim sessionId pada sub-request continuation agar server tidak membuat file phantom _cont_*.json
+        // (klien sudah menggabungkan dan menyimpan hasil final ke sesi induk)
         if (isDirect) {
           headers['HTTP-Referer'] = location.origin || 'https://zozi0999.github.io/zoz_router';
           headers['X-Title'] = 'ZOZ Router Continuation';
@@ -15702,7 +15845,6 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         let body = {
           ...basePayload,
           ...(isDirect ? {} : {
-            sessionId: isolatedContSessionId,
             userId: STATE.userId || null,
             apiKey: STATE.settings.openRouterKey || undefined
           })
@@ -15880,7 +16022,6 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         try {
           const fallbackBody = {
             ...res._usedBody,
-            ...(res._usedBody.sessionId ? { sessionId: `${res._usedBody.sessionId}_fb` } : {}),
             messages: [...res._usedBody.messages, { role: 'user', content: promptInstruction || 'Continue seamlessly from the exact end without repeating earlier text.' }]
           };
           const fbRes = await fetch(res._usedEndpoint, {
@@ -15937,6 +16078,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     );
 
     const messagesPayload = [];
+    const contPersonaDirOllama = (!isPureMathCont && typeof getEffectivePersonaSystemDirective === 'function')
+      ? getEffectivePersonaSystemDirective(session, options)
+      : '';
+    if (contPersonaDirOllama) {
+      messagesPayload.push({ role: 'system', content: contPersonaDirOllama });
+    }
     let hasAssistantTail = false;
     if (historyMessages.length > 0 && historyMessages[historyMessages.length - 1].role === 'assistant') {
       hasAssistantTail = true;
@@ -15966,12 +16113,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     const chatUrl = (!isTargetingCloud && isLoopbackEp && !cleanKey && isLocalOrigin)
       ? '/api/ollama/chat'
       : getUniversalApiUrl('/api/ollama/chat');
-    const isolatedOllamaSessionId = session?.id ? `${session.id}_cont_${Date.now()}` : undefined;
+    // Jangan kirim sessionId pada sub-request continuation agar server tidak membuat file phantom _cont_*.json
     const baseOllamaBody = {
       model: effectiveModel,
       messages: messagesPayload,
       stream: true,
-      ...(isolatedOllamaSessionId ? { sessionId: isolatedOllamaSessionId } : {}),
       options: {
         num_ctx: 16384,
         num_predict: 16384,
@@ -16080,7 +16226,6 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       try {
         const fbBody = {
           ...baseOllamaBody,
-          ...(isolatedOllamaSessionId ? { sessionId: `${isolatedOllamaSessionId}_fb` } : {}),
           messages: [...messagesPayload, { role: 'user', content: promptInstruction || 'Continue seamlessly from the exact end without repeating earlier text.' }]
         };
         const fbRes = await fetch(chatUrl, {
@@ -17972,7 +18117,30 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         if (fullSess.lastWebsiteMode && !targetSession.lastWebsiteMode) {
           targetSession.lastWebsiteMode = fullSess.lastWebsiteMode;
         }
-        if (targetSession._isLazyDisk || diskLen !== memLen || diskTime > memTime || isDiskContentChanged || (diskLast && diskLast.backgroundCompleted)) {
+        const isTargetDiskFresh = !memTime || diskTime >= memTime;
+        let repairedTargetImages = false;
+        if (Array.isArray(targetSession.messages) && Array.isArray(fullSess.messages)) {
+          targetSession.messages.forEach((mMsg, idx) => {
+            const dMsg = fullSess.messages[idx];
+            if (!mMsg || !dMsg) return;
+            const mImgs = Array.isArray(mMsg.images) ? mMsg.images : (mMsg.image ? [mMsg.image] : []);
+            const hasCorrupt = mImgs.some(img => typeof img === 'string' && (img === '[data:image]' || img.startsWith('[data:image')));
+            if (!hasCorrupt) return;
+            const dImgs = Array.isArray(dMsg.images) ? dMsg.images : (dMsg.image ? [dMsg.image] : []);
+            const validDImgs = dImgs.filter(img => typeof img === 'string' && img && img !== '[data:image]' && !img.startsWith('[data:image'));
+            if (validDImgs.length > 0) {
+              mMsg.images = validDImgs;
+              mMsg.image = validDImgs[0];
+              repairedTargetImages = true;
+            }
+          });
+        }
+        const shouldHydrateTargetFromDisk = Boolean(
+          targetSession._isLazyDisk ||
+          (diskLen > memLen) ||
+          (diskLen === memLen && isTargetDiskFresh && (diskTime > memTime || isDiskContentChanged))
+        );
+        if (shouldHydrateTargetFromDisk) {
           if (Array.isArray(targetSession.messages)) {
             preserveMultimodalImages(fullSess.messages, targetSession.messages);
           }
@@ -17981,6 +18149,8 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           if (fullSess.planMode) targetSession.planMode = normalizePlanMode(fullSess.planMode);
           if (fullSess.lastWebsiteMode) targetSession.lastWebsiteMode = fullSess.lastWebsiteMode;
           delete targetSession._isLazyDisk;
+          await ChatDB.saveSession(targetSession);
+        } else if (repairedTargetImages) {
           await ChatDB.saveSession(targetSession);
         }
       }
@@ -18972,6 +19142,10 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     const regenBtn = card.querySelector('.btn-regen-img');
     regenBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (STATE.isGenerating || STATE.isSending) {
+        showToast('Tunggu proses generasi selesai atau tekan Stop terlebih dahulu.', 'info');
+        return;
+      }
       const currentSession = getActiveSession();
       if (currentSession) {
         const effectiveRefImage = refImage || (STATE.photoEditImage || null);
@@ -20842,7 +21016,9 @@ ATURAN MUTLAK OUTPUT:
       return;
     }
     if (typeof getActivePlanMode === 'function' && getActivePlanMode() === 'z21') {
-      els.promptInput.placeholder = 'Mode Z21 aktif — jelaskan website, aplikasi, atau pratinjau yang ingin dibuat...';
+      els.promptInput.placeholder = (typeof isStrictLocalhostMode === 'function' && isStrictLocalhostMode())
+        ? 'Mode Z21 aktif (Localhost) — buat website live atau analisa chat WhatsApp, email & tiket lokal...'
+        : 'Mode Z21 aktif — jelaskan website, aplikasi, atau pratinjau yang ingin dibuat...';
       return;
     }
     els.promptInput.placeholder = '';
@@ -30275,6 +30451,613 @@ ${blocks}
     return hasEditVerbOrFeedback;
   }
 
+  function isStrictLocalhostMode() {
+    if (typeof location === 'undefined') return false;
+    const host = String(location.hostname || '').toLowerCase();
+    const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+    return Boolean(isLoopback && !IS_GITHUB_PAGES && !IS_VERCEL);
+  }
+
+  function isCommunicationContextPrompt(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    if (/^\/(?:forge|z21|website|webapp|landing)\b/i.test(trimmed)) return false;
+    if (/fetch_communication_context/i.test(trimmed)) return true;
+
+    const hasChannel = /\b(?:whatsap+t?|watsap+p?|wasap|whtsap+p?|whastapp|wa|email|e-?mail|surel|inbox|kotak\s+masuk|chat\s+(?:tim|grup|group|wa|whatsap+t?|klien|pelanggan|dari|dengan|sama|kontak|nomor|masuk|terbaru|terakhir|baru)|pesan\s+(?:tim|grup|group|masuk|terbaru|terakhir|baru|belum\s+dibaca|wa|whatsap+t?|dari|dengan|sama|kontak|nomor)|obrolan\s+(?:wa|whatsap+t?|grup|tim|dari|dengan|terbaru|baru)|riwayat\s+(?:chat|pesan|email|komunikasi|obrolan|tiket)|catatan\s+tiket|tiket|ticket|slack|discord|teams|notulen|kontak\s+(?:wa|whatsap+t?)|draft\s+balasan|balasan\s+(?:chat|pesan|wa|email))\b/i.test(trimmed);
+    const hasActionVerb = /\b(?:analis(?:a|is)|rangkum(?:an|kan)?|ringkas(?:an|kan)?|rekap|cek|periksa|ambil(?:kan)?|cari(?:kan)?|lihat|baca(?:kan)?|tampilkan|tunjuk(?:kan)?|tindak\s*lanjut(?:i|nya)?|follow[\s-]*up|action\s*item|summary|summarize|review|audit|evaluasi|pantau|lacak|track|ekstrak|sentimen|balas(?:an)?|draft|status|terbaru|terkini|terakhir|baru|belum\s+(?:dibaca|dibalas)|ada\s+(?:chat|pesan)|siapa\s+yang\s+(?:baru\s+)?(?:nge)?chat|siapa\s+yang\s+(?:chat|pesan|email|kirim)|apa\s+isi|isi\s+(?:chat|pesan|email|tiket)|apa\s+yang\s+(?:sedang\s+|terakhir(?:\s+kali)?\s+)?di\s*bahas|terakhir(?:\s+kali)?\s+di\s*bahas|bahas\s+apa|ngobrol(?:in)?\s+apa|diskusi\s+apa|notif)\b/i.test(trimmed);
+    const hasNewChatInquiry = /\b(?:ada\s+(?:chat|pesan)\s+(?:baru|masuk|terbaru|belum\s+dibaca)|(?:chat|pesan)\s+(?:baru|terbaru|terakhir|masuk|hari\s+ini|barusan|tadi|dari|dengan)|(?:lihat|cek|baca|periksa|ambil|cari|tampilkan|apa)\s+(?:isi\s+)?(?:chat|pesan)\s+(?:terbaru|baru|terakhir|masuk|dari|di|grup|group|wa|whatsap+t?)|apa\s+yang\s+(?:sedang\s+|terakhir(?:\s+kali)?\s+)?di\s*bahas|terakhir(?:\s+kali)?\s+di\s*bahas|(?:di|do)\s+[a-z0-9\s-]{2,25}\s+apa\s+yang\s+.*di\s*bahas|siapa\s+yang\s+(?:baru\s+)?(?:nge)?chat|belum\s+(?:dibaca|dibalas)|cek\s+(?:chat|pesan|inbox|notif))\b/i.test(trimmed);
+    const hasExplicitId = /\b(?:TICKET|TKT|INC|BUG|ISSUE|JIRA|CASE|REQ|SR)[-_#]?\d+\b/i.test(trimmed) ||
+      /\b(?:08|628)\d{7,12}\b/.test(trimmed) ||
+      /@(?:s\.whatsapp\.net|g\.us)\b/i.test(trimmed) ||
+      /(?:^|\s)#\d{2,6}\b/.test(trimmed);
+
+    if (hasChannel && (hasActionVerb || hasExplicitId)) return true;
+    if (hasNewChatInquiry && !isWebsiteCreationPrompt(trimmed)) return true;
+    if (/\b(?:TICKET|TKT|INC|BUG|ISSUE|JIRA|CASE|REQ|SR)[-_#]?\d+\b/i.test(trimmed) && hasActionVerb) return true;
+    if (isStrictLocalhostMode() && hasActionVerb && !isWebsiteCreationPrompt(trimmed) && typeof WhatsAppController !== 'undefined' && Array.isArray(WhatsAppController.contacts) && WhatsAppController.contacts.length > 0) {
+      const normPrompt = normalizeClientCommPhrase(trimmed);
+      if (normPrompt.length >= 3) {
+        for (const c of WhatsAppController.contacts) {
+          const cn = normalizeClientCommPhrase(c && (c.name || c.notify));
+          if (cn && cn.length >= 3 && normPrompt.includes(cn)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function isLocalTimeOrClockPrompt(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    if (/^\/(?:forge|z21|website|webapp|landing)\b/i.test(trimmed)) return false;
+    return /\b(?:jam\s+berapa|pukul\s+berapa|waktu\s+(?:sekarang|saat\s+ini|lokal)|tanggal\s+berapa|hari\s+apa(?:\s+(?:sekarang|ini))?|sekarang\s+(?:jam|pukul|hari|tanggal)|what\s+time\s+is\s+it|current\s+time|what(?:'s|\s+is)\s+the\s+(?:time|date)|today'?s\s+date|cek\s+(?:jam|waktu|tanggal)|lihat\s+(?:jam|waktu))\b/i.test(trimmed);
+  }
+
+  function isDocumentKnowledgePrompt(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    if (/^\/(?:forge|z21|website|webapp|landing)\b/i.test(trimmed)) return false;
+    if (/\b(?:search_documents|retrieve_knowledge|rag_search|retrieve_documents|search_knowledge)\b/i.test(trimmed)) return true;
+    const hasDocNoun = /\b(?:sop\b|standar\s+operasional|prosedur\s+operasional|regulasi|peraturan\s+internal|kebijakan\s+(?:diskon|perusahaan|internal|privasi|hr|keuangan|cuti|klaim|pengadaan|operasional|harga|refund|garansi|sla)|dokumen\s+(?:sop|internal|regulasi|laporan|kebijakan|panduan|perusahaan)|laporan\s+(?:internal|penjualan|keuangan|audit|kuartal|bulanan|tahunan)|basis\s+pengetahuan|knowledge\s+base|vector\s+database|rag\s+dinamis)\b/i.test(trimmed);
+    const hasDocVerb = /\b(?:cari(?:kan)?|ambil(?:kan)?|cek|periksa|lihat|baca|telusuri|analis(?:a|is)|rangkum|ringkas|hitung|berapa|apa|bagaimana|aturan|ketentuan|pasal|syarat)\b/i.test(trimmed);
+    if (hasDocNoun && hasDocVerb && !isWebsiteCreationPrompt(trimmed)) return true;
+    return false;
+  }
+
+  function canUseZ21LocalCommunicationTool(planModeOverride = null, session = null) {
+    if (!isStrictLocalhostMode()) return false;
+    const activePlan = planModeOverride
+      ? normalizePlanMode(planModeOverride)
+      : (typeof getActivePlanMode === 'function' ? getActivePlanMode(session) : 'zoz');
+    return activePlan === 'z21';
+  }
+
+  const CLIENT_COMM_META_STOPWORDS = new Set([
+    'whatsapp', 'whatsap', 'whatsapt', 'watsap', 'watsapp', 'wasap', 'whtsapp', 'whastapp', 'wa',
+    'chat', 'chats', 'pesan', 'obrolan', 'percakapan', 'baru', 'terbaru', 'terkini', 'terakhir', 'masuk',
+    'hari', 'ini', 'kemarin', 'minggu', 'bulan', 'sekarang', 'tadi', 'barusan', 'belum', 'dibaca',
+    'dibalas', 'unread', 'new', 'latest', 'recent', 'message', 'messages', 'all', 'semua', 'cek',
+    'periksa', 'lihat', 'baca', 'bacakan', 'tampilkan', 'tunjuk', 'tunjukkan', 'ambil', 'ambilkan',
+    'cari', 'carikan', 'analisa', 'analisis', 'rangkum', 'ringkas', 'rekap', 'tindak', 'lanjut',
+    'kontak', 'grup', 'group', 'email', 'tiket', 'ticket', 'komunikasi', 'riwayat', 'ada', 'gak',
+    'nggak', 'tidak', 'yang', 'dari', 'soal', 'tentang', 'dong', 'tolong', 'saya', 'aku', 'nya',
+    'anda', 'kamu', 'bisa', 'coba', 'bagaimana', 'bagaimaana', 'gimana', 'kalau', 'kalo', 'jika',
+    'apakah', 'siapakah', 'dimana', 'kapan', 'kenapa', 'mengapa', 'isi', 'kasih', 'tahu', 'info',
+    'infokan', 'beritahu', 'jelaskan', 'jam', 'berapa', 'waktu', 'tanggal', 'siapa', 'ngechat',
+    'sama', 'dengan', 'untuk', 'pada', 'apa', 'atau', 'dan', 'ke', 'di', 'do', 'kali', 'bahas',
+    'dibahas', 'membahas', 'pembahasan', 'topik', 'ngobrol', 'ngobrolin', 'diskusi', 'diskusikan'
+  ]);
+
+  function normalizeClientCommPhrase(str) {
+    if (!str) return '';
+    return String(str)
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function parseClientCommTimestampMs(ts) {
+    if (ts === null || ts === undefined || ts === '' || typeof ts === 'boolean') return 0;
+    let num = NaN;
+    if (typeof ts === 'number') {
+      num = ts;
+    } else if (typeof ts === 'bigint') {
+      num = Number(ts);
+    } else if (typeof ts === 'object') {
+      if (typeof ts.toNumber === 'function') {
+        try { num = ts.toNumber(); } catch (_) {}
+      }
+      if (!Number.isFinite(num) && ts.low !== undefined) {
+        const hi = Number(ts.high) || 0;
+        const lo = Number(ts.low) >>> 0;
+        num = hi > 0 ? (hi * 4294967296 + lo) : Number(ts.low);
+      }
+    } else if (typeof ts === 'string') {
+      const trimmed = ts.trim();
+      if (/^\d{9,}(?:\.\d+)?$/.test(trimmed)) {
+        num = Number(trimmed);
+      }
+    }
+    if (Number.isFinite(num) && num > 0) return num < 1e12 ? num * 1000 : num;
+    const parsed = Date.parse(String(ts));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  }
+
+  function formatClientCommTimestamp(ts) {
+    const ms = parseClientCommTimestampMs(ts);
+    if (!Number.isFinite(ms) || ms <= 0) return '';
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  function formatClientCommRelativeAge(tsMs, nowMs = Date.now()) {
+    if (!tsMs || tsMs <= 0) return '';
+    const diffSec = Math.max(0, Math.round((nowMs - tsMs) / 1000));
+    if (diffSec < 60) return 'baru saja';
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)} menit lalu`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} jam lalu`;
+    if (diffSec < 172800) return 'kemarin';
+    return `${Math.floor(diffSec / 86400)} hari lalu`;
+  }
+
+  function buildClientLocalClockInfo(nowMs = Date.now()) {
+    const now = new Date(nowMs);
+    const daysId = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const monthsId = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateText = `${daysId[now.getDay()]}, ${now.getDate()} ${monthsId[now.getMonth()]} ${now.getFullYear()}`;
+    const timeText = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    const offsetTotalMin = -now.getTimezoneOffset();
+    const sign = offsetTotalMin >= 0 ? '+' : '-';
+    const absMin = Math.abs(offsetTotalMin);
+    const utcOffset = `UTC${sign}${pad(Math.floor(absMin / 60))}:${pad(absMin % 60)}`;
+    let timeZone = utcOffset;
+    try {
+      timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || utcOffset;
+    } catch (_) {}
+    return {
+      epochMs: nowMs,
+      isoUtc: now.toISOString(),
+      dateText,
+      timeText,
+      timeZone,
+      utcOffset,
+      formattedDateTime: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${timeText}`,
+      summaryLine: `${dateText}, pukul ${timeText} (${timeZone}, ${utcOffset})`
+    };
+  }
+
+  async function collectCommunicationContextClientFallback(payload = {}, reqHeaders = {}, signal = undefined, session = null) {
+    if (!canUseZ21LocalCommunicationTool(payload?.planMode, session)) return null;
+    const nowMs = Date.now();
+    const serverTime = buildClientLocalClockInfo(nowMs);
+    const source = String(payload.source || 'auto').trim().toLowerCase();
+    const targetId = String(payload.target_id || '').trim();
+    const query = String(payload.query || '').trim();
+    const limit = Math.max(1, Math.min(15, parseInt(payload.limit, 10) || 6));
+    const maxMessages = Math.max(3, Math.min(80, parseInt(payload.max_messages, 10) || 25));
+    const days = Math.max(0, Math.min(365, parseInt(payload.days, 10) || 0));
+    const sinceMinutes = Math.max(0, Math.min(10080, parseInt(payload.since_minutes, 10) || 0));
+    const isLivePulse = String(payload.mode || '').toLowerCase() === 'live_pulse';
+    const unreadOnly = Boolean(payload.unread_only);
+    const cutoffMs = sinceMinutes > 0 ? (nowMs - sinceMinutes * 60000) : (days > 0 ? (nowMs - days * 86400000) : 0);
+
+    const targetLower = targetId.toLowerCase();
+    const queryLower = query.toLowerCase();
+    const normTargetPhrase = normalizeClientCommPhrase(targetId);
+    const searchTokens = Array.from(new Set(
+      `${targetLower} ${queryLower}`
+        .replace(/[^\p{L}\p{N}_@.\-#+]/gu, ' ')
+        .split(/\s+/)
+        .map(t => t.replace(/^[^a-zA-Z0-9\p{L}\p{N}]+|[^a-zA-Z0-9\p{L}\p{N}]+$/gu, ''))
+        .filter(t => t.length >= 1)
+    )).slice(0, 14);
+    const substantiveTokens = searchTokens.filter(t => !CLIENT_COMM_META_STOPWORDS.has(t));
+    const normSubstantivePhrase = normalizeClientCommPhrase(substantiveTokens.join(' '));
+    const hasSubstantiveFilter = Boolean(targetId || substantiveTokens.length > 0);
+    const effectiveUnreadOnly = unreadOnly || /\b(?:belum\s+(?:dibaca|dibalas)|unread)\b/i.test(queryLower);
+
+    const apiUrl = (p) => (typeof getUniversalApiUrl === 'function') ? getUniversalApiUrl(p) : p;
+    const wantsWaSource = ['auto', 'all', 'whatsapp'].includes(source);
+    let waConnected = Boolean(typeof WhatsAppController !== 'undefined' && WhatsAppController.status?.connected);
+    let contacts = (wantsWaSource && typeof WhatsAppController !== 'undefined' && Array.isArray(WhatsAppController.contacts) && WhatsAppController.contacts.length > 0)
+      ? [...WhatsAppController.contacts]
+      : [];
+
+    if (signal?.aborted) return null;
+
+    if (wantsWaSource) {
+      try {
+        const [stRes, ctRes] = await Promise.all([
+          fetch(apiUrl('/api/wa/status'), { headers: reqHeaders, signal }).catch(() => null),
+          fetch(apiUrl('/api/wa/contacts'), { headers: reqHeaders, signal }).catch(() => null)
+        ]);
+        if (signal?.aborted) return null;
+        if (stRes && stRes.ok) {
+          const stData = await stRes.json().catch(() => null);
+          if (stData && typeof stData.connected === 'boolean') waConnected = stData.connected;
+        }
+        if (ctRes && ctRes.ok) {
+          const ctData = await ctRes.json().catch(() => null);
+          if (ctData && Array.isArray(ctData.contacts) && ctData.contacts.length > 0) {
+            contacts = ctData.contacts;
+          }
+        }
+      } catch (_) {}
+    }
+    if (signal?.aborted) return null;
+
+    const totalContacts = contacts.length;
+    const unreadChats = contacts.filter(c => (c?.unreadCount || 0) > 0).length;
+    const directoryPreview = [...contacts]
+      .sort((a, b) => (parseClientCommTimestampMs(b?.lastTimestamp) - parseClientCommTimestampMs(a?.lastTimestamp)) || ((b?.unreadCount || 0) - (a?.unreadCount || 0)))
+      .slice(0, 10)
+      .map(c => {
+        const tsMs = parseClientCommTimestampMs(c.lastTimestamp);
+        return {
+          id: c.id,
+          name: c.name || c.notify || c.phone || c.id,
+          phone: c.phone || '',
+          unreadCount: c.unreadCount || 0,
+          timestampMs: tsMs,
+          lastTimestamp: formatClientCommTimestamp(tsMs),
+          relativeAge: formatClientCommRelativeAge(tsMs, nowMs),
+          lastMessage: String(c.lastMessage || '').slice(0, 120)
+        };
+      });
+
+    const scoredContacts = [];
+    for (const c of contacts) {
+      if (!c || !c.id) continue;
+      const tsMs = parseClientCommTimestampMs(c.lastTimestamp);
+      if (cutoffMs > 0 && tsMs > 0 && tsMs < cutoffMs) continue;
+      const jidLower = String(c.id || '').toLowerCase();
+      const nameLower = String(c.name || '').toLowerCase();
+      const notifyLower = String(c.notify || '').toLowerCase();
+      const normName = normalizeClientCommPhrase(c.name);
+      const normNotify = normalizeClientCommPhrase(c.notify);
+      const normWords = new Set(`${normName} ${normNotify}`.split(/\s+/).filter(Boolean));
+      const lastMsgLower = String(c.lastMessage || '').toLowerCase();
+
+      let score = 0;
+      let contactMatchedDirectly = false;
+      if (targetLower) {
+        if (jidLower === targetLower) { score += 130; contactMatchedDirectly = true; }
+        else if (nameLower.includes(targetLower) || notifyLower.includes(targetLower) || (normTargetPhrase && (normName.includes(normTargetPhrase) || normNotify.includes(normTargetPhrase)))) { score += 105; contactMatchedDirectly = true; }
+        else if (jidLower.includes(targetLower)) { score += 70; contactMatchedDirectly = true; }
+      }
+      if (normSubstantivePhrase && normSubstantivePhrase.length >= 2) {
+        if (normName === normSubstantivePhrase || normNotify === normSubstantivePhrase) { score += 115; contactMatchedDirectly = true; }
+        else if (normName.includes(normSubstantivePhrase) || normNotify.includes(normSubstantivePhrase)) { score += 95; contactMatchedDirectly = true; }
+        else if (substantiveTokens.length >= 2 && substantiveTokens.every(t => normWords.has(t))) { score += 85; contactMatchedDirectly = true; }
+      }
+      for (const tok of substantiveTokens) {
+        if (tok.length >= 2 && (nameLower.includes(tok) || notifyLower.includes(tok))) score += 28;
+        else if (tok.length === 1 && normWords.has(tok)) score += 18;
+        else if (tok.length >= 2 && lastMsgLower.includes(tok)) score += 10;
+      }
+
+      if (hasSubstantiveFilter && score <= 0 && !isLivePulse) continue;
+      if (effectiveUnreadOnly && !(c.unreadCount > 0) && !contactMatchedDirectly) continue;
+
+      const ageMs = tsMs > 0 ? Math.max(0, nowMs - tsMs) : Infinity;
+      const recencyBonus = ageMs <= 15 * 60000 ? 55 : ageMs <= 2 * 3600000 ? 45 : ageMs <= 24 * 3600000 ? 35 : ageMs <= 7 * 86400000 ? 22 : 10;
+      score += (!hasSubstantiveFilter ? recencyBonus : Math.min(12, Math.floor(recencyBonus / 4))) + ((c.unreadCount > 0) ? 15 : 0);
+      scoredContacts.push({ contact: c, score, tsMs, contactMatchedDirectly });
+    }
+
+    if (hasSubstantiveFilter && !isLivePulse) {
+      scoredContacts.sort((a, b) => (b.score - a.score) || (b.tsMs - a.tsMs));
+    } else {
+      scoredContacts.sort((a, b) => {
+        if (isLivePulse && hasSubstantiveFilter) {
+          const ma = a.contactMatchedDirectly ? 1 : 0;
+          const mb = b.contactMatchedDirectly ? 1 : 0;
+          if (mb !== ma) return mb - ma;
+        }
+        return (b.tsMs - a.tsMs) || (b.score - a.score);
+      });
+    }
+
+    const picked = scoredContacts.slice(0, source === 'whatsapp' ? limit : Math.min(limit, 5));
+    const items = [];
+    let returnedMessages = 0;
+
+    const fetchedWaItems = await Promise.all(picked.map(async (entry) => {
+      if (signal?.aborted) return null;
+      const c = entry.contact;
+      const savedUnread = c.unreadCount || 0;
+      let rawMsgs = [];
+      try {
+        const mRes = await fetch(apiUrl(`/api/wa/messages?jid=${encodeURIComponent(c.id)}&markAsRead=false`), {
+          headers: reqHeaders,
+          signal
+        }).catch(() => null);
+        if (signal?.aborted) return null;
+        if (mRes && mRes.ok) {
+          const mData = await mRes.json().catch(() => null);
+          if (mData && Array.isArray(mData.messages)) rawMsgs = mData.messages;
+        }
+      } catch (_) {}
+
+      const filteredMsgs = cutoffMs > 0
+        ? rawMsgs.filter(m => { const ms = parseClientCommTimestampMs(m?.timestamp); return ms > 0 && ms >= cutoffMs; })
+        : rawMsgs;
+      const selected = filteredMsgs.slice(-maxMessages);
+      const formattedMessages = selected.map(m => {
+        const mTsMs = parseClientCommTimestampMs(m?.timestamp);
+        const who = m?.fromMe ? 'Anda' : (m?.senderName || c.name || c.phone || c.id);
+        const mediaType = m?.mediaType || m?.media?.type || '';
+        const mediaFileName = m?.fileName || m?.media?.fileName || '';
+        const mediaTag = (m?.hasFile || mediaType || mediaFileName)
+          ? ` [${mediaType || 'Lampiran'}${mediaFileName ? `: ${mediaFileName}` : ''}]`
+          : '';
+        const body = String(m?.text || m?.caption || '').replace(/\s+/g, ' ').trim();
+        const textOut = (mediaFileName && body.includes(mediaFileName)) ? body : `${body}${mediaTag}`;
+        return {
+          timestamp: formatClientCommTimestamp(mTsMs),
+          timestampMs: mTsMs,
+          relativeAge: formatClientCommRelativeAge(mTsMs, nowMs),
+          sender: who,
+          fromMe: Boolean(m?.fromMe),
+          text: textOut.trim().slice(0, 600)
+        };
+      });
+      if (formattedMessages.length === 0 && c.lastMessage) {
+        formattedMessages.push({
+          timestamp: formatClientCommTimestamp(entry.tsMs),
+          timestampMs: entry.tsMs,
+          relativeAge: formatClientCommRelativeAge(entry.tsMs, nowMs),
+          sender: c.name || c.phone || c.id,
+          fromMe: false,
+          text: String(c.lastMessage || '').slice(0, 600)
+        });
+      }
+      return {
+        source: 'whatsapp',
+        id: c.id,
+        title: c.name || c.notify || c.phone || c.id,
+        phone: c.phone || '',
+        isGroup: Boolean(c.isGroup || String(c.id).endsWith('@g.us')),
+        unreadCount: savedUnread,
+        totalMessages: filteredMsgs.length || formattedMessages.length,
+        timestampMs: entry.tsMs,
+        lastTimestamp: formatClientCommTimestamp(entry.tsMs),
+        relativeAge: formatClientCommRelativeAge(entry.tsMs, nowMs),
+        score: entry.score,
+        messages: formattedMessages
+      };
+    }));
+    if (signal?.aborted) return null;
+    for (const waItem of fetchedWaItems) {
+      if (!waItem) continue;
+      returnedMessages += waItem.messages.length;
+      items.push(waItem);
+    }
+
+    const recentIncoming = (typeof WhatsAppController !== 'undefined' && Array.isArray(WhatsAppController.recentIncomingQueue))
+      ? WhatsAppController.recentIncomingQueue.slice(0, 12).map(ev => {
+          const tsMs = parseClientCommTimestampMs(ev.timestamp || ev.receivedAt);
+          return {
+            ...ev,
+            timestampMs: tsMs,
+            formattedTime: formatClientCommTimestamp(tsMs),
+            relativeAge: formatClientCommRelativeAge(tsMs, nowMs)
+          };
+        })
+      : [];
+
+    const stats = {
+      whatsapp: {
+        connected: waConnected,
+        totalContacts,
+        unreadChats,
+        matchedThreads: items.length,
+        returnedMessages,
+        recentIncomingCount: recentIncoming.length
+      },
+      files: { scanned: 0, matchedFiles: 0 },
+      sessions: { scanned: 0, matchedSessions: 0 },
+      memory: { matchedNotes: 0 }
+    };
+
+    const lines = [];
+    lines.push(`[KONTEKS KOMUNIKASI LOKAL — MODE Z21 LOCALHOST]`);
+    lines.push(`Waktu Server Lokal Sekarang: ${serverTime.summaryLine} | ISO: ${serverTime.isoUtc}`);
+    lines.push(`Parameter: source=${source} | target_id=${targetId || '(semua)'} | query=${query || '(tanpa filter)'}`);
+    lines.push(`Statistik Sumber: WhatsApp(${totalContacts} kontak, ${unreadChats} belum dibaca, ${items.length} cocok, status=${waConnected ? 'Terhubung' : 'Arsip Lokal'})`);
+
+    if (recentIncoming.length > 0) {
+      lines.push(`\n[PESAN WHATSAPP BARU MASUK LIVE (REAL-TIME)]:`);
+      for (const ev of recentIncoming.slice(0, 10)) {
+        lines.push(`- [${ev.formattedTime || '-'}${ev.relativeAge ? ` | ${ev.relativeAge}` : ''}] ${ev.contactName || ev.jid}: ${String(ev.text || '').replace(/\s+/g, ' ').slice(0, 220)}`);
+      }
+    }
+
+    if (items.length === 0) {
+      lines.push('\nTidak ditemukan kecocokan langsung pada riwayat komunikasi lokal untuk kriteria tersebut.');
+      if (directoryPreview.length > 0) {
+        lines.push('\nAktivitas Kontak/Grup WhatsApp Paling Baru di Disk (dapat dipakai sebagai target_id):');
+        for (const c of directoryPreview) {
+          lines.push(`- ${c.name} (ID: ${c.id}${c.phone ? `, Telp: ${c.phone}` : ''}, Waktu: ${c.lastTimestamp || '-'}${c.relativeAge ? ` [${c.relativeAge}]` : ''}, Belum dibaca: ${c.unreadCount}) — Pesan terakhir: "${c.lastMessage}"`);
+        }
+      }
+    } else {
+      items.forEach((item, idx) => {
+        const unreadTag = item.unreadCount > 0 ? ` | BELUM DIBACA: ${item.unreadCount}` : '';
+        const ageTag = item.relativeAge ? ` (${item.relativeAge})` : '';
+        lines.push(`\n--- [${idx + 1}] WHATSAPP ${item.isGroup ? 'GRUP' : 'CHAT'}: ${item.title} (ID: ${item.id}${item.phone ? ` | Telp: ${item.phone}` : ''}${unreadTag} | Update: ${item.lastTimestamp || '-'}${ageTag}) ---`);
+        for (const m of (item.messages || [])) {
+          lines.push(`  [${m.timestamp || '-'}${m.relativeAge ? ` | ${m.relativeAge}` : ''}] ${m.sender}: ${m.text}`);
+        }
+      });
+    }
+
+    return {
+      success: true,
+      fallbackUsed: true,
+      serverTime,
+      query: { source, targetId, query, limit, maxMessages, days, sinceMinutes, unreadOnly },
+      stats,
+      recentIncoming,
+      items,
+      directoryPreview,
+      formattedContext: lines.join('\n').slice(0, 18000)
+    };
+  }
+
+  async function requestZ21CommunicationContext(payload, reqHeaders, signal, session = null) {
+    const endpoint = (typeof getUniversalApiUrl === 'function')
+      ? getUniversalApiUrl('/api/tools/communication-context')
+      : '/api/tools/communication-context';
+    let res = null;
+    let data = null;
+    try {
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers: reqHeaders,
+        body: JSON.stringify(payload),
+        signal
+      });
+      data = await res.json().catch(() => null);
+      if (res.ok && data && data.success) {
+        return { ok: true, status: res.status, data };
+      }
+      if (res.status === 403 || res.status === 401) {
+        return { ok: false, status: res.status, data };
+      }
+    } catch (fetchErr) {
+      if (signal?.aborted || fetchErr?.name === 'AbortError') {
+        throw fetchErr;
+      }
+    }
+
+    if (signal?.aborted) return { ok: false, status: 499, data: null };
+
+    // Fallback tangguh sisi klien ke /api/wa/* + memori WhatsAppController bila server belum di-restart (404/5xx)
+    const fallbackData = await collectCommunicationContextClientFallback(payload, reqHeaders, signal, session).catch(() => null);
+    if (fallbackData && fallbackData.success) {
+      return { ok: true, status: 200, data: fallbackData };
+    }
+    return { ok: false, status: res ? res.status : 500, data };
+  }
+
+  async function fetchZ21LocalhostLivePulse(promptText, session = null, options = {}) {
+    if (!canUseZ21LocalCommunicationTool(options?.planMode, session)) return '';
+    let pulseFallbackCtrl = null;
+    let pulseTimeoutId = null;
+    let onParentAbort = null;
+    try {
+      const reqHeaders = {
+        'Content-Type': 'application/json',
+        'X-Zoz-Plan-Mode': 'z21',
+        'X-User-ID': STATE.userId || 'default'
+      };
+      if (STATE.userToken) reqHeaders['X-User-Token'] = STATE.userToken;
+      if (typeof WhatsAppController !== 'undefined') {
+        if (WhatsAppController.userId) reqHeaders['X-WA-User-ID'] = WhatsAppController.userId;
+        if (WhatsAppController.pin) reqHeaders['X-WA-PIN'] = WhatsAppController.pin;
+      }
+
+      let pulseSignal;
+      if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' && typeof AbortSignal.any === 'function' && STATE.abortController?.signal) {
+        pulseSignal = AbortSignal.any([AbortSignal.timeout(3000), STATE.abortController.signal]);
+      } else {
+        pulseFallbackCtrl = new AbortController();
+        pulseTimeoutId = setTimeout(() => { try { pulseFallbackCtrl.abort(); } catch (_) {} }, 3000);
+        if (STATE.abortController?.signal) {
+          if (STATE.abortController.signal.aborted) {
+            pulseFallbackCtrl.abort();
+          } else {
+            onParentAbort = () => { try { pulseFallbackCtrl.abort(); } catch (_) {} };
+            STATE.abortController.signal.addEventListener('abort', onParentAbort, { once: true });
+          }
+        }
+        pulseSignal = pulseFallbackCtrl.signal;
+      }
+
+      const isCommTurn = Boolean(options && options.isCommTurn);
+      const outcome = await requestZ21CommunicationContext({
+        planMode: 'z21',
+        source: 'whatsapp',
+        mode: 'live_pulse',
+        sort_by: 'recent',
+        query: isCommTurn ? String(promptText || '').slice(0, 240) : '',
+        limit: isCommTurn ? 6 : 4,
+        max_messages: isCommTurn ? 10 : 3,
+        exclude_session_id: session?.id || ''
+      }, reqHeaders, pulseSignal, session);
+      if (!outcome || !outcome.ok || !outcome.data || !outcome.data.success) return '';
+      const data = outcome.data;
+
+      const lines = [];
+      const waStats = data.stats?.whatsapp || {};
+      const serverClock = data.serverTime?.summaryLine || '';
+      lines.push(`[LIVE PULSE WHATSAPP & WAKTU LOKAL — MODE Z21 LOCALHOST]`);
+      if (serverClock) lines.push(`- Waktu Server Lokal Sekarang: ${serverClock}`);
+      lines.push(`- Status WhatsApp Gateway: ${waStats.connected ? 'Terhubung (Real-Time Aktif)' : 'Arsip Lokal / Belum Scan QR'} | Total Kontak: ${waStats.totalContacts || 0} | Chat Belum Dibaca: ${waStats.unreadChats || 0}`);
+
+      const serverIncoming = Array.isArray(data.recentIncoming) ? data.recentIncoming : [];
+      const seenIncomingIds = new Set(serverIncoming.map(ev => ev && ev.id).filter(Boolean));
+      const seenIncomingFps = new Set(serverIncoming.map(ev => {
+        if (!ev) return '';
+        const t = Math.floor(parseClientCommTimestampMs(ev.timestamp || ev.receivedAt) / 5000);
+        return `${ev.jid || ''}|${t}|${String(ev.text || '').trim().slice(0, 40)}`;
+      }).filter(Boolean));
+      const sseCutoffMs = Date.now() - 30 * 60000;
+      const clientSseIncoming = (typeof WhatsAppController !== 'undefined' && Array.isArray(WhatsAppController.recentIncomingQueue))
+        ? WhatsAppController.recentIncomingQueue.filter(ev => {
+            if (!ev) return false;
+            if (ev.id && seenIncomingIds.has(ev.id)) return false;
+            const evMs = parseClientCommTimestampMs(ev.receivedAt || ev.timestamp);
+            if (evMs < sseCutoffMs) return false;
+            const fp = `${ev.jid || ''}|${Math.floor(parseClientCommTimestampMs(ev.timestamp || ev.receivedAt) / 5000)}|${String(ev.text || '').trim().slice(0, 40)}`;
+            return !seenIncomingFps.has(fp);
+          })
+        : [];
+      const mergedIncoming = [...clientSseIncoming, ...serverIncoming].slice(0, 8);
+
+      if (mergedIncoming.length > 0) {
+        lines.push(`- Pesan Baru Masuk Real-Time (${mergedIncoming.length}):`);
+        for (const ev of mergedIncoming) {
+          const sender = ev.senderName || ev.contactName || ev.jid || 'Kontak';
+          const evTsMs = parseClientCommTimestampMs(ev.timestamp || ev.receivedAt);
+          const whenStr = ev.formattedTime || (evTsMs > 0 ? formatClientCommTimestamp(evTsMs) : 'baru saja');
+          const ageStr = ev.relativeAge ? `, ${ev.relativeAge}` : '';
+          lines.push(`  • [${whenStr}${ageStr}] ${ev.contactName || ev.jid}${sender !== ev.contactName ? ` (${sender})` : ''}: ${String(ev.text || '').replace(/\s+/g, ' ').slice(0, 180)}`);
+        }
+      }
+
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (items.length > 0) {
+        lines.push(`- Thread WhatsApp Paling Baru (${items.length}):`);
+        items.forEach((it, idx) => {
+          const unreadBadge = it.unreadCount > 0 ? ` | BELUM DIBACA: ${it.unreadCount}` : '';
+          const timeMeta = it.lastTimestamp ? ` | ${it.lastTimestamp}${it.relativeAge ? ` (${it.relativeAge})` : ''}` : '';
+          lines.push(`  ${idx + 1}. ${it.title} (${it.id}${timeMeta}${unreadBadge})`);
+          if (Array.isArray(it.messages) && it.messages.length > 0) {
+            const isDirectMatch = (it.score || 0) >= 85;
+            const latestMsg = it.messages[it.messages.length - 1];
+            const earlierWindow = isCommTurn ? (isDirectMatch ? -8 : -4) : -2;
+            const earlierMsgs = it.messages.slice(earlierWindow, -1);
+            for (const m of earlierMsgs) {
+              lines.push(`     - [${m.timestamp || '-'}${m.relativeAge ? ` | ${m.relativeAge}` : ''}] ${m.sender || 'Pengirim'}: ${String(m.text || '').slice(0, 240)}`);
+            }
+            if (latestMsg && latestMsg.text) {
+              lines.push(`     * Pesan Paling Akhir [${latestMsg.timestamp || '-'}${latestMsg.relativeAge ? ` | ${latestMsg.relativeAge}` : ''}] (Pengirim: ${latestMsg.sender || 'Pengirim'}): "${String(latestMsg.text || '').slice(0, 260)}"`);
+            }
+          }
+        });
+      } else if (Array.isArray(data.directoryPreview) && data.directoryPreview.length > 0) {
+        lines.push(`- Aktivitas Kontak Terbaru (${data.directoryPreview.length}):`);
+        data.directoryPreview.slice(0, 5).forEach((c, idx) => {
+          lines.push(`  ${idx + 1}. ${c.name} [${c.lastTimestamp || '-'}${c.relativeAge ? `, ${c.relativeAge}` : ''}]${c.unreadCount > 0 ? ` (${c.unreadCount} belum dibaca)` : ''}: "${c.lastMessage || ''}"`);
+        });
+      }
+
+      const maxPulseChars = isCommTurn ? 9000 : 2500;
+      const joinedPulse = lines.join('\n');
+      if (joinedPulse.length <= maxPulseChars) return joinedPulse;
+      const slicedPulse = joinedPulse.slice(0, maxPulseChars);
+      const lastNl = slicedPulse.lastIndexOf('\n');
+      return lastNl > 200 ? slicedPulse.slice(0, lastNl) : slicedPulse;
+    } catch (_) {
+      return '';
+    } finally {
+      if (pulseTimeoutId) clearTimeout(pulseTimeoutId);
+      if (onParentAbort && STATE.abortController?.signal) {
+        try { STATE.abortController.signal.removeEventListener('abort', onParentAbort); } catch (_) {}
+      }
+    }
+  }
+
   function resolveWebForgeRunContext(promptText, session, runOptions, flags = {}) {
     const isBlocked = Boolean(flags.isDocRequest || flags.hasNegativePreview || flags.isExplicitCleanCodeCmd);
     const explicitStudioRev = Boolean(runOptions && runOptions.isWebsiteRevision);
@@ -30300,7 +31083,25 @@ ${blocks}
       : null;
 
     const isExplicitCreationPrompt = isWebsiteCreationPrompt(promptText);
-    const isWebCreationIntent = !isBlocked && !explicitStudioRev && !flags.isStudioIsolated && allowForgeInThisTurn && (
+    const isLocalZ21 = Boolean(activePlan === 'z21' && typeof isStrictLocalhostMode === 'function' && isStrictLocalhostMode());
+    const isCommPrompt = Boolean(typeof isCommunicationContextPrompt === 'function' && isCommunicationContextPrompt(promptText));
+    const isTimePrompt = Boolean(typeof isLocalTimeOrClockPrompt === 'function' && isLocalTimeOrClockPrompt(promptText));
+    const isDocRagPrompt = Boolean(typeof isDocumentKnowledgePrompt === 'function' && isDocumentKnowledgePrompt(promptText));
+    const lastAssistantSessionMsg = (session && Array.isArray(session.messages) && session.messages.length > 0)
+      ? [...session.messages].reverse().find(m => m && m.role === 'assistant')
+      : null;
+    const isCommFollowUp = Boolean(
+      !latestSessionWebFile &&
+      lastAssistantSessionMsg &&
+      lastAssistantSessionMsg.isCommunicationAnalysis === true &&
+      /\b(?:tindak\s*lanjut|follow[\s-]*up|balas(?:an)?|draft|rangkum|ringkas|rekap|poin|action\s*item|kirim|kontak|chat\s+tadi|pesan\s+tadi|tiket\s+tadi|email\s+tadi)\b/i.test(trimmedPrompt)
+    );
+    const isCommunicationAnalysis = Boolean(isLocalZ21 && (isCommPrompt || isCommFollowUp));
+    const isLocalTimeQuery = Boolean(isLocalZ21 && isTimePrompt);
+    const isDocumentKnowledgeQuery = Boolean(isLocalZ21 && isDocRagPrompt);
+    const isNonWebLocalOnly = Boolean((isCommunicationAnalysis || isLocalTimeQuery || isDocumentKnowledgeQuery) && !isExplicitCreationPrompt && !hasExplicitForgeCmd && !explicitWebsiteMode && !explicitStudioRev);
+
+    const isWebCreationIntent = !isBlocked && !explicitStudioRev && !flags.isStudioIsolated && allowForgeInThisTurn && !isNonWebLocalOnly && (
       explicitWebsiteMode ||
       hasExplicitForgeCmd ||
       isExplicitCreationPrompt ||
@@ -30310,18 +31111,21 @@ ${blocks}
       explicitStudioRev ||
       Boolean(latestSessionWebFile && !isExplicitCreationPrompt && isWebsiteEditRequest(promptText))
     );
-    const isWebRequest = Boolean(isWebCreationIntent || isWebRevisionIntent || (!flags.isStudioIsolated && activePlan === 'z21' && !isBlocked));
+    const isWebRequest = Boolean(isWebCreationIntent || isWebRevisionIntent || (!flags.isStudioIsolated && activePlan === 'z21' && !isBlocked && !isNonWebLocalOnly));
     if (runOptions) {
       if (activePlan === 'z21') {
         runOptions.planMode = 'z21';
       } else if (!runOptions.planMode) {
         runOptions.planMode = 'zoz';
       }
+      runOptions.isCommunicationAnalysis = isCommunicationAnalysis;
+      runOptions.isLocalTimeQuery = isLocalTimeQuery;
+      runOptions.isDocumentKnowledgeQuery = isDocumentKnowledgeQuery;
       if (isWebRequest) {
         runOptions.websiteMode = activePlan === 'z21' ? 'z21' : 'forge';
         if (isWebCreationIntent) runOptions.isWebCreation = true;
         if (isWebRevisionIntent) runOptions.isWebsiteRevision = true;
-      } else if (activePlan === 'zoz') {
+      } else if (activePlan === 'zoz' || isNonWebLocalOnly) {
         runOptions.isWebCreation = false;
         runOptions.isWebsiteRevision = false;
       }
@@ -30332,7 +31136,10 @@ ${blocks}
       isWebCreationIntent,
       isWebRevisionIntent,
       isWebRequest,
-      isWebTask: isWebRequest
+      isWebTask: isWebRequest,
+      isCommunicationAnalysis,
+      isLocalTimeQuery,
+      isDocumentKnowledgeQuery
     };
   }
 
@@ -31564,18 +32371,122 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           additionalProperties: false
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'fetch_communication_context',
+        description: 'Khusus Mode Z21 Localhost: Mengambil riwayat chat WhatsApp (kontak, grup, pesan, lampiran, status unread), email lokal (.eml/.mbox), pesan chat tim/notulen, catatan tiket/issue, riwayat sesi AI, serta memori lokal berdasarkan ID atau kata kunci untuk dirangkum, dianalisis, atau ditindaklanjuti.',
+        parameters: {
+          type: 'object',
+          properties: {
+            source: {
+              type: 'string',
+              enum: ['auto', 'all', 'whatsapp', 'email', 'team_chat', 'ticket', 'session', 'memory'],
+              default: 'auto',
+              description: 'Sumber komunikasi lokal yang diambil. Gunakan "auto" (rekomendasi), "whatsapp", "email", "team_chat", "ticket", "session", "memory", atau "all".'
+            },
+            query: {
+              type: 'string',
+              description: 'Kata kunci, topik, nama pengirim/kontak, atau konteks masalah yang ingin dianalisis/dirangkum.'
+            },
+            target_id: {
+              type: 'string',
+              description: 'Opsional: ID spesifik target seperti nomor HP/JID WhatsApp, nama kontak/grup, ID tiket (#123, TICKET-101), ID sesi, atau nama berkas email.'
+            },
+            limit: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 15,
+              default: 6,
+              description: 'Jumlah maksimal thread/item komunikasi yang dikembalikan (default 6).'
+            },
+            max_messages: {
+              type: 'integer',
+              minimum: 5,
+              maximum: 80,
+              default: 25,
+              description: 'Jumlah maksimal pesan kronologis per thread chat (default 25).'
+            },
+            days: {
+              type: 'integer',
+              minimum: 0,
+              maximum: 365,
+              default: 0,
+              description: 'Filter rentang waktu N hari terakhir (0 = semua waktu).'
+            },
+            since_minutes: {
+              type: 'integer',
+              minimum: 0,
+              maximum: 10080,
+              default: 0,
+              description: 'Filter rentang waktu N menit terakhir (mis. 60 untuk 1 jam terakhir, 1440 untuk 24 jam terakhir).'
+            },
+            sort_by: {
+              type: 'string',
+              enum: ['auto', 'recent', 'relevance'],
+              default: 'auto',
+              description: 'Urutan hasil: "recent" untuk chat/pesan terbaru paling atas, "relevance" untuk kecocokan kata kunci, atau "auto".'
+            },
+            unread_only: {
+              type: 'boolean',
+              default: false,
+              description: 'Jika true, fokus pada obrolan WhatsApp yang masih memiliki pesan belum dibaca.'
+            }
+          },
+          required: [],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'search_documents',
+        description: 'search_documents / retrieve_knowledge: Mencari dan mengambil potongan dokumen relevan (SOP, laporan, regulasi, kebijakan, panduan, atau basis pengetahuan internal) dari vector database (Hybrid Vector Cosine Similarity + SQLite FTS5 BM25 + Knowledge Graph RRF) dan sistem manajemen dokumen internal secara real-time (RAG dinamis). Mendukung Parallel Tool Calling (dipanggil bersamaan dengan fetch_communication_context, search_memory, atau search_web) maupun Sequential Chaining (hasilnya diteruskan ke execute_python_code untuk kalkulasi).',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Kata kunci atau pertanyaan semantik untuk mencari potongan dokumen relevan (contoh: "kebijakan diskon pelanggan VIP SOP", "regulasi batas klaim", "laporan penjualan kuartal").'
+            },
+            category: {
+              type: 'string',
+              enum: ['auto', 'all', 'sop', 'laporan', 'regulasi', 'kebijakan', 'panduan', 'vector_db', 'workspace'],
+              default: 'auto',
+              description: 'Kategori dokumen internal: "sop", "laporan", "regulasi", "kebijakan", "panduan", "vector_db", "workspace", atau "auto" (default).'
+            },
+            doc_id: {
+              type: 'string',
+              description: 'Opsional: ID dokumen, kode SOP, atau nama berkas spesifik yang ingin diambil (contoh: "SOP-DISKON-01", "kebijakan_diskon.md").'
+            },
+            top_k: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 15,
+              default: 5,
+              description: 'Jumlah maksimal potongan dokumen (chunks) paling relevan yang dikembalikan (default 5).'
+            }
+          },
+          required: ['query'],
+          additionalProperties: false
+        }
+      }
     }
   ];
 
-  // Seluruh tool otonom (Pencarian Web Real-Time Terbuka, Pembacaan URL, Visual Image Grounding, Rekomendasi Video, Memori SQLite, Python & WhatsApp Consent): diizinkan SELALU
+  // Seluruh tool otonom (Pencarian Web Real-Time Terbuka, Pembacaan URL, Visual Image Grounding, Rekomendasi Video, Memori SQLite, Python, WhatsApp Consent, Konteks Komunikasi Z21 Localhost & RAG Dinamis search_documents / retrieve_knowledge)
   const LOCAL_UTILITY_TOOL_NAMES = [
     'search_web', 'web_search', 'search', 'google_search', 'internet_search', 'pencarian_web', 'cari_web',
     'pencarian', 'tool_pencarian', 'cari', 'penelusuran', 'penelusuran_web', 'search_internet', 'google', 'duckduckgo', 'bing',
     'browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url', 'baca_web', 'ambil_web',
     'save_memory', 'simpan_memori', 'store_memory',
     'search_memory', 'cari_memori', 'query_memory',
+    'search_documents', 'retrieve_knowledge', 'search_knowledge', 'retrieve_documents', 'search_internal_docs', 'rag_search', 'cari_dokumen', 'ambil_pengetahuan', 'cari_sop', 'search_doc', 'retrieve_doc',
     'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python',
     'summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary',
+    'fetch_communication_context', 'communication_context', 'analyze_whatsapp_chat', 'analisis_whatsapp', 'analisis_komunikasi', 'cek_whatsapp', 'cari_chat_whatsapp', 'fetch_whatsapp_context', 'fetch_email_context', 'fetch_ticket_context', 'cek_tiket', 'cek_email', 'riwayat_komunikasi',
     'find_related_videos', 'search_related_videos', 'recommend_related_videos', 'recommend_videos', 'cari_video_terkait', 'rekomendasi_video', 'related_videos',
     'search_images', 'cari_gambar',
     'inspect_image', 'periksa_gambar',
@@ -31590,8 +32501,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     
     'save_memory', 'simpan_memori', 'store_memory',
     'search_memory', 'cari_memori', 'query_memory',
+    'search_documents', 'retrieve_knowledge', 'search_knowledge', 'retrieve_documents', 'search_internal_docs', 'rag_search', 'cari_dokumen', 'ambil_pengetahuan', 'cari_sop', 'search_doc', 'retrieve_doc',
     'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python',
     'summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary',
+    'fetch_communication_context', 'communication_context', 'analyze_whatsapp_chat', 'analisis_whatsapp', 'analisis_komunikasi', 'cek_whatsapp', 'cari_chat_whatsapp', 'fetch_whatsapp_context', 'fetch_email_context', 'fetch_ticket_context', 'cek_tiket', 'cek_email', 'riwayat_komunikasi',
     'find_related_videos', 'search_related_videos', 'recommend_related_videos', 'recommend_videos', 'cari_video_terkait', 'rekomendasi_video', 'related_videos',
     'search_images', 'cari_gambar',
     'inspect_image', 'periksa_gambar',
@@ -31613,8 +32526,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     ].includes(n)) return 'browse_web_page';
     if (['save_memory', 'simpan_memori', 'store_memory'].includes(n)) return 'save_memory';
     if (['search_memory', 'cari_memori', 'query_memory'].includes(n)) return 'search_memory';
+    if ([
+      'search_documents', 'retrieve_knowledge', 'search_knowledge', 'retrieve_documents',
+      'search_internal_docs', 'rag_search', 'cari_dokumen', 'ambil_pengetahuan', 'cari_sop',
+      'search_doc', 'retrieve_doc'
+    ].includes(n)) return 'search_documents';
     if (['execute_python_code', 'execute_code', 'run_python', 'run_code', 'python_code', 'python'].includes(n)) return 'execute_python_code';
     if (['summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary'].includes(n)) return 'summarize_whatsapp_chat';
+    if ([
+      'fetch_communication_context', 'communication_context', 'analyze_whatsapp_chat', 'analisis_whatsapp',
+      'analisis_komunikasi', 'cek_whatsapp', 'cari_chat_whatsapp', 'fetch_whatsapp_context',
+      'fetch_email_context', 'fetch_ticket_context', 'cek_tiket', 'cek_email', 'riwayat_komunikasi'
+    ].includes(n)) return 'fetch_communication_context';
     if (['find_related_videos', 'search_related_videos', 'recommend_related_videos', 'recommend_videos', 'cari_video_terkait', 'rekomendasi_video', 'related_videos'].includes(n)) return 'find_related_videos';
     if (['search_images', 'cari_gambar'].includes(n)) return 'search_images';
     if (['inspect_image', 'periksa_gambar'].includes(n)) return 'inspect_image';
@@ -31628,16 +32551,35 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     return AUTONOMOUS_TOOL_NAMES.includes(n) || AUTONOMOUS_TOOL_NAMES.includes(normalizeToolName(n)) || LOCAL_UTILITY_TOOL_NAMES.includes(normalizeToolName(n));
   }
 
-  // Tool utility & web otonom selalu diizinkan secara matematis tanpa blokade manual
-  function isAutonomousToolAllowed(toolName, webToolsAllowed = true) {
+  function hasClientRagDocuments(session = null) {
+    if (Array.isArray(STATE.attachedDocs) && STATE.attachedDocs.some(d => d && (d.content || d.rawContent))) return true;
+    if (STATE.localWorkspace?.enabled && STATE.localWorkspace?.aiCanRead !== false && Array.isArray(STATE.localWorkspace.files) && STATE.localWorkspace.files.length > 0) return true;
+    if (session && Array.isArray(session.messages) && session.messages.slice(-6).some(m => m && Array.isArray(m.docs) && m.docs.some(d => d && d.content))) return true;
+    return false;
+  }
+
+  // Tool utility & web otonom: fetch_communication_context dikunci ketat hanya untuk Mode Z21 pada localhost;
+  // search_documents aktif pada localhost atau bila klien memiliki lampiran/workspace dokumen
+  function isAutonomousToolAllowed(toolName, webToolsAllowed = true, context = null) {
     const norm = normalizeToolName(toolName) || toolName;
+    if (norm === 'fetch_communication_context') {
+      return canUseZ21LocalCommunicationTool(context?.planMode, context?.session);
+    }
+    if (norm === 'search_documents') {
+      return isStrictLocalhostMode() || hasClientRagDocuments(context?.session);
+    }
     return LOCAL_UTILITY_TOOL_NAMES.includes(norm) || LOCAL_UTILITY_TOOL_NAMES.includes(toolName);
   }
 
   // Susun daftar tool yang dikirimkan ke model
-  function getSelectableAutonomousTools(webToolsAllowed = true) {
+  function getSelectableAutonomousTools(webToolsAllowed = true, context = null) {
+    const allowZ21LocalComm = canUseZ21LocalCommunicationTool(context?.planMode, context?.session);
+    const allowDocRag = isStrictLocalhostMode() || hasClientRagDocuments(context?.session);
     return AUTONOMOUS_WEB_TOOLS.filter((t) => {
       const name = t && t.function ? t.function.name : '';
+      if (name === 'fetch_communication_context') return allowZ21LocalComm;
+      if (name === 'search_documents') return allowDocRag;
+      if (name === 'summarize_whatsapp_chat' && allowZ21LocalComm) return false;
       return LOCAL_UTILITY_TOOL_NAMES.includes(name);
     });
   }
@@ -31665,9 +32607,28 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const q = (raw && typeof raw === 'object') ? (raw.query || raw.q || raw.keyword || raw.topic || raw.cari || raw.kata_kunci || '') : String(raw || '');
       return `search_mem:${String(q).trim().toLowerCase()}`;
     }
+    if (toolName === 'search_documents') {
+      const q = (raw && typeof raw === 'object') ? (raw.query || raw.q || raw.keyword || raw.kata_kunci || raw.topic || raw.topik || '') : String(raw || '');
+      const cat = (raw && typeof raw === 'object') ? (raw.category || raw.kategori || raw.type || 'auto') : 'auto';
+      const did = (raw && typeof raw === 'object') ? (raw.doc_id || raw.docId || raw.id || raw.file || '') : '';
+      const tk = (raw && typeof raw === 'object' && (raw.top_k || raw.topK || raw.limit)) ? (raw.top_k || raw.topK || raw.limit) : 5;
+      return `search_docs:${String(cat).trim().toLowerCase()}:${String(did).trim().toLowerCase()}:${String(q).trim().toLowerCase().slice(0, 60)}:${tk}`;
+    }
     if (toolName === 'execute_python_code') {
       const code = (raw && typeof raw === 'object') ? (raw.code || raw.script || raw.python || '') : String(raw || '');
       return `code:${String(code).trim().replace(/\s+/g, ' ').slice(0, 60)}`;
+    }
+    if (toolName === 'fetch_communication_context') {
+      const src = (raw && typeof raw === 'object') ? (raw.source || raw.sumber || 'auto') : 'auto';
+      const tid = (raw && typeof raw === 'object') ? (raw.target_id || raw.id || raw.target || raw.contact || raw.kontak || raw.nomor || raw.phone || raw.jid || '') : '';
+      const q = (raw && typeof raw === 'object') ? (raw.query || raw.q || raw.kata_kunci || raw.topik || raw.topic || '') : String(raw || '');
+      const lim = (raw && typeof raw === 'object' && raw.limit) ? raw.limit : 6;
+      const maxm = (raw && typeof raw === 'object' && (raw.max_messages || raw.maxMessages)) ? (raw.max_messages || raw.maxMessages) : 25;
+      const days = (raw && typeof raw === 'object' && raw.days) ? raw.days : 0;
+      const sinceM = (raw && typeof raw === 'object' && (raw.since_minutes || raw.sinceMinutes)) ? (raw.since_minutes || raw.sinceMinutes) : 0;
+      const sortBy = (raw && typeof raw === 'object' && (raw.sort_by || raw.sortBy)) ? (raw.sort_by || raw.sortBy) : 'auto';
+      const unrd = (raw && typeof raw === 'object' && (raw.unread_only || raw.unreadOnly)) ? 1 : 0;
+      return `comm_ctx:${String(src).trim().toLowerCase()}:${String(tid).trim().toLowerCase()}:${String(q).trim().toLowerCase().slice(0, 50)}:${lim}:${maxm}:${days}:${sinceM}:${sortBy}:${unrd}`;
     }
     if (toolName === 'summarize_whatsapp_chat') {
       const target = (raw && typeof raw === 'object') ? (raw.target_number_or_name || raw.target || raw.contact || raw.number || raw.phone || raw.jid || raw.query || '') : String(raw || '');
@@ -32257,7 +33218,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
   }
 
-  async function executeAutonomousWebTool(rawToolName, rawArgs, promptContext = '', session = null) {
+  async function executeAutonomousWebTool(rawToolName, rawArgs, promptContext = '', session = null, toolContext = null) {
     if (STATE.abortController?.signal?.aborted) {
       const abortErr = new Error('The operation was aborted');
       abortErr.name = 'AbortError';
@@ -32274,27 +33235,59 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       return timeoutSig;
     };
     try {
+      const coerceRawToolStringToArgs = (tName, strVal) => {
+        const s = String(strVal || '').trim();
+        if (tName === 'browse_web_page' || tName === 'extract_web') {
+          return { url: s };
+        }
+        if (tName === 'find_related_videos') {
+          return /^https?:\/\//i.test(s) ? { video_url: s } : { query: s };
+        }
+        if (tName === 'execute_python_code') {
+          return { code: s };
+        }
+        if (tName === 'save_memory') {
+          return { topic: 'catatan', content: s };
+        }
+        if (tName === 'fetch_communication_context') {
+          return /^(?:TICKET|TKT|INC|BUG|ISSUE|JIRA|CASE|REQ|SR)[-_#]?\d+$/i.test(s) || /@\S+/.test(s) || /^(?:08|\+?628)\d{6,}$/.test(s)
+            ? { target_id: s }
+            : { query: s };
+        }
+        if (tName === 'search_documents') {
+          return /^(?:SOP|DOC|REG|MEM|PDF|REF)[-_#]?\d+/i.test(s) ? { doc_id: s } : { query: s };
+        }
+        // search_web & search_memory memakai query
+        return { query: s };
+      };
       let args = {};
       if (typeof rawArgs === 'string') {
         const trimmed = rawArgs.trim();
         try {
-          args = JSON.parse(trimmed);
+          const parsedArgs = JSON.parse(trimmed);
+          if (parsedArgs && typeof parsedArgs === 'object' && !Array.isArray(parsedArgs)) {
+            args = parsedArgs;
+          } else if (typeof parsedArgs === 'string') {
+            // Cegah JSON.parse mengembalikan primitive string mentah (mis. "\"SOP-01\"" atau double-encoded JSON)
+            const innerTrimmed = parsedArgs.trim();
+            let nestedObj = null;
+            if (innerTrimmed.startsWith('{')) {
+              try {
+                const candidate = JSON.parse(innerTrimmed);
+                if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+                  nestedObj = candidate;
+                }
+              } catch (_) {}
+            }
+            args = nestedObj || coerceRawToolStringToArgs(toolName, innerTrimmed);
+          } else {
+            args = coerceRawToolStringToArgs(toolName, parsedArgs != null ? String(parsedArgs) : trimmed);
+          }
         } catch (_) {
           // If string is raw text (not JSON), use it directly
-          if (toolName === 'browse_web_page' || toolName === 'extract_web') {
-            args = { url: trimmed };
-          } else if (toolName === 'find_related_videos') {
-            args = /^https?:\/\//i.test(trimmed) ? { video_url: trimmed } : { query: trimmed };
-          } else if (toolName === 'execute_python_code') {
-            args = { code: trimmed };
-          } else if (toolName === 'save_memory') {
-            args = { topic: 'catatan', content: trimmed };
-          } else {
-            // search_web & search_memory memakai query
-            args = { query: trimmed };
-          }
+          args = coerceRawToolStringToArgs(toolName, trimmed);
         }
-      } else if (rawArgs && typeof rawArgs === 'object') {
+      } else if (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)) {
         args = rawArgs;
       }
 
@@ -32331,6 +33324,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       } else if (toolName === 'execute_python_code') {
         canonicalTool = 'execute_python_code';
         canonicalArg = String(args.code || args.script || args.python || (typeof args === 'string' ? args : '')).trim();
+      } else if (toolName === 'fetch_communication_context') {
+        canonicalTool = 'fetch_communication_context';
+        canonicalArg = ''; // Komunikasi lokal (WhatsApp/chat) real-time tidak pernah di-cache antar-giliran
+      } else if (toolName === 'search_documents') {
+        canonicalTool = 'search_documents';
+        canonicalArg = ''; // RAG dokumen lokal/workspace & lampiran sesi harus selalu fresh per giliran
       } else if (toolName === 'find_related_videos') {
         canonicalTool = 'find_related_videos';
         const u = String(args.video_url || args.url || args.link || '').trim().toLowerCase();
@@ -32342,7 +33341,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       }
 
       const cacheKey = `${canonicalTool}:${canonicalArg}`;
-      const cachedEntry = AUTONOMOUS_TOOL_CACHE.get(cacheKey);
+      const cachedEntry = (canonicalTool !== 'fetch_communication_context' && canonicalTool !== 'search_documents' && canonicalArg)
+        ? AUTONOMOUS_TOOL_CACHE.get(cacheKey)
+        : null;
       if (cachedEntry) {
         if (cachedEntry.expiresAt > Date.now()) {
           return cachedEntry.data;
@@ -32807,6 +33808,432 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           sources: [],
           success: false
         };
+      }
+
+      if (toolName === 'fetch_communication_context') {
+        if (!canUseZ21LocalCommunicationTool(toolContext?.planMode, session)) {
+          return {
+            text: 'Error: Tool fetch_communication_context hanya aktif pada Mode Z21 di localhost.',
+            sources: [],
+            success: false
+          };
+        }
+        const source = String(args.source || args.sumber || 'auto').trim().toLowerCase();
+        const query = String(args.query || args.q || args.keyword || args.keywords || args.kata_kunci || args.topic || args.topik || args.search || '').trim();
+        const targetId = String(args.target_id || args.id || args.target || args.contact || args.kontak || args.nomor || args.phone || args.jid || args.ticket_id || '').trim();
+        const limit = Math.max(1, Math.min(15, parseInt(args.limit || args.max_results || 6, 10) || 6));
+        const maxMessages = Math.max(5, Math.min(80, parseInt(args.max_messages || args.maxMessages || 25, 10) || 25));
+        const days = Math.max(0, Math.min(365, parseInt(args.days || args.hari || 0, 10) || 0));
+        const sinceMinutes = Math.max(0, Math.min(10080, parseInt(args.since_minutes || args.sinceMinutes || args.menit || 0, 10) || 0));
+        const sortBy = ['auto', 'recent', 'relevance'].includes(String(args.sort_by || args.sortBy || 'auto').trim().toLowerCase())
+          ? String(args.sort_by || args.sortBy || 'auto').trim().toLowerCase()
+          : 'auto';
+        const unreadOnly = Boolean(args.unread_only || args.unreadOnly || args.belum_dibaca);
+
+        const reqHeaders = {
+          'Content-Type': 'application/json',
+          'X-Zoz-Plan-Mode': 'z21',
+          'X-User-ID': STATE.userId || 'default'
+        };
+        if (STATE.userToken) reqHeaders['X-User-Token'] = STATE.userToken;
+        if (typeof WhatsAppController !== 'undefined') {
+          if (WhatsAppController.userId) reqHeaders['X-WA-User-ID'] = WhatsAppController.userId;
+          if (WhatsAppController.pin) reqHeaders['X-WA-PIN'] = WhatsAppController.pin;
+        }
+
+        try {
+          const outcome = await requestZ21CommunicationContext({
+            planMode: 'z21',
+            source,
+            query,
+            target_id: targetId,
+            limit,
+            max_messages: maxMessages,
+            days,
+            since_minutes: sinceMinutes,
+            sort_by: sortBy,
+            unread_only: unreadOnly,
+            exclude_session_id: session?.id || ''
+          }, reqHeaders, makeToolSignal(15000), session);
+          const data = outcome ? outcome.data : null;
+          if (!outcome || !outcome.ok || !data || !data.success) {
+            const errMsg = (data && data.error) ? data.error : `Server lokal menolak atau gagal memproses (HTTP ${outcome?.status || 500}).`;
+            if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+              BioEndocrine.registerToolIssue({ toolName: 'fetch_communication_context', error: errMsg, status: outcome?.status || 500 });
+            }
+            return { text: `Error: ${errMsg}`, sources: [], success: false };
+          }
+
+          let combinedText = String(data.formattedContext || '').trim();
+          const tokList = Array.from(new Set(
+            `${targetId} ${query}`.toLowerCase().replace(/[^\p{L}\p{N}_@.\-#+]/gu, ' ').split(/\s+/).filter(t => t.length >= 2)
+          )).slice(0, 10);
+
+          // Augmentasi sisi klien 1: Task Tracker lokal bila relevan
+          if (['auto', 'all', 'ticket'].includes(source) && Array.isArray(STATE.taskTracker?.tasks) && STATE.taskTracker.tasks.length > 0) {
+            const matchedTasks = STATE.taskTracker.tasks.filter(t => {
+              if (!t) return false;
+              if (tokList.length === 0) return true;
+              const tTitle = t.subject || t.title || '';
+              const tNote = t.description || t.activeForm || t.note || '';
+              const hay = `${t.id || ''} ${tTitle} ${tNote} ${t.status || ''}`.toLowerCase();
+              return tokList.some(tok => hay.includes(tok));
+            }).slice(0, 8);
+            if (matchedTasks.length > 0) {
+              combinedText += '\n\n[TASK TRACKER LOKAL]:\n' + matchedTasks.map(t => {
+                const isDone = t.status === 'completed' || Boolean(t.done);
+                const statusTag = isDone ? 'SELESAI' : (t.status === 'in_progress' ? 'BERJALAN' : 'TERBUKA');
+                const tTitle = t.subject || t.title || t.id || 'Tugas';
+                const tDesc = t.description || t.activeForm || t.note || '';
+                return `- [${statusTag}] ${tTitle}${tDesc ? ` — ${tDesc}` : ''}${t.id ? ` (ID: ${t.id})` : ''}`;
+              }).join('\n');
+            }
+          }
+
+          // Augmentasi sisi klien 2: Local Workspace browser yang sudah dimuat ke memori (email/chat/tiket)
+          if (['auto', 'all', 'email', 'team_chat', 'ticket'].includes(source) && STATE.localWorkspace?.enabled && Array.isArray(STATE.localWorkspace.files)) {
+            const wsHits = [];
+            for (const f of STATE.localWorkspace.files.slice(0, 60)) {
+              if (!f || !f.name) continue;
+              const fname = String(f.name).toLowerCase();
+              if (!/\.(?:eml|mbox|msg|md|txt|json|csv|log)$/i.test(fname)) continue;
+              const content = String(f.rawContent || f.content || '');
+              if (!content) continue;
+              const hay = `${fname} ${content.slice(0, 4000)}`.toLowerCase();
+              const isMatch = tokList.length === 0
+                ? /(?:email|mail|chat|tiket|ticket|whatsapp|notulen)/i.test(fname)
+                : tokList.some(tok => hay.includes(tok));
+              if (isMatch && !(Array.isArray(data.items) && data.items.some(it => it.path && String(it.path).endsWith(f.name)))) {
+                wsHits.push(`- File Workspace (${f.path || f.name}):\n  ${content.slice(0, 600).replace(/\n+/g, '\n  ')}`);
+              }
+              if (wsHits.length >= 3) break;
+            }
+            if (wsHits.length > 0) {
+              combinedText += '\n\n[BERKAS DIREKTORI LOKAL BROWSER]:\n' + wsHits.join('\n').slice(0, 2500);
+            }
+          }
+
+          // Augmentasi sisi klien 3: Sesi obrolan browser jika server sessions kosong
+          if (['auto', 'all', 'session'].includes(source) && (!data.stats?.sessions?.matchedSessions) && Array.isArray(STATE.sessions)) {
+            const localSessHits = [];
+            for (const s of STATE.sessions) {
+              if (!s || s.id === session?.id || !Array.isArray(s.messages) || s.messages.length === 0) continue;
+              const sHay = `${s.id} ${s.title || ''} ${s.messages.slice(-8).map(m => m?.content || '').join(' ')}`.toLowerCase();
+              if (tokList.length === 0 || tokList.some(tok => sHay.includes(tok))) {
+                const tail = s.messages.slice(-4).map(m => `  - [${m.role}]: ${String(m.content || '').replace(/\s+/g, ' ').slice(0, 220)}`).join('\n');
+                localSessHits.push(`- Sesi "${s.title || s.id}" (ID: ${s.id}):\n${tail}`);
+              }
+              if (localSessHits.length >= 2) break;
+            }
+            if (localSessHits.length > 0) {
+              combinedText += '\n\n[SESI RIWAYAT BROWSER LOKAL]:\n' + localSessHits.join('\n').slice(0, 2000);
+            }
+          }
+
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+            BioEndocrine.registerToolSuccess({
+              toolName: 'fetch_communication_context',
+              count: data.count || (Array.isArray(data.items) ? data.items.length : 1),
+              details: `${data.count || 0} konteks komunikasi lokal Z21 berhasil diambil`
+            });
+          }
+
+          return {
+            text: combinedText.slice(0, 14500),
+            data,
+            sources: [],
+            success: true
+          };
+        } catch (err) {
+          if (STATE.abortController?.signal?.aborted) {
+            return { text: 'Pengambilan konteks komunikasi dihentikan oleh pengguna.', sources: [], success: false };
+          }
+          const msg = `Gagal menghubungi server localhost Z21 untuk fetch_communication_context: ${err.message || err}`;
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+            BioEndocrine.registerToolIssue({ toolName: 'fetch_communication_context', error: msg, status: 503 });
+          }
+          return { text: `Error: ${msg}`, sources: [], success: false };
+        }
+      }
+
+      if (toolName === 'search_documents') {
+        const query = String(
+          (args && typeof args === 'object')
+            ? (args.query || args.q || args.keyword || args.keywords || args.kata_kunci || args.topic || args.topik || args.search || '')
+            : (rawArgs || '')
+        ).trim();
+        const docId = String(
+          (args && typeof args === 'object')
+            ? (args.doc_id || args.docId || args.document_id || args.id || args.file || args.filename || args.path || '')
+            : ''
+        ).trim();
+        const rawCat = String((args && typeof args === 'object') ? (args.category || args.kategori || args.type || args.doc_type || 'auto') : 'auto').trim().toLowerCase();
+        const category = ['auto', 'all', 'sop', 'laporan', 'regulasi', 'kebijakan', 'panduan', 'vector_db', 'workspace'].includes(rawCat) ? rawCat : 'auto';
+        const topK = Math.max(1, Math.min(15, parseInt((args && typeof args === 'object') && (args.top_k || args.topK || args.limit || args.max_results), 10) || 5));
+
+        const reqHeaders = {
+          'Content-Type': 'application/json',
+          'X-Zoz-Plan-Mode': normalizePlanMode(toolContext?.planMode || getActivePlanMode(session)),
+          'X-User-ID': STATE.userId || 'default'
+        };
+        if (STATE.userToken) reqHeaders['X-User-Token'] = STATE.userToken;
+
+        const effectiveClientRagQuery = query || (docId ? '' : (promptContext || ''));
+        const tokList = Array.from(new Set(
+          `${docId} ${effectiveClientRagQuery}`
+            .toLowerCase()
+            .replace(/[^\p{L}\p{N}_.\-#]/gu, ' ')
+            .split(/\s+/)
+            .filter(t => t.length >= 2 && !CLIENT_COMM_META_STOPWORDS.has(t))
+        )).slice(0, 12);
+
+        const buildClientRagChunks = () => {
+          const clientChunks = [];
+          try {
+            const candidateDocs = [];
+            const seenClientDocKeys = new Set();
+            const pushCandidateDoc = (name, docPath, rawBody) => {
+              const bodyStr = String(rawBody || '').slice(0, 250000);
+              if (!bodyStr.trim()) return;
+              const fp = `${String(docPath || name).toLowerCase()}|${bodyStr.length}`;
+              if (seenClientDocKeys.has(fp)) return;
+              seenClientDocKeys.add(fp);
+              candidateDocs.push({ name: name || 'Dokumen Lampiran', path: docPath || name || 'attached', content: bodyStr });
+            };
+            if (Array.isArray(STATE.attachedDocs)) {
+              for (const d of STATE.attachedDocs) {
+                if (d && (d.content || d.rawContent)) {
+                  pushCandidateDoc(d.name || 'Dokumen Lampiran', d.url || d.name || 'attached', d.rawContent || d.content);
+                }
+              }
+            }
+            if (session && Array.isArray(session.messages)) {
+              for (const m of session.messages.slice(-6)) {
+                if (m && Array.isArray(m.docs)) {
+                  for (const d of m.docs) {
+                    if (d && d.content) {
+                      pushCandidateDoc(d.name || 'Lampiran Sesi', d.name || 'session_doc', d.content);
+                    }
+                  }
+                }
+              }
+            }
+            if (STATE.localWorkspace?.enabled && STATE.localWorkspace?.aiCanRead !== false && Array.isArray(STATE.localWorkspace?.files)) {
+              for (const f of STATE.localWorkspace.files.slice(0, 80)) {
+                if (f && f.name && /\.(?:md|txt|json|csv|tsv|yaml|yml|eml|log)$/i.test(f.name)) {
+                  const body = String(f.rawContent || f.content || '');
+                  if (body) pushCandidateDoc(f.name, f.path || f.name, body);
+                }
+              }
+            }
+
+            const docIdLower = docId.toLowerCase();
+            for (const doc of candidateDocs) {
+              const paras = doc.content.replace(/\r\n/g, '\n').split(/\n\s*\n/);
+              let currentSection = doc.name;
+              let buf = '';
+              let idx = 0;
+              let emittedForDoc = 0;
+              const flushChunk = (txt, sec) => {
+                if (emittedForDoc >= 40) return;
+                const clean = txt.trim();
+                if (!clean) return;
+                const hay = `${doc.name} ${doc.path} ${sec} ${clean}`.toLowerCase();
+                const inferredCat = /\bsop\b/i.test(hay) ? 'sop' : (/\bregulasi|pasal\b/i.test(hay) ? 'regulasi' : (/\bkebijakan|diskon\b/i.test(hay) ? 'kebijakan' : (/\blaporan\b/i.test(hay) ? 'laporan' : (/\bpanduan|manual|guide\b/i.test(hay) ? 'panduan' : 'workspace'))));
+                const docIdHit = Boolean(docIdLower && hay.includes(docIdLower));
+                if (docIdLower && !docIdHit) return;
+                if (!docIdHit && category !== 'auto' && category !== 'all' && category !== 'workspace' && inferredCat !== category && !hay.includes(category)) {
+                  return;
+                }
+                let hits = 0;
+                for (const tok of tokList) {
+                  if (hay.includes(tok)) hits++;
+                }
+                if (docIdHit) hits += 4;
+                if (tokList.length > 0 && hits === 0) return;
+                if (tokList.length === 0 && !docIdLower && (category === 'auto' || category === 'all') && emittedForDoc >= 1) return;
+                emittedForDoc++;
+                clientChunks.push({
+                  doc_id: doc.path,
+                  title: doc.name,
+                  category: inferredCat,
+                  section: sec,
+                  chunk_index: ++idx,
+                  relevance_score: Number((25 + hits * 24).toFixed(2)),
+                  matched_signals: 'client_rag_workspace+lexical',
+                  content: clean.slice(0, 1200)
+                });
+              };
+              for (const p of paras) {
+                if (emittedForDoc >= 40) break;
+                const hm = p.trim().match(/^#{1,4}\s+(.+)/);
+                if (hm) currentSection = hm[1].trim().slice(0, 100);
+                if ((buf.length + p.length) > 900 && buf.length >= 100) {
+                  flushChunk(buf, currentSection);
+                  buf = p;
+                } else {
+                  buf = buf ? `${buf}\n\n${p}` : p;
+                }
+              }
+              if (buf.trim() && emittedForDoc < 40) flushChunk(buf, currentSection);
+            }
+          } catch (_) {}
+          clientChunks.sort((a, b) => b.relevance_score - a.relevance_score);
+          return clientChunks.slice(0, topK);
+        };
+
+        try {
+          const endpoint = (typeof getUniversalApiUrl === 'function')
+            ? getUniversalApiUrl('/api/tools/search-documents')
+            : '/api/tools/search-documents';
+          let data = null;
+          let res = null;
+          const canQueryServerRag = isStrictLocalhostMode();
+          if (canQueryServerRag) {
+            try {
+              res = await fetch(endpoint, {
+                method: 'POST',
+                headers: reqHeaders,
+                body: JSON.stringify({
+                  query: effectiveClientRagQuery,
+                  category,
+                  doc_id: docId,
+                  top_k: topK,
+                  scope: STATE.activeProjectScope || 'global'
+                }),
+                signal: makeToolSignal(15000)
+              });
+              data = await res.json().catch(() => null);
+            } catch (_) {}
+          }
+
+          const clientExtraChunks = buildClientRagChunks();
+
+          if (!res || !res.ok || !data || !data.success) {
+            if (res && res.status === 403 && data && data.error && clientExtraChunks.length === 0) {
+              return { text: `Error: ${data.error}`, sources: [], success: false };
+            }
+            const fallbackChunks = [...clientExtraChunks];
+            if (canQueryServerRag) {
+              try {
+                const fallbackMemQ = effectiveClientRagQuery || docId || '';
+                const memUrl = (typeof getUniversalApiUrl === 'function')
+                  ? getUniversalApiUrl(`/api/memory/search?q=${encodeURIComponent(fallbackMemQ)}&userId=${encodeURIComponent(STATE.userId || 'default')}&limit=${topK}`)
+                  : `/api/memory/search?q=${encodeURIComponent(fallbackMemQ)}&limit=${topK}`;
+                const mRes = await fetch(memUrl, { headers: reqHeaders, signal: makeToolSignal(6000) }).catch(() => null);
+                if (mRes && mRes.ok) {
+                  const mData = await mRes.json().catch(() => null);
+                  if (mData && Array.isArray(mData.results)) {
+                    mData.results.forEach((r, idx) => {
+                      fallbackChunks.push({
+                        doc_id: `vec_mem_${r.id || idx + 1}`,
+                        title: r.topic || 'Basis Pengetahuan Internal',
+                        category: 'vector_db',
+                        section: r.topic || 'Catatan Terindeks',
+                        chunk_index: idx + 1,
+                        relevance_score: 60 - idx * 4,
+                        matched_signals: 'sqlite_fts5_fallback',
+                        content: String(r.content || '').slice(0, 1200)
+                      });
+                    });
+                  }
+                }
+              } catch (_) {}
+            }
+
+            fallbackChunks.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
+            const topFb = fallbackChunks.slice(0, topK);
+            const clockNow = buildClientLocalClockInfo();
+            const fbLines = [
+              `[HASIL RAG DINAMIS — SEARCH_DOCUMENTS / RETRIEVE_KNOWLEDGE]`,
+              `Waktu Retrieval: ${clockNow.summaryLine}`,
+              `Query: "${query || '-'}" | Kategori: ${category} | Doc ID: "${docId || '(semua)'}" | Top-K: ${topK}`,
+              `Statistik RAG: Potongan Terpilih=${topFb.length}`
+            ];
+            if (topFb.length === 0) {
+              fbLines.push(`\nTidak ditemukan potongan dokumen internal (SOP, laporan, regulasi, atau vector database) yang cocok dengan "${query || docId}".`);
+            } else {
+              topFb.forEach((ch, idx) => {
+                fbLines.push(`\n--- [CHUNK #${idx + 1}/${topFb.length}] [${String(ch.category || 'DOKUMEN').toUpperCase()}] ${ch.title} (ID: ${ch.doc_id} | Bagian: "${ch.section}" | Skor: ${ch.relevance_score} | Sinyal: ${ch.matched_signals}) ---`);
+                fbLines.push(ch.content);
+              });
+            }
+            return {
+              text: fbLines.join('\n').slice(0, 14000),
+              data: { success: true, fallbackUsed: true, count: topFb.length, chunks: topFb },
+              sources: [],
+              success: true
+            };
+          }
+
+          let combinedRagText = String(data.formattedContext || '').trim();
+          const normalizeRagDocKey = (rawId) => String(rawId || '')
+            .trim()
+            .replace(/^workspace:/i, '')
+            .replace(/\\/g, '/')
+            .replace(/^\.\//, '')
+            .replace(/^\/+/, '')
+            .toLowerCase();
+          const extractRagBaseName = (normId) => {
+            const parts = normId.split('/');
+            return parts[parts.length - 1] || normId;
+          };
+          const makeRagContentFp = (c) => String(c?.content || '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 140);
+          const serverDocIds = new Set();
+          const serverDocBasenames = new Set();
+          const serverContentFps = new Set();
+          (data.chunks || []).forEach(c => {
+            if (!c) return;
+            const nk = normalizeRagDocKey(c.doc_id || c.title || c.file || '');
+            if (nk) {
+              serverDocIds.add(nk);
+              const bn = extractRagBaseName(nk);
+              if (bn) serverDocBasenames.add(bn);
+            }
+            const fp = makeRagContentFp(c);
+            if (fp) serverContentFps.add(fp);
+          });
+          const uniqueClientChunks = clientExtraChunks.filter(c => {
+            if (!c) return false;
+            const nk = normalizeRagDocKey(c.doc_id || c.title || '');
+            const bn = nk ? extractRagBaseName(nk) : '';
+            const fp = makeRagContentFp(c);
+            if (nk && serverDocIds.has(nk)) return false;
+            if (fp && serverContentFps.has(fp)) return false;
+            if (bn && !nk.includes('/') && serverDocBasenames.has(bn)) return false;
+            return true;
+          }).slice(0, 3);
+          if (uniqueClientChunks.length > 0) {
+            combinedRagText += '\n\n[POTONGAN DOKUMEN WORKSPACE / LAMPIRAN BROWSER]:\n' +
+              uniqueClientChunks.map((ch, i) =>
+                `--- [CLIENT CHUNK #${i + 1}] [${String(ch.category || 'WORKSPACE').toUpperCase()}] ${ch.title} (Bagian: "${ch.section}") ---\n${ch.content}`
+              ).join('\n\n');
+          }
+
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+            BioEndocrine.registerToolSuccess({
+              toolName: 'search_documents',
+              count: (data.count || 0) + uniqueClientChunks.length,
+              details: `${(data.count || 0) + uniqueClientChunks.length} potongan dokumen RAG ditemukan`
+            });
+          }
+
+          return {
+            text: combinedRagText.slice(0, 14500),
+            data,
+            sources: [],
+            success: true
+          };
+        } catch (err) {
+          if (STATE.abortController?.signal?.aborted) {
+            return { text: 'Pencarian dokumen RAG dihentikan oleh pengguna.', sources: [], success: false };
+          }
+          const msg = `Gagal menjalankan search_documents / retrieve_knowledge: ${err.message || err}`;
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolIssue === 'function') {
+            BioEndocrine.registerToolIssue({ toolName: 'search_documents', error: msg, status: 503 });
+          }
+          return { text: `Error: ${msg}`, sources: [], success: false };
+        }
       }
 
       if (toolName === 'summarize_whatsapp_chat') {
@@ -33323,7 +34750,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     return results;
   }
 
-  function extractToolNameFromParsedJson(p) {
+  function extractToolNameFromParsedJson(p, options = {}) {
     if (!p || typeof p !== 'object' || Array.isArray(p)) return '';
     let name = '';
     if (typeof p.name === 'string') name = p.name;
@@ -33334,8 +34761,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     else if (typeof p.tool_name === 'string') name = p.tool_name;
     else if (typeof p.action === 'string') name = p.action;
 
-    if (!name) {
-      if (p.video_url || (p.query && (p.platform || p.limit !== undefined))) {
+    if (!name && options && options.allowImplicit === true) {
+      if (p.target_id || (p.source && ['whatsapp', 'email', 'team_chat', 'ticket', 'session', 'memory', 'all', 'auto'].includes(String(p.source).toLowerCase())) || p.unread_only !== undefined || p.max_messages !== undefined) {
+        name = 'fetch_communication_context';
+      } else if (p.doc_id || p.top_k !== undefined || (p.category && ['sop', 'laporan', 'regulasi', 'kebijakan', 'panduan', 'vector_db', 'workspace'].includes(String(p.category).toLowerCase()))) {
+        name = 'search_documents';
+      } else if (p.video_url || (p.query && (p.platform || p.limit !== undefined))) {
         name = 'find_related_videos';
       } else if (p.target_number_or_name || (p.focus_topic && (p.target || p.contact))) {
         name = 'summarize_whatsapp_chat';
@@ -33349,6 +34780,57 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
     return name;
   }
+
+  function extractBalancedFunctionJsonCalls(text, allowedNamesSet) {
+    const matches = [];
+    if (!text || typeof text !== 'string') return matches;
+    const headRe = /\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(\s*\{/g;
+    let m;
+    while ((m = headRe.exec(text)) !== null) {
+      const fnName = m[1];
+      if (allowedNamesSet && !allowedNamesSet.has(fnName.toLowerCase())) continue;
+      const braceStart = m.index + m[0].length - 1;
+      let depth = 0;
+      let inStr = false;
+      let strQuote = '"';
+      let esc = false;
+      let braceEnd = -1;
+      for (let i = braceStart; i < text.length; i++) {
+        const ch = text[i];
+        if (inStr) {
+          if (esc) { esc = false; continue; }
+          if (ch === '\\') { esc = true; continue; }
+          if (ch === strQuote) { inStr = false; }
+          continue;
+        }
+        if (ch === '"' || ch === "'") { inStr = true; strQuote = ch; continue; }
+        if (ch === '{') depth++;
+        else if (ch === '}') {
+          depth--;
+          if (depth === 0) { braceEnd = i; break; }
+        }
+      }
+      if (braceEnd !== -1) {
+        const rest = text.slice(braceEnd + 1);
+        const closeParen = rest.match(/^\s*\)/);
+        if (closeParen) {
+          const fullEnd = braceEnd + 1 + closeParen[0].length;
+          matches.push({
+            name: fnName,
+            json: text.slice(braceStart, braceEnd + 1),
+            raw: text.slice(m.index, fullEnd),
+            start: m.index,
+            end: fullEnd
+          });
+          headRe.lastIndex = fullEnd;
+        }
+      }
+    }
+    return matches;
+  }
+
+  const STRICT_INLINE_TOOL_NAMES = AUTONOMOUS_TOOL_NAMES.filter(n => n.includes('_'));
+  const STRICT_INLINE_TOOL_SET = new Set(STRICT_INLINE_TOOL_NAMES.map(n => n.toLowerCase()));
 
   function extractToolArgsFromParsedJson(p) {
     if (!p || typeof p !== 'object' || Array.isArray(p)) return {};
@@ -33375,48 +34857,81 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
   function scrubRawToolCallArtifacts(text) {
     if (!text || typeof text !== 'string') return '';
-    const toolPattern = AUTONOMOUS_TOOL_NAMES.join('|');
-    const invokeRegex = new RegExp(`<invoke\\s+name=["'](?:${toolPattern})["']>[\\s\\S]*?<\\/invoke>`, 'gi');
-    const jsonCodeBlockRegex = new RegExp(`\`\`\`(?:tool_call|json)?\\s*\\{[\\s\\S]*?"(?:name|function|tool|tool_name|action)"\\s*:\\s*"(?:${toolPattern})"[\\s\\S]*?\\}\\s*\`\`\``, 'gi');
-    const callPreambleRegex = new RegExp(`(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\\s+(?:${toolPattern})[\\s\\S]*?(?:\\.|\\n|$)`, 'gi');
-    const funcCallRegex = new RegExp(`\\b(?:${toolPattern})\\s*\\(\\s*\\{[\\s\\S]*?\\}\\s*\\)`, 'gi');
-    const funcCallEmptyRegex = new RegExp(`\\b(?:${toolPattern})\\s*\\(\\s*\\)`, 'gi');
-    const funcCallArgsRegex = new RegExp(`\\b(?:${toolPattern})\\s*\\(\\s*(?:(?:query|url|q|code|topic|content|script|link|target|isi|kata_kunci|topik)\\s*[:=]\\s*)?(["'\`])[\\s\\S]*?\\1\\s*\\)`, 'gi');
+    const fullToolPattern = AUTONOMOUS_TOOL_NAMES.join('|');
+    const strictToolPattern = STRICT_INLINE_TOOL_NAMES.join('|');
+    const invokeRegex = new RegExp(`<invoke\\s+name=["'](?:${fullToolPattern})["']>[\\s\\S]*?<\\/invoke>`, 'gi');
+    const fencedCandidateRegex = /```(tool_call|json)?\s*([\{\[](?:(?!```)[\s\S])*?[\}\]])\s*```/gi;
+    const callPreambleRegex = new RegExp(`(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\\s+(?:${strictToolPattern})[\\s\\S]*?(?:\\.|\\n|$)`, 'gi');
+    const funcCallEmptyRegex = new RegExp(`\\b(?:${strictToolPattern})\\s*\\(\\s*\\)`, 'gi');
+    const funcCallArgsRegex = new RegExp(`\\b(?:${strictToolPattern})\\s*\\(\\s*(?:(?:query|url|q|code|topic|content|script|link|target|target_id|source|sumber|kontak|nomor|isi|kata_kunci|topik|doc_id|category|top_k)\\s*[:=]\\s*)?(["'\`])[\\s\\S]*?\\1\\s*\\)`, 'gi');
     const funcCallTwoArgsRegex = /\b(?:save_memory|simpan_memori|store_memory)\s*\(\s*(?:[a-zA-Z_]+\s*[:=]\s*)?(["'`])[\s\S]*?\1\s*,\s*(?:[a-zA-Z_]+\s*[:=]\s*)?(["'`])[\s\S]*?\2\s*\)/gi;
 
     let cleaned = text
       .replace(/<(?:tool_call|function_call)>[\s\S]*?<\/(?:tool_call|function_call)>/gi, '')
       .replace(invokeRegex, '')
       .replace(/\[TOOL_CALLS\][\s\S]*?(?:\[\/TOOL_CALLS\]|(?=\n\n)|$)/gi, '')
-      .replace(jsonCodeBlockRegex, '')
-      .replace(/(?:call:(?:search_web|web_search|search)|\b(?:search_web|web_search))\s*(?:query\s*[:=]|:\s*query\s*=)\s*(?:["'][^"']+["']|[^\n<{}>]+?)(?:<\/?|>|$)/gi, '')
+      .replace(fencedCandidateRegex, (fullMatch, lang, inner) => {
+        try {
+          const parsed = JSON.parse(inner.trim());
+          const list = Array.isArray(parsed) ? parsed : [parsed];
+          const allowImp = String(lang || '').toLowerCase() === 'tool_call';
+          const isToolFence = list.length > 0 && list.every(it => {
+            const n = extractToolNameFromParsedJson(it, { allowImplicit: allowImp });
+            return Boolean(n && isKnownAutonomousTool(n));
+          });
+          return isToolFence ? '' : fullMatch;
+        } catch (_) {
+          return fullMatch;
+        }
+      })
+      .replace(/(?:call:(?:search_web|web_search|search|search_documents|retrieve_knowledge|fetch_communication_context)|\b(?:search_web|web_search|search_documents|retrieve_knowledge|fetch_communication_context))\s*(?:query\s*[:=]|:\s*query\s*=)\s*(?:["'][^"']+["']|[^\n<{}>]+?)(?:<\/?|>|$)/gi, '')
       .replace(/(?:call:(?:browse_web_page|browse_web|extract_web|read_url)|\b(?:browse_web_page|browse_web|extract_web|read_url))\s*(?:url\s*[:=]|:\s*url\s*=)\s*(?:["'][^"']+["']|(?:https?:\/\/[^\s\n<{}]+|[^\n<{}>]+?))(?:<\/?|>|$)/gi, '')
       .replace(/<\/?start_of_turn>(?:model|user)?\s*/gi, '')
       .replace(/<\/?end_of_turn>\s*/gi, '')
       .replace(/\[DATA (?:HASIL )?PENELUSURAN (?:INTERNAL|FAKTA)\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '')
+      .replace(/\[KONTEKS KOMUNIKASI LOKAL[^\]]*\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '')
+      .replace(/\[LIVE PULSE WHATSAPP[^\]]*\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '')
+      .replace(/\[HASIL RAG DINAMIS[^\]]*\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '')
+      .replace(/^\s*\[DIREKTIF PERSONA CUSTOM[^\]]*\]:?\n-\s*Identitas \/ Peran:[^\n]*\n-\s*Nada & Pendekatan Komunikasi:[^\n]*(?:\n-\s*Instruksi Karakteristik & Struktur:[\s\S]*?)?\n-\s*Catatan Integritas Sistem:[^\n]*\s*/gim, '')
+      .replace(/^\s*\[DIREKTIF PERSONA (?:NON-CUSTOM|CUSTOM)[^\]]*\]:?(?:\n(?:Gunakan gaya komunikasi AI Formal[^\n]*|-\s*(?:Identitas \/ Peran|Nada & Pendekatan Komunikasi|Instruksi Karakteristik & Struktur|Catatan Integritas Sistem):[^\n]*))*\s*/gim, '')
       .replace(/\[HASIL prepare_image_display[^\]]*\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '')
       .replace(/\[INSTRUKSI PENYAJIAN JAWABAN AKHIR\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '')
       .replace(/\[SPESIFIKASI SINTESIS BUKTI[^\]]*\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '')
       .replace(/\[ALUR VERIFIKASI VISUAL AKTIF\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '')
-      .replace(/BATASAN DOMAIN KLAIM:[\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '');
+      .replace(/BATASAN (?:DOMAIN KLAIM|ANALISIS KOMUNIKASI)[^:]*:[\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '');
 
-    // Bersihkan sintaks pemanggilan fungsi sebelum extractBalancedJsonObjects agar kurung fungsi tidak tertinggal
+    // Lindungi blok kode sah (```...```) agar pembersihan pemanggilan fungsi/JSON mentah tidak pernah menghapus contoh kode jawaban
+    const protectedFences = [];
+    cleaned = cleaned.replace(/```(?:(?!```)[\s\S])*?```/g, (m) => {
+      const idx = protectedFences.push(m) - 1;
+      return `@@ZOZ_PROTECTED_FENCE_${idx}@@`;
+    });
+
+    // Bersihkan sintaks pemanggilan fungsi bersarang-kurawal seimbang (e.g. execute_python_code({"code": "d={'a':1}"}))
+    const balFuncCalls = extractBalancedFunctionJsonCalls(cleaned, STRICT_INLINE_TOOL_SET);
+    for (let i = balFuncCalls.length - 1; i >= 0; i--) {
+      const bf = balFuncCalls[i];
+      cleaned = cleaned.slice(0, bf.start) + cleaned.slice(bf.end);
+    }
     cleaned = cleaned
-      .replace(funcCallRegex, '')
       .replace(funcCallArgsRegex, '')
       .replace(funcCallTwoArgsRegex, '');
 
-    // Hapus blok JSON seimbang yang merepresentasikan pemanggilan tool mentah
+    // Hapus blok JSON seimbang di luar blok kode yang secara eksplisit memiliki kunci nama tool
     const jsonBlocks = extractBalancedJsonObjects(cleaned);
-    for (const block of jsonBlocks) {
+    for (let i = jsonBlocks.length - 1; i >= 0; i--) {
+      const block = jsonBlocks[i];
       try {
         const p = JSON.parse(block.json);
-        const name = extractToolNameFromParsedJson(p);
+        const name = extractToolNameFromParsedJson(p, { allowImplicit: false });
         if (name && isKnownAutonomousTool(name)) {
-          cleaned = cleaned.replace(block.json, '');
+          cleaned = cleaned.slice(0, block.start) + cleaned.slice(block.end);
         }
       } catch (_) {}
     }
+
+    // Pulihkan blok kode sah yang dilindungi
+    cleaned = cleaned.replace(/@@ZOZ_PROTECTED_FENCE_(\d+)@@/g, (_, idxStr) => protectedFences[Number(idxStr)] || '');
 
     // Bersihkan sisa empty code blocks, tag tool_call yatim (tanpa tag penutup), sisa fungsi kosong, dan residu teks bocor
     cleaned = cleaned
@@ -33479,6 +34994,20 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           platform: String(parsedArgs.platform || 'auto').trim(),
           limit: Math.max(1, Math.min(10, parseInt(parsedArgs.limit || parsedArgs.max_results || 5, 10) || 5))
         };
+      } else if (normalizedName === 'fetch_communication_context') {
+        parsedArgs = {
+          source: String(parsedArgs.source || parsedArgs.sumber || 'auto').trim().toLowerCase(),
+          query: String(parsedArgs.query || parsedArgs.q || parsedArgs.kata_kunci || parsedArgs.topik || parsedArgs.topic || '').trim(),
+          target_id: String(parsedArgs.target_id || parsedArgs.id || parsedArgs.target || parsedArgs.contact || parsedArgs.kontak || parsedArgs.nomor || parsedArgs.phone || parsedArgs.jid || parsedArgs.ticket_id || '').trim(),
+          limit: Math.max(1, Math.min(15, parseInt(parsedArgs.limit || parsedArgs.max_results || 6, 10) || 6)),
+          max_messages: Math.max(5, Math.min(80, parseInt(parsedArgs.max_messages || parsedArgs.maxMessages || 25, 10) || 25)),
+          days: Math.max(0, Math.min(365, parseInt(parsedArgs.days || parsedArgs.hari || 0, 10) || 0)),
+          since_minutes: Math.max(0, Math.min(10080, parseInt(parsedArgs.since_minutes || parsedArgs.sinceMinutes || parsedArgs.menit || 0, 10) || 0)),
+          sort_by: ['auto', 'recent', 'relevance'].includes(String(parsedArgs.sort_by || parsedArgs.sortBy || 'auto').trim().toLowerCase())
+            ? String(parsedArgs.sort_by || parsedArgs.sortBy || 'auto').trim().toLowerCase()
+            : 'auto',
+          unread_only: Boolean(parsedArgs.unread_only || parsedArgs.unreadOnly || parsedArgs.belum_dibaca)
+        };
       } else if (normalizedName === 'summarize_whatsapp_chat') {
         parsedArgs = {
           target_number_or_name: String(parsedArgs.target_number_or_name || parsedArgs.target || parsedArgs.number || parsedArgs.contact || '').trim(),
@@ -33492,6 +35021,15 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       } else if (normalizedName === 'search_memory') {
         const qVal = parsedArgs.query || parsedArgs.q || parsedArgs.keyword || parsedArgs.topic || parsedArgs.cari || parsedArgs.kata_kunci || '';
         parsedArgs = { query: String(qVal).trim() };
+      } else if (normalizedName === 'search_documents') {
+        const qVal = parsedArgs.query || parsedArgs.q || parsedArgs.keyword || parsedArgs.keywords || parsedArgs.kata_kunci || parsedArgs.topic || parsedArgs.topik || parsedArgs.search || '';
+        const catVal = String(parsedArgs.category || parsedArgs.kategori || parsedArgs.type || parsedArgs.doc_type || 'auto').trim().toLowerCase();
+        parsedArgs = {
+          query: String(qVal).trim(),
+          category: ['auto', 'all', 'sop', 'laporan', 'regulasi', 'kebijakan', 'panduan', 'vector_db', 'workspace'].includes(catVal) ? catVal : 'auto',
+          doc_id: String(parsedArgs.doc_id || parsedArgs.docId || parsedArgs.document_id || parsedArgs.id || parsedArgs.file || parsedArgs.filename || '').trim(),
+          top_k: Math.max(1, Math.min(15, parseInt(parsedArgs.top_k || parsedArgs.topK || parsedArgs.limit || parsedArgs.max_results || 5, 10) || 5))
+        };
       } else if (normalizedName === 'execute_python_code') {
         const codeVal = parsedArgs.code || parsedArgs.script || parsedArgs.python || (typeof parsedArgs === 'string' ? parsedArgs : '');
         parsedArgs = { code: String(codeVal).trim() };
@@ -33514,8 +35052,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         };
       } else if (normalizedName === 'prepare_image_display') {
         const ids = Array.isArray(parsedArgs.image_ids)
-          ? parsedArgs.image_ids.map((s) => String(s || '').trim()).filter(Boolean).slice(0, 3)
-          : (parsedArgs.image_ids ? String(parsedArgs.image_ids).split(',').map((s) => s.trim()).filter(Boolean).slice(0, 3) : []);
+          ? parsedArgs.image_ids.map((s) => String(s || '').trim()).filter(Boolean).slice(0, 12)
+          : (parsedArgs.image_ids ? String(parsedArgs.image_ids).split(',').map((s) => s.trim()).filter(Boolean).slice(0, 12) : []);
         const alts = Array.isArray(parsedArgs.alt_texts)
           ? parsedArgs.alt_texts.map((s) => String(s || '').trim())
           : ids.map((_, idx) => `Gambar referensi ${idx + 1}`);
@@ -33543,80 +35081,100 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       }
     }
 
-    // 1. Tag <tool_call>...</tool_call> and <function_call>...</function_call>
+    function parseAndAddMultiToolJsonBlock(rawInner, rawTag, allowImplicit = true) {
+      if (!rawInner || typeof rawInner !== 'string') return;
+      const clean = rawInner.replace(/^```(?:json|tool_call)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      if (!clean) return;
+      let parsedList = null;
+      try {
+        const p = JSON.parse(clean);
+        parsedList = Array.isArray(p) ? p : [p];
+      } catch (_) {
+        try {
+          const pArr = JSON.parse(`[${clean}]`);
+          if (Array.isArray(pArr)) parsedList = pArr;
+        } catch (_2) {
+          const subBlocks = extractBalancedJsonObjects(clean);
+          if (subBlocks.length > 0) {
+            parsedList = [];
+            for (const sb of subBlocks) {
+              try {
+                parsedList.push(JSON.parse(sb.json));
+              } catch (_3) {}
+            }
+          }
+        }
+      }
+      if (Array.isArray(parsedList)) {
+        parsedList.forEach(item => {
+          const name = extractToolNameFromParsedJson(item, { allowImplicit });
+          if (name) {
+            addCall(name, extractToolArgsFromParsedJson(item), rawTag);
+          }
+        });
+      }
+    }
+
+    // 1. Tag <tool_call>...</tool_call> and <function_call>...</function_call> (mendukung Parallel Tool Calling multi-objek)
     const tagRegex = /<(?:tool_call|function_call)>\s*([\s\S]*?)\s*<\/(?:tool_call|function_call)>/gi;
     let tm;
     while ((tm = tagRegex.exec(text)) !== null) {
-      try {
-        const clean = tm[1].replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-        const p = JSON.parse(clean);
-        const items = Array.isArray(p) ? p : [p];
-        items.forEach(item => {
-          const name = extractToolNameFromParsedJson(item);
-          if (name) {
-            addCall(name, extractToolArgsFromParsedJson(item), tm[0]);
-          }
-        });
-      } catch (_) {}
+      parseAndAddMultiToolJsonBlock(tm[1], tm[0], true);
     }
 
     // 2. Mistral format: [TOOL_CALLS] [{"name": "search_web", "arguments": ...}]
     const mistralRegex = /\[TOOL_CALLS\]\s*([\s\S]*?)(?:\[\/TOOL_CALLS\]|$)/gi;
     let mtm;
     while ((mtm = mistralRegex.exec(text)) !== null) {
-      try {
-        const block = mtm[1].trim();
-        const parsed = JSON.parse(block);
-        const items = Array.isArray(parsed) ? parsed : [parsed];
-        items.forEach(it => {
-          const name = extractToolNameFromParsedJson(it);
-          if (name) {
-            addCall(name, extractToolArgsFromParsedJson(it), mtm[0]);
-          }
-        });
-      } catch (_) {}
+      parseAndAddMultiToolJsonBlock(mtm[1], mtm[0], true);
     }
 
-    // 3. Anthropic XML format: <invoke name="search_web"><parameter name="query">...</parameter></invoke>
+    // 3. Anthropic XML format: <invoke name="search_web"><parameter name="query">...</parameter></invoke> (multi-parameter support)
     const toolPattern = AUTONOMOUS_TOOL_NAMES.join('|');
+    const strictToolPattern = STRICT_INLINE_TOOL_NAMES.join('|');
     const invokeRegex = new RegExp(`<invoke\\s+name=["'](${toolPattern})["']>([\\s\\S]*?)<\\/invoke>`, 'gi');
     let ivm;
     while ((ivm = invokeRegex.exec(text)) !== null) {
       const name = ivm[1];
       const inner = ivm[2];
-      const paramMatch = inner.match(/<parameter\s+name=["'](?:query|q|url|target|link|href|code|topic|content)["']>([\s\S]*?)<\/parameter>/i);
-      const val = paramMatch ? paramMatch[1].trim() : inner.replace(/<[^>]+>/g, '').trim();
-      if (val) {
-        const isUrlTool = ['browse_web_page', 'browse_web', 'browse_page', 'extract_web', 'read_url', 'scrape_url'].includes(name.toLowerCase());
-        const isCodeTool = ['execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python'].includes(name.toLowerCase());
-        const isSaveMem = ['save_memory', 'simpan_memori', 'store_memory'].includes(name.toLowerCase());
-        if (isUrlTool) addCall(name, { url: val }, ivm[0]);
-        else if (isCodeTool) addCall(name, { code: val }, ivm[0]);
-        else if (isSaveMem) addCall(name, { topic: 'catatan', content: val }, ivm[0]);
-        else addCall(name, { query: val }, ivm[0]);
+      const paramMap = {};
+      const paramRe = /<parameter\s+name=["']([a-zA-Z0-9_]+)["']>([\s\S]*?)<\/parameter>/gi;
+      let pm;
+      while ((pm = paramRe.exec(inner)) !== null) {
+        const pk = pm[1].trim();
+        const pv = pm[2].trim();
+        if (pk) paramMap[pk] = pv;
+      }
+      if (Object.keys(paramMap).length > 0) {
+        addCall(name, paramMap, ivm[0]);
+      } else {
+        const val = inner.replace(/<[^>]+>/g, '').trim();
+        if (val) {
+          const normInv = normalizeToolName(name);
+          if (['browse_web_page', 'extract_web'].includes(normInv)) addCall(name, { url: val }, ivm[0]);
+          else if (normInv === 'execute_python_code') addCall(name, { code: val }, ivm[0]);
+          else if (normInv === 'save_memory') addCall(name, { topic: 'catatan', content: val }, ivm[0]);
+          else addCall(name, { query: val }, ivm[0]);
+        }
       }
     }
 
-    // 4. Fenced codeblock ```json ... ``` or ```tool_call ... ```
-    const codeBlockRegex = /```(?:json|tool_call)?\s*(\{[\s\S]*?\})\s*```/gi;
+    // 4. Fenced codeblock ```json ... ``` or ```tool_call ... ``` (mendukung single object maupun parallel array [...] tanpa menembus pagar)
+    const codeBlockRegex = /```(json|tool_call)?\s*([\{\[](?:(?!```)[\s\S])*?[\}\]])\s*```/gi;
     let cm;
     while ((cm = codeBlockRegex.exec(text)) !== null) {
-      try {
-        const p = JSON.parse(cm[1]);
-        const name = extractToolNameFromParsedJson(p);
-        if (name && isKnownAutonomousTool(name)) {
-          addCall(name, extractToolArgsFromParsedJson(p), cm[0]);
-        }
-      } catch (_) {}
+      const allowImp = String(cm[1] || '').toLowerCase() === 'tool_call';
+      parseAndAddMultiToolJsonBlock(cm[2], cm[0], allowImp);
     }
 
-    // 4b. Gemma / compact pseudo-syntax: search_web query: <query> or call:search_web{...}
-    const gemmaSearchRegex = /(?:call:(?:search_web|web_search|search)|\b(?:search_web|web_search))\s*(?:query\s*[:=]|:\s*query\s*=)\s*(?:["']([^"']+)["']|([^\n<{}>]+?)(?:<\/?|>|$))/gi;
+    // 4b. Gemma / compact pseudo-syntax: search_web / search_documents / fetch_communication_context / browse_web_page
+    const gemmaQueryToolRegex = /(?:call:(search_web|web_search|search_documents|retrieve_knowledge|fetch_communication_context)|\b(search_web|web_search|search_documents|retrieve_knowledge|fetch_communication_context))\s*(?:query\s*[:=]|:\s*query\s*=)\s*(?:["']([^"']+)["']|([^\n<{}>]+?)(?:<\/?|>|$))/gi;
     let gm;
-    while ((gm = gemmaSearchRegex.exec(text)) !== null) {
-      const q = (gm[1] || gm[2] || '').trim();
+    while ((gm = gemmaQueryToolRegex.exec(text)) !== null) {
+      const rawTool = (gm[1] || gm[2] || 'search_web').trim();
+      const q = (gm[3] || gm[4] || '').trim();
       if (q && q.length > 2 && !q.startsWith('http://') && !q.startsWith('https://') && !q.includes('(')) {
-        addCall('search_web', { query: q }, gm[0]);
+        addCall(rawTool, { query: q }, gm[0]);
       }
     }
     const gemmaBrowseRegex = /(?:call:(?:browse_web_page|browse_web|extract_web|read_url)|\b(?:browse_web_page|browse_web|extract_web|read_url))\s*(?:url\s*[:=]|:\s*url\s*=)\s*(?:["']([^"']+)["']|(https?:\/\/[^\s\n<{}]+|[^\n<{}>]+?)(?:<\/?|>|$))/gi;
@@ -33633,18 +35191,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     let textWithoutCode = text
       .replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY)[\s\S]*?(?:<<<END_ZOZ_(?:FILE|EDIT|MODIFY)>>>|$)/gi, ' ')
       .replace(/<!DOCTYPE\s+html[\s\S]*?(?:<\/html>|$)/gi, ' ')
-      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/```(?:(?!```)[\s\S])*?```/g, ' ')
       .replace(/`[^`\n]+`/g, ' ');
 
     const remainingProse = scrubRawToolCallArtifacts(textWithoutCode).trim();
     const isLongCompleteText = textWithoutCode.trim().length > 350 && remainingProse.length > 150;
 
-    // 5. Raw balanced JSON objects anywhere in text (di luar blok kode)
+    // 5. Raw balanced JSON objects anywhere in text (di luar blok kode — wajib eksplisit membawa nama tool)
     const jsonBlocks = extractBalancedJsonObjects(textWithoutCode);
     for (const block of jsonBlocks) {
       try {
         const p = JSON.parse(block.json);
-        const name = extractToolNameFromParsedJson(p);
+        const name = extractToolNameFromParsedJson(p, { allowImplicit: false });
         const normName = normalizeToolName(name);
         if (isLongCompleteText && block.start > 220 && normName === 'search_web') continue;
         if (name && isKnownAutonomousTool(name)) {
@@ -33653,35 +35211,34 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       } catch (_) {}
     }
 
-    // 6. Function call with JSON argument: search_web({"query": "..."}) or browse_web_page({"url": "..."})
-    const funcJsonRegex = new RegExp(`\\b(${toolPattern})\\s*\\(\\s*(\\{[\\s\\S]*?\\})\\s*\\)`, 'gi');
-    let fjm;
-    while ((fjm = funcJsonRegex.exec(textWithoutCode)) !== null) {
-      const name = fjm[1];
-      if (isLongCompleteText && fjm.index > 220 && normalizeToolName(name) === 'search_web') continue;
+    // 6. Function call with balanced JSON argument: search_web({"query": "..."}) atau execute_python_code({"code": "d = {'a': 1}"})
+    const balFuncMatches = extractBalancedFunctionJsonCalls(textWithoutCode, STRICT_INLINE_TOOL_SET);
+    for (const bf of balFuncMatches) {
+      const name = bf.name;
+      if (isLongCompleteText && bf.start > 220 && normalizeToolName(name) === 'search_web') continue;
       try {
         let p;
         try {
-          p = JSON.parse(fjm[2]);
+          p = JSON.parse(bf.json);
         } catch (_) {
-          let cleanJson = fjm[2]
+          let cleanJson = bf.json
             .replace(/'(?=\s*[:,\}\]])/g, '"')
             .replace(/([\{\[,]\s*)'/g, '$1"')
             .replace(/,\s*([}\]])/g, '$1');
           p = JSON.parse(cleanJson);
         }
-        addCall(name, p, fjm[0]);
+        addCall(name, p, bf.raw);
       } catch (_) {
         const extracted = {};
         const kvRegex = /["']?([a-zA-Z0-9_]+)["']?\s*:\s*(?:["']([^"']*)["']|(\d+(?:\.\d+)?)|(true|false)|null)/g;
         let km;
-        while ((km = kvRegex.exec(fjm[2])) !== null) {
+        while ((km = kvRegex.exec(bf.json)) !== null) {
           const k = km[1];
           const v = km[2] !== undefined ? km[2] : (km[3] !== undefined ? Number(km[3]) : (km[4] !== undefined ? km[4] === 'true' : null));
           extracted[k] = v;
         }
         if (Object.keys(extracted).length > 0) {
-          addCall(name, extracted, fjm[0]);
+          addCall(name, extracted, bf.raw);
         }
       }
     }
@@ -33707,31 +35264,43 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       }
     }
 
-    // 7b. Single-argument function call syntax: search_web("query") or browse_web_page("url")
-    // Jika teks sangat panjang (> 300 kata), batasi search_web di awal teks (< 220 karakter), namun izinkan tool spesifik lain (browse_web_page, execute_python_code, save_memory, search_memory, find_related_videos)
-    const funcRegex = new RegExp(`\\b(${toolPattern})\\s*\\(\\s*(?:(?:query|url|video_url|q|link|target|code|topic|content|isi|kata_kunci|topik|script|cari|tautan|konten)\\s*[:=]\\s*)?(["'\`])([\\s\\S]*?)\\2\\s*\\)`, 'gi');
+    // 7b. Single-argument function call syntax: search_web("query") or search_documents(doc_id="SOP-01") or fetch_communication_context(target_id="628...")
+    const funcRegex = new RegExp(`\\b(${strictToolPattern})\\s*\\(\\s*(?:(query|url|video_url|q|link|target|target_id|source|sumber|kontak|nomor|code|topic|content|isi|kata_kunci|topik|script|cari|tautan|konten|doc_id|category|top_k)\\s*[:=]\\s*)?(["'\`])([\\s\\S]*?)\\3\\s*\\)`, 'gi');
     let fm;
     while ((fm = funcRegex.exec(textWithoutCode)) !== null) {
       const name = fm[1];
+      const paramKey = fm[2] ? fm[2].toLowerCase() : '';
       const normName = normalizeToolName(name);
       if (isLongCompleteText && fm.index > 220 && normName === 'search_web') continue;
-      const val = fm[3].trim();
+      const val = fm[4].trim();
       if (val) {
         const isUrlTool = ['browse_web_page', 'extract_web'].includes(normName);
         const isCodeTool = ['execute_python_code', 'run_python', 'python'].includes(normName);
         const isSaveMem = normName === 'save_memory';
         const isVideoTool = normName === 'find_related_videos';
-        if (isUrlTool) addCall(name, { url: val }, fm[0]);
-        else if (isCodeTool) addCall(name, { code: val }, fm[0]);
-        else if (isSaveMem) addCall(name, { topic: 'catatan', content: val }, fm[0]);
-        else if (isVideoTool) addCall(name, /^https?:\/\//i.test(val) ? { video_url: val } : { query: val }, fm[0]);
-        else addCall(name, { query: val }, fm[0]);
+        if (paramKey && ['doc_id', 'category', 'top_k', 'target_id', 'source'].includes(paramKey)) {
+          addCall(name, { [paramKey]: val }, fm[0]);
+        } else if (paramKey && ['sumber'].includes(paramKey)) {
+          addCall(name, { source: val }, fm[0]);
+        } else if (paramKey && ['kontak', 'nomor'].includes(paramKey)) {
+          addCall(name, { target_id: val }, fm[0]);
+        } else if (isUrlTool) {
+          addCall(name, { url: val }, fm[0]);
+        } else if (isCodeTool) {
+          addCall(name, { code: val }, fm[0]);
+        } else if (isSaveMem) {
+          addCall(name, { topic: 'catatan', content: val }, fm[0]);
+        } else if (isVideoTool) {
+          addCall(name, /^https?:\/\//i.test(val) ? { video_url: val } : { query: val }, fm[0]);
+        } else {
+          addCall(name, { query: val }, fm[0]);
+        }
       }
     }
 
     // 8. Conversational triggers: "We will call search_web for <query>"
     // Hanya picu jika berada di awal generasi (bukan teks penutup di akhir pesan panjang)
-    const convRegex = new RegExp(`(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari|menjelajahi|ekstrak|rekomendasi video)\\s+(${toolPattern})(?:\\s+(?:for|with|tentang|query|url|code|topic|isi|kata_kunci|topik|cari|tautan|:))?\\s*(["'\`])([^\\n]+?)\\2`, 'gi');
+    const convRegex = new RegExp(`(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari|menjelajahi|ekstrak|rekomendasi video)\\s+(${strictToolPattern})(?:\\s+(?:for|with|tentang|query|url|code|topic|isi|kata_kunci|topik|cari|tautan|:))?\\s*(["'\`])([^\\n]+?)\\2`, 'gi');
     let cvm;
     while ((cvm = convRegex.exec(textWithoutCode)) !== null) {
       const name = cvm[1];
@@ -33754,7 +35323,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     return calls;
   }
 
-  function getAutonomousSystemDirective() {
+  function getAutonomousSystemDirective(options = {}) {
+    const allowZ21LocalComm = canUseZ21LocalCommunicationTool(options?.planMode, options?.session);
+    const commToolDoc = allowZ21LocalComm
+      ? `  7. \`fetch_communication_context({"source": "auto|all|whatsapp|email|team_chat|ticket|session|memory", "query": "<kata kunci>", "target_id": "<opsional: nomor HP/JID/nama kontak/ID tiket>", "limit": 6, "max_messages": 25, "days": 0, "since_minutes": 0, "sort_by": "auto|recent|relevance", "unread_only": false})\`: KHUSUS MODE Z21 LOCALHOST — Mengambil riwayat chat WhatsApp terbaru (termasuk pesan baru masuk real-time, kontak, grup, lampiran, timestamp HH:mm:ss & status unread), email lokal, pesan chat tim/notulen, catatan tiket, riwayat sesi AI, dan memori lokal untuk dirangkum atau ditindaklanjuti secara langsung. Gunakan sort_by="recent" atau since_minutes (mis. 60) untuk melihat chat terbaru.`
+      : `  7. \`summarize_whatsapp_chat({"target_number_or_name": "<nama/nomor>", "focus_topic": "<fokus>"})\`: Rangkuman obrolan WhatsApp dengan gerbang persetujuan pengguna.`;
     return `\n[SKEMA TOOL EKSTERNAL AKTIF]:
 - Panggil fungsi melalui native tool calling API; apabila jalur upstream tidak mendukung native tool API, keluarkan blok \`<tool_call>{"name": "<nama_tool>", "arguments": {<parameter_json>}}</tool_call>\`.
 - Daftar fungsi tersedia:
@@ -33764,14 +35337,47 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   4. \`search_memory({"query": "<kata kunci>", "limit": 5})\`: Mencari catatan dari memori jangka panjang lokal via SQLite Full-Text Search.
   5. \`execute_python_code({"code": "<script python>"})\`: Menjalankan kode Python dalam sandbox lokal untuk kalkulasi matematika presisi atau manipulasi data.
   6. \`find_related_videos({"video_url": "<URL video>", "query": "<topik>", "platform": "auto", "limit": 5})\`: Pencarian dan rekomendasi video nyata lintas platform yang dapat diputar langsung di percakapan.
-  7. \`summarize_whatsapp_chat({"target_number_or_name": "<nama/nomor>", "focus_topic": "<fokus>"})\`: Rangkuman obrolan WhatsApp dengan gerbang persetujuan pengguna.
-  8. \`search_images({"query": "<kata kunci bahasa Inggris>", "per_page": 3, "sources": ["unsplash"], "orientation": "any", "image_type": "photo", "safe_search": true})\` -> \`inspect_image({"image_id": "<id>"})\` -> \`prepare_image_display({"image_ids": ["<id1>", "<id2>", "<id3>"], "layout": "collage", "placement": "after_intro", "alt_texts": ["<deskripsi>"]})\`: Siklus pencarian dan perenderan 3 foto paling relevan untuk mendukung jawaban visual. ATURAN PEMROSESAN: (1) Analisis pertanyaan pengguna dan tentukan visual apa yang paling cocok mendukung jawaban; (2) Terjemahkan kata kunci tersebut ke Bahasa Inggris agar pencarian Unsplash akurat (contoh: "kopi hangat" menjadi "hot coffee"); (3) Ambil per_page: 3 dari ["unsplash"] untuk objek/kuliner/alam/sejarah umum atau ["wikimedia_commons"] khusus potret tokoh bernama spesifik, lalu sisipkan token \`[[ZOZ_IMAGE_DISPLAY:disp_...]]\` di dekat pembahasan tanpa menampilkan JSON mentah.`;
+${commToolDoc}
+  8. \`search_documents({"query": "<kata kunci SOP/laporan/regulasi/kebijakan>", "category": "auto|all|sop|laporan|regulasi|kebijakan|panduan|vector_db|workspace", "doc_id": "<opsional: ID/nama berkas>", "top_k": 5})\` (atau alias \`retrieve_knowledge({"query": "...", "category": "auto", "top_k": 5})\`): Mencari dan mengambil potongan dokumen relevan (SOP, laporan, regulasi, kebijakan, panduan) dari vector database (Hybrid Vector Cosine Similarity + SQLite FTS5 BM25 + Knowledge Graph RRF) atau sistem manajemen dokumen internal secara real-time (RAG dinamis).
+  9. \`search_images({"query": "<kata kunci bahasa Inggris>", "per_page": 3, "sources": ["unsplash"], "orientation": "any", "image_type": "photo", "safe_search": true})\` -> \`inspect_image({"image_id": "<id>"})\` -> \`prepare_image_display({"image_ids": ["<id1>", "<id2>", "<id3>"], "layout": "collage", "placement": "after_intro", "alt_texts": ["<deskripsi>"]})\`: Siklus pencarian dan perenderan 3 foto paling relevan untuk mendukung jawaban visual. ATURAN PEMROSESAN: (1) Analisis pertanyaan pengguna dan tentukan visual apa yang paling cocok mendukung jawaban; (2) Terjemahkan kata kunci tersebut ke Bahasa Inggris agar pencarian Unsplash akurat (contoh: "kopi hangat" menjadi "hot coffee"); (3) Ambil per_page: 3 dari ["unsplash"] untuk objek/kuliner/alam/sejarah umum atau ["wikimedia_commons"] khusus potret tokoh bernama spesifik, lalu sisipkan token \`[[ZOZ_IMAGE_DISPLAY:disp_...]]\` di dekat pembahasan tanpa menampilkan JSON mentah.
+
+[4. ORCHESTRATION & CHAINING (MULTI-STEP TOOL CALLING)]:
+- **Parallel Tool Calling**: Anda dapat memanggil beberapa tool sekaligus dalam satu giliran (baik beberapa item pada array \`tool_calls\` maupun beberapa blok \`<tool_call>...</tool_call>\` berurutan dalam satu respons) untuk mengambil beberapa sumber sekaligus secara paralel (contoh: mengambil data transaksi/riwayat dari \`${allowZ21LocalComm ? 'fetch_communication_context' : 'search_memory'}\` + mengambil kebijakan diskon/SOP dari \`search_documents\` / \`retrieve_knowledge\` dalam satu giliran) sebelum menyusun jawaban.
+- **Sequential Chaining**: Anda dapat menggunakan output dari satu putaran tool sebagai input untuk tool berikutnya pada putaran selanjutnya (contoh: \`${allowZ21LocalComm ? 'fetch_communication_context' : 'search_memory'}\` / \`search_documents\` -> \`execute_python_code\` untuk kalkulasi presisi -> menyusun laporan akhir atau berkas dokumen).`;
   }
   const AUTONOMOUS_SYSTEM_DIRECTIVE = '';
 
-  function createAutonomousToolHudHtml(toolName, targetText, status = 'loading') {
+  function createAutonomousToolHudHtml(toolName, targetText, status = 'loading', parallelTools = null) {
     if (status === 'done') return '';
+    if (Array.isArray(parallelTools) && parallelTools.length > 1) {
+      const labelList = parallelTools.map(t => normalizeToolName(t?.toolName || t) || 'tool').join(' + ');
+      return `
+        <div class="autonomous-search-status" style="border-color: rgba(168, 85, 247, 0.5); background: rgba(59, 7, 100, 0.35); color: #d8b4fe;">
+          <span class="typing-cursor"></span>
+          <i class="fa-solid fa-diagram-project fa-spin"></i>
+          <span>Parallel Tool Calling (${parallelTools.length} sumber): ${escapeHtml(labelList)}...</span>
+        </div>
+      `;
+    }
     const norm = normalizeToolName(toolName);
+    if (norm === 'search_documents') {
+      return `
+        <div class="autonomous-search-status" style="border-color: rgba(245, 158, 11, 0.45); background: rgba(69, 26, 3, 0.35); color: #fcd34d;">
+          <span class="typing-cursor"></span>
+          <i class="fa-solid fa-book-open-reader fa-spin"></i>
+          <span>RAG Dinamis: Mencari potongan dokumen relevan (SOP, laporan, regulasi & vector DB)...</span>
+        </div>
+      `;
+    }
+    if (norm === 'fetch_communication_context') {
+      return `
+        <div class="autonomous-search-status" style="border-color: rgba(244, 63, 94, 0.45); background: rgba(76, 5, 25, 0.35); color: #fda4af;">
+          <span class="typing-cursor"></span>
+          <i class="fa-solid fa-comments fa-spin"></i>
+          <span>Mengambil & menganalisis riwayat komunikasi lokal (WhatsApp, email, chat tim, tiket)...</span>
+        </div>
+      `;
+    }
     if (norm === 'search_images' || norm === 'inspect_image' || norm === 'prepare_image_display') {
       return `
         <div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc;">
@@ -33995,19 +35601,30 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
       'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
     ];
+    const pad = (n) => String(n).padStart(2, '0');
     const dayName = daysId[now.getDay()];
     const dateNum = now.getDate();
     const monthName = monthsId[now.getMonth()];
     const year = now.getFullYear();
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const timeFormatted = `${hours}:${minutes}`;
+    const hours = pad(now.getHours());
+    const minutes = pad(now.getMinutes());
+    const seconds = pad(now.getSeconds());
+    const timeFormatted = `${hours}:${minutes}:${seconds}`;
+    const offsetMin = -now.getTimezoneOffset();
+    const sign = offsetMin >= 0 ? '+' : '-';
+    const absMin = Math.abs(offsetMin);
+    const utcOffsetStr = `UTC${sign}${pad(Math.floor(absMin / 60))}:${pad(absMin % 60)}`;
+    let tzName = utcOffsetStr;
+    try {
+      tzName = Intl.DateTimeFormat().resolvedOptions().timeZone || utcOffsetStr;
+    } catch (_) {}
     const isoUtc = now.toISOString();
 
-    return `[KOORDINAT WAKTU REFERENSI SISTEM]
-- Tanggal Lokal: ${dayName}, ${dateNum} ${monthName} ${year} (${timeFormatted})
+    return `[KOORDINAT WAKTU REFERENSI SISTEM — REAL-TIME LOKAL]
+- Waktu Lokal Perangkat Saat Ini: ${dayName}, ${dateNum} ${monthName} ${year}, pukul ${timeFormatted} (${tzName}, ${utcOffsetStr})
 - Timestamp UTC: ${isoUtc}
-- Tahun Referensi: ${year}`;
+- Tahun Referensi: ${year}
+- Catatan: Anda MEMILIKI akses langsung ke jam & tanggal real-time perangkat ini. Jika pengguna menanyakan jam/tanggal/hari sekarang atau jarak waktu suatu chat, jawab langsung dan akurat berdasarkan koordinat waktu di atas.`;
   }
 
   function estimateBpeTokens(text) {
@@ -34115,70 +35732,109 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     autonomousRound,
     maxAutonomousRounds,
     circuitBreakerTripped,
-    conversationChain
+    conversationChain,
+    allowInlineToolFallback = false
   }) {
     const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(normalizeToolName(c.function.name)));
     const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web'].includes(normalizeToolName(c.function.name)));
     const hasExecutedPython = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'execute_python_code');
     const hasExecutedMemory = detectedAutonomousCalls.some(c => c && c.function && ['save_memory', 'search_memory'].includes(normalizeToolName(c.function.name)));
+    const hasExecutedCommunication = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'fetch_communication_context');
+    const hasExecutedDocuments = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'search_documents');
     const hasExecutedVideo = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'find_related_videos');
     const hasExecutedImageSearch = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'search_images');
     const hasExecutedImageInspect = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'inspect_image');
     const hasExecutedImagePrepare = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'prepare_image_display');
+    const isParallelRound = detectedAutonomousCalls.length > 1;
     const hasGroundedSearchSources = Boolean(webSources && webSources.length > 0);
     const isMidImagePipeline = (hasExecutedImageSearch || hasExecutedImageInspect) && !hasExecutedImagePrepare;
-    const isLastRound = circuitBreakerTripped || hasExecutedImagePrepare || (!isMidImagePipeline && (hasBrowsedWeb || hasExecutedVideo)) || (autonomousRound >= maxAutonomousRounds - 1);
+    const isLastRound = circuitBreakerTripped || hasExecutedImagePrepare || (!isMidImagePipeline && hasExecutedVideo) || (autonomousRound >= maxAutonomousRounds - 1);
 
     const currentDateObj = new Date();
     const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     const currentIsoDate = currentDateObj.toISOString().slice(0, 10);
+    const inlineChainHint = allowInlineToolFallback
+      ? ' (Jika native tool tidak tersedia, keluarkan blok <tool_call>{"name":"nama_tool","arguments":{...}}</tool_call>.)'
+      : '';
 
-    const roundInstruction = isMidImagePipeline
-      ? `[ALUR VERIFIKASI VISUAL AKTIF]:
-${hasExecutedImageSearch ? '1. Pilih 3–6 image_id yang paling cocok secara subjek dari daftar kandidat di atas, lalu panggil inspect_image({"image_id": "..."}) terlebih dahulu (apabila native tool tidak tersedia, keluarkan blok <tool_call>{"name":"inspect_image","arguments":{"image_id":"..."}}</tool_call>).' : '1. Untuk seluruh kandidat yang lolos verifikasi (accessible: true dan usage_status: "allowed"), panggil prepare_image_display({"image_ids": [...], "layout": "collage"|"gallery", "placement": "after_intro"|"within_section", "alt_texts": [...]}) untuk menyajikan banyak contoh foto sekaligus dalam format kolase. Jika semua kandidat ditolak, jawab langsung pertanyaan pengguna secara faktual tanpa mengarang URL gambar.'}`
-      : ((hasExecutedSearch && !hasGroundedSearchSources && !hasBrowsedWeb && !hasExecutedImagePrepare && !hasExecutedVideo)
-      ? `[INSTRUKSI JAWABAN LANGSUNG]:
-Berikan jawaban akhir yang akurat, objektif, terstruktur, dan langsung menjawab inti persoalan sesuai bahasa pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Jangan menyebutkan catatan tool internal, jangan mengeluh bahwa sumber tidak relevan, dan jangan mengarang URL tautan.`
-      : ((isLastRound || hasExecutedImagePrepare || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedVideo || hasBrowsedWeb)
-      ? `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:
-${circuitBreakerTripped
-  ? 'MANDAT JAWABAN DEDUKTIF: Penelusuran selesai. Berikan penjelasan komprehensif, langsung, dan objektif atas pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian atau menyalin catatan sistem internal ini.'
-  : (hasExecutedImagePrepare
-    ? 'MANDAT ANALISIS FAKTIK & PENYAJIAN VISUAL: Susun jawaban akhir dengan format: (1) Penjelasan pembuka yang lugas dan tajam selaras dengan persona Anda, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat, serta (4) Kredit gambar dan tautan halaman sumber.'
-    : (hasBrowsedWeb
-      ? (isLastRound
+    let evidenceDirective = '';
+    if (circuitBreakerTripped) {
+      evidenceDirective = 'MANDAT JAWABAN DEDUKTIF: Penelusuran selesai. Berikan penjelasan komprehensif, langsung, dan objektif atas pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian atau menyalin catatan sistem internal ini.';
+    } else if (hasExecutedImagePrepare) {
+      evidenceDirective = 'MANDAT ANALISIS FAKTIK & PENYAJIAN VISUAL: Susun jawaban akhir dengan format: (1) Penjelasan pembuka yang lugas dan tajam selaras dengan persona Anda, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat, serta (4) Kredit gambar dan tautan halaman sumber.';
+    } else if (isParallelRound) {
+      evidenceDirective = isLastRound
+        ? 'SINTESIS PARALLEL TOOL CALLING: Gabungkan dan silangkan seluruh bukti dari beberapa sumber paralel di atas (dokumen SOP/regulasi, riwayat komunikasi, memori, atau hasil perhitungan) menjadi satu jawaban terpadu yang akurat, terstruktur, dan langsung dapat ditindaklanjuti.'
+        : `ORKESTRASI PARALLEL & SEQUENTIAL CHAINING: Anda baru saja mengambil data dari beberapa sumber secara paralel. Jika diperlukan langkah berantai berikutnya (Sequential Chaining, misalnya meneruskan angka/aturan di atas ke execute_python_code untuk kalkulasi presisi atau menyimpan hasil ke save_memory), panggil tool berikutnya sekarang.${inlineChainHint} Jika seluruh data sudah lengkap, susun jawaban akhir terpadu.`;
+    } else if (hasExecutedDocuments && !hasExecutedSearch) {
+      evidenceDirective = isLastRound
+        ? 'RAG DINAMIS (SEARCH_DOCUMENTS / RETRIEVE_KNOWLEDGE): Susun jawaban akurat berdasarkan potongan dokumen internal (SOP, laporan, regulasi, kebijakan, atau vector database) di atas. Cantumkan nama dokumen, kode/ID, dan bagian/pasal rujukan secara eksplisit.'
+        : `RAG DINAMIS & SEQUENTIAL CHAINING: Gunakan potongan dokumen internal (SOP/laporan/regulasi) di atas untuk menjawab pertanyaan pengguna. Apabila diperlukan kalkulasi lanjutan atas angka/aturan dalam dokumen, Anda dapat melanjutkan Sequential Chaining dengan memanggil execute_python_code.${inlineChainHint} Jika sudah lengkap, sajikan jawaban akhir bersitasi dokumen.`;
+    } else if (hasExecutedCommunication && !hasExecutedSearch) {
+      evidenceDirective = isLastRound
+        ? 'ANALISIS KOMUNIKASI LOKAL (MODE Z21): Susun rangkuman & analisis terstruktur berdasarkan data riwayat komunikasi lokal di atas (cantumkan pengirim, waktu, ID/JID/berkas asli, inti pembicaraan, poin penting/isu terbuka, serta daftar tindak lanjut / action items konkret beserta opsi draf balasan bila diminta). Dilarang keras mengarang isi pesan di luar data tool.'
+        : `ANALISIS KOMUNIKASI LOKAL & SEQUENTIAL CHAINING (MODE Z21): Jika data di atas sudah cukup untuk menjawab kebutuhan pengguna, susun rangkuman lengkap beserta analisis thread, poin keputusan/risiko, dan daftar tindak lanjut (action items) terprioritas. Apabila perlu pendalaman kontak lain, pencocokan dengan dokumen SOP (search_documents), atau kalkulasi (execute_python_code), Anda boleh memanggil tool berikutnya.${inlineChainHint}`;
+    } else if (hasBrowsedWeb) {
+      evidenceDirective = isLastRound
         ? 'Susun PENJELASAN LENGKAP dan mendalam yang menjawab pertanyaan pengguna berdasarkan teks halaman web di atas dengan sitasi [1], [2]. DILARANG KERAS hanya menampilkan daftar link tanpa penjelasan isi.'
-        : 'Susun penjelasan lengkap bersitasi [1], [2] jika bukti artikel di atas sudah mencukupi, atau panggil browse_web_page ke URL lain jika memerlukan detail lengkap.')
-      : (hasExecutedVideo
-        ? 'JELASKAN secara mendalam, informatif, dan terstruktur setiap video yang ditemukan di atas (uraikan topik/isi pembahasan video berdasarkan judul, deskripsi resmi, kanal pembuat, durasi, serta mengapa relevan dengan permintaan pengguna). Sertakan tautan URL video lengkap di dalam penjelasan Anda agar kartu pemutar interaktif dirender. DILARANG KERAS hanya menampilkan daftar link/judul tanpa uraian penjelasan!'
-        : (hasExecutedPython && !hasExecutedSearch
-          ? 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan dan penjelasannya secara presisi dalam Bahasa Indonesia.'
-          : (hasExecutedMemory && !hasExecutedSearch
-            ? 'Gunakan hasil pencarian memori lokal di atas untuk menjawab dan menjelaskan secara akurat dalam Bahasa Indonesia.'
-            : 'Susun PENJELASAN KOMPREHENSIF, mendalam, dan langsung menjawab pertanyaan pengguna berdasarkan isi artikel & fakta terverifikasi di atas (uraikan definisi, mekanisme, poin analisis utama, dan detail faktual). Jika cuplikan bukti masih singkat sementara masih ada putaran tool, panggil browse_web_page pada URL paling relevan. DILARANG KERAS hanya mencetak daftar link/URL sumber tanpa penjelasan mendalam!')))))}`
-      : `[HASIL EKSEKUSI TOOL]:
-Jika bukti di atas telah mencukupi, susun jawaban akhir yang menjelaskan hasilnya secara menyeluruh. Jika diperlukan pembacaan halaman lengkap (browse_web_page), panggil fungsi terkait.`));
+        : 'Susun penjelasan lengkap bersitasi [1], [2] jika bukti artikel di atas sudah mencukupi, atau panggil browse_web_page ke URL lain jika memerlukan detail lengkap.';
+    } else if (hasExecutedVideo) {
+      evidenceDirective = 'JELASKAN secara mendalam, informatif, dan terstruktur setiap video yang ditemukan di atas (uraikan topik/isi pembahasan video berdasarkan judul, deskripsi resmi, kanal pembuat, durasi, serta mengapa relevan dengan permintaan pengguna). Sertakan tautan URL video lengkap di dalam penjelasan Anda agar kartu pemutar interaktif dirender. DILARANG KERAS hanya menampilkan daftar link/judul tanpa uraian penjelasan!';
+    } else if (hasExecutedPython && !hasExecutedSearch) {
+      evidenceDirective = 'Gunakan stdout eksekusi Python di atas untuk menyajikan hasil perhitungan dan penjelasannya secara presisi dalam Bahasa Indonesia.';
+    } else if (hasExecutedMemory && !hasExecutedSearch) {
+      evidenceDirective = 'Gunakan hasil pencarian memori lokal di atas untuk menjawab dan menjelaskan secara akurat dalam Bahasa Indonesia.';
+    } else {
+      evidenceDirective = 'Susun PENJELASAN KOMPREHENSIF, mendalam, dan langsung menjawab pertanyaan pengguna berdasarkan isi artikel & fakta terverifikasi di atas (uraikan definisi, mekanisme, poin analisis utama, dan detail faktual). Jika cuplikan bukti masih singkat sementara masih ada putaran tool, panggil browse_web_page pada URL paling relevan. DILARANG KERAS hanya mencetak daftar link/URL sumber tanpa penjelasan mendalam!';
+    }
 
-    const claimConstraint = (hasGroundedSearchSources && !circuitBreakerTripped)
+    let roundInstruction = '';
+    if (isMidImagePipeline) {
+      roundInstruction = `[ALUR VERIFIKASI VISUAL AKTIF]:
+${hasExecutedImageSearch ? '1. Pilih 3–6 image_id yang paling cocok secara subjek dari daftar kandidat di atas, lalu panggil inspect_image({"image_id": "..."}) terlebih dahulu (apabila native tool tidak tersedia, keluarkan blok <tool_call>{"name":"inspect_image","arguments":{"image_id":"..."}}</tool_call>).' : '1. Untuk seluruh kandidat yang lolos verifikasi (accessible: true dan usage_status: "allowed"), panggil prepare_image_display({"image_ids": [...], "layout": "collage"|"gallery", "placement": "after_intro"|"within_section", "alt_texts": [...]}) untuk menyajikan banyak contoh foto sekaligus dalam format kolase. Jika semua kandidat ditolak, jawab langsung pertanyaan pengguna secara faktual tanpa mengarang URL gambar.'}`;
+    } else if (hasExecutedSearch && !hasGroundedSearchSources && !hasBrowsedWeb && !hasExecutedImagePrepare && !hasExecutedVideo && !hasExecutedCommunication && !hasExecutedDocuments) {
+      roundInstruction = `[INSTRUKSI JAWABAN LANGSUNG]:
+Berikan jawaban akhir yang akurat, objektif, terstruktur, dan langsung menjawab inti persoalan sesuai bahasa pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Jangan menyebutkan catatan tool internal, jangan mengeluh bahwa sumber tidak relevan, dan jangan mengarang URL tautan.`;
+    } else if (isLastRound || hasExecutedImagePrepare || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedCommunication || hasExecutedDocuments || hasExecutedVideo || hasBrowsedWeb) {
+      roundInstruction = `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:\n${evidenceDirective}`;
+    } else {
+      roundInstruction = `[HASIL EKSEKUSI TOOL]:
+Jika bukti di atas telah mencukupi, susun jawaban akhir yang menjelaskan hasilnya secara menyeluruh. Jika diperlukan pembacaan halaman lengkap (browse_web_page), panggil fungsi terkait.`;
+    }
+
+    const claimConstraint = (hasExecutedCommunication || hasExecutedDocuments)
+      ? `BATASAN ANALISIS KOMUNIKASI & RAG DOKUMEN INTERNAL:
+1. Seluruh nama pengirim, nomor/ID, waktu, kutipan pesan, status unread, kode SOP/dokumen, pasal/bagian, dan angka kebijakan WAJIB bersumber persis dari data di atas (tanggal referensi hari ini: ${currentFormattedDate}). Dilarang keras mengarang isi pesan, aturan SOP, atau ID yang tidak tercatat di data.
+2. Sajikan jawaban yang langsung dapat ditindaklanjuti: (a) Ringkasan Eksekutif, (b) Analisis detail per sumber/dokumen/thread, (c) Hasil kalkulasi/perbandingan aturan SOP bila ada, dan (d) Daftar Tindak Lanjut (Action Items) terprioritas.
+3. Jangan memanggil ulang fungsi (${toolSummaryList.map(s => s.split('(')[0]).join(', ')}) dengan parameter identik.`
+      : ((hasGroundedSearchSources && !circuitBreakerTripped)
       ? `BATASAN DOMAIN KLAIM & STANDAR PENJELASAN:
 1. Gunakan entitas, konsep, metrik, dan tanggal rilis yang selaras dengan bukti dokumen/video di atas (tanggal referensi hari ini: ${currentFormattedDate}).
 2. Berikan PENJELASAN SUBSTANTIF yang langsung menjawab pertanyaan pengguna (Markdown rapi: heading, paragraf penjelas, poin analisis). JANGAN PERNAH hanya mencetak daftar tautan sumber / URL tanpa isi penjelasan lengkap!
 3. Jangan memanggil ulang fungsi (${toolSummaryList.map(s => s.split('(')[0]).join(', ') || 'search_web'}) dengan argumen yang sama.`
       : `MANDAT PENALARAN FAKTUIL & ILMIAH:
-Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunakan penalaran ilmiah serta bukti yang ada. Dilarang keras menyatakan kegagalan pencarian, dilarang hanya mengembalikan tautan mentah, dan dilarang menyalin catatan sistem internal ini.`;
+Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunakan penalaran ilmiah serta bukti yang ada. Dilarang keras menyatakan kegagalan pencarian, dilarang hanya mengembalikan tautan mentah, dan dilarang menyalin catatan sistem internal ini.`);
 
-    if (validNativeCalls.length > 0) {
-      conversationChain.push({
-        role: 'assistant',
-        content: cleanAssistant || null,
-        tool_calls: validNativeCalls.map(c => ({
+    const hasExecutedNativeCall = validNativeCalls.length > 0 && toolTaskItems.some(it => validNativeCalls.includes(it.call));
+    if (hasExecutedNativeCall) {
+      // Pastikan assistant.tool_calls 1-to-1 identik dengan toolTaskItems yang benar-benar dieksekusi
+      // (mencegah HTTP 400 saat native+inline digabung atau ada duplicate native call yang di-dedup)
+      const bijectiveToolCalls = toolTaskItems.map((item, idx) => {
+        const c = item.call;
+        if (!c.id) c.id = `call_auto_${Date.now()}_${idx}`;
+        return {
           id: c.id,
           type: 'function',
           function: {
             name: c.function.name,
             arguments: (typeof c.function.arguments === 'string') ? c.function.arguments : JSON.stringify(c.function.arguments || {})
           }
-        }))
+        };
+      });
+      conversationChain.push({
+        role: 'assistant',
+        content: cleanAssistant || null,
+        tool_calls: bijectiveToolCalls
       });
 
       toolTaskItems.forEach((item, idx) => {
@@ -34189,6 +35845,12 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
 
         if (matchedRes && matchedRes.toolExecRes) {
           const res = matchedRes.toolExecRes;
+          const normItemTool = normalizeToolName(item.call?.function?.name || '');
+          const shouldCleanWebNoise = ['search_web', 'browse_web_page', 'extract_web'].includes(normItemTool);
+          const formatToolText = (rawStr, maxChars) => (
+            shouldCleanWebNoise ? cleanWebExtractedContent(rawStr) : String(rawStr || '').trim()
+          ).slice(0, maxChars);
+
           if (res.sources && res.sources.length > 0) {
             resultObj = {
               status: 'success',
@@ -34211,14 +35873,20 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
                 return entry;
               })
             };
-            if (res.text && (hasExecutedVideo || hasBrowsedWeb)) {
-              resultObj.formatted_context = cleanWebExtractedContent(res.text).slice(0, 4500);
+            if (normItemTool === 'prepare_image_display' || res.placement_token || res.display_id) {
+              if (res.display_id) resultObj.display_id = res.display_id;
+              if (res.placement_token) resultObj.placement_token = res.placement_token;
+              if (res.text) resultObj.formatted_context = String(res.text).trim().slice(0, 4500);
+            } else if (res.text && (hasExecutedVideo || hasBrowsedWeb)) {
+              resultObj.formatted_context = formatToolText(res.text, 4500);
             }
           } else if (res.text) {
             resultObj = {
               status: 'complete',
-              text: cleanWebExtractedContent(res.text).slice(0, 6500)
+              text: formatToolText(res.text, (hasExecutedCommunication || hasExecutedDocuments) ? 14000 : 6500)
             };
+            if (res.display_id) resultObj.display_id = res.display_id;
+            if (res.placement_token) resultObj.placement_token = res.placement_token;
           } else {
             resultObj = {
               status: 'complete',
@@ -34250,7 +35918,7 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
 
       const effectiveToolPayload = (circuitBreakerTripped && (!webSources || webSources.length === 0))
         ? '[STATUS PENELUSURAN]: Selesai. Lanjutkan dengan sintesis deduktif penuh berdasarkan pengetahuan analitis Anda.'
-        : roundToolResponsesText.substring(0, 12000);
+        : roundToolResponsesText.substring(0, (hasExecutedCommunication || hasExecutedDocuments) ? 14000 : 12000);
 
       conversationChain.push({
         role: 'user',
@@ -34263,6 +35931,9 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
       hasExecutedSearch,
       hasExecutedPython,
       hasExecutedMemory,
+      hasExecutedCommunication,
+      hasExecutedDocuments,
+      isParallelRound,
       hasExecutedVideo,
       hasExecutedImageSearch,
       hasExecutedImageInspect,
@@ -34828,6 +36499,8 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
 
     const wantsFile = (isDocRequest || isWebRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
     let isUsingLaptopOllamaTunnel = false;
+    let jozzMemoryRecall = null;
+    let activeStreamRenderer = null;
 
     try {
       // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q), PELURUHAN W(Δt), & KALIBRASI BAYESIAN
@@ -34873,6 +36546,13 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
 
       const canRunAutonomous = !isPureMathSession;
       let systemContent = getDynamicSystemTemporalContext();
+      const personaDirective = (typeof getEffectivePersonaSystemDirective === 'function')
+        ? getEffectivePersonaSystemDirective(session, runOptions)
+        : '';
+      const shouldSkipPersonaForPureMath = Boolean(isPureAlgebraConcept || isQuizRevision);
+      if (personaDirective && !shouldSkipPersonaForPureMath) {
+        systemContent = systemContent ? `${personaDirective}\n\n${systemContent}` : personaDirective;
+      }
 
       if (entityResolution && entityResolution.directive) {
         systemContent = `${entityResolution.directive}\n\n${systemContent}`;
@@ -34896,7 +36576,7 @@ $$
       const hasExplicitNoMemoryDirective = /\b(?:jangan\s+(?:simpan|masuk(?:kan)?)\s*(?:ke\s+)?memor[iy]|tidak\s+perlu\s+(?:masuk(?:kan)?|simpan)\s*(?:ke\s+)?memor[iy]|tanpa\s+memor[iy]|no\s+memor[iy]|don'?t\s+save\s+(?:to\s+)?memor[iy])\b/i.test(promptText);
 
       // Jozz Memory Scoped Hybrid Recall (Hybrid Storage + Cross-Session Episodic & Error-Learning Vault)
-      let jozzMemoryRecall = null;
+      jozzMemoryRecall = null;
       if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && !hasExplicitNoMemoryDirective) {
         try {
           let effectiveMemoryQuery = promptText;
@@ -34999,15 +36679,38 @@ $$
         /\[Web:[^\]]+\]/i.test(promptText)
       );
 
+      const z21ToolCtx = { planMode: webCtx?.planMode, session };
+      const isZ21LocalCommEnabled = canUseZ21LocalCommunicationTool(webCtx?.planMode, session);
+      const isCommAnalysisTurn = Boolean(isZ21LocalCommEnabled && (webCtx?.isCommunicationAnalysis || isCommunicationContextPrompt(promptText)));
+      const isLocalTimeTurn = Boolean(isZ21LocalCommEnabled && (webCtx?.isLocalTimeQuery || isLocalTimeOrClockPrompt(promptText)));
+      const canUseDocRagInTurn = isZ21LocalCommEnabled || isStrictLocalhostMode() || hasClientRagDocuments(session);
+      const isDocKnowledgeTurn = Boolean(canUseDocRagInTurn && (webCtx?.isDocumentKnowledgeQuery || isDocumentKnowledgePrompt(promptText)));
+
+      if (isZ21LocalCommEnabled && !isPureMathSession && !isStudioIsolated && (isCommAnalysisTurn || isLocalTimeTurn || !isWebRequest)) {
+        const livePulseContext = await fetchZ21LocalhostLivePulse(promptText, session, {
+          planMode: webCtx?.planMode,
+          isCommTurn: isCommAnalysisTurn || isLocalTimeTurn
+        });
+        if (livePulseContext) {
+          systemContent = systemContent ? `${systemContent}\n\n${livePulseContext}` : livePulseContext;
+        }
+      }
+
       // Direktif tool pencarian/rekomendasi video & utilitas otonom disuntikkan hanya bila relevan secara matematis (I(Q; Tools) > 0)
       const hasExplicitToolTrigger = !isPureMathSession && Boolean(
         canRunAutonomous ||
+        isCommAnalysisTurn ||
+        isDocKnowledgeTurn ||
         temporalRecencyProfile.epistemicSearchTrigger >= 0.72 ||
-        /\b(?:cari(?:kan)?|search|searching|telusuri|pencarian|tool\s+pencarian|browse|browsing|googling|tampilkan\s+(?:foto|gambar|visual|video)|unsplash|wikimedia|whatsapp|\bwa\b|jalankan\s+(?:kode|python)|hitung\s+dengan\s+python|simpan\s+(?:ke\s+)?memori|ingat\s+ini)/i.test(promptText) ||
+        /\b(?:cari(?:kan)?|search|searching|telusuri|pencarian|tool\s+pencarian|browse|browsing|googling|tampilkan\s+(?:foto|gambar|visual|video)|unsplash|wikimedia|whatsap+t?|watsap+|wasap|\bwa\b|sop\b|regulasi|kebijakan|dokumen|search_documents|retrieve_knowledge|jalankan\s+(?:kode|python)|hitung\s+dengan\s+python|simpan\s+(?:ke\s+)?memori|ingat\s+ini)/i.test(promptText) ||
         (!hasAttachedWebDocs && /https?:\/\//i.test(promptText))
       );
       if (hasExplicitToolTrigger) {
-        systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
+        const autoDirective = getAutonomousSystemDirective(z21ToolCtx);
+        systemContent = systemContent ? `${systemContent}\n\n${autoDirective}` : autoDirective;
+        if (isCommAnalysisTurn && isZ21LocalCommEnabled) {
+          systemContent += `\n\n[PRIORITAS KONTEKS KOMUNIKASI Z21 LOCALHOST]:\nPengguna berada di Mode Z21 pada localhost dan menanyakan chat terbaru atau analisis komunikasi lokal. Endpoint \`/api/tools/communication-context\` dan Snapshot Live Pulse WhatsApp & waktu real-time di atas SUDAH AKTIF dan terhubung penuh (abaikan pesan error lama seperti "Endpoint API tidak ditemukan" pada giliran sebelumnya karena gateway sudah pulih). Jika membutuhkan pesan lebih banyak, riwayat kontak tertentu, email, tiket, atau filter spesifik (\`source\`, \`target_id\`, \`query\`, \`since_minutes\`, \`sort_by\`), panggil tool \`fetch_communication_context\`.`;
+        }
       }
 
       if (hasAttachedWebDocs) {
@@ -35069,7 +36772,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // Aktif HANYA jika kueri BUKAN konsep aljabar murni / Nemotron (IG = 0), BUKAN evaluasi pilihan ganda / gambar soal lokal,
       // BELUM memiliki dokumen web yang diekstrak (H(Web) = 0),
       // serta pengguna menyalakan toggle Web Search secara eksplisit ATAU kueri memiliki ketidakpastian temporal-aktual tinggi (U(Q) >= 0.72).
-      const autoEpistemicPreSearch = !hasAttachedWebDocs && !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      const autoEpistemicPreSearch = !hasAttachedWebDocs && !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn) && !STATE.webSearchEnabled) && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
@@ -35158,7 +36861,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
       // Pasang tools ke Ollama HANYA jika model memiliki kapabilitas tools, relevan secara matematis (I(Q; Tools) > 0), dan BUKAN sesi matematika murni
       const canOllamaUseTools = doesModelSupportTools(modelName) && !isPureMathSession && hasExplicitToolTrigger;
-      let selectedOllamaTools = canOllamaUseTools ? getSelectableAutonomousTools(canRunAutonomous) : [];
+      let selectedOllamaTools = canOllamaUseTools ? getSelectableAutonomousTools(canRunAutonomous, z21ToolCtx) : [];
       if (hasAttachedWebDocs && selectedOllamaTools.length > 0) {
         selectedOllamaTools = selectedOllamaTools.filter(t => t?.function?.name !== 'browse_web_page');
       }
@@ -35490,9 +37193,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           throw abortErr;
         }
 
-        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && isKnownAutonomousTool(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
-        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && isKnownAutonomousTool(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
-        let rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
+        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && isKnownAutonomousTool(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch, z21ToolCtx));
+        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && isKnownAutonomousTool(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch, z21ToolCtx));
+        let rawAutonomousCalls = validNativeCalls.length > 0 ? [...validNativeCalls, ...inlineCalls] : inlineCalls;
 
         if (rawAutonomousCalls.length === 0) {
           break; // Model selesai merumuskan respon tanpa pemanggilan tool tambahan
@@ -35570,20 +37273,30 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         toolTaskItems.forEach(item => toolSummaryList.push(item.summary));
 
-        // Tampilkan status visual proses pencarian latar belakang secara bersih tanpa metadata teknis
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Membaca dan menelusuri data web terkini...</span></div>`;
+        // Tampilkan status visual proses penelusuran latar belakang secara bersih tanpa metadata teknis
+        const primaryLoadingTool = toolTaskItems.find(t => ['fetch_communication_context', 'search_documents'].includes(normalizeToolName(t.toolName))) || toolTaskItems[0];
+        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + createAutonomousToolHudHtml(primaryLoadingTool?.toolName || 'search_web', primaryLoadingTool?.previewArg || '', 'loading', toolTaskItems);
         smartScrollChatToBottom(true);
 
-        // Eksekusi seluruh tool secara paralel (Promise.all) untuk memangkas latensi jaringan
+        // Eksekusi seluruh tool secara paralel (Promise.all) dengan isolasi kegagalan per-tool
         const toolExecResults = await Promise.all(
           toolTaskItems.map(async (item) => {
-            const toolExecRes = await executeAutonomousWebTool(item.toolName, item.call.function.arguments, promptText, session);
-            return { ...item, toolExecRes };
+            try {
+              const toolExecRes = await executeAutonomousWebTool(item.toolName, item.call.function.arguments, promptText, session, z21ToolCtx);
+              return { ...item, toolExecRes: toolExecRes || { text: '', sources: [], success: false } };
+            } catch (toolErr) {
+              if (STATE.abortController?.signal?.aborted || toolErr?.name === 'AbortError') throw toolErr;
+              return { ...item, toolExecRes: { text: `Error: ${toolErr?.message || toolErr}`, sources: [], success: false } };
+            }
           })
         );
 
-        for (const resItem of toolExecResults) {
+        for (let pIdx = 0; pIdx < toolExecResults.length; pIdx++) {
+          const resItem = toolExecResults[pIdx];
           const { toolName, toolExecRes } = resItem;
+          const parallelHeader = toolExecResults.length > 1
+            ? `\n[HASIL PARALEL TOOL #${pIdx + 1}/${toolExecResults.length} — ${normalizeToolName(toolName) || toolName}]:`
+            : '';
           if (toolExecRes.sources && Array.isArray(toolExecRes.sources)) {
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
@@ -35597,15 +37310,16 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             });
           }
           const normTool = normalizeToolName(toolName);
+          const isWebCleanTool = ['search_web', 'browse_web_page', 'extract_web'].includes(normTool);
           if (['browse_web_page', 'extract_web'].includes(normTool) && toolExecRes.text) {
             const cleanBrowseText = cleanWebExtractedContent(toolExecRes.text);
-            roundToolResponsesText += `\n[ISI LENGKAP HALAMAN WEB DARI ${toolName}]:\n${cleanBrowseText}\n\n`;
+            roundToolResponsesText += `${parallelHeader}\n[ISI LENGKAP HALAMAN WEB DARI ${toolName}]:\n${cleanBrowseText}\n\n`;
           } else if (toolExecRes.text) {
-            // Gunakan toolExecRes.text lengkap yang sudah membawa Isi Artikel utuh dan instruksi penjelasan
-            const cleanText = cleanWebExtractedContent(toolExecRes.text);
-            roundToolResponsesText += `\n${cleanText}\n\n`;
+            // Hanya bersihkan kebisingan HTML/wiki pada tool web; pertahankan teks terstruktur & token gambar apa adanya
+            const cleanText = isWebCleanTool ? cleanWebExtractedContent(toolExecRes.text) : String(toolExecRes.text).trim();
+            roundToolResponsesText += `${parallelHeader}\n${cleanText}\n\n`;
           } else if (toolExecRes.sources && Array.isArray(toolExecRes.sources) && toolExecRes.sources.length > 0) {
-            let structuredEvidence = `\n[FAKTA & BUKTI RESMI HASIL PENELUSURAN DARI ${toolName}]:\n`;
+            let structuredEvidence = `${parallelHeader}\n[FAKTA & BUKTI RESMI HASIL PENELUSURAN DARI ${toolName}]:\n`;
             toolExecRes.sources.slice(0, 10).forEach((s, idx) => {
               const cleanTitle = (s.title || '').trim();
               const domain = s.domain || 'web';
@@ -35616,8 +37330,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             });
             roundToolResponsesText += structuredEvidence;
           } else {
-            const cleanText = cleanWebExtractedContent(toolExecRes.text);
-            roundToolResponsesText += `\n[Fakta internal dari ${toolName}]:\n${cleanText}\n`;
+            const cleanText = isWebCleanTool ? cleanWebExtractedContent(toolExecRes.text) : String(toolExecRes.text || '').trim();
+            roundToolResponsesText += `${parallelHeader}\n[Fakta internal dari ${toolName}]:\n${cleanText}\n`;
           }
         }
         allAccumulatedToolResponsesText += roundToolResponsesText;
@@ -35707,11 +37421,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             top_p: optSampling.topP
           };
         }
-        if (!isLastRound && (isMidImagePipeline || (!hasBrowsedWeb && !hasExecutedVideo)) && selectedOllamaTools && selectedOllamaTools.length > 0) {
+        if (!isLastRound && (isMidImagePipeline || !hasExecutedVideo) && selectedOllamaTools && selectedOllamaTools.length > 0) {
           const availableTools = selectedOllamaTools.filter(t => {
             const tName = normalizeToolName(t?.function?.name || t?.name || '');
             if (isMidImagePipeline) return ['inspect_image', 'prepare_image_display'].includes(tName);
-            if (['search_web', 'web_search', 'search'].includes(tName)) return false;
+            if (hasExecutedSearch && ['search_web', 'web_search', 'search'].includes(tName)) return false;
             return true;
           });
           if (availableTools.length > 0) {
@@ -35720,7 +37434,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
         // Jika tools tidak dikirim pada ronde sintesis akhir, normalisasi pesan tool -> user agar model tidak memicu error skema 400/500
         if (!digestionBody.tools && hasUnconvertedToolMessages(digestionBody.messages)) {
-          digestionBody.messages = convertToolMessagesToUserRole(digestionBody.messages);
+          const convertedMsgs = convertToolMessagesToUserRole(digestionBody.messages);
+          digestionBody.messages = convertedMsgs;
+          conversationChain.splice(0, conversationChain.length, ...convertedMsgs);
         }
         if (session?.id) digestionBody.sessionId = session.id + '_digest_' + autonomousRound;
         if (STATE.settings.ollamaApiKey) digestionBody.apiKey = STATE.settings.ollamaApiKey;
@@ -35746,7 +37462,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Model returned HTTP ${digestionRes.status} with tools. Retrying without tools and normalizing tool messages...`);
             delete digestionBody.tools;
             if (Array.isArray(digestionBody.messages)) {
-              digestionBody.messages = convertToolMessagesToUserRole(digestionBody.messages);
+              const convertedRetry = convertToolMessagesToUserRole(digestionBody.messages);
+              digestionBody.messages = convertedRetry;
+              conversationChain.splice(0, conversationChain.length, ...convertedRetry);
             }
             digestionRes = await fetch(chatUrl, {
               method: 'POST',
@@ -35780,9 +37498,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           bubbleText.appendChild(digestionContentBox);
 
           const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false));
+          activeStreamRenderer = digestionRenderer;
           currentRoundNativeCalls = [];
           currentRoundText = '';
 
+          try {
           while (true) {
             const { done, value } = await digestionReader.read();
             if (done) {
@@ -35822,6 +37542,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 }
               } catch (_) {}
             }
+          }
+          } catch (readErr) {
+            try { await digestionReader.cancel(); } catch (_) {}
+            throw readErr;
           }
 
           if (digestionBuffer && digestionBuffer.trim()) {
@@ -35879,7 +37603,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // ===== GERBANG KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) >= 0.75 =====
-      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
+      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn) && !STATE.webSearchEnabled) && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
         try {
           bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Menjalankan penelusuran indeks matematis (U=${temporalRecencyProfile.epistemicSearchTrigger})...</span></div>`;
           smartScrollChatToBottom(true);
@@ -36027,10 +37751,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         } else {
           const candidateCalls = [...extractInlineToolCalls(rawTextBeforeScrub), ...(currentRoundNativeCalls || accumulatedToolCalls || [])].filter(tc => tc && tc.function);
           if (candidateCalls.length > 0) {
-            const callableTool = candidateCalls.find(tc => isKnownAutonomousTool(normalizeToolName(tc.function.name)));
+            const callableTool = candidateCalls.find(tc => isKnownAutonomousTool(normalizeToolName(tc.function.name)) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch, z21ToolCtx));
             if (callableTool) {
               try {
-                const rescuedRes = await executeAutonomousWebTool(callableTool.function.name, callableTool.function.arguments, promptText, session);
+                const rescuedRes = await executeAutonomousWebTool(callableTool.function.name, callableTool.function.arguments, promptText, session, z21ToolCtx);
                 if (rescuedRes && rescuedRes.sources && rescuedRes.sources.length > 0) {
                   webSources = rescuedRes.sources;
                   allAccumulatedToolResponsesText = rescuedRes.text || '';
@@ -36100,7 +37824,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // ===== GERBANG VISUAL GROUNDING OTONOM (OLLAMA - FINAL TURN) =====
       // Analisis pertanyaan pengguna -> terjemahkan kata kunci ke Bahasa Inggris -> ambil 3 foto paling relevan via API Unsplash (per_page: 3).
       const visualSpecOllama = resolveVisualSearchSpec(promptText, fullText);
-      if (groundedImageDisplays.length === 0 && visualSpecOllama && !wantsFile && !isDocRequest && !isStudioIsolated && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
+      if (groundedImageDisplays.length === 0 && visualSpecOllama && !wantsFile && !isDocRequest && !isStudioIsolated && !isCommAnalysisTurn && !isLocalTimeTurn && !isDocKnowledgeTurn && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
           const existingGeneratedHtml = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
           bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari 3 foto relevan untuk "${escapeHtml(visualSpecOllama.englishQuery)}"...</span></div>`;
@@ -36224,6 +37948,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           engine: 'ollama',
           planMode: normalizePlanMode(runOptions.planMode || getActivePlanMode(session)),
           websiteMode: runOptions.websiteMode,
+          isCommunicationAnalysis: isCommAnalysisTurn || undefined,
           docFormat: runOptions.docFormat,
           sources: webSources,
           memoryReceipts: (jozzMemoryRecall?.receipts?.length > 0) ? jozzMemoryRecall.receipts : undefined,
@@ -36292,7 +38017,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         engineLabel: 'Ollama'
       });
       if (ollamaContRes.continued) {
-        fullText = ollamaContRes.text;
+        fullText = ollamaContRes.cleanText || ollamaContRes.text;
         rawFullTextBeforeStripping = ollamaContRes.text;
       }
       AudioEngine.receive();
@@ -36321,8 +38046,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (isUserAborted) {
         // render:false → baris di bawah langsung mengganti innerHTML (atau baris
         // dihapus), jadi render dari finish hanya akan dibuang.
-        const partialRaw = streamRenderer ? streamRenderer.finish({ render: false }) : '';
-        const stoppedPartial = sanitizePartialResponseWithFiles(partialRaw, { ...runOptions, session });
+        const finishTarget = activeStreamRenderer || streamRenderer;
+        const partialRaw = finishTarget ? finishTarget.finish({ render: false }) : '';
+        if (activeStreamRenderer && streamRenderer && activeStreamRenderer !== streamRenderer) {
+          try { streamRenderer.finish({ render: false }); } catch (_) {}
+        }
+        const cleanedPartialRaw = (typeof scrubRawToolCallArtifacts === 'function') ? scrubRawToolCallArtifacts(partialRaw) : partialRaw;
+        const stoppedPartial = sanitizePartialResponseWithFiles(cleanedPartialRaw, { ...runOptions, session });
         const partialText = stoppedPartial.text;
         const hasStoppedContent = Boolean((partialText && partialText.trim()) || (stoppedPartial.files && stoppedPartial.files.length > 0));
         if (hasStoppedContent && (isStudioIsolated || STATE.sessions.some(s => s.id === session.id))) {
@@ -36527,14 +38257,6 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           </div>
         `;
 
-        if (hasPartialText) {
-          enhanceCodeBlocks(bubbleText);
-          renderMessageFiles(assistantRow, rescuePartial.files);
-          if (webSources && webSources.length > 0) {
-            renderMessageSources(assistantRow, webSources, true);
-          }
-        }
-
         if (isAutoRouterActive) {
           bubbleText.querySelector('.switch-openrouter-btn')?.addEventListener('click', () => {
             if (STATE.isGenerating || STATE.isSending) return;
@@ -36694,6 +38416,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
     const wantsFile = (isDocRequest || isWebRequest || isFileGenerationRequest(promptText)) && !isExplicitCleanCodeCmd;
     let isUsingLaptopOllamaTunnel = false;
+    let jozzMemoryRecall = null;
+    let activeStreamRenderer = null;
 
     try {
       // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q), PELURUHAN W(Δt), & KALIBRASI BAYESIAN
@@ -36739,6 +38463,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       const canRunAutonomous = !isPureMathSession;
       let systemContent = getDynamicSystemTemporalContext();
+      const personaDirective = (typeof getEffectivePersonaSystemDirective === 'function')
+        ? getEffectivePersonaSystemDirective(session, runOptions)
+        : '';
+      const shouldSkipPersonaForPureMath = Boolean(isPureAlgebraConcept || isQuizRevision);
+      if (personaDirective && !shouldSkipPersonaForPureMath) {
+        systemContent = systemContent ? `${personaDirective}\n\n${systemContent}` : personaDirective;
+      }
 
       if (entityResolution && entityResolution.directive) {
         systemContent = `${entityResolution.directive}\n\n${systemContent}`;
@@ -36762,7 +38493,7 @@ $$
       const hasExplicitNoMemoryDirective = /\b(?:jangan\s+(?:simpan|masuk(?:kan)?)\s*(?:ke\s+)?memor[iy]|tidak\s+perlu\s+(?:masuk(?:kan)?|simpan)\s*(?:ke\s+)?memor[iy]|tanpa\s+memor[iy]|no\s+memor[iy]|don'?t\s+save\s+(?:to\s+)?memor[iy])\b/i.test(promptText);
 
       // Jozz Memory Scoped Hybrid Recall (Hybrid Storage + Cross-Session Episodic & Error-Learning Vault)
-      let jozzMemoryRecall = null;
+      jozzMemoryRecall = null;
       if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && !hasExplicitNoMemoryDirective) {
         try {
           let effectiveMemoryQuery = promptText;
@@ -36865,15 +38596,38 @@ $$
         /\[Web:[^\]]+\]/i.test(promptText)
       );
 
+      const z21ToolCtx = { planMode: webCtx?.planMode, session };
+      const isZ21LocalCommEnabled = canUseZ21LocalCommunicationTool(webCtx?.planMode, session);
+      const isCommAnalysisTurn = Boolean(isZ21LocalCommEnabled && (webCtx?.isCommunicationAnalysis || isCommunicationContextPrompt(promptText)));
+      const isLocalTimeTurn = Boolean(isZ21LocalCommEnabled && (webCtx?.isLocalTimeQuery || isLocalTimeOrClockPrompt(promptText)));
+      const canUseDocRagInTurn = isZ21LocalCommEnabled || isStrictLocalhostMode() || hasClientRagDocuments(session);
+      const isDocKnowledgeTurn = Boolean(canUseDocRagInTurn && (webCtx?.isDocumentKnowledgeQuery || isDocumentKnowledgePrompt(promptText)));
+
+      if (isZ21LocalCommEnabled && !isPureMathSession && !isStudioIsolated && (isCommAnalysisTurn || isLocalTimeTurn || !isWebRequest)) {
+        const livePulseContext = await fetchZ21LocalhostLivePulse(promptText, session, {
+          planMode: webCtx?.planMode,
+          isCommTurn: isCommAnalysisTurn || isLocalTimeTurn
+        });
+        if (livePulseContext) {
+          systemContent = systemContent ? `${systemContent}\n\n${livePulseContext}` : livePulseContext;
+        }
+      }
+
       // Direktif tool pencarian/rekomendasi video & utilitas otonom disuntikkan hanya bila relevan secara matematis (I(Q; Tools) > 0)
       const hasExplicitToolTrigger = !isPureMathSession && Boolean(
         canRunAutonomous ||
+        isCommAnalysisTurn ||
+        isDocKnowledgeTurn ||
         temporalRecencyProfile.epistemicSearchTrigger >= 0.72 ||
-        /\b(?:cari(?:kan)?|search|searching|telusuri|pencarian|tool\s+pencarian|browse|browsing|googling|tampilkan\s+(?:foto|gambar|visual|video)|unsplash|wikimedia|whatsapp|\bwa\b|jalankan\s+(?:kode|python)|hitung\s+dengan\s+python|simpan\s+(?:ke\s+)?memori|ingat\s+ini)/i.test(promptText) ||
+        /\b(?:cari(?:kan)?|search|searching|telusuri|pencarian|tool\s+pencarian|browse|browsing|googling|tampilkan\s+(?:foto|gambar|visual|video)|unsplash|wikimedia|whatsap+t?|watsap+|wasap|\bwa\b|sop\b|regulasi|kebijakan|dokumen|search_documents|retrieve_knowledge|jalankan\s+(?:kode|python)|hitung\s+dengan\s+python|simpan\s+(?:ke\s+)?memori|ingat\s+ini)/i.test(promptText) ||
         (!hasAttachedWebDocs && /https?:\/\//i.test(promptText))
       );
       if (hasExplicitToolTrigger) {
-        systemContent = systemContent ? `${systemContent}\n\n${getAutonomousSystemDirective()}` : getAutonomousSystemDirective();
+        const autoDirective = getAutonomousSystemDirective(z21ToolCtx);
+        systemContent = systemContent ? `${systemContent}\n\n${autoDirective}` : autoDirective;
+        if (isCommAnalysisTurn && isZ21LocalCommEnabled) {
+          systemContent += `\n\n[PRIORITAS KONTEKS KOMUNIKASI Z21 LOCALHOST]:\nPengguna berada di Mode Z21 pada localhost dan menanyakan chat terbaru atau analisis komunikasi lokal. Endpoint \`/api/tools/communication-context\` dan Snapshot Live Pulse WhatsApp & waktu real-time di atas SUDAH AKTIF dan terhubung penuh (abaikan pesan error lama seperti "Endpoint API tidak ditemukan" pada giliran sebelumnya karena gateway sudah pulih). Jika membutuhkan pesan lebih banyak, riwayat kontak tertentu, email, tiket, atau filter spesifik (\`source\`, \`target_id\`, \`query\`, \`since_minutes\`, \`sort_by\`), panggil tool \`fetch_communication_context\`.`;
+        }
       }
 
       if (hasAttachedWebDocs) {
@@ -36947,7 +38701,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // Aktif HANYA jika kueri BUKAN konsep aljabar murni / Nemotron (IG = 0), BUKAN evaluasi pilihan ganda / gambar soal lokal,
       // BELUM memiliki dokumen web yang diekstrak (H(Web) = 0),
       // serta pengguna menyalakan toggle Web Search secara eksplisit ATAU kueri memiliki ketidakpastian temporal-aktual tinggi (U(Q) >= 0.72).
-      const autoEpistemicPreSearch = !hasAttachedWebDocs && !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      const autoEpistemicPreSearch = !hasAttachedWebDocs && !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn) && !STATE.webSearchEnabled) && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
@@ -37002,6 +38756,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       let activeEndpoint = '';
       let activeHeaders = {};
       let activeRouteType = '';
+      let resolvedMaxTokensOr = 16384;
       let finishReason = null;
       let openRouterUsage = null;
       let resolvedUpstreamModel = '';
@@ -37009,7 +38764,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       let isStreamInterrupted = false;
       const collectedImages = [];
       const accumulatedToolCalls = [];
-      const rawAutonomousTools = getSelectableAutonomousTools(canRunAutonomous);
+      const rawAutonomousTools = getSelectableAutonomousTools(canRunAutonomous, z21ToolCtx);
       const selectedAutonomousTools = hasAttachedWebDocs
         ? rawAutonomousTools.filter(t => t?.function?.name !== 'browse_web_page')
         : rawAutonomousTools;
@@ -37017,6 +38772,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       for (let i = 0; i < candidateModels.length; i++) {
         if (STATE.abortController?.signal?.aborted) break;
+        accumulatedToolCalls.length = 0;
         const currentModel = candidateModels[i];
         const currentIsFree = Boolean(
           currentModel.includes(':free') ||
@@ -37282,6 +39038,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             activeEndpoint = targetUrl;
             activeHeaders = targetHeaders;
             activeRouteType = routeType;
+            resolvedMaxTokensOr = initialMaxTokensOr;
             activeMessagesPayload = currentMessagesPayload;
 
             const reader = attemptRes.body.getReader();
@@ -37620,9 +39377,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           throw abortErr;
         }
 
-        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && isKnownAutonomousTool(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
-        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && isKnownAutonomousTool(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch));
-        let rawAutonomousCalls = validNativeCalls.length > 0 ? validNativeCalls : inlineCalls;
+        const validNativeCalls = currentRoundNativeCalls.filter(tc => tc && tc.function && isKnownAutonomousTool(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch, z21ToolCtx));
+        const inlineCalls = extractInlineToolCalls(currentRoundText).filter(tc => tc && tc.function && isKnownAutonomousTool(tc.function.name) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch, z21ToolCtx));
+        let rawAutonomousCalls = validNativeCalls.length > 0 ? [...validNativeCalls, ...inlineCalls] : inlineCalls;
 
         if (rawAutonomousCalls.length === 0) {
           break; // Model selesai merumuskan respon tanpa pemanggilan tool tambahan
@@ -37700,20 +39457,30 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         toolTaskItems.forEach(item => toolSummaryList.push(item.summary));
 
-        // Tampilkan status visual proses pencarian latar belakang secara bersih tanpa metadata teknis
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Membaca dan menelusuri data web terkini...</span></div>`;
+        // Tampilkan status visual proses penelusuran latar belakang secara bersih tanpa metadata teknis
+        const primaryLoadingTool = toolTaskItems.find(t => ['fetch_communication_context', 'search_documents'].includes(normalizeToolName(t.toolName))) || toolTaskItems[0];
+        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + createAutonomousToolHudHtml(primaryLoadingTool?.toolName || 'search_web', primaryLoadingTool?.previewArg || '', 'loading', toolTaskItems);
         smartScrollChatToBottom(true);
 
-        // Eksekusi seluruh tool secara paralel (Promise.all) untuk memangkas latensi jaringan
+        // Eksekusi seluruh tool secara paralel (Promise.all) dengan isolasi kegagalan per-tool
         const toolExecResults = await Promise.all(
           toolTaskItems.map(async (item) => {
-            const toolExecRes = await executeAutonomousWebTool(item.toolName, item.call.function.arguments, promptText, session);
-            return { ...item, toolExecRes };
+            try {
+              const toolExecRes = await executeAutonomousWebTool(item.toolName, item.call.function.arguments, promptText, session, z21ToolCtx);
+              return { ...item, toolExecRes: toolExecRes || { text: '', sources: [], success: false } };
+            } catch (toolErr) {
+              if (STATE.abortController?.signal?.aborted || toolErr?.name === 'AbortError') throw toolErr;
+              return { ...item, toolExecRes: { text: `Error: ${toolErr?.message || toolErr}`, sources: [], success: false } };
+            }
           })
         );
 
-        for (const resItem of toolExecResults) {
+        for (let pIdx = 0; pIdx < toolExecResults.length; pIdx++) {
+          const resItem = toolExecResults[pIdx];
           const { toolName, toolExecRes } = resItem;
+          const parallelHeader = toolExecResults.length > 1
+            ? `\n[HASIL PARALEL TOOL #${pIdx + 1}/${toolExecResults.length} — ${normalizeToolName(toolName) || toolName}]:`
+            : '';
           if (toolExecRes.sources && Array.isArray(toolExecRes.sources)) {
             if (!webSources) webSources = [];
             webSources.push(...toolExecRes.sources);
@@ -37727,15 +39494,16 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             });
           }
           const normTool = normalizeToolName(toolName);
+          const isWebCleanTool = ['search_web', 'browse_web_page', 'extract_web'].includes(normTool);
           if (['browse_web_page', 'extract_web'].includes(normTool) && toolExecRes.text) {
             const cleanBrowseText = cleanWebExtractedContent(toolExecRes.text);
-            roundToolResponsesText += `\n[ISI LENGKAP HALAMAN WEB DARI ${toolName}]:\n${cleanBrowseText}\n\n`;
+            roundToolResponsesText += `${parallelHeader}\n[ISI LENGKAP HALAMAN WEB DARI ${toolName}]:\n${cleanBrowseText}\n\n`;
           } else if (toolExecRes.text) {
-            // Gunakan toolExecRes.text lengkap yang sudah membawa Isi Artikel utuh dan instruksi penjelasan
-            const cleanText = cleanWebExtractedContent(toolExecRes.text);
-            roundToolResponsesText += `\n${cleanText}\n\n`;
+            // Hanya bersihkan kebisingan HTML/wiki pada tool web; pertahankan teks terstruktur & token gambar apa adanya
+            const cleanText = isWebCleanTool ? cleanWebExtractedContent(toolExecRes.text) : String(toolExecRes.text).trim();
+            roundToolResponsesText += `${parallelHeader}\n${cleanText}\n\n`;
           } else if (toolExecRes.sources && Array.isArray(toolExecRes.sources) && toolExecRes.sources.length > 0) {
-            let structuredEvidence = `\n[FAKTA & BUKTI RESMI HASIL PENELUSURAN DARI ${toolName}]:\n`;
+            let structuredEvidence = `${parallelHeader}\n[FAKTA & BUKTI RESMI HASIL PENELUSURAN DARI ${toolName}]:\n`;
             toolExecRes.sources.slice(0, 10).forEach((s, idx) => {
               const cleanTitle = (s.title || '').trim();
               const domain = s.domain || 'web';
@@ -37746,8 +39514,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             });
             roundToolResponsesText += structuredEvidence;
           } else {
-            const cleanText = cleanWebExtractedContent(toolExecRes.text);
-            roundToolResponsesText += `\n[Fakta internal dari ${toolName}]:\n${cleanText}\n`;
+            const cleanText = isWebCleanTool ? cleanWebExtractedContent(toolExecRes.text) : String(toolExecRes.text || '').trim();
+            roundToolResponsesText += `${parallelHeader}\n[Fakta internal dari ${toolName}]:\n${cleanText}\n`;
           }
         }
         allAccumulatedToolResponsesText += roundToolResponsesText;
@@ -37795,6 +39563,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             details: 'Tool loop diselesaikan secara adaptif; beralih ke sintesis deduktif langsung.'
           });
         }
+        const activeDigestionModel = actualModelUsed || modelName;
+        const isDigestionLiquid = Boolean(activeDigestionModel && (activeDigestionModel.includes('liquid') || activeDigestionModel.includes('lfm-')));
+        const isDigestionReasoning = Boolean(activeDigestionModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(activeDigestionModel)));
+        const canDigestionUseTools = doesModelSupportTools(activeDigestionModel);
+        const isDigestionFree = Boolean(
+          activeDigestionModel.includes(':free') ||
+          activeDigestionModel.endsWith('/free') ||
+          activeDigestionModel === 'openrouter/free' ||
+          (STATE.openRouterModels || []).some(m => m.id === activeDigestionModel && (m.cat === 'free' || m.tag === 'Free'))
+        );
+
         const {
           hasBrowsedWeb,
           hasExecutedSearch,
@@ -37813,39 +39592,29 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           autonomousRound,
           maxAutonomousRounds,
           circuitBreakerTripped,
-          conversationChain
+          conversationChain,
+          allowInlineToolFallback: Boolean((isDigestionFree && validNativeCalls.length === 0) || !canDigestionUseTools)
         });
         if (hasExecutedSearch || hasExecutedVideo || hasBrowsedWeb) {
           hadSearchOrVideoToolRound = true;
         }
 
         // Jalankan panggilan streaming ke model untuk putaran berikutnya
-        const activeDigestionModel = actualModelUsed || modelName;
-        const isDigestionLiquid = Boolean(activeDigestionModel && (activeDigestionModel.includes('liquid') || activeDigestionModel.includes('lfm-')));
-        const isDigestionReasoning = Boolean(activeDigestionModel && (/\/o[1-9]|\b(r1|reasoning|deepseek-r)\b/i.test(activeDigestionModel)));
-
         const digestionRequestBody = {
           model: activeDigestionModel,
           messages: conversationChain,
           stream: true,
-          max_tokens: initialMaxTokensOr || 16384,
+          max_tokens: resolvedMaxTokensOr || 16384,
           provider: {
             allow_fallbacks: isAutoRouterActive
           }
         };
-        const canDigestionUseTools = doesModelSupportTools(activeDigestionModel);
-        const isDigestionFree = Boolean(
-          activeDigestionModel.includes(':free') ||
-          activeDigestionModel.endsWith('/free') ||
-          activeDigestionModel === 'openrouter/free' ||
-          (STATE.openRouterModels || []).some(m => m.id === activeDigestionModel && (m.cat === 'free' || m.tag === 'Free'))
-        );
-        if (!isLastRound && (isMidImagePipeline || (!hasBrowsedWeb && !hasExecutedVideo)) && !isDigestionFree && canDigestionUseTools && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
+        if (!isLastRound && (isMidImagePipeline || !hasExecutedVideo) && (!isDigestionFree || validNativeCalls.length > 0) && canDigestionUseTools && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
           const validFunctionTools = selectedAutonomousTools.filter(t => {
             if (!t || t.type !== 'function' || !t.function?.name) return false;
             const tName = normalizeToolName(t.function.name);
             if (isMidImagePipeline) return ['inspect_image', 'prepare_image_display'].includes(tName);
-            if (['search_web', 'web_search', 'search'].includes(tName)) return false;
+            if (hasExecutedSearch && ['search_web', 'web_search', 'search'].includes(tName)) return false;
             return true;
           });
           if (validFunctionTools.length > 0) {
@@ -37855,7 +39624,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
         // Jika tools tidak dikirim pada ronde sintesis akhir, normalisasi pesan tool -> user agar provider OpenRouter tidak memicu HTTP 400
         if (!digestionRequestBody.tools && hasUnconvertedToolMessages(digestionRequestBody.messages)) {
-          digestionRequestBody.messages = convertToolMessagesToUserRole(digestionRequestBody.messages);
+          const convertedOrMsgs = convertToolMessagesToUserRole(digestionRequestBody.messages);
+          digestionRequestBody.messages = convertedOrMsgs;
+          conversationChain.splice(0, conversationChain.length, ...convertedOrMsgs);
         }
         if (STATE.settings.useCustomParameters) {
           if (!isDigestionReasoning && STATE.settings.temperature !== null && STATE.settings.temperature !== undefined) {
@@ -37909,7 +39680,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             delete digestionRequestBody.tools;
             delete digestionRequestBody.tool_choice;
             if (Array.isArray(digestionRequestBody.messages)) {
-              digestionRequestBody.messages = convertToolMessagesToUserRole(digestionRequestBody.messages);
+              const convertedOrRetry = convertToolMessagesToUserRole(digestionRequestBody.messages);
+              digestionRequestBody.messages = convertedOrRetry;
+              conversationChain.splice(0, conversationChain.length, ...convertedOrRetry);
             }
             digestionRes = await fetch(digestionUrl, {
               method: 'POST',
@@ -37938,6 +39711,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           }
 
           const digestionReader = digestionRes.body.getReader();
+          const digestionDecoder = new TextDecoder();
           let digestionBuffer = '';
           const digestionContentBox = document.createElement('div');
           digestionContentBox.className = 'autonomous-digested-output';
@@ -37945,14 +39719,16 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           bubbleText.appendChild(digestionContentBox);
 
           const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false));
+          activeStreamRenderer = digestionRenderer;
 
-          while (true) {
+          try {
+          while (!digestionSseDone) {
             const { done, value } = await digestionReader.read();
             if (done) {
-              digestionBuffer += decoder.decode();
+              digestionBuffer += digestionDecoder.decode();
               break;
             }
-            digestionBuffer += decoder.decode(value, { stream: true });
+            digestionBuffer += digestionDecoder.decode(value, { stream: true });
             const dLines = digestionBuffer.split('\n');
             digestionBuffer = dLines.pop();
 
@@ -37963,6 +39739,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (dJson === '[DONE]') {
                 digestionSseDone = true;
                 if (!finishReason) finishReason = 'stop';
+                try { await digestionReader.cancel(); } catch (_) {}
                 break;
               }
               try {
@@ -37984,6 +39761,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                   digestionRenderer.append(dDelta);
                   if (digestionRenderer.isLoopTerminated) {
                     console.warn('[OpenRouter Digestion] Degeneration loop detected and gracefully halted.');
+                    digestionSseDone = true;
                     try { await digestionReader.cancel(); } catch (_) {}
                     break;
                   }
@@ -38016,6 +39794,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 }
               } catch (_) {}
             }
+          }
+          } catch (digReadErr) {
+            try { await digestionReader.cancel(); } catch (_) {}
+            throw digReadErr;
           }
 
           if (digestionBuffer && digestionBuffer.trim() && digestionBuffer.trim().startsWith('data:')) {
@@ -38103,7 +39885,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // ===== GERBANG KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) >= 0.75 (OPENROUTER) =====
-      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
+      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn) && !STATE.webSearchEnabled) && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
         try {
           bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Menjalankan penelusuran indeks matematis (U=${temporalRecencyProfile.epistemicSearchTrigger})...</span></div>`;
           smartScrollChatToBottom(true);
@@ -38265,12 +40047,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           const bestAlt = decisionCalibration.remainingOptions[0];
           fullText = `**Jawaban revisi yang tepat: ${bestAlt}**\n\nPilihan sebelumnya telah difalsifikasi ($P=0$). Berdasarkan evaluasi hipotesis alternatif, opsi **${bestAlt}** merupakan kandidat paling tepat untuk kuis ini.`;
         } else {
-          const candidateCalls = [...extractInlineToolCalls(rawTextBeforeScrub), ...(accumulatedToolCalls || [])].filter(tc => tc && tc.function);
+          const candidateCalls = [...extractInlineToolCalls(rawTextBeforeScrub), ...(currentRoundNativeCalls || [])].filter(tc => tc && tc.function);
           if (candidateCalls.length > 0) {
-            const callableTool = candidateCalls.find(tc => isKnownAutonomousTool(normalizeToolName(tc.function.name)));
+            const callableTool = candidateCalls.find(tc => isKnownAutonomousTool(normalizeToolName(tc.function.name)) && isAutonomousToolAllowed(tc.function.name, canRunAutonomousSearch, z21ToolCtx));
             if (callableTool) {
               try {
-                const rescuedRes = await executeAutonomousWebTool(callableTool.function.name, callableTool.function.arguments, promptText, session);
+                const rescuedRes = await executeAutonomousWebTool(callableTool.function.name, callableTool.function.arguments, promptText, session, z21ToolCtx);
                 if (rescuedRes && rescuedRes.sources && rescuedRes.sources.length > 0) {
                   webSources = rescuedRes.sources;
                   allAccumulatedToolResponsesText = rescuedRes.text || '';
@@ -38335,7 +40117,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // ===== GERBANG VISUAL GROUNDING OTONOM (OPENROUTER - FINAL TURN) =====
       // Analisis pertanyaan pengguna -> terjemahkan kata kunci ke Bahasa Inggris -> ambil 3 foto paling relevan via API Unsplash (per_page: 3).
       const visualSpecOpenRouter = resolveVisualSearchSpec(promptText, fullText);
-      if (groundedImageDisplays.length === 0 && visualSpecOpenRouter && !wantsFile && !isDocRequest && !isStudioIsolated && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
+      if (groundedImageDisplays.length === 0 && visualSpecOpenRouter && !wantsFile && !isDocRequest && !isStudioIsolated && !isCommAnalysisTurn && !isLocalTimeTurn && !isDocKnowledgeTurn && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
           const existingGeneratedHtml = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
           bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari 3 foto relevan untuk "${escapeHtml(visualSpecOpenRouter.englishQuery)}"...</span></div>`;
@@ -38532,6 +40314,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           engine: engineMode,
           planMode: normalizePlanMode(runOptions.planMode || getActivePlanMode(session)),
           websiteMode: runOptions.websiteMode,
+          isCommunicationAnalysis: isCommAnalysisTurn || undefined,
           docFormat: runOptions.docFormat,
           images: collectedImages.length > 0 ? collectedImages : undefined,
           imageDisplays: groundedImageDisplays.length > 0 ? groundedImageDisplays : undefined,
@@ -38599,7 +40382,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         engineLabel: 'OpenRouter'
       });
       if (orContRes.continued) {
-        fullText = orContRes.text;
+        fullText = orContRes.cleanText || orContRes.text;
         rawFullTextBeforeStripping = orContRes.text;
         isStreamInterrupted = false;
       }
@@ -38629,8 +40412,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (isUserAborted) {
         // render:false → baris di bawah langsung mengganti innerHTML (atau baris
         // dihapus), jadi render dari finish hanya akan dibuang.
-        const partialRaw = streamRenderer ? streamRenderer.finish({ render: false }) : '';
-        const stoppedPartial = sanitizePartialResponseWithFiles(partialRaw, { ...runOptions, session });
+        const finishTarget = activeStreamRenderer || streamRenderer;
+        const partialRaw = finishTarget ? finishTarget.finish({ render: false }) : '';
+        if (activeStreamRenderer && streamRenderer && activeStreamRenderer !== streamRenderer) {
+          try { streamRenderer.finish({ render: false }); } catch (_) {}
+        }
+        const cleanedPartialRaw = (typeof scrubRawToolCallArtifacts === 'function') ? scrubRawToolCallArtifacts(partialRaw) : partialRaw;
+        const stoppedPartial = sanitizePartialResponseWithFiles(cleanedPartialRaw, { ...runOptions, session });
         const partialText = stoppedPartial.text;
         const hasStoppedContent = Boolean((partialText && partialText.trim()) || (stoppedPartial.files && stoppedPartial.files.length > 0));
         if (hasStoppedContent && (isStudioIsolated || STATE.sessions.some(s => s.id === session.id))) {
@@ -38788,14 +40576,6 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             </button>
           </div>
         `;
-
-        if (hasPartialText) {
-          enhanceCodeBlocks(bubbleText);
-          renderMessageFiles(assistantRow, rescuePartial.files);
-          if (webSources && webSources.length > 0) {
-            renderMessageSources(assistantRow, webSources, true);
-          }
-        }
 
         bubbleText.querySelector('.retry-send-btn')?.addEventListener('click', () => {
           if (STATE.isGenerating || STATE.isSending) return;
@@ -39145,6 +40925,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }).catch(() => {});
     }
     STATE.userStoppedGeneration = true;
+    if (typeof WhatsAppController !== 'undefined' && typeof WhatsAppController.dismissSummaryModalWithRejection === 'function') {
+      WhatsAppController.dismissSummaryModalWithRejection('[DIBATALKAN PENGGUNA]: Generasi AI dihentikan oleh pengguna.');
+    }
     if (STATE.abortController) {
       STATE.abortController.abort('USER_ABORT');
     }
@@ -42888,9 +44671,9 @@ Aturan:
       const reader = res.body.getReader();
       const decoder = new TextDecoder('utf-8');
       const onMusicAbort = () => { try { reader.cancel(); } catch(_) {} };
-      if (activeSignal) {
-        if (activeSignal.aborted) onMusicAbort();
-        else activeSignal.addEventListener('abort', onMusicAbort, { once: true });
+      if (signal) {
+        if (signal.aborted) onMusicAbort();
+        else signal.addEventListener('abort', onMusicAbort, { once: true });
       }
       let buffer = '';
       try {
@@ -42927,7 +44710,7 @@ Aturan:
         }
       }
       } finally {
-        if (activeSignal) activeSignal.removeEventListener('abort', onMusicAbort);
+        if (signal) signal.removeEventListener('abort', onMusicAbort);
         try { reader.cancel(); } catch(_) {}
       }
     }
@@ -43447,6 +45230,15 @@ Aturan:
     }
     if (modalId === 'termQrScannerModal' && typeof TerminalManager !== 'undefined' && typeof TerminalManager.stopQrScanner === 'function') {
       TerminalManager.stopQrScanner();
+    }
+    if (modalId === 'termRemoteTunnelModal' && typeof WhatsAppController !== 'undefined' && typeof WhatsAppController.stopStatusPolling === 'function') {
+      WhatsAppController.stopStatusPolling();
+    }
+    if (modalId === 'modalWaSummaryResult' && typeof WhatsAppController !== 'undefined' && typeof WhatsAppController.dismissSummaryModalWithRejection === 'function') {
+      WhatsAppController.dismissSummaryModalWithRejection('[AKSES DITOLAK PENGGUNA]: Pengguna menutup modal rangkuman WhatsApp.');
+    }
+    if (modalId === 'zozPersonaModal' && typeof ZozPersonaController !== 'undefined') {
+      ZozPersonaController._openedFromSettingsInWa = false;
     }
     if (modalId === 'terminalModal' && typeof TerminalManager !== 'undefined') {
       try {
@@ -43978,6 +45770,9 @@ Aturan:
     if (els.settingWorkspaceAutoTaskTracker) els.settingWorkspaceAutoTaskTracker.checked = STATE.taskTracker.enabled !== false;
     if (els.settingWorkspaceRequireApproval) els.settingWorkspaceRequireApproval.checked = STATE.localWorkspace.requireApproval !== false;
     updateLocalWorkspaceUI();
+    if (typeof ZozPersonaController !== 'undefined' && typeof ZozPersonaController.syncUI === 'function') {
+      ZozPersonaController.syncUI();
+    }
   }
 
   // ==================== SLASH COMMANDS & QUICK TOOLS AUTOCOMPLETE ENGINE ====================
@@ -44905,6 +46700,11 @@ Aturan:
     let _lastSidebarToggleAt = 0;
     function openMobileSidebar() {
       _lastSidebarToggleAt = Date.now();
+      if (typeof closeModelOptionsMenuPopup === 'function') closeModelOptionsMenuPopup();
+      if (typeof setModelDropdownOpen === 'function') setModelDropdownOpen(false);
+      if (typeof closeAttachmentDropdown === 'function') closeAttachmentDropdown();
+      if (typeof closeImageModelDropdown === 'function') closeImageModelDropdown();
+      if (typeof closeMusicModelDropdown === 'function') closeMusicModelDropdown();
       els.sidebar?.classList.add('open');
       els.sidebarBackdrop?.classList.add('active', 'show');
       document.body.classList.add('mobile-sidebar-open');
@@ -54139,6 +55939,7 @@ Aturan:
   const WhatsAppController = {
     sse: null,
     contacts: [],
+    recentIncomingQueue: [],
     activeContact: null,
     status: { connected: false, connecting: false, phone: null, qr: null, contactCount: 0 },
     statusPollTimer: null,
@@ -54536,7 +56337,9 @@ Aturan:
     closeLocalhostOnlyModal() {
       const modal = document.getElementById('modalWaLocalhostOnly');
       if (modal) {
-        modal.style.display = 'none';
+        modal.classList.remove('show');
+        modal.style.removeProperty('display');
+        if (typeof syncBodyModalState === 'function') syncBodyModalState();
       }
     },
 
@@ -54898,19 +56701,33 @@ Aturan:
     },
 
     async bootstrapBackground() {
+      const bootEpoch = (this._bootstrapEpoch = (this._bootstrapEpoch || 0) + 1);
       try {
         if (!this.isLocalHostOrTunnelOrigin() && STATE.chatMode !== 'whatsapp') {
           return;
         }
         await this.probeLocalHostMaster();
+        if (this._bootstrapEpoch !== bootEpoch) return;
         await this.resolveApiBase();
+        if (this._bootstrapEpoch !== bootEpoch) return;
+        if (!this.isLocalHostOrTunnelOrigin() && STATE.chatMode !== 'whatsapp') return;
         await this.fetchStatus();
+        if (this._bootstrapEpoch !== bootEpoch) return;
         await this.fetchContacts();
+        if (this._bootstrapEpoch !== bootEpoch) return;
+        if (!this.isLocalHostOrTunnelOrigin() && STATE.chatMode !== 'whatsapp') return;
+        this.sseReconnectAttempts = 0;
         this.initSSE();
         if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
         this.keepAliveTimer = setInterval(() => {
           if (!this.isConnectingWa && !this.isFetchingStatus && (this.isLocalHostOrTunnelOrigin() || STATE.chatMode === 'whatsapp')) {
-            this.fetchStatus().catch(() => {});
+            this.fetchStatus().then(() => {
+              // Pulihkan SSE otomatis jika koneksi sempat mati melebihi maxSseAttempts
+              if (!this.sse && !this._sseReconnectTimer && (this.isLocalHostOrTunnelOrigin() || STATE.chatMode === 'whatsapp')) {
+                this.sseReconnectAttempts = 0;
+                this.initSSE();
+              }
+            }).catch(() => {});
           }
         }, 25000);
       } catch (_) {}
@@ -54923,8 +56740,8 @@ Aturan:
       // WhatsApp Mode Switcher (Sidebar)
       document.getElementById('sidebarWhatsAppBtn')?.addEventListener('click', () => {
         AudioEngine.click();
-        if (typeof isMobile === 'function' && isMobile()) {
-          if (typeof closeMobileSidebar === 'function') closeMobileSidebar(false);
+        if (window.innerWidth <= 768 && typeof hideMobileSidebarAndBackdrop === 'function') {
+          hideMobileSidebarAndBackdrop(false);
         }
         if (!this.isAllowedAccess()) {
           this.showLocalhostOnlyModal();
@@ -55196,8 +57013,10 @@ Aturan:
       // WhatsApp Document Preview Modal Close
       const closeWaDocModal = () => {
         if (els.modalWaDocPreview) {
-          els.modalWaDocPreview.style.display = 'none';
+          els.modalWaDocPreview.classList.remove('show');
+          els.modalWaDocPreview.style.removeProperty('display');
           if (els.waDocPreviewBody) els.waDocPreviewBody.innerHTML = '';
+          if (typeof syncBodyModalState === 'function') syncBodyModalState();
         }
       };
       els.btnCloseWaDocPreview?.addEventListener('click', () => {
@@ -55325,6 +57144,17 @@ Aturan:
         };
       } catch (err) {
         console.warn('[WA-Client] Notice SSE:', err.message);
+      }
+    },
+
+    stopSSE() {
+      if (this._sseReconnectTimer) {
+        clearTimeout(this._sseReconnectTimer);
+        this._sseReconnectTimer = null;
+      }
+      if (this.sse) {
+        try { this.sse.close(); } catch (_) {}
+        this.sse = null;
       }
     },
 
@@ -55653,7 +57483,25 @@ Aturan:
     },
 
     handleNewMessage(payload) {
-      const { jid, message, contact } = payload;
+      const { jid, message, contact } = payload || {};
+      if (!jid || !message) return;
+      if (!message.fromMe) {
+        if (!Array.isArray(this.recentIncomingQueue)) this.recentIncomingQueue = [];
+        const dupIdx = this.recentIncomingQueue.findIndex(e => e && message.id && e.id === message.id);
+        if (dupIdx !== -1) this.recentIncomingQueue.splice(dupIdx, 1);
+        this.recentIncomingQueue.unshift({
+          id: message.id || `sse_${Date.now()}`,
+          jid,
+          contactName: contact?.name || contact?.notify || jid,
+          senderName: message.senderName || contact?.name || '',
+          text: String(message.text || '').slice(0, 300),
+          timestamp: message.timestamp || Date.now(),
+          receivedAt: Date.now()
+        });
+        if (this.recentIncomingQueue.length > 30) {
+          this.recentIncomingQueue.length = 30;
+        }
+      }
       const idx = this.contacts.findIndex(c => c.id === jid);
       if (idx !== -1) {
         this.contacts[idx] = contact;
@@ -55896,7 +57744,9 @@ Aturan:
 
       if (isAi) {
         if (!this.isLocalHostOrTunnelOrigin()) {
+          this._bootstrapEpoch = (this._bootstrapEpoch || 0) + 1;
           this.stopStatusPolling();
+          this.stopSSE();
           if (this.keepAliveTimer) {
             clearInterval(this.keepAliveTimer);
             this.keepAliveTimer = null;
@@ -55915,6 +57765,10 @@ Aturan:
         }
       } else {
         purgeEphemeralIncognitoSessions(null);
+        const pModal = els.zozPersonaModal || document.getElementById('zozPersonaModal');
+        if (pModal && pModal.classList.contains('show')) {
+          closeModal('zozPersonaModal', false);
+        }
         if (STATE.isIncognito) {
           STATE.isIncognito = false;
           if (typeof JozzMemoryUI !== 'undefined') JozzMemoryUI.updateIncognitoStateUI(false);
@@ -55924,6 +57778,9 @@ Aturan:
           this.fetchStatus(true).catch(() => {});
           this.fetchContacts(false).catch(() => {});
           this.bootstrapBackground();
+        } else if (!this.sse && !this._sseReconnectTimer) {
+          this.sseReconnectAttempts = 0;
+          this.initSSE();
         }
         if (els.singleModelPickerWrap) els.singleModelPickerWrap.style.display = 'none';
         if (els.singleWaContactPickerWrap) els.singleWaContactPickerWrap.style.display = 'block';
@@ -56459,8 +58316,8 @@ Aturan:
           cache: 'no-store'
         }, 2);
         const data = await res.json().catch(() => null);
-        if (this.activeContact?.id !== jid) {
-          // Navigasi telah berpindah ke kontak lain, abaikan respon lama
+        if (STATE.chatMode !== 'whatsapp' || this.activeContact?.id !== jid) {
+          // Navigasi telah berpindah ke Mode AI atau kontak lain, abaikan respon lama
           return;
         }
         const list = (data && data.messages) || [];
@@ -56472,7 +58329,7 @@ Aturan:
     },
 
     renderMessages() {
-      if (!els.messagesList) return;
+      if (STATE.chatMode !== 'whatsapp' || !els.messagesList) return;
       const bubbles = Array.from(els.messagesList.querySelectorAll('.wa-bubble-wrap'));
       bubbles.forEach(b => b.remove());
       const emptyStateEl = els.messagesList.querySelector('.wa-empty-chat-state');
@@ -57651,7 +59508,9 @@ Aturan:
               caption: docCaption
             }
           };
-          this.appendMessageBubble(tempMsg);
+          if (STATE.chatMode === 'whatsapp' && this.activeContact?.id === targetJid) {
+            this.appendMessageBubble(tempMsg);
+          }
           AudioEngine.sent?.() || AudioEngine.click();
 
           try {
@@ -57706,7 +59565,9 @@ Aturan:
               caption: imgCaption
             }
           };
-          this.appendMessageBubble(tempMsg);
+          if (STATE.chatMode === 'whatsapp' && this.activeContact?.id === targetJid) {
+            this.appendMessageBubble(tempMsg);
+          }
           AudioEngine.sent?.() || AudioEngine.click();
 
           try {
@@ -58441,7 +60302,7 @@ Aturan:
         engine = 'openrouter';
         model = (typeof STATE !== 'undefined' && STATE.settings?.openRouterModel) ? STATE.settings.openRouterModel : 'openrouter/free';
       } else if (mode === 'auto') {
-        if (typeof STATE !== 'undefined' && STATE.settings?.openRouterApiKey && STATE.settings?.openRouterModel) {
+        if (typeof STATE !== 'undefined' && STATE.settings?.openRouterKey && STATE.settings?.openRouterModel) {
           engine = 'openrouter';
           model = STATE.settings.openRouterModel;
         } else {
@@ -58476,6 +60337,26 @@ Aturan:
       this.updateSummaryActiveModelBadge();
     },
 
+    dismissSummaryModalWithRejection(reasonText = '[AKSES DITOLAK PENGGUNA]: Pengguna menutup modal rangkuman WhatsApp.') {
+      if (this.summaryAbortCtrl) {
+        try { this.summaryAbortCtrl.abort(); } catch (_) {}
+        this.summaryAbortCtrl = null;
+      }
+      const summaryModal = document.getElementById('modalWaSummaryResult');
+      if (summaryModal) {
+        summaryModal.classList.remove('show');
+        summaryModal.style.removeProperty('display');
+        if (typeof syncBodyModalState === 'function') syncBodyModalState();
+      }
+      if (this.pendingConsentResolver) {
+        const resolve = this.pendingConsentResolver;
+        this.pendingConsentResolver = null;
+        try {
+          resolve({ approved: false, approvedJids: [], success: false, text: reasonText });
+        } catch (_) {}
+      }
+    },
+
     bindConsentAndSummaryModalListeners() {
       this.bindSummaryModalListeners();
     },
@@ -58486,15 +60367,18 @@ Aturan:
 
       const summaryModal = document.getElementById('modalWaSummaryResult');
       const closeSummaryModal = (rejected = false) => {
-        if (this.summaryAbortCtrl) {
-          try { this.summaryAbortCtrl.abort(); } catch (_) {}
-          this.summaryAbortCtrl = null;
-        }
-        if (summaryModal) summaryModal.style.display = 'none';
-        if (rejected && this.pendingConsentResolver) {
-          const resolve = this.pendingConsentResolver;
-          this.pendingConsentResolver = null;
-          resolve({ approved: false, approvedJids: [], success: false, text: '[AKSES DITOLAK PENGGUNA]: Pengguna menutup modal rangkuman WhatsApp.' });
+        if (rejected) {
+          this.dismissSummaryModalWithRejection('[AKSES DITOLAK PENGGUNA]: Pengguna menutup modal rangkuman WhatsApp.');
+        } else {
+          if (this.summaryAbortCtrl) {
+            try { this.summaryAbortCtrl.abort(); } catch (_) {}
+            this.summaryAbortCtrl = null;
+          }
+          if (summaryModal) {
+            summaryModal.classList.remove('show');
+            summaryModal.style.removeProperty('display');
+            if (typeof syncBodyModalState === 'function') syncBodyModalState();
+          }
         }
       };
 
@@ -58515,9 +60399,9 @@ Aturan:
         }
       });
 
-      // Escape key dismissal
+      // Escape key dismissal (hanya jika modal benar-benar sedang terbuka / memiliki class .show)
       document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && summaryModal && summaryModal.style.display !== 'none') {
+        if (e.key === 'Escape' && summaryModal && summaryModal.classList.contains('show')) {
           closeSummaryModal(true);
         }
       });
@@ -58811,6 +60695,16 @@ Aturan:
 
       return new Promise((resolve) => {
         this.pendingConsentResolver = resolve;
+        const activeSig = typeof STATE !== 'undefined' ? STATE.abortController?.signal : null;
+        if (activeSig) {
+          if (activeSig.aborted) {
+            this.dismissSummaryModalWithRejection('[DIBATALKAN PENGGUNA]: Generasi AI dihentikan oleh pengguna.');
+          } else if (typeof activeSig.addEventListener === 'function') {
+            activeSig.addEventListener('abort', () => {
+              this.dismissSummaryModalWithRejection('[DIBATALKAN PENGGUNA]: Generasi AI dihentikan oleh pengguna.');
+            }, { once: true });
+          }
+        }
       });
     },
 
@@ -59210,6 +61104,9 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     autoResizeTextarea(els.promptInput);
     updatePromptVisibilityUI(true);
     syncPlanSelectorUI();
+    if (typeof ZozPersonaController !== 'undefined' && typeof ZozPersonaController.init === 'function') {
+      ZozPersonaController.init();
+    }
 
     // Restore desktop sidebar collapsed preference
     if (window.innerWidth > 768) {
@@ -59346,6 +61243,9 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       if (!isAiMode) {
         this.toggleMenu(false);
       }
+      if (typeof ZozPersonaController !== 'undefined' && typeof ZozPersonaController.syncUI === 'function') {
+        ZozPersonaController.syncUI();
+      }
 
       const themeTitle = this.THEMES[theme] || this.THEMES.default;
       const shortLabel = this.THEME_SHORT_LABELS[theme] || this.THEME_SHORT_LABELS.default;
@@ -59432,9 +61332,718 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     }
   };
 
+  /**
+   * Sanitasi teks kustom persona agar tidak mengandung token protokol sistem internal
+   * yang dapat memicu false-positive ekstraksi file atau loop pemanggilan tool otonom.
+   */
+  function sanitizeCustomPersonaField(rawStr, maxLen = 4000) {
+    if (!rawStr || typeof rawStr !== 'string') return '';
+    return rawStr
+      .replace(/<<<(?:END_)?ZOZ_(?:FILE|EDIT|MODIFY|DELETE)\b[^>]*>{1,3}/gi, '')
+      .replace(/<\/?(?:tool_call|function_call|invoke)\b[^>]*>/gi, '')
+      .replace(/\[(?:TOOL_CALLS|\/TOOL_CALLS|DATA PENELUSURAN FAKTA|KONTEKS KOMUNIKASI LOKAL|HASIL RAG DINAMIS|DIREKTIF PERSONA[^\]]*|Instruksi Sistem & Konteks:)[^\]]*\]?/gi, '')
+      .replace(/\u0000/g, '')
+      .trim()
+      .slice(0, maxLen);
+  }
+
+  /**
+   * Menghasilkan direktif sistem Persona aktif:
+   * - Mode 'off': Persona dimatikan -> return '' (tanpa direktif persona apa pun).
+   * - Mode Non-Custom ('formal'): HANYA AI Formal tunggal (tanpa preset lain).
+   * - Mode Custom ('custom'): Menggunakan nama peran, nada komunikasi, dan instruksi kustom pengguna
+   *   (otomatis fallback ke AI Formal bila kolom custom masih kosong).
+   */
+  function getEffectivePersonaSystemDirective(session = null, runOptions = {}) {
+    const settings = (typeof STATE !== 'undefined' && STATE && STATE.settings) ? STATE.settings : {};
+    if (settings.personaMode === 'off') {
+      return '';
+    }
+    const mode = settings.personaMode === 'custom' ? 'custom' : 'formal';
+    const cleanTitle = sanitizeCustomPersonaField(settings.personaCustomTitle || '', 80);
+    const cleanPrompt = sanitizeCustomPersonaField(settings.personaCustomPrompt || '', 4000);
+    const toneKey = ['professional', 'analytical', 'concise', 'flexible'].includes(settings.personaCustomTone)
+      ? settings.personaCustomTone
+      : 'professional';
+
+    const TONE_DIRECTIVES = {
+      professional: 'Profesional, teknis, terstruktur, dan berorientasi solusi eksekutif.',
+      analytical: 'Analitis mendalam, sistematis, menjabarkan alasan logis dan pembuktian secara komprehensif.',
+      concise: 'Ringkas, padat, langsung pada pokok jawaban (to-the-point) tanpa pengantar bertele-tele.',
+      flexible: 'Adaptif dan fleksibel mengikuti seluruh instruksi kustom pengguna secara presisi.'
+    };
+
+    if (mode === 'custom' && (cleanTitle || cleanPrompt)) {
+      const lines = [
+        `[DIREKTIF PERSONA CUSTOM EKSEKUTIF]:`,
+        `- Identitas / Peran: ${cleanTitle || 'Persona Custom'}`,
+        `- Nada & Pendekatan Komunikasi: ${TONE_DIRECTIVES[toneKey] || TONE_DIRECTIVES.professional}`
+      ];
+      if (cleanPrompt) {
+        lines.push(`- Instruksi Karakteristik & Struktur:\n${cleanPrompt}`);
+      }
+      lines.push(`- Catatan Integritas Sistem: Patuhi identitas, gaya bahasa, dan aturan format di atas secara konsisten tanpa mengorbankan ketepatan fakta, akurasi matematis, protokol pembuatan berkas, atau pemanggilan tool otonom bila diperlukan.`);
+      return lines.join('\n');
+    }
+
+    return `[DIREKTIF PERSONA NON-CUSTOM — AI FORMAL EKSEKUTIF]:\nGunakan gaya komunikasi AI Formal yang profesional, objektif, lugas, dan terstruktur rapi. Gunakan Bahasa Indonesia baku yang sopan dan presisi (atau bahasa yang diminta pengguna), langsung menjawab pokok permasalahan dengan analisis sistematis berbasis bukti, serta bebas dari bahasa gaul, emoji berlebihan, atau basa-basi yang tidak perlu.`;
+  }
+
+  /**
+   * Controller Menu Persona AI Eksekutif:
+   * - Nonaktif ('off'): Matikan seluruh direktif persona.
+   * - Non-Custom ('formal'): Eksklusif hanya AI Formal (tanpa preset lain).
+   * - Custom ('custom'): Peran, Nada Komunikasi, Instruksi Khusus, & Daftar Profil Custom Tersimpan.
+   */
+  const ZozPersonaController = {
+    initialized: false,
+    editingTabMode: 'formal',
+    selectedTone: 'professional',
+
+    TONE_LABELS: {
+      professional: 'Profesional & Teknis',
+      analytical: 'Analitis & Mendalam',
+      concise: 'Ringkas & To-The-Point',
+      flexible: 'Fleksibel Sesuai Instruksi'
+    },
+
+    getNormalizedState() {
+      const s = STATE.settings || {};
+      const rawMode = ['off', 'formal', 'custom'].includes(s.personaMode) ? s.personaMode : 'formal';
+      const title = sanitizeCustomPersonaField(s.personaCustomTitle || '', 80);
+      const prompt = sanitizeCustomPersonaField(s.personaCustomPrompt || '', 4000);
+      const tone = ['professional', 'analytical', 'concise', 'flexible'].includes(s.personaCustomTone)
+        ? s.personaCustomTone
+        : 'professional';
+      const hasCustomContent = Boolean(title || prompt);
+      let effectiveMode = 'formal';
+      if (rawMode === 'off') {
+        effectiveMode = 'off';
+      } else if (rawMode === 'custom' && hasCustomContent) {
+        effectiveMode = 'custom';
+      }
+      const isEnabled = effectiveMode !== 'off';
+      const lastActiveMode = (s.personaLastActiveMode === 'custom' && hasCustomContent) ? 'custom' : 'formal';
+      const profiles = Array.isArray(s.personaCustomProfiles) ? s.personaCustomProfiles : [];
+      return {
+        rawMode,
+        effectiveMode,
+        isEnabled,
+        lastActiveMode,
+        hasCustomContent,
+        title,
+        tone,
+        prompt,
+        profiles
+      };
+    },
+
+    updateApplyButtonLabel() {
+      const st = this.getNormalizedState();
+      const applyLbl = els.zozApplyPersonaBtnLabel || document.getElementById('zozApplyPersonaBtnLabel');
+      if (!applyLbl) return;
+      if (this.editingTabMode === 'custom') {
+        applyLbl.textContent = st.isEnabled ? 'Terapkan Persona Custom' : 'Aktifkan Persona Custom';
+      } else {
+        applyLbl.textContent = st.isEnabled ? 'Terapkan AI Formal' : 'Aktifkan AI Formal';
+      }
+    },
+
+    syncUI() {
+      const st = this.getNormalizedState();
+      const isOff = st.effectiveMode === 'off';
+      const isCustom = st.effectiveMode === 'custom';
+      const isFormal = st.effectiveMode === 'formal';
+      const customDisplayTitle = st.title || 'Persona Custom';
+      const isAiChatMode = typeof STATE === 'undefined' || STATE.chatMode !== 'whatsapp';
+
+      // Tutup modal persona otomatis bila beralih keluar dari Mode AI (kecuali dibuka sengaja dari Pengaturan saat di Mode WA)
+      if (!isAiChatMode && !this._openedFromSettingsInWa) {
+        const pModal = els.zozPersonaModal || document.getElementById('zozPersonaModal');
+        if (pModal && pModal.classList.contains('show')) {
+          closeModal('zozPersonaModal', false);
+        }
+      }
+
+      // 1. Composer Button Pill
+      const compBtn = els.btnComposerPersonaMenu || document.getElementById('btnComposerPersonaMenu');
+      const compLabel = els.zozPersonaComposerLabel || document.getElementById('zozPersonaComposerLabel');
+      const compIcon = els.zozPersonaComposerIcon || document.getElementById('zozPersonaComposerIcon');
+      if (compBtn) {
+        compBtn.style.display = isAiChatMode ? 'inline-flex' : 'none';
+        compBtn.classList.toggle('is-custom-mode', isCustom);
+        compBtn.classList.toggle('is-off-mode', isOff);
+        compBtn.title = isOff
+          ? 'Menu Persona AI: Nonaktif (Klik untuk mengaktifkan)'
+          : (isCustom
+            ? `Menu Persona AI: Custom (${customDisplayTitle})`
+            : 'Menu Persona AI: Non-Custom (AI Formal)');
+      }
+      if (compLabel) {
+        compLabel.textContent = isOff ? 'Persona: Off' : (isCustom ? customDisplayTitle : 'AI Formal');
+      }
+      if (compIcon) {
+        compIcon.className = isOff
+          ? 'fa-solid fa-power-off zoz-persona-btn-icon'
+          : (isCustom
+            ? 'fa-solid fa-pen-ruler zoz-persona-btn-icon'
+            : 'fa-solid fa-user-tie zoz-persona-btn-icon');
+      }
+
+      // 2. Topbar 3-Dots Model Options Menu Item
+      const optBtn = els.btnModelOptPersonaMenu || document.getElementById('btnModelOptPersonaMenu');
+      const optIcon = els.iconModelOptPersona || document.getElementById('iconModelOptPersona');
+      const optDesc = els.modelOptPersonaDesc || document.getElementById('modelOptPersonaDesc');
+      const optBadge = els.modelOptPersonaBadge || document.getElementById('modelOptPersonaBadge');
+      if (optBtn) {
+        optBtn.style.display = isAiChatMode ? 'flex' : 'none';
+        optBtn.classList.toggle('is-custom-mode', isCustom);
+        optBtn.classList.toggle('is-off-mode', isOff);
+        optBtn.title = isOff
+          ? 'Menu Persona AI: Nonaktif (Mati)'
+          : (isCustom ? `Menu Persona AI: Custom (${customDisplayTitle})` : 'Menu Persona AI: Non-Custom (AI Formal)');
+      }
+      if (optIcon) {
+        optIcon.className = isOff
+          ? 'fa-solid fa-power-off'
+          : (isCustom ? 'fa-solid fa-pen-ruler' : 'fa-solid fa-user-tie');
+      }
+      if (optDesc) {
+        optDesc.textContent = isOff
+          ? 'Nonaktif • Tanpa direktif persona'
+          : (isCustom ? `Custom • ${customDisplayTitle}` : 'Non-Custom • AI Formal');
+      }
+      if (optBadge) {
+        optBadge.textContent = isOff ? 'Mati' : (isCustom ? 'Custom' : 'AI Formal');
+      }
+
+      // 3. Settings Modal Persona Studio Tab
+      const setIcon = els.settingsPersonaOverviewIcon || document.getElementById('settingsPersonaOverviewIcon');
+      const setBadge = els.settingsPersonaStatusBadge || document.getElementById('settingsPersonaStatusBadge');
+      const qOff = els.btnSettingsQuickOff || document.getElementById('btnSettingsQuickOff');
+      const qFormal = els.btnSettingsQuickFormal || document.getElementById('btnSettingsQuickFormal');
+      const qCustom = els.btnSettingsQuickCustom || document.getElementById('btnSettingsQuickCustom');
+      const cTitle = els.settingsCustomPersonaCardTitle || document.getElementById('settingsCustomPersonaCardTitle');
+      const cDesc = els.settingsCustomPersonaCardDesc || document.getElementById('settingsCustomPersonaCardDesc');
+      if (setIcon) {
+        setIcon.classList.toggle('is-custom', isCustom);
+        setIcon.classList.toggle('is-off', isOff);
+        const setIconGlyph = typeof setIcon.querySelector === 'function' ? setIcon.querySelector('i') : null;
+        if (setIconGlyph) {
+          setIconGlyph.className = isOff
+            ? 'fa-solid fa-power-off'
+            : (isCustom ? 'fa-solid fa-pen-ruler' : 'fa-solid fa-user-tie');
+        }
+      }
+      if (setBadge) {
+        setBadge.textContent = isOff
+          ? 'Nonaktif • Persona Mati'
+          : (isCustom ? `Custom • ${customDisplayTitle}` : 'Non-Custom • AI Formal');
+        setBadge.classList.toggle('is-custom', isCustom);
+        setBadge.classList.toggle('is-off', isOff);
+      }
+      if (qOff) qOff.classList.toggle('is-selected', isOff);
+      if (qFormal) qFormal.classList.toggle('is-selected', isFormal);
+      if (qCustom) qCustom.classList.toggle('is-selected', isCustom);
+      if (cTitle) cTitle.textContent = st.title ? `Custom: ${st.title}` : 'Persona Custom';
+      if (cDesc) {
+        cDesc.textContent = st.prompt
+          ? st.prompt.slice(0, 120) + (st.prompt.length > 120 ? '...' : '')
+          : 'Rancang peran, nada komunikasi, dan instruksi sistem khusus sesuai kebutuhan Anda.';
+      }
+
+      // 4. Modal Header, Power Switch, OFF Banner, Badge Formal & Footer
+      const modalEmblem = els.zozPersonaModalHeaderEmblem || document.getElementById('zozPersonaModalHeaderEmblem');
+      const modalIcon = els.zozPersonaModalHeaderIcon || document.getElementById('zozPersonaModalHeaderIcon');
+      const livePill = els.zozPersonaLivePill || document.getElementById('zozPersonaLivePill');
+      const powerBtn = els.btnTogglePersonaPower || document.getElementById('btnTogglePersonaPower');
+      const powerLbl = els.zozPersonaPowerLabel || document.getElementById('zozPersonaPowerLabel');
+      const offBanner = els.zozPersonaOffBanner || document.getElementById('zozPersonaOffBanner');
+      const formalBadge = els.zozFormalActiveBadge || document.getElementById('zozFormalActiveBadge');
+      const disableBtn = els.btnDisablePersona || document.getElementById('btnDisablePersona');
+      const disableLbl = els.zozDisablePersonaBtnLabel || document.getElementById('zozDisablePersonaBtnLabel');
+
+      if (modalEmblem) {
+        modalEmblem.classList.toggle('is-custom', isCustom);
+        modalEmblem.classList.toggle('is-off', isOff);
+      }
+      if (modalIcon) {
+        modalIcon.className = isOff
+          ? 'fa-solid fa-power-off'
+          : (isCustom ? 'fa-solid fa-pen-ruler' : 'fa-solid fa-user-tie');
+      }
+      if (livePill) {
+        livePill.textContent = isOff
+          ? 'Nonaktif • Persona Mati'
+          : (isCustom ? `Aktif: Custom • ${customDisplayTitle}` : 'Aktif: Non-Custom • AI Formal');
+        livePill.classList.toggle('is-custom', isCustom);
+        livePill.classList.toggle('is-off', isOff);
+      }
+      if (powerBtn) {
+        const powerAria = isOff ? 'Aktifkan kembali Persona AI' : 'Matikan Persona AI';
+        powerBtn.setAttribute('aria-pressed', String(!isOff));
+        powerBtn.setAttribute('aria-label', powerAria);
+        powerBtn.classList.toggle('is-persona-off', isOff);
+        powerBtn.title = powerAria;
+      }
+      if (powerLbl) {
+        powerLbl.textContent = isOff ? 'Aktifkan Persona' : 'Matikan Persona';
+      }
+      if (offBanner) {
+        offBanner.style.display = isOff ? 'flex' : 'none';
+      }
+      if (formalBadge) {
+        formalBadge.textContent = isFormal ? 'Aktif Saat Ini' : (isOff ? 'Nonaktif' : 'Standar Non-Custom');
+        formalBadge.classList.toggle('is-inactive', !isFormal);
+      }
+      if (disableBtn) {
+        disableBtn.disabled = isOff;
+        disableBtn.classList.toggle('is-already-off', isOff);
+      }
+      if (disableLbl) {
+        disableLbl.textContent = isOff ? 'Persona Nonaktif' : 'Matikan Persona';
+      }
+
+      this.updateApplyButtonLabel();
+      this.renderSavedCustomProfiles();
+    },
+
+    setModalTab(tabMode) {
+      const nextTab = tabMode === 'custom' ? 'custom' : 'formal';
+      this.editingTabMode = nextTab;
+      const tabFormal = els.btnPersonaTabFormal || document.getElementById('btnPersonaTabFormal');
+      const tabCustom = els.btnPersonaTabCustom || document.getElementById('btnPersonaTabCustom');
+      const paneFormal = els.zozPersonaPaneFormal || document.getElementById('zozPersonaPaneFormal');
+      const paneCustom = els.zozPersonaPaneCustom || document.getElementById('zozPersonaPaneCustom');
+
+      if (tabFormal) {
+        tabFormal.classList.toggle('is-active', nextTab === 'formal');
+        tabFormal.setAttribute('aria-selected', String(nextTab === 'formal'));
+      }
+      if (tabCustom) {
+        tabCustom.classList.toggle('is-active', nextTab === 'custom');
+        tabCustom.setAttribute('aria-selected', String(nextTab === 'custom'));
+      }
+      if (paneFormal) paneFormal.style.display = nextTab === 'formal' ? 'block' : 'none';
+      if (paneCustom) paneCustom.style.display = nextTab === 'custom' ? 'block' : 'none';
+      this.updateApplyButtonLabel();
+    },
+
+    setToneSelection(toneKey) {
+      const validTone = ['professional', 'analytical', 'concise', 'flexible'].includes(toneKey)
+        ? toneKey
+        : 'professional';
+      this.selectedTone = validTone;
+      const group = els.zozCustomPersonaToneGroup || document.getElementById('zozCustomPersonaToneGroup');
+      if (group) {
+        group.querySelectorAll('.zoz-tone-pill').forEach((btn) => {
+          const isMatch = btn.dataset.tone === validTone;
+          btn.classList.toggle('is-selected', isMatch);
+          btn.setAttribute('aria-checked', String(isMatch));
+        });
+      }
+    },
+
+    updateCharCounter() {
+      const promptEl = els.zozCustomPersonaPromptInput || document.getElementById('zozCustomPersonaPromptInput');
+      const counterEl = els.zozCustomPersonaCharCount || document.getElementById('zozCustomPersonaCharCount');
+      if (promptEl && counterEl) {
+        const len = String(promptEl.value || '').length;
+        counterEl.textContent = `${len} / 4000`;
+      }
+    },
+
+    populateModalFields(preferredTab = null) {
+      const st = this.getNormalizedState();
+      const titleEl = els.zozCustomPersonaTitleInput || document.getElementById('zozCustomPersonaTitleInput');
+      const promptEl = els.zozCustomPersonaPromptInput || document.getElementById('zozCustomPersonaPromptInput');
+      if (titleEl) titleEl.value = st.title;
+      if (promptEl) promptEl.value = st.prompt;
+      this.setToneSelection(st.tone);
+      this.updateCharCounter();
+      const targetTab = preferredTab || (st.effectiveMode === 'off' ? st.lastActiveMode : st.effectiveMode);
+      this.setModalTab(targetTab);
+      this.syncUI();
+    },
+
+    openPersonaModal(preferredTab = null, { fromSettings = false } = {}) {
+      closeModelOptionsMenuPopup();
+      closeAttachmentDropdown();
+      this._openedFromSettingsInWa = Boolean(fromSettings && typeof STATE !== 'undefined' && STATE.chatMode === 'whatsapp');
+      if (fromSettings) {
+        closeModal('settingsModal', false);
+        if (typeof history !== 'undefined' && history.state?.modal === 'settingsModal') {
+          try { history.replaceState({ modal: 'zozPersonaModal' }, ''); } catch (_) {}
+        }
+      }
+      this.populateModalFields(preferredTab);
+      openModal('zozPersonaModal');
+    },
+
+    deactivatePersonaMode({ closeAfter = false, silent = false } = {}) {
+      const st = this.getNormalizedState();
+      if (st.effectiveMode === 'custom' || st.effectiveMode === 'formal') {
+        STATE.settings.personaLastActiveMode = st.effectiveMode;
+      }
+      STATE.settings.personaMode = 'off';
+      savePersistedState({ immediate: true });
+      this.syncUI();
+      if (!silent) {
+        showToast('Persona AI dimatikan (mode murni tanpa direktif persona).', 'info');
+      }
+      if (closeAfter) {
+        closeModal('zozPersonaModal');
+      }
+    },
+
+    togglePersonaPower() {
+      const st = this.getNormalizedState();
+      if (!st.isEnabled) {
+        const resumeMode = st.lastActiveMode === 'custom' && st.hasCustomContent ? 'custom' : 'formal';
+        STATE.settings.personaMode = resumeMode;
+        savePersistedState({ immediate: true });
+        this.setModalTab(resumeMode);
+        this.syncUI();
+        showToast(
+          resumeMode === 'custom'
+            ? `Persona Custom "${st.title || 'Persona Custom'}" diaktifkan kembali.`
+            : 'Persona AI Formal diaktifkan kembali.',
+          'success'
+        );
+      } else {
+        this.deactivatePersonaMode({ closeAfter: false, silent: false });
+      }
+    },
+
+    activateFormalMode({ closeAfter = false, silent = false } = {}) {
+      STATE.settings.personaMode = 'formal';
+      STATE.settings.personaLastActiveMode = 'formal';
+      this.setModalTab('formal');
+      savePersistedState({ immediate: true });
+      this.syncUI();
+      if (!silent) {
+        showToast('Persona diatur ke Non-Custom (AI Formal).', 'success');
+      }
+      if (closeAfter) {
+        closeModal('zozPersonaModal');
+      }
+    },
+
+    applyFromModal() {
+      if (this.editingTabMode === 'custom') {
+        const titleEl = els.zozCustomPersonaTitleInput || document.getElementById('zozCustomPersonaTitleInput');
+        const promptEl = els.zozCustomPersonaPromptInput || document.getElementById('zozCustomPersonaPromptInput');
+        const cleanTitle = sanitizeCustomPersonaField(titleEl ? titleEl.value : '', 80);
+        const cleanPrompt = sanitizeCustomPersonaField(promptEl ? promptEl.value : '', 4000);
+        if (titleEl) titleEl.value = cleanTitle;
+        if (promptEl) promptEl.value = cleanPrompt;
+
+        if (!cleanTitle && !cleanPrompt) {
+          showToast('Isi Nama Peran atau Instruksi Persona Custom terlebih dahulu, atau gunakan AI Formal / Matikan Persona.', 'warning');
+          if (promptEl) promptEl.focus();
+          return false;
+        }
+        STATE.settings.personaCustomTitle = cleanTitle;
+        STATE.settings.personaCustomTone = this.selectedTone || 'professional';
+        STATE.settings.personaCustomPrompt = cleanPrompt;
+        STATE.settings.personaMode = 'custom';
+        STATE.settings.personaLastActiveMode = 'custom';
+        savePersistedState({ immediate: true });
+        this.syncUI();
+        closeModal('zozPersonaModal');
+        showToast(`Persona Custom "${cleanTitle || 'Persona Custom'}" diaktifkan.`, 'success');
+        return true;
+      }
+
+      // Jangan timpa draf custom ketika pengguna menerapkan mode Non-Custom (AI Formal)
+      this.activateFormalMode({ closeAfter: true, silent: false });
+      return true;
+    },
+
+    saveCurrentAsCustomProfile() {
+      const titleEl = els.zozCustomPersonaTitleInput || document.getElementById('zozCustomPersonaTitleInput');
+      const promptEl = els.zozCustomPersonaPromptInput || document.getElementById('zozCustomPersonaPromptInput');
+      const cleanTitle = sanitizeCustomPersonaField(titleEl ? titleEl.value : '', 80);
+      const cleanPrompt = sanitizeCustomPersonaField(promptEl ? promptEl.value : '', 4000);
+      const tone = this.selectedTone || 'professional';
+
+      if (!cleanTitle && !cleanPrompt) {
+        showToast('Tuliskan nama peran atau instruksi sebelum menyimpan profil Custom.', 'warning');
+        return false;
+      }
+
+      if (!Array.isArray(STATE.settings.personaCustomProfiles)) {
+        STATE.settings.personaCustomProfiles = [];
+      }
+      let effectiveTitle = cleanTitle;
+      if (!effectiveTitle) {
+        const usedTitles = new Set(
+          STATE.settings.personaCustomProfiles.map(p => String(p?.title || '').trim().toLowerCase())
+        );
+        let fallbackIdx = 1;
+        while (usedTitles.has(`custom #${fallbackIdx}`)) {
+          fallbackIdx += 1;
+        }
+        effectiveTitle = `Custom #${fallbackIdx}`;
+      }
+      const existingIdx = STATE.settings.personaCustomProfiles.findIndex(
+        p => p && String(p.title || '').toLowerCase() === effectiveTitle.toLowerCase()
+      );
+      const uniqueId = `cp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+      const record = {
+        id: existingIdx >= 0 ? STATE.settings.personaCustomProfiles[existingIdx].id : uniqueId,
+        title: effectiveTitle,
+        tone,
+        prompt: cleanPrompt,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (existingIdx >= 0) {
+        STATE.settings.personaCustomProfiles[existingIdx] = record;
+      } else {
+        if (STATE.settings.personaCustomProfiles.length >= 10) {
+          STATE.settings.personaCustomProfiles.pop();
+        }
+        STATE.settings.personaCustomProfiles.unshift(record);
+      }
+
+      if (titleEl) titleEl.value = effectiveTitle;
+      savePersistedState({ immediate: true });
+      this.renderSavedCustomProfiles();
+      showToast(`Profil Custom "${effectiveTitle}" disimpan ke daftar.`, 'success');
+      return true;
+    },
+
+    loadSavedProfile(profileId) {
+      const list = Array.isArray(STATE.settings.personaCustomProfiles) ? STATE.settings.personaCustomProfiles : [];
+      const found = list.find(p => p && p.id === profileId);
+      if (!found) return false;
+      const titleEl = els.zozCustomPersonaTitleInput || document.getElementById('zozCustomPersonaTitleInput');
+      const promptEl = els.zozCustomPersonaPromptInput || document.getElementById('zozCustomPersonaPromptInput');
+      if (titleEl) titleEl.value = found.title || '';
+      if (promptEl) promptEl.value = found.prompt || '';
+      this.setToneSelection(found.tone || 'professional');
+      this.updateCharCounter();
+      this.setModalTab('custom');
+      STATE.settings.personaMode = 'custom';
+      STATE.settings.personaLastActiveMode = 'custom';
+      STATE.settings.personaCustomTitle = found.title || '';
+      STATE.settings.personaCustomTone = found.tone || 'professional';
+      STATE.settings.personaCustomPrompt = found.prompt || '';
+      savePersistedState({ immediate: true });
+      this.syncUI();
+      showToast(`Profil Custom "${found.title}" dimuat & diaktifkan.`, 'success');
+      return true;
+    },
+
+    deleteSavedProfile(profileId) {
+      if (!Array.isArray(STATE.settings.personaCustomProfiles)) return false;
+      const beforeLen = STATE.settings.personaCustomProfiles.length;
+      STATE.settings.personaCustomProfiles = STATE.settings.personaCustomProfiles.filter(p => p && p.id !== profileId);
+      if (STATE.settings.personaCustomProfiles.length !== beforeLen) {
+        savePersistedState({ immediate: true });
+        this.syncUI();
+        showToast('Profil Custom dihapus.', 'info');
+        return true;
+      }
+      return false;
+    },
+
+    renderSavedCustomProfiles() {
+      const listEl = els.zozCustomSavedProfilesList || document.getElementById('zozCustomSavedProfilesList');
+      const countEl = els.zozCustomSavedCount || document.getElementById('zozCustomSavedCount');
+      const st = this.getNormalizedState();
+      const list = st.profiles;
+      if (countEl) countEl.textContent = String(list.length);
+      if (!listEl) return;
+
+      if (list.length === 0) {
+        listEl.innerHTML = `<div style="padding: 10px; text-align: center; font-size: 0.72rem; color: #64748b; border: 1px dashed rgba(255,255,255,0.08); border-radius: 8px;">Belum ada profil Custom yang Anda simpan. Buat instruksi di atas lalu klik <strong>Simpan ke Daftar Custom</strong>.</div>`;
+        return;
+      }
+
+      listEl.innerHTML = list.map((p) => {
+        const safeId = escapeHtml(String(p.id || ''));
+        const safeTitle = escapeHtml(String(p.title || 'Persona Custom'));
+        const toneLbl = escapeHtml(this.TONE_LABELS[p.tone] || this.TONE_LABELS.professional);
+        const safePreview = escapeHtml(String(p.prompt || '').replace(/\s+/g, ' ').slice(0, 90) || '(Tanpa instruksi tambahan)');
+        const isCurrentActive = st.effectiveMode === 'custom' &&
+          String(p.title || '') === st.title &&
+          String(p.prompt || '') === st.prompt &&
+          (p.tone || 'professional') === st.tone;
+        return `
+          <div class="zoz-saved-profile-item${isCurrentActive ? ' is-active-profile' : ''}" data-profile-id="${safeId}">
+            <div class="zoz-saved-profile-info">
+              <strong>${safeTitle} <small style="color:#a78bfa; font-weight:600;">&bull; ${toneLbl}</small></strong>
+              <span>${safePreview}</span>
+            </div>
+            <div class="zoz-saved-profile-actions">
+              <button type="button" class="btn btn-xs btn-outline zoz-btn-load-profile" data-load-profile="${safeId}" title="Gunakan profil Custom ini">${isCurrentActive ? 'Aktif' : 'Pakai'}</button>
+              <button type="button" class="btn btn-xs btn-outline zoz-btn-del-profile" data-del-profile="${safeId}" style="border-color:rgba(248,113,113,0.35); color:#f87171;" title="Hapus profil Custom ini"><i class="fa-solid fa-trash-can"></i></button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      listEl.querySelectorAll('[data-load-profile]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+          this.loadSavedProfile(btn.getAttribute('data-load-profile'));
+        });
+      });
+
+      listEl.querySelectorAll('[data-del-profile]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+          this.deleteSavedProfile(btn.getAttribute('data-del-profile'));
+        });
+      });
+    },
+
+    init() {
+      this.syncUI();
+      if (this.initialized) return;
+      this.initialized = true;
+
+      const compBtn = els.btnComposerPersonaMenu || document.getElementById('btnComposerPersonaMenu');
+      const optBtn = els.btnModelOptPersonaMenu || document.getElementById('btnModelOptPersonaMenu');
+      const powerBtn = els.btnTogglePersonaPower || document.getElementById('btnTogglePersonaPower');
+      const tabFormal = els.btnPersonaTabFormal || document.getElementById('btnPersonaTabFormal');
+      const tabCustom = els.btnPersonaTabCustom || document.getElementById('btnPersonaTabCustom');
+      const titleEl = els.zozCustomPersonaTitleInput || document.getElementById('zozCustomPersonaTitleInput');
+      const toneGroup = els.zozCustomPersonaToneGroup || document.getElementById('zozCustomPersonaToneGroup');
+      const promptEl = els.zozCustomPersonaPromptInput || document.getElementById('zozCustomPersonaPromptInput');
+      const clearBtn = els.btnClearCustomPersonaInput || document.getElementById('btnClearCustomPersonaInput');
+      const helperBar = els.zozCustomPersonaHelperChips || document.getElementById('zozCustomPersonaHelperChips');
+      const saveProfBtn = els.btnSaveCustomPersonaProfile || document.getElementById('btnSaveCustomPersonaProfile');
+      const disableBtn = els.btnDisablePersona || document.getElementById('btnDisablePersona');
+      const applyBtn = els.btnApplyPersonaConfig || document.getElementById('btnApplyPersonaConfig');
+      const qOff = els.btnSettingsQuickOff || document.getElementById('btnSettingsQuickOff');
+      const qFormal = els.btnSettingsQuickFormal || document.getElementById('btnSettingsQuickFormal');
+      const qCustom = els.btnSettingsQuickCustom || document.getElementById('btnSettingsQuickCustom');
+      const openFromSettings = els.btnOpenPersonaStudioFromSettings || document.getElementById('btnOpenPersonaStudioFromSettings');
+
+      compBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        this.openPersonaModal();
+      });
+
+      optBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        this.openPersonaModal();
+      });
+
+      powerBtn?.addEventListener('click', () => {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        this.togglePersonaPower();
+      });
+
+      tabFormal?.addEventListener('click', () => {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        this.setModalTab('formal');
+      });
+
+      tabCustom?.addEventListener('click', () => {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        this.setModalTab('custom');
+      });
+
+      titleEl?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          promptEl?.focus();
+        }
+      });
+
+      toneGroup?.querySelectorAll('.zoz-tone-pill').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+          this.setToneSelection(btn.dataset.tone || 'professional');
+        });
+      });
+
+      promptEl?.addEventListener('input', () => {
+        this.updateCharCounter();
+      });
+
+      clearBtn?.addEventListener('click', () => {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        if (promptEl) {
+          promptEl.value = '';
+          promptEl.focus();
+        }
+        this.updateCharCounter();
+      });
+
+      helperBar?.querySelectorAll('.zoz-helper-chip').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+          const clause = chip.getAttribute('data-append') || '';
+          if (!clause || !promptEl) return;
+          const cur = promptEl.value.trim();
+          if (!cur.includes(clause)) {
+            promptEl.value = (cur ? `${cur}\n${clause}` : clause).slice(0, 4000);
+            this.updateCharCounter();
+          }
+          promptEl.focus();
+        });
+      });
+
+      saveProfBtn?.addEventListener('click', () => {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        this.saveCurrentAsCustomProfile();
+      });
+
+      disableBtn?.addEventListener('click', () => {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        this.deactivatePersonaMode({ closeAfter: true, silent: false });
+      });
+
+      applyBtn?.addEventListener('click', () => {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        this.applyFromModal();
+      });
+
+      qOff?.addEventListener('click', () => {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        this.deactivatePersonaMode({ closeAfter: false, silent: false });
+      });
+
+      qFormal?.addEventListener('click', () => {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        this.activateFormalMode({ closeAfter: false, silent: false });
+      });
+
+      qCustom?.addEventListener('click', () => {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        const st = this.getNormalizedState();
+        if (st.hasCustomContent) {
+          STATE.settings.personaMode = 'custom';
+          STATE.settings.personaLastActiveMode = 'custom';
+          savePersistedState({ immediate: true });
+          this.syncUI();
+          showToast(`Persona Custom "${st.title || 'Persona Custom'}" diaktifkan.`, 'success');
+        } else {
+          this.openPersonaModal('custom', { fromSettings: true });
+        }
+      });
+
+      openFromSettings?.addEventListener('click', () => {
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        this.openPersonaModal(null, { fromSettings: true });
+      });
+    }
+  };
+
   // Expose clean namespace for extension & programmatic workspace control
   window.ZozWorkspace = {
     STATE,
+    getEffectivePersonaSystemDirective,
+    ZozPersonaController,
     setConnectedLocalWorkspace,
     disconnectLocalWorkspace,
     createWorkspaceDocument,

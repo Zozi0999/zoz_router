@@ -66,13 +66,31 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
   // 2. FTS5 BM25 Signal
   const ftsHits = dbStorage.searchMemoriesFTS5(uid, q, targetScope, 24);
 
-  // 3. Graph Signal (Entity match -> Active Relation Traversal)
+  // 3. Graph Signal (Entity match -> Active Relation Traversal, supports punctuation & multi-word entities)
   const graphHits = [];
-  const words = q.split(/\s+/).filter(w => w.length >= 3);
+  const rawTokens = q
+    .replace(/[^\p{L}\p{N}_-]+/gu, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(w => w.length >= 2);
+  const candidateNames = [];
+  const seenCand = new Set();
+  const pushCand = (s) => {
+    const k = s.toLowerCase();
+    if (k.length >= 3 && !seenCand.has(k)) {
+      seenCand.add(k);
+      candidateNames.push(s);
+    }
+  };
+  for (let i = 0; i < rawTokens.length; i++) {
+    pushCand(rawTokens[i]);
+    if (i + 1 < rawTokens.length) pushCand(`${rawTokens[i]} ${rawTokens[i + 1]}`);
+    if (i + 2 < rawTokens.length) pushCand(`${rawTokens[i]} ${rawTokens[i + 1]} ${rawTokens[i + 2]}`);
+  }
   const matchedEntities = [];
 
-  for (const w of words) {
-    const ent = dbStorage.findEntityByName(uid, w, targetScope);
+  for (const cand of candidateNames) {
+    const ent = dbStorage.findEntityByName(uid, cand, targetScope);
     if (ent && !matchedEntities.some(e => e.id === ent.id)) {
       matchedEntities.push(ent);
       const activeRelations = dbStorage.traverseActiveGraph(uid, ent.id, config.GRAPH_MAX_HOPS);

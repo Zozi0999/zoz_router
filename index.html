@@ -16,40 +16,45 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <script>
-    // 1. Musnahkan Service Worker aktif agar tidak melayani aset kadaluwarsa
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(function(regs) {
-        for (var i = 0; i < regs.length; i++) regs[i].unregister();
-      }).catch(function() {});
-    }
-    // 2. Bersihkan seluruh CacheStorage API
-    if ('caches' in window) {
-      caches.keys().then(function(keys) {
-        for (var j = 0; j < keys.length; j++) caches.delete(keys[j]);
-      }).catch(function() {});
-    }
-    // 3. Tangkal BFCache (Back-Forward Cache) seluler yang memulihkan DOM usang
-    window.addEventListener('pageshow', function(ev) {
-      if (ev.persisted) {
-        window.location.reload();
+    (function() {
+      // 1. Kumpulkan promise pemusnahan Service Worker & CacheStorage agar selesai sebelum reload
+      var cleanupTasks = [];
+      if ('serviceWorker' in navigator) {
+        cleanupTasks.push(
+          navigator.serviceWorker.getRegistrations().then(function(regs) {
+            return Promise.all(regs.map(function(r) { return r.unregister(); }));
+          }).catch(function() {})
+        );
       }
-    });
-    try {
-      var currentVer = 'v20261120_v805';
-      var savedVer = localStorage.getItem('__zoz_ver__');
-      if (savedVer !== currentVer) {
-        localStorage.setItem('__zoz_ver__', currentVer);
-        if ('caches' in window) {
-          caches.keys().then(function(ks) {
-            ks.forEach(function(k) { caches.delete(k); });
-          });
-        }
-        if (savedVer) {
-          window.location.reload(true);
-        }
+      if ('caches' in window) {
+        cleanupTasks.push(
+          caches.keys().then(function(keys) {
+            return Promise.all(keys.map(function(k) { return caches.delete(k); }));
+          }).catch(function() {})
+        );
       }
-    } catch (_) {}
-    window.__ZOZ_VERSION__ = 'v20261120_v805';
+      // 2. Tangkal BFCache (Back-Forward Cache) seluler yang memulihkan DOM usang
+      window.addEventListener('pageshow', function(ev) {
+        if (ev.persisted) {
+          window.location.reload();
+        }
+      });
+      try {
+        var currentVer = 'v20261120_v807';
+        var savedVer = localStorage.getItem('__zoz_ver__');
+        if (savedVer !== currentVer) {
+          if (savedVer) {
+            Promise.all(cleanupTasks).catch(function() {}).then(function() {
+              try { localStorage.setItem('__zoz_ver__', currentVer); } catch (_) {}
+              window.location.reload();
+            });
+          } else {
+            localStorage.setItem('__zoz_ver__', currentVer);
+          }
+        }
+      } catch (_) {}
+      window.__ZOZ_VERSION__ = 'v20261120_v807';
+    })();
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png?v=20261112_v765">
@@ -109,12 +114,12 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261120_v805">
-  <link rel="stylesheet" href="style.css?v=20261120_v805">
+  <link rel="preload" as="style" href="style.css?v=20261120_v807">
+  <link rel="stylesheet" href="style.css?v=20261120_v807">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
-  <header class="h-11 bg-[#07090e]/80 backdrop-blur-md flex items-center justify-between px-3 z-50 text-xs shrink-0 select-none border-b border-white/[0.06] top-nav" id="topNav">
+  <header class="bg-[#07090e]/80 backdrop-blur-md flex items-center justify-between px-3 text-xs shrink-0 select-none border-b border-white/[0.06] top-nav" id="topNav">
     <!-- Left: Window identifier / Sidebar Toggle -->
     <div class="flex items-center space-x-2 top-nav-left">
       <button class="w-8 h-8 rounded-lg text-slate-300 hover:text-teal-300 hover:bg-white/[0.06] flex items-center justify-center transition-colors toggle-sidebar-btn" id="toggleSidebarBtn" title="Buka / Tutup Sidebar" type="button">
@@ -580,6 +585,23 @@
                 </button>
               </div>
             </div>
+
+            <!-- 4. Menu Persona AI (Non-Custom: AI Formal Tunggal & Custom Persona) -->
+            <button type="button" class="model-options-action-item zoz-persona-opt-trigger" id="btnModelOptPersonaMenu" title="Menu Persona AI: Non-Custom (AI Formal)" aria-label="Buka Menu Persona AI" aria-haspopup="dialog">
+              <div class="action-item-icon zoz-persona-opt-icon" id="iconBoxModelOptPersona" aria-hidden="true">
+                <i class="fa-solid fa-user-tie" id="iconModelOptPersona"></i>
+              </div>
+              <div class="action-item-content">
+                <div class="action-item-title-row">
+                  <span class="action-item-title">Menu Persona AI</span>
+                </div>
+                <span class="action-item-desc" id="modelOptPersonaDesc">Non-Custom &bull; AI Formal</span>
+              </div>
+              <div class="ai-theme-trigger-trail" aria-hidden="true">
+                <span class="action-item-badge zoz-persona-opt-badge" id="modelOptPersonaBadge">AI Formal</span>
+                <i class="fa-solid fa-sliders ai-theme-chevron"></i>
+              </div>
+            </button>
           </div>
 
           <div class="model-options-footer" id="modelOptionsFooterInfo">
@@ -914,7 +936,7 @@
             <button class="pull-up-new-chat-btn" id="pullUpNewChatBtn" title="Klik untuk memulai obrolan baru" type="button">
               <i class="fa-solid fa-plus"></i>
               <span class="btn-text">Mulai Obrolan Baru</span>
-              <span class="btn-badge"><i class="fa-solid fa-sparkles"></i> New Chat</span>
+              <span class="btn-badge"><i class="fa-solid fa-wand-magic-sparkles"></i> New Chat</span>
             </button>
           </div>
         </div>
@@ -1183,6 +1205,13 @@
               </div>
                 </div>
 
+                <!-- Executive Persona Menu Trigger (Non-Custom: AI Formal / Custom Persona) -->
+                <button class="composer-btn zoz-persona-composer-btn" id="btnComposerPersonaMenu" type="button" title="Menu Persona AI: Non-Custom (AI Formal)" aria-label="Buka Menu Persona AI" aria-haspopup="dialog">
+                  <i class="fa-solid fa-user-tie zoz-persona-btn-icon" id="zozPersonaComposerIcon" aria-hidden="true"></i>
+                  <span class="zoz-persona-btn-label" id="zozPersonaComposerLabel">AI Formal</span>
+                  <span class="zoz-persona-btn-dot" id="zozPersonaComposerDot" aria-hidden="true"></span>
+                </button>
+
 
 
                 <!-- Hidden indicator elements for connectome safety -->
@@ -1304,6 +1333,7 @@
         <!-- Tab Navigation -->
         <div class="settings-tabs">
           <button class="settings-tab-btn active" data-target="tabProviders">Providers &amp; API</button>
+          <button class="settings-tab-btn" data-target="tabPersonaStudio" id="tabBtnPersonaStudio"><i class="fa-solid fa-user-tie"></i> Persona AI</button>
           <button class="settings-tab-btn" data-target="tabJozzMemory"><i class="fa-solid fa-brain"></i> Jozz Memory</button>
           <button class="settings-tab-btn" data-target="tabDeveloper" id="tabBtnDeveloper">
             <i class="fa-solid fa-code"></i> About Developer
@@ -1378,7 +1408,7 @@
               </div>
             </div>
             <div class="provider-status-meta" id="settingOpenRouterBalanceMeta">
-              <span id="settingOpenRouterUsageText"><i class="fa-solid fa-receipt"></i> Terpakai: $0.00</span> &bull; <span id="settingOpenRouterTierText"><i class="fa-solid fa-shield-check"></i> Status: Siap</span>
+              <span id="settingOpenRouterUsageText"><i class="fa-solid fa-receipt"></i> Terpakai: $0.00</span> &bull; <span id="settingOpenRouterTierText"><i class="fa-solid fa-shield-halved"></i> Status: Siap</span>
             </div>
           </div>
 
@@ -1512,6 +1542,59 @@
           </div>
         </div>
 
+        <!-- Tab 3: Persona AI (Nonaktif / Non-Custom: AI Formal / Custom) -->
+        <div class="settings-tab-pane" id="tabPersonaStudio">
+          <div class="zoz-persona-settings-overview">
+            <div class="zoz-persona-settings-head">
+              <div class="zoz-persona-settings-icon" id="settingsPersonaOverviewIcon">
+                <i class="fa-solid fa-user-tie"></i>
+              </div>
+              <div class="zoz-persona-settings-title-wrap">
+                <div class="zoz-persona-settings-title-row">
+                  <h4>Arsitektur Persona AI</h4>
+                  <span class="zoz-persona-status-chip" id="settingsPersonaStatusBadge">Non-Custom &bull; AI Formal</span>
+                </div>
+                <p>Anda dapat mematikan Persona sepenuhnya (<strong>Nonaktif</strong>), menggunakan standar baku tunggal <strong>AI Formal</strong> (Non-Custom), atau merancang <strong>Persona Custom</strong> Anda sendiri.</p>
+              </div>
+            </div>
+
+            <div class="zoz-persona-settings-cards">
+              <button type="button" class="zoz-persona-quick-card" id="btnSettingsQuickOff" data-persona-quick="off">
+                <div class="quick-card-top">
+                  <span class="quick-card-icon off"><i class="fa-solid fa-power-off"></i></span>
+                  <span class="quick-card-tag">Tanpa Persona</span>
+                </div>
+                <strong>Nonaktif (Mati)</strong>
+                <span>Matikan direktif persona agar model menjawab murni sesuai karakter bawaan aslinya.</span>
+              </button>
+
+              <button type="button" class="zoz-persona-quick-card is-selected" id="btnSettingsQuickFormal" data-persona-quick="formal">
+                <div class="quick-card-top">
+                  <span class="quick-card-icon formal"><i class="fa-solid fa-shield-halved"></i></span>
+                  <span class="quick-card-tag">Non-Custom Tunggal</span>
+                </div>
+                <strong>AI Formal</strong>
+                <span>Standar bahasa Indonesia baku, objektif, lugas, dan analitis profesional.</span>
+              </button>
+
+              <button type="button" class="zoz-persona-quick-card" id="btnSettingsQuickCustom" data-persona-quick="custom">
+                <div class="quick-card-top">
+                  <span class="quick-card-icon custom"><i class="fa-solid fa-pen-ruler"></i></span>
+                  <span class="quick-card-tag">Kustomisasi Penuh</span>
+                </div>
+                <strong id="settingsCustomPersonaCardTitle">Persona Custom</strong>
+                <span id="settingsCustomPersonaCardDesc">Rancang peran, nada komunikasi, dan instruksi sistem khusus sesuai kebutuhan Anda.</span>
+              </button>
+            </div>
+
+            <div class="zoz-persona-settings-actions">
+              <button type="button" class="btn btn-sm btn-primary-neon" id="btnOpenPersonaStudioFromSettings">
+                <i class="fa-solid fa-sliders"></i> Buka Menu Persona Lengkap
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- Tab 4: About Developer -->
         <div class="settings-tab-pane" id="tabDeveloper">
           <div class="developer-about-card">
@@ -1571,6 +1654,204 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" data-close="settingsModal">Tutup</button>
         <button class="btn btn-primary" id="saveSettingsBtn">Simpan Pengaturan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1B. EXECUTIVE PERSONA STUDIO MODAL (NON-CUSTOM: AI FORMAL ONLY + CUSTOM PERSONA) -->
+  <div class="modal-backdrop" id="zozPersonaModal" role="dialog" aria-modal="true" aria-labelledby="zozPersonaModalTitle">
+    <div class="modal-card zoz-persona-modal-card">
+      <div class="modal-header zoz-persona-modal-header">
+        <div class="zoz-persona-header-left">
+          <div class="zoz-persona-header-emblem" id="zozPersonaModalHeaderEmblem" aria-hidden="true">
+            <i class="fa-solid fa-user-tie" id="zozPersonaModalHeaderIcon"></i>
+          </div>
+          <div class="zoz-persona-header-titles">
+            <div class="zoz-persona-title-line">
+              <h3 class="modal-title" id="zozPersonaModalTitle">Menu Persona AI</h3>
+              <span class="zoz-persona-live-pill" id="zozPersonaLivePill">Non-Custom &bull; AI Formal</span>
+            </div>
+            <p class="zoz-persona-header-sub">Arsitektur Identitas Eksekutif: Non-Custom (Hanya AI Formal) &amp; Custom Persona</p>
+          </div>
+        </div>
+        <div class="zoz-persona-header-actions">
+          <button type="button" class="zoz-persona-power-btn" id="btnTogglePersonaPower" aria-pressed="true" aria-label="Matikan Persona AI" title="Matikan atau aktifkan Persona AI">
+            <i class="fa-solid fa-power-off" aria-hidden="true"></i>
+            <span id="zozPersonaPowerLabel">Matikan Persona</span>
+          </button>
+          <button type="button" class="modal-close-btn" data-close="zozPersonaModal" aria-label="Tutup Menu Persona" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+      </div>
+
+      <div class="modal-body zoz-persona-modal-body">
+        <div class="zoz-persona-off-banner" id="zozPersonaOffBanner" style="display: none;" role="status">
+          <div class="off-banner-left">
+            <span class="off-banner-icon" aria-hidden="true"><i class="fa-solid fa-power-off"></i></span>
+            <div class="off-banner-text">
+              <strong>Persona AI Sedang Nonaktif (Mati)</strong>
+              <span>Tidak ada direktif persona yang dikirim ke model. Pilih Non-Custom (AI Formal) atau Custom di bawah, lalu klik Terapkan untuk mengaktifkan kembali.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Segmented Mode Switcher: Non-Custom (AI Formal) vs Custom -->
+        <div class="zoz-persona-mode-switcher" id="zozPersonaModeTabs" role="tablist" aria-label="Pilih Kategori Persona">
+          <button type="button" class="zoz-persona-mode-tab is-active" id="btnPersonaTabFormal" data-persona-mode="formal" role="tab" aria-selected="true" aria-controls="zozPersonaPaneFormal">
+            <div class="mode-tab-icon formal"><i class="fa-solid fa-shield-halved"></i></div>
+            <div class="mode-tab-text">
+              <span class="mode-tab-title">Non-Custom</span>
+              <span class="mode-tab-sub">Hanya AI Formal (Standar)</span>
+            </div>
+            <span class="mode-tab-check" aria-hidden="true"><i class="fa-solid fa-circle-check"></i></span>
+          </button>
+
+          <button type="button" class="zoz-persona-mode-tab" id="btnPersonaTabCustom" data-persona-mode="custom" role="tab" aria-selected="false" aria-controls="zozPersonaPaneCustom">
+            <div class="mode-tab-icon custom"><i class="fa-solid fa-pen-ruler"></i></div>
+            <div class="mode-tab-text">
+              <span class="mode-tab-title">Custom Persona</span>
+              <span class="mode-tab-sub">Peran &amp; Instruksi Kustom</span>
+            </div>
+            <span class="mode-tab-check" aria-hidden="true"><i class="fa-solid fa-circle-check"></i></span>
+          </button>
+        </div>
+
+        <!-- PANE 1: NON-CUSTOM (STRICTLY ONLY AI FORMAL) -->
+        <div class="zoz-persona-pane" id="zozPersonaPaneFormal" role="tabpanel" aria-labelledby="btnPersonaTabFormal">
+          <div class="zoz-formal-executive-card" id="zozFormalSpecCard">
+            <div class="formal-card-top">
+              <div class="formal-card-badge-wrap">
+                <div class="formal-card-avatar" aria-hidden="true">
+                  <i class="fa-solid fa-user-tie"></i>
+                </div>
+                <div class="formal-card-heading">
+                  <div class="formal-card-title-row">
+                    <h4>AI Formal</h4>
+                    <span class="formal-exclusive-tag"><i class="fa-solid fa-lock"></i> Satu-satunya Mode Non-Custom</span>
+                  </div>
+                  <p>Identitas standar eksekutif tunggal tanpa tambahan karakter preset lainnya.</p>
+                </div>
+              </div>
+              <span class="formal-active-indicator" id="zozFormalActiveBadge">Aktif</span>
+            </div>
+
+            <div class="formal-specs-grid">
+              <div class="formal-spec-item">
+                <div class="spec-icon"><i class="fa-solid fa-scale-balanced"></i></div>
+                <div class="spec-info">
+                  <strong>Tata Bahasa &amp; Diksi Baku</strong>
+                  <span>Menggunakan bahasa formal, objektif, sopan, dan presisi tanpa bahasa gaul atau basa-basi berlebihan.</span>
+                </div>
+              </div>
+              <div class="formal-spec-item">
+                <div class="spec-icon"><i class="fa-solid fa-diagram-project"></i></div>
+                <div class="spec-info">
+                  <strong>Struktur Analitis &amp; Terukur</strong>
+                  <span>Menyajikan argumen, ringkasan eksekutif, kode, dan solusi teknis secara sistematis serta langsung pada inti persoalan.</span>
+                </div>
+              </div>
+              <div class="formal-spec-item">
+                <div class="spec-icon"><i class="fa-solid fa-microchip"></i></div>
+                <div class="spec-info">
+                  <strong>Integritas Multi-Engine</strong>
+                  <span>Kompatibel penuh dengan penalaran matematika murni, Dynamic RAG, ZOZ FORGE, dan orkestrasi tool otonom.</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="formal-directive-preview">
+              <div class="directive-preview-label">
+                <i class="fa-solid fa-terminal"></i>
+                <span>Spesifikasi Direktif Sistem (Non-Custom &bull; AI Formal)</span>
+              </div>
+              <p class="directive-preview-code">Gaya komunikasi AI Formal yang profesional, objektif, lugas, dan terstruktur rapi. Menggunakan tata bahasa baku yang presisi, berbasis bukti analitis, serta langsung menjawab pokok permasalahan.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANE 2: CUSTOM PERSONA STUDIO -->
+        <div class="zoz-persona-pane" id="zozPersonaPaneCustom" role="tabpanel" aria-labelledby="btnPersonaTabCustom" style="display: none;">
+          <div class="zoz-custom-studio-card">
+            <div class="custom-field-group">
+              <div class="custom-field-label-row">
+                <label for="zozCustomPersonaTitleInput"><i class="fa-solid fa-id-badge"></i> Nama / Peran Persona Custom</label>
+                <span class="custom-field-hint">Opsional (maks. 80 karakter)</span>
+              </div>
+              <input type="text" id="zozCustomPersonaTitleInput" class="zoz-persona-input" maxlength="80" placeholder="Contoh: Arsitek Sistem Cloud Senior, Analis Hukum Korporat, Tutor Riset..." autocomplete="off">
+            </div>
+
+            <div class="custom-field-group">
+              <div class="custom-field-label-row">
+                <label><i class="fa-solid fa-sliders"></i> Nada &amp; Pendekatan Komunikasi</label>
+                <span class="custom-field-hint">Pilih gaya penyampaian utama</span>
+              </div>
+              <div class="zoz-persona-tone-grid" id="zozCustomPersonaToneGroup" role="radiogroup" aria-label="Nada Komunikasi Custom">
+                <button type="button" class="zoz-tone-pill is-selected" data-tone="professional" role="radio" aria-checked="true">
+                  <i class="fa-solid fa-briefcase"></i>
+                  <span>Profesional &amp; Teknis</span>
+                </button>
+                <button type="button" class="zoz-tone-pill" data-tone="analytical" role="radio" aria-checked="false">
+                  <i class="fa-solid fa-magnifying-glass-chart"></i>
+                  <span>Analitis &amp; Mendalam</span>
+                </button>
+                <button type="button" class="zoz-tone-pill" data-tone="concise" role="radio" aria-checked="false">
+                  <i class="fa-solid fa-bolt"></i>
+                  <span>Ringkas &amp; To-The-Point</span>
+                </button>
+                <button type="button" class="zoz-tone-pill" data-tone="flexible" role="radio" aria-checked="false">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i>
+                  <span>Fleksibel Sesuai Instruksi</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="custom-field-group">
+              <div class="custom-field-label-row">
+                <label for="zozCustomPersonaPromptInput"><i class="fa-solid fa-scroll"></i> Instruksi &amp; Karakteristik Persona Custom</label>
+                <div class="custom-char-tools">
+                  <span class="custom-char-counter" id="zozCustomPersonaCharCount">0 / 4000</span>
+                  <button type="button" class="custom-clear-link" id="btnClearCustomPersonaInput" title="Kosongkan kolom instruksi">Bersihkan</button>
+                </div>
+              </div>
+              <textarea id="zozCustomPersonaPromptInput" class="zoz-persona-textarea" rows="4" maxlength="4000" placeholder="Tuliskan instruksi spesifik karakter, keahlian domain, sudut pandang analisis, atau struktur format jawaban yang wajib diikuti AI..."></textarea>
+
+              <!-- Quick Structural Clause Builders (Not presets, just structural clause helpers) -->
+              <div class="zoz-persona-helper-bar" id="zozCustomPersonaHelperChips">
+                <span class="helper-bar-label">Sisipkan Struktur:</span>
+                <button type="button" class="zoz-helper-chip" data-append="Sajikan jawaban dengan struktur: (1) Ringkasan Eksekutif, (2) Analisis Teknis Mendalam, dan (3) Rekomendasi Tindak Lanjut.">+ Ringkasan Eksekutif</button>
+                <button type="button" class="zoz-helper-chip" data-append="Uraikan setiap solusi secara bertahap (step-by-step) beserta alasan logis dan potensi risikonya.">+ Langkah-demi-Langkah</button>
+                <button type="button" class="zoz-helper-chip" data-append="Utamakan ketepatan data, verifikasi fakta secara ketat, dan cantumkan rujukan secara eksplisit.">+ Verifikasi Ketat</button>
+              </div>
+            </div>
+
+            <!-- User's Own Saved Custom Profiles Vault -->
+            <div class="zoz-custom-saved-vault">
+              <div class="saved-vault-header">
+                <div class="saved-vault-title">
+                  <i class="fa-solid fa-bookmark"></i>
+                  <span>Profil Custom Tersimpan Anda (<span id="zozCustomSavedCount">0</span>/10)</span>
+                </div>
+                <button type="button" class="btn btn-xs btn-outline zoz-save-profile-btn" id="btnSaveCustomPersonaProfile">
+                  <i class="fa-solid fa-plus"></i> Simpan ke Daftar Custom
+                </button>
+              </div>
+              <div class="zoz-custom-saved-list" id="zozCustomSavedProfilesList">
+                <!-- Populated dynamically with user's own saved custom personas -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer zoz-persona-modal-footer">
+        <button type="button" class="btn btn-sm btn-outline zoz-persona-off-btn" id="btnDisablePersona" title="Matikan seluruh Persona AI (tanpa instruksi persona)">
+          <i class="fa-solid fa-power-off"></i> <span id="zozDisablePersonaBtnLabel">Matikan Persona</span>
+        </button>
+        <div class="zoz-persona-footer-right">
+          <button type="button" class="btn btn-sm btn-secondary" data-close="zozPersonaModal">Tutup</button>
+          <button type="button" class="btn btn-sm btn-primary" id="btnApplyPersonaConfig">
+            <i class="fa-solid fa-check"></i> <span id="zozApplyPersonaBtnLabel">Terapkan Persona</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -2153,7 +2434,7 @@
       </header>
 
       <!-- Main Content: Pure Systems Engineering -->
-      <main class="endocrine-util-body">
+      <div class="endocrine-util-body">
         <!-- Hidden Toggles for State Compatibility -->
         <input type="checkbox" id="toggleEndocrineCode" checked style="display:none;">
         <input type="checkbox" id="toggleEndocrineChat" style="display:none;">
@@ -2504,7 +2785,7 @@
             <div class="endocrine-util-box endocrine-logs-list" id="chatEndocrineLogsList" style="padding: 8px; max-height: 160px; overflow-y: auto;"></div>
           </section>
         </div>
-      </main>
+      </div>
 
       <!-- 5. Footer Aksi Utilitarian -->
       <footer class="endocrine-util-footer">
@@ -2637,7 +2918,7 @@
 
         <div class="doc-mode-options" style="display: flex; flex-direction: column; gap: 12px;">
           <!-- Opsi 1: Format PDF (Standar Publikasi & Siap Cetak) -->
-          <div class="doc-mode-card" id="optDocModePdf" style="cursor: pointer; border: 1.5px solid var(--neon-cyan); background: rgba(56, 189, 248, 0.08); border-radius: 10px; padding: 14px 16px; transition: all 0.2s ease;">
+          <div class="doc-mode-card" id="optDocModePdf" role="button" tabindex="0" style="cursor: pointer; border: 1.5px solid var(--neon-cyan); background: rgba(56, 189, 248, 0.08); border-radius: 10px; padding: 14px 16px; transition: all 0.2s ease;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
               <div style="display: flex; align-items: center; gap: 10px; font-weight: 700; color: #FFF; font-size: 0.95rem;">
                 <i class="fa-solid fa-file-pdf" style="color: #ef4444; font-size: 1.1rem;"></i>
@@ -2651,7 +2932,7 @@
           </div>
 
           <!-- Opsi 2: Format Word (.docx) (Bisa Diedit) -->
-          <div class="doc-mode-card" id="optDocModeDocx" style="cursor: pointer; border: 1.5px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.03); border-radius: 10px; padding: 14px 16px; transition: all 0.2s ease;">
+          <div class="doc-mode-card" id="optDocModeDocx" role="button" tabindex="0" style="cursor: pointer; border: 1.5px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.03); border-radius: 10px; padding: 14px 16px; transition: all 0.2s ease;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
               <div style="display: flex; align-items: center; gap: 10px; font-weight: 700; color: #FFF; font-size: 0.95rem;">
                 <i class="fa-solid fa-file-word" style="color: #3b82f6; font-size: 1.1rem;"></i>
@@ -3698,8 +3979,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression & Bayesian calibration engine (must load before app.js) -->
-  <script src="text-safety.js?v=20261120_v805" defer></script>
+  <script src="text-safety.js?v=20261120_v807" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261120_v805" defer></script>
+  <script src="app.js?v=20261120_v807" defer></script>
 </body>
 </html>

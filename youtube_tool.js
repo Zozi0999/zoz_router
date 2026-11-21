@@ -225,6 +225,17 @@ function httpsGetWithRetry(targetUrl, timeoutMs = 8000, maxRetries = 2, backoffM
 
     function executeRequest() {
       attempt++;
+      let attemptSettled = false;
+      const retryOrFail = (err, retryable = true) => {
+        if (attemptSettled) return;
+        attemptSettled = true;
+        if (retryable && attempt <= maxRetries) {
+          setTimeout(executeRequest, backoffMs * attempt);
+        } else {
+          reject(err);
+        }
+      };
+
       const req = https.get(targetUrl, {
         timeout: timeoutMs,
         headers: {
@@ -234,6 +245,7 @@ function httpsGetWithRetry(targetUrl, timeoutMs = 8000, maxRetries = 2, backoffM
       }, (res) => {
         // Handle redirect 301/302/303/307/308 secara aman
         if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+          attemptSettled = true;
           res.resume();
           if (maxRetries <= 0) {
             return reject(new Error('Terlalu banyak pengalihan (redirect) saat menghubungi YouTube.'));
@@ -255,53 +267,44 @@ function httpsGetWithRetry(targetUrl, timeoutMs = 8000, maxRetries = 2, backoffM
 
         // Retry jika terkena rate limit (429) atau server error (500, 502, 503, 504)
         if ((res.statusCode === 429 || (res.statusCode >= 500 && res.statusCode <= 504)) && attempt <= maxRetries) {
+          attemptSettled = true;
           res.resume();
           const delay = backoffMs * Math.pow(2, attempt - 1);
           return setTimeout(executeRequest, delay);
         }
 
-        let body = '';
+        const chunks = [];
         let totalBytes = 0;
-        let resDone = false;
-        const finishRes = (err) => {
-          if (resDone) return;
-          resDone = true;
+        const finishRes = (err, retryable = true) => {
+          if (attemptSettled) return;
           if (err) {
-            if (attempt <= maxRetries) return setTimeout(executeRequest, backoffMs * attempt);
-            return reject(err);
+            return retryOrFail(err, retryable);
           }
+          attemptSettled = true;
+          const body = Buffer.concat(chunks).toString('utf8');
           resolve({ statusCode: res.statusCode, body, headers: res.headers });
         };
         res.on('data', chunk => {
-          totalBytes += chunk.length;
+          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          totalBytes += buf.length;
           if (totalBytes > 2 * 1024 * 1024) {
+            finishRes(new Error('YouTube response exceeds 2MB cap'), false);
             try { req.destroy(); } catch (_) {}
-            return finishRes(new Error('YouTube response exceeds 2MB cap'));
+            return;
           }
-          body += chunk;
+          chunks.push(buf);
         });
-        res.on('error', (err) => finishRes(err));
+        res.on('error', (err) => finishRes(err, true));
         res.on('end', () => finishRes(null));
       });
 
-      let attemptSettled = false;
-      const retryOrFail = (err) => {
-        if (attemptSettled) return;
-        attemptSettled = true;
-        if (attempt <= maxRetries) {
-          setTimeout(executeRequest, backoffMs * attempt);
-        } else {
-          reject(err);
-        }
-      };
-
       req.on('timeout', () => {
         try { req.destroy(); } catch (_) {}
-        retryOrFail(new Error(`Timeout setelah ${timeoutMs}ms`));
+        retryOrFail(new Error(`Timeout setelah ${timeoutMs}ms`), true);
       });
 
       req.on('error', (err) => {
-        retryOrFail(err);
+        retryOrFail(err, true);
       });
     }
 

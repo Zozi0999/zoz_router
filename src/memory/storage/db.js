@@ -917,7 +917,7 @@ function getExportSnapshot(userId) {
 
   if (instance.mode === 'memory' || !instance.db) {
     const memories = Array.from(memStore.memories.values())
-      .filter(m => isRecordOwnedBy(m, uid))
+      .filter(m => isRecordOwnedBy(m, uid) && (m.is_active === undefined || m.is_active === 1 || m.is_active === true))
       .map(normalizeMemoryRow)
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     const entities = Array.from(memStore.entities.values())
@@ -960,7 +960,7 @@ function getExportSnapshot(userId) {
 
   const { db } = instance;
   return {
-    memories: queryAll(db.prepare('SELECT * FROM memories WHERE user_id = ? ORDER BY created_at ASC'), uid),
+    memories: queryAll(db.prepare('SELECT * FROM memories WHERE user_id = ? AND is_active = 1 ORDER BY created_at ASC'), uid),
     entities: queryAll(db.prepare('SELECT * FROM entities WHERE user_id = ? ORDER BY name ASC'), uid),
     relations: queryAll(db.prepare('SELECT * FROM relations WHERE user_id = ? ORDER BY valid_from ASC'), uid),
     episodes: queryAll(db.prepare('SELECT * FROM episodes WHERE user_id = ? ORDER BY created_at ASC'), uid)

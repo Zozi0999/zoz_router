@@ -11,7 +11,8 @@ const {
   Browsers,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
-  downloadMediaMessage
+  downloadMediaMessage,
+  BufferJSON
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const QRCode = require('qrcode');
@@ -104,6 +105,7 @@ class WhatsAppGateway {
 
     this.contacts = new Map(); // jid -> { id, name, notify, phone, lastMessage, lastTimestamp, unreadCount, hasAvatar, avatarUpdatedAt, about }
     this.messages = new Map(); // jid -> [ { id, fromMe, text, timestamp, senderName, status, media } ]
+    this.recentIncomingEvents = []; // Ring buffer pesan masuk real-time terbaru untuk Z21 Live Pulse
     this.rawMessages = new Map(); // id -> raw Baileys WAMessage
     this.groupMetadataCache = new Map(); // jid -> { id, subject, ... }
     this.uploadsDir = path.join(SHARED_DATA_DIR, 'uploads');
@@ -164,6 +166,8 @@ class WhatsAppGateway {
       const cutoff = Date.now() - (retentionDays * 24 * 60 * 60 * 1000);
       let pruned = 0;
       for (const file of files) {
+        // Hanya bersihkan berkas media WhatsApp (prefiks wa_) agar lampiran chat AI / gambar / musik pengguna tidak ikut terhapus
+        if (!String(file).toLowerCase().startsWith('wa_')) continue;
         const fullPath = path.join(this.uploadsDir, file);
         try {
           const stat = fs.statSync(fullPath);
@@ -382,23 +386,30 @@ class WhatsAppGateway {
 
   saveRawMediaData(immediate = false) {
     if (!this.rawMediaFile) return;
-    const doWrite = async () => {
-      try {
-        const obj = {};
-        const entries = Array.from(this.rawMessages.entries()).slice(-600);
-        for (const [id, msg] of entries) {
-          obj[id] = msg;
-        }
-        const payload = JSON.stringify(obj);
-        const tmpFile = `${this.rawMediaFile}.tmp.${process.pid}.${Date.now()}`;
-        await fs.promises.writeFile(tmpFile, payload, 'utf8');
+    const doWrite = () => {
+      const prev = this._rawMediaSaveQueue || Promise.resolve();
+      const next = prev.catch(() => {}).then(async () => {
         try {
-          await fs.promises.rename(tmpFile, this.rawMediaFile);
-        } catch (_) {
-          await fs.promises.writeFile(this.rawMediaFile, payload, 'utf8');
-          try { await fs.promises.unlink(tmpFile); } catch (_) {}
-        }
-      } catch (_) {}
+          const obj = {};
+          const entries = Array.from(this.rawMessages.entries()).slice(-600);
+          for (const [id, msg] of entries) {
+            obj[id] = msg;
+          }
+          const replacer = (BufferJSON && typeof BufferJSON.replacer === 'function') ? BufferJSON.replacer : undefined;
+          const payload = JSON.stringify(obj, replacer);
+          const nonce = crypto.randomBytes(4).toString('hex');
+          const tmpFile = `${this.rawMediaFile}.tmp.${process.pid}.${Date.now()}.${nonce}`;
+          await fs.promises.writeFile(tmpFile, payload, 'utf8');
+          try {
+            await fs.promises.rename(tmpFile, this.rawMediaFile);
+          } catch (_) {
+            await fs.promises.writeFile(this.rawMediaFile, payload, 'utf8');
+            try { await fs.promises.unlink(tmpFile); } catch (_) {}
+          }
+        } catch (_) {}
+      });
+      this._rawMediaSaveQueue = next;
+      return next;
     };
     if (immediate) {
       if (this._rawMediaSaveTimer) {
@@ -555,6 +566,18 @@ class WhatsAppGateway {
       }
 
       const devId = crypto.createHash('md5').update(`${ip}_${rawUa}`).digest('hex').slice(0, 8);
+      if (!this.devices.has(devId) && this.devices.size >= 50) {
+        let oldestKey = null;
+        let oldestSeen = Infinity;
+        for (const [k, v] of this.devices.entries()) {
+          const ts = v?.lastSeen || 0;
+          if (ts < oldestSeen) {
+            oldestSeen = ts;
+            oldestKey = k;
+          }
+        }
+        if (oldestKey !== null) this.devices.delete(oldestKey);
+      }
       this.devices.set(devId, {
         id: devId,
         platform,
@@ -724,7 +747,7 @@ class WhatsAppGateway {
     );
     if (!hasChat && numOnly) {
       for (const [k, msgs] of this.messages.entries()) {
-        if (k.startsWith(numOnly) && msgs.length > 0) {
+        if (this.matchesJidKey(k, c.id, numOnly) && msgs.length > 0) {
           hasChat = true;
           break;
         }
@@ -761,23 +784,9 @@ class WhatsAppGateway {
     }
 
     try {
-      if (fs.existsSync(this.contactsFile)) {
-        const raw = JSON.parse(fs.readFileSync(this.contactsFile, 'utf8'));
-        if (Array.isArray(raw)) {
-          raw.forEach(c => {
-            if (!this.isRealContact(c)) return;
-            const cleaned = this.cleanContact(c);
-            this.contacts.set(cleaned.id, cleaned);
-          });
-        }
-      }
-    } catch (e) {
-      console.warn('[WA-Gateway] Gagal memuat wa-contacts.json:', e.message);
-    }
-
-    try {
       if (this.rawMediaFile && fs.existsSync(this.rawMediaFile)) {
-        const rawMap = JSON.parse(fs.readFileSync(this.rawMediaFile, 'utf8'));
+        const reviver = (BufferJSON && typeof BufferJSON.reviver === 'function') ? BufferJSON.reviver : undefined;
+        const rawMap = JSON.parse(fs.readFileSync(this.rawMediaFile, 'utf8'), reviver);
         if (rawMap && typeof rawMap === 'object') {
           for (const [mid, rmsg] of Object.entries(rawMap)) {
             this.rawMessages.set(mid, rmsg);
@@ -938,6 +947,22 @@ class WhatsAppGateway {
     } catch (e) {
       console.warn('[WA-Gateway] Gagal memuat wa-messages.json:', e.message);
     }
+
+    // Muat kontak SETELAH riwayat pesan dimuat agar isRealContact() akurat mengecek this.messages
+    try {
+      if (fs.existsSync(this.contactsFile)) {
+        const raw = JSON.parse(fs.readFileSync(this.contactsFile, 'utf8'));
+        if (Array.isArray(raw)) {
+          raw.forEach(c => {
+            if (!this.isRealContact(c)) return;
+            const cleaned = this.cleanContact(c);
+            this.contacts.set(cleaned.id, cleaned);
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[WA-Gateway] Gagal memuat wa-contacts.json:', e.message);
+    }
   }
 
   savePersistedData(immediate = false) {
@@ -993,33 +1018,47 @@ class WhatsAppGateway {
             const isMe = myPhone && rawPhone === myPhone;
             let cleanNotify = (c.notify || '').trim();
             let cleanName = (c.name || '').trim();
+            let nameWasScrubbed = false;
             if (!isMe) {
               if (cleanNotify === 'We Are Here' || (myPushName && cleanNotify === myPushName)) cleanNotify = '';
-              if (cleanName === 'We Are Here' || (myPushName && cleanName === myPushName)) cleanName = '';
+              if (cleanName === 'We Are Here' || (myPushName && cleanName === myPushName)) {
+                cleanName = '';
+                nameWasScrubbed = true;
+              }
             }
             return {
               ...c,
-              name: cleanName || c.name,
+              name: cleanName || (nameWasScrubbed ? (rawPhone || c.id.split('@')[0]) : c.name),
               notify: cleanNotify
             };
           });
-        await fsp.writeFile(tmpContacts, JSON.stringify(contactsArr, null, 2), 'utf8');
+        const safeAtomicRename = async (tmpPath, finalPath, dataStr) => {
+          try {
+            await fsp.rename(tmpPath, finalPath);
+          } catch (_) {
+            await fsp.writeFile(finalPath, dataStr, 'utf8');
+            try { await fsp.unlink(tmpPath); } catch (__) {}
+          }
+        };
+        const contactsPayload = JSON.stringify(contactsArr, null, 2);
+        await fsp.writeFile(tmpContacts, contactsPayload, 'utf8');
         if (this._lastLogoutAt > saveStartedAt) {
           try { await fsp.unlink(tmpContacts); } catch (_) {}
           return;
         }
-        await fsp.rename(tmpContacts, this.contactsFile);
+        await safeAtomicRename(tmpContacts, this.contactsFile, contactsPayload);
 
         const msgObj = {};
         for (const [jid, list] of this.messages.entries()) {
           msgObj[jid] = list.slice(-200);
         }
-        await fsp.writeFile(tmpMessages, JSON.stringify(msgObj, null, 2), 'utf8');
+        const messagesPayload = JSON.stringify(msgObj, null, 2);
+        await fsp.writeFile(tmpMessages, messagesPayload, 'utf8');
         if (this._lastLogoutAt > saveStartedAt) {
           try { await fsp.unlink(tmpMessages); } catch (_) {}
           return;
         }
-        await fsp.rename(tmpMessages, this.messagesFile);
+        await safeAtomicRename(tmpMessages, this.messagesFile, messagesPayload);
       } catch (e) {
         console.error('[WA-Gateway] Gagal menyimpan data WhatsApp secara atomik:', e.message);
         try { if (fs.existsSync(tmpContacts)) await fsp.unlink(tmpContacts); } catch (_) {}
@@ -1058,6 +1097,13 @@ class WhatsAppGateway {
         } else {
           contact.name = meta.subject;
           contact.notify = meta.subject;
+        }
+        if (Array.isArray(this.recentIncomingEvents) && this.recentIncomingEvents.length > 0) {
+          for (const ev of this.recentIncomingEvents) {
+            if (ev && ev.jid === jid) {
+              ev.contactName = meta.subject;
+            }
+          }
         }
         this.savePersistedData();
         this.broadcast('contacts', this.getContacts());
@@ -1343,6 +1389,13 @@ class WhatsAppGateway {
   // Registrasi SSE Listener untuk push event real-time ke web client
   addSseClient(res) {
     if (!res || res.destroyed || res.writableEnded) return;
+    // Batasi maksimal 20 klien SSE aktif per tenant agar koneksi lama tidak menumpuk
+    while (this.sseClients.size >= 20) {
+      const oldestClient = this.sseClients.values().next().value;
+      if (!oldestClient) break;
+      this.sseClients.delete(oldestClient);
+      try { if (!oldestClient.writableEnded) oldestClient.end(); } catch (_) {}
+    }
     this.sseClients.add(res);
     const removeClient = () => {
       this.sseClients.delete(res);
@@ -1381,6 +1434,10 @@ class WhatsAppGateway {
         return;
       }
       for (const client of this.sseClients) {
+        if (!client || client.destroyed || client.writableEnded) {
+          this.sseClients.delete(client);
+          continue;
+        }
         try {
           client.write(': ping\n\n');
         } catch (_) {
@@ -1388,27 +1445,76 @@ class WhatsAppGateway {
         }
       }
     }, 15000);
+    if (this.sseHeartbeatTimer.unref) this.sseHeartbeatTimer.unref();
   }
 
-  async resolveLidToPhone(jid) {
+  parseBaileysTimestampMs(rawTsVal) {
+    if (rawTsVal === null || rawTsVal === undefined || typeof rawTsVal === 'boolean') return Date.now();
+    let rawTs = NaN;
+    if (typeof rawTsVal === 'number') {
+      rawTs = rawTsVal;
+    } else if (typeof rawTsVal === 'bigint') {
+      rawTs = Number(rawTsVal);
+    } else if (typeof rawTsVal === 'object') {
+      if (typeof rawTsVal.toNumber === 'function') {
+        try { rawTs = rawTsVal.toNumber(); } catch (_) {}
+      }
+      if (!Number.isFinite(rawTs) && rawTsVal.low !== undefined) {
+        const hi = Number(rawTsVal.high) || 0;
+        const lo = Number(rawTsVal.low) >>> 0;
+        rawTs = hi > 0 ? (hi * 4294967296 + lo) : Number(rawTsVal.low);
+      }
+    } else {
+      rawTs = Number(rawTsVal);
+    }
+    if (!Number.isFinite(rawTs) || rawTs <= 0) return Date.now();
+    return rawTs > 9999999999 ? rawTs : rawTs * 1000;
+  }
+
+  async resolveLidToPhone(jid, altJid = '') {
     if (!jid || typeof jid !== 'string') return jid;
-    if (!jid.endsWith('@lid')) return jid;
+    const normalizeDeviceSuffix = (v) => String(v || '').replace(/:\d+@/, '@');
+    const lidBase = jid.split('@')[0].split(':')[0];
+    if (jid.endsWith('@lid') && altJid && typeof altJid === 'string' && altJid.endsWith('@s.whatsapp.net')) {
+      const normalizedAlt = normalizeDeviceSuffix(altJid);
+      if (this.lidCache && lidBase) {
+        this.lidCache.set(lidBase, normalizedAlt.split('@')[0]);
+      }
+      return normalizedAlt;
+    }
+    if (!jid.endsWith('@lid')) return normalizeDeviceSuffix(jid);
+    if (this.lidCache && lidBase && this.lidCache.has(lidBase)) {
+      const cachedPhone = String(this.lidCache.get(lidBase) || '').replace(/[^0-9]/g, '');
+      if (cachedPhone) return `${cachedPhone}@s.whatsapp.net`;
+    }
     try {
       if (this.sock?.signalRepository?.lidMapping) {
         const pn = await this.sock.signalRepository.lidMapping.getPNForLID(jid);
-        if (pn) return pn.replace(/:.*@/, '@');
+        if (pn) {
+          const cleanPn = pn.replace(/:.*@/, '@');
+          if (this.lidCache && lidBase) {
+            this.lidCache.set(lidBase, cleanPn.split('@')[0]);
+          }
+          return cleanPn;
+        }
       }
     } catch (_) {}
     // Fallback: cek pemetaan reverse LID di direktori wa-auth
     try {
-      const lidNum = jid.split('@')[0].split(':')[0];
-      const revFile = path.join(this.authDir, `lid-mapping-${lidNum}_reverse.json`);
+      const revFile = path.join(this.authDir, `lid-mapping-${lidBase}_reverse.json`);
       if (fs.existsSync(revFile)) {
         const phoneNum = JSON.parse(fs.readFileSync(revFile, 'utf8'));
-        if (phoneNum) return `${phoneNum}@s.whatsapp.net`;
+        if (phoneNum) {
+          const cleanPhone = String(phoneNum).replace(/[^0-9]/g, '');
+          if (cleanPhone) {
+            if (this.lidCache && lidBase) this.lidCache.set(lidBase, cleanPhone);
+            return `${cleanPhone}@s.whatsapp.net`;
+          }
+        }
       }
     } catch (_) {}
-    if (this.sock?.user?.lid && jid.startsWith(this.sock.user.lid.split(':')[0])) {
+    const selfLidBase = this.sock?.user?.lid ? String(this.sock.user.lid).split('@')[0].split(':')[0] : '';
+    if (selfLidBase && lidBase && lidBase === selfLidBase && this.sock?.user?.id) {
       return this.sock.user.id.replace(/:.*@/, '@');
     }
     return jid;
@@ -1477,8 +1583,16 @@ class WhatsAppGateway {
       }
     }
 
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this._connectGen = (this._connectGen || 0) + 1;
+    const myConnectGen = this._connectGen;
+
     if (forceNew) {
       await this.disconnect(true);
+      this._connectGen = (this._connectGen || 0) + 1;
     } else {
       if (this.sock) {
         try {
@@ -1488,6 +1602,7 @@ class WhatsAppGateway {
         this.sock = null;
       }
     }
+    const activeGen = this._connectGen;
 
     this.isExplicitDisconnect = false;
     this.status.connecting = true;
@@ -1500,6 +1615,9 @@ class WhatsAppGateway {
       }
 
       const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+      if (this._connectGen !== activeGen || this.isExplicitDisconnect) {
+        return this.getStatus();
+      }
       let version;
       try {
         const vInfo = await fetchLatestBaileysVersion();
@@ -1507,35 +1625,48 @@ class WhatsAppGateway {
       } catch (_) {
         version = [2, 3000, 1043857760];
       }
+      if (this._connectGen !== activeGen || this.isExplicitDisconnect) {
+        return this.getStatus();
+      }
 
       this.sock = makeWASocket({
         version,
         auth: {
           creds: state.creds,
-          keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
+          keys: (typeof makeCacheableSignalKeyStore === 'function')
+            ? makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+            : state.keys,
         },
         logger: pino({ level: 'silent' }),
-        browser: Browsers.windows('Chrome'),
+        browser: (Browsers && typeof Browsers.windows === 'function')
+          ? Browsers.windows('Chrome')
+          : ['Windows', 'Chrome', '10.0.22631'],
         syncFullHistory: false,
-        keepAliveIntervalMs: 25000,
+        keepAliveIntervalMs: 30000,
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         retryRequestDelayMs: 250,
         maxMsgRetryCount: 3,
         markOnlineOnConnect: false,
-        getMessage: async () => ({ conversation: '' }),
+        getMessage: async (key) => {
+          const cached = key && key.id && this.rawMessages ? this.rawMessages.get(key.id) : null;
+          return cached?.message || undefined;
+        },
       });
 
-      this.sock.ev.on('creds.update', saveCreds);
+      const currentSock = this.sock;
+      this.sock.ev.on('creds.update', () => {
+        if (this.sock !== currentSock || this._connectGen !== activeGen || this.isExplicitDisconnect) return;
+        Promise.resolve(saveCreds()).catch(() => {});
+      });
 
       let resolveSettled = null;
       const settlePromise = new Promise((resolve) => {
         resolveSettled = resolve;
       });
 
-      const currentSock = this.sock;
       this.sock.ev.on('connection.update', async (update) => {
-        if (this.sock && this.sock !== currentSock) return;
+        if (this.sock !== currentSock || this._connectGen !== activeGen) return;
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
@@ -1548,6 +1679,7 @@ class WhatsAppGateway {
                 light: '#ffffff'
               }
             });
+            if (this.sock !== currentSock || this._connectGen !== activeGen || this.isExplicitDisconnect) return;
             this.status.qr = qrDataUrl;
             this.status.connecting = true;
             this.status.connected = false;
@@ -1564,7 +1696,15 @@ class WhatsAppGateway {
         }
 
         if (connection === 'open') {
-          this._reconnectAttempts = 0;
+          if (this._stableConnectTimer) {
+            clearTimeout(this._stableConnectTimer);
+            this._stableConnectTimer = null;
+          }
+          // Hanya reset counter reconnect setelah koneksi bertahan stabil >= 60 detik agar loop 408 tetap melakukan backoff
+          this._stableConnectTimer = setTimeout(() => {
+            this._reconnectAttempts = 0;
+            this._stableConnectTimer = null;
+          }, 60000);
           this.isStreamRestarting = false;
           this.status.connected = true;
           this.status.connecting = false;
@@ -1576,14 +1716,10 @@ class WhatsAppGateway {
           this.status.phone = rawId ? rawId.split(':')[0] : 'Aktif';
           this.status.updatedAt = Date.now();
 
-          if (this.pingInterval) clearInterval(this.pingInterval);
-          this.pingInterval = setInterval(() => {
-            try {
-              if (this.sock?.ws?.readyState === 1) {
-                this.sock.ws.ping?.();
-              }
-            } catch (_) {}
-          }, 20000);
+          if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+            this.pingInterval = null;
+          }
 
           try {
             if (state && state.creds) {
@@ -1596,12 +1732,21 @@ class WhatsAppGateway {
           this.broadcast('status', this.getStatus());
           this.savePersistedData();
 
-          // Sinkronisasi nama grup & profil orang-orang (foto + bio) di latar belakang
-          setTimeout(() => {
-            this.syncAllGroupMetadata()
-              .then(() => this.syncAllProfiles({ limit: 50, force: false }))
-              .catch(() => {});
-          }, 800);
+          // Sinkronisasi nama grup & profil orang-orang dengan cooldown 15 menit agar reconnect singkat tidak membanjiri rate limit WA
+          if (this._postConnectSyncTimer) {
+            clearTimeout(this._postConnectSyncTimer);
+            this._postConnectSyncTimer = null;
+          }
+          const nowSync = Date.now();
+          if (!this._lastPostConnectSyncAt || (nowSync - this._lastPostConnectSyncAt) >= 15 * 60 * 1000) {
+            this._postConnectSyncTimer = setTimeout(() => {
+              this._postConnectSyncTimer = null;
+              this._lastPostConnectSyncAt = Date.now();
+              this.syncAllGroupMetadata()
+                .then(() => this.syncAllProfiles({ limit: 50, force: false }))
+                .catch(() => {});
+            }, 2500);
+          }
 
           if (resolveSettled) {
             resolveSettled(this.getStatus());
@@ -1610,6 +1755,14 @@ class WhatsAppGateway {
         }
 
         if (connection === 'close') {
+          if (this._stableConnectTimer) {
+            clearTimeout(this._stableConnectTimer);
+            this._stableConnectTimer = null;
+          }
+          if (this._postConnectSyncTimer) {
+            clearTimeout(this._postConnectSyncTimer);
+            this._postConnectSyncTimer = null;
+          }
           if (this.pingInterval) {
             clearInterval(this.pingInterval);
             this.pingInterval = null;
@@ -1643,9 +1796,20 @@ class WhatsAppGateway {
 
           if (statusCode === DisconnectReason.loggedOut || this.isExplicitDisconnect) {
             this._lastLogoutAt = Date.now();
+            this._connectGen = (this._connectGen || 0) + 1;
             if (this._saveTimer) {
               clearTimeout(this._saveTimer);
               this._saveTimer = null;
+            }
+            if (this._rawMediaSaveTimer) {
+              clearTimeout(this._rawMediaSaveTimer);
+              this._rawMediaSaveTimer = null;
+            }
+            if (currentSock) {
+              try { currentSock.ev?.removeAllListeners?.(); } catch (_) {}
+            }
+            if (this.sock === currentSock) {
+              this.sock = null;
             }
             this.status.qr = null;
             this.status.pairingCode = null;
@@ -1653,6 +1817,8 @@ class WhatsAppGateway {
             this.status.user = null;
             this.contacts.clear();
             this.messages.clear();
+            this.devices.clear();
+            this.recentIncomingEvents = [];
             if (this.rawMessages) this.rawMessages.clear();
             if (this.groupMetadataCache) this.groupMetadataCache.clear();
             this.clearCachedAvatars();
@@ -1668,7 +1834,8 @@ class WhatsAppGateway {
           if (shouldReconnect) {
             if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
             const attemptIdx = isStreamRestart ? 0 : (this._reconnectAttempts = (this._reconnectAttempts || 0) + 1);
-            const delayMs = isStreamRestart ? 250 : Math.min(Math.round(800 * Math.pow(1.8, attemptIdx - 1)), 30000);
+            const baseDelay = statusCode === 408 ? 3500 : 800;
+            const delayMs = isStreamRestart ? 250 : Math.min(Math.round(baseDelay * Math.pow(1.8, Math.max(0, attemptIdx - 1))), 60000);
             this.reconnectTimer = setTimeout(() => {
               this.connect(false, isStreamRestart).catch(() => {});
             }, delayMs);
@@ -1704,7 +1871,9 @@ class WhatsAppGateway {
           for (const chat of chats) {
             if (!chat.id || chat.id === 'status@broadcast') continue;
             const chatId = await this.resolveLidToPhone(chat.id);
+            if (this.sock !== currentSock || this._connectGen !== activeGen || this.isExplicitDisconnect) return;
             if (chatId.endsWith('@lid')) continue;
+            const parsedChatTs = chat.conversationTimestamp ? this.parseBaileysTimestampMs(chat.conversationTimestamp) : 0;
             let contact = this.contacts.get(chatId);
             if (!contact) {
               contact = {
@@ -1714,26 +1883,29 @@ class WhatsAppGateway {
                 phone: chatId.split('@')[0],
                 unreadCount: chat.unreadCount || 0,
                 lastMessage: '',
-                lastTimestamp: chat.conversationTimestamp ? Number(chat.conversationTimestamp) * 1000 : 0
+                lastTimestamp: parsedChatTs
               };
               this.contacts.set(chatId, contact);
             } else {
               if (chat.name && !contact.name) contact.name = chat.name;
               if (chat.unreadCount !== undefined) contact.unreadCount = chat.unreadCount;
-              if (chat.conversationTimestamp) contact.lastTimestamp = Number(chat.conversationTimestamp) * 1000;
+              if (parsedChatTs > 0) contact.lastTimestamp = Math.max(contact.lastTimestamp || 0, parsedChatTs);
             }
             changed = true;
           }
         }
 
         if (Array.isArray(messages)) {
+          const touchedHistoryJids = new Set();
+          const pendingHistoryMediaDownloads = [];
           for (const rawMsg of messages) {
             if (!rawMsg) continue;
             const msg = { ...rawMsg, message: unwrapMessage(rawMsg) };
             if (!msg.message) continue;
             const rawJid = msg.key?.remoteJid;
             if (!rawJid || rawJid === 'status@broadcast') continue;
-            const jid = await this.resolveLidToPhone(rawJid);
+            const jid = await this.resolveLidToPhone(rawJid, msg.key?.remoteJidAlt || '');
+            if (this.sock !== currentSock || this._connectGen !== activeGen || this.isExplicitDisconnect) return;
             if (jid.endsWith('@lid')) continue;
 
             const fromMe = Boolean(msg.key?.fromMe);
@@ -1748,13 +1920,7 @@ class WhatsAppGateway {
                          '';
             if (!text && !msg.message.imageMessage && !msg.message.audioMessage && !msg.message.documentMessage && !msg.message.videoMessage && !msg.message.stickerMessage && !msg.message.lottieStickerMessage) continue;
 
-            let ts = Date.now();
-            if (msg.messageTimestamp) {
-              const rawTs = typeof msg.messageTimestamp === 'number'
-                ? msg.messageTimestamp
-                : Number(msg.messageTimestamp.low || msg.messageTimestamp);
-              ts = rawTs > 9999999999 ? rawTs : rawTs * 1000;
-            }
+            const ts = msg.messageTimestamp ? this.parseBaileysTimestampMs(msg.messageTimestamp) : Date.now();
 
             const media = this.extractMediaFromMessage(msg);
             const id = msg.key.id || `hist_${ts}_${Math.random().toString(36).slice(2, 6)}`;
@@ -1762,7 +1928,7 @@ class WhatsAppGateway {
             const rawParticipant = msg.key?.participant || msg.participant || '';
             let senderPhone = '';
             if (rawParticipant) {
-              const pJid = await this.resolveLidToPhone(rawParticipant);
+              const pJid = await this.resolveLidToPhone(rawParticipant, msg.key?.participantAlt || '');
               senderPhone = pJid ? pJid.split('@')[0].split(':')[0] : '';
             }
             if (!senderPhone && !fromMe && !jid.endsWith('@g.us')) {
@@ -1792,21 +1958,27 @@ class WhatsAppGateway {
               };
               list.push(item);
               if (media) {
+                while (this.rawMessages.size >= 300) {
+                  const oldestRaw = this.rawMessages.keys().next().value;
+                  if (oldestRaw === undefined) break;
+                  this.rawMessages.delete(oldestRaw);
+                }
                 this.rawMessages.set(id, msg);
                 this.saveRawMediaData();
-                this.downloadAndSaveMedia(msg, item).then(url => {
-                  if (url) this.broadcast('media_ready', { jid, msgId: id, media: item.media });
-                }).catch(() => {});
+                pendingHistoryMediaDownloads.push({ msg, target: item, jid, id });
               }
             } else {
               if (media) {
+                while (this.rawMessages.size >= 300) {
+                  const oldestRaw = this.rawMessages.keys().next().value;
+                  if (oldestRaw === undefined) break;
+                  this.rawMessages.delete(oldestRaw);
+                }
                 this.rawMessages.set(id, msg);
                 this.saveRawMediaData();
                 if (!existing.media || !existing.media.url) {
                   existing.media = { ...(existing.media || {}), ...media };
-                  this.downloadAndSaveMedia(msg, existing).then(url => {
-                    if (url) this.broadcast('media_ready', { jid, msgId: id, media: existing.media });
-                  }).catch(() => {});
+                  pendingHistoryMediaDownloads.push({ msg, target: existing, jid, id });
                 }
               }
             }
@@ -1816,7 +1988,31 @@ class WhatsAppGateway {
               contact.lastMessage = text;
               contact.lastTimestamp = ts;
             }
+            touchedHistoryJids.add(jid);
             changed = true;
+          }
+          // Batasi unduhan media histori maksimal 3 paralel untuk mencegah RAM spike & rate limit WA
+          if (pendingHistoryMediaDownloads.length > 0) {
+            const batchQueue = pendingHistoryMediaDownloads.slice(-24);
+            let cursor = 0;
+            const runWorker = async () => {
+              while (cursor < batchQueue.length) {
+                if (this.sock !== currentSock || this._connectGen !== activeGen || this.isExplicitDisconnect) return;
+                const job = batchQueue[cursor++];
+                try {
+                  const url = await this.downloadAndSaveMedia(job.msg, job.target);
+                  if (url) this.broadcast('media_ready', { jid: job.jid, msgId: job.id, media: job.target.media });
+                } catch (_) {}
+              }
+            };
+            Promise.all([runWorker(), runWorker(), runWorker()]).catch(() => {});
+          }
+          for (const hJid of touchedHistoryJids) {
+            const hList = this.messages.get(hJid);
+            if (Array.isArray(hList) && hList.length > 1) {
+              hList.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+              if (hList.length > 250) hList.splice(0, hList.length - 250);
+            }
           }
         }
 
@@ -1965,7 +2161,7 @@ class WhatsAppGateway {
           if (!msg.message) continue;
           const rawJid = msg.key?.remoteJid;
           if (!rawJid || rawJid === 'status@broadcast') continue;
-          const jid = await this.resolveLidToPhone(rawJid);
+          const jid = await this.resolveLidToPhone(rawJid, msg.key?.remoteJidAlt || '');
           if (jid.endsWith('@lid')) continue;
 
           // Penanganan Pesan Dihapus Pengirim (Revoke / Delete for everyone)
@@ -1979,8 +2175,12 @@ class WhatsAppGateway {
                 targetMsg.isDeleted = true;
                 targetMsg.media = null;
                 const contact = this.contacts.get(jid);
-                if (contact && contact.lastMessage) {
+                const latestMsgInList = list.length > 0 ? list[list.length - 1] : null;
+                if (contact && latestMsgInList && latestMsgInList.id === targetMsgId) {
                   contact.lastMessage = '🚫 Pesan ini telah dihapus';
+                }
+                if (Array.isArray(this.recentIncomingEvents) && this.recentIncomingEvents.length > 0) {
+                  this.recentIncomingEvents = this.recentIncomingEvents.filter(ev => ev && ev.id !== targetMsgId);
                 }
                 this.savePersistedData();
                 this.broadcast('message_revoked', { jid, msgId: targetMsgId });
@@ -2019,20 +2219,14 @@ class WhatsAppGateway {
 
           if (!text && !msg.message.imageMessage && !msg.message.audioMessage && !msg.message.documentMessage && !msg.message.videoMessage && !msg.message.stickerMessage && !msg.message.lottieStickerMessage) continue;
 
-          let ts = Date.now();
-          if (msg.messageTimestamp) {
-            const rawTs = typeof msg.messageTimestamp === 'number'
-              ? msg.messageTimestamp
-              : Number(msg.messageTimestamp.low || msg.messageTimestamp);
-            ts = rawTs > 9999999999 ? rawTs : rawTs * 1000;
-          }
+          const ts = msg.messageTimestamp ? this.parseBaileysTimestampMs(msg.messageTimestamp) : Date.now();
 
           const id = msg.key.id || `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
           
           const rawParticipant = msg.key?.participant || msg.participant || '';
           let senderPhone = '';
           if (rawParticipant) {
-            const pJid = await this.resolveLidToPhone(rawParticipant);
+            const pJid = await this.resolveLidToPhone(rawParticipant, msg.key?.participantAlt || '');
             senderPhone = pJid ? pJid.split('@')[0].split(':')[0] : '';
           }
           if (!senderPhone && !fromMe && !jid.endsWith('@g.us')) {
@@ -2069,13 +2263,14 @@ class WhatsAppGateway {
             (fromMe && m.fromMe && !media && String(m.id || '').startsWith('msg_') && m.text === text && Math.abs((m.timestamp || 0) - ts) < 15000)
           );
           if (existingIndex !== -1) {
-            // Sudah tercatat via sendMessage() REST API, update ID resmi & lewati agar tidak membroadcast ulang
+            // Sudah tercatat via sendMessage() REST API atau re-delivery, update ID resmi & lewati agar tidak membroadcast ulang
             list[existingIndex].id = id;
-            list[existingIndex].status = 'sent';
+            if (fromMe) list[existingIndex].status = 'sent';
             if (media) {
-              if (this.rawMessages.size >= 300) {
+              while (this.rawMessages.size >= 300) {
                 const oldestRaw = this.rawMessages.keys().next().value;
-                if (oldestRaw !== undefined) this.rawMessages.delete(oldestRaw);
+                if (oldestRaw === undefined) break;
+                this.rawMessages.delete(oldestRaw);
               }
               this.rawMessages.set(id, msg);
               this.saveRawMediaData();
@@ -2090,9 +2285,10 @@ class WhatsAppGateway {
           }
 
           if (media) {
-            if (this.rawMessages.size >= 300) {
+            while (this.rawMessages.size >= 300) {
               const oldestRaw = this.rawMessages.keys().next().value;
-              if (oldestRaw !== undefined) this.rawMessages.delete(oldestRaw);
+              if (oldestRaw === undefined) break;
+              this.rawMessages.delete(oldestRaw);
             }
             this.rawMessages.set(id, msg);
             this.saveRawMediaData();
@@ -2103,7 +2299,11 @@ class WhatsAppGateway {
             }).catch(() => {});
           }
 
+          const prevTailTs = list.length > 0 ? (list[list.length - 1]?.timestamp || 0) : 0;
           list.push(messageItem);
+          if (ts < prevTailTs) {
+            list.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+          }
           if (list.length > 250) list.splice(0, list.length - 250);
           hasNew = true;
 
@@ -2125,7 +2325,7 @@ class WhatsAppGateway {
               name: initialName,
               notify: isGroup ? '' : validPush,
               phone: isGroup ? 'Grup WhatsApp' : jid.split('@')[0],
-              unreadCount: fromMe ? 0 : 1,
+              unreadCount: (!fromMe && type === 'notify') ? 1 : 0,
               lastMessage: text,
               lastTimestamp: ts
             };
@@ -2134,10 +2334,15 @@ class WhatsAppGateway {
               this.syncGroupMetadata(jid).catch(() => {});
             }
           } else {
-            contact.lastMessage = text;
-            contact.lastTimestamp = ts;
-            if (!fromMe) {
+            const prevLastTs = contact.lastTimestamp || 0;
+            if (ts >= prevLastTs) {
+              contact.lastMessage = text;
+              contact.lastTimestamp = ts;
+            }
+            if (!fromMe && type === 'notify') {
               contact.unreadCount = (contact.unreadCount || 0) + 1;
+            }
+            if (!fromMe) {
               if (validPush && !isGroup) {
                 contact.notify = validPush;
                 const currentName = (contact.name || '').trim();
@@ -2161,6 +2366,30 @@ class WhatsAppGateway {
 
           if (!contact.avatarCheckedAt) {
             this.syncContactProfile(jid, { force: false }).catch(() => {});
+          }
+
+          if (!fromMe && (type === 'notify' || (Date.now() - ts) < 600000)) {
+            if (!Array.isArray(this.recentIncomingEvents)) this.recentIncomingEvents = [];
+            const dedupIdx = this.recentIncomingEvents.findIndex(e => e && e.id === id);
+            if (dedupIdx !== -1) this.recentIncomingEvents.splice(dedupIdx, 1);
+            const cleanedEvContact = (typeof this.cleanContact === 'function') ? this.cleanContact(contact) : contact;
+            this.recentIncomingEvents.unshift({
+              id,
+              jid,
+              contactName: cleanedEvContact?.name || contact.name || contact.notify || jid,
+              phone: cleanedEvContact?.phone || contact.phone || '',
+              isGroup,
+              senderName,
+              text: String(text || '').slice(0, 500),
+              timestamp: ts,
+              receivedAt: Date.now(),
+              hasFile: Boolean(hasFile),
+              mediaType: media?.type || '',
+              fileName: media?.fileName || ''
+            });
+            if (this.recentIncomingEvents.length > 60) {
+              this.recentIncomingEvents.length = 60;
+            }
           }
 
           // Broadcast pesan baru HANYA untuk pesan baru yang belum ada di layar
@@ -2198,6 +2427,14 @@ class WhatsAppGateway {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    if (this._stableConnectTimer) {
+      clearTimeout(this._stableConnectTimer);
+      this._stableConnectTimer = null;
+    }
+    if (this._postConnectSyncTimer) {
+      clearTimeout(this._postConnectSyncTimer);
+      this._postConnectSyncTimer = null;
+    }
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
@@ -2233,6 +2470,7 @@ class WhatsAppGateway {
       }
       this.contacts.clear();
       this.messages.clear();
+      this.recentIncomingEvents = [];
       if (this.rawMessages) this.rawMessages.clear();
       if (this.groupMetadataCache) this.groupMetadataCache.clear();
       this.clearCachedAvatars();
@@ -2284,24 +2522,36 @@ class WhatsAppGateway {
 
     // Tunggu socket WebSocket terbuka / QR state siap menerima perintah pairing code (max 15 detik)
     let waited = 0;
+    const isWsOpen = () => {
+      const ws = this.sock?.ws;
+      if (!ws) return false;
+      return Boolean(ws.isOpen || ws.readyState === 1 || ws.socket?.readyState === 1);
+    };
     while (
-      (!this.sock || typeof this.sock.requestPairingCode !== 'function' || (this.sock.ws && this.sock.ws.readyState !== 1 && !this.status.qr)) &&
+      (!this.sock || typeof this.sock.requestPairingCode !== 'function' || (this.sock.ws && !isWsOpen() && !this.status.qr)) &&
       waited < 15000
     ) {
       await new Promise(r => setTimeout(r, 300));
       waited += 300;
     }
 
-    if (!this.sock || typeof this.sock.requestPairingCode !== 'function') {
+    if (!this.sock || typeof this.sock.requestPairingCode !== 'function' || (this.sock.ws && !isWsOpen() && !this.status.qr)) {
+      this.status.isPairing = false;
       throw new Error('Socket WhatsApp belum siap. Silakan coba klik Hubungkan ulang.');
     }
 
     this.status.isPairing = true;
-    const rawCode = await this.sock.requestPairingCode(cleanPhone);
-    const formatted = rawCode ? (rawCode.match(/.{1,4}/g)?.join('-') || rawCode) : '';
-    this.status.pairingCode = formatted;
-    this.broadcast('pairing_code', { code: formatted, phone: cleanPhone });
-    return { code: formatted, phone: cleanPhone };
+    try {
+      const rawCode = await this.sock.requestPairingCode(cleanPhone);
+      const formatted = rawCode ? (rawCode.match(/.{1,4}/g)?.join('-') || rawCode) : '';
+      this.status.pairingCode = formatted;
+      this.broadcast('pairing_code', { code: formatted, phone: cleanPhone });
+      return { code: formatted, phone: cleanPhone };
+    } catch (pairErr) {
+      this.status.isPairing = false;
+      this.broadcast('status', this.getStatus());
+      throw pairErr;
+    }
   }
 
   async sendMessage(jid, text, options = {}) {
@@ -2338,8 +2588,10 @@ class WhatsAppGateway {
     const mentions = [];
     if (options && Array.isArray(options.mentions)) {
       for (const m of options.mentions) {
-        let clean = String(m).replace(/[^0-9]/g, '');
-        if (clean) mentions.push(clean.includes('@') ? clean : `${clean}@s.whatsapp.net`);
+        const rawMention = String(m || '').split('@')[0].split(':')[0];
+        let clean = rawMention.replace(/[^0-9]/g, '');
+        if (clean.startsWith('0')) clean = '62' + clean.slice(1);
+        if (clean) mentions.push(`${clean}@s.whatsapp.net`);
       }
     }
     if (targetJid.endsWith('@g.us') && outgoingText) {
@@ -2366,8 +2618,9 @@ class WhatsAppGateway {
           const b64 = rawSource.replace(/^data:[^;]+;base64,/, '');
           mediaBuffer = Buffer.from(b64, 'base64');
         } else if (rawSource.startsWith('/uploads/')) {
+          // Cegah kebocoran lintas-tenant: hanya akun Master yang boleh membaca berkas lokal /uploads/
           const baseName = path.basename(rawSource);
-          if (baseName && baseName !== '.' && baseName !== '..' && !baseName.includes('/') && !baseName.includes('\\')) {
+          if (this.isMaster && baseName && baseName !== '.' && baseName !== '..' && !baseName.includes('/') && !baseName.includes('\\')) {
             const localPath = path.join(this.uploadsDir, baseName);
             try {
               if (fs.existsSync(localPath) && fs.statSync(localPath).isFile()) {
@@ -2473,7 +2726,13 @@ class WhatsAppGateway {
     if (!this.messages.has(targetJid)) {
       this.messages.set(targetJid, []);
     }
-    this.messages.get(targetJid).push(messageItem);
+    const targetList = this.messages.get(targetJid);
+    if (!targetList.some(m => m && m.id === messageItem.id)) {
+      targetList.push(messageItem);
+      if (targetList.length > 250) {
+        targetList.splice(0, targetList.length - 250);
+      }
+    }
 
     // Update kontak
     let contact = this.contacts.get(targetJid);
@@ -2570,7 +2829,12 @@ class WhatsAppGateway {
           } else {
             displayName = 'Grup WhatsApp';
             if (this.sock && this.status.connected) {
-              this.syncGroupMetadata(c.id).catch(() => {});
+              if (!this._groupMetaCooldown) this._groupMetaCooldown = new Map();
+              const lastAttempt = this._groupMetaCooldown.get(c.id) || 0;
+              if (Date.now() - lastAttempt > 60000) {
+                this._groupMetaCooldown.set(c.id, Date.now());
+                this.syncGroupMetadata(c.id).catch(() => {});
+              }
             }
           }
         }
@@ -2650,8 +2914,9 @@ class WhatsAppGateway {
   }
 
   getMessages(jid, options = {}) {
+    const safeOptions = (options && typeof options === 'object') ? options : {};
     if (!this.status.connected && !this.hasStoredSession() && (!this.messages || this.messages.size === 0)) return [];
-    if (!jid) return [];
+    if (!jid || typeof jid !== 'string') return [];
     if (jid.includes('6281234567890')) return [];
     let targetJid = jid;
     if (!targetJid.includes('@')) {
@@ -2673,8 +2938,9 @@ class WhatsAppGateway {
     }
     const list = [...rawList].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
-    // Reset unread count hanya saat dibuka pengguna (bukan lookup media internal)
-    if (options.markAsRead !== false) {
+    // Reset unread count hanya saat dibuka pengguna (bukan lookup media internal / read-only)
+    const isPassiveRead = safeOptions.markAsRead === false;
+    if (!isPassiveRead) {
       const contact = this.contacts.get(targetJid);
       if (contact && contact.unreadCount > 0) {
         contact.unreadCount = 0;
@@ -2684,33 +2950,35 @@ class WhatsAppGateway {
     }
 
     return list.map(m => {
-      if (!m.media && m.text && /\[(?:Stiker|Sticker)\]/i.test(m.text)) {
-        const safeId = String(m.id || '').replace(/[^a-zA-Z0-9._-]/g, '_');
-        const savedFile = `wa_${safeId}_sticker.webp`;
-        const localPath = path.join(this.uploadsDir, savedFile);
-        m.media = {
-          type: 'sticker',
-          fileName: 'sticker.webp',
-          mimetype: 'image/webp',
-          url: fs.existsSync(localPath) ? `/uploads/${savedFile}` : null
-        };
-      } else if (m.media && (m.media.type === 'sticker' || m.media.fileName === 'sticker.webp' || (m.text && /\[(?:Stiker|Sticker)\]/i.test(m.text)))) {
-        m.media.type = 'sticker';
-        if (!m.media.fileName) m.media.fileName = 'sticker.webp';
-        if (!m.media.url) {
+      if (!isPassiveRead) {
+        if (!m.media && m.text && /\[(?:Stiker|Sticker)\]/i.test(m.text)) {
           const safeId = String(m.id || '').replace(/[^a-zA-Z0-9._-]/g, '_');
           const savedFile = `wa_${safeId}_sticker.webp`;
           const localPath = path.join(this.uploadsDir, savedFile);
-          if (fs.existsSync(localPath)) {
-            m.media.url = `/uploads/${savedFile}`;
+          m.media = {
+            type: 'sticker',
+            fileName: 'sticker.webp',
+            mimetype: 'image/webp',
+            url: fs.existsSync(localPath) ? `/uploads/${savedFile}` : null
+          };
+        } else if (m.media && (m.media.type === 'sticker' || m.media.fileName === 'sticker.webp' || (m.text && /\[(?:Stiker|Sticker)\]/i.test(m.text)))) {
+          m.media.type = 'sticker';
+          if (!m.media.fileName) m.media.fileName = 'sticker.webp';
+          if (!m.media.url) {
+            const safeId = String(m.id || '').replace(/[^a-zA-Z0-9._-]/g, '_');
+            const savedFile = `wa_${safeId}_sticker.webp`;
+            const localPath = path.join(this.uploadsDir, savedFile);
+            if (fs.existsSync(localPath)) {
+              m.media.url = `/uploads/${savedFile}`;
+            }
           }
         }
-      }
-      if (m.media && !m.media.url && this.rawMessages && this.rawMessages.has(m.id)) {
-        const rawMsg = this.rawMessages.get(m.id);
-        this.downloadAndSaveMedia(rawMsg, m).then(url => {
-          if (url) this.broadcast('media_ready', { jid: targetJid, msgId: m.id, media: m.media });
-        }).catch(() => {});
+        if (m.media && !m.media.url && this.rawMessages && this.rawMessages.has(m.id)) {
+          const rawMsg = this.rawMessages.get(m.id);
+          this.downloadAndSaveMedia(rawMsg, m).then(url => {
+            if (url) this.broadcast('media_ready', { jid: targetJid, msgId: m.id, media: m.media });
+          }).catch(() => {});
+        }
       }
       const hasFile = Boolean(
         m.hasFile ||
@@ -2736,11 +3004,34 @@ class WhatsAppGateway {
     });
   }
 
+  getRecentIncoming(sinceMs = 0, limit = 20) {
+    if (!Array.isArray(this.recentIncomingEvents) || this.recentIncomingEvents.length === 0) {
+      return [];
+    }
+    const clamped = Math.max(1, Math.min(60, parseInt(limit, 10) || 20));
+    const cutoff = Number(sinceMs) || 0;
+    const nowCeiling = Date.now() + 60000;
+    const effectiveTs = (ev) => {
+      const rawT = Number(ev?.timestamp) || 0;
+      const rawR = Number(ev?.receivedAt) || 0;
+      const safeT = (Number.isFinite(rawT) && rawT > 0) ? Math.min(rawT, nowCeiling) : 0;
+      const safeR = (Number.isFinite(rawR) && rawR > 0) ? Math.min(rawR, nowCeiling) : 0;
+      return safeT || safeR;
+    };
+    return this.recentIncomingEvents
+      .filter(ev => ev && effectiveTs(ev) >= cutoff)
+      .sort((a, b) => effectiveTs(b) - effectiveTs(a))
+      .slice(0, clamped)
+      .map(ev => ({ ...ev }));
+  }
+
   clearChatHistory(jid) {
     if (!jid) return false;
-    let targetJid = jid;
+    let targetJid = String(jid).trim();
     if (!targetJid.includes('@')) {
-      targetJid = `${targetJid.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
+      let cleanNum = targetJid.replace(/[^0-9]/g, '');
+      if (cleanNum.startsWith('0')) cleanNum = '62' + cleanNum.slice(1);
+      targetJid = `${cleanNum}@s.whatsapp.net`;
     }
     const numOnly = targetJid.split('@')[0];
     const keysToDelete = [];
@@ -2751,6 +3042,9 @@ class WhatsAppGateway {
     }
     for (const k of keysToDelete) {
       this.messages.delete(k);
+    }
+    if (Array.isArray(this.recentIncomingEvents) && this.recentIncomingEvents.length > 0) {
+      this.recentIncomingEvents = this.recentIncomingEvents.filter(ev => ev && !this.matchesJidKey(ev.jid, targetJid, numOnly));
     }
     for (const [k, c] of this.contacts.entries()) {
       if (this.matchesJidKey(k, targetJid, numOnly)) {
@@ -2829,6 +3123,17 @@ class WhatsAppGatewayManager {
 
     let gw = this.sessions.get(targetUid);
     if (!gw) {
+      // Verifikasi PIN akun tamu dari disk SEBELUM melakukan eviksi, penyimpanan ke sessions Map, atau auto-connect socket
+      const candidateGw = new WhatsAppGateway(targetUid, { isMaster: false });
+      if (candidateGw.hasConfiguredPin() && !candidateGw.verifyPin(cleanPin)) {
+        return {
+          success: false,
+          status: 403,
+          error: cleanPin ? 'PIN Keamanan Akun Anda salah.' : 'PIN Keamanan Akun wajib dimasukkan.',
+          requiresPin: true,
+          userId: targetUid
+        };
+      }
       // Batasi jumlah sesi tamu tidak aktif di memori untuk mencegah memory/session exhaustion DoS
       if (this.sessions.size >= 60) {
         let oldestKey = null;
@@ -2850,23 +3155,40 @@ class WhatsAppGatewayManager {
           }
         }
         const evictKey = oldestKey || fallbackKey;
-        if (evictKey) {
-          const evicted = this.sessions.get(evictKey);
-          if (evicted) {
-            if (evicted.reconnectTimer) { clearTimeout(evicted.reconnectTimer); evicted.reconnectTimer = null; }
-            if (evicted._saveTimer) { clearTimeout(evicted._saveTimer); evicted._saveTimer = null; }
-            if (evicted._rawMediaSaveTimer) { clearTimeout(evicted._rawMediaSaveTimer); evicted._rawMediaSaveTimer = null; }
-            if (evicted.sseHeartbeatTimer) { clearInterval(evicted.sseHeartbeatTimer); evicted.sseHeartbeatTimer = null; }
-            if (evicted.pingInterval) { clearInterval(evicted.pingInterval); evicted.pingInterval = null; }
-            if (evicted.sseClients) {
-              for (const c of evicted.sseClients) { try { if (!c.writableEnded) c.end(); } catch (_) {} }
-              evicted.sseClients.clear();
-            }
-          }
-          this.sessions.delete(evictKey);
+        if (!evictKey) {
+          return {
+            success: false,
+            status: 503,
+            error: 'Kapasitas sesi WhatsApp aktif server sedang penuh. Silakan coba beberapa saat lagi.',
+            userId: targetUid
+          };
         }
+        const evicted = this.sessions.get(evictKey);
+        if (evicted) {
+          evicted._connectGen = (evicted._connectGen || 0) + 1;
+          if (evicted.reconnectTimer) { clearTimeout(evicted.reconnectTimer); evicted.reconnectTimer = null; }
+          if (evicted._stableConnectTimer) { clearTimeout(evicted._stableConnectTimer); evicted._stableConnectTimer = null; }
+          if (evicted._postConnectSyncTimer) { clearTimeout(evicted._postConnectSyncTimer); evicted._postConnectSyncTimer = null; }
+          if (evicted._saveTimer) { clearTimeout(evicted._saveTimer); evicted._saveTimer = null; }
+          if (evicted._rawMediaSaveTimer) { clearTimeout(evicted._rawMediaSaveTimer); evicted._rawMediaSaveTimer = null; }
+          if (evicted.sseHeartbeatTimer) { clearInterval(evicted.sseHeartbeatTimer); evicted.sseHeartbeatTimer = null; }
+          if (evicted.pingInterval) { clearInterval(evicted.pingInterval); evicted.pingInterval = null; }
+          if (Array.isArray(evicted._pendingSaveResolvers) && evicted._pendingSaveResolvers.length > 0) {
+            const pending = evicted._pendingSaveResolvers.splice(0);
+            pending.forEach(fn => { try { fn(); } catch (_) {} });
+          }
+          if (evicted.sock) {
+            try { evicted.sock.ev?.removeAllListeners?.(); evicted.sock.end?.(); } catch (_) {}
+            evicted.sock = null;
+          }
+          if (evicted.sseClients) {
+            for (const c of evicted.sseClients) { try { if (!c.writableEnded) c.end(); } catch (_) {} }
+            evicted.sseClients.clear();
+          }
+        }
+        this.sessions.delete(evictKey);
       }
-      gw = new WhatsAppGateway(targetUid, { isMaster: false });
+      gw = candidateGw;
       this.sessions.set(targetUid, gw);
       if (gw.hasStoredSession()) {
         gw.connect(false).catch(() => {});

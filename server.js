@@ -20,6 +20,33 @@ const { spawn, execSync, execFile } = require('child_process');
 const textSafety = require('./text-safety');
 const { createImageGroundingService } = require('./image-grounding');
 
+// Loader .env minimal diposisikan paling awal sebelum modul lain (whatsapp-gateway, WORKSPACE_ROOT, tunnel sync) membaca process.env
+try {
+  const envFilePath = path.join(__dirname, '.env');
+  if (fs.existsSync(envFilePath)) {
+    const envLines = fs.readFileSync(envFilePath, 'utf8').split(/\r?\n/);
+    for (const envLine of envLines) {
+      const trimmedEnvLine = envLine.trim();
+      if (!trimmedEnvLine || trimmedEnvLine.startsWith('#')) continue;
+      const eqIdx = trimmedEnvLine.indexOf('=');
+      if (eqIdx <= 0) continue;
+      const envKey = trimmedEnvLine.slice(0, eqIdx).trim();
+      let envValue = trimmedEnvLine.slice(eqIdx + 1).trim();
+      if (envValue.startsWith('"') || envValue.startsWith("'")) {
+        const quoteChar = envValue[0];
+        const closeQuoteIdx = envValue.indexOf(quoteChar, 1);
+        envValue = closeQuoteIdx > 0 ? envValue.slice(1, closeQuoteIdx) : envValue.slice(1);
+      } else {
+        const inlineCommentIdx = envValue.search(/\s#/);
+        if (inlineCommentIdx >= 0) envValue = envValue.slice(0, inlineCommentIdx).trimEnd();
+      }
+      if (envKey && !(envKey in process.env)) process.env[envKey] = envValue;
+    }
+  }
+} catch (envErr) {
+  console.warn('Warning: gagal memuat file .env:', envErr.message);
+}
+
 // Persistent HTTPS Agent dengan TCP Keep-Alive untuk kestabilan koneksi streaming OpenRouter tanpa putus
 const openRouterHttpsAgent = new https.Agent({
   keepAlive: true,
@@ -229,8 +256,18 @@ async function syncTunnelUrlToEdge(url) {
         changedFiles.push(target.file.split(path.sep).join('/'));
       }
     }
-    edgeTunnelLastSyncedUrl = url;
-    if (changedFiles.length === 0) return;
+    if (changedFiles.length === 0) {
+      if (fs.existsSync(path.join(__dirname, '.git'))) {
+        // Jika berkas sudah tertulis namun push sebelumnya sempat gagal, coba dorong ulang ke origin
+        const retryPush = await runGit(['push', 'origin', 'HEAD']);
+        if (retryPush.ok) {
+          edgeTunnelLastSyncedUrl = url;
+        }
+      } else {
+        edgeTunnelLastSyncedUrl = url;
+      }
+      return;
+    }
 
     // Bump cache-buster pada index.html agar browser seluler pengguna otomatis flush cache & baca tunnel baru
     const newEdgeVer = 'v' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '_t' + Date.now().toString(36);
@@ -247,13 +284,17 @@ async function syncTunnelUrlToEdge(url) {
     }
 
     console.log(`[Edge Tunnel Sync] URL tunnel baru ditulis ke: ${changedFiles.join(', ')}`);
-    if (!fs.existsSync(path.join(__dirname, '.git'))) return;
+    if (!fs.existsSync(path.join(__dirname, '.git'))) {
+      edgeTunnelLastSyncedUrl = url;
+      return;
+    }
     const add = await runGit(['add', '--', ...changedFiles]);
     if (!add.ok) return console.warn('[Edge Tunnel Sync] git add gagal:', add.stderr.trim());
     const commit = await runGit(['commit', '-m', `chore(tunnel): auto-sync active tunnel ${url}`, '--', ...changedFiles]);
     if (!commit.ok) return console.warn('[Edge Tunnel Sync] git commit gagal:', commit.stderr.trim());
     const push = await runGit(['push', 'origin', 'HEAD']);
     if (!push.ok) return console.warn('[Edge Tunnel Sync] git push gagal:', push.stderr.trim());
+    edgeTunnelLastSyncedUrl = url;
     console.log('[Edge Tunnel Sync] Terdorong ke origin — Cloudflare Pages akan redeploy otomatis.');
   } catch (err) {
     console.warn('[Edge Tunnel Sync] Gagal:', err && err.message);
@@ -432,22 +473,31 @@ function stopCloudflareTunnel() {
   return { active: false, message: 'Cloudflare Tunnel dimatikan.' };
 }
 
+const STRICT_LOCAL_HOST_RE = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i;
+
 function isRemoteTunnelRequest(req) {
   if (!req || !req.headers) return false;
-  const host = (req.headers.host || '').toLowerCase();
-  const cfIp = req.headers['cf-connecting-ip'];
-  const cfRay = req.headers['cf-ray'];
-  const xfHost = (req.headers['x-forwarded-host'] || '').toLowerCase();
-  const xfFor = req.headers['x-forwarded-for'];
-  const xfProto = req.headers['x-forwarded-proto'];
-  if (cfIp || cfRay || xfHost || xfFor || xfProto || host.includes('trycloudflare.com')) {
+  const host = String(req.headers.host || '').trim().toLowerCase();
+  const proxyOrTunnelHeader = Boolean(
+    req.headers['cf-connecting-ip'] ||
+    req.headers['cf-ray'] ||
+    req.headers['cf-visitor'] ||
+    req.headers['x-forwarded-host'] ||
+    req.headers['x-forwarded-for'] ||
+    req.headers['x-forwarded-proto'] ||
+    req.headers['forwarded'] ||
+    req.headers['x-real-ip'] ||
+    req.headers['true-client-ip'] ||
+    req.headers['x-vercel-id']
+  );
+  if (proxyOrTunnelHeader || host.includes('trycloudflare.com')) {
     return true;
   }
   const remoteIp = req.socket?.remoteAddress || req.connection?.remoteAddress || '';
   if (remoteIp && remoteIp !== '127.0.0.1' && remoteIp !== '::1' && remoteIp !== '::ffff:127.0.0.1') {
     return true;
   }
-  if (host && !host.startsWith('localhost:') && host !== 'localhost' && !host.startsWith('127.0.0.1:') && host !== '127.0.0.1' && !host.startsWith('[::1]:') && host !== '[::1]') {
+  if (host && !STRICT_LOCAL_HOST_RE.test(host)) {
     return true;
   }
   return false;
@@ -516,6 +566,7 @@ function validateRemoteTerminalPin(req, reqUrl, body) {
     cleanPin &&
     waGatewayManager &&
     waGatewayManager.masterGateway &&
+    (waGatewayManager.masterGateway.hasConfiguredPin?.() || Boolean(process.env.ZOZ_MASTER_PIN)) &&
     typeof waGatewayManager.masterGateway.verifyPin === 'function' &&
     waGatewayManager.masterGateway.verifyPin(cleanPin)
   );
@@ -1173,38 +1224,7 @@ function handleServerAutoEnter(session, data, opts = {}) {
   }
 }
 
-// Loader .env minimal (TANPA dependensi eksternal — proyek zero-dep).
-// Baca file .env bila ada, parse baris KEY=VALUE (lewati komentar/baris kosong),
-// dan JANGAN pernah menimpa variabel yang sudah ada di process.env.
-try {
-  const envFilePath = path.join(__dirname, '.env');
-  if (fs.existsSync(envFilePath)) {
-    const envLines = fs.readFileSync(envFilePath, 'utf8').split(/\r?\n/);
-    for (const envLine of envLines) {
-      const trimmedEnvLine = envLine.trim();
-      if (!trimmedEnvLine || trimmedEnvLine.startsWith('#')) continue;
-      const eqIdx = trimmedEnvLine.indexOf('=');
-      if (eqIdx <= 0) continue;
-      const envKey = trimmedEnvLine.slice(0, eqIdx).trim();
-      let envValue = trimmedEnvLine.slice(eqIdx + 1).trim();
-      if (envValue.startsWith('"') || envValue.startsWith("'")) {
-        // Berpetik: nilai = isi di antara petik; komentar inline SETELAH petik
-        // penutup diabaikan (semantik dotenv): KEY="a b" # catatan → "a b".
-        const quoteChar = envValue[0];
-        const closeQuoteIdx = envValue.indexOf(quoteChar, 1);
-        envValue = closeQuoteIdx > 0 ? envValue.slice(1, closeQuoteIdx) : envValue.slice(1);
-      } else {
-        // Tanpa petik: komentar inline dimulai dari spasi diikuti '#' —
-        // "abc # catatan" → "abc", tapi "abc#def" tetap utuh (tanpa spasi).
-        const inlineCommentIdx = envValue.search(/\s#/);
-        if (inlineCommentIdx >= 0) envValue = envValue.slice(0, inlineCommentIdx).trimEnd();
-      }
-      if (envKey && !(envKey in process.env)) process.env[envKey] = envValue;
-    }
-  }
-} catch (envErr) {
-  console.warn('Warning: gagal memuat file .env:', envErr.message);
-}
+// Variabel .env sudah dimuat lebih awal di bagian atas server.js sebelum modul lain diinisialisasi.
 
 const PORT = process.env.PORT || 4040;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -1260,16 +1280,20 @@ try {
 // Helper to send JSON responses
 function sendJSON(res, statusCode, data) {
   if (res.headersSent || res.writableEnded || res.destroyed) return;
-  res.writeHead(statusCode, {
+  const existingCacheControl = typeof res.getHeader === 'function' ? res.getHeader('Cache-Control') : null;
+  const headers = {
     'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-    'Pragma': 'no-cache',
-    'Expires': '0',
+    'Cache-Control': existingCacheControl || 'no-store, no-cache, must-revalidate, proxy-revalidate',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Private-Network': 'true',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, X-Title, HTTP-Referer, http-referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-auto-router, X-Auto-Router, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-user-id, X-WA-User-ID, X-WA-USER-ID, x-wa-pin, X-WA-PIN, x-terminal-pin, X-Terminal-Pin, Access-Control-Request-Private-Network'
-  });
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, X-Title, HTTP-Referer, http-referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-auto-router, X-Auto-Router, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-user-id, X-WA-User-ID, X-WA-USER-ID, x-wa-pin, X-WA-PIN, x-terminal-pin, X-Terminal-Pin, x-zoz-plan-mode, X-Zoz-Plan-Mode, Access-Control-Request-Private-Network'
+  };
+  if (!existingCacheControl) {
+    headers['Pragma'] = 'no-cache';
+    headers['Expires'] = '0';
+  }
+  res.writeHead(statusCode, headers);
   res.end(JSON.stringify(data));
 }
 
@@ -3997,13 +4021,26 @@ function markChatTaskInterrupted(sessionId, reason = 'Koneksi terputus', taskTok
 // Rantai promise memaksa read-modify-write berjalan satu per satu per sesi.
 const sessionAppendQueues = new Map(); // cleanSid -> Promise tail antrean
 
-// Resolusi ID sesi induk untuk subtugas internal (digest, rescue, epistemic)
+// Resolusi ID sesi induk untuk subtugas internal (digest, cont, continue, retry, synth, fb, rescue, epistemic, temp)
 // agar jawaban dari penelusuran otonom tersimpan ke sesi utama pengguna dan tidak mencemari disk dengan berkas phantom
+const SUBTASK_SESSION_SUFFIX_RE = /_(?:digest_\d+|cont_\d+(?:_\d+)?|continue_\d+|retry_\d+|synth_\d+|fb|rescue|epistemic|temp)$/i;
+function isInternalSubtaskSessionId(sid) {
+  if (!sid || typeof sid !== 'string') return false;
+  const clean = sid.trim();
+  return /__studio_/i.test(clean) || SUBTASK_SESSION_SUFFIX_RE.test(clean);
+}
+function isContinuationOrStudioSessionId(sid) {
+  if (!sid || typeof sid !== 'string') return false;
+  const clean = sid.trim();
+  return /__studio_/i.test(clean) || /_(?:cont_\d+(?:_\d+)?|continue_\d+)(?:_fb)?$/i.test(clean);
+}
 function resolveParentSessionId(sid) {
   if (!sid || typeof sid !== 'string') return sid;
-  const clean = sid.trim();
-  const m = clean.match(/^(ses_[a-zA-Z0-9]+)_(?:digest_\d+|rescue|epistemic|temp)$/i);
-  return m ? m[1] : clean;
+  let clean = sid.trim();
+  while (SUBTASK_SESSION_SUFFIX_RE.test(clean)) {
+    clean = clean.replace(SUBTASK_SESSION_SUFFIX_RE, '');
+  }
+  return clean;
 }
 
 // Deteksi absolut muatan digest/tool/instruksi internal agar tidak pernah bocor atau dianggap pesan pengguna
@@ -4020,7 +4057,12 @@ function isInternalSystemPayload(text) {
          trimmed.startsWith('[SPESIFIKASI SINTESIS BUKTI') ||
          trimmed.startsWith('[ALUR VERIFIKASI VISUAL AKTIF]') ||
          trimmed.startsWith('[HASIL EKSEKUSI TOOL]') ||
-         trimmed.startsWith('BATASAN DOMAIN KLAIM:');
+         trimmed.startsWith('[LIVE PULSE WHATSAPP') ||
+         trimmed.startsWith('[KONTEKS KOMUNIKASI LOKAL') ||
+         trimmed.startsWith('[HASIL RAG DINAMIS') ||
+         trimmed.startsWith('[DIREKTIF PERSONA ') ||
+         trimmed.startsWith('BATASAN DOMAIN KLAIM:') ||
+         trimmed.startsWith('BATASAN ANALISIS KOMUNIKASI');
 }
 
 // Defense-in-depth: Gerbang Nol-Informasi Shannon di sisi server (mencegah unconditioned prior collapse & halusinasi gambar)
@@ -4340,6 +4382,9 @@ function appendAssistantMessageToSessionDisk(sessionId, content, modelName, extr
   try {
     const rawSid = String(sessionId).trim();
     if (!/^[a-zA-Z0-9_-]+$/.test(rawSid) || /^incog_/i.test(rawSid)) return Promise.resolve(false);
+    // Jangan pernah menulis berkas phantom atau fragmen parsial untuk sesi continuation (_cont_*) / __studio_
+    // (klien sudah menggabungkan dan menyimpan hasil finalnya ke sesi induk)
+    if (isContinuationOrStudioSessionId(rawSid)) return Promise.resolve(false);
 
     // Resolusi parent session jika ini adalah tugas subtask internal (digest, rescue, epistemic)
     // agar jawaban tersimpan ke sesi utama pengguna dan tidak mencemari disk dengan berkas phantom
@@ -4955,10 +5000,12 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
   if (isOllamaEndpointForbidden(rawEp)) {
     throw new Error('Endpoint Ollama mengarah ke host privat/internal - akses diblokir (SSRF Protection).');
   }
-  // M23: endpoint non-tepercaya yang me-resolve ke IP privat (DNS-rebinding) ditolak.
+  // M23: endpoint non-tepercaya yang me-resolve ke IP privat (DNS-rebinding) ditolak & di-pin IP-nya.
+  let pinnedOllamaIps = null;
   if (!isTrustedOllamaEndpoint(rawEp)) {
     const dnsVerdict = await assertResolvesPublic(rawEp);
     if (!dnsVerdict.ok) throw new Error(dnsVerdict.msg);
+    pinnedOllamaIps = dnsVerdict.ips || null;
   }
 
   const executeOllamaOnce = (targetEp, targetModel, authKey) => {
@@ -4985,11 +5032,16 @@ async function callLLMBackend({ prompt, system, messages, model, provider, endpo
         headers['x-ollama-key'] = authKey;
       }
 
-      const req = client.request(ollamaUrl.toString(), {
+      const reqOpts = {
         method: 'POST',
         headers,
         timeout: 180000
-      }, (res) => {
+      };
+      if (pinnedOllamaIps && targetEp === rawEp) {
+        reqOpts.lookup = createPinnedLookup(pinnedOllamaIps);
+        if (ollamaUrl.protocol === 'https:') reqOpts.servername = ollamaUrl.hostname;
+      }
+      const req = client.request(ollamaUrl.toString(), reqOpts, (res) => {
         let rawData = '';
         res.on('data', chunk => rawData += chunk);
         res.on('end', () => {
@@ -5356,6 +5408,10 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
         },
         timeout: 15000
       };
+      if (verdict && Array.isArray(verdict.ips) && verdict.ips.length > 0) {
+        options.lookup = createPinnedLookup(verdict.ips);
+        if (parsedUrl.protocol === 'https:') options.servername = parsedUrl.hostname;
+      }
 
       let resolved = false;
       const tryJinaOrFail = (fallbackError) => {
@@ -6816,6 +6872,10 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
         },
         timeout: 15000
       };
+      if (verdict && Array.isArray(verdict.ips) && verdict.ips.length > 0) {
+        options.lookup = createPinnedLookup(verdict.ips);
+        if (parsedUrl.protocol === 'https:') options.servername = parsedUrl.hostname;
+      }
 
       let resolved = false;
       const tryJinaOrFail = (fallbackError) => {
@@ -7390,6 +7450,1575 @@ try {
   }
 } catch (_) {}
 
+function isStrictLocalOriginHeader(req) {
+  const headers = (req && req.headers) ? req.headers : {};
+  const secFetchSite = String(headers['sec-fetch-site'] || '').trim().toLowerCase();
+  if (secFetchSite === 'cross-site') return false;
+  const checkLocalUrl = (rawUrl) => {
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+      const host = String(parsed.hostname || '').toLowerCase();
+      return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+    } catch (_) {
+      return false;
+    }
+  };
+  const origin = headers.origin;
+  if (origin) return checkLocalUrl(origin);
+  const referer = headers.referer;
+  if (referer) return checkLocalUrl(referer);
+  return true;
+}
+
+function parseBoolParam(val, defaultValue = false) {
+  if (val === undefined || val === null || val === '') return defaultValue;
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'number') return val !== 0;
+  const s = String(val).trim().toLowerCase();
+  if (s === 'true' || s === '1' || s === 'yes' || s === 'ya' || s === 'on') return true;
+  if (s === 'false' || s === '0' || s === 'no' || s === 'tidak' || s === 'off' || s === 'null' || s === 'undefined') return false;
+  return defaultValue;
+}
+
+const SENSITIVE_WORKSPACE_BASENAMES = new Set([
+  'identities.json',
+  'tunnel-state.json',
+  'wa-config.json',
+  'wa-master-config.json',
+  'wa-contacts.json',
+  'wa-messages.json',
+  'wa-raw-media.json',
+  'creds.json',
+  'config.json',
+  'secrets.json',
+  'credentials.json',
+  'openrouter-models-cache.json',
+  'ollama-models-cache.json',
+  'package-lock.json',
+  'image_proxy.secret'
+]);
+const SENSITIVE_WORKSPACE_EXTS = new Set(['.key', '.pem', '.secret', '.p12', '.pfx', '.jks', '.keystore', '.env']);
+const SENSITIVE_WORKSPACE_NAME_RE = /(?:^|[\/_.-])(?:secret|secrets|credential|credentials|password|passwd|private[_-]?key|service[_-]?account|api[_-]?key|access[_-]?token|auth[_-]?token|id_rsa)(?:$|[\/_.-])/i;
+
+function isSensitiveWorkspaceFile(name, relPath = '') {
+  const base = String(name || '').trim().toLowerCase();
+  const rel = String(relPath || '').replace(/\\/g, '/').trim().toLowerCase();
+  if (!base || base.startsWith('.')) return true;
+  if (rel.split('/').some(seg => seg && seg.startsWith('.'))) return true;
+  if (SENSITIVE_WORKSPACE_BASENAMES.has(base)) return true;
+  const ext = path.extname(base);
+  if (SENSITIVE_WORKSPACE_EXTS.has(ext)) return true;
+  if (/^\.env(?:\.|$)/i.test(base) || /^env\.(?:local|prod|production|dev|secret)/i.test(base)) return true;
+  if (SENSITIVE_WORKSPACE_NAME_RE.test(base) || SENSITIVE_WORKSPACE_NAME_RE.test(rel)) return true;
+  return false;
+}
+
+function isPathContainedInRealRoot(realCandidate, realRoot) {
+  if (!realCandidate || !realRoot) return false;
+  const isWin = process.platform === 'win32';
+  const cNorm = isWin ? realCandidate.toLowerCase() : realCandidate;
+  const rNorm = isWin ? realRoot.toLowerCase() : realRoot;
+  const prefix = rNorm.endsWith(path.sep) ? rNorm : (rNorm + path.sep);
+  return cNorm === rNorm || cNorm.startsWith(prefix);
+}
+
+function normalizeCommPhoneDigits(val) {
+  const rawDigits = String(val || '').replace(/\D/g, '');
+  if (!rawDigits || rawDigits.length < 5) return [];
+  const variants = new Set([rawDigits]);
+  if (rawDigits.startsWith('08')) {
+    variants.add('62' + rawDigits.slice(1));
+  } else if (rawDigits.startsWith('628')) {
+    variants.add('0' + rawDigits.slice(2));
+  }
+  return Array.from(variants);
+}
+
+const COMM_META_STOPWORDS = new Set([
+  'whatsapp', 'whatsap', 'whatsapt', 'watsap', 'watsapp', 'wasap', 'whtsapp', 'whastapp', 'wa',
+  'chat', 'chats', 'pesan', 'obrolan', 'percakapan', 'baru', 'terbaru', 'terkini', 'terakhir', 'masuk',
+  'hari', 'ini', 'kemarin', 'minggu', 'bulan', 'sekarang', 'tadi', 'barusan', 'belum', 'dibaca',
+  'dibalas', 'unread', 'new', 'latest', 'recent', 'message', 'messages', 'all', 'semua', 'cek',
+  'periksa', 'lihat', 'baca', 'bacakan', 'tampilkan', 'tunjuk', 'tunjukkan', 'ambil', 'ambilkan',
+  'cari', 'carikan', 'analisa', 'analisis', 'rangkum', 'ringkas', 'rekap', 'tindak', 'lanjut',
+  'kontak', 'grup', 'group', 'email', 'tiket', 'ticket', 'komunikasi', 'riwayat', 'ada', 'gak',
+  'nggak', 'tidak', 'yang', 'dari', 'soal', 'tentang', 'dong', 'tolong', 'saya', 'aku', 'nya',
+  'anda', 'kamu', 'bisa', 'coba', 'bagaimana', 'bagaimaana', 'gimana', 'kalau', 'kalo', 'jika',
+  'apakah', 'siapakah', 'dimana', 'kapan', 'kenapa', 'mengapa', 'isi', 'kasih', 'tahu', 'info',
+  'infokan', 'beritahu', 'jelaskan', 'jam', 'berapa', 'waktu', 'tanggal', 'siapa', 'ngechat',
+  'sama', 'dengan', 'untuk', 'pada', 'apa', 'atau', 'dan', 'ke', 'di', 'do', 'kali', 'bahas',
+  'dibahas', 'membahas', 'pembahasan', 'topik', 'ngobrol', 'ngobrolin', 'diskusi', 'diskusikan'
+]);
+
+function normalizeCommMatchPhrase(str) {
+  if (!str) return '';
+  return String(str)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function formatCommTimestamp(ts) {
+  if (ts === null || ts === undefined || ts === '') return '';
+  let ms = 0;
+  if (typeof ts === 'number' && Number.isFinite(ts)) {
+    ms = ts < 1e12 ? ts * 1000 : ts;
+  } else {
+    const num = Number(ts);
+    if (Number.isFinite(num) && num > 0) {
+      ms = num < 1e12 ? num * 1000 : num;
+    } else {
+      const parsed = Date.parse(String(ts));
+      if (!Number.isFinite(parsed)) return '';
+      ms = parsed;
+    }
+  }
+  if (!ms || ms <= 0) return '';
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function parseCommTimestampMs(ts) {
+  if (ts === null || ts === undefined || ts === '') return 0;
+  if (typeof ts === 'number' && Number.isFinite(ts)) {
+    return ts < 1e12 ? ts * 1000 : ts;
+  }
+  const num = Number(ts);
+  if (Number.isFinite(num) && num > 0) {
+    return num < 1e12 ? num * 1000 : num;
+  }
+  const parsed = Date.parse(String(ts));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatCommRelativeAge(tsMs, nowMs = Date.now()) {
+  if (!tsMs || tsMs <= 0) return '';
+  const diffSec = Math.max(0, Math.round((nowMs - tsMs) / 1000));
+  if (diffSec < 60) return 'baru saja';
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)} menit lalu`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} jam lalu`;
+  if (diffSec < 172800) return 'kemarin';
+  return `${Math.floor(diffSec / 86400)} hari lalu`;
+}
+
+function getServerLocalClockInfo(nowMs = Date.now()) {
+  const now = new Date(nowMs);
+  const daysId = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+  const monthsId = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  ];
+  const pad = (n) => String(n).padStart(2, '0');
+  const dayName = daysId[now.getDay()];
+  const monthName = monthsId[now.getMonth()];
+  const dateText = `${dayName}, ${now.getDate()} ${monthName} ${now.getFullYear()}`;
+  const timeText = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const offsetTotalMin = -now.getTimezoneOffset();
+  const sign = offsetTotalMin >= 0 ? '+' : '-';
+  const absMin = Math.abs(offsetTotalMin);
+  const utcOffset = `UTC${sign}${pad(Math.floor(absMin / 60))}:${pad(absMin % 60)}`;
+  let timeZone = utcOffset;
+  try {
+    timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || utcOffset;
+  } catch (_) {}
+  return {
+    epochMs: nowMs,
+    isoUtc: now.toISOString(),
+    dateText,
+    timeText,
+    timeZone,
+    utcOffset,
+    formattedDateTime: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${timeText}`,
+    summaryLine: `${dateText}, pukul ${timeText} (${timeZone}, ${utcOffset})`
+  };
+}
+
+async function collectCommunicationContext(params, { reqUserId = 'default', waTenant = null } = {}) {
+  const rawSource = String(params?.source || params?.sumber || 'auto').trim().toLowerCase();
+  const validSources = new Set(['auto', 'all', 'whatsapp', 'email', 'team_chat', 'ticket', 'session', 'memory']);
+  const source = validSources.has(rawSource) ? rawSource : 'auto';
+  const targetId = String(
+    params?.target_id || params?.id || params?.target || params?.contact || params?.jid ||
+    params?.phone || params?.ticket_id || params?.email_id || params?.nomor || params?.kontak || ''
+  ).trim();
+  const query = String(
+    params?.query || params?.q || params?.keyword || params?.keywords || params?.kata_kunci ||
+    params?.topic || params?.topik || params?.search || ''
+  ).trim();
+  const limit = Math.max(1, Math.min(15, parseInt(params?.limit, 10) || 6));
+  const maxMessages = Math.max(3, Math.min(80, parseInt(params?.max_messages || params?.maxMessages, 10) || 25));
+  const days = Math.max(0, Math.min(365, parseInt(params?.days || params?.hari, 10) || 0));
+  const sinceMinutes = Math.max(0, Math.min(10080, parseInt(params?.since_minutes || params?.sinceMinutes || params?.menit, 10) || 0));
+  const sortByRaw = String(params?.sort_by || params?.sortBy || params?.urutkan || 'auto').trim().toLowerCase();
+  const sortBy = (sortByRaw === 'recent' || sortByRaw === 'relevance') ? sortByRaw : 'auto';
+  const mode = String(params?.mode || 'full').trim().toLowerCase() === 'live_pulse' ? 'live_pulse' : 'full';
+  const isLivePulse = mode === 'live_pulse';
+  const unreadOnly = parseBoolParam(params?.unread_only ?? params?.unreadOnly ?? params?.belum_dibaca, false);
+  const excludeSessionId = String(params?.exclude_session_id || params?.excludeSessionId || '').trim();
+
+  const nowMs = Date.now();
+  const serverTime = getServerLocalClockInfo(nowMs);
+  const cutoffMs = sinceMinutes > 0
+    ? (nowMs - sinceMinutes * 60000)
+    : (days > 0 ? (nowMs - days * 86400 * 1000) : 0);
+
+  const queryLower = query.toLowerCase();
+  const targetLower = targetId.toLowerCase();
+  const normTargetPhrase = normalizeCommMatchPhrase(targetId);
+  const searchTokens = Array.from(new Set(
+    `${targetLower} ${queryLower}`
+      .replace(/[^\p{L}\p{N}_@.\-#+]/gu, ' ')
+      .split(/\s+/)
+      .map(t => t.replace(/^[^a-zA-Z0-9\p{L}\p{N}]+|[^a-zA-Z0-9\p{L}\p{N}]+$/gu, ''))
+      .filter(t => t.length >= 1)
+  )).slice(0, 14);
+  const substantiveTokens = searchTokens.filter(t => !COMM_META_STOPWORDS.has(t));
+  const normSubstantivePhrase = normalizeCommMatchPhrase(substantiveTokens.join(' '));
+  const phoneVariants = Array.from(new Set([
+    ...normalizeCommPhoneDigits(targetId),
+    ...normalizeCommPhoneDigits(query)
+  ]));
+
+  const wantsUnreadFromQuery = /\b(?:belum\s+(?:dibaca|dibalas)|unread)\b/i.test(queryLower);
+  const effectiveUnreadOnly = unreadOnly || wantsUnreadFromQuery;
+  const wantsRecentFromQuery = /\b(?:chat\s+baru|pesan\s+baru|terbaru|barusan|baru\s+masuk|hari\s+ini|tadi|latest|recent|new)\b/i.test(queryLower);
+  const hasSubstantiveFilter = Boolean(targetId || substantiveTokens.length > 0 || phoneVariants.length > 0);
+  const effectiveSortBy = (sortBy === 'recent' || sortBy === 'relevance')
+    ? sortBy
+    : ((!hasSubstantiveFilter || wantsRecentFromQuery || sinceMinutes > 0 || effectiveUnreadOnly || isLivePulse) ? 'recent' : 'relevance');
+
+  const wantsWhatsApp = source === 'auto' || source === 'all' || source === 'whatsapp';
+  const wantsFiles = !isLivePulse && !(effectiveUnreadOnly && source === 'auto') && (source === 'auto' || source === 'all' || source === 'email' || source === 'team_chat' || source === 'ticket');
+  const wantsSessions = !isLivePulse && !(effectiveUnreadOnly && source === 'auto') && (source === 'auto' || source === 'all' || source === 'session');
+  const wantsMemory = !isLivePulse && !(effectiveUnreadOnly && source === 'auto') && (source === 'auto' || source === 'all' || source === 'memory' || source === 'ticket') && hasSubstantiveFilter;
+
+  const items = [];
+  const stats = {
+    whatsapp: { connected: false, totalContacts: 0, unreadChats: 0, matchedThreads: 0, returnedMessages: 0, recentIncomingCount: 0 },
+    files: { scanned: 0, matchedFiles: 0 },
+    sessions: { scanned: 0, matchedSessions: 0 },
+    memory: { matchedNotes: 0 }
+  };
+  let waDirectoryPreview = [];
+  let recentIncoming = [];
+  let unreadFallback = false;
+
+  // A. WHATSAPP COLLECTOR (Strictly read-only: ALWAYS pass markAsRead: false)
+  if (wantsWhatsApp) {
+    try {
+      const tenant = waTenant;
+      const gw = (tenant && tenant.success && tenant.gateway) ? tenant.gateway : null;
+      const waStatus = gw && typeof gw.getStatus === 'function' ? gw.getStatus() : null;
+      stats.whatsapp.connected = Boolean(waStatus && waStatus.connected);
+
+      let contacts = (gw && typeof gw.getContacts === 'function') ? gw.getContacts() : [];
+      const canUseMasterFallbackFiles = Boolean(tenant && tenant.success && tenant.isMaster);
+      let fallbackMessagesMap = null;
+      const loadFallbackMessages = () => {
+        if (fallbackMessagesMap !== null) return fallbackMessagesMap;
+        fallbackMessagesMap = {};
+        if (!canUseMasterFallbackFiles) return fallbackMessagesMap;
+        try {
+          const msgPath = path.join(DATA_DIR, 'wa-messages.json');
+          if (fs.existsSync(msgPath)) {
+            const parsed = JSON.parse(fs.readFileSync(msgPath, 'utf8'));
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              fallbackMessagesMap = parsed;
+            }
+          }
+        } catch (_) {}
+        return fallbackMessagesMap;
+      };
+
+      if ((!Array.isArray(contacts) || contacts.length === 0) && canUseMasterFallbackFiles) {
+        try {
+          const cPath = path.join(DATA_DIR, 'wa-contacts.json');
+          if (fs.existsSync(cPath)) {
+            const parsedC = JSON.parse(fs.readFileSync(cPath, 'utf8'));
+            if (Array.isArray(parsedC)) contacts = parsedC;
+          }
+        } catch (_) {}
+      }
+
+      const contactMap = new Map();
+      for (const c of (contacts || [])) {
+        if (c && c.id) contactMap.set(c.id, c);
+      }
+      // Sertakan JID yang sudah memiliki pesan masuk baru di memori gateway walau belum masuk daftar kontak
+      if (gw && gw.messages instanceof Map) {
+        for (const [jid, mList] of gw.messages.entries()) {
+          if (!jid || jid === 'status@broadcast' || jid.endsWith('@lid') || jid.includes('6281234567890') || !Array.isArray(mList) || mList.length === 0) continue;
+          if (!contactMap.has(jid)) {
+            const sortedCopy = [...mList].sort((a, b) => parseCommTimestampMs(a?.timestamp) - parseCommTimestampMs(b?.timestamp));
+            const tail = sortedCopy[sortedCopy.length - 1];
+            const isOrphanGroup = jid.includes('@g.us');
+            const cachedSubject = isOrphanGroup ? (gw.groupMetadataCache?.get?.(jid)?.subject || '') : '';
+            contactMap.set(jid, {
+              id: jid,
+              name: isOrphanGroup ? (cachedSubject || `Grup WhatsApp (${jid.split('@')[0]})`) : (tail?.senderName || jid.split('@')[0]),
+              phone: isOrphanGroup ? 'Grup WhatsApp' : jid.split('@')[0],
+              unreadCount: 0,
+              lastMessage: tail?.text || '',
+              lastTimestamp: tail?.timestamp || 0
+            });
+          }
+        }
+      }
+      const rawFallbackMsgs = (!gw || contactMap.size === 0) ? loadFallbackMessages() : {};
+      for (const jid of Object.keys(rawFallbackMsgs || {})) {
+        if (!jid || jid === 'status@broadcast' || jid.endsWith('@lid') || jid.includes('6281234567890')) continue;
+        if (!contactMap.has(jid)) {
+          const list = Array.isArray(rawFallbackMsgs[jid]) ? rawFallbackMsgs[jid] : [];
+          if (list.length === 0) continue;
+          const sortedCopy = [...list].sort((a, b) => parseCommTimestampMs(a?.timestamp) - parseCommTimestampMs(b?.timestamp));
+          const tail = sortedCopy[sortedCopy.length - 1];
+          const isOrphanGroup = jid.includes('@g.us');
+          contactMap.set(jid, {
+            id: jid,
+            name: isOrphanGroup ? `Grup WhatsApp (${jid.split('@')[0]})` : (tail?.senderName || jid.split('@')[0]),
+            phone: isOrphanGroup ? 'Grup WhatsApp' : jid.split('@')[0],
+            unreadCount: 0,
+            lastMessage: tail?.text || '',
+            lastTimestamp: tail?.timestamp || 0
+          });
+        }
+      }
+
+      if (gw && typeof gw.getRecentIncoming === 'function') {
+        let rawInc = gw.getRecentIncoming(cutoffMs, 15).map(ev => {
+          const tsMs = parseCommTimestampMs(ev.timestamp || ev.receivedAt);
+          return {
+            ...ev,
+            timestampMs: tsMs,
+            formattedTime: formatCommTimestamp(tsMs),
+            relativeAge: formatCommRelativeAge(tsMs, nowMs)
+          };
+        });
+        if (hasSubstantiveFilter && !isLivePulse) {
+          rawInc = rawInc.filter(ev => {
+            const hay = `${ev.jid || ''} ${ev.contactName || ''} ${ev.senderName || ''} ${ev.phone || ''} ${ev.text || ''}`.toLowerCase();
+            if (targetLower && hay.includes(targetLower)) return true;
+            if (normTargetPhrase && normalizeCommMatchPhrase(hay).includes(normTargetPhrase)) return true;
+            if (phoneVariants.some(pv => pv.length >= 5 && String(ev.phone || ev.jid || '').replace(/\D/g, '').includes(pv))) return true;
+            return substantiveTokens.some(tok => tok.length >= 2 && hay.includes(tok));
+          });
+        }
+        recentIncoming = rawInc;
+        stats.whatsapp.recentIncomingCount = recentIncoming.length;
+      }
+
+      const allContacts = Array.from(contactMap.values());
+      stats.whatsapp.totalContacts = allContacts.length;
+      stats.whatsapp.unreadChats = allContacts.filter(c => (c.unreadCount || 0) > 0).length;
+
+      waDirectoryPreview = [...allContacts]
+        .sort((a, b) => (parseCommTimestampMs(b.lastTimestamp) - parseCommTimestampMs(a.lastTimestamp)) || ((b.unreadCount || 0) - (a.unreadCount || 0)))
+        .slice(0, 10)
+        .map(c => {
+          const tsMs = parseCommTimestampMs(c.lastTimestamp);
+          return {
+            id: c.id,
+            name: c.name || c.notify || c.phone || c.id,
+            phone: c.phone || '',
+            unreadCount: c.unreadCount || 0,
+            timestampMs: tsMs,
+            lastTimestamp: formatCommTimestamp(tsMs),
+            relativeAge: formatCommRelativeAge(tsMs, nowMs),
+            lastMessage: String(c.lastMessage || '').slice(0, 120)
+          };
+        });
+
+      const scoredThreads = [];
+      const fallbackThreads = [];
+      for (const contact of allContacts) {
+        if (!contact || !contact.id) continue;
+
+        const rawThreadMsgs = (gw && typeof gw.getMessages === 'function')
+          ? gw.getMessages(contact.id, { markAsRead: false })
+          : [];
+        let allContactMsgs = Array.isArray(rawThreadMsgs) && rawThreadMsgs.length > 0
+          ? rawThreadMsgs
+          : (canUseMasterFallbackFiles && !contact.hasClearedHistory && Array.isArray(loadFallbackMessages()[contact.id]) ? loadFallbackMessages()[contact.id] : []);
+        if (!Array.isArray(allContactMsgs)) allContactMsgs = [];
+        if (allContactMsgs.length > 1) {
+          allContactMsgs = [...allContactMsgs].sort((a, b) => parseCommTimestampMs(a?.timestamp) - parseCommTimestampMs(b?.timestamp));
+        }
+
+        const latestUnfilteredMs = allContactMsgs.length > 0
+          ? parseCommTimestampMs(allContactMsgs[allContactMsgs.length - 1]?.timestamp)
+          : parseCommTimestampMs(contact.lastTimestamp);
+
+        let threadMsgs = allContactMsgs;
+        if (cutoffMs > 0) {
+          threadMsgs = allContactMsgs.filter(m => {
+            const ms = parseCommTimestampMs(m && m.timestamp);
+            return ms > 0 && ms >= cutoffMs;
+          });
+        }
+
+        const latestMsgMs = threadMsgs.length > 0
+          ? parseCommTimestampMs(threadMsgs[threadMsgs.length - 1]?.timestamp)
+          : latestUnfilteredMs;
+
+        // Bila filter waktu aktif (`since_minutes` / `days`) dan tidak ada pesan dalam rentang waktu tsb, skip thread ini
+        if (cutoffMs > 0 && threadMsgs.length === 0 && (latestMsgMs <= 0 || latestMsgMs < cutoffMs)) {
+          continue;
+        }
+
+        const jidLower = String(contact.id || '').toLowerCase();
+        const nameLower = String(contact.name || '').toLowerCase();
+        const notifyLower = String(contact.notify || '').toLowerCase();
+        const normName = normalizeCommMatchPhrase(contact.name);
+        const normNotify = normalizeCommMatchPhrase(contact.notify);
+        const normNameWords = new Set(`${normName} ${normNotify}`.split(/\s+/).filter(Boolean));
+        const phoneDigits = String(contact.phone || contact.id.split('@')[0] || '').replace(/\D/g, '');
+        const lastMsgLower = String(contact.lastMessage || '').toLowerCase();
+
+        let score = 0;
+        let contactMatchedDirectly = false;
+        if (targetLower) {
+          if (jidLower === targetLower) { score += 130; contactMatchedDirectly = true; }
+          else if (phoneVariants.some(pv => phoneDigits && (phoneDigits === pv || phoneDigits.endsWith(pv) || (phoneDigits.length >= 6 && pv.endsWith(phoneDigits))))) { score += 110; contactMatchedDirectly = true; }
+          else if (nameLower.includes(targetLower) || notifyLower.includes(targetLower) || (normTargetPhrase && (normName.includes(normTargetPhrase) || normNotify.includes(normTargetPhrase)))) { score += 105; contactMatchedDirectly = true; }
+          else if (jidLower.includes(targetLower)) { score += 70; contactMatchedDirectly = true; }
+        }
+
+        if (normSubstantivePhrase && normSubstantivePhrase.length >= 2) {
+          if (normName === normSubstantivePhrase || normNotify === normSubstantivePhrase) {
+            score += 115;
+            contactMatchedDirectly = true;
+          } else if (normName.includes(normSubstantivePhrase) || normNotify.includes(normSubstantivePhrase)) {
+            score += 95;
+            contactMatchedDirectly = true;
+          } else if (substantiveTokens.length >= 2 && substantiveTokens.every(tok => normNameWords.has(tok))) {
+            score += 85;
+            contactMatchedDirectly = true;
+          }
+        }
+
+        for (const pv of phoneVariants) {
+          if (phoneDigits && (phoneDigits === pv || phoneDigits.endsWith(pv))) {
+            score += 45;
+            contactMatchedDirectly = true;
+            break;
+          }
+        }
+        for (const tok of substantiveTokens) {
+          if (tok.length >= 2 && (nameLower.includes(tok) || notifyLower.includes(tok))) {
+            score += 28;
+          } else if (tok.length === 1 && normNameWords.has(tok)) {
+            score += 18;
+          } else if (tok.length >= 2 && lastMsgLower.includes(tok)) {
+            score += 10;
+          }
+        }
+
+        const matchedIndices = [];
+        let totalMsgHitScore = 0;
+        const matchedDistinctTokens = new Set();
+        let exactPhraseMsgHit = false;
+        if (hasSubstantiveFilter) {
+          for (let idx = 0; idx < threadMsgs.length; idx++) {
+            const m = threadMsgs[idx];
+            if (!m) continue;
+            const mFile = m.fileName || m.media?.fileName || '';
+            const hay = `${m.text || ''} ${m.senderName || ''} ${mFile} ${m.caption || ''}`.toLowerCase();
+            let msgHits = 0;
+            if (targetLower && hay.includes(targetLower)) msgHits += 3;
+            if (normSubstantivePhrase && normSubstantivePhrase.length >= 4 && normalizeCommMatchPhrase(hay).includes(normSubstantivePhrase)) {
+              msgHits += 3;
+              exactPhraseMsgHit = true;
+            }
+            for (const tok of substantiveTokens) {
+              if (tok.length >= 2 && hay.includes(tok)) {
+                msgHits += 1;
+                matchedDistinctTokens.add(tok);
+              }
+            }
+            if (msgHits > 0) {
+              matchedIndices.push(idx);
+              totalMsgHitScore = Math.min(48, totalMsgHitScore + Math.min(16, msgHits * 8));
+            }
+          }
+          score += totalMsgHitScore + (matchedDistinctTokens.size * 12) + (exactPhraseMsgHit ? 20 : 0);
+        }
+
+        const hasSubstantiveMatch = Boolean(contactMatchedDirectly || matchedIndices.length > 0 || (hasSubstantiveFilter && score > 0));
+        if (hasSubstantiveFilter && !hasSubstantiveMatch && !isLivePulse) continue;
+        if ((!hasSubstantiveFilter || isLivePulse) && threadMsgs.length === 0 && !contact.lastMessage) continue;
+
+        const ageMs = latestMsgMs > 0 ? Math.max(0, nowMs - latestMsgMs) : Infinity;
+        const recencyBonus = ageMs <= 15 * 60000 ? 55
+          : ageMs <= 2 * 3600000 ? 45
+          : ageMs <= 24 * 3600000 ? 35
+          : ageMs <= 7 * 86400000 ? 22
+          : ageMs <= 30 * 86400000 ? 12 : 4;
+
+        if (!hasSubstantiveFilter) {
+          score += recencyBonus + ((contact.unreadCount > 0) ? 25 : 0);
+        } else {
+          score += Math.min(12, Math.floor(recencyBonus / 4)) + ((contact.unreadCount > 0) ? 5 : 0);
+        }
+
+        // Pilih pesan kronologis dengan konteks sekitar kecocokan
+        const chosenSet = new Set();
+        if (matchedIndices.length > 0 && !contactMatchedDirectly) {
+          const recentHits = matchedIndices.slice(-6);
+          for (const hi of recentHits) {
+            for (let k = Math.max(0, hi - 2); k <= Math.min(threadMsgs.length - 1, hi + 2); k++) {
+              chosenSet.add(k);
+            }
+          }
+        }
+        const tailCount = (contactMatchedDirectly || matchedIndices.length === 0) ? maxMessages : 6;
+        const tailStart = Math.max(0, threadMsgs.length - tailCount);
+        for (let k = tailStart; k < threadMsgs.length; k++) {
+          chosenSet.add(k);
+        }
+        const chosenIndices = Array.from(chosenSet).sort((a, b) => a - b).slice(-maxMessages);
+        const selectedMsgs = chosenIndices.map(i => threadMsgs[i]).filter(Boolean);
+
+        const formattedMessages = selectedMsgs.map(m => {
+          const who = m.fromMe ? 'Anda' : (m.senderName || contact.name || contact.phone || contact.id);
+          const mTsMs = parseCommTimestampMs(m.timestamp);
+          const timeStr = formatCommTimestamp(mTsMs);
+          const relAge = formatCommRelativeAge(mTsMs, nowMs);
+          const mediaType = m.mediaType || m.media?.type || '';
+          const mediaFileName = m.fileName || m.media?.fileName || '';
+          const mediaTag = (m.hasFile || mediaType || mediaFileName)
+            ? ` [${mediaType || 'Lampiran'}${mediaFileName ? `: ${mediaFileName}` : ''}]`
+            : '';
+          const msgBody = String(m.text || m.caption || '').replace(/\s+/g, ' ').trim();
+          const finalLineText = mediaFileName && msgBody.includes(mediaFileName) ? msgBody : `${msgBody}${mediaTag}`;
+          return {
+            timestamp: timeStr,
+            timestampMs: mTsMs,
+            relativeAge: relAge,
+            sender: who,
+            fromMe: Boolean(m.fromMe),
+            text: finalLineText.trim().slice(0, 600)
+          };
+        });
+        if (formattedMessages.length === 0 && contact.lastMessage) {
+          const fallbackTs = latestMsgMs || parseCommTimestampMs(contact.lastTimestamp);
+          formattedMessages.push({
+            timestamp: formatCommTimestamp(fallbackTs),
+            timestampMs: fallbackTs,
+            relativeAge: formatCommRelativeAge(fallbackTs, nowMs),
+            sender: contact.name || contact.phone || contact.id,
+            fromMe: false,
+            text: String(contact.lastMessage).replace(/\s+/g, ' ').trim().slice(0, 600)
+          });
+        }
+
+        const threadObj = {
+          source: 'whatsapp',
+          id: contact.id,
+          title: contact.name || contact.notify || contact.phone || contact.id,
+          phone: contact.phone || '',
+          isGroup: Boolean(contact.isGroup || String(contact.id).endsWith('@g.us')),
+          unreadCount: contact.unreadCount || 0,
+          totalMessages: threadMsgs.length,
+          timestampMs: latestMsgMs || parseCommTimestampMs(contact.lastTimestamp),
+          lastTimestamp: formatCommTimestamp(latestMsgMs || contact.lastTimestamp),
+          relativeAge: formatCommRelativeAge(latestMsgMs || parseCommTimestampMs(contact.lastTimestamp), nowMs),
+          hasMatch: hasSubstantiveMatch,
+          score,
+          messages: formattedMessages
+        };
+
+        if (effectiveUnreadOnly && !(contact.unreadCount > 0)) {
+          fallbackThreads.push(threadObj);
+          continue;
+        }
+        scoredThreads.push(threadObj);
+      }
+
+      if (effectiveUnreadOnly && scoredThreads.length === 0 && fallbackThreads.length > 0 && !hasSubstantiveFilter) {
+        unreadFallback = true;
+        fallbackThreads.sort((a, b) => (b.timestampMs - a.timestampMs));
+        scoredThreads.push(...fallbackThreads.slice(0, 3));
+      }
+
+      if (effectiveSortBy === 'recent') {
+        scoredThreads.sort((a, b) => {
+          if (isLivePulse && hasSubstantiveFilter) {
+            const ma = a.hasMatch ? 1 : 0;
+            const mb = b.hasMatch ? 1 : 0;
+            if (mb !== ma) return mb - ma;
+            if (ma && mb && b.score !== a.score) return b.score - a.score;
+          }
+          if (effectiveUnreadOnly) {
+            const ua = (a.unreadCount || 0) > 0 ? 1 : 0;
+            const ub = (b.unreadCount || 0) > 0 ? 1 : 0;
+            if (ub !== ua) return ub - ua;
+          }
+          return (b.timestampMs - a.timestampMs) || (b.score - a.score);
+        });
+      } else {
+        scoredThreads.sort((a, b) => (b.score - a.score) || (b.timestampMs - a.timestampMs));
+      }
+
+      const pickedWa = scoredThreads.slice(0, source === 'whatsapp' ? limit : Math.min(limit, 5));
+      stats.whatsapp.matchedThreads = scoredThreads.length;
+      for (const tw of pickedWa) {
+        stats.whatsapp.returnedMessages += tw.messages.length;
+        items.push(tw);
+      }
+    } catch (waErr) {
+      console.warn('[fetch_communication_context] WhatsApp scan warning:', waErr.message);
+    }
+  }
+
+  // B. LOCAL EMAILS, TEAM CHATS & TICKET NOTES COLLECTOR
+  if (wantsFiles) {
+    try {
+      const COMM_DIR = path.join(DATA_DIR, 'communications');
+      const ALLOWED_EXTS = new Set(['.eml', '.mbox', '.msg', '.md', '.txt', '.json', '.csv', '.tsv', '.log', '.yaml', '.yml']);
+      const SKIP_DIRS = new Set(['node_modules', '.git', '.zoz-snapshots', '.gemini', 'public', 'dist', 'build', '.cache', 'data', 'wa-auth', 'wa-users']);
+      const candidates = [];
+      const seenCommPaths = new Set();
+      let walkedCount = 0;
+
+      const walkCommDir = async (dir, rootLabel, realRoot, depth = 0) => {
+        if (depth > 5 || walkedCount >= 400 || !realRoot) return;
+        let entries;
+        try {
+          entries = await fsp.readdir(dir, { withFileTypes: true });
+        } catch (_) {
+          return;
+        }
+        for (const entry of entries) {
+          if (walkedCount >= 400) break;
+          const name = entry.name;
+          if (!name || entry.isSymbolicLink()) continue;
+          const fullPath = path.join(dir, name);
+          if (entry.isDirectory()) {
+            if (SKIP_DIRS.has(name.toLowerCase()) || name.startsWith('.')) continue;
+            try {
+              const realSub = await fsp.realpath(fullPath);
+              if (!isPathContainedInRealRoot(realSub, realRoot)) continue;
+            } catch (_) {
+              continue;
+            }
+            await walkCommDir(fullPath, rootLabel, realRoot, depth + 1);
+          } else if (entry.isFile()) {
+            const relPath = path.relative(rootLabel === 'comm' ? DATA_DIR : WORKSPACE_ROOT, fullPath).replace(/\\/g, '/');
+            if (isSensitiveWorkspaceFile(name, relPath)) continue;
+            const ext = path.extname(name).toLowerCase();
+            if (!ALLOWED_EXTS.has(ext)) continue;
+            if (/^package-lock\.json$/i.test(name) || /^verify_/i.test(name)) continue;
+            try {
+              const lstat = await fsp.lstat(fullPath);
+              if (lstat.isSymbolicLink() || !lstat.isFile()) continue;
+              if (lstat.size <= 0 || lstat.size > 524288) continue;
+              if (cutoffMs > 0 && lstat.mtimeMs < cutoffMs) continue;
+              const realFull = await fsp.realpath(fullPath);
+              if (!isPathContainedInRealRoot(realFull, realRoot)) continue;
+              const dedupKey = process.platform === 'win32' ? realFull.toLowerCase() : realFull;
+              if (seenCommPaths.has(dedupKey)) continue;
+              seenCommPaths.add(dedupKey);
+              walkedCount++;
+              candidates.push({ fullPath: realFull, relPath, name, ext, mtimeMs: lstat.mtimeMs, fromCommDir: rootLabel === 'comm' });
+            } catch (_) {}
+          }
+        }
+      };
+
+      if (fs.existsSync(COMM_DIR)) {
+        try {
+          const realCommRoot = await fsp.realpath(COMM_DIR);
+          await walkCommDir(COMM_DIR, 'comm', realCommRoot, 0);
+        } catch (_) {}
+      }
+      try {
+        const realWsRoot = await fsp.realpath(WORKSPACE_ROOT);
+        await walkCommDir(WORKSPACE_ROOT, 'workspace', realWsRoot, 0);
+      } catch (_) {}
+      stats.files.scanned = walkedCount;
+
+      const fileMatches = [];
+      const fileMatchTokens = substantiveTokens.length > 0 ? substantiveTokens : [];
+      for (const cand of candidates) {
+        let raw = '';
+        try {
+          raw = await fsp.readFile(cand.fullPath, 'utf8');
+        } catch (_) {
+          continue;
+        }
+        if (!raw || raw.includes('\u0000')) continue;
+        const pathLower = cand.relPath.toLowerCase();
+        const headSlice = raw.slice(0, 2000);
+        const isEmail = cand.ext === '.eml' || cand.ext === '.mbox' || cand.ext === '.msg' ||
+          /(?:email|mail|inbox|surel)/i.test(pathLower) ||
+          (/^\s*From:\s*.+/im.test(headSlice) && /^\s*Subject:\s*.+/im.test(headSlice));
+        const isTicket = /(?:ticket|tiket|issue|incident|support|helpdesk|jira|bug)/i.test(pathLower) ||
+          /\b(?:TICKET|TKT|INC|BUG|ISSUE|JIRA|CASE|REQ|SR)[-_#]?\d+\b/i.test(cand.name + ' ' + headSlice);
+        const isTeamChat = /(?:chat|whatsapp|slack|discord|teams|telegram|notulen|meeting|pesan|tim)/i.test(pathLower) ||
+          /^\s*\[?\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4},?\s+\d{1,2}[:.]\d{2}/m.test(headSlice);
+
+        let kind = isEmail ? 'email' : (isTicket ? 'ticket' : (isTeamChat ? 'team_chat' : (cand.fromCommDir ? 'team_chat' : '')));
+        if (!kind) {
+          // Only match non-communication workspace files when explicitly referenced by target_id or source==='all' + substantive query
+          if (!(targetLower && (pathLower.includes(targetLower) || raw.toLowerCase().includes(targetLower))) && !(source === 'all' && hasSubstantiveFilter)) {
+            continue;
+          }
+          kind = 'ticket';
+        }
+
+        if (source === 'email' && kind !== 'email') continue;
+        if (source === 'ticket' && kind !== 'ticket') continue;
+        if (source === 'team_chat' && kind !== 'team_chat') continue;
+
+        const contentLower = raw.toLowerCase();
+        let score = 0;
+        if (targetLower) {
+          if (cand.name.toLowerCase() === targetLower || pathLower === targetLower) score += 120;
+          else if (pathLower.includes(targetLower) || contentLower.includes(targetLower)) score += 90;
+        }
+        for (const tok of fileMatchTokens) {
+          if (tok.length >= 2 && pathLower.includes(tok)) score += 25;
+          if (tok.length >= 2 && contentLower.includes(tok)) score += 12;
+        }
+        if (hasSubstantiveFilter) {
+          if (score <= 0) continue;
+        } else {
+          score += cand.fromCommDir ? 30 : 10;
+        }
+
+        let headers = null;
+        if (kind === 'email') {
+          const fromM = headSlice.match(/^From:\s*(.+)$/im);
+          const toM = headSlice.match(/^To:\s*(.+)$/im);
+          const subjM = headSlice.match(/^Subject:\s*(.+)$/im);
+          const dateM = headSlice.match(/^Date:\s*(.+)$/im);
+          if (fromM || subjM) {
+            headers = {
+              from: fromM ? fromM[1].trim() : '',
+              to: toM ? toM[1].trim() : '',
+              subject: subjM ? subjM[1].trim() : '',
+              date: dateM ? dateM[1].trim() : ''
+            };
+          }
+        }
+
+        const lines = raw.split(/\r?\n/);
+        const hitLineIdx = [];
+        for (let li = 0; li < lines.length; li++) {
+          const ll = lines[li].toLowerCase();
+          if ((targetLower && ll.includes(targetLower)) || fileMatchTokens.some(tok => tok.length >= 2 && ll.includes(tok))) {
+            hitLineIdx.push(li);
+          }
+        }
+        const chosenLineSet = new Set();
+        if (hitLineIdx.length > 0) {
+          for (const hi of hitLineIdx.slice(0, 8)) {
+            for (let k = Math.max(0, hi - 3); k <= Math.min(lines.length - 1, hi + 3); k++) {
+              chosenLineSet.add(k);
+            }
+          }
+        } else {
+          for (let k = 0; k < Math.min(lines.length, 30); k++) chosenLineSet.add(k);
+        }
+        const excerpt = Array.from(chosenLineSet).sort((a, b) => a - b).map(i => lines[i]).join('\n').slice(0, 1800);
+
+        fileMatches.push({
+          source: kind,
+          id: cand.relPath,
+          title: (headers && headers.subject) ? headers.subject : cand.name,
+          path: cand.relPath,
+          headers,
+          timestampMs: cand.mtimeMs,
+          lastTimestamp: formatCommTimestamp(cand.mtimeMs),
+          score,
+          excerpt
+        });
+      }
+
+      fileMatches.sort((a, b) => (b.score - a.score) || (b.timestampMs - a.timestampMs));
+      stats.files.matchedFiles = fileMatches.length;
+      for (const fm of fileMatches.slice(0, limit)) {
+        items.push(fm);
+      }
+    } catch (fErr) {
+      console.warn('[fetch_communication_context] Workspace/comm scan warning:', fErr.message);
+    }
+  }
+
+  // C. LOCAL AI CHAT SESSIONS COLLECTOR
+  if (wantsSessions) {
+    try {
+      const uidClean = sanitizeUserId(reqUserId || 'default');
+      const dirsToCheck = [path.join(SESSIONS_DIR, uidClean)];
+
+      const seenSessIds = new Set();
+      const sessCandidates = [];
+      for (const sDir of dirsToCheck) {
+        if (!fs.existsSync(sDir)) continue;
+        const files = (await fsp.readdir(sDir)).filter(f =>
+          f.endsWith('.json') &&
+          !isInternalSubtaskSessionId(path.basename(f, '.json')) &&
+          !/^incog_/i.test(f)
+        );
+        for (const f of files.slice(0, 300)) {
+          const full = path.join(sDir, f);
+          try {
+            const st = await fsp.stat(full);
+            if (cutoffMs > 0 && st.mtimeMs < cutoffMs) continue;
+            sessCandidates.push({ full, mtimeMs: st.mtimeMs });
+          } catch (_) {}
+        }
+      }
+      sessCandidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+      stats.sessions.scanned = sessCandidates.length;
+
+      const sessMatches = [];
+      const sessMatchTokens = substantiveTokens.length > 0 ? substantiveTokens : [];
+      for (const sc of sessCandidates.slice(0, 50)) {
+        try {
+          const obj = JSON.parse(await fsp.readFile(sc.full, 'utf8'));
+          if (!obj || !obj.id || obj.id === excludeSessionId || seenSessIds.has(obj.id)) continue;
+          if (obj.isIncognito === true || /^incog_/i.test(obj.id) || obj.title === 'Obrolan Privat' || isInternalSubtaskSessionId(obj.id)) continue;
+          seenSessIds.add(obj.id);
+          const msgs = Array.isArray(obj.messages) ? obj.messages : [];
+          if (msgs.length === 0) continue;
+
+          const titleLower = String(obj.title || '').toLowerCase();
+          const idLower = String(obj.id || '').toLowerCase();
+          let score = 0;
+          if (targetLower && (idLower === targetLower || idLower.includes(targetLower) || titleLower.includes(targetLower))) {
+            score += 95;
+          }
+          for (const tok of sessMatchTokens) {
+            if (tok.length >= 2 && titleLower.includes(tok)) score += 20;
+          }
+          const hitMsgs = [];
+          for (const m of msgs) {
+            const c = String(m?.content || '');
+            const cl = c.toLowerCase();
+            if ((targetLower && cl.includes(targetLower)) || sessMatchTokens.some(tok => tok.length >= 2 && cl.includes(tok))) {
+              score += 10;
+              hitMsgs.push({ role: m.role || 'user', text: c.replace(/\s+/g, ' ').trim().slice(0, 320), timestamp: formatCommTimestamp(m.timestamp) });
+            }
+          }
+          if (hasSubstantiveFilter && score <= 0) continue;
+          if (!hasSubstantiveFilter) score += 5;
+
+          const chosenMsgs = (hitMsgs.length > 0 ? hitMsgs : msgs.map(m => ({ role: m.role || 'user', text: String(m?.content || '').replace(/\s+/g, ' ').trim().slice(0, 320), timestamp: formatCommTimestamp(m?.timestamp) }))).slice(-6);
+          const tsMs = parseCommTimestampMs(obj.updatedAt) || sc.mtimeMs;
+          sessMatches.push({
+            source: 'session',
+            id: obj.id,
+            title: obj.title || obj.id,
+            timestampMs: tsMs,
+            lastTimestamp: formatCommTimestamp(tsMs),
+            score,
+            messages: chosenMsgs
+          });
+        } catch (_) {}
+      }
+      sessMatches.sort((a, b) => (b.score - a.score) || (b.timestampMs - a.timestampMs));
+      stats.sessions.matchedSessions = sessMatches.length;
+      const capSess = source === 'session' ? limit : Math.min(2, limit);
+      for (const sm of sessMatches.slice(0, capSess)) {
+        items.push(sm);
+      }
+    } catch (sErr) {
+      console.warn('[fetch_communication_context] Session scan warning:', sErr.message);
+    }
+  }
+
+  // D. LOCAL SQLITE MEMORY COLLECTOR
+  if (wantsMemory) {
+    try {
+      const memRes = searchMemoryRecords(reqUserId || 'default', query || targetId, Math.min(limit, 5));
+      if (memRes && Array.isArray(memRes.results) && memRes.results.length > 0) {
+        stats.memory.matchedNotes = memRes.results.length;
+        for (const r of memRes.results) {
+          items.push({
+            source: 'memory',
+            id: `mem:${r.topic}`,
+            title: r.topic,
+            timestampMs: 0,
+            lastTimestamp: '',
+            score: 35,
+            excerpt: String(r.content || '').slice(0, 800)
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (effectiveSortBy === 'recent') {
+    items.sort((a, b) => {
+      if (effectiveUnreadOnly) {
+        const ua = (a.unreadCount || 0) > 0 ? 1 : 0;
+        const ub = (b.unreadCount || 0) > 0 ? 1 : 0;
+        if (ub !== ua) return ub - ua;
+      }
+      return ((b.timestampMs || 0) - (a.timestampMs || 0)) || (b.score - a.score);
+    });
+  } else {
+    items.sort((a, b) => (b.score - a.score) || ((b.timestampMs || 0) - (a.timestampMs || 0)));
+  }
+  const finalItems = items.slice(0, limit);
+
+  // Format konteks terstruktur lengkap dengan waktu real-time & pesan terbaru untuk LLM
+  const lines = [];
+  lines.push(`[KONTEKS KOMUNIKASI LOKAL — MODE Z21 LOCALHOST]`);
+  lines.push(`Waktu Lokal Server Sekarang: ${serverTime.summaryLine}`);
+  lines.push(`Filter: mode=${mode} | source=${source} | sort_by=${effectiveSortBy} | target_id="${targetId || '-'}" | query="${query || '-'}" | since_minutes=${sinceMinutes || 0} | days=${days || 'semua'} | unread_only=${effectiveUnreadOnly}`);
+  lines.push(`Statistik Sumber: WhatsApp(${stats.whatsapp.totalContacts} kontak, ${stats.whatsapp.unreadChats} belum dibaca, ${stats.whatsapp.matchedThreads} cocok, masuk_baru_live=${stats.whatsapp.recentIncomingCount}, status=${stats.whatsapp.connected ? 'Terhubung' : 'Arsip Lokal'}) | File Email/Tiket/Chat(${stats.files.matchedFiles}/${stats.files.scanned}) | Sesi AI(${stats.sessions.matchedSessions}/${stats.sessions.scanned}) | Memori(${stats.memory.matchedNotes})`);
+
+  if (unreadFallback) {
+    lines.push(`\n[INFO UNREAD]: Saat ini tidak ada obrolan dengan badge unreadCount > 0; menampilkan 3 thread paling baru masuk sebagai referensi.`);
+  }
+
+  if (recentIncoming.length > 0) {
+    lines.push(`\n[PESAN WHATSAPP BARU MASUK LIVE (REAL-TIME)]:`);
+    recentIncoming.slice(0, 8).forEach((ev, idx) => {
+      const senderLabel = ev.senderName && ev.senderName !== ev.contactName ? ` (${ev.senderName})` : '';
+      const mediaNote = ev.hasFile && ev.fileName ? ` [Lampiran: ${ev.fileName}]` : '';
+      lines.push(`  ${idx + 1}. [${ev.formattedTime || '-'} | ${ev.relativeAge || 'baru saja'}] ${ev.contactName || ev.jid}${senderLabel}: ${String(ev.text || '').replace(/\s+/g, ' ').slice(0, 260)}${mediaNote}`);
+    });
+  }
+
+  if (finalItems.length === 0) {
+    if (sinceMinutes > 0 || days > 0) {
+      lines.push(`\nTidak ada pesan baru masuk dalam rentang waktu tersebut (${sinceMinutes > 0 ? `${sinceMinutes} menit terakhir` : `${days} hari terakhir`}) hingga ${serverTime.timeText}.`);
+    } else {
+      lines.push('\nTidak ditemukan kecocokan langsung pada riwayat komunikasi lokal untuk kriteria tersebut.');
+    }
+    if (waDirectoryPreview.length > 0) {
+      lines.push('\nAktivitas Kontak/Grup WhatsApp Paling Baru di Disk (dapat dipakai sebagai target_id):');
+      waDirectoryPreview.slice(0, 8).forEach((c, i) => {
+        const ageMeta = c.relativeAge ? ` (${c.relativeAge})` : '';
+        lines.push(`  ${i + 1}. ${c.name} (${c.id}${c.unreadCount > 0 ? `, belum dibaca: ${c.unreadCount}` : ''})${c.lastTimestamp ? ` [${c.lastTimestamp}${ageMeta}]` : ''}${c.lastMessage ? ` — "${c.lastMessage}"` : ''}`);
+      });
+    }
+    if (!isLivePulse) {
+      lines.push('\nCatatan: Untuk email (.eml/.mbox), log chat tim (.txt/.json), atau catatan tiket (.md), file dapat diletakkan di direktori proyek atau folder `data/communications/`.');
+    }
+  } else {
+    finalItems.forEach((it, idx) => {
+      const ageLabel = it.relativeAge ? ` (${it.relativeAge})` : '';
+      lines.push(`\n[${idx + 1}] [${String(it.source || '').toUpperCase()}] ${it.title} (ID: ${it.id}${it.lastTimestamp ? ` | Terakhir: ${it.lastTimestamp}${ageLabel}` : ''}${it.unreadCount ? ` | Belum dibaca: ${it.unreadCount}` : ''})`);
+      if (it.headers) {
+        if (it.headers.from) lines.push(`    From: ${it.headers.from}`);
+        if (it.headers.to) lines.push(`    To: ${it.headers.to}`);
+        if (it.headers.date) lines.push(`    Date: ${it.headers.date}`);
+      }
+      if (Array.isArray(it.messages) && it.messages.length > 0) {
+        for (const m of it.messages) {
+          const msgAge = m.relativeAge ? ` | ${m.relativeAge}` : '';
+          lines.push(`    - [${m.timestamp || '-'}${msgAge}] ${m.sender || m.role || 'Pengirim'}: ${m.text}`);
+        }
+      } else if (it.excerpt) {
+        lines.push(`    Cuplikan:\n    ${String(it.excerpt).replace(/\n/g, '\n    ')}`);
+      }
+    });
+  }
+
+  return {
+    success: true,
+    localhostOnly: true,
+    planMode: 'z21',
+    mode,
+    sortBy: effectiveSortBy,
+    serverTime,
+    source,
+    query,
+    target_id: targetId,
+    unreadFallback,
+    stats,
+    recentIncoming,
+    count: finalItems.length,
+    items: finalItems,
+    directoryPreview: waDirectoryPreview,
+    formattedContext: lines.join('\n').slice(0, 13500)
+  };
+}
+
+// =========================================================================
+// DYNAMIC REAL-TIME RAG ENGINE: search_documents / retrieve_knowledge
+// Hybrid Vector Cosine Similarity + SQLite FTS5 BM25 + Knowledge Graph +
+// Dynamic Document Section Chunking (SOP, Laporan, Regulasi, Kebijakan)
+// =========================================================================
+const RAG_DOC_STOPWORDS = new Set([
+  'cari', 'carikan', 'ambil', 'ambilkan', 'dokumen', 'document', 'documents', 'knowledge',
+  'pengetahuan', 'potongan', 'chunk', 'relevan', 'tentang', 'mengenai', 'soal', 'terkait',
+  'yang', 'dan', 'atau', 'dari', 'pada', 'untuk', 'dengan', 'dalam', 'di', 'ke', 'ini', 'itu',
+  'apa', 'bagaimana', 'berapa', 'siapa', 'kapan', 'dimana', 'tolong', 'lihat', 'cek', 'periksa',
+  'baca', 'isi', 'aturan', 'berdasarkan', 'menurut', 'internal', 'database', 'vector', 'rag'
+]);
+
+function inferInternalDocCategory(relPath, contentPreview = '') {
+  const hay = `${relPath || ''} ${String(contentPreview || '').slice(0, 600)}`.toLowerCase();
+  if (/\b(?:sop|standar\s+operasional|prosedur\s+operasional|standard\s+operating)\b/i.test(hay)) return 'sop';
+  if (/\b(?:regulasi|peraturan|undang-undang|pasal|kepatuhan|compliance|hukum)\b/i.test(hay)) return 'regulasi';
+  if (/\b(?:kebijakan|policy|diskon|cuti|klaim|reimbursement|sla|garansi|privasi)\b/i.test(hay)) return 'kebijakan';
+  if (/\b(?:laporan|report|keuangan|penjualan|audit|rekap|kuartal|bulanan|tahunan|kpi)\b/i.test(hay)) return 'laporan';
+  if (/\b(?:panduan|manual|guide|handbook|pedoman|instruksi|tutorial)\b/i.test(hay)) return 'panduan';
+  return 'workspace';
+}
+
+const RAG_DOC_CHUNK_CACHE = new Map();
+const RAG_DOC_CHUNK_CACHE_MAX = 150;
+
+function splitDocumentIntoDynamicRagChunks(rawText, docMeta = {}) {
+  const cleanText = String(rawText || '').replace(/\r\n/g, '\n').trim();
+  if (!cleanText) return [];
+  const maxChunkChars = Math.max(250, Math.min(2000, parseInt(docMeta.chunkSize, 10) || 900));
+  const overlapChars = Math.min(120, Math.floor(maxChunkChars / 5));
+  const lines = cleanText.split('\n');
+  const sections = [];
+  let currentHeading = docMeta.title || 'Bagian Utama';
+  let currentBuf = [];
+
+  const headingRegex = /^(?:#{1,4}\s+(.+)|((?:PASAL|BAB|BAGIAN|SOP|KLAUSUL|POIN|SECTION|CHAPTER)\s+[A-Za-z0-9.\-_:()\/,\s]{1,100}))$/i;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const hm = trimmed.match(headingRegex);
+    if (hm && currentBuf.join('\n').trim().length >= 80) {
+      sections.push({ heading: currentHeading, body: currentBuf.join('\n').trim() });
+      currentHeading = (hm[1] || hm[2] || trimmed).replace(/^#+\s*/, '').trim().slice(0, 120);
+      currentBuf = [line];
+    } else {
+      if (hm && currentBuf.join('\n').trim().length < 80) {
+        currentHeading = (hm[1] || hm[2] || trimmed).replace(/^#+\s*/, '').trim().slice(0, 120);
+      }
+      currentBuf.push(line);
+    }
+  }
+  if (currentBuf.join('\n').trim()) {
+    sections.push({ heading: currentHeading, body: currentBuf.join('\n').trim() });
+  }
+
+  const chunks = [];
+  let chunkIndex = 0;
+  const pushOversizedBlock = (blockText, secHeading) => {
+    const subLines = blockText.split('\n');
+    let subBuf = '';
+    for (const sl of subLines) {
+      if (sl.length > maxChunkChars) {
+        if (subBuf.trim()) {
+          chunks.push({ chunkIndex: ++chunkIndex, section: secHeading, text: subBuf.trim() });
+          subBuf = '';
+        }
+        const step = Math.max(150, maxChunkChars - overlapChars);
+        for (let offset = 0; offset < sl.length; offset += step) {
+          const piece = sl.slice(offset, offset + maxChunkChars).trim();
+          if (piece) chunks.push({ chunkIndex: ++chunkIndex, section: secHeading, text: piece });
+          if (offset + maxChunkChars >= sl.length) break;
+        }
+      } else {
+        const nextSub = subBuf ? `${subBuf}\n${sl}` : sl;
+        if (nextSub.length > maxChunkChars && subBuf.trim()) {
+          chunks.push({ chunkIndex: ++chunkIndex, section: secHeading, text: subBuf.trim() });
+          const ov = subBuf.slice(-overlapChars).trim();
+          subBuf = (ov && (ov.length + 1 + sl.length) <= maxChunkChars) ? `${ov}\n${sl}` : sl;
+        } else {
+          subBuf = nextSub;
+        }
+      }
+    }
+    if (subBuf.trim()) {
+      chunks.push({ chunkIndex: ++chunkIndex, section: secHeading, text: subBuf.trim() });
+    }
+  };
+
+  for (const sec of sections) {
+    if (chunks.length >= 120) break;
+    if (sec.body.length <= maxChunkChars) {
+      chunks.push({
+        chunkIndex: ++chunkIndex,
+        section: sec.heading,
+        text: sec.body
+      });
+    } else {
+      const paras = sec.body.split(/\n\s*\n/);
+      let windowBuf = '';
+      for (const p of paras) {
+        if (chunks.length >= 120) break;
+        if (p.length > maxChunkChars) {
+          if (windowBuf.trim()) {
+            chunks.push({ chunkIndex: ++chunkIndex, section: sec.heading, text: windowBuf.trim() });
+            windowBuf = '';
+          }
+          pushOversizedBlock(p, sec.heading);
+          continue;
+        }
+        const candidate = windowBuf ? `${windowBuf}\n\n${p}` : p;
+        if (candidate.length > maxChunkChars && windowBuf.length >= 80) {
+          chunks.push({
+            chunkIndex: ++chunkIndex,
+            section: sec.heading,
+            text: windowBuf.trim()
+          });
+          const rawOverlap = windowBuf.slice(-overlapChars).trim();
+          const maxAllowedOverlap = Math.max(0, maxChunkChars - p.length - 2);
+          const boundedOverlap = rawOverlap.slice(-maxAllowedOverlap).trim();
+          windowBuf = (boundedOverlap && (boundedOverlap.length + 1 + p.length) <= maxChunkChars)
+            ? `${boundedOverlap}\n${p}`
+            : p;
+        } else {
+          windowBuf = candidate;
+        }
+      }
+      if (windowBuf.trim() && chunks.length < 120) {
+        chunks.push({
+          chunkIndex: ++chunkIndex,
+          section: sec.heading,
+          text: windowBuf.trim()
+        });
+      }
+    }
+  }
+  return chunks.slice(0, 120);
+}
+
+async function collectDocumentKnowledgeRAG(params = {}, { reqUserId = 'default' } = {}) {
+  const query = String(
+    params?.query || params?.q || params?.keyword || params?.keywords || params?.kata_kunci ||
+    params?.topic || params?.topik || params?.search || ''
+  ).trim();
+  const docIdFilter = String(
+    params?.doc_id || params?.docId || params?.document_id || params?.id || params?.file || params?.filename || params?.path || ''
+  ).trim().replace(/\\/g, '/');
+  const rawCategory = String(params?.category || params?.kategori || params?.type || params?.doc_type || 'auto').trim().toLowerCase();
+  const validCategories = new Set(['auto', 'all', 'sop', 'laporan', 'regulasi', 'kebijakan', 'panduan', 'vector_db', 'workspace']);
+  const category = validCategories.has(rawCategory) ? rawCategory : 'auto';
+  const topK = Math.max(1, Math.min(15, parseInt(params?.top_k || params?.topK || params?.limit || params?.max_results, 10) || 5));
+  const scope = String(params?.scope || 'global').trim() || 'global';
+  const nowMs = Date.now();
+  const serverTime = getServerLocalClockInfo(nowMs);
+
+  let memDb = null;
+  let memRetriever = null;
+  try {
+    memDb = require('./src/memory/storage/db');
+    memRetriever = require('./src/memory/pipeline/retriever');
+  } catch (_) {}
+
+  const effectiveQuery = query || docIdFilter || (category !== 'auto' && category !== 'all' ? category : '');
+  const queryLower = query.toLowerCase();
+  const docIdLower = docIdFilter.toLowerCase();
+  const normDocId = normalizeCommMatchPhrase(docIdFilter);
+
+  const tokenizeRagString = (str) => Array.from(new Set(
+    String(str || '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}_.\-#]/gu, ' ')
+      .split(/[\s_./\-]+/)
+      .map(t => t.replace(/^[^a-zA-Z0-9\p{L}\p{N}]+|[^a-zA-Z0-9\p{L}\p{N}]+$/gu, ''))
+      .filter(t => t.length >= 2)
+  )).slice(0, 14);
+
+  const queryAllTokens = query ? tokenizeRagString(queryLower) : [];
+  const docIdTokens = (!query && docIdFilter) ? tokenizeRagString(docIdLower) : [];
+  const baseTokens = queryAllTokens.length > 0 ? queryAllTokens : (docIdTokens.length > 0 ? docIdTokens : (category !== 'auto' && category !== 'all' ? [category] : []));
+  const queryTokens = baseTokens.filter(t => !RAG_DOC_STOPWORDS.has(t));
+  const activeTokens = queryTokens.length > 0 ? queryTokens : baseTokens;
+  const normPhrase = normalizeCommMatchPhrase((query ? activeTokens : []).join(' '));
+  const queryVec = (effectiveQuery && memDb && typeof memDb.computeFastEmbedding === 'function')
+    ? memDb.computeFastEmbedding(effectiveQuery)
+    : null;
+
+  const candidateChunks = [];
+  const stats = {
+    vectorDbHits: 0,
+    sqliteFtsHits: 0,
+    filesScanned: 0,
+    chunksEvaluated: 0
+  };
+
+  const hasExplicitTargetOrQuery = Boolean(activeTokens.length > 0 || docIdLower || (category !== 'auto' && category !== 'all'));
+
+  // 1. VECTOR DATABASE & HYBRID KNOWLEDGE GRAPH RETRIEVAL (zoz_memory.db + jozz_memory.db)
+  if (hasExplicitTargetOrQuery && category !== 'workspace') {
+    if (memRetriever && typeof memRetriever.recallMemories === 'function') {
+      try {
+        const recalled = memRetriever.recallMemories(reqUserId || 'default', effectiveQuery || category, scope, { maxResults: Math.max(8, topK * 2) });
+        if (recalled && Array.isArray(recalled.memories)) {
+          for (let rIdx = 0; rIdx < recalled.memories.length; rIdx++) {
+            const m = recalled.memories[rIdx];
+            if (!m) continue;
+            const receipt = Array.isArray(recalled.receipts) ? (recalled.receipts[rIdx] || null) : null;
+            const textBody = String(m.fact || m.content || receipt?.rawSnippet || m.rawSnippet || '').trim();
+            if (!textBody) continue;
+            const mId = String(m.id || `vec_${rIdx + 1}`);
+            const mTitle = String(receipt?.sourceTitle || m.sourceTitle || m.topic || m.category || 'Basis Pengetahuan Vector DB');
+            const mSourceUri = String(receipt?.sourceUri || m.sourceUri || `/vector-db/${m.scope || 'global'}/${mId}`);
+            const mUpdatedAt = String(m.updated_at || m.updatedAt || m.created_at || m.createdAt || '');
+            const rrfBase = Number(receipt?.relevanceScore ?? m.rrfScore ?? 0) || 0;
+            const hay = `${mId} ${mTitle} ${m.topic || ''} ${mSourceUri} ${textBody}`.toLowerCase();
+            const docIdMatched = Boolean(docIdLower && (hay.includes(docIdLower) || (normDocId && normalizeCommMatchPhrase(hay).includes(normDocId))));
+            if (docIdLower && !docIdMatched) continue;
+            const inferredCat = inferInternalDocCategory(`${mTitle} ${m.topic || ''}`, textBody);
+            if (!docIdMatched && category !== 'auto' && category !== 'all' && category !== 'vector_db' && inferredCat !== category) {
+              if (!textBody.toLowerCase().includes(category)) continue;
+            }
+            const vecSim = (queryVec && memDb && typeof memDb.computeFastEmbedding === 'function' && typeof memDb.cosineSimilarity === 'function')
+              ? Math.max(0, memDb.cosineSimilarity(queryVec, memDb.computeFastEmbedding(`${mTitle} ${textBody}`)))
+              : Math.min(1, rrfBase || 0.35);
+            let lexHits = 0;
+            for (const tok of activeTokens) {
+              if (hay.includes(tok)) lexHits++;
+            }
+            stats.vectorDbHits++;
+            const lexBoost = (docIdMatched ? 95 : 0) + (rrfBase * 40) + (lexHits * 18);
+            const matchedSig = Array.isArray(m.matchedSignals)
+              ? m.matchedSignals.join('+')
+              : String(receipt?.matchedSignal || 'vector_cosine+bm25+rrf');
+            candidateChunks.push({
+              doc_id: mId,
+              title: mTitle,
+              category: inferredCat === 'workspace' ? 'vector_db' : inferredCat,
+              source_type: 'vector_database',
+              path: mSourceUri,
+              section: m.topic || m.category || 'Memori Terindeks',
+              chunk_index: 1,
+              vector_score: Number(vecSim.toFixed(4)),
+              lexical_score: activeTokens.length > 0 ? Number((lexHits / activeTokens.length).toFixed(4)) : 0.25,
+              lex_boost: Number(lexBoost.toFixed(2)),
+              base_boost: Number((lexBoost + vecSim * 35).toFixed(2)),
+              matched_signals: matchedSig,
+              updated_at: mUpdatedAt,
+              content: textBody.slice(0, 1400)
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
+    // SQLite FTS5 long-term memory notes (save_memory / search_memory table)
+    try {
+      const ftsMem = searchMemoryRecords(reqUserId || 'default', effectiveQuery || category, Math.max(6, topK));
+      if (ftsMem && Array.isArray(ftsMem.results)) {
+        for (let fIdx = 0; fIdx < ftsMem.results.length; fIdx++) {
+          const r = ftsMem.results[fIdx];
+          const body = String(r?.content || '').trim();
+          if (!body) continue;
+          const rTopic = String(r.topic || 'Catatan Pengetahuan Internal');
+          const rDocId = `fts_mem_${r.id || (fIdx + 1)}`;
+          const hay = `${rDocId} ${rTopic} ${body}`.toLowerCase();
+          const docIdMatched = Boolean(docIdLower && (hay.includes(docIdLower) || (normDocId && normalizeCommMatchPhrase(hay).includes(normDocId))));
+          if (docIdLower && !docIdMatched) continue;
+          const inferredCat = inferInternalDocCategory(rTopic, body);
+          if (!docIdMatched && category !== 'auto' && category !== 'all' && category !== 'vector_db' && inferredCat !== category) {
+            if (!hay.includes(category)) continue;
+          }
+          const vecSim = (queryVec && memDb && typeof memDb.computeFastEmbedding === 'function' && typeof memDb.cosineSimilarity === 'function')
+            ? Math.max(0, memDb.cosineSimilarity(queryVec, memDb.computeFastEmbedding(`${rTopic} ${body}`)))
+            : 0.4;
+          let lexHits = 0;
+          for (const tok of activeTokens) {
+            if (hay.includes(tok)) lexHits++;
+          }
+          stats.sqliteFtsHits++;
+          const lexBoost = (docIdMatched ? 95 : 0) + 22 + (lexHits * 18);
+          candidateChunks.push({
+            doc_id: rDocId,
+            title: rTopic,
+            category: inferredCat === 'workspace' ? 'vector_db' : inferredCat,
+            source_type: 'sqlite_fts5_knowledge',
+            path: `memory://${rTopic}`,
+            section: rTopic,
+            chunk_index: 1,
+            vector_score: Number(vecSim.toFixed(4)),
+            lexical_score: activeTokens.length > 0 ? Number((lexHits / activeTokens.length).toFixed(4)) : 0.3,
+            lex_boost: Number(lexBoost.toFixed(2)),
+            base_boost: Number((lexBoost + vecSim * 35).toFixed(2)),
+            matched_signals: 'sqlite_fts5+vector_cosine',
+            updated_at: r.timestamp || r.updated_at || '',
+            content: body.slice(0, 1400)
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. INTERNAL DOCUMENT MANAGEMENT SYSTEM & WORKSPACE RAG CHUNKER
+  if (hasExplicitTargetOrQuery && category !== 'vector_db') {
+    const DOC_DIRS = category === 'workspace'
+      ? [{ dir: WORKSPACE_ROOT, prefix: '' }]
+      : [
+          { dir: path.join(DATA_DIR, 'documents'), prefix: 'data/documents' },
+          { dir: path.join(DATA_DIR, 'knowledge'), prefix: 'data/knowledge' },
+          { dir: path.join(DATA_DIR, 'sop'), prefix: 'data/sop' },
+          { dir: path.join(DATA_DIR, 'communications'), prefix: 'data/communications' },
+          { dir: WORKSPACE_ROOT, prefix: '' }
+        ];
+    const ALLOWED_DOC_EXTS = new Set(['.md', '.txt', '.json', '.csv', '.tsv', '.yaml', '.yml', '.eml', '.log']);
+    const SKIP_DIRS = new Set(['node_modules', '.git', '.zoz-snapshots', '.gemini', 'public', 'dist', 'build', '.cache', 'data', 'wa-auth', 'wa-users', 'src', 'bin']);
+    const SKIP_ROOT_FILES = new Set(['package.json', 'package-lock.json', 'app.js', 'server.js', 'whatsapp-gateway.js', '_worker.js', 'text-safety.js', 'image-grounding.js', 'youtube_tool.js']);
+
+    const docFiles = [];
+    const seenPaths = new Set();
+    let walked = 0;
+
+    async function walkRagDir(baseDir, relPrefix, realRoot, depth, maxDepth) {
+      if (depth > maxDepth || walked > 300 || !realRoot || !fs.existsSync(baseDir)) return;
+      let entries = [];
+      try {
+        entries = await fsp.readdir(baseDir, { withFileTypes: true });
+      } catch (_) {
+        return;
+      }
+      for (const entry of entries) {
+        if (walked > 300) break;
+        const name = entry.name;
+        if (!name || name.startsWith('.') || entry.isSymbolicLink()) continue;
+        const full = path.join(baseDir, name);
+        const rel = relPrefix ? `${relPrefix}/${name}` : name;
+        if (entry.isDirectory()) {
+          if (SKIP_DIRS.has(name.toLowerCase())) continue;
+          try {
+            const realSub = await fsp.realpath(full);
+            if (!isPathContainedInRealRoot(realSub, realRoot)) continue;
+          } catch (_) {
+            continue;
+          }
+          await walkRagDir(full, rel, realRoot, depth + 1, maxDepth);
+        } else if (entry.isFile()) {
+          if (!relPrefix && SKIP_ROOT_FILES.has(name.toLowerCase())) continue;
+          if (isSensitiveWorkspaceFile(name, rel)) continue;
+          const ext = path.extname(name).toLowerCase();
+          if (!ALLOWED_DOC_EXTS.has(ext)) continue;
+          try {
+            const st = await fsp.lstat(full);
+            if (st.isSymbolicLink() || !st.isFile()) continue;
+            if (st.size <= 0 || st.size > 512 * 1024) continue;
+            const realFull = await fsp.realpath(full);
+            if (!isPathContainedInRealRoot(realFull, realRoot)) continue;
+            const dedupKey = process.platform === 'win32' ? realFull.toLowerCase() : realFull;
+            if (seenPaths.has(dedupKey)) continue;
+            seenPaths.add(dedupKey);
+            walked++;
+            docFiles.push({
+              full: realFull,
+              dedupKey,
+              rel,
+              name,
+              mtimeMs: st.mtimeMs,
+              size: st.size,
+              isInternalDms: Boolean(relPrefix)
+            });
+          } catch (_) {}
+        }
+      }
+    }
+
+    for (const d of DOC_DIRS) {
+      if (!fs.existsSync(d.dir)) continue;
+      try {
+        const realRoot = await fsp.realpath(d.dir);
+        await walkRagDir(d.dir, d.prefix, realRoot, 0, d.prefix ? 3 : 2);
+      } catch (_) {}
+    }
+
+    // Prioritaskan kecocokan doc_id & berkas DMS internal sebelum membatasi 80 file terbaru
+    docFiles.sort((a, b) => {
+      if (docIdLower) {
+        const aMatch = (a.rel.toLowerCase().includes(docIdLower) || a.name.toLowerCase().includes(docIdLower)) ? 1 : 0;
+        const bMatch = (b.rel.toLowerCase().includes(docIdLower) || b.name.toLowerCase().includes(docIdLower)) ? 1 : 0;
+        if (bMatch !== aMatch) return bMatch - aMatch;
+      }
+      if (a.isInternalDms !== b.isInternalDms) return a.isInternalDms ? -1 : 1;
+      return b.mtimeMs - a.mtimeMs;
+    });
+
+    const filesToEvaluate = docFiles.slice(0, 80);
+    stats.filesScanned = filesToEvaluate.length;
+
+    for (const df of filesToEvaluate) {
+      let rawContent = '';
+      try {
+        rawContent = await fsp.readFile(df.full, 'utf8');
+      } catch (_) {
+        continue;
+      }
+      if (!rawContent || !rawContent.trim() || rawContent.includes('\u0000')) continue;
+
+      const fileCat = inferInternalDocCategory(df.rel, rawContent);
+      const relLower = df.rel.toLowerCase();
+      const nameLower = df.name.toLowerCase();
+      const normFileName = normalizeCommMatchPhrase(df.name);
+
+      let fileHeaderScore = 0;
+      let docIdMatched = false;
+      if (docIdLower) {
+        if (relLower === docIdLower || nameLower === docIdLower || nameLower.startsWith(docIdLower)) {
+          fileHeaderScore += 120;
+          docIdMatched = true;
+        } else if (relLower.includes(docIdLower) || (normDocId && normFileName.includes(normDocId))) {
+          fileHeaderScore += 90;
+          docIdMatched = true;
+        } else if (rawContent.toLowerCase().includes(docIdLower)) {
+          fileHeaderScore += 75;
+          docIdMatched = true;
+        }
+        if (!docIdMatched) continue;
+      }
+
+      if (category !== 'auto' && category !== 'all' && category !== 'workspace') {
+        if (fileCat === category || relLower.includes(category)) {
+          fileHeaderScore += 25;
+        } else if (!rawContent.toLowerCase().includes(category) && !docIdMatched) {
+          continue;
+        }
+      }
+
+      for (const tok of activeTokens) {
+        if (relLower.includes(tok) || normFileName.includes(tok)) {
+          fileHeaderScore += 24;
+        }
+      }
+
+      const cacheKey = `${df.dedupKey}|${df.mtimeMs}|${df.size}`;
+      let cachedDoc = RAG_DOC_CHUNK_CACHE.get(cacheKey);
+      if (!cachedDoc) {
+        const chunks = splitDocumentIntoDynamicRagChunks(rawContent, {
+          title: df.name,
+          chunkSize: 900
+        });
+        const preparedChunks = chunks.map(ch => {
+          const chLower = `${ch.section} ${ch.text}`.toLowerCase();
+          const normCh = normalizeCommMatchPhrase(chLower);
+          const emb = (memDb && typeof memDb.computeFastEmbedding === 'function')
+            ? memDb.computeFastEmbedding(`${df.name} ${ch.section} ${ch.text}`)
+            : null;
+          return { ch, chLower, normCh, emb };
+        });
+        cachedDoc = { preparedChunks };
+        if (RAG_DOC_CHUNK_CACHE.size >= RAG_DOC_CHUNK_CACHE_MAX) {
+          const oldestKey = RAG_DOC_CHUNK_CACHE.keys().next().value;
+          if (oldestKey !== undefined) RAG_DOC_CHUNK_CACHE.delete(oldestKey);
+        }
+        RAG_DOC_CHUNK_CACHE.set(cacheKey, cachedDoc);
+      }
+
+      for (const item of cachedDoc.preparedChunks) {
+        const { ch, chLower, normCh, emb } = item;
+        stats.chunksEvaluated++;
+        let lexHits = 0;
+        for (const tok of activeTokens) {
+          if (chLower.includes(tok)) lexHits++;
+        }
+        const exactPhraseHit = Boolean(normPhrase && normPhrase.length >= 4 && normCh.includes(normPhrase));
+        const vecSim = (queryVec && emb && memDb && typeof memDb.cosineSimilarity === 'function')
+          ? Math.max(0, memDb.cosineSimilarity(queryVec, emb))
+          : 0;
+
+        if (!docIdMatched && activeTokens.length > 0 && lexHits === 0 && fileHeaderScore === 0 && vecSim < 0.18) {
+          continue;
+        }
+
+        const signals = [];
+        if (vecSim >= 0.15) signals.push('vector_cosine');
+        if (lexHits > 0) signals.push('bm25_lexical');
+        if (exactPhraseHit) signals.push('exact_phrase');
+        if (fileHeaderScore > 0) signals.push('doc_title');
+
+        const lexBoost = fileHeaderScore +
+          (exactPhraseHit ? 45 : 0) +
+          (lexHits * 22) +
+          (fileCat === category ? 18 : 0);
+        const baseBoost = lexBoost + (vecSim * 45);
+
+        candidateChunks.push({
+          doc_id: df.rel,
+          title: df.name,
+          category: fileCat,
+          source_type: df.rel.startsWith('data/') ? 'internal_dms' : 'workspace_document',
+          path: df.rel,
+          section: ch.section || df.name,
+          chunk_index: ch.chunkIndex,
+          vector_score: Number(vecSim.toFixed(4)),
+          lexical_score: activeTokens.length > 0 ? Number((lexHits / activeTokens.length).toFixed(4)) : 1,
+          lex_boost: Number(lexBoost.toFixed(2)),
+          base_boost: Number(baseBoost.toFixed(2)),
+          matched_signals: signals.join('+') || 'semantic_chunk',
+          updated_at: formatCommTimestamp(df.mtimeMs),
+          content: ch.text.slice(0, 1400)
+        });
+      }
+    }
+  }
+
+  // Deduplikasi konten identik lintas Vector DB / SQLite FTS5 / berkas lokal (pertahankan skor tertinggi)
+  const dedupChunkMap = new Map();
+  for (const c of candidateChunks) {
+    const contentFp = String(c.content || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 240);
+    const prev = dedupChunkMap.get(contentFp);
+    if (!prev || (c.base_boost || 0) > (prev.base_boost || 0)) {
+      dedupChunkMap.set(contentFp, c);
+    }
+  }
+  const uniqueCandidates = Array.from(dedupChunkMap.values());
+
+  // 3. RECIPROCAL RANK FUSION (RRF) — pisahkan peringkat vektor murni vs leksikal murni (anti triple-counting)
+  const byVector = [...uniqueCandidates]
+    .filter(c => (c.vector_score || 0) > 0)
+    .sort((a, b) => (b.vector_score - a.vector_score) || (b.lex_boost - a.lex_boost));
+  const byLexical = [...uniqueCandidates]
+    .sort((a, b) => (b.lex_boost - a.lex_boost) || (b.vector_score - a.vector_score));
+  const vecRankMap = new Map();
+  const lexRankMap = new Map();
+  byVector.forEach((c, i) => vecRankMap.set(c, i + 1));
+  byLexical.forEach((c, i) => lexRankMap.set(c, i + 1));
+
+  const rrfK = 20;
+  for (const c of uniqueCandidates) {
+    const rVec = vecRankMap.get(c);
+    const rLex = lexRankMap.get(c) || 100;
+    const vecContrib = rVec ? (0.45 / (rrfK + rVec)) : 0;
+    const lexContrib = 0.55 / (rrfK + rLex);
+    const rrf = vecContrib + lexContrib;
+    c.rrf_score = Number(rrf.toFixed(5));
+    c.relevance_score = Number((c.base_boost + rrf * 1000).toFixed(2));
+  }
+
+  uniqueCandidates.sort((a, b) => (b.relevance_score - a.relevance_score) || (b.vector_score - a.vector_score));
+  const topChunks = uniqueCandidates.slice(0, topK);
+
+  const lines = [];
+  lines.push(`[HASIL RAG DINAMIS — SEARCH_DOCUMENTS / RETRIEVE_KNOWLEDGE]`);
+  lines.push(`Waktu Retrieval: ${serverTime.summaryLine}`);
+  lines.push(`Query: "${query || '-'}" | Kategori: ${category} | Doc ID: "${docIdFilter || '(semua)'}" | Top-K: ${topK}`);
+  lines.push(`Statistik RAG: File Dipindai=${stats.filesScanned} | Potongan Dievaluasi=${stats.chunksEvaluated} | VectorDB Hits=${stats.vectorDbHits} | SQLite FTS5 Hits=${stats.sqliteFtsHits} | Potongan Terpilih=${topChunks.length}`);
+
+  if (topChunks.length === 0) {
+    lines.push(`\nTidak ditemukan potongan dokumen internal (SOP, laporan, regulasi, atau vector database) yang cocok dengan kriteria "${query || docIdFilter}".`);
+    lines.push(`Tips: Letakkan dokumen SOP/laporan/regulasi (.md, .txt, .json, .csv, .yaml) di folder \`data/documents/\`, \`data/sop/\`, \`data/knowledge/\`, atau direktori workspace lokal.`);
+  } else {
+    topChunks.forEach((ch, idx) => {
+      lines.push(`\n--- [CHUNK #${idx + 1}/${topChunks.length}] [${String(ch.category || 'DOKUMEN').toUpperCase()}] ${ch.title} (ID: ${ch.doc_id} | Bagian: "${ch.section}" | Skor: ${ch.relevance_score} | Cosine: ${ch.vector_score} | Sinyal: ${ch.matched_signals}) ---`);
+      lines.push(ch.content);
+    });
+  }
+
+  return {
+    success: true,
+    tool: 'search_documents',
+    alias: 'retrieve_knowledge',
+    serverTime,
+    query,
+    category,
+    doc_id: docIdFilter,
+    top_k: topK,
+    stats,
+    count: topChunks.length,
+    chunks: topChunks,
+    formattedContext: lines.join('\n').slice(0, 14000)
+  };
+}
+
 // Main HTTP Request Handler & Server
 async function requestHandler(req, res) {
   if (!req) return;
@@ -7414,7 +9043,7 @@ async function requestHandler(req, res) {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Private-Network': 'true',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, X-Title, HTTP-Referer, http-referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-auto-router, X-Auto-Router, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-user-id, X-WA-User-ID, X-WA-USER-ID, x-wa-pin, X-WA-PIN, x-terminal-pin, X-Terminal-Pin, Access-Control-Request-Private-Network'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-ollama-endpoint, x-title, X-Title, HTTP-Referer, http-referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-auto-router, X-Auto-Router, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-user-id, X-WA-User-ID, X-WA-USER-ID, x-wa-pin, X-WA-PIN, x-terminal-pin, X-Terminal-Pin, x-zoz-plan-mode, X-Zoz-Plan-Mode, Access-Control-Request-Private-Network'
     });
     return res.end();
   }
@@ -7430,7 +9059,13 @@ async function requestHandler(req, res) {
                                  pathname === '/api/storage-mode' ||
                                  pathname === '/api/youtube-info' ||
                                  pathname === '/api/video-probe' ||
-                                 (pathname.startsWith('/api/tools/') && pathname !== '/api/tools/execute-code') ||
+                                 (pathname.startsWith('/api/tools/') &&
+                                  pathname !== '/api/tools/execute-code' &&
+                                  pathname !== '/api/tools/communication-context' &&
+                                  pathname !== '/api/tools/search-documents' &&
+                                  pathname !== '/api/tools/retrieve-knowledge' &&
+                                  pathname !== '/api/tools/memory/save' &&
+                                  pathname !== '/api/tools/memory/search') ||
                                  pathname === '/api/extract-web' ||
                                  pathname === '/api/read-url' ||
                                  pathname === '/api/scrape-url';
@@ -7675,8 +9310,7 @@ async function requestHandler(req, res) {
       }
       const files = (await fsp.readdir(userDir)).filter(f =>
         f.endsWith('.json') &&
-        !/_(?:digest_\d+|rescue|epistemic|temp)\.json$/i.test(f) &&
-        !/__studio_/i.test(f)
+        !isInternalSubtaskSessionId(path.basename(f, '.json'))
       );
       const sessions = [];
       for (const file of files) {
@@ -7767,6 +9401,9 @@ async function requestHandler(req, res) {
       const rawId = (body && body.id) ? String(body.id).trim() : ('ses_' + Date.now().toString(36) + '_' + randHex);
       if (body.isIncognito === true || /^incog_/i.test(rawId) || body.title === 'Obrolan Privat') {
         return sendJSON(res, 200, { ok: true, skippedIncognito: true });
+      }
+      if (isInternalSubtaskSessionId(rawId)) {
+        return sendJSON(res, 200, { ok: true, skippedSubtask: true });
       }
       const effectiveUid = reqUserId; // identitas HANYA dari header tervalidasi — body.userId tidak dipercaya
       const validation = validateSessionId(rawId, effectiveUid);
@@ -8093,7 +9730,7 @@ async function requestHandler(req, res) {
       decodedUploadPath = decodeURIComponent(pathname);
     } catch (_) {}
     const uploadFilename = path.basename(decodedUploadPath);
-    if (uploadFilename.startsWith('wa_') && isRemoteTunnelRequest(req)) {
+    if (uploadFilename.toLowerCase().startsWith('wa_') && isRemoteTunnelRequest(req)) {
       const waPinCheck = validateRemoteTerminalPin(req, reqUrl, null);
       if (!waPinCheck.valid) {
         return sendJSON(res, waPinCheck.status || 401, { error: 'Autentikasi PIN diperlukan untuk mengakses media WhatsApp.' });
@@ -8565,7 +10202,7 @@ async function requestHandler(req, res) {
     const isRemote = isRemoteTunnelRequest(req);
     if (isRemote) {
       let startBody = null;
-      try { startBody = await readJSONBody(req); } catch (_) {}
+      try { startBody = await parseBody(req); } catch (_) {}
       const pinCheck = validateRemoteTerminalPin(req, reqUrl, startBody);
       if (!pinCheck.valid) {
         return sendJSON(res, pinCheck.status || 401, { error: 'Akses ditolak: Hanya host lokal atau klien dengan PIN valid yang dapat memulai tunnel.' });
@@ -8579,7 +10216,7 @@ async function requestHandler(req, res) {
     const isRemote = isRemoteTunnelRequest(req);
     if (isRemote) {
       let stopBody = null;
-      try { stopBody = await readJSONBody(req); } catch (_) {}
+      try { stopBody = await parseBody(req); } catch (_) {}
       const pinCheck = validateRemoteTerminalPin(req, reqUrl, stopBody);
       if (!pinCheck.valid) {
         return sendJSON(res, pinCheck.status || 401, { error: 'Akses ditolak: Hanya host lokal atau klien dengan PIN valid yang dapat mematikan tunnel.' });
@@ -8953,7 +10590,15 @@ async function requestHandler(req, res) {
       while ((rawCwd.startsWith('"') && rawCwd.endsWith('"')) || (rawCwd.startsWith("'") && rawCwd.endsWith("'"))) {
         rawCwd = rawCwd.slice(1, -1).trim();
       }
-      let targetCwd = (rawCwd && fs.existsSync(rawCwd) && path.resolve(rawCwd).toLowerCase() !== WORKSPACE_ROOT.toLowerCase()) ? path.resolve(rawCwd) : DEFAULT_TERMINAL_CWD;
+      let targetCwd = DEFAULT_TERMINAL_CWD;
+      if (rawCwd) {
+        try {
+          const resolvedCwd = path.resolve(rawCwd);
+          if (fs.existsSync(resolvedCwd) && fs.statSync(resolvedCwd).isDirectory()) {
+            targetCwd = resolvedCwd;
+          }
+        } catch (_) {}
+      }
 
       // Pastikan targetCwd ada atau fallback ke DEFAULT_TERMINAL_CWD (kecuali Vercel sandbox virtual)
       if (!fs.existsSync(targetCwd) && !IS_VERCEL_ENV) {
@@ -9161,6 +10806,9 @@ async function requestHandler(req, res) {
 
       proc.stderr.on('data', chunk => {
         stderr += chunk.toString();
+        if (stderr.length > 80000) {
+          stderr = stderr.slice(-80000);
+        }
       });
 
       proc.on('error', err => {
@@ -9307,9 +10955,20 @@ async function requestHandler(req, res) {
   function isLocalWaRequest(req) {
     const remoteIp = req.socket?.remoteAddress || req.connection?.remoteAddress || '';
     const isLoopbackIp = remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp === '::ffff:127.0.0.1';
-    const host = (req.headers['host'] || '').toLowerCase();
-    const isLocalHost = host.startsWith('localhost:') || host === 'localhost' || host.startsWith('127.0.0.1:') || host === '127.0.0.1' || host.startsWith('[::1]:') || host === '[::1]';
-    const isTunnel = Boolean(req.headers['cf-connecting-ip'] || req.headers['cf-ray'] || req.headers['x-forwarded-for'] || req.headers['x-forwarded-host'] || req.headers['x-forwarded-proto']);
+    const host = String(req.headers['host'] || '').trim().toLowerCase();
+    const isLocalHost = Boolean(host && STRICT_LOCAL_HOST_RE.test(host));
+    const isTunnel = Boolean(
+      req.headers['cf-connecting-ip'] ||
+      req.headers['cf-ray'] ||
+      req.headers['cf-visitor'] ||
+      req.headers['x-forwarded-for'] ||
+      req.headers['x-forwarded-host'] ||
+      req.headers['x-forwarded-proto'] ||
+      req.headers['forwarded'] ||
+      req.headers['x-real-ip'] ||
+      req.headers['true-client-ip'] ||
+      req.headers['x-vercel-id']
+    );
     return isLoopbackIp && isLocalHost && !isTunnel;
   }
 
@@ -9528,7 +11187,9 @@ async function requestHandler(req, res) {
     }
     const jid = reqUrl.searchParams.get('jid');
     if (!jid) return sendJSON(res, 400, { success: false, error: 'Parameter jid dibutuhkan' });
-    const messages = tenant.gateway.getMessages(jid);
+    const markAsReadParam = String(reqUrl.searchParams.get('markAsRead') ?? reqUrl.searchParams.get('mark_as_read') ?? '').trim().toLowerCase();
+    const markAsRead = !(markAsReadParam === 'false' || markAsReadParam === '0');
+    const messages = tenant.gateway.getMessages(jid, { markAsRead });
     return sendJSON(res, 200, { success: true, jid, messages });
   }
 
@@ -10034,6 +11695,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     }
     try {
       if (hasMasterAuth && isMasterTarget) {
+        if (!waGatewayManager || !waGatewayManager.masterGateway) {
+          return sendJSON(res, 503, { success: false, error: 'WhatsApp Gateway Master sedang tidak tersedia.' });
+        }
         waGatewayManager.masterGateway.setPin(pinCandidate);
         return sendJSON(res, 200, {
           success: true,
@@ -10041,6 +11705,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           userId: 'usr_kaisar_master',
           isMaster: true
         });
+      }
+      if (!tenant.gateway) {
+        return sendJSON(res, 503, { success: false, error: 'WhatsApp Gateway sedang tidak tersedia.' });
       }
       if (tenant.gateway.hasConfiguredPin() && !isLocal) {
         const curPin = String(body.currentPin || req.headers['x-wa-pin'] || '').trim();
@@ -10067,15 +11734,34 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
   if ((pathname === '/api/wa/verify-pin' || pathname === '/api/wa/login') && method === 'POST') {
     const body = await safeParseBody(req);
     if (!body) return;
+    const clientIp = getRemoteClientIp(req);
+    const nowMs = Date.now();
+    const failTracker = remotePinFailTracker.get(clientIp);
+    if (failTracker && failTracker.resetAt > nowMs && failTracker.count >= 25) {
+      return sendJSON(res, 429, {
+        success: false,
+        isMaster: false,
+        error: 'Terlalu banyak percobaan PIN salah. Tunggu beberapa menit sebelum mencoba lagi.'
+      });
+    }
     const inputPin = String(body.pin || body.password || '').trim();
     if (!inputPin) {
       return sendJSON(res, 400, { success: false, error: 'PIN tidak boleh kosong.' });
     }
+    const matchedTunnelPin = Boolean(cloudflareTunnelPin && constantTimePinEqual(inputPin, String(cloudflareTunnelPin).trim()));
     const isMaster = Boolean(
-      (cloudflareTunnelPin && inputPin === String(cloudflareTunnelPin).trim()) ||
+      matchedTunnelPin ||
       (waGatewayManager && waGatewayManager.masterGateway && waGatewayManager.masterGateway.verifyPin(inputPin))
     );
     if (isMaster) {
+      remotePinFailTracker.delete(clientIp);
+      if (!waGatewayManager || !waGatewayManager.masterGateway) {
+        return sendJSON(res, 503, {
+          success: false,
+          isMaster: true,
+          error: 'PIN terverifikasi, namun WhatsApp Gateway Master tidak aktif di lingkungan ini.'
+        });
+      }
       const status = waGatewayManager.masterGateway.getStatus();
       const contacts = waGatewayManager.masterGateway.getContacts();
       return sendJSON(res, 200, {
@@ -10092,6 +11778,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     // Cek apakah PIN cocok untuk tenant guest tertentu (wajib sudah punya PIN terkonfigurasi)
     const tenant = getWaTenant(req, reqUrl, body);
     if (tenant && tenant.gateway && tenant.gateway.hasConfiguredPin() && tenant.gateway.verifyPin(inputPin)) {
+      remotePinFailTracker.delete(clientIp);
       return sendJSON(res, 200, {
         success: true,
         isMaster: false,
@@ -10101,6 +11788,14 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         contactCount: tenant.gateway.getContacts().length,
         message: 'PIN Akun Tamu Terverifikasi.'
       });
+    }
+
+    const curFail = remotePinFailTracker.get(clientIp);
+    if (!curFail || curFail.resetAt <= nowMs) {
+      if (remotePinFailTracker.size > 500) remotePinFailTracker.clear();
+      remotePinFailTracker.set(clientIp, { count: 1, resetAt: nowMs + 5 * 60 * 1000 });
+    } else {
+      curFail.count += 1;
     }
 
     return sendJSON(res, 401, {
@@ -10223,6 +11918,113 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       tenant.gateway.addSseClient(res);
     } catch (_) {}
     return;
+  }
+
+  // MODE Z21 LOCALHOST ONLY: fetch_communication_context multi-source collector
+  if (pathname === '/api/tools/communication-context' && (method === 'GET' || method === 'POST')) {
+    if (!isLocalWaRequest(req)) {
+      return sendJSON(res, 403, {
+        success: false,
+        error: 'Endpoint fetch_communication_context hanya tersedia di mode localhost (loopback).'
+      });
+    }
+    if (!isStrictLocalOriginHeader(req)) {
+      return sendJSON(res, 403, {
+        success: false,
+        error: 'Akses lintas-asal ke fetch_communication_context ditolak.'
+      });
+    }
+    let body = {};
+    if (method === 'POST') {
+      const parsedBody = await safeParseBody(req);
+      if (!parsedBody) return;
+      body = parsedBody;
+    }
+    const reqPlanMode = String(
+      (body && body.planMode) ||
+      reqUrl.searchParams.get('planMode') ||
+      req.headers['x-zoz-plan-mode'] ||
+      ''
+    ).trim().toLowerCase();
+    if (reqPlanMode !== 'z21') {
+      return sendJSON(res, 403, {
+        success: false,
+        error: 'Tool fetch_communication_context hanya aktif pada Mode Z21 di localhost.'
+      });
+    }
+    try {
+      const mergedParams = {
+        source: body.source ?? body.sumber ?? reqUrl.searchParams.get('source') ?? 'auto',
+        query: body.query ?? body.q ?? body.keyword ?? body.keywords ?? body.kata_kunci ?? body.topic ?? body.topik ?? body.search ?? reqUrl.searchParams.get('query') ?? reqUrl.searchParams.get('q') ?? '',
+        target_id: body.target_id ?? body.id ?? body.target ?? body.contact ?? body.jid ?? body.phone ?? body.ticket_id ?? body.email_id ?? body.nomor ?? body.kontak ?? reqUrl.searchParams.get('target_id') ?? reqUrl.searchParams.get('id') ?? '',
+        limit: body.limit ?? reqUrl.searchParams.get('limit') ?? 6,
+        max_messages: body.max_messages ?? body.maxMessages ?? reqUrl.searchParams.get('max_messages') ?? 25,
+        days: body.days ?? body.hari ?? reqUrl.searchParams.get('days') ?? 0,
+        since_minutes: body.since_minutes ?? body.sinceMinutes ?? body.menit ?? reqUrl.searchParams.get('since_minutes') ?? 0,
+        sort_by: body.sort_by ?? body.sortBy ?? body.urutkan ?? reqUrl.searchParams.get('sort_by') ?? 'auto',
+        mode: body.mode ?? reqUrl.searchParams.get('mode') ?? 'full',
+        unread_only: parseBoolParam(body.unread_only ?? body.unreadOnly ?? body.belum_dibaca ?? reqUrl.searchParams.get('unread_only') ?? reqUrl.searchParams.get('unreadOnly'), false),
+        exclude_session_id: body.exclude_session_id ?? body.excludeSessionId ?? reqUrl.searchParams.get('exclude_session_id') ?? ''
+      };
+      let waTenant = getWaTenant(req, reqUrl, body);
+      if (
+        (!waTenant || !waTenant.success || !waTenant.gateway ||
+          (typeof waTenant.gateway.getContacts === 'function' && waTenant.gateway.getContacts().length === 0)) &&
+        waGatewayManager && waGatewayManager.masterGateway
+      ) {
+        waTenant = {
+          success: true,
+          gateway: waGatewayManager.masterGateway,
+          isMaster: true,
+          userId: 'usr_kaisar_master'
+        };
+      }
+      const contextRes = await collectCommunicationContext(mergedParams, { reqUserId, waTenant });
+      return sendJSON(res, 200, contextRes);
+    } catch (e) {
+      return sendJSON(res, 500, {
+        success: false,
+        error: 'Gagal mengambil konteks komunikasi lokal: ' + e.message
+      });
+    }
+  }
+
+  // DYNAMIC REAL-TIME INTERNAL RAG: search_documents / retrieve_knowledge
+  if ((pathname === '/api/tools/search-documents' || pathname === '/api/tools/retrieve-knowledge') && (method === 'GET' || method === 'POST')) {
+    if (!isLocalWaRequest(req)) {
+      return sendJSON(res, 403, {
+        success: false,
+        error: 'Endpoint search_documents / retrieve_knowledge hanya tersedia di mode localhost (loopback).'
+      });
+    }
+    if (!isStrictLocalOriginHeader(req)) {
+      return sendJSON(res, 403, {
+        success: false,
+        error: 'Akses lintas-asal ke search_documents / retrieve_knowledge ditolak.'
+      });
+    }
+    let body = {};
+    if (method === 'POST') {
+      const parsedBody = await safeParseBody(req);
+      if (!parsedBody) return;
+      body = parsedBody;
+    }
+    try {
+      const mergedRagParams = {
+        query: body.query ?? body.q ?? body.keyword ?? body.keywords ?? body.kata_kunci ?? body.topic ?? body.topik ?? body.search ?? reqUrl.searchParams.get('query') ?? reqUrl.searchParams.get('q') ?? '',
+        category: body.category ?? body.kategori ?? body.type ?? body.doc_type ?? reqUrl.searchParams.get('category') ?? 'auto',
+        doc_id: body.doc_id ?? body.docId ?? body.document_id ?? body.id ?? body.file ?? body.filename ?? body.path ?? reqUrl.searchParams.get('doc_id') ?? reqUrl.searchParams.get('id') ?? '',
+        top_k: body.top_k ?? body.topK ?? body.limit ?? body.max_results ?? reqUrl.searchParams.get('top_k') ?? reqUrl.searchParams.get('limit') ?? 5,
+        scope: body.scope ?? reqUrl.searchParams.get('scope') ?? 'global'
+      };
+      const ragRes = await collectDocumentKnowledgeRAG(mergedRagParams, { reqUserId });
+      return sendJSON(res, 200, ragRes);
+    } catch (e) {
+      return sendJSON(res, 500, {
+        success: false,
+        error: 'Gagal menjalankan RAG search_documents / retrieve_knowledge: ' + e.message
+      });
+    }
   }
 
   // 1. Workspace Status
@@ -10436,8 +12238,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
   // AI IMAGE STUDIO: GENERATE IMAGE SYNTHESIS (FLUX & OPENROUTER)
   // ----------------------------------------------------
   if ((pathname === '/api/generate-image' || pathname === '/api/image/generate') && (method === 'POST' || method === 'GET')) {
+    let prompt = '';
     try {
-      let prompt = '';
       let model = 'flux';
       let width = 1024;
       let height = 1024;
@@ -10447,9 +12249,11 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       let referenceImage = null;
 
       let rawImageUserId = null;
+      let reqBody = null;
       if (method === 'POST') {
         const body = await safeParseBody(req);
         if (!body) return;
+        reqBody = body;
         prompt = body.prompt || body.q || '';
         referenceImage = body.referenceImage || body.image || body.initImage || null;
         sessionId = body.sessionId || req.headers['x-session-id'] || req.headers['X-Session-ID'] || null;
@@ -10484,7 +12288,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
       // Resolusi URL foto referensi lokal (/uploads/...) ke data URI base64 jika ada (hanya jika lokal atau terautentikasi PIN & <= 25 MB)
       let resolvedRefDataUrl = referenceImage;
-      const allowImageEditUploadRead = !isRemoteTunnelRequest(req) || validateRemoteTerminalPin(req, reqUrl, body).valid;
+      const allowImageEditUploadRead = !isRemoteTunnelRequest(req) || validateRemoteTerminalPin(req, reqUrl, reqBody).valid;
       if (allowImageEditUploadRead && typeof referenceImage === 'string' && referenceImage.startsWith('/uploads/')) {
         const refFile = path.basename(referenceImage);
         const localRefPath = path.join(UPLOADS_DIR, refFile);
@@ -11403,10 +13207,12 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     if (isOllamaEndpointForbidden(rawEndpoint)) {
       return sendJSON(res, 400, { error: 'Endpoint Ollama mengarah ke host privat/internal — akses diblokir (SSRF Protection).' });
     }
-    // M23: DNS-rebinding guard untuk endpoint non-tepercaya.
+    // M23: DNS-rebinding guard + IP pinning untuk endpoint non-tepercaya.
+    let pinnedModelsIps = null;
     if (!isTrustedOllamaEndpoint(rawEndpoint)) {
       const dnsVerdict = await assertResolvesPublic(rawEndpoint);
       if (!dnsVerdict.ok) return sendJSON(res, 400, { error: dnsVerdict.msg });
+      pinnedModelsIps = dnsVerdict.ips || null;
     }
 
     const isServerlessEnv = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NOW_REGION || req.headers['x-vercel-id']);
@@ -11430,7 +13236,12 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           if (rawHeaderKey) reqHeaders['x-ollama-key'] = rawHeaderKey;
 
           const fetchTimeout = isServerlessEnv ? 2500 : 5000;
-          const proxyReq = client.get(ollamaUrl.toString(), { timeout: fetchTimeout, headers: reqHeaders }, (proxyRes) => {
+          const getOpts = { timeout: fetchTimeout, headers: reqHeaders };
+          if (pinnedModelsIps && endpointUrl === rawEndpoint) {
+            getOpts.lookup = createPinnedLookup(pinnedModelsIps);
+            if (ollamaUrl.protocol === 'https:') getOpts.servername = ollamaUrl.hostname;
+          }
+          const proxyReq = client.get(ollamaUrl.toString(), getOpts, (proxyRes) => {
             let rawData = '';
             proxyRes.on('data', chunk => rawData += chunk);
             proxyRes.on('end', () => {
@@ -11463,7 +13274,12 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           if (rawHeaderKey) reqHeaders['x-ollama-key'] = rawHeaderKey;
 
           const fetchTimeout = isServerlessEnv ? 2500 : 5000;
-          const proxyReq = client.get(ollamaUrl.toString(), { timeout: fetchTimeout, headers: reqHeaders }, (proxyRes) => {
+          const getOpts = { timeout: fetchTimeout, headers: reqHeaders };
+          if (pinnedModelsIps && endpointUrl === rawEndpoint) {
+            getOpts.lookup = createPinnedLookup(pinnedModelsIps);
+            if (ollamaUrl.protocol === 'https:') getOpts.servername = ollamaUrl.hostname;
+          }
+          const proxyReq = client.get(ollamaUrl.toString(), getOpts, (proxyRes) => {
             let rawData = '';
             proxyRes.on('data', chunk => rawData += chunk);
             proxyRes.on('end', () => {
@@ -11644,10 +13460,13 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       if (isOllamaEndpointForbidden(customEndpoint)) {
         return sendJSON(res, 400, { error: 'Endpoint Ollama mengarah ke host privat/internal — akses diblokir (SSRF Protection).' });
       }
-      // M23: DNS-rebinding guard — endpoint publik yang me-resolve ke IP privat ditolak.
+      // M23: DNS-rebinding guard + IP pinning — endpoint publik yang me-resolve ke IP privat ditolak.
+      let pinnedChatIps = null;
+      const pinnedChatTargetEndpoint = customEndpoint;
       if (!isTrustedOllamaEndpoint(customEndpoint)) {
         const dnsVerdict = await assertResolvesPublic(customEndpoint);
         if (!dnsVerdict.ok) return sendJSON(res, 400, { error: dnsVerdict.msg });
+        pinnedChatIps = dnsVerdict.ips || null;
       }
 
       // H6: env OLLAMA_API_KEY hanya diteruskan ke endpoint TePERCAYA
@@ -12197,26 +14016,16 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       }
 
       if (sessionId) {
-        if (dbActiveChatTasks[sessionId] && dbActiveChatTasks[sessionId].status === 'streaming') {
-          return sendJSON(res, 429, { error: 'Stream already active for this session' });
-        }
-        ollamaTaskToken = createChatTaskToken();
-        dbActiveChatTasks[sessionId] = {
-          sessionId,
-          taskToken: ollamaTaskToken,
+        ollamaTaskToken = registerActiveChatTask(sessionId, {
           userId: chatUserId,
           model: body.model || 'Ollama Model',
           provider: 'ollama',
           userPrompt: userPrompt || null,
-          userImages: userImages || null,
-          fullText: '',
-          fullBytes: 0,
-          fullEpoch: 0,
-          rawBuffer: '',
-          status: 'streaming',
-          startedAt: Date.now(),
-          proxyReq: null
-        };
+          userImages: userImages || null
+        });
+        if (!ollamaTaskToken) {
+          return sendJSON(res, 429, { error: 'Stream already active for this session' });
+        }
       }
 
       const isStream = body.stream !== false;
@@ -12268,11 +14077,16 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           proxyHeaders['x-ollama-key'] = targetAuthKey;
         }
 
-        proxyReq = client.request(ollamaUrl.toString(), {
+        const upstreamOpts = {
           method: 'POST',
           headers: proxyHeaders,
           timeout: 300000
-        }, (proxyRes) => {
+        };
+        if (pinnedChatIps && targetEndpoint === pinnedChatTargetEndpoint) {
+          upstreamOpts.lookup = createPinnedLookup(pinnedChatIps);
+          if (ollamaUrl.protocol === 'https:') upstreamOpts.servername = ollamaUrl.hostname;
+        }
+        proxyReq = client.request(ollamaUrl.toString(), upstreamOpts, (proxyRes) => {
           if (isTaskCurrent(sessionId, ollamaTaskToken)) {
             dbActiveChatTasks[sessionId].proxyReq = proxyReq;
           }
@@ -12445,7 +14259,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   message: { role: 'assistant', content: clampedPrefix },
                   done: false
                 }) + '\n';
-                if (sessionId) accumulateChatChunk(sessionId, anchorFrame, 'ollama');
+                if (isTaskCurrent(sessionId, ollamaTaskToken)) accumulateChatChunk(sessionId, anchorFrame, 'ollama');
                 try { res.write(anchorFrame); } catch (_) {}
               }
               const splicedBody = {
@@ -12458,7 +14272,12 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               const splicedData = JSON.stringify(splicedBody);
               const splicedHeaders = { ...proxyHeaders, 'Content-Length': Buffer.byteLength(splicedData) };
               const splicedFilter = textSafety.createProviderStreamFilter('ollama', 'stream', { userPrompt, bypassPreambleStrip: true });
-              const splicedReq = client.request(ollamaUrl.toString(), { method: 'POST', headers: splicedHeaders, timeout: 300000 }, (splicedRes) => {
+              const splicedOpts = { method: 'POST', headers: splicedHeaders, timeout: 300000 };
+              if (pinnedChatIps && targetEndpoint === pinnedChatTargetEndpoint) {
+                splicedOpts.lookup = createPinnedLookup(pinnedChatIps);
+                if (ollamaUrl.protocol === 'https:') splicedOpts.servername = ollamaUrl.hostname;
+              }
+              const splicedReq = client.request(ollamaUrl.toString(), splicedOpts, (splicedRes) => {
                 if (isTaskCurrent(sessionId, ollamaTaskToken)) {
                   dbActiveChatTasks[sessionId].proxyReq = splicedReq;
                 }
@@ -12525,8 +14344,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               console.warn(`[Ollama Stream Diagnostics] Potential repetition orbit detected for session ${sessionId || 'anon'}. Allowing stream to continue.`);
             }
 
-            // Persist hanya event jawaban bersih; reasoning provider tidak disimpan.
-            if (sessionId && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'ollama');
+            // Persist hanya event jawaban bersih untuk task aktif (cegah kontaminasi zombie stream)
+            if (isTaskCurrent(sessionId, ollamaTaskToken) && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'ollama');
 
             if (clientDisconnected || res.writableEnded || res.destroyed) {
               if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
@@ -12535,16 +14354,21 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             try {
               if (!safeChunk) return;
               const flushed = res.write(safeChunk);
-              // M27: hormati backpressure dengan 150ms safety resume agar stream latar belakang tidak pernah deadlock saat klien putus sebelum drain
-              if (flushed === false && typeof proxyRes.pause === 'function') {
+              // M27: backpressure deduplikasi agar listener drain tidak menumpuk di koneksi lambat
+              if (flushed === false && typeof proxyRes.pause === 'function' && !proxyRes._zozWaitingDrain) {
+                proxyRes._zozWaitingDrain = true;
                 proxyRes.pause();
+                const onDrain = () => {
+                  clearTimeout(resumeTimer);
+                  proxyRes._zozWaitingDrain = false;
+                  try { if (typeof proxyRes.resume === 'function') proxyRes.resume(); } catch (_) {}
+                };
                 const resumeTimer = setTimeout(() => {
+                  if (typeof res.removeListener === 'function') res.removeListener('drain', onDrain);
+                  proxyRes._zozWaitingDrain = false;
                   try { if (typeof proxyRes.resume === 'function') proxyRes.resume(); } catch (_) {}
                 }, 150);
-                res.once('drain', () => {
-                  clearTimeout(resumeTimer);
-                  try { if (typeof proxyRes.resume === 'function') proxyRes.resume(); } catch (_) {}
-                });
+                res.once('drain', onDrain);
               }
             } catch (e) {}
           });
@@ -12553,7 +14377,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             clearOllamaKeepAlive();
             if (hasSplicedRefusal) return;
             const safeTail = reasoningFilter.end();
-            if (sessionId && safeTail) accumulateChatChunk(sessionId, safeTail, 'ollama');
+            if (isTaskCurrent(sessionId, ollamaTaskToken) && safeTail) accumulateChatChunk(sessionId, safeTail, 'ollama');
             if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
               try {
                 if (safeTail) res.write(safeTail);
@@ -12645,8 +14469,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         proxyReq.end();
       };
 
-      const isCloudTarget = Boolean(rawOllamaKey || isCloudModelRequested || (customEndpoint && customEndpoint.includes('ollama.com')));
-      const allowLocalFallback = !isServerlessChat && !isCloudTarget;
+      const allowLocalFallback = !isServerlessChat && !isCustomRemoteEndpoint;
       dispatchOllamaUpstream(customEndpoint, body.model, rawOllamaKey, allowLocalFallback, true).catch((err) => {
         clearOllamaKeepAlive();
         if (isTaskCurrent(sessionId, ollamaTaskToken)) {
@@ -13509,25 +15332,32 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       const stopUserId = reqUserId;
       let stoppedAny = false;
 
-      if (sid && dbActiveChatTasks[sid] && dbActiveChatTasks[sid].status === 'streaming') {
-        const task = dbActiveChatTasks[sid];
-        if (!task.userId || task.userId === stopUserId) {
-          task.status = 'aborted';
-          if (task.proxyReq && !task.proxyReq.destroyed) {
-            try { task.proxyReq.destroy(); } catch (_) {}
+      if (sid) {
+        const stopParentSid = resolveParentSessionId(String(sid).trim());
+        const matchingTaskKeys = Object.keys(dbActiveChatTasks).filter(k =>
+          k === sid || resolveParentSessionId(k) === stopParentSid
+        );
+        for (const taskKey of matchingTaskKeys) {
+          const task = dbActiveChatTasks[taskKey];
+          if (!task || task.status !== 'streaming') continue;
+          if (!task.userId || task.userId === stopUserId) {
+            task.status = 'aborted';
+            if (task.proxyReq && !task.proxyReq.destroyed) {
+              try { task.proxyReq.destroy(); } catch (_) {}
+            }
+            if (task.rawBuffer) {
+              flushChatTaskBuffer(taskKey, task.provider || 'openrouter');
+            }
+            // Simpan potongan yang sudah terlanjur dibuat (kecuali continuation/_studio)
+            if (task.fullText && task.fullText.trim() && !isContinuationOrStudioSessionId(taskKey)) {
+              appendAssistantMessageToSessionDisk(taskKey, task.fullText + '\n\n*[Respons dihentikan oleh pengguna]*', task.model, {}, task.userId || stopUserId)
+                .catch(err => console.warn('Gagal simpan respons terhenti ke sesi:', err && err.message));
+            }
+            // Buang task dari map AGAR polling /api/chat/status tidak terus
+            // mengembalikan status 'aborted' untuk sesi yang sudah dihentikan
+            delete dbActiveChatTasks[taskKey];
+            stoppedAny = true;
           }
-          if (task.rawBuffer) {
-            flushChatTaskBuffer(sid, task.provider || 'openrouter');
-          }
-          // Simpan potongan yang sudah terlanjur dibuat
-          if (task.fullText && task.fullText.trim()) {
-            appendAssistantMessageToSessionDisk(sid, task.fullText + '\n\n*[Respons dihentikan oleh pengguna]*', task.model, {}, task.userId || stopUserId)
-              .catch(err => console.warn('Gagal simpan respons terhenti ke sesi:', err && err.message));
-          }
-          // Buang task dari map AGAR polling /api/chat/status tidak terus
-          // mengembalikan status 'aborted' untuk sesi yang sudah dihentikan
-          delete dbActiveChatTasks[sid];
-          stoppedAny = true;
         }
       }
 

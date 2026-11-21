@@ -20,54 +20,113 @@ function sendJson(res, statusCode, data) {
 }
 
 function parseJsonBody(req) {
-  return new Promise((resolve) => {
-    let body = '';
+  if (req && req.body !== undefined && req.body !== null) {
+    if (typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+      return Promise.resolve(req.body);
+    }
+    if (typeof req.body === 'string') {
+      if (!req.body.trim()) return Promise.resolve({});
+      try {
+        return Promise.resolve(JSON.parse(req.body));
+      } catch (e) {
+        return Promise.reject(new Error(`Invalid JSON body: ${e.message}`));
+      }
+    }
+    if (Buffer.isBuffer(req.body)) {
+      const str = req.body.toString('utf8');
+      if (!str.trim()) return Promise.resolve({});
+      try {
+        return Promise.resolve(JSON.parse(str));
+      } catch (e) {
+        return Promise.reject(new Error(`Invalid JSON body: ${e.message}`));
+      }
+    }
+  }
+  if (!req || req.readableEnded || req.complete) {
+    return Promise.resolve({});
+  }
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let totalBytes = 0;
     let settled = false;
-    const done = (val) => {
+    const doneResolve = (val) => {
       if (!settled) {
         settled = true;
         resolve(val);
       }
     };
-    req.on('data', chunk => {
-      body += chunk;
-      if (body.length > 5 * 1024 * 1024) { // 5MB limit
-        done({});
-        try { req.destroy(); } catch (_) {}
+    const doneReject = (err) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
       }
+    };
+    req.on('data', chunk => {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buf.length;
+      if (totalBytes > 5 * 1024 * 1024) { // 5MB limit
+        doneReject(new Error('Payload JSON memori terlalu besar (maksimal 5MB).'));
+        try { req.destroy(); } catch (_) {}
+        return;
+      }
+      chunks.push(buf);
     });
     req.on('end', () => {
+      const bodyStr = chunks.length > 0 ? Buffer.concat(chunks).toString('utf8') : '';
+      if (!bodyStr.trim()) return doneResolve({});
       try {
-        done(body ? JSON.parse(body) : {});
-      } catch (_) {
-        done({});
+        doneResolve(JSON.parse(bodyStr));
+      } catch (e) {
+        doneReject(new Error(`Invalid JSON body: ${e.message}`));
       }
     });
-    req.on('error', () => done({}));
-    req.on('close', () => done({}));
+    req.on('error', (err) => doneReject(err || new Error('Request stream error')));
+    req.on('close', () => doneResolve({}));
   });
 }
 
 function parseRawBody(req) {
-  return new Promise((resolve) => {
-    let body = '';
+  if (req && req.body !== undefined && req.body !== null) {
+    if (typeof req.body === 'string') return Promise.resolve(req.body);
+    if (Buffer.isBuffer(req.body)) return Promise.resolve(req.body.toString('utf8'));
+    if (typeof req.body === 'object') {
+      try { return Promise.resolve(JSON.stringify(req.body)); } catch (_) { return Promise.resolve(''); }
+    }
+  }
+  if (!req || req.readableEnded || req.complete) {
+    return Promise.resolve('');
+  }
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let totalBytes = 0;
     let settled = false;
-    const done = (val) => {
+    const doneResolve = (val) => {
       if (!settled) {
         settled = true;
         resolve(val);
       }
     };
-    req.on('data', chunk => {
-      body += chunk;
-      if (body.length > 10 * 1024 * 1024) {
-        done('');
-        try { req.destroy(); } catch (_) {}
+    const doneReject = (err) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
       }
+    };
+    req.on('data', chunk => {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buf.length;
+      if (totalBytes > 10 * 1024 * 1024) {
+        doneReject(new Error('Payload memori terlalu besar (maksimal 10MB).'));
+        try { req.destroy(); } catch (_) {}
+        return;
+      }
+      chunks.push(buf);
     });
-    req.on('end', () => done(body || ''));
-    req.on('error', () => done(''));
-    req.on('close', () => done(''));
+    req.on('end', () => {
+      doneResolve(chunks.length > 0 ? Buffer.concat(chunks).toString('utf8') : '');
+    });
+    req.on('error', (err) => doneReject(err || new Error('Request stream error')));
+    req.on('close', () => doneResolve(''));
   });
 }
 
