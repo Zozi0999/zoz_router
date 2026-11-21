@@ -7709,11 +7709,16 @@ async function requestHandler(req, res) {
             createdAt = createdAt || st.birthtime.toISOString();
             updatedAt = updatedAt || st.mtime.toISOString();
           }
+          const derivedPlanMode = (sess.planMode === 'z21' || sess.planMode === 'zoz')
+            ? sess.planMode
+            : (Array.isArray(sess.messages) && sess.messages.some(m => m && (m.planMode === 'z21' || m.websiteMode === 'z21' || m.websiteMode === 'forge' || m.websiteMode === 'preview')) ? 'z21' : 'zoz');
           sessions.push({
             id: sess.id || path.basename(file, '.json'),
             userId: reqUserId,
             title: sess.title || 'Obrolan Baru',
             mode: sess.mode || 'ollama',
+            planMode: derivedPlanMode,
+            lastWebsiteMode: sess.lastWebsiteMode,
             createdAt,
             updatedAt,
             messageCount: Array.isArray(sess.messages) ? sess.messages.length : 0,

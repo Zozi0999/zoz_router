@@ -35,7 +35,7 @@
       }
     });
     try {
-      var currentVer = 'v20261120_tmwohurbl';
+      var currentVer = 'v20261120_v805';
       var savedVer = localStorage.getItem('__zoz_ver__');
       if (savedVer !== currentVer) {
         localStorage.setItem('__zoz_ver__', currentVer);
@@ -49,7 +49,7 @@
         }
       }
     } catch (_) {}
-    window.__ZOZ_VERSION__ = 'v20261120_tmwohurbl';
+    window.__ZOZ_VERSION__ = 'v20261120_v805';
   </script>
   <title>ZOZ ROUTER</title>
   <link rel="icon" type="image/png" href="zoz-logo.png?v=20261112_v765">
@@ -109,8 +109,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261119_v800">
-  <link rel="stylesheet" href="style.css?v=20261119_v800">
+  <link rel="preload" as="style" href="style.css?v=20261120_v805">
+  <link rel="stylesheet" href="style.css?v=20261120_v805">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -654,11 +654,6 @@
         </div>
       </div>
 
-      <!-- Action Button 1: Peers / Preset Persona -->
-      <button class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] transition-colors top-action-btn" id="systemPromptModalBtn" title="Workspace Peers / System Persona" type="button">
-        <svg class="lucide lucide-users w-3.5 h-3.5" data-lucide="users" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><path d="M16 3.128a4 4 0 0 1 0 7.744"></path><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><circle cx="9" cy="7" r="4"></circle></svg>
-      </button>
-
       <!-- Action Button 2: ZOZ Shell Terminal Console -->
       <button class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] transition-colors top-action-btn" id="terminalToggleBtn" title="ZOZ Shell (Buka Console)" aria-label="Buka Terminal" type="button">
         <svg class="lucide lucide-terminal w-3.5 h-3.5" data-lucide="terminal" fill="none" height="24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M12 19h8"></path><path d="m4 17 6-6-6-6"></path></svg>
@@ -933,12 +928,6 @@
 
       <!-- BOTTOM COMPOSER / INPUT SECTION (For Single / Auto Mode) -->
       <footer class="composer-container w-full flex flex-col items-center justify-end pb-8 pt-2 z-20 relative" id="mainComposerContainer">
-        <div class="active-preset-banner" id="activePresetBanner" style="display: none;">
-          <i class="fa-solid fa-sparkles"></i>
-          <span id="activePresetName">Persona: Default</span>
-          <button class="clear-preset-btn" id="clearPresetBtn" type="button" aria-label="Hapus preset kustom" title="Hapus preset kustom"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-
         <!-- Active Local Workspace Pill -->
         <div class="workspace-composer-pill" id="workspaceComposerPill" style="display: none;">
           <div class="workspace-pill-left">
@@ -1060,9 +1049,20 @@
           <button type="button" id="btnCancelMusicGenMode" style="display: none;"></button>
         </div>
 
-        <!-- BEGIN: BottomTaskbarPromptDock (Animated expandable/collapsible dock) -->
-        <div class="w-full px-4 transition-all duration-300 ease-in-out overflow-visible max-h-none opacity-100 transform translate-y-0 max-w-2xl mx-auto prompt-dock-wrapper" id="promptDockWrapper">
-          <div class="rounded-3xl transition-all duration-300 py-2 px-3 relative composer-box">
+        <!-- BEGIN: Dual-Plan Vertical Dragon Pillars (ZOZ Blue Left | Prompt | Z21 Red Right) -->
+        <div class="composer-plan-stage is-empty-chat" id="composerPlanStage" data-active-plan="zoz">
+          <button type="button" class="plan-dragon-card plan-dragon-pillar plan-dragon-zoz is-selected" id="btnSelectPlanZoz" data-plan="zoz" aria-pressed="true" aria-label="Mode ZOZ — Chat Biasa (Default)" title="Mode ZOZ — Chat Biasa (Default)">
+            <span class="dragon-scale-layer" aria-hidden="true"></span>
+            <span class="dragon-edge-glow" aria-hidden="true"></span>
+            <span class="plan-dragon-inner">
+              <span class="plan-dragon-gem" aria-hidden="true"></span>
+              <span class="plan-dragon-code">ZOZ</span>
+            </span>
+          </button>
+
+          <!-- BEGIN: BottomTaskbarPromptDock (Animated expandable/collapsible dock) -->
+          <div class="w-full px-4 transition-all duration-300 ease-in-out overflow-visible max-h-none opacity-100 transform translate-y-0 max-w-2xl mx-auto prompt-dock-wrapper" id="promptDockWrapper">
+            <div class="rounded-3xl transition-all duration-300 py-2 px-3 relative composer-box">
             <!-- Slash Commands / Quick Tools Autocomplete Menu -->
             <div class="slash-commands-menu" id="slashCommandsMenu" style="display: none;" role="listbox" aria-label="Skills">
               <div class="slash-menu-header">
@@ -1226,6 +1226,16 @@
               </div>
             </div>
           </div>
+          </div>
+
+          <button type="button" class="plan-dragon-card plan-dragon-pillar plan-dragon-z21" id="btnSelectPlanZ21" data-plan="z21" aria-pressed="false" aria-label="Mode Z21 — Website &amp; Live Pratinjau" title="Mode Z21 — Website &amp; Live Pratinjau">
+            <span class="dragon-scale-layer" aria-hidden="true"></span>
+            <span class="dragon-edge-glow" aria-hidden="true"></span>
+            <span class="plan-dragon-inner">
+              <span class="plan-dragon-gem" aria-hidden="true"></span>
+              <span class="plan-dragon-code">Z21</span>
+            </span>
+          </button>
         </div>
       </footer>
     </main>
@@ -1295,7 +1305,6 @@
         <div class="settings-tabs">
           <button class="settings-tab-btn active" data-target="tabProviders">Providers &amp; API</button>
           <button class="settings-tab-btn" data-target="tabJozzMemory"><i class="fa-solid fa-brain"></i> Jozz Memory</button>
-          <button class="settings-tab-btn" data-target="tabSystem">System Persona</button>
           <button class="settings-tab-btn" data-target="tabDeveloper" id="tabBtnDeveloper">
             <i class="fa-solid fa-code"></i> About Developer
           </button>
@@ -1500,35 +1509,6 @@
             <button type="button" class="btn btn-xs" id="btnClearAllMemoriesBtn" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; font-size: 0.7rem; padding: 3px 8px;" title="Hapus seluruh memori">
               <i class="fa-solid fa-trash-can"></i> Hapus Semua
             </button>
-          </div>
-        </div>
-
-        <!-- Tab 3: System Persona -->
-        <div class="settings-tab-pane" id="tabSystem">
-          <!-- Primary Modes: Default & Custom on top -->
-          <div class="persona-primary-row">
-            <button class="preset-pill default-pill" data-preset="default">
-              <i class="fa-solid fa-ban"></i> Default
-            </button>
-            <button class="preset-pill custom-pill" data-preset="custom">
-              <i class="fa-solid fa-pen-ruler"></i> Custom
-            </button>
-          </div>
-
-          <!-- Preset Personas Below -->
-          <div class="persona-section-label">Preset Persona:</div>
-          <div class="preset-pills">
-            <button class="preset-pill" data-preset="kaisar">👑 Kaisar Zozi Assistant</button>
-            <button class="preset-pill" data-preset="coder">💻 Senior Architect Coder</button>
-            <button class="preset-pill" data-preset="cyber">🛡️ Cyber Security & Hacker</button>
-            <button class="preset-pill" data-preset="concise">⚡ Ultra Ringkas & Direct</button>
-            <button class="preset-pill" data-preset="uncensored">🔓 Deep Reasoning Raw</button>
-          </div>
-
-          <div class="form-group" style="margin-top: 14px;">
-            <label for="settingSystemPrompt">Instruksi Prompt Sistem (System Prompt):</label>
-            <textarea id="settingSystemPrompt" rows="6" placeholder="Ketik instruksi persona AI kustom di sini..."></textarea>
-            <div class="form-hint" style="font-size: 11px; color: var(--text-muted); margin-top: 5px;"><i class="fa-solid fa-circle-info"></i> Persona kustom Anda akan selalu tersimpan aman meskipun beralih ke Default atau preset lain.</div>
           </div>
         </div>
 
@@ -1792,110 +1772,133 @@
     </div>
   </div>
 
-  <!-- 6.5b. AI FILE STUDIO MODAL (Neural Canvas Studio Mode) -->
-  <div class="modal-backdrop gemini-studio-backdrop" id="aiFileStudioModal">
-    <div class="modal-card modal-lg ai-file-studio-card gemini-canvas-studio">
+  <!-- 6.5b. ZOZ FORGE STUDIO MODAL (Live Web & Interactive Canvas Viewport) -->
+  <div class="modal-backdrop gemini-studio-backdrop zoz-forge-backdrop" id="aiFileStudioModal">
+    <div class="modal-card modal-lg ai-file-studio-card gemini-canvas-studio zoz-forge-studio">
       <div class="modal-header gemini-studio-header">
         <div class="gemini-studio-header-left">
+          <button class="forge-circle-btn studio-close-btn" data-close="aiFileStudioModal" type="button" aria-label="Kembali" title="Kembali ke Obrolan">
+            <i class="fa-solid fa-chevron-left"></i>
+          </button>
           <div class="modal-title gemini-studio-title" id="aiFileStudioTitle">
-            <i class="fa-solid fa-wand-magic-sparkles"></i> AI File Studio
-          </div>
-          <span class="gemini-canvas-status" title="Tersimpan di Zoz Router">
-            <i class="fa-solid fa-cloud"></i>
-            <i class="fa-solid fa-check gemini-status-check"></i>
-          </span>
-          <div class="gemini-history-nav">
-            <button class="gemini-icon-btn" id="btnStudioUndo" type="button" title="Urungkan (Undo)" disabled>
-              <i class="fa-solid fa-rotate-left"></i>
-            </button>
-            <button class="gemini-icon-btn" id="btnStudioRedo" type="button" title="Ulangi (Redo)" disabled>
-              <i class="fa-solid fa-rotate-right"></i>
-            </button>
+            <span class="forge-brand-dot"></span><span class="forge-title-text">ZOZ FORGE</span>
           </div>
         </div>
 
         <div class="gemini-studio-header-center">
-          <div class="gemini-segmented-toggle" id="aiFileStudioTabs">
-            <button type="button" class="seg-btn ai-file-tab" data-tab="code">
-              <i class="fa-solid fa-code"></i> Kode
-            </button>
-            <button type="button" class="seg-btn ai-file-tab active" data-tab="preview">
-              <i class="fa-solid fa-play"></i> Pratinjau
-            </button>
+          <div class="gemini-segmented-toggle forge-segmented-toggle" id="aiFileStudioTabs">
+            <button type="button" class="seg-btn ai-file-tab" data-tab="code">Kode</button>
+            <button type="button" class="seg-btn ai-file-tab active" data-tab="preview">Pratinjau</button>
           </div>
         </div>
 
         <div class="gemini-studio-header-right">
-          <button class="gemini-pill-btn studio-search-code-btn" id="btnStudioHeaderSearchCode" type="button" style="display: none;" title="Cari kata, nama, atau baris dalam kode (Ctrl+F)">
-            <i class="fa-solid fa-magnifying-glass"></i> <span id="labelStudioHeaderSearch">Cari</span>
-          </button>
-          <button class="gemini-pill-btn studio-edit-code-btn" id="btnStudioEditCode" type="button" title="Edit kode secara langsung">
-            <i class="fa-solid fa-pen-to-square" id="iconStudioEditCode"></i> <span id="labelStudioEditCode">Edit Kode</span>
-          </button>
-          <button class="gemini-pill-btn studio-chat-toggle-btn" id="btnToggleStudioAssistant" type="button" title="Tanya AI Asisten Studio (Popup Melayang)">
-            <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Tanya AI</span>
-          </button>
-          <div class="studio-download-wrap gemini-dropdown-wrap" id="aiFileStudioDownloadWrap">
-            <button class="gemini-pill-btn" id="aiFileStudioDownloadBtn" type="button" title="Ekspor atau unduh file ini">
-              <i class="fa-solid fa-arrow-down-to-bracket"></i> <span id="aiFileStudioDownloadText">Ekspor</span> <i class="fa-solid fa-chevron-down caret-icon" id="aiFileStudioDownloadCaret"></i>
-            </button>
-            <div class="studio-download-menu gemini-export-menu" id="aiFileStudioDownloadMenu" style="display: none;">
-              <button type="button" class="studio-download-item gemini-export-item" id="btnStudioDownloadHtml">
-                <i class="fa-solid fa-file-code" style="color: var(--neon-cyan);"></i>
-                <div class="menu-desc-text">
-                  <span class="fmt-title">Berkas HTML (.html)</span>
-                  <span class="fmt-sub">Siap dibuka langsung di browser atau di-hosting</span>
-                </div>
-              </button>
-              <button type="button" class="studio-download-item gemini-export-item" id="btnStudioDownloadZip">
-                <i class="fa-solid fa-file-zipper" style="color: var(--neon-teal);"></i>
-                <div class="menu-desc-text">
-                  <span class="fmt-title">Paket Arsip ZIP (.zip)</span>
-                  <span class="fmt-sub">Arsip proyek lengkap siap diekstraksi</span>
-                </div>
-              </button>
-              <button type="button" class="studio-download-item gemini-export-item" id="btnStudioDownloadSvg" style="display: none;">
-                <i class="fa-solid fa-bezier-curve" style="color: var(--neon-cyan);"></i>
-                <div class="menu-desc-text">
-                  <span class="fmt-title">Vektor SVG (.svg)</span>
-                  <span class="fmt-sub">Resolusi tajam tak terbatas, format vektor</span>
-                </div>
-              </button>
-              <button type="button" class="studio-download-item gemini-export-item" id="btnStudioDownloadJpeg" style="display: none;">
-                <i class="fa-solid fa-file-image" style="color: var(--neon-amber);"></i>
-                <div class="menu-desc-text">
-                  <span class="fmt-title">Gambar JPEG (.jpeg)</span>
-                  <span class="fmt-sub">Gambar raster HD, siap dibagikan ke mana saja</span>
-                </div>
-              </button>
-              <button type="button" class="studio-download-item gemini-export-item" id="btnStudioDownloadPdf" style="display: none;">
-                <i class="fa-solid fa-file-pdf" style="color: #ef4444;"></i>
-                <div class="menu-desc-text">
-                  <span class="fmt-title">Dokumen PDF (.pdf)</span>
-                  <span class="fmt-sub">Tata letak baku rapi & tajam, siap cetak & baca</span>
-                </div>
-              </button>
-              <button type="button" class="studio-download-item gemini-export-item" id="btnStudioDownloadDocx" style="display: none;">
-                <i class="fa-solid fa-file-word" style="color: #3b82f6;"></i>
-                <div class="menu-desc-text">
-                  <span class="fmt-title">Dokumen Word (.docx)</span>
-                  <span class="fmt-sub">Office Open XML asli, fleksibel diedit di Word/Docs</span>
-                </div>
-              </button>
-            </div>
-          </div>
-          <button class="gemini-icon-btn" id="aiFileStudioCopyBtn" type="button" title="Salin seluruh isi file ke clipboard">
-            <i class="fa-solid fa-copy"></i>
-          </button>
-          <button class="gemini-pill-btn gemini-save-disk-btn" id="aiFileStudioSaveDiskBtn" type="button" style="display: none;" title="Simpan langsung ke direktori lokal proyek tanpa unduh">
-            <i class="fa-solid fa-floppy-disk"></i> Direktori
-          </button>
-          <button class="gemini-icon-btn" id="btnToggleStudioFullscreen" type="button" aria-label="Layar Penuh" title="Layar Penuh (Full Screen)">
+          <button class="forge-circle-btn" id="btnToggleStudioFullscreen" type="button" aria-label="Layar Penuh" title="Layar Penuh (Full Screen)">
             <i class="fa-solid fa-expand"></i>
           </button>
-          <button class="gemini-icon-btn studio-close-btn" data-close="aiFileStudioModal" type="button" aria-label="Tutup" title="Tutup Studio">
-            <i class="fa-solid fa-xmark"></i>
-          </button>
+          <div class="forge-more-wrap" id="forgeStudioMoreWrap">
+            <button class="forge-circle-btn" id="btnForgeStudioMore" type="button" aria-label="Opsi ZOZ Forge" aria-expanded="false" aria-controls="forgeStudioMoreMenu" title="Opsi &amp; Ekspor ZOZ Forge">
+              <i class="fa-solid fa-ellipsis"></i>
+            </button>
+            <div class="forge-more-menu" id="forgeStudioMoreMenu" role="region" aria-label="Opsi ZOZ Forge" style="display: none;">
+              <div class="forge-more-head">
+                <div class="forge-more-brand">
+                  <span class="forge-more-tag">ZOZ FORGE</span>
+                  <span class="forge-more-filename" id="forgeMoreMenuTitle">index.html</span>
+                </div>
+                <div class="gemini-history-nav">
+                  <button class="gemini-icon-btn" id="btnStudioUndo" type="button" title="Urungkan (Undo)" disabled>
+                    <i class="fa-solid fa-rotate-left"></i>
+                  </button>
+                  <button class="gemini-icon-btn" id="btnStudioRedo" type="button" title="Ulangi (Redo)" disabled>
+                    <i class="fa-solid fa-rotate-right"></i>
+                  </button>
+                </div>
+              </div>
+
+              <button class="forge-more-item" id="btnForgeReloadPreview" type="button" title="Muat ulang pratinjau langsung">
+                <i class="fa-solid fa-rotate"></i>
+                <span>Muat Ulang Pratinjau</span>
+              </button>
+              <button class="forge-more-item studio-edit-code-btn" id="btnStudioEditCode" type="button" title="Edit kode secara langsung">
+                <i class="fa-solid fa-pen-to-square" id="iconStudioEditCode"></i>
+                <span id="labelStudioEditCode">Edit Kode</span>
+              </button>
+              <button class="forge-more-item studio-search-code-btn" id="btnStudioHeaderSearchCode" type="button" style="display: none;" title="Cari kata, nama, atau baris dalam kode (Ctrl+F)">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <span id="labelStudioHeaderSearch">Cari dalam Kode</span>
+              </button>
+              <button class="forge-more-item" id="btnForgeOpenNewTab" type="button" title="Buka pratinjau website di tab browser baru">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                <span>Buka di Tab Baru</span>
+              </button>
+              <button class="forge-more-item studio-chat-toggle-btn" id="btnToggleStudioAssistant" type="button" title="Buka jendela riwayat Asisten ZOZ Forge">
+                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                <span>Riwayat Asisten Forge</span>
+              </button>
+              <button class="forge-more-item" id="aiFileStudioCopyBtn" type="button" title="Salin seluruh isi kode ke clipboard">
+                <i class="fa-solid fa-copy"></i>
+                <span>Salin Seluruh Kode</span>
+              </button>
+              <button class="forge-more-item gemini-save-disk-btn" id="aiFileStudioSaveDiskBtn" type="button" style="display: none;" title="Simpan langsung ke direktori lokal proyek">
+                <i class="fa-solid fa-floppy-disk"></i>
+                <span>Simpan ke Direktori</span>
+              </button>
+
+              <div class="forge-more-divider"></div>
+
+              <div class="studio-download-wrap forge-more-export-section" id="aiFileStudioDownloadWrap">
+                <button class="forge-more-export-trigger" id="aiFileStudioDownloadBtn" type="button" title="Opsi Ekspor &amp; Unduh">
+                  <span id="aiFileStudioDownloadText">Ekspor &amp; Unduh</span>
+                  <i class="fa-solid fa-chevron-down caret-icon" id="aiFileStudioDownloadCaret"></i>
+                </button>
+                <div class="studio-download-menu forge-more-export-list is-inline-export-list" id="aiFileStudioDownloadMenu">
+                  <button type="button" class="forge-more-item studio-download-item gemini-export-item" id="btnStudioDownloadHtml">
+                    <i class="fa-solid fa-file-code" style="color: var(--neon-cyan);"></i>
+                    <div class="menu-desc-text">
+                      <span class="fmt-title">Unduh HTML (.html)</span>
+                      <span class="fmt-sub">Siap dibuka di browser atau di-hosting</span>
+                    </div>
+                  </button>
+                  <button type="button" class="forge-more-item studio-download-item gemini-export-item" id="btnStudioDownloadZip">
+                    <i class="fa-solid fa-file-zipper" style="color: var(--neon-teal);"></i>
+                    <div class="menu-desc-text">
+                      <span class="fmt-title">Paket Arsip ZIP (.zip)</span>
+                      <span class="fmt-sub">Arsip proyek lengkap siap ekstrak</span>
+                    </div>
+                  </button>
+                  <button type="button" class="forge-more-item studio-download-item gemini-export-item" id="btnStudioDownloadSvg" style="display: none;">
+                    <i class="fa-solid fa-bezier-curve" style="color: var(--neon-cyan);"></i>
+                    <div class="menu-desc-text">
+                      <span class="fmt-title">Vektor SVG (.svg)</span>
+                      <span class="fmt-sub">Resolusi tajam tak terbatas</span>
+                    </div>
+                  </button>
+                  <button type="button" class="forge-more-item studio-download-item gemini-export-item" id="btnStudioDownloadJpeg" style="display: none;">
+                    <i class="fa-solid fa-file-image" style="color: var(--neon-amber);"></i>
+                    <div class="menu-desc-text">
+                      <span class="fmt-title">Gambar JPEG (.jpeg)</span>
+                      <span class="fmt-sub">Gambar raster HD siap bagikan</span>
+                    </div>
+                  </button>
+                  <button type="button" class="forge-more-item studio-download-item gemini-export-item" id="btnStudioDownloadPdf" style="display: none;">
+                    <i class="fa-solid fa-file-pdf" style="color: #ef4444;"></i>
+                    <div class="menu-desc-text">
+                      <span class="fmt-title">Dokumen PDF (.pdf)</span>
+                      <span class="fmt-sub">Tata letak rapi siap cetak &amp; baca</span>
+                    </div>
+                  </button>
+                  <button type="button" class="forge-more-item studio-download-item gemini-export-item" id="btnStudioDownloadDocx" style="display: none;">
+                    <i class="fa-solid fa-file-word" style="color: #3b82f6;"></i>
+                    <div class="menu-desc-text">
+                      <span class="fmt-title">Dokumen Word (.docx)</span>
+                      <span class="fmt-sub">Office Open XML fleksibel diedit</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1905,7 +1908,10 @@
             <div class="studio-preview-stream-hud" id="studioPreviewStreamHud" style="display: none;">
               <span class="stream-hud-pulse"></span>
               <i class="fa-solid fa-wand-magic-sparkles fa-spin text-cyan-400"></i>
-              <span id="studioPreviewStreamStatusText">AI sedang meracik revisi real-time...</span>
+              <span id="studioPreviewStreamStatusText">ZOZ Forge sedang meracik revisi real-time...</span>
+              <button class="studio-hud-stop-btn" id="btnStudioHudStop" type="button" title="Hentikan revisi" aria-label="Hentikan revisi">
+                <i class="fa-solid fa-stop"></i>
+              </button>
             </div>
             <iframe id="aiFileStudioFrame" title="Pratinjau langsung file" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"></iframe>
             <div class="ai-file-studio-placeholder" id="aiFileStudioPlaceholder">
@@ -1969,21 +1975,21 @@
 
         <!-- Studio Assistant Floating Mini Popup (Compact & Freely Draggable on Mobile & Desktop) -->
         <div class="studio-assistant-panel" id="studioAssistantPanel" style="display: none;">
-          <div class="studio-floating-drag-pill" id="studioFloatingDragPill" title="Tahan &amp; geser untuk memindahkan jendela Tanya AI">
+          <div class="studio-floating-drag-pill" id="studioFloatingDragPill" title="Tahan &amp; geser untuk memindahkan jendela Asisten ZOZ Forge">
             <span class="drag-pill-bar"></span>
             <span class="drag-pill-hint">Geser</span>
           </div>
           <div class="studio-assistant-header" id="studioAssistantHeader">
             <div class="studio-assistant-title">
               <i class="fa-solid fa-grip-vertical studio-drag-grip" title="Tahan &amp; geser untuk memindahkan"></i>
-              <i class="fa-solid fa-wand-magic-sparkles"></i> <span id="studioAssistantTitleText">Tanya AI</span>
-              <span class="studio-history-mode-badge" id="studioHistoryModeBadge" title="Riwayat terpisah dari obrolan utama agar ringan &amp; tidak penuh">Studio</span>
+              <i class="fa-solid fa-wand-magic-sparkles"></i> <span id="studioAssistantTitleText">ZOZ Forge AI</span>
+              <span class="studio-history-mode-badge" id="studioHistoryModeBadge" title="Riwayat terpisah dari obrolan utama agar ringan &amp; tidak penuh">Forge</span>
             </div>
             <div class="studio-assistant-controls">
               <button class="gemini-pill-btn studio-endocrine-toggle-btn" id="btnToggleStudioEndocrine" type="button" title="Sensor Kode (Endocrine Code): Pantau kesehatan berkas &amp; sintaks">
                 <i class="fa-solid fa-dna" id="iconStudioEndocrine"></i> <span id="labelStudioEndocrine">Endocrine: ON</span>
               </button>
-              <button class="gemini-icon-btn assistant-min-btn" id="btnStudioMinAssistant" type="button" title="Lipat / Buka Isi Jendela Tanya AI">
+              <button class="gemini-icon-btn assistant-min-btn" id="btnStudioMinAssistant" type="button" title="Lipat / Buka Isi Jendela Asisten">
                 <i class="fa-solid fa-chevron-up" id="iconStudioMin"></i>
               </button>
               <button class="gemini-icon-btn" id="btnStudioClearChat" type="button" title="Bersihkan Riwayat Panel Ini (Tanpa Menghapus History Utama)">
@@ -2001,27 +2007,43 @@
           </div>
           <div class="studio-agent-loop-hud" id="studioAgentLoopHud" style="display: none;"></div>
           <div class="studio-assistant-body" id="studioAssistantBody">
-            <!-- Riwayat Khusus Pratinjau / Tanya AI (Terpisah dari History Utama) -->
+            <!-- Riwayat Khusus Pratinjau / ZOZ Forge AI (Terpisah dari History Utama) -->
             <div class="studio-assistant-messages" id="studioAssistantMessages">
               <div class="studio-assistant-empty" id="studioAssistantEmpty">
                 <i class="fa-solid fa-comments"></i>
-                <p>Riwayat Tanya AI (Pratinjau) — terpisah dari obrolan utama agar ringan &amp; tidak penuh.</p>
+                <p>Riwayat Revisi ZOZ Forge — terpisah dari obrolan utama agar ringan &amp; tidak penuh.</p>
               </div>
             </div>
             <!-- Riwayat Khusus Menu Edit Kode (Terpisah dari Pratinjau & History Utama) -->
             <div class="studio-assistant-messages studio-edit-assistant-messages" id="studioEditAssistantMessages" style="display: none;">
               <div class="studio-assistant-empty" id="studioEditAssistantEmpty">
                 <i class="fa-solid fa-code"></i>
-                <p>Riwayat AI Edit Kode — khusus pengeditan baris kode di menu Edit, terpisah dari history utama agar tidak penuh.</p>
+                <p>Riwayat AI Edit Kode — khusus pengeditan baris kode di menu Edit, terpisah dari history utama.</p>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- AUTHENTIC ZOZ ROUTER PROMPT COMPOSER IN STUDIO -->
+      <!-- ZOZ FORGE FLOATING AI ORB & EXPANDABLE PROMPT COMPOSER -->
       <div class="gemini-studio-footer" id="geminiStudioFooter">
+        <button type="button" class="forge-prompt-orb" id="btnForgePromptOrb" aria-label="Arahkan AI ZOZ Forge" aria-expanded="false" title="Ubah desain atau fitur website dengan AI ZOZ Forge">
+          <svg class="forge-orb-emblem" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="zozForgeOrbGrad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#00e5a3"/>
+                <stop offset="55%" stop-color="#00f2fe"/>
+                <stop offset="100%" stop-color="#38bdf8"/>
+              </linearGradient>
+            </defs>
+            <path d="M12 2L14.7 9.3L22 12L14.7 14.7L12 22L9.3 14.7L2 12L9.3 9.3L12 2Z" fill="url(#zozForgeOrbGrad)"/>
+            <circle cx="12" cy="12" r="2.2" fill="#05070b"/>
+          </svg>
+        </button>
         <div class="composer-box studio-composer-box" id="studioComposerBox">
+          <button type="button" class="composer-btn forge-collapse-composer-btn" id="btnForgeCollapseComposer" title="Tutup bilah perintah (Esc)" aria-label="Tutup bilah perintah">
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
           <!-- Textarea Input (Genuine Zoz Router multi-line, auto-expand, Shift+Enter support) -->
           <div class="input-field-wrap">
             <textarea
@@ -2036,11 +2058,11 @@
           <!-- Action Buttons Right -->
           <div class="composer-tools-right">
             <!-- Stop Generation Button (when streaming/generating) -->
-            <button class="composer-btn stop-btn" id="btnStudioStopFollowup" style="display: none;" title="Hentikan Generasi">
+            <button class="composer-btn stop-btn" id="btnStudioStopFollowup" type="button" style="display: none;" title="Hentikan Generasi">
               <i class="fa-solid fa-circle-stop"></i>
             </button>
             <!-- Send Button -->
-            <button class="send-btn studio-send-btn" id="btnStudioSendFollowup" title="Kirim Pertanyaan / Revisi (Enter)" aria-label="Kirim Permintaan">
+            <button class="send-btn studio-send-btn" id="btnStudioSendFollowup" type="button" title="Kirim Pertanyaan / Revisi (Enter)" aria-label="Kirim Permintaan">
               <i class="fa-solid fa-paper-plane"></i>
             </button>
           </div>
@@ -3676,8 +3698,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression & Bayesian calibration engine (must load before app.js) -->
-  <script src="text-safety.js?v=20261119_v800" defer></script>
+  <script src="text-safety.js?v=20261120_v805" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=v20261120_tmwohurbl" defer></script>
+  <script src="app.js?v=20261120_v805" defer></script>
 </body>
 </html>
