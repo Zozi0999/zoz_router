@@ -2158,6 +2158,18 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   flex-direction: column;
 }
 
+@media (max-width: 1120px) {
+  #mainContent:not(.wa-chat-themed):not(.is-wa-chat-mode) .chat-messages-container {
+    padding-right: 52px;
+  }
+}
+
+@media (max-width: 640px) {
+  #mainContent:not(.wa-chat-themed):not(.is-wa-chat-mode) .chat-messages-container {
+    padding-right: 40px;
+  }
+}
+
 /* ==================== WELCOME HERO (Clean Minimalist Cyberpunk Hub) ==================== */
 .welcome-hero {
   display: flex;
@@ -21383,23 +21395,134 @@ svg.lucide,
    EXECUTIVE PERSONA STUDIO (NON-CUSTOM: AI FORMAL ONLY + CUSTOM PERSONA)
    ========================================================================= */
 
-/* 1. Composer Toolbar Trigger Button */
-.composer-btn.zoz-persona-composer-btn {
+/* 1. Right-Middle Vertical Persona Dock & Upward Trigger Pill */
+.zoz-persona-vertical-dock {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 36;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  user-select: none;
+}
+
+#mainContent.wa-chat-themed .zoz-persona-vertical-dock,
+#mainContent.is-wa-chat-mode .zoz-persona-vertical-dock,
+body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
+  display: none !important;
+}
+
+.zoz-persona-vertical-capsule {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 34px;
+  padding: 4px 3px;
+  gap: 5px;
+  border-radius: 9999px;
+  background: linear-gradient(180deg, rgba(11, 16, 29, 0.92) 0%, rgba(7, 10, 18, 0.96) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.62), 0 0 18px rgba(14, 165, 233, 0.14);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.zoz-persona-vertical-capsule:hover {
+  border-color: rgba(56, 189, 248, 0.58);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.72), 0 0 22px rgba(14, 165, 233, 0.24);
+}
+
+.zoz-persona-vertical-dock.is-custom-mode .zoz-persona-vertical-capsule {
+  border-color: rgba(167, 139, 250, 0.48);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.65), 0 0 20px rgba(139, 92, 246, 0.22);
+}
+
+.zoz-persona-vertical-dock.is-custom-mode .zoz-persona-vertical-capsule:hover {
+  border-color: rgba(196, 181, 253, 0.78);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.74), 0 0 24px rgba(139, 92, 246, 0.34);
+}
+
+.zoz-persona-vertical-dock.is-off-mode .zoz-persona-vertical-capsule {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.78) 0%, rgba(9, 13, 22, 0.86) 100%);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.48);
+}
+
+.zoz-persona-vert-power-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  width: auto !important;
-  min-width: 0;
-  height: 30px;
-  padding: 0 10px;
+  justify-content: center;
   flex-shrink: 0;
-  border-radius: 9px;
-  background: rgba(15, 23, 42, 0.72);
-  border: 1px solid rgba(56, 189, 248, 0.24);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  background: rgba(16, 185, 129, 0.16);
+  color: #34d399;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+}
+
+.zoz-persona-vert-power-btn:hover {
+  transform: scale(1.07);
+  background: rgba(16, 185, 129, 0.26);
+  border-color: rgba(52, 211, 153, 0.8);
+  color: #ecfdf5;
+}
+
+.zoz-persona-vert-power-btn.is-custom-mode {
+  border-color: rgba(167, 139, 250, 0.55);
+  background: rgba(139, 92, 246, 0.22);
+  color: #ddd6fe;
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.32);
+}
+
+.zoz-persona-vert-power-btn.is-custom-mode:hover {
+  background: rgba(139, 92, 246, 0.34);
+  border-color: rgba(196, 181, 253, 0.85);
+  color: #ffffff;
+}
+
+.zoz-persona-vert-power-btn.is-persona-off {
+  border-color: rgba(244, 63, 94, 0.38);
+  background: rgba(244, 63, 94, 0.13);
+  color: #fb7185;
+  box-shadow: none;
+}
+
+.zoz-persona-vert-power-btn.is-persona-off:hover {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(52, 211, 153, 0.65);
+  color: #6ee7b7;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.25);
+}
+
+.composer-btn.zoz-persona-composer-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: auto !important;
+  min-width: 26px;
+  max-width: 26px;
+  height: auto !important;
+  padding: 8px 2px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(56, 189, 248, 0.22);
   color: #cbd5e1;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   cursor: pointer;
   transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   white-space: nowrap;
@@ -21407,7 +21530,7 @@ svg.lucide,
 }
 
 .composer-btn.zoz-persona-composer-btn:hover {
-  background: rgba(14, 165, 233, 0.14);
+  background: rgba(14, 165, 233, 0.16);
   border-color: rgba(56, 189, 248, 0.55);
   color: #f8fafc;
   box-shadow: 0 0 14px rgba(14, 165, 233, 0.18);
@@ -21420,10 +21543,17 @@ svg.lucide,
 }
 
 .composer-btn.zoz-persona-composer-btn .zoz-persona-btn-label {
-  max-width: 112px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  max-height: 112px;
+  max-inline-size: 112px;
+  max-width: 22px;
+  padding: 0 1px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.35;
 }
 
 .composer-btn.zoz-persona-composer-btn .zoz-persona-btn-dot {
@@ -21476,6 +21606,48 @@ svg.lucide,
 .composer-btn.zoz-persona-composer-btn.is-off-mode .zoz-persona-btn-dot {
   background: #475569;
   box-shadow: none;
+}
+
+/* Light Nature Theme Adaptations for Vertical Persona Dock */
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .zoz-persona-vertical-capsule,
+#mainContent.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .zoz-persona-vertical-capsule,
+#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .zoz-persona-vertical-capsule {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(241, 245, 249, 0.97) 100%);
+  border-color: rgba(14, 165, 233, 0.38);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14), 0 0 14px rgba(14, 165, 233, 0.1);
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-btn.zoz-persona-composer-btn,
+#mainContent.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .composer-btn.zoz-persona-composer-btn,
+#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .composer-btn.zoz-persona-composer-btn {
+  background: rgba(241, 245, 249, 0.92);
+  border-color: rgba(14, 165, 233, 0.32);
+  color: #0f172a;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-btn.zoz-persona-composer-btn.is-custom-mode,
+#mainContent.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .composer-btn.zoz-persona-composer-btn.is-custom-mode,
+#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .composer-btn.zoz-persona-composer-btn.is-custom-mode {
+  background: rgba(237, 233, 254, 0.94);
+  border-color: rgba(139, 92, 246, 0.45);
+  color: #4c1d95;
+}
+
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-btn.zoz-persona-composer-btn.is-off-mode,
+#mainContent.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .composer-btn.zoz-persona-composer-btn.is-off-mode,
+#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .composer-btn.zoz-persona-composer-btn.is-off-mode {
+  background: rgba(226, 232, 240, 0.88);
+  border-color: rgba(100, 116, 139, 0.35);
+  color: #475569;
+}
+
+@media (max-width: 768px) {
+  .zoz-persona-vertical-capsule {
+    background: linear-gradient(180deg, rgba(11, 16, 29, 0.97) 0%, rgba(7, 10, 18, 0.98) 100%);
+  }
+  .zoz-persona-vertical-dock.is-off-mode .zoz-persona-vertical-capsule {
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(9, 13, 22, 0.97) 100%);
+  }
 }
 
 /* 2. Topbar Model Options Menu Entry */
@@ -22491,15 +22663,33 @@ svg.lucide,
   .zoz-persona-modal-footer {
     padding: 11px 14px;
   }
+  .zoz-persona-vertical-dock {
+    right: 5px;
+    top: 46%;
+  }
+  .zoz-persona-vertical-capsule {
+    width: 30px;
+    padding: 3px 2px;
+    gap: 4px;
+  }
+  .zoz-persona-vert-power-btn {
+    width: 22px;
+    height: 22px;
+    font-size: 0.64rem;
+  }
   .composer-btn.zoz-persona-composer-btn {
     width: auto !important;
-    height: 28px;
-    padding: 0 8px;
-    max-width: 145px;
+    min-width: 22px;
+    max-width: 24px;
+    height: auto !important;
+    padding: 6px 2px;
+    gap: 5px;
   }
   .composer-btn.zoz-persona-composer-btn .zoz-persona-btn-label {
-    max-width: 78px;
-    font-size: 0.68rem;
+    max-height: 82px;
+    max-inline-size: 82px;
+    max-width: 18px;
+    font-size: 0.64rem;
   }
   .zoz-persona-power-btn span {
     display: none;

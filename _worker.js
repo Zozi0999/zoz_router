@@ -1051,12 +1051,13 @@ export default {
         'default'
       );
       const getMemOwner = (m) => (m && (m.userId || m.user_id)) || 'default';
+      const isMemActive = (m) => Boolean(m && (m.isActive !== undefined ? m.isActive : (m.is_active !== undefined ? m.is_active : 1)));
 
       if (request.method === 'GET' && url.pathname === '/api/memories/insights') {
         const uid = resolveMemUid();
         const scope = url.searchParams.get('scope') || null;
         const userItems = Array.from(memMap.values()).filter(m =>
-          m && getMemOwner(m) === uid && (!scope || m.scope === scope || m.scope === 'global')
+          isMemActive(m) && getMemOwner(m) === uid && (!scope || m.scope === scope || m.scope === 'global')
         );
         const categoryDistribution = {};
         for (const item of userItems) {
@@ -1174,7 +1175,7 @@ export default {
         const catFilter = url.searchParams.get('category') || null;
         const scopeFilter = url.searchParams.get('scope') || null;
         const qFilter = (url.searchParams.get('q') || '').trim().toLowerCase();
-        let list = Array.from(memMap.values()).filter(m => m && getMemOwner(m) === uid);
+        let list = Array.from(memMap.values()).filter(m => isMemActive(m) && getMemOwner(m) === uid);
         if (catFilter) list = list.filter(m => m.category === catFilter);
         if (scopeFilter) list = list.filter(m => m.scope === scopeFilter || m.scope === 'global');
         if (qFilter) list = list.filter(m => String(m.content || '').toLowerCase().includes(qFilter));
@@ -1225,7 +1226,7 @@ export default {
         }
         let body = {};
         try { body = await request.json(); } catch (_) {}
-        const uid = resolveMemUid(body.userId || '');
+        const uid = resolveMemUid(body);
         const existing = memMap.get(memId);
         if (!existing || getMemOwner(existing) !== uid) {
           return new Response(JSON.stringify({ success: false, error: 'Memori tidak ditemukan atau bukan milik akun Anda.' }), { status: 404, headers: jsonHeaders });
@@ -2246,7 +2247,46 @@ export default {
         width = Math.min(Math.max(width, 256), 2048);
         height = Math.min(Math.max(height, 256), 2048);
 
-        let effectiveModel = (model || 'flux').toLowerCase().trim();
+        let rawModel = String(model || 'flux').trim();
+        let lowModel = rawModel.toLowerCase();
+        let effectiveModel = rawModel;
+        if (lowModel === 'qwen/qwen-image-2.1-pro' || lowModel === 'qwen: qwen image 2.1 pro' || lowModel === 'qwen-image-2.1-pro' || lowModel === 'qwen image 2.1 pro' || lowModel === 'qwen 2.1 pro') {
+          effectiveModel = 'qwen/qwen-image-2.1-pro';
+        } else if (lowModel === 'qwen/qwen-image-2.1-turbo' || lowModel === 'qwen: qwen image 2.1 turbo' || lowModel === 'qwen-image-2.1-turbo' || lowModel === 'qwen image 2.1 turbo' || lowModel === 'qwen 2.1 turbo') {
+          effectiveModel = 'qwen/qwen-image-2.1-turbo';
+        } else if (lowModel === 'qwen/qwen-image-3-pro' || lowModel === 'qwen: qwen image 3 pro' || lowModel === 'qwen-image-3-pro' || lowModel === 'qwen image 3 pro') {
+          effectiveModel = 'qwen/qwen-image-3-pro';
+        } else if (lowModel === 'qwen/qwen-image-3' || lowModel === 'qwen: qwen image 3' || lowModel === 'qwen-image-3' || lowModel === 'qwen image 3') {
+          effectiveModel = 'qwen/qwen-image-3';
+        } else if (lowModel === 'flux-3' || lowModel === 'flux.3' || lowModel === 'flux 3 image' || lowModel === 'black-forest-labs/flux-3-image') {
+          effectiveModel = 'black-forest-labs/flux-3-image';
+        } else if (lowModel === 'flux-3-klein' || lowModel === 'flux.3-klein' || lowModel === 'black-forest-labs/flux-3-image-klein') {
+          effectiveModel = 'black-forest-labs/flux-3-image-klein';
+        } else if (lowModel === 'flux.2-pro' || lowModel === 'flux-2-pro' || lowModel === 'black-forest-labs/flux.2-pro') {
+          effectiveModel = 'black-forest-labs/flux.2-pro';
+        } else if (lowModel === 'flux.2-max' || lowModel === 'flux-2-max' || lowModel === 'black-forest-labs/flux.2-max') {
+          effectiveModel = 'black-forest-labs/flux.2-max';
+        } else if (lowModel === 'nano-banana-2.1' || lowModel === 'gemini-nano-banana-2.1' || lowModel === 'nano banana 2.1' || lowModel === 'google/gemini-nano-banana-2.1') {
+          effectiveModel = 'google/gemini-nano-banana-2.1';
+        } else if (lowModel === 'gemini-3.1-flash-image' || lowModel === 'google/gemini-3.1-flash-image') {
+          effectiveModel = 'google/gemini-3.1-flash-image';
+        } else if (lowModel === 'gemini-3-pro-image' || lowModel === 'google/gemini-3-pro-image') {
+          effectiveModel = 'google/gemini-3-pro-image';
+        } else if (lowModel === 'gpt-image-2' || lowModel === 'gpt image 2' || lowModel === 'openai/gpt-image-2') {
+          effectiveModel = 'openai/gpt-image-2';
+        } else if (lowModel === 'gpt-image-2.5-sunburst' || lowModel === 'openai/gpt-image-2.5-sunburst') {
+          effectiveModel = 'openai/gpt-image-2.5-sunburst';
+        } else if (lowModel === 'gpt-image-2.5-flare' || lowModel === 'openai/gpt-image-2.5-flare') {
+          effectiveModel = 'openai/gpt-image-2.5-flare';
+        } else if (lowModel === 'gpt-image-1' || lowModel === 'openai/gpt-image-1') {
+          effectiveModel = 'openai/gpt-image-1';
+        } else if (lowModel === 'recraft-ai/recraft-v3') {
+          effectiveModel = 'recraft/recraft-v3';
+        } else if (lowModel === 'tencent/hunyuan-image-v3.5') {
+          effectiveModel = 'tencent/hy-image-v3.5-preview';
+        } else {
+          effectiveModel = lowModel;
+        }
         let finalImageUrl = '';
 
         const isCloudModel = effectiveModel.includes('/');

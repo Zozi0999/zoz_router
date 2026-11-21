@@ -11,6 +11,7 @@ const insights = require('../pipeline/insights');
 const porter = require('../sovereignty/porter');
 
 function sendJson(res, statusCode, data) {
+  if (!res || res.headersSent || res.writableEnded || res.destroyed) return;
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
@@ -81,7 +82,12 @@ function parseJsonBody(req) {
       }
     });
     req.on('error', (err) => doneReject(err || new Error('Request stream error')));
-    req.on('close', () => doneResolve({}));
+    req.on('close', () => {
+      if (!settled && req && req.complete === false) {
+        return doneReject(new Error('Request aborted by client'));
+      }
+      doneResolve({});
+    });
   });
 }
 
@@ -126,7 +132,12 @@ function parseRawBody(req) {
       doneResolve(chunks.length > 0 ? Buffer.concat(chunks).toString('utf8') : '');
     });
     req.on('error', (err) => doneReject(err || new Error('Request stream error')));
-    req.on('close', () => doneResolve(''));
+    req.on('close', () => {
+      if (!settled && req && req.complete === false) {
+        return doneReject(new Error('Request aborted by client'));
+      }
+      doneResolve('');
+    });
   });
 }
 
@@ -164,7 +175,8 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
 
     // 2. GET /api/memories/receipts/:episodeId
     if (method === 'GET' && pathname.startsWith('/api/memories/receipts/')) {
-      const episodeId = pathname.replace('/api/memories/receipts/', '').trim();
+      let episodeId = pathname.replace('/api/memories/receipts/', '').trim();
+      try { episodeId = decodeURIComponent(episodeId); } catch (_) {}
       const episode = dbStorage.getEpisodeById(episodeId, userId);
       if (!episode) {
         sendJson(res, 404, { success: false, error: 'Episode receipt tidak ditemukan atau bukan milik akun Anda.' });
@@ -284,7 +296,8 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
 
     // 9. PATCH /api/memories/:id (Edit memory — scoped by userId + guardrails)
     if (method === 'PATCH' && pathname.startsWith('/api/memories/')) {
-      const memoryId = pathname.replace('/api/memories/', '').trim();
+      let memoryId = pathname.replace('/api/memories/', '').trim();
+      try { memoryId = decodeURIComponent(memoryId); } catch (_) {}
       if (!memoryId) {
         sendJson(res, 400, { success: false, error: 'ID memori wajib disertakan.' });
         return true;
@@ -330,7 +343,8 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
         return true;
       }
 
-      const memoryId = pathname.replace('/api/memories/', '').trim();
+      let memoryId = pathname.replace('/api/memories/', '').trim();
+      try { memoryId = decodeURIComponent(memoryId); } catch (_) {}
       if (!memoryId) {
         sendJson(res, 400, { success: false, error: 'ID memori wajib disertakan.' });
         return true;

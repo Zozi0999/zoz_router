@@ -13660,6 +13660,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 try {
                   const parsed = JSON.parse(errBuf);
                   const msg = parsed?.error?.message || parsed?.error || `OpenRouter bridge error: HTTP ${bStatus}`;
+                  if ((clientDisconnected && !sessionId) || res.__zozWatchdogTimedOut) {
+                    if (isTaskCurrent(sessionId, bridgeTaskToken)) delete dbActiveChatTasks[sessionId];
+                    return;
+                  }
                   // Auto-Recovery Missing Reasoning on Jinja Template (Beam / Reflection)
                   if (bStatus === 400 && /missing its reasoning|allow_missing_thinking/i.test(msg) && retryCount <= 1) {
                     console.log(`[Ollama Cloud Bridge Auto-Recovery] Model ${payload.model} template missing reasoning. Injeksi reasoning_content...`);
@@ -14000,11 +14004,14 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 }
                 const uploadMatch = allowServerUploadRead ? img.match(/(?:\/uploads\/|^uploads\/)([a-zA-Z0-9_.-]+)$/) : null;
                 if (uploadMatch) {
-                  const filename = uploadMatch[1];
-                  const localPath = path.join(UPLOADS_DIR, filename);
-                  if (fs.existsSync(localPath)) {
+                  const filename = path.basename(uploadMatch[1]);
+                  if (filename && filename !== '.' && filename !== '..') {
+                    const localPath = path.join(UPLOADS_DIR, filename);
                     try {
-                      return fs.readFileSync(localPath).toString('base64');
+                      const st = fs.existsSync(localPath) ? fs.statSync(localPath) : null;
+                      if (st && st.isFile() && st.size <= 25 * 1024 * 1024) {
+                        return fs.readFileSync(localPath).toString('base64');
+                      }
                     } catch (_) {}
                   }
                 }
@@ -14086,20 +14093,24 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           upstreamOpts.lookup = createPinnedLookup(pinnedChatIps);
           if (ollamaUrl.protocol === 'https:') upstreamOpts.servername = ollamaUrl.hostname;
         }
-        proxyReq = client.request(ollamaUrl.toString(), upstreamOpts, (proxyRes) => {
+        const currentReq = client.request(ollamaUrl.toString(), upstreamOpts, (proxyRes) => {
+          if (proxyReq !== currentReq) {
+            try { proxyRes.resume(); } catch (_) {}
+            return;
+          }
           if (isTaskCurrent(sessionId, ollamaTaskToken)) {
-            dbActiveChatTasks[sessionId].proxyReq = proxyReq;
+            dbActiveChatTasks[sessionId].proxyReq = currentReq;
           }
 
           // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
           if (isTaskCurrent(sessionId, ollamaTaskToken) && dbActiveChatTasks[sessionId]?.status === 'aborted') {
-            if (!proxyReq.destroyed) proxyReq.destroy();
+            if (!currentReq.destroyed) currentReq.destroy();
             delete dbActiveChatTasks[sessionId];
             return;
           }
 
           if (clientDisconnected || res.writableEnded || res.destroyed) {
-            if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
+            if (!sessionId && !currentReq.destroyed) currentReq.destroy();
             if (!sessionId) return;
           }
 
@@ -14404,14 +14415,16 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           });
         });
 
+        proxyReq = currentReq;
         if (isTaskCurrent(sessionId, ollamaTaskToken)) {
-          dbActiveChatTasks[sessionId].proxyReq = proxyReq;
+          dbActiveChatTasks[sessionId].proxyReq = currentReq;
         }
 
-        proxyReq.on('timeout', async () => {
+        currentReq.on('timeout', async () => {
+          if (proxyReq !== currentReq) return;
           clearOllamaKeepAlive();
           if (hasSplicedRefusal) return;
-          if (!proxyReq.destroyed) proxyReq.destroy();
+          if (!currentReq.destroyed) currentReq.destroy();
           if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
             try {
               const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
@@ -14432,7 +14445,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           } catch (_) {}
         });
 
-        proxyReq.on('error', async (err) => {
+        currentReq.on('error', async (err) => {
+          if (proxyReq !== currentReq) return;
           clearOllamaKeepAlive();
           if (hasSplicedRefusal) return;
           if (canRetryCloud && targetEndpoint.includes('ollama.com') && !res.headersSent && (!clientDisconnected || sessionId)) {

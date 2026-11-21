@@ -119,7 +119,10 @@ function captureExplicitMemory(userId, factText, scope = 'global', metadata = {}
   });
 
   // Extract simple entity & temporal relation if applicable
-  const words = cleanContent.split(/\s+/).filter(w => w.length >= 3);
+  const words = cleanContent
+    .split(/\s+/)
+    .map(w => w.replace(/^[^\p{L}\p{N}_-]+|[^\p{L}\p{N}_-]+$/gu, ''))
+    .filter(w => w.length >= 3);
   if (words.length >= 2) {
     const entSubject = dbStorage.upsertEntity({
       userId,

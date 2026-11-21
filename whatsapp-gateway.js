@@ -1655,8 +1655,9 @@ class WhatsAppGateway {
       });
 
       const currentSock = this.sock;
+      const isStaleSock = () => (this.sock !== currentSock || this._connectGen !== activeGen || this.isExplicitDisconnect);
       this.sock.ev.on('creds.update', () => {
-        if (this.sock !== currentSock || this._connectGen !== activeGen || this.isExplicitDisconnect) return;
+        if (isStaleSock()) return;
         Promise.resolve(saveCreds()).catch(() => {});
       });
 
@@ -1839,17 +1840,22 @@ class WhatsAppGateway {
             this.reconnectTimer = setTimeout(() => {
               this.connect(false, isStreamRestart).catch(() => {});
             }, delayMs);
+          } else if (resolveSettled) {
+            resolveSettled(this.getStatus());
+            resolveSettled = null;
           }
         }
       });
 
       // Sinkronisasi Riwayat Chat Penuh dari HP (Messaging History Sync)
       this.sock.ev.on('messaging-history.set', async ({ chats, contacts, messages, isLatest }) => {
+        if (isStaleSock()) return;
         let changed = false;
         if (Array.isArray(contacts)) {
           for (const c of contacts) {
             if (!c.id || c.id === 'status@broadcast') continue;
             const cid = await this.resolveLidToPhone(c.id);
+            if (isStaleSock()) return;
             if (cid.endsWith('@lid')) continue;
             const existing = this.contacts.get(cid) || {
               id: cid,
@@ -2024,10 +2030,12 @@ class WhatsAppGateway {
 
       // Sinkronisasi Kontak Masuk / Update
       this.sock.ev.on('contacts.upsert', async (newContacts) => {
+        if (isStaleSock()) return;
         let changed = false;
         for (const c of newContacts) {
           if (!c.id || c.id === 'status@broadcast') continue;
           const cid = await this.resolveLidToPhone(c.id);
+          if (isStaleSock()) return;
           if (cid.endsWith('@lid')) continue;
           const existing = this.contacts.get(cid) || {
             id: cid,
@@ -2048,18 +2056,20 @@ class WhatsAppGateway {
           }
           this.contacts.set(cid, existing);
         }
-        if (changed) {
+        if (changed && !isStaleSock()) {
           this.savePersistedData();
           this.broadcast('contacts', this.getContacts());
         }
       });
 
       this.sock.ev.on('contacts.update', async (updates) => {
+        if (isStaleSock()) return;
         let changed = false;
         const avatarRefreshJids = [];
         for (const u of updates) {
           if (!u.id) continue;
           const uid = await this.resolveLidToPhone(u.id);
+          if (isStaleSock()) return;
           const existing = this.contacts.get(uid);
           if (existing) {
             if (u.name) existing.name = u.name;
@@ -2070,17 +2080,19 @@ class WhatsAppGateway {
             avatarRefreshJids.push(uid);
           }
         }
-        if (changed) {
+        if (changed && !isStaleSock()) {
           this.savePersistedData();
           this.broadcast('contacts', this.getContacts());
         }
         for (const refreshJid of avatarRefreshJids) {
+          if (isStaleSock()) return;
           this.syncContactProfile(refreshJid, { force: true }).catch(() => {});
         }
       });
 
       // Sinkronisasi Nama Subjek Grup WhatsApp Asli
       this.sock.ev.on('groups.update', async (groupUpdates) => {
+        if (isStaleSock()) return;
         let changed = false;
         for (const update of groupUpdates) {
           if (!update.id) continue;
@@ -2110,13 +2122,14 @@ class WhatsAppGateway {
             changed = true;
           }
         }
-        if (changed) {
+        if (changed && !isStaleSock()) {
           this.savePersistedData();
           this.broadcast('contacts', this.getContacts());
         }
       });
 
       this.sock.ev.on('groups.upsert', async (groups) => {
+        if (isStaleSock()) return;
         let changed = false;
         for (const g of groups) {
           if (!g.id) continue;
@@ -2146,7 +2159,7 @@ class WhatsAppGateway {
             changed = true;
           }
         }
-        if (changed) {
+        if (changed && !isStaleSock()) {
           this.savePersistedData();
           this.broadcast('contacts', this.getContacts());
         }
@@ -2154,6 +2167,7 @@ class WhatsAppGateway {
 
       // Menangani Pesan Masuk / Keluar
       this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        if (isStaleSock()) return;
         let hasNew = false;
         for (const rawMsg of messages) {
           if (!rawMsg) continue;
@@ -2162,6 +2176,7 @@ class WhatsAppGateway {
           const rawJid = msg.key?.remoteJid;
           if (!rawJid || rawJid === 'status@broadcast') continue;
           const jid = await this.resolveLidToPhone(rawJid, msg.key?.remoteJidAlt || '');
+          if (isStaleSock()) return;
           if (jid.endsWith('@lid')) continue;
 
           // Penanganan Pesan Dihapus Pengirim (Revoke / Delete for everyone)
@@ -2623,7 +2638,8 @@ class WhatsAppGateway {
           if (this.isMaster && baseName && baseName !== '.' && baseName !== '..' && !baseName.includes('/') && !baseName.includes('\\')) {
             const localPath = path.join(this.uploadsDir, baseName);
             try {
-              if (fs.existsSync(localPath) && fs.statSync(localPath).isFile()) {
+              const st = fs.existsSync(localPath) ? fs.statSync(localPath) : null;
+              if (st && st.isFile() && st.size <= 25 * 1024 * 1024) {
                 mediaBuffer = fs.readFileSync(localPath);
               }
             } catch (_) {}

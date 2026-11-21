@@ -253,9 +253,37 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  // 6. Eksekusi Request Handler Asli
+  // 6. Eksekusi Request Handler Asli (Tunggu hingga stream/callback selesai menulis response)
   try {
-    await requestHandler(req, res);
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const onDone = () => {
+        if (settled) return;
+        settled = true;
+        res.removeListener('finish', onDone);
+        res.removeListener('close', onDone);
+        cleanupWatchdog();
+        resolve();
+      };
+      if (finished || res.writableEnded || res.destroyed) {
+        return onDone();
+      }
+      res.once('finish', onDone);
+      res.once('close', onDone);
+      Promise.resolve(requestHandler(req, res))
+        .then(() => {
+          if (finished || res.writableEnded || res.destroyed) {
+            onDone();
+          }
+        })
+        .catch((err) => {
+          if (settled) return;
+          settled = true;
+          res.removeListener('finish', onDone);
+          res.removeListener('close', onDone);
+          reject(err);
+        });
+    });
   } catch (err) {
     console.error(`[Vercel Gateway Error] ${rawUrl} setelah ${Date.now() - startedAt}ms:`, err);
     sendJson(res, 500, {
@@ -264,12 +292,6 @@ module.exports = async function handler(req, res) {
       details: err && err.message ? err.message : String(err)
     });
   } finally {
-    const keepPendingWatchdog = !finished && !res.writableEnded && !res.destroyed;
-    if (keepPendingWatchdog) {
-      res.once('finish', cleanupWatchdog);
-      res.once('close', cleanupWatchdog);
-    } else {
-      cleanupWatchdog();
-    }
+    cleanupWatchdog();
   }
 };

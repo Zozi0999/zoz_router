@@ -1301,6 +1301,8 @@
     aiChatThemeMenu: $('#aiChatThemeMenu'),
     aiChatThemeActiveBadge: $('#aiChatThemeActiveBadge'),
     aiChatThemeActiveDesc: $('#aiChatThemeActiveDesc'),
+    zozPersonaVerticalDock: $('#zozPersonaVerticalDock'),
+    btnPersonaVerticalPowerToggle: $('#btnPersonaVerticalPowerToggle'),
     btnComposerPersonaMenu: $('#btnComposerPersonaMenu'),
     zozPersonaComposerIcon: $('#zozPersonaComposerIcon'),
     zozPersonaComposerLabel: $('#zozPersonaComposerLabel'),
@@ -3555,7 +3557,7 @@
             if (topStyle && topStyle.pointerEvents === 'none') continue;
 
             // Abaikan jika topEl adalah modal backdrop, dialog, drawer, atau sticky chrome UI sementara tombol berada di luar overlay tersebut
-            const topOverlay = topEl.closest ? topEl.closest('.modal-backdrop, .modal, .sidebar-backdrop, .lightbox-backdrop, [role="dialog"], .composer-area, #composerContainer, .composer-container, #composerArea, .top-nav, #topNav, #studioAssistantPanel, .toast-container, .sidebar, #sidebar, .model-picker-popover, .model-options-popup, .model-dropdown-menu, .wa-contact-dropdown-menu, .dropdown-menu, #aiFileStudioModal') : null;
+            const topOverlay = topEl.closest ? topEl.closest('.modal-backdrop, .modal, .sidebar-backdrop, .lightbox-backdrop, [role="dialog"], .composer-area, #composerContainer, .composer-container, #composerArea, .top-nav, #topNav, #studioAssistantPanel, .toast-container, .sidebar, #sidebar, .model-picker-popover, .model-options-popup, .model-dropdown-menu, .wa-contact-dropdown-menu, .dropdown-menu, #aiFileStudioModal, #zozPersonaVerticalDock, .zoz-persona-vertical-dock, .attachment-dropdown-popup, .image-model-dropdown-popup, .music-model-dropdown-popup') : null;
             if (topOverlay && !topOverlay.contains(btn)) continue;
 
             const blockerTag = (topEl.tagName || 'div').toLowerCase();
@@ -6869,7 +6871,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       safeLocalStorage.removeItem('zoz_prompt_hidden');
 
       // Fast synchronous load from localStorage (0ms startup)
-      const savedSessions = safeLocalStorage.getItem('zoz_router_sessions_v1');
+      const savedSessions = safeLocalStorage.getItem('zoz_router_sessions_v1') || safeLocalStorage.getItem('zoz_router_sessions_v1_lite');
       if (savedSessions) {
         try {
           const parsed = JSON.parse(savedSessions);
@@ -7904,7 +7906,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         }
         localStorageMirrorBroken = true;
         try {
-          const headersOnly = STATE.sessions
+          const headersOnly = persistableSessions
             .slice()
             .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
             .slice(0, 20)
@@ -8430,13 +8432,16 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       ? ZozTextSafety.extractNegativeFormattingConstraints(question)
       : { noTable: false, noCode: false, isExhaustive: false, directive: '' };
     const hasSubstantiveEvidence = evidenceText && !evidenceText.includes('tidak menemukan dokumen') && !evidenceText.includes('tidak memberikan fakta spesifik') && evidenceText.length > 80;
-    const rescuePersonaDirective = (!isPureMath && typeof getEffectivePersonaSystemDirective === 'function')
+    const isPersonaOff = typeof STATE !== 'undefined' && STATE.settings?.personaMode === 'off';
+    const rescuePersonaDirective = (!isPureMath && !isPersonaOff && typeof getEffectivePersonaSystemDirective === 'function')
       ? getEffectivePersonaSystemDirective()
       : '';
     const personaPrefix = rescuePersonaDirective ? `${rescuePersonaDirective}\n\n` : '';
-    const langInstruction = (typeof STATE !== 'undefined' && STATE.settings?.personaMode === 'custom')
-      ? 'sesuai bahasa dan gaya direktif persona di atas (atau bahasa pertanyaan pengguna)'
-      : 'dalam Bahasa Indonesia (atau bahasa yang digunakan pengguna)';
+    const langInstruction = isPersonaOff
+      ? 'sesuai bahasa pertanyaan pengguna'
+      : ((typeof STATE !== 'undefined' && STATE.settings?.personaMode === 'custom')
+        ? 'sesuai bahasa dan gaya direktif persona di atas (atau bahasa pertanyaan pengguna)'
+        : 'dalam Bahasa Indonesia (atau bahasa yang digunakan pengguna)');
 
     if (!hasSubstantiveEvidence) {
       const extraDirectives = [];
@@ -8448,11 +8453,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return [
         {
           role: 'system',
-          content: `${prefixNotes}### MANDAT JAWABAN DEDUKTIF & ANALISIS KOMPREHENSIF (UTC ${isoDate})\n` +
-            `1. Jawab pertanyaan pengguna secara langsung, menyeluruh, terstruktur, dan mendalam ${langInstruction}.\n` +
-            `2. DILARANG KERAS mengeluhkan ketiadaan indeks atau dokumen, dilarang menolak menjawab, dilarang mencetak catatan diagnostik atau penanda status sistem internal, dan dilarang menyebutkan kendala pencarian internal.\n` +
-            `3. Sajikan ide, solusi, penjelasan konsep, atau analisis mendalam menggunakan Markdown yang rapi (heading, poin bernomor/bullet).\n` +
-            (formattingConstraints.noTable ? `4. BATASAN FORMAT: Pengguna secara tegas melarang tabel ("tanpa tabel"). DILARANG KERAS membuat tabel Markdown.` : '')
+          content: isPersonaOff
+            ? `${prefixNotes}Jawab pertanyaan pengguna secara langsung dan faktual ${langInstruction}. Jangan mencetak blok tool call atau catatan diagnostik internal.${formattingConstraints.noTable ? ' Jangan membuat tabel Markdown.' : ''}`
+            : `${prefixNotes}### MANDAT JAWABAN DEDUKTIF & ANALISIS KOMPREHENSIF (UTC ${isoDate})\n` +
+              `1. Jawab pertanyaan pengguna secara langsung, menyeluruh, terstruktur, dan mendalam ${langInstruction}.\n` +
+              `2. DILARANG KERAS mengeluhkan ketiadaan indeks atau dokumen, dilarang menolak menjawab, dilarang mencetak catatan diagnostik atau penanda status sistem internal, dan dilarang menyebutkan kendala pencarian internal.\n` +
+              `3. Sajikan ide, solusi, penjelasan konsep, atau analisis mendalam menggunakan Markdown yang rapi (heading, poin bernomor/bullet).\n` +
+              (formattingConstraints.noTable ? `4. BATASAN FORMAT: Pengguna secara tegas melarang tabel ("tanpa tabel"). DILARANG KERAS membuat tabel Markdown.` : '')
         },
         {
           role: 'user',
@@ -8464,11 +8471,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     return [
       {
         role: 'system',
-        content: `${personaPrefix}[SPESIFIKASI SINTESIS BUKTI TERVERIFIKASI — UTC ${isoDate}]\n` +
-          `1. Jawab pertanyaan pengguna dengan PENJELASAN YANG MENDALAM, JELAS, DAN LENGKAP ${langInstruction} menggunakan korpus bukti di bawah (entitas, konsep, angka, mekanisme, dan fakta).\n` +
-          `2. Jika korpus berupa daftar video, jelaskan topik/isi masing-masing video (berdasarkan judul, deskripsi, kanal, durasi) serta mengapa video tersebut relevan untuk ditonton, lalu sertakan tautan video lengkap agar pemutar chat bekerja.\n` +
-          `3. DILARANG KERAS hanya menampilkan daftar link URL atau daftar sumber saja tanpa uraian penjelasan yang memadai!\n` +
-          `4. Jangan mencetak blok tool call atau monolog internal.`
+        content: isPersonaOff
+          ? `Jawab pertanyaan pengguna secara faktual dan lengkap ${langInstruction} berdasarkan korpus bukti terverifikasi di bawah (UTC ${isoDate}). Jangan hanya menampilkan daftar link URL tanpa penjelasan, dan jangan mencetak blok tool call.`
+          : `${personaPrefix}[SPESIFIKASI SINTESIS BUKTI TERVERIFIKASI — UTC ${isoDate}]\n` +
+            `1. Jawab pertanyaan pengguna dengan PENJELASAN YANG MENDALAM, JELAS, DAN LENGKAP ${langInstruction} menggunakan korpus bukti di bawah (entitas, konsep, angka, mekanisme, dan fakta).\n` +
+            `2. Jika korpus berupa daftar video, jelaskan topik/isi masing-masing video (berdasarkan judul, deskripsi, kanal, durasi) serta mengapa video tersebut relevan untuk ditonton, lalu sertakan tautan video lengkap agar pemutar chat bekerja.\n` +
+            `3. DILARANG KERAS hanya menampilkan daftar link URL atau daftar sumber saja tanpa uraian penjelasan yang memadai!\n` +
+            `4. Jangan mencetak blok tool call atau monolog internal.`
       },
       {
         role: 'user',
@@ -8482,9 +8491,15 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     const isStrictReasoning = Boolean(model && (/\/o[1-3]|\b(r1|deepseek-r1)\b/i.test(model) || model.toLowerCase().includes('deepseek-r1') || model.toLowerCase().includes('-r1')));
     const isLiquid = Boolean(model && (model.includes('liquid') || model.includes('lfm-')));
     const sampling = getGroundedSamplingParams(question);
+    let rescueMessages = buildWebRescueMessages(question, evidenceText, model);
+    if (typeof doesModelSupportSystemRole === 'function' && !doesModelSupportSystemRole(model, 'openrouter')) {
+      const sysText = rescueMessages.filter(m => m.role === 'system').map(m => m.content).join('\n\n');
+      const usrText = rescueMessages.filter(m => m.role !== 'system').map(m => m.content).join('\n\n');
+      rescueMessages = [{ role: 'user', content: sysText ? `[Instruksi Sistem & Konteks]:\n${sysText}\n\n---\n\n${usrText}` : usrText }];
+    }
     const baseBody = {
       model,
-      messages: buildWebRescueMessages(question, evidenceText, model),
+      messages: rescueMessages,
       stream: true,
       provider: { allow_fallbacks: (STATE.mode === 'auto') },
       ...(extraBody || {})
@@ -15305,6 +15320,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
     setGeneratingState(true);
     STATE.abortController = new AbortController();
+    if (typeof runOptions !== 'undefined' && runOptions && runOptions.parentAbortSignal) {
+      if (runOptions.parentAbortSignal.aborted) {
+        STATE.abortController.abort();
+      } else {
+        runOptions.parentAbortSignal.addEventListener('abort', () => STATE.abortController?.abort(), { once: true });
+      }
+    }
 
     const MAX_AGENT_ROUNDS = 5;
     let agentRound = 0;
@@ -16659,17 +16681,26 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         persistStudioCodeChange(newCode);
       }
 
+      const cleanupRollbackListeners = () => {
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('error', handleRuntimeCrash);
+          window.removeEventListener('unhandledrejection', handleRuntimeCrash);
+        }
+      };
+
       const rollbackTimer = setTimeout(() => {
+        cleanupRollbackListeners();
         this.lastWorkingSnapshot = newCode;
       }, 2000);
 
-      const handleRuntimeCrash = (ev) => {
+      function handleRuntimeCrash(ev) {
+        cleanupRollbackListeners();
         console.warn('[ClaudeCodeParallelSwarm] Runtime crash terdeteksi pasca commit. Menjalankan Instant Rollback:', ev);
         clearTimeout(rollbackTimer);
-        if (this.lastWorkingSnapshot) {
-          persistStudioCodeChange(this.lastWorkingSnapshot);
+        if (ClaudeCodeParallelSwarm.lastWorkingSnapshot) {
+          persistStudioCodeChange(ClaudeCodeParallelSwarm.lastWorkingSnapshot);
         }
-      };
+      }
 
       if (typeof window !== 'undefined') {
         window.addEventListener('error', handleRuntimeCrash, { once: true });
@@ -17641,7 +17672,12 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         } catch (_) {}
       }
 
-      const system = 'Kamu adalah mesin transformasi kode deterministik yang mengedit file website aktif sesuai spesifikasi pengguna.';
+      const studioPersonaDir = (typeof STATE !== 'undefined' && STATE.settings?.personaMode === 'custom' && typeof getEffectivePersonaSystemDirective === 'function')
+        ? getEffectivePersonaSystemDirective()
+        : '';
+      const system = studioPersonaDir
+        ? `${studioPersonaDir}\n\nKamu adalah mesin transformasi kode deterministik yang mengedit file website aktif sesuai spesifikasi pengguna.`
+        : 'Kamu adalah mesin transformasi kode deterministik yang mengedit file website aktif sesuai spesifikasi pengguna.';
       const fileBlock = `FILE: ${name} (${lineCount} baris)\n\`\`\`${fence}\n${codeView}\n\`\`\``;
       const generalRule = 'Jika permintaan bersifat umum (mis. "rapikan", "percantik", "perbaiki tampilan", atau mengganti tema), lakukan perubahan nyata yang langsung terlihat pada struktur dan CSS. Untuk menambah gaya baru, jangkarkan SEARCH pada baris </head> dan ganti dengan <style>...</style> lalu </head>.';
 
@@ -18279,6 +18315,12 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     if (STATE.currentSessionId === sessionId) {
       STATE.currentSessionId = null;
       STATE.pendingPlanMode = 'zoz';
+      if (STATE.isIncognito) {
+        STATE.isIncognito = false;
+        if (typeof JozzMemoryUI !== 'undefined' && typeof JozzMemoryUI.updateIncognitoStateUI === 'function') {
+          JozzMemoryUI.updateIncognitoStateUI(false);
+        }
+      }
       safeSessionStorage.removeItem('zoz_active_session_id');
     }
 
@@ -18478,6 +18520,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
   function toggleSelectAllHistory() {
     const q = els.searchHistoryInput?.value?.toLowerCase()?.trim() || '';
     const validSessions = STATE.sessions.filter(s => {
+      if (!s || isIncognitoSession(s)) return false;
       const hasMsg = s._isLazyDisk 
         ? ((typeof s.messageCount === 'number' && s.messageCount > 0) || (Array.isArray(s.messages) && s.messages.length > 0))
         : (Array.isArray(s.messages) && s.messages.length > 0);
@@ -18548,9 +18591,16 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
 
     let createdFreshSession = false;
     if (activeDeleted) {
+      if (STATE.isIncognito) {
+        STATE.isIncognito = false;
+        if (typeof JozzMemoryUI !== 'undefined' && typeof JozzMemoryUI.updateIncognitoStateUI === 'function') {
+          JozzMemoryUI.updateIncognitoStateUI(false);
+        }
+      }
       safeSessionStorage.removeItem('zoz_active_session_id');
-      if (STATE.sessions.length > 0) {
-        STATE.currentSessionId = STATE.sessions[0].id;
+      const nonIncogRemaining = STATE.sessions.filter(s => s && !isIncognitoSession(s));
+      if (nonIncogRemaining.length > 0) {
+        STATE.currentSessionId = nonIncogRemaining[0].id;
         safeSessionStorage.setItem('zoz_active_session_id', STATE.currentSessionId);
         try { localStorage.setItem('zoz_last_active_session_id', STATE.currentSessionId); } catch (_) {}
       } else {
@@ -36456,6 +36506,13 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
 
     setGeneratingState(true);
     STATE.abortController = new AbortController();
+    if (typeof runOptions !== 'undefined' && runOptions && runOptions.parentAbortSignal) {
+      if (runOptions.parentAbortSignal.aborted) {
+        STATE.abortController.abort();
+      } else {
+        runOptions.parentAbortSignal.addEventListener('abort', () => STATE.abortController?.abort(), { once: true });
+      }
+    }
 
     const startTime = performance.now();
     let firstTokenTime = null;
@@ -36546,10 +36603,11 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
 
       const canRunAutonomous = !isPureMathSession;
       let systemContent = getDynamicSystemTemporalContext();
+      const currentPersonaSetting = String((typeof STATE !== 'undefined' && STATE.settings?.personaMode) || 'formal').toLowerCase();
       const personaDirective = (typeof getEffectivePersonaSystemDirective === 'function')
         ? getEffectivePersonaSystemDirective(session, runOptions)
         : '';
-      const shouldSkipPersonaForPureMath = Boolean(isPureAlgebraConcept || isQuizRevision);
+      const shouldSkipPersonaForPureMath = Boolean((isPureAlgebraConcept || isQuizRevision) && currentPersonaSetting !== 'custom');
       if (personaDirective && !shouldSkipPersonaForPureMath) {
         systemContent = systemContent ? `${personaDirective}\n\n${systemContent}` : personaDirective;
       }
@@ -36562,7 +36620,9 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
       }
 
       if (isPureMathSession) {
-        const mathFormattingDirective = `[MANDAT OUTPUT MATEMATIKA MURNI (LATEX / KATEX)]:
+        const mathFormattingDirective = currentPersonaSetting === 'off'
+          ? `[LATEX / KATEX DELIMITER FORMAT]: Gunakan pembungkus ganda \`$$...$$\` pada baris tersendiri untuk rumus/persamaan display math dan pembungkus tunggal \`$x$\` untuk variabel/notasi inline dengan penutup yang seimbang.`
+          : `[MANDAT OUTPUT MATEMATIKA MURNI (LATEX / KATEX)]:
 1. Untuk setiap rumus/persamaan matematika terpisah, SELALU gunakan blok display math dengan pembungkus ganda \`$$\` di baris tersendiri:
 $$
 [rumus]
@@ -38291,7 +38351,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (typeof bubbleText !== 'undefined' && bubbleText) {
         bubbleText.querySelector('.autonomous-search-status, .typing-cursor')?.remove();
       }
-      setGeneratingState(false);
+      if (!runOptions || !runOptions.deferGeneratingCleanupToParent) {
+        setGeneratingState(false);
+      }
     }
   }
 
@@ -38373,6 +38435,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
     setGeneratingState(true);
     STATE.abortController = new AbortController();
+    if (typeof runOptions !== 'undefined' && runOptions && runOptions.parentAbortSignal) {
+      if (runOptions.parentAbortSignal.aborted) {
+        STATE.abortController.abort();
+      } else {
+        runOptions.parentAbortSignal.addEventListener('abort', () => STATE.abortController?.abort(), { once: true });
+      }
+    }
 
     const startTime = performance.now();
     let firstTokenTime = null;
@@ -38463,10 +38532,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       const canRunAutonomous = !isPureMathSession;
       let systemContent = getDynamicSystemTemporalContext();
+      const currentPersonaSetting = String((typeof STATE !== 'undefined' && STATE.settings?.personaMode) || 'formal').toLowerCase();
       const personaDirective = (typeof getEffectivePersonaSystemDirective === 'function')
         ? getEffectivePersonaSystemDirective(session, runOptions)
         : '';
-      const shouldSkipPersonaForPureMath = Boolean(isPureAlgebraConcept || isQuizRevision);
+      const shouldSkipPersonaForPureMath = Boolean((isPureAlgebraConcept || isQuizRevision) && currentPersonaSetting !== 'custom');
       if (personaDirective && !shouldSkipPersonaForPureMath) {
         systemContent = systemContent ? `${personaDirective}\n\n${systemContent}` : personaDirective;
       }
@@ -38479,7 +38549,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       if (isPureMathSession) {
-        const mathFormattingDirective = `[MANDAT OUTPUT MATEMATIKA MURNI (LATEX / KATEX)]:
+        const mathFormattingDirective = currentPersonaSetting === 'off'
+          ? `[LATEX / KATEX DELIMITER FORMAT]: Gunakan pembungkus ganda \`$$...$$\` pada baris tersendiri untuk rumus/persamaan display math dan pembungkus tunggal \`$x$\` untuk variabel/notasi inline dengan penutup yang seimbang.`
+          : `[MANDAT OUTPUT MATEMATIKA MURNI (LATEX / KATEX)]:
 1. Untuk setiap rumus/persamaan matematika terpisah, SELALU gunakan blok display math dengan pembungkus ganda \`$$\` di baris tersendiri:
 $$
 [rumus]
@@ -40608,7 +40680,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (typeof bubbleText !== 'undefined' && bubbleText) {
         bubbleText.querySelector('.autonomous-search-status, .typing-cursor')?.remove();
       }
-      setGeneratingState(false);
+      if (!runOptions || !runOptions.deferGeneratingCleanupToParent) {
+        setGeneratingState(false);
+      }
     }
   }
 
@@ -40847,28 +40921,37 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       showToast(`🔀 Auto-Router: Memilih model "${topCandidate.modelId}" (${topCandidate.provider.toUpperCase()}) [Skor: ${topCandidate.score.toFixed(1)}]`, 'info');
 
+      const primaryRunOptions = {
+        ...runOptions,
+        autoFallback: Boolean(fallbackCandidate),
+        parentAbortSignal: autoRouterAbort.signal,
+        deferGeneratingCleanupToParent: Boolean(fallbackCandidate)
+      };
+
       if (topCandidate.provider === 'ollama') {
-        const ollamaOk = await runOllamaStreaming(session, promptText, image, topCandidate.modelId, { ...runOptions, autoFallback: Boolean(fallbackCandidate) });
-        if (!ollamaOk && fallbackCandidate && !STATE.userStoppedGeneration) {
+        const ollamaOk = await runOllamaStreaming(session, promptText, image, topCandidate.modelId, primaryRunOptions);
+        if (!ollamaOk && fallbackCandidate && !STATE.userStoppedGeneration && !autoRouterAbort.signal.aborted) {
           console.warn(`Auto-Router: Ollama "${topCandidate.modelId}" gagal, beralih ke "${fallbackCandidate.modelId}" (${fallbackCandidate.provider})...`);
           showToast(`🔀 Auto-Router: Beralih ke model cadangan "${fallbackCandidate.modelId}"...`, 'info');
           setGeneratingState(true);
+          const fallbackRunOptions = { ...runOptions, parentAbortSignal: autoRouterAbort.signal, deferGeneratingCleanupToParent: true };
           if (fallbackCandidate.provider === 'openrouter') {
-            await runOpenRouterStreaming(session, promptText, image, fallbackCandidate.modelId, runOptions);
+            await runOpenRouterStreaming(session, promptText, image, fallbackCandidate.modelId, fallbackRunOptions);
           } else {
-            await runOllamaStreaming(session, promptText, image, fallbackCandidate.modelId, runOptions);
+            await runOllamaStreaming(session, promptText, image, fallbackCandidate.modelId, fallbackRunOptions);
           }
         }
       } else {
-        const orOk = await runOpenRouterStreaming(session, promptText, image, topCandidate.modelId, { ...runOptions, autoFallback: Boolean(fallbackCandidate) });
-        if (!orOk && fallbackCandidate && !STATE.userStoppedGeneration) {
+        const orOk = await runOpenRouterStreaming(session, promptText, image, topCandidate.modelId, primaryRunOptions);
+        if (!orOk && fallbackCandidate && !STATE.userStoppedGeneration && !autoRouterAbort.signal.aborted) {
           console.warn(`Auto-Router: OpenRouter "${topCandidate.modelId}" gagal, beralih ke "${fallbackCandidate.modelId}" (${fallbackCandidate.provider})...`);
           showToast(`🔀 Auto-Router: Beralih ke model cadangan "${fallbackCandidate.modelId}"...`, 'info');
           setGeneratingState(true);
+          const fallbackRunOptions = { ...runOptions, parentAbortSignal: autoRouterAbort.signal, deferGeneratingCleanupToParent: true };
           if (fallbackCandidate.provider === 'ollama') {
-            await runOllamaStreaming(session, promptText, image, fallbackCandidate.modelId, runOptions);
+            await runOllamaStreaming(session, promptText, image, fallbackCandidate.modelId, fallbackRunOptions);
           } else {
-            await runOpenRouterStreaming(session, promptText, image, fallbackCandidate.modelId, runOptions);
+            await runOpenRouterStreaming(session, promptText, image, fallbackCandidate.modelId, fallbackRunOptions);
           }
         }
       }
@@ -43536,6 +43619,13 @@ Aturan:
     
     setGeneratingState(true);
     STATE.abortController = new AbortController();
+    if (typeof runOptions !== 'undefined' && runOptions && runOptions.parentAbortSignal) {
+      if (runOptions.parentAbortSignal.aborted) {
+        STATE.abortController.abort();
+      } else {
+        runOptions.parentAbortSignal.addEventListener('abort', () => STATE.abortController?.abort(), { once: true });
+      }
+    }
 
     const startTime = performance.now();
     const isStudioIsolated = Boolean(session && session.isStudioIsolated);
@@ -44381,9 +44471,15 @@ Aturan:
 
       recomposeBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
+        if (STATE.isGenerating || STATE.isSending) {
+          showToast('Tunggu proses generasi saat ini selesai.', 'warning');
+          return;
+        }
         const p = cardPrompt || cardTitle;
         if (p) {
-          const session = STATE.sessions.find(s => s.id === STATE.activeSessionId);
+          const session = (typeof getActiveSession === 'function')
+            ? getActiveSession()
+            : STATE.sessions.find(s => s.id === STATE.currentSessionId);
           runMusicGeneration(session, p);
         }
       });
@@ -44763,6 +44859,13 @@ Aturan:
 
     setGeneratingState(true);
     STATE.abortController = new AbortController();
+    if (typeof runOptions !== 'undefined' && runOptions && runOptions.parentAbortSignal) {
+      if (runOptions.parentAbortSignal.aborted) {
+        STATE.abortController.abort();
+      } else {
+        runOptions.parentAbortSignal.addEventListener('abort', () => STATE.abortController?.abort(), { once: true });
+      }
+    }
     const startTime = performance.now();
 
     const isStudioIsolated = Boolean((options && options.isStudioIsolated) || (session && session.isStudioIsolated));
@@ -48061,6 +48164,9 @@ Aturan:
           if (m.id === 'termQrScannerModal' && typeof TerminalManager !== 'undefined' && typeof TerminalManager.stopQrScanner === 'function') {
             TerminalManager.stopQrScanner();
           }
+          if (m.id === 'zozPersonaModal' && typeof ZozPersonaController !== 'undefined') {
+            ZozPersonaController._openedFromSettingsInWa = false;
+          }
           m.classList.remove('show');
         };
         const activeModalId = e.state?.modal;
@@ -48077,10 +48183,10 @@ Aturan:
             targetEl.classList.add('show');
           }
         } else {
-          // Check if child modal (e.g. liveModelCatalogModal) was open on top of settingsModal
+          // Check if child modal (e.g. liveModelCatalogModal or zozPersonaModal) was open on top of settingsModal
           const settingsModal = document.getElementById('settingsModal');
           const isSettingsOpen = settingsModal && settingsModal.classList.contains('show');
-          const isChildOpen = openModals.some(m => m.id === 'liveModelCatalogModal');
+          const isChildOpen = openModals.some(m => m.id === 'liveModelCatalogModal' || m.id === 'zozPersonaModal');
 
           if (isSettingsOpen && isChildOpen) {
             // Dismiss child modal only, keep settingsModal alive
@@ -55109,7 +55215,7 @@ Aturan:
       document.getElementById('btnTopBarRemoteQr')?.addEventListener('click', () => this.openRemoteTunnelModal('terminal'));
       document.getElementById('btnTermSwitchToWa')?.addEventListener('click', () => {
         AudioEngine?.click?.();
-        this.closeModal();
+        closeModal('terminalModal');
         if (typeof WhatsAppController !== 'undefined') {
           WhatsAppController.setChatMode('whatsapp');
         }
@@ -57730,7 +57836,12 @@ Aturan:
         mode = 'ai';
         STATE.chatMode = 'ai';
         try { localStorage.setItem('zoz_chat_mode', 'ai'); } catch (_) {}
+        if (els.mainContent) els.mainContent.classList.remove('is-wa-chat-mode');
+        if (typeof document !== 'undefined' && document.body) document.body.setAttribute('data-chat-mode', 'ai');
         this.updateModeButtonsUI('ai');
+        if (typeof ZozPersonaController !== 'undefined' && typeof ZozPersonaController.syncUI === 'function') {
+          ZozPersonaController.syncUI();
+        }
         return;
       }
 
@@ -57738,9 +57849,14 @@ Aturan:
       localStorage.setItem('zoz_chat_mode', mode);
 
       const isAi = mode === 'ai';
+      if (els.mainContent) els.mainContent.classList.toggle('is-wa-chat-mode', !isAi);
+      if (typeof document !== 'undefined' && document.body) document.body.setAttribute('data-chat-mode', mode);
       if (els.btnChatModeAi) els.btnChatModeAi.classList.toggle('active', isAi);
       if (els.btnChatModeWa) els.btnChatModeWa.classList.toggle('active', !isAi);
       this.updateModeButtonsUI(mode);
+      if (typeof ZozPersonaController !== 'undefined' && typeof ZozPersonaController.syncUI === 'function') {
+        ZozPersonaController.syncUI();
+      }
 
       if (isAi) {
         if (!this.isLocalHostOrTunnelOrigin()) {
@@ -61465,16 +61581,33 @@ Gunakan format Markdown lengkap dengan struktur berikut:
         }
       }
 
-      // 1. Composer Button Pill
+      // 1. Right-Middle Vertical Persona Dock (1-Click ON/OFF Power Cap + Vertical Upward Studio Trigger)
+      const vertDock = els.zozPersonaVerticalDock || document.getElementById('zozPersonaVerticalDock');
+      const vertPowerBtn = els.btnPersonaVerticalPowerToggle || document.getElementById('btnPersonaVerticalPowerToggle');
       const compBtn = els.btnComposerPersonaMenu || document.getElementById('btnComposerPersonaMenu');
       const compLabel = els.zozPersonaComposerLabel || document.getElementById('zozPersonaComposerLabel');
       const compIcon = els.zozPersonaComposerIcon || document.getElementById('zozPersonaComposerIcon');
+      if (vertDock) {
+        vertDock.style.display = isAiChatMode ? 'flex' : 'none';
+        vertDock.classList.toggle('is-custom-mode', isCustom);
+        vertDock.classList.toggle('is-off-mode', isOff);
+      }
+      if (vertPowerBtn) {
+        const vertPowerAria = isOff ? 'Aktifkan Persona AI (1-Klik)' : 'Matikan Persona AI (1-Klik)';
+        vertPowerBtn.setAttribute('aria-pressed', String(!isOff));
+        vertPowerBtn.setAttribute('aria-label', vertPowerAria);
+        vertPowerBtn.title = isOff
+          ? 'Persona Nonaktif — Klik untuk mengaktifkan kembali Persona AI'
+          : 'Persona Aktif — Klik untuk mematikan Persona AI';
+        vertPowerBtn.classList.toggle('is-persona-off', isOff);
+        vertPowerBtn.classList.toggle('is-custom-mode', isCustom && !isOff);
+      }
       if (compBtn) {
         compBtn.style.display = isAiChatMode ? 'inline-flex' : 'none';
         compBtn.classList.toggle('is-custom-mode', isCustom);
         compBtn.classList.toggle('is-off-mode', isOff);
         compBtn.title = isOff
-          ? 'Menu Persona AI: Nonaktif (Klik untuk mengaktifkan)'
+          ? 'Menu Persona AI: Nonaktif (Klik untuk membuka Menu Persona)'
           : (isCustom
             ? `Menu Persona AI: Custom (${customDisplayTitle})`
             : 'Menu Persona AI: Non-Custom (AI Formal)');
@@ -61672,9 +61805,6 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       this._openedFromSettingsInWa = Boolean(fromSettings && typeof STATE !== 'undefined' && STATE.chatMode === 'whatsapp');
       if (fromSettings) {
         closeModal('settingsModal', false);
-        if (typeof history !== 'undefined' && history.state?.modal === 'settingsModal') {
-          try { history.replaceState({ modal: 'zozPersonaModal' }, ''); } catch (_) {}
-        }
       }
       this.populateModalFields(preferredTab);
       openModal('zozPersonaModal');
@@ -61907,6 +62037,7 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       if (this.initialized) return;
       this.initialized = true;
 
+      const vertPowerBtn = els.btnPersonaVerticalPowerToggle || document.getElementById('btnPersonaVerticalPowerToggle');
       const compBtn = els.btnComposerPersonaMenu || document.getElementById('btnComposerPersonaMenu');
       const optBtn = els.btnModelOptPersonaMenu || document.getElementById('btnModelOptPersonaMenu');
       const powerBtn = els.btnTogglePersonaPower || document.getElementById('btnTogglePersonaPower');
@@ -61924,6 +62055,12 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       const qFormal = els.btnSettingsQuickFormal || document.getElementById('btnSettingsQuickFormal');
       const qCustom = els.btnSettingsQuickCustom || document.getElementById('btnSettingsQuickCustom');
       const openFromSettings = els.btnOpenPersonaStudioFromSettings || document.getElementById('btnOpenPersonaStudioFromSettings');
+
+      vertPowerBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof AudioEngine !== 'undefined' && AudioEngine.click) AudioEngine.click();
+        this.togglePersonaPower();
+      });
 
       compBtn?.addEventListener('click', (e) => {
         e.stopPropagation();

@@ -983,7 +983,17 @@ function getInsightsData(userId, scope = null) {
       .slice(0, 30);
 
     const activeRelations = Array.from(memStore.relations.values())
-      .filter(r => isRecordOwnedBy(r, uid) && !(r.valid_until ?? r.validUntil))
+      .filter(r => {
+        if (!isRecordOwnedBy(r, uid) || (r.valid_until ?? r.validUntil)) return false;
+        if (!scope) return true;
+        const srcId = r.source_entity_id || r.sourceEntityId;
+        const tgtId = r.target_entity_id || r.targetEntityId;
+        const srcEnt = srcId ? memStore.entities.get(srcId) : null;
+        const tgtEnt = tgtId ? memStore.entities.get(tgtId) : null;
+        const srcMatch = !srcEnt || srcEnt.scope === scope || srcEnt.scope === 'global';
+        const tgtMatch = !tgtEnt || tgtEnt.scope === scope || tgtEnt.scope === 'global';
+        return srcMatch && tgtMatch;
+      })
       .map(r => {
         const srcId = r.source_entity_id || r.sourceEntityId;
         const tgtId = r.target_entity_id || r.targetEntityId;
@@ -1013,15 +1023,20 @@ function getInsightsData(userId, scope = null) {
   entSql += ' ORDER BY updated_at DESC LIMIT 30';
   const entities = queryAll(db.prepare(entSql), ...entParams);
 
-  const relStmt = db.prepare(`
+  let relSql = `
     SELECT r.*, e1.name as source_name, e2.name as target_name 
     FROM relations r
     LEFT JOIN entities e1 ON r.source_entity_id = e1.id
     LEFT JOIN entities e2 ON r.target_entity_id = e2.id
     WHERE r.user_id = ? AND r.valid_until IS NULL
-    ORDER BY r.valid_from DESC LIMIT 20
-  `);
-  const activeRelations = queryAll(relStmt, uid);
+  `;
+  const relParams = [uid];
+  if (scope) {
+    relSql += " AND (e1.scope IS NULL OR e1.scope = ? OR e1.scope = 'global')";
+    relParams.push(scope);
+  }
+  relSql += ' ORDER BY r.valid_from DESC LIMIT 20';
+  const activeRelations = queryAll(db.prepare(relSql), ...relParams);
   return { entities, activeRelations };
 }
 

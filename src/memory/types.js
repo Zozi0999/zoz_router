@@ -47,7 +47,7 @@ function createEpisode({
     userId: validateString(userId, 'default', 64),
     sessionId: validateString(sessionId, 'default', 64),
     turnIndex: Number(turnIndex) || 0,
-    sourceType: ['chat', 'document', 'manual'].includes(sourceType) ? sourceType : 'chat',
+    sourceType: ['chat', 'document', 'manual', 'chat_error_correction', 'chat_preference', 'chat_episodic'].includes(sourceType) ? sourceType : 'chat',
     sourceTitle: validateString(sourceTitle, 'Percakapan AI', 256),
     sourceUri: validateString(sourceUri, '', 512),
     rawSnippet: validateString(rawSnippet, '', 4000),
