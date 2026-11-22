@@ -3122,6 +3122,12 @@ function fetchYouTubeSearchResults(query, limit = 5) {
   return new Promise((resolve) => {
     const cleanQ = String(query || '').trim();
     if (!cleanQ) return resolve([]);
+    let resolved = false;
+    const done = (val) => {
+      if (resolved) return;
+      resolved = true;
+      resolve(val);
+    };
     const targetUrl = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(cleanQ);
     const req = https.get(targetUrl, {
       headers: {
@@ -3133,13 +3139,18 @@ function fetchYouTubeSearchResults(query, limit = 5) {
     }, (res) => {
       if (res.statusCode !== 200) {
         res.resume();
-        return resolve([]);
+        return done([]);
       }
       let html = '';
       res.on('data', chunk => {
+        if (resolved) return;
         html += chunk;
-        if (html.length > 2500000) { res.destroy(); }
+        if (html.length > 2500000) {
+          done([]);
+          try { res.destroy(); } catch (_) {}
+        }
       });
+      res.on('close', () => done([]));
       res.on('end', () => {
         const results = [];
         const startTag = 'var ytInitialData = ';
@@ -3192,12 +3203,12 @@ function fetchYouTubeSearchResults(query, limit = 5) {
             }
           } catch (_) {}
         }
-        resolve(results);
+        done(results);
       });
-      res.on('error', () => resolve([]));
+      res.on('error', () => done([]));
     });
-    req.on('timeout', () => { req.destroy(); resolve([]); });
-    req.on('error', () => resolve([]));
+    req.on('timeout', () => { done([]); try { req.destroy(); } catch (_) {} });
+    req.on('error', () => done([]));
   });
 }
 
@@ -3217,6 +3228,12 @@ function fetchXVideosSearchResults(query, limit = 5) {
   return new Promise((resolve) => {
     const cleanQ = String(query || '').trim();
     if (!cleanQ) return resolve([]);
+    let resolved = false;
+    const done = (val) => {
+      if (resolved) return;
+      resolved = true;
+      resolve(val);
+    };
     const targetUrl = 'https://www.xvideos.com/?k=' + encodeURIComponent(cleanQ);
     const req = https.get(targetUrl, {
       headers: {
@@ -3228,13 +3245,18 @@ function fetchXVideosSearchResults(query, limit = 5) {
     }, (res) => {
       if (res.statusCode !== 200) {
         res.resume();
-        return resolve([]);
+        return done([]);
       }
       let html = '';
       res.on('data', chunk => {
+        if (resolved) return;
         html += chunk;
-        if (html.length > 500000) { res.destroy(); }
+        if (html.length > 500000) {
+          done([]);
+          try { res.destroy(); } catch (_) {}
+        }
       });
+      res.on('close', () => done([]));
       res.on('end', () => {
         const results = [];
         const videoBlockRegex = /<div id="video_([0-9a-zA-Z]+)"[\s\S]*?<p class="title">\s*<a href="([^"]+)"\s+title="([^"]+)"[\s\S]*?<\/div>/gi;
@@ -3254,12 +3276,12 @@ function fetchXVideosSearchResults(query, limit = 5) {
             views: viewsMatch ? `${viewsMatch[1]} views` : ''
           });
         }
-        resolve(results);
+        done(results);
       });
-      res.on('error', () => resolve([]));
+      res.on('error', () => done([]));
     });
-    req.on('timeout', () => { req.destroy(); resolve([]); });
-    req.on('error', () => resolve([]));
+    req.on('timeout', () => { done([]); try { req.destroy(); } catch (_) {} });
+    req.on('error', () => done([]));
   });
 }
 
@@ -4469,9 +4491,23 @@ function persistUserImagesToUploads(images) {
       if (cleanImg.startsWith('data:image') || (/^[A-Za-z0-9+/=]+$/.test(cleanImg) && cleanImg.length > 100)) {
         try {
           const mimeMatch = cleanImg.match(/^data:(image\/[a-zA-Z0-9.+_-]+);base64,/i);
-          const ext = mimeMatch ? (mimeMatch[1].split('/')[1] || 'webp') : 'webp';
+          const rawMime = mimeMatch ? mimeMatch[1].toLowerCase() : 'image/webp';
+          const mimeExtMap = {
+            'image/jpeg': 'jpg',
+            'image/jpg': 'jpg',
+            'image/png': 'png',
+            'image/webp': 'webp',
+            'image/gif': 'gif',
+            'image/svg+xml': 'svg',
+            'image/x-icon': 'ico',
+            'image/vnd.microsoft.icon': 'ico',
+            'image/avif': 'avif',
+            'image/bmp': 'bmp'
+          };
+          const ext = mimeExtMap[rawMime] || (rawMime.split('/')[1] || 'webp').replace(/[^a-z0-9]/g, '') || 'webp';
           const rawBase64 = cleanImg.replace(/^data:image\/[a-zA-Z0-9.+_-]+;base64,/i, '').replace(/[\r\n\s]/g, '');
           const buffer = Buffer.from(rawBase64, 'base64');
+          if (!buffer || buffer.length === 0) continue;
           if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
           const filename = `img_carried_${Date.now()}_${idx}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
           const filePath = path.join(UPLOADS_DIR, filename);
@@ -5417,7 +5453,7 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
       const tryJinaOrFail = (fallbackError) => {
         if (resolved) return;
         resolved = true;
-        if (redirectCount === 0) {
+        if (redirectCount <= 5) {
           return fallbackJinaReader(cleanTarget, maxChars).then(jinaRes => {
             if (jinaRes && jinaRes.text && jinaRes.text.length > 30 && !textSafety.isGarbledPdfBinaryText(jinaRes.text)) {
               return resolve({
@@ -5486,7 +5522,7 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
       }
 
       const req = client.request(options, (res) => {
-        if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
           try {
             res.resume();
             resolved = true;
@@ -5874,6 +5910,12 @@ const SOVEREIGN_PRIMARY_FEEDS = [
 
 function crawlDirectPrimaryFeed(feedUrl, category = 'tech', maxItems = 12) {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      resolve(val);
+    };
     try {
       const parsedUrl = new URL(feedUrl);
       const client = parsedUrl.protocol === 'https:' ? https : http;
@@ -5881,11 +5923,20 @@ function crawlDirectPrimaryFeed(feedUrl, category = 'tech', maxItems = 12) {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ZozSpider/2.0 (Sovereign Neural Indexer)' },
         timeout: 5000
       }, (res) => {
+        if (res.statusCode && res.statusCode >= 400) {
+          res.resume();
+          return finish([]);
+        }
         let xml = '';
         res.on('data', c => {
+          if (settled) return;
           xml += c;
-          if (xml.length > 800000) req.destroy();
+          if (xml.length > 800000) {
+            finish([]);
+            try { req.destroy(); } catch (_) {}
+          }
         });
+        res.on('close', () => finish([]));
         res.on('end', () => {
           try {
             const items = [];
@@ -5947,14 +5998,14 @@ function crawlDirectPrimaryFeed(feedUrl, category = 'tech', maxItems = 12) {
             for (const it of items) {
               indexArticleToZozDb(it);
             }
-            resolve(items);
-          } catch (_) { resolve([]); }
+            finish(items);
+          } catch (_) { finish([]); }
         });
-        res.on('error', () => resolve([]));
+        res.on('error', () => finish([]));
       });
-      req.on('timeout', () => { req.destroy(); resolve([]); });
-      req.on('error', () => resolve([]));
-    } catch (_) { resolve([]); }
+      req.on('timeout', () => { finish([]); try { req.destroy(); } catch (_) {} });
+      req.on('error', () => finish([]));
+    } catch (_) { finish([]); }
   });
 }
 
@@ -6947,7 +6998,7 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
       }
 
       const req = client.request(options, (res) => {
-        if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
           try {
             res.resume();
             const redirectUrl = new URL(res.headers.location, cleanTarget).toString();
@@ -8282,7 +8333,7 @@ async function collectCommunicationContext(params, { reqUserId = 'default', waTe
         try {
           const obj = JSON.parse(await fsp.readFile(sc.full, 'utf8'));
           if (!obj || !obj.id || obj.id === excludeSessionId || seenSessIds.has(obj.id)) continue;
-          if (obj.isIncognito === true || /^incog_/i.test(obj.id) || obj.title === 'Obrolan Privat' || isInternalSubtaskSessionId(obj.id)) continue;
+          if (obj.isIncognito === true || /^incog_/i.test(obj.id) || isInternalSubtaskSessionId(obj.id)) continue;
           seenSessIds.add(obj.id);
           const msgs = Array.isArray(obj.messages) ? obj.messages : [];
           if (msgs.length === 0) continue;
@@ -9019,6 +9070,466 @@ async function collectDocumentKnowledgeRAG(params = {}, { reqUserId = 'default' 
   };
 }
 
+// ==================== PENCARIAN RIWAYAT OBROLAN (ZOZ ROUTER NATIVE) ====================
+const CHAT_HISTORY_STOPWORDS = new Set([
+  'yang', 'dan', 'atau', 'di', 'ke', 'dari', 'pada', 'untuk', 'dengan', 'dalam', 'adalah', 'itu', 'ini',
+  'tersebut', 'juga', 'sudah', 'udah', 'belum', 'pernah', 'lagi', 'akan', 'bisa', 'dapat', 'boleh',
+  'harus', 'mau', 'ingin', 'aja', 'saja', 'nih', 'sih', 'dong', 'yah', 'ya', 'kok', 'deh', 'lah', 'kah',
+  'apa', 'siapa', 'mana', 'kapan', 'kenapa', 'mengapa', 'bagaimana', 'gimana', 'berapa', 'apakah',
+  'saya', 'aku', 'kamu', 'anda', 'kita', 'kami', 'mereka', 'dia', 'nya',
+  'kemarin', 'tadi', 'barusan', 'dulu', 'sebelumnya', 'terakhir', 'terbaru', 'lalu', 'waktu',
+  'chat', 'chats', 'obrolan', 'percakapan', 'diskusi', 'pembahasan', 'topik', 'riwayat', 'history',
+  'bahas', 'dibahas', 'membahas', 'ngobrol', 'ngobrolin', 'obrolin', 'bicarakan', 'cerita', 'ingat', 'ingatkan',
+  'lanjut', 'lanjutkan', 'cari', 'carikan', 'temukan', 'lihat', 'baca', 'cek', 'periksa', 'tampilkan', 'tolong', 'coba',
+  'tentang', 'soal', 'mengenai', 'sama', 'buat', 'bikin', 'kasih', 'tahu', 'info',
+  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
+  'we', 'our', 'us', 'you', 'your', 'i', 'me', 'my', 'they', 'their', 'it', 'its', 'this', 'that', 'these', 'those',
+  'in', 'on', 'at', 'to', 'from', 'for', 'of', 'with', 'about', 'into', 'earlier', 'previous', 'past', 'last',
+  'recent', 'latest', 'conversation', 'conversations', 'discussion', 'discussed', 'talked', 'talking', 'remember',
+  'what', 'when', 'where', 'why', 'how', 'which', 'who', 'can', 'could', 'please', 'find', 'search', 'show', 'continue'
+]);
+
+function parseChatHistoryDateBoundMs(rawDate, isEndBound = false) {
+  if (rawDate === null || rawDate === undefined || rawDate === '') return 0;
+  if (typeof rawDate === 'number' && Number.isFinite(rawDate) && rawDate > 0) {
+    return rawDate < 1e12 ? rawDate * 1000 : rawDate;
+  }
+  const str = String(rawDate).trim();
+  if (!str) return 0;
+  if (/^\d{9,}(?:\.\d+)?$/.test(str)) {
+    const n = Number(str);
+    return (Number.isFinite(n) && n > 0) ? (n < 1e12 ? n * 1000 : n) : 0;
+  }
+  const isoDateOnly = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDateOnly) {
+    const y = Number(isoDateOnly[1]);
+    const m = Number(isoDateOnly[2]);
+    const d = Number(isoDateOnly[3]);
+    const dt = isEndBound
+      ? new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999))
+      : new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
+    if (dt.getUTCFullYear() === y && (dt.getUTCMonth() + 1) === m && dt.getUTCDate() === d) {
+      return dt.getTime();
+    }
+    return 0;
+  }
+  const parsed = Date.parse(str);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function cleanChatHistoryMessageText(msg) {
+  if (!msg) return '';
+  let raw = '';
+  if (msg.role === 'user' && typeof msg.displayContent === 'string' && msg.displayContent.trim()) {
+    raw = msg.displayContent;
+  } else if (typeof msg.content === 'string') {
+    raw = msg.content;
+  } else if (Array.isArray(msg.content)) {
+    raw = msg.content
+      .map(part => {
+        if (!part) return '';
+        if (typeof part === 'string') return part;
+        if (part.type === 'text' && typeof part.text === 'string') return part.text;
+        if (part.type === 'image_url') return '[Gambar]';
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (!raw) return '';
+  let cleaned = String(raw)
+    .replace(/---\s*\[LAMPIRAN DOKUMEN:\s*([^\]]+)\]\s*---[\s\S]*?(?:---\s*\[AKHIR DOKUMEN:[^\]]+\]\s*---|$)/gi, '[Lampiran: $1]')
+    .replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY)[\s\S]*?(?:<<<END_ZOZ_(?:FILE|EDIT|MODIFY)>>>|$)/gi, '[Berkas/Artefak]')
+    .replace(/data:image\/[^;\s]+;base64,[A-Za-z0-9+/=]+/gi, '[Gambar]')
+    .replace(/<(?:tool_call|function_call|think|reasoning|thought)>[\s\S]*?<\/(?:tool_call|function_call|think|reasoning|thought)>/gi, '')
+    .replace(/\[(?:KONTEKS|DIREKTIF|HASIL|SPESIFIKASI|BATASAN|LIVE PULSE|HASIL RAG)[^\]]*\][^\n]*/gi, '');
+  if (typeof textSafety.stripInjectedSystemTagsFromUserText === 'function') {
+    cleaned = textSafety.stripInjectedSystemTagsFromUserText(cleaned);
+  }
+  return cleaned.replace(/\s+/g, ' ').trim();
+}
+
+function buildChatHistoryTokenVariants(tokens) {
+  const variantMap = new Map();
+  for (const tok of tokens) {
+    const vars = new Set([tok]);
+    if (tok.length >= 5) {
+      const noPref = tok.replace(/^(?:meng|meny|mem|men|me|peng|peny|pem|pen|di|ber|ter|ke|se)/i, '');
+      if (noPref.length >= 3 && noPref !== tok) vars.add(noPref);
+      const noSuf = tok.replace(/(?:nya|kan|lah|kah|an|i)$/i, '');
+      if (noSuf.length >= 3 && noSuf !== tok) vars.add(noSuf);
+      const stemBoth = noPref.replace(/(?:nya|kan|an|i)$/i, '');
+      if (stemBoth.length >= 3) vars.add(stemBoth);
+    }
+    if (typeof textSafety.expandMorphologicalAndBilingualVariants === 'function') {
+      try {
+        const expanded = textSafety.expandMorphologicalAndBilingualVariants(tok);
+        if (Array.isArray(expanded)) {
+          expanded.forEach(v => {
+            const vl = String(v || '').toLowerCase().trim();
+            if (vl.length >= 2 && !CHAT_HISTORY_STOPWORDS.has(vl)) vars.add(vl);
+          });
+        }
+      } catch (_) {}
+    }
+    variantMap.set(tok, Array.from(vars));
+  }
+  return variantMap;
+}
+
+function extractChatHistorySnippet(text, activeTokens = [], variantMap = null, maxLen = 360) {
+  const str = String(text || '').trim();
+  if (!str) return '';
+  if (str.length <= maxLen) return str;
+  const lower = str.toLowerCase();
+  let hitIdx = -1;
+  for (const tok of activeTokens) {
+    const candidates = (variantMap && variantMap.get(tok)) || [tok];
+    for (const c of candidates) {
+      const idx = lower.indexOf(c);
+      if (idx !== -1 && (hitIdx === -1 || idx < hitIdx)) {
+        hitIdx = idx;
+      }
+    }
+  }
+  if (hitIdx <= 90) {
+    return str.slice(0, maxLen).trim() + '...';
+  }
+  const start = Math.max(0, hitIdx - 90);
+  const end = Math.min(str.length, start + maxLen);
+  const prefix = start > 0 ? '...' : '';
+  const suffix = end < str.length ? '...' : '';
+  return `${prefix}${str.slice(start, end).trim()}${suffix}`;
+}
+
+async function searchChatHistorySessions(params = {}, { reqUserId = 'default' } = {}) {
+  const nowMs = Date.now();
+  const serverTime = getServerLocalClockInfo(nowMs);
+  const toSafeParamStr = (v) => (typeof v === 'string' || typeof v === 'number') ? String(v).trim() : '';
+  const query = toSafeParamStr(
+    params?.query ?? params?.q ?? params?.keyword ?? params?.keywords ?? params?.kata_kunci ??
+    params?.topic ?? params?.topik ?? params?.search
+  );
+  const rawMode = toSafeParamStr(params?.mode || 'auto').toLowerCase() || 'auto';
+  const requestedMode = ['auto', 'search', 'recent'].includes(rawMode) ? rawMode : 'auto';
+  const limit = Math.max(1, Math.min(10, parseInt(params?.limit || params?.max_results || 5, 10) || 5));
+  const maxSnippets = Math.max(1, Math.min(6, parseInt(params?.max_snippets || params?.maxSnippets || 3, 10) || 3));
+  const days = Math.max(0, Math.min(365, parseInt(params?.days || params?.hari || 0, 10) || 0));
+  const rawSort = toSafeParamStr(params?.sort_by ?? params?.sortBy ?? params?.urutkan ?? 'auto').toLowerCase() || 'auto';
+  const sortBy = ['auto', 'relevance', 'recent'].includes(rawSort) ? rawSort : 'auto';
+  const excludeSessionId = toSafeParamStr(params?.exclude_session_id ?? params?.excludeSessionId);
+  const includeCurrent = parseBoolParam(params?.include_current ?? params?.includeCurrent, false);
+  const rawRoleFilter = toSafeParamStr(params?.role_filter ?? params?.roleFilter ?? 'all').toLowerCase() || 'all';
+  const roleFilter = ['all', 'user', 'assistant'].includes(rawRoleFilter) ? rawRoleFilter : 'all';
+
+  let afterMs = parseChatHistoryDateBoundMs(params?.after ?? params?.since ?? params?.from_date, false);
+  const beforeMs = parseChatHistoryDateBoundMs(params?.before ?? params?.until ?? params?.to_date, true);
+  if (days > 0) {
+    const daysCutoffMs = nowMs - (days * 86400 * 1000);
+    afterMs = afterMs > 0 ? Math.max(afterMs, daysCutoffMs) : daysCutoffMs;
+  }
+
+  if (afterMs > 0 && beforeMs > 0 && afterMs > beforeMs) {
+    return {
+      success: true,
+      tool: 'search_chat_history',
+      mode: requestedMode === 'auto' ? 'recent' : requestedMode,
+      sort_by: sortBy,
+      query,
+      serverTime,
+      totalScanned: 0,
+      totalMatched: 0,
+      count: 0,
+      sessions: [],
+      formattedContext: `[HASIL PENCARIAN RIWAYAT OBROLAN ZOZ ROUTER]\nWaktu Server: ${serverTime.summaryLine}\nRentang tanggal tidak menghasilkan sesi yang cocok.`
+    };
+  }
+
+  if (!reqUserId || reqUserId === 'anon_remote') {
+    return {
+      success: true,
+      tool: 'search_chat_history',
+      mode: 'recent',
+      query,
+      serverTime,
+      totalScanned: 0,
+      totalMatched: 0,
+      count: 0,
+      sessions: [],
+      formattedContext: `[HASIL PENCARIAN RIWAYAT OBROLAN ZOZ ROUTER]\nWaktu Server: ${serverTime.summaryLine}\nTidak ada riwayat obrolan tersimpan untuk sesi tamu anonim.`
+    };
+  }
+
+  const rawTokens = Array.from(new Set(
+    query
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}_.\-#]/gu, ' ')
+      .split(/\s+/)
+      .map(t => t.replace(/^[^a-zA-Z0-9\p{L}\p{N}]+|[^a-zA-Z0-9\p{L}\p{N}]+$/gu, ''))
+      .filter(t => t.length >= 2)
+  )).slice(0, 14);
+  const activeTokens = rawTokens.filter(t => !CHAT_HISTORY_STOPWORDS.has(t));
+  const variantMap = buildChatHistoryTokenVariants(activeTokens);
+  const normPhrase = normalizeCommMatchPhrase(activeTokens.join(' '));
+
+  let effectiveMode = requestedMode;
+  if (effectiveMode === 'auto') {
+    effectiveMode = activeTokens.length > 0 ? 'search' : 'recent';
+  } else if (effectiveMode === 'search' && activeTokens.length === 0) {
+    effectiveMode = 'recent';
+  }
+  const effectiveSort = (sortBy === 'recent' || sortBy === 'relevance')
+    ? sortBy
+    : (effectiveMode === 'recent' ? 'recent' : 'relevance');
+
+  const uidClean = sanitizeUserId(reqUserId);
+  const userSessDir = path.resolve(SESSIONS_DIR, uidClean);
+  const resolvedRoot = path.resolve(SESSIONS_DIR);
+  if (!isPathContainedInRealRoot(userSessDir, resolvedRoot) || !fs.existsSync(userSessDir)) {
+    return {
+      success: true,
+      tool: 'search_chat_history',
+      mode: effectiveMode,
+      query,
+      serverTime,
+      totalScanned: 0,
+      totalMatched: 0,
+      count: 0,
+      sessions: [],
+      formattedContext: `[HASIL PENCARIAN RIWAYAT OBROLAN ZOZ ROUTER]\nWaktu Server: ${serverTime.summaryLine}\nBelum ada riwayat percakapan terdahulu pada akun ini.`
+    };
+  }
+
+  let files = [];
+  try {
+    files = (await fsp.readdir(userSessDir)).filter(f =>
+      f.endsWith('.json') &&
+      !isInternalSubtaskSessionId(path.basename(f, '.json')) &&
+      !/^incog_/i.test(f)
+    );
+  } catch (_) {
+    files = [];
+  }
+
+  const fileStats = [];
+  for (const f of files) {
+    const full = path.join(userSessDir, f);
+    try {
+      const st = await fsp.stat(full);
+      if (st.isFile() && st.size > 0 && st.size <= 15 * 1024 * 1024) {
+        fileStats.push({ full, file: f, mtimeMs: st.mtimeMs || 0 });
+      }
+    } catch (_) {}
+  }
+  fileStats.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const cappedFiles = fileStats.slice(0, 250);
+
+  let totalScanned = 0;
+  const matchedSessions = [];
+  const seenSessionIds = new Set();
+
+  for (const fsEntry of cappedFiles) {
+    try {
+      const obj = JSON.parse(await fsp.readFile(fsEntry.full, 'utf8'));
+      if (!obj || typeof obj !== 'object') continue;
+      const sid = String(obj.id || path.basename(fsEntry.file, '.json')).trim();
+      if (!sid || seenSessionIds.has(sid)) continue;
+      if (obj.isIncognito === true || /^incog_/i.test(sid) || isInternalSubtaskSessionId(sid)) continue;
+      if (!includeCurrent && excludeSessionId && sid === excludeSessionId) continue;
+
+      const rawMsgs = Array.isArray(obj.messages) ? obj.messages : [];
+      if (rawMsgs.length === 0) continue;
+
+      const updatedAtMs = parseCommTimestampMs(obj.updatedAt) || parseCommTimestampMs(obj.createdAt) || fsEntry.mtimeMs || 0;
+      if (afterMs > 0 && (updatedAtMs <= 0 || updatedAtMs < afterMs)) continue;
+      if (beforeMs > 0 && (updatedAtMs <= 0 || updatedAtMs > beforeMs)) continue;
+
+      totalScanned++;
+      seenSessionIds.add(sid);
+
+      const title = String(obj.title || 'Obrolan Tanpa Judul').trim() || 'Obrolan Tanpa Judul';
+      const titleLower = title.toLowerCase();
+      const normTitle = normalizeCommMatchPhrase(title);
+
+      let titleScore = 0;
+      if (effectiveMode === 'search') {
+        if (normPhrase && normPhrase.length >= 4 && normTitle.includes(normPhrase)) {
+          titleScore += 80;
+        }
+        for (const tok of activeTokens) {
+          const vars = variantMap.get(tok) || [tok];
+          if (vars.some(v => titleLower.includes(v))) {
+            titleScore += 22;
+          }
+        }
+      }
+
+      const cleanMsgs = rawMsgs.map((m, idx) => ({
+        idx,
+        role: m?.role === 'assistant' ? 'assistant' : 'user',
+        text: cleanChatHistoryMessageText(m),
+        timestamp: m?.timestamp || obj.updatedAt || obj.createdAt || ''
+      }));
+
+      const scoredMsgs = [];
+      for (const cm of cleanMsgs) {
+        if (!cm.text) continue;
+        if (roleFilter !== 'all' && cm.role !== roleFilter) continue;
+        if (effectiveMode === 'recent') {
+          scoredMsgs.push({ ...cm, msgScore: 1 });
+          continue;
+        }
+        const hayLower = cm.text.toLowerCase();
+        const hayNorm = normPhrase && normPhrase.length >= 4 ? normalizeCommMatchPhrase(cm.text) : '';
+        let msgScore = 0;
+        if (hayNorm && hayNorm.includes(normPhrase)) {
+          msgScore += 65;
+        }
+        let distinctHits = 0;
+        let tfHits = 0;
+        for (const tok of activeTokens) {
+          const vars = variantMap.get(tok) || [tok];
+          let tokCount = 0;
+          for (const v of vars) {
+            let pos = hayLower.indexOf(v);
+            while (pos !== -1 && tokCount < 3) {
+              tokCount++;
+              pos = hayLower.indexOf(v, pos + v.length);
+            }
+            if (tokCount > 0) break;
+          }
+          if (tokCount > 0) {
+            distinctHits++;
+            tfHits += Math.min(3, tokCount);
+          }
+        }
+        if (distinctHits > 0) {
+          const coverage = activeTokens.length > 0 ? (distinctHits / activeTokens.length) : 0;
+          msgScore += Math.round(coverage * 45) + (tfHits * 14) + (cm.role === 'user' ? 4 : 0);
+          scoredMsgs.push({ ...cm, msgScore });
+        }
+      }
+
+      const bestMsgScore = scoredMsgs.reduce((mx, m) => Math.max(mx, m.msgScore), 0);
+      const totalHitMsgs = scoredMsgs.length;
+      const rawRelevance = titleScore + bestMsgScore + Math.min(24, totalHitMsgs * 5);
+
+      if (effectiveMode === 'search' && rawRelevance <= 0) {
+        continue;
+      }
+
+      const ageDays = updatedAtMs > 0 ? Math.max(0, (nowMs - updatedAtMs) / 86400000) : 365;
+      const recencyBoost = Number((Math.max(0, 12 * Math.exp(-ageDays / 30))).toFixed(2));
+      const finalScore = Number((rawRelevance + recencyBoost).toFixed(2));
+
+      let pickedMsgs = [];
+      if (effectiveMode === 'recent') {
+        const meaningful = cleanMsgs.filter(cm => cm.text && cm.text !== '[Gambar]' && (roleFilter === 'all' || cm.role === roleFilter));
+        pickedMsgs = meaningful.slice(-maxSnippets);
+        if (pickedMsgs.length === 0) {
+          pickedMsgs = cleanMsgs.filter(cm => cm.text && (roleFilter === 'all' || cm.role === roleFilter)).slice(-maxSnippets);
+        }
+      } else {
+        if (scoredMsgs.length > 0) {
+          scoredMsgs.sort((a, b) => (b.msgScore - a.msgScore) || (b.idx - a.idx));
+          pickedMsgs = scoredMsgs.slice(0, maxSnippets).sort((a, b) => a.idx - b.idx);
+        } else {
+          // Judul cocok meskipun isi pesan tidak mengandung token eksplisit -> ambil konteks akhir
+          pickedMsgs = cleanMsgs.filter(cm => cm.text && (roleFilter === 'all' || cm.role === roleFilter)).slice(-Math.min(2, maxSnippets));
+        }
+      }
+      if (pickedMsgs.length === 0) continue;
+
+      const matchedSnippets = pickedMsgs.map(pm => {
+        const snippetText = extractChatHistorySnippet(pm.text, activeTokens, variantMap, 360);
+        let partnerRole = '';
+        let partnerText = '';
+        if (pm.role === 'user') {
+          const nextMsg = cleanMsgs[pm.idx + 1];
+          if (nextMsg && nextMsg.role === 'assistant' && nextMsg.text) {
+            partnerRole = 'assistant';
+            partnerText = extractChatHistorySnippet(nextMsg.text, activeTokens, variantMap, 220);
+          }
+        } else {
+          const prevMsg = cleanMsgs[pm.idx - 1];
+          if (prevMsg && prevMsg.role === 'user' && prevMsg.text) {
+            partnerRole = 'user';
+            partnerText = extractChatHistorySnippet(prevMsg.text, activeTokens, variantMap, 220);
+          }
+        }
+        return {
+          index: pm.idx,
+          role: pm.role,
+          text: snippetText,
+          ...(partnerText ? { partnerRole, partnerText } : {}),
+          timestamp: formatCommTimestamp(pm.timestamp) || ''
+        };
+      });
+
+      const firstSnippet = matchedSnippets[0] || null;
+      matchedSessions.push({
+        sessionId: sid,
+        title,
+        updatedAt: formatCommTimestamp(updatedAtMs) || String(obj.updatedAt || obj.createdAt || ''),
+        updatedAtIso: updatedAtMs > 0 ? new Date(updatedAtMs).toISOString() : '',
+        updatedAtMs,
+        relativeAge: formatCommRelativeAge(updatedAtMs, nowMs) || 'tidak diketahui',
+        messageCount: rawMsgs.length,
+        matchCount: effectiveMode === 'search' ? totalHitMsgs : matchedSnippets.length,
+        matchIndex: firstSnippet ? firstSnippet.index : 0,
+        score: finalScore,
+        snippetPreview: firstSnippet ? firstSnippet.text.slice(0, 160) : '',
+        matchedSnippets
+      });
+    } catch (_) {}
+  }
+
+  matchedSessions.sort((a, b) => {
+    if (effectiveSort === 'recent') {
+      return (b.updatedAtMs - a.updatedAtMs) || (b.score - a.score);
+    }
+    return (b.score - a.score) || (b.updatedAtMs - a.updatedAtMs);
+  });
+
+  const totalMatched = matchedSessions.length;
+  const selectedSessions = matchedSessions.slice(0, limit);
+
+  const lines = [];
+  lines.push(`[HASIL PENCARIAN RIWAYAT OBROLAN ZOZ ROUTER]`);
+  lines.push(`Waktu Server: ${serverTime.summaryLine}`);
+  lines.push(`Query: "${query || '-'}" | Mode: ${effectiveMode} | Urutan: ${effectiveSort} | Sesi Dipindai: ${totalScanned} | Cocok: ${totalMatched} | Ditampilkan: ${selectedSessions.length}`);
+
+  if (selectedSessions.length === 0) {
+    lines.push(`\nTidak ditemukan riwayat percakapan terdahulu yang cocok dengan kriteria "${query || 'filter tanggal'}".`);
+  } else {
+    selectedSessions.forEach((s, idx) => {
+      lines.push(`\n=== [SESI #${idx + 1}/${selectedSessions.length}] "${s.title}" (ID: ${s.sessionId} | Terakhir: ${s.updatedAt || '-'} [${s.relativeAge}] | Total Pesan: ${s.messageCount} | Skor: ${s.score}) ===`);
+      s.matchedSnippets.forEach(sn => {
+        const speaker = sn.role === 'assistant' ? 'Zoz AI' : 'Pengguna';
+        lines.push(`  • [Pesan #${sn.index + 1} - ${speaker}${sn.timestamp ? ` (${sn.timestamp})` : ''}]: ${sn.text}`);
+        if (sn.partnerText) {
+          const pSpeaker = sn.partnerRole === 'assistant' ? 'Balasan Zoz AI' : 'Konteks Pengguna';
+          lines.push(`    ↳ [${pSpeaker}]: ${sn.partnerText}`);
+        }
+      });
+    });
+  }
+
+  return {
+    success: true,
+    tool: 'search_chat_history',
+    mode: effectiveMode,
+    sort_by: effectiveSort,
+    query,
+    serverTime,
+    totalScanned,
+    totalMatched,
+    count: selectedSessions.length,
+    sessions: selectedSessions,
+    formattedContext: lines.join('\n').slice(0, 12000)
+  };
+}
+
 // Main HTTP Request Handler & Server
 async function requestHandler(req, res) {
   if (!req) return;
@@ -9064,6 +9575,8 @@ async function requestHandler(req, res) {
                                   pathname !== '/api/tools/communication-context' &&
                                   pathname !== '/api/tools/search-documents' &&
                                   pathname !== '/api/tools/retrieve-knowledge' &&
+                                  pathname !== '/api/tools/search-chat-history' &&
+                                  pathname !== '/api/tools/chat-history-search' &&
                                   pathname !== '/api/tools/memory/save' &&
                                   pathname !== '/api/tools/memory/search') ||
                                  pathname === '/api/extract-web' ||
@@ -9116,7 +9629,7 @@ async function requestHandler(req, res) {
       res.setHeader('Retry-After', String(retryAfter));
       return sendJSON(res, 429, { error: 'Terlalu banyak permintaan dari alamat ini. Coba lagi dalam ' + retryAfter + ' detik.' });
     }
-    if (pathname === '/api/sessions' && method === 'POST') {
+    if ((pathname === '/api/sessions' && method === 'POST') || (/^\/api\/sessions\/[^/]+$/.test(pathname) && (method === 'PUT' || method === 'PATCH'))) {
       const writeRetry = rateLimitCheck(req, RATE_LIMIT_SESSION_WRITE);
       if (writeRetry !== null) {
         res.setHeader('Retry-After', String(writeRetry));
@@ -9163,10 +9676,15 @@ async function requestHandler(req, res) {
   }
   const reqUserId = identityResult.userId || (isRemoteTunnelRequest(req) ? 'anon_remote' : 'default');
 
-  // Helper: safe parseBody wrapper that converts rejection to 400 response
+  // Helper: safe parseBody wrapper that converts rejection or non-object JSON to 400 response
   async function safeParseBody(req) {
     try {
-      return await parseBody(req);
+      const parsed = await parseBody(req);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        sendJSON(res, 400, { error: 'Body JSON harus berupa objek JSON.' });
+        return null;
+      }
+      return parsed;
     } catch (e) {
       const msg = e && e.message ? e.message : 'Body JSON tidak valid.';
       sendJSON(res, 400, { error: msg });
@@ -9202,6 +9720,9 @@ async function requestHandler(req, res) {
 
   // Jozz Memory API Endpoints (Hybrid Storage: Scoped Recall, Receipts, Insights, Sovereignty)
   if (pathname.startsWith('/api/memories')) {
+    if (reqUserId === 'anon_remote') {
+      return sendJSON(res, 401, { success: false, error: 'Identitas pengguna (X-User-ID & X-User-Token) diperlukan untuk akses memori remote.' });
+    }
     try {
       const memoryRoutes = require('./src/memory/routes/memoryRoutes');
       const handled = await memoryRoutes.handleMemoryRoutes(req, res, reqUrl, reqUserId);
@@ -9319,7 +9840,7 @@ async function requestHandler(req, res) {
           const content = await fsp.readFile(fullPath, 'utf8');
           const sess = JSON.parse(content);
           const sessIdCandidate = sess.id || path.basename(file, '.json');
-          if (sess.isIncognito === true || /^incog_/i.test(sessIdCandidate) || sess.title === 'Obrolan Privat') {
+          if (sess.isIncognito === true || /^incog_/i.test(sessIdCandidate)) {
             await fsp.unlink(fullPath).catch(() => {});
             continue;
           }
@@ -9399,7 +9920,7 @@ async function requestHandler(req, res) {
         randHex = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
       }
       const rawId = (body && body.id) ? String(body.id).trim() : ('ses_' + Date.now().toString(36) + '_' + randHex);
-      if (body.isIncognito === true || /^incog_/i.test(rawId) || body.title === 'Obrolan Privat') {
+      if (body.isIncognito === true || /^incog_/i.test(rawId)) {
         return sendJSON(res, 200, { ok: true, skippedIncognito: true });
       }
       if (isInternalSubtaskSessionId(rawId)) {
@@ -9521,6 +10042,12 @@ async function requestHandler(req, res) {
     const { id, sessFile, userDir } = validation;
     const body = await safeParseBody(req);
     if (!body) return;
+    if (body.isIncognito === true || /^incog_/i.test(id)) {
+      return sendJSON(res, 200, { ok: true, skippedIncognito: true });
+    }
+    if (isInternalSubtaskSessionId(id)) {
+      return sendJSON(res, 200, { ok: true, skippedSubtask: true });
+    }
     try {
       let existing = {};
       if (fs.existsSync(sessFile)) {
@@ -10082,10 +10609,13 @@ async function requestHandler(req, res) {
       if (method === 'POST') {
         const body = await safeParseBody(req);
         if (!body) return;
-        targetUrl = body.url || body.targetUrl || body.link || body.target || body.tautan || targetUrl;
+        const rawUrlCandidate = body.url ?? body.targetUrl ?? body.link ?? body.target ?? body.tautan;
+        if (rawUrlCandidate !== undefined && rawUrlCandidate !== null) {
+          targetUrl = typeof rawUrlCandidate === 'string' ? rawUrlCandidate : '';
+        }
         if (body.maxChars) maxChars = parseInt(body.maxChars, 10);
       }
-      if (!targetUrl || !targetUrl.trim()) {
+      if (typeof targetUrl !== 'string' || !targetUrl.trim()) {
         return sendJSON(res, 400, { success: false, error: 'Parameter `url` diperlukan untuk membaca konten halaman.' });
       }
       const safeMaxChars = Math.min(Math.max(isNaN(maxChars) ? 8000 : maxChars, 200), 50000);
@@ -10098,6 +10628,9 @@ async function requestHandler(req, res) {
 
   // Long-Term Memory Save Tool Endpoint (SQLite FTS5)
   if ((pathname === '/api/memory/save' || pathname === '/api/tools/memory/save') && method === 'POST') {
+    if (reqUserId === 'anon_remote') {
+      return sendJSON(res, 401, { success: false, error: 'Identitas pengguna (X-User-ID & X-User-Token) diperlukan untuk akses memori remote.' });
+    }
     try {
       const body = await safeParseBody(req);
       if (!body) return;
@@ -10122,16 +10655,22 @@ async function requestHandler(req, res) {
 
   // Long-Term Memory Search Tool Endpoint (SQLite FTS5)
   if ((pathname === '/api/memory/search' || pathname === '/api/tools/memory/search') && (method === 'GET' || method === 'POST')) {
+    if (reqUserId === 'anon_remote') {
+      return sendJSON(res, 401, { success: false, error: 'Identitas pengguna (X-User-ID & X-User-Token) diperlukan untuk akses memori remote.' });
+    }
     try {
       let query = reqUrl.searchParams.get('q') || reqUrl.searchParams.get('query') || reqUrl.searchParams.get('cari') || reqUrl.searchParams.get('kata_kunci') || reqUrl.searchParams.get('topik') || '';
       let limit = parseInt(reqUrl.searchParams.get('limit') || '5', 10);
       if (method === 'POST') {
         const body = await safeParseBody(req);
         if (!body) return;
-        query = body.query || body.cari || body.kata_kunci || body.keyword || body.topik || body.topic || body.q || query;
+        const rawQuery = body.query ?? body.cari ?? body.kata_kunci ?? body.keyword ?? body.topik ?? body.topic ?? body.q;
+        if (rawQuery !== undefined && rawQuery !== null) {
+          query = typeof rawQuery === 'string' ? rawQuery : '';
+        }
         if (body.limit) limit = parseInt(body.limit, 10);
       }
-      if (!query || !query.trim()) {
+      if (typeof query !== 'string' || !query.trim()) {
         return sendJSON(res, 400, { error: 'Parameter `query` atau `q` diperlukan untuk mencari memori.' });
       }
       const searchRes = searchMemoryRecords(reqUserId, query, limit);
@@ -10147,9 +10686,10 @@ async function requestHandler(req, res) {
       const body = await safeParseBody(req);
       if (!body) return;
       if (!requireRemoteHostPin(req, res, reqUrl, body)) return;
-      const code = body.code || body.script || body.python || '';
+      const rawCode = body.code ?? body.script ?? body.python;
+      const code = typeof rawCode === 'string' ? rawCode : '';
       const timeoutMs = Math.min(Math.max(parseInt(body.timeoutMs || '5000', 10) || 5000, 1000), 10000);
-      if (!code || !code.trim()) {
+      if (!code.trim()) {
         return sendJSON(res, 400, { error: 'Parameter `code` diperlukan untuk eksekusi kode.' });
       }
       const execRes = await executePythonSandbox(code, timeoutMs);
@@ -10248,7 +10788,17 @@ async function requestHandler(req, res) {
     const body = await safeParseBody(req);
     if (!body) return;
     if (body.url && typeof body.url === 'string') {
-      cloudflareTunnelUrl = body.url.trim().replace(/\/+$/, '');
+      const candidateUrl = body.url.trim().replace(/\/+$/, '');
+      let parsedTunnelUrl = null;
+      try {
+        parsedTunnelUrl = new URL(candidateUrl);
+      } catch (_) {
+        parsedTunnelUrl = null;
+      }
+      if (!parsedTunnelUrl || (parsedTunnelUrl.protocol !== 'https:' && parsedTunnelUrl.protocol !== 'http:') || !parsedTunnelUrl.hostname) {
+        return sendJSON(res, 400, { error: 'URL Cloudflare Tunnel tidak valid (hanya protokol http/https yang diizinkan).' });
+      }
+      cloudflareTunnelUrl = parsedTunnelUrl.origin + parsedTunnelUrl.pathname.replace(/\/+$/, '');
       cloudflareTunnelActive = true;
       cloudflareTunnelStartedAt = new Date().toISOString();
       savePersistedTunnelState();
@@ -10269,20 +10819,28 @@ async function requestHandler(req, res) {
   if (pathname === '/api/terminal/stream' && method === 'GET') {
     const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
     if (!pinCheck.valid) {
-      res.writeHead(401, {
+      res.writeHead(pinCheck.status || 401, {
         'Content-Type': 'text/plain; charset=utf-8',
         'Access-Control-Allow-Origin': '*'
       });
       return res.end(pinCheck.error || 'Akses ditolak: PIN keamanan remote salah.');
     }
 
-    const sessionId = (reqUrl.searchParams.get('session') || 'default').trim();
+    const sessionId = (reqUrl.searchParams.get('session') || '').trim() || 'default';
     const shellType = (reqUrl.searchParams.get('shell') || 'powershell').toLowerCase();
     let reqCwd = (reqUrl.searchParams.get('cwd') || '').trim();
     while ((reqCwd.startsWith('"') && reqCwd.endsWith('"')) || (reqCwd.startsWith("'") && reqCwd.endsWith("'"))) {
       reqCwd = reqCwd.slice(1, -1).trim();
     }
-    const targetCwd = (reqCwd && fs.existsSync(reqCwd)) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
+    let targetCwd = DEFAULT_TERMINAL_CWD;
+    if (reqCwd) {
+      try {
+        const resolvedReqCwd = path.resolve(reqCwd);
+        if (fs.existsSync(resolvedReqCwd) && fs.statSync(resolvedReqCwd).isDirectory()) {
+          targetCwd = resolvedReqCwd;
+        }
+      } catch (_) {}
+    }
     const cols = Math.max(32, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10) || 100));
     const rows = Math.max(8, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10) || 28));
 
@@ -10425,7 +10983,7 @@ async function requestHandler(req, res) {
   if (pathname === '/api/terminal/sessions' && method === 'GET') {
     const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
     if (!pinCheck.valid) {
-      return sendJSON(res, 401, { error: pinCheck.error });
+      return sendJSON(res, pinCheck.status || 401, { error: pinCheck.error });
     }
     const sessions = [];
     for (const [id, s] of activeTerminalSessions.entries()) {
@@ -10454,9 +11012,9 @@ async function requestHandler(req, res) {
       if (!body) return;
       const pinCheck = validateRemoteTerminalPin(req, reqUrl, body);
       if (!pinCheck.valid) {
-        return sendJSON(res, 401, { error: pinCheck.error });
+        return sendJSON(res, pinCheck.status || 401, { error: pinCheck.error });
       }
-      const sessionId = (body.session || 'default').trim();
+      const sessionId = (typeof body.session === 'string' ? body.session.trim() : '') || 'default';
       const enabled = syncAutoEnterState(Boolean(body.enabled), 'HTTP', sessionId);
       return sendJSON(res, 200, { success: true, session: sessionId, autoEnter: enabled });
     } catch (e) {
@@ -10471,14 +11029,18 @@ async function requestHandler(req, res) {
       if (!body) return;
       const pinCheck = validateRemoteTerminalPin(req, reqUrl, body);
       if (!pinCheck.valid) {
-        return sendJSON(res, 401, { error: pinCheck.error });
+        return sendJSON(res, pinCheck.status || 401, { error: pinCheck.error });
       }
-      const sessionId = (body.session || 'default').trim();
+      const sessionId = (typeof body.session === 'string' ? body.session.trim() : '') || 'default';
       const rawData = typeof body.data === 'string' ? body.data : '';
       const session = activeTerminalSessions.get(sessionId);
       if (session && session.pty) {
         const data = sanitizePtyInputForShell(session, rawData);
-        session.pty.write(data);
+        try {
+          session.pty.write(data);
+        } catch (writeErr) {
+          return sendJSON(res, 200, { success: false, reason: 'PTY write failed: ' + (writeErr?.message || writeErr) });
+        }
         session.lastActivity = Date.now();
         markSessionManualInput(session, data);
         return sendJSON(res, 200, { success: true });
@@ -10496,9 +11058,9 @@ async function requestHandler(req, res) {
       if (!body) return;
       const pinCheck = validateRemoteTerminalPin(req, reqUrl, body);
       if (!pinCheck.valid) {
-        return sendJSON(res, 401, { error: pinCheck.error });
+        return sendJSON(res, pinCheck.status || 401, { error: pinCheck.error });
       }
-      const sessionId = (body.session || 'default').trim();
+      const sessionId = (typeof body.session === 'string' ? body.session.trim() : '') || 'default';
       const cols = Math.max(32, Math.min(400, parseInt(body.cols || '100', 10) || 100));
       const rows = Math.max(8, Math.min(200, parseInt(body.rows || '28', 10) || 28));
       const session = activeTerminalSessions.get(sessionId);
@@ -10555,9 +11117,9 @@ async function requestHandler(req, res) {
       if (!body) return;
       const pinCheck = validateRemoteTerminalPin(req, reqUrl, body);
       if (!pinCheck.valid) {
-        return sendJSON(res, 401, { error: pinCheck.error });
+        return sendJSON(res, pinCheck.status || 401, { error: pinCheck.error });
       }
-      const sessionId = (body.session || 'default').trim();
+      const sessionId = (typeof body.session === 'string' ? body.session.trim() : '') || 'default';
       const session = activeTerminalSessions.get(sessionId);
       if (session) {
         destroyTerminalSession(sessionId, session);
@@ -10580,7 +11142,7 @@ async function requestHandler(req, res) {
       if (!body) return;
       const pinCheck = validateRemoteTerminalPin(req, reqUrl, body);
       if (!pinCheck.valid) {
-        return sendJSON(res, 401, { error: pinCheck.error });
+        return sendJSON(res, pinCheck.status || 401, { error: pinCheck.error });
       }
       const cmd = (body.command || body.cmd || '').trim();
       const shellType = (body.shell || 'powershell').toLowerCase();
@@ -10738,20 +11300,20 @@ async function requestHandler(req, res) {
         }
       }
 
-      // 4. Eksekusi Subprocess Shell Asli dengan Sentinel Pelacak CWD
+      // 4. Eksekusi Subprocess Shell Asli dengan Sentinel Pelacak CWD & Kode Keluar Asli
       const sentinel = '---ZOZ_CWD_MARKER---';
       const isWin = process.platform === 'win32';
       let executable = isWin ? 'powershell.exe' : 'sh';
       let args = isWin 
-        ? ['-ExecutionPolicy', 'Bypass', '-Command', `${cmd}\nWrite-Output '${sentinel}'\n(Get-Location).Path`]
-        : ['-c', `${cmd} ; echo "${sentinel}" ; pwd`];
+        ? ['-ExecutionPolicy', 'Bypass', '-Command', `$global:LASTEXITCODE = 0\n${cmd}\n$__zoz_ok = $?\n$__zoz_ec = if ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { $LASTEXITCODE } elseif (-not $__zoz_ok) { 1 } else { 0 }\nWrite-Output '${sentinel}'\n(Get-Location).Path\nexit $__zoz_ec`]
+        : ['-c', `${cmd}\n__zoz_ec=$?\necho "${sentinel}"\npwd\nexit $__zoz_ec`];
 
       if (shellType === 'cmd' || shellType === 'cmd.exe') {
         executable = isWin ? 'cmd.exe' : 'sh';
-        args = isWin ? ['/c', `${cmd} & echo ${sentinel} & cd`] : ['-c', `${cmd} ; echo "${sentinel}" ; pwd`];
+        args = isWin ? ['/v:on', '/c', `${cmd} & set "__zoz_ec=!ERRORLEVEL!" & echo ${sentinel} & cd & exit /b !__zoz_ec!`] : ['-c', `${cmd}\n__zoz_ec=$?\necho "${sentinel}"\npwd\nexit $__zoz_ec`];
       } else if (shellType === 'wsl' || shellType === 'bash' || shellType === 'ubuntu-wsl') {
         executable = isWin ? 'wsl.exe' : (fs.existsSync('/bin/bash') ? '/bin/bash' : 'sh');
-        args = isWin ? ['-e', 'bash', '-c', `${cmd} ; echo "${sentinel}" ; pwd`] : ['-c', `${cmd} ; echo "${sentinel}" ; pwd`];
+        args = isWin ? ['-e', 'bash', '-c', `${cmd}\n__zoz_ec=$?\necho "${sentinel}"\npwd\nexit $__zoz_ec`] : ['-c', `${cmd}\n__zoz_ec=$?\necho "${sentinel}"\npwd\nexit $__zoz_ec`];
       } else if (shellType === 'node') {
         executable = process.execPath;
         args = ['-e', cmd];
@@ -10883,8 +11445,29 @@ async function requestHandler(req, res) {
     const normRoot = process.platform === 'win32' ? rootResolved.toLowerCase() : rootResolved;
     const normResolved = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
     const rootPrefix = normRoot.endsWith(path.sep) ? normRoot : normRoot + path.sep;
-    if (normResolved !== normRoot && !normResolved.startsWith(rootPrefix)) {
+    if (normResolved === normRoot || !normResolved.startsWith(rootPrefix)) {
       return false;
+    }
+    const relPosix = path.relative(rootResolved, resolved).replace(/\\/g, '/').toLowerCase();
+    const relSegments = relPosix.split('/').filter(Boolean);
+    const BLOCKED_WORKSPACE_DIRS = new Set(['.git', 'data', '.zoz-snapshots', 'node_modules', '.gemini']);
+    if (relSegments.length > 0 && BLOCKED_WORKSPACE_DIRS.has(relSegments[0])) {
+      return false;
+    }
+    const baseName = relSegments[relSegments.length - 1] || '';
+    if (relSegments.some(seg => seg.startsWith('.') && seg !== '.env.example')) {
+      return false;
+    }
+    if ((/^\.env(?:\.|$)/i.test(baseName) && baseName !== '.env.example') || /^env\.(?:local|prod|production|dev|secret)/i.test(baseName)) {
+      return false;
+    }
+    if (SENSITIVE_WORKSPACE_BASENAMES.has(baseName)) return false;
+    if (SENSITIVE_WORKSPACE_EXTS.has(path.extname(baseName))) return false;
+    try {
+      const lst = fs.lstatSync(resolved);
+      if (lst.isSymbolicLink()) return false;
+    } catch (lstatErr) {
+      if (lstatErr && lstatErr.code !== 'ENOENT') return false;
     }
     try {
       const realRoot = fs.realpathSync(rootResolved);
@@ -10897,6 +11480,11 @@ async function requestHandler(req, res) {
         checkTarget = parent;
       }
       if (fs.existsSync(checkTarget)) {
+        try {
+          if (fs.lstatSync(checkTarget).isSymbolicLink()) return false;
+        } catch (_) {
+          return false;
+        }
         const realTarget = fs.realpathSync(checkTarget);
         const normRealTarget = process.platform === 'win32' ? realTarget.toLowerCase() : realTarget;
         if (normRealTarget !== normRealRoot && !normRealTarget.startsWith(realRootPrefix)) {
@@ -10923,7 +11511,11 @@ async function requestHandler(req, res) {
       const IGNORE_SET = new Set(['node_modules', '.git', '.zoz-snapshots', '.gemini', 'data', 'dist', 'build', '.cache']);
 
       for (const entry of entries) {
+        if (entry.isSymbolicLink && entry.isSymbolicLink()) continue;
+        const lowerName = entry.name.toLowerCase();
         if (IGNORE_SET.has(entry.name) || (entry.name.startsWith('.') && entry.name !== '.env.example')) continue;
+        if ((/^\.env(?:\.|$)/i.test(lowerName) && lowerName !== '.env.example') || /^env\.(?:local|prod|production|dev|secret)/i.test(lowerName)) continue;
+        if (SENSITIVE_WORKSPACE_BASENAMES.has(lowerName) || SENSITIVE_WORKSPACE_EXTS.has(path.extname(lowerName))) continue;
         const relPath = basePath ? `${basePath}/${entry.name}` : entry.name;
         const fullPath = path.join(dir, entry.name);
 
@@ -11135,6 +11727,7 @@ async function requestHandler(req, res) {
         buf = tenant.gateway.getCachedAvatarBuffer(jid);
       }
     }
+    if (res.headersSent || res.writableEnded || res.destroyed) return;
     if (!buf) {
       res.writeHead(404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
       return res.end(JSON.stringify({ success: false, error: 'Foto profil tidak tersedia' }));
@@ -11271,7 +11864,8 @@ async function requestHandler(req, res) {
     let rawMsg = tenant.gateway.rawMessages?.get(msgId);
     if (!rawMsg && tenant.gateway.rawMediaFile && fs.existsSync(tenant.gateway.rawMediaFile)) {
       try {
-        const rawMap = JSON.parse(fs.readFileSync(tenant.gateway.rawMediaFile, 'utf8'));
+        const waBufferReviver = (_k, v) => (v && v.type === 'Buffer' && typeof v.data === 'string' ? Buffer.from(v.data, 'base64') : v);
+        const rawMap = JSON.parse(fs.readFileSync(tenant.gateway.rawMediaFile, 'utf8'), waBufferReviver);
         if (rawMap[msgId]) {
           rawMsg = rawMap[msgId];
           tenant.gateway.rawMessages?.set(msgId, rawMsg);
@@ -11661,7 +12255,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     if (!body) return;
     const tenant = getWaTenant(req, reqUrl, body);
     const isLocal = isLocalWaRequest(req);
-    const requestedUid = String(body.userId || reqUrl.searchParams.get('userId') || req.headers['x-wa-user-id'] || '').trim();
+    const requestedUid = String(body.userId || reqUrl.searchParams.get('userId') || req.headers['x-wa-user-id'] || req.headers['x-user-id'] || req.headers['x-client-id'] || '').trim();
     const isMasterTarget = !requestedUid ||
       requestedUid === 'usr_kaisar_master' ||
       requestedUid === 'usr_e465zuklwesa' ||
@@ -12023,6 +12617,38 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       return sendJSON(res, 500, {
         success: false,
         error: 'Gagal menjalankan RAG search_documents / retrieve_knowledge: ' + e.message
+      });
+    }
+  }
+
+  // ZOZ ROUTER NATIVE CHAT HISTORY SEARCH: /api/tools/search-chat-history
+  if ((pathname === '/api/tools/search-chat-history' || pathname === '/api/tools/chat-history-search') && (method === 'GET' || method === 'POST')) {
+    let body = {};
+    if (method === 'POST') {
+      const parsedBody = await safeParseBody(req);
+      if (!parsedBody) return;
+      body = parsedBody;
+    }
+    try {
+      const mergedParams = {
+        query: body.query ?? body.q ?? body.keyword ?? body.keywords ?? body.kata_kunci ?? body.topic ?? body.topik ?? body.search ?? reqUrl.searchParams.get('query') ?? reqUrl.searchParams.get('q') ?? '',
+        mode: body.mode ?? reqUrl.searchParams.get('mode') ?? 'auto',
+        limit: body.limit ?? body.max_results ?? reqUrl.searchParams.get('limit') ?? 5,
+        max_snippets: body.max_snippets ?? body.maxSnippets ?? reqUrl.searchParams.get('max_snippets') ?? 3,
+        days: body.days ?? body.hari ?? reqUrl.searchParams.get('days') ?? 0,
+        after: body.after ?? body.since ?? body.from_date ?? reqUrl.searchParams.get('after') ?? '',
+        before: body.before ?? body.until ?? body.to_date ?? reqUrl.searchParams.get('before') ?? '',
+        sort_by: body.sort_by ?? body.sortBy ?? body.urutkan ?? reqUrl.searchParams.get('sort_by') ?? 'auto',
+        exclude_session_id: body.exclude_session_id ?? body.excludeSessionId ?? reqUrl.searchParams.get('exclude_session_id') ?? '',
+        include_current: body.include_current ?? body.includeCurrent ?? reqUrl.searchParams.get('include_current') ?? false,
+        role_filter: body.role_filter ?? body.roleFilter ?? reqUrl.searchParams.get('role_filter') ?? 'all'
+      };
+      const searchRes = await searchChatHistorySessions(mergedParams, { reqUserId });
+      return sendJSON(res, 200, searchRes);
+    } catch (e) {
+      return sendJSON(res, 500, {
+        success: false,
+        error: 'Gagal mencari riwayat obrolan: ' + e.message
       });
     }
   }
@@ -13536,6 +14162,17 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         if (sessionId && !bridgeTaskToken) {
           return sendJSON(res, 429, { error: 'Sesi chat sedang aktif digunakan oleh permintaan lain.' });
         }
+        ollamaTaskToken = bridgeTaskToken;
+        if (isTaskCurrent(sessionId, bridgeTaskToken)) {
+          dbActiveChatTasks[sessionId].abortResponse = () => {
+            if (!res.writableEnded && !res.destroyed) {
+              try {
+                if (!res.headersSent) sendJSON(res, 499, { aborted: true, error: 'Dibatalkan pengguna' });
+                else res.end();
+              } catch (_) {}
+            }
+          };
+        }
 
         // Multimodal Translation, Tool Normalization & Latent Reasoning Preservation
         const normalizedOrMessages = normalizeMessagesForOpenRouter(body.messages, {
@@ -13629,13 +14266,24 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             timeout: 300000
           };
 
+          let bridgeAttemptHandled = false;
+          const canContinueBridgeTask = () => !sessionId || (isTaskCurrent(sessionId, bridgeTaskToken) && dbActiveChatTasks[sessionId]?.status !== 'aborted');
+
           const bridgeReq = https.request(reqOptions, (bridgeRes) => {
-            if (isTaskCurrent(sessionId, bridgeTaskToken) && dbActiveChatTasks[sessionId].status === 'aborted') {
-              delete dbActiveChatTasks[sessionId];
+            if (activeBridgeReq !== bridgeReq || !canContinueBridgeTask()) {
+              try { bridgeRes.resume(); } catch (_) {}
               if (!bridgeReq.destroyed) try { bridgeReq.destroy(); } catch (_) {}
+              if (isTaskCurrent(sessionId, bridgeTaskToken) && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+                delete dbActiveChatTasks[sessionId];
+                if (!res.writableEnded && !res.destroyed) {
+                  try { if (!res.headersSent) sendJSON(res, 499, { aborted: true }); else res.end(); } catch (_) {}
+                }
+              }
               return;
             }
             bridgeRes.on('error', (err) => {
+              if (bridgeAttemptHandled || activeBridgeReq !== bridgeReq) return;
+              bridgeAttemptHandled = true;
               finalizeBridgeTask(err.message || 'Bridge upstream response error');
               if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
                 try {
@@ -13653,8 +14301,13 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               let errBuf = '';
               bridgeRes.on('data', chunk => errBuf += chunk);
               bridgeRes.on('end', () => {
-                if (isTaskCurrent(sessionId, bridgeTaskToken) && dbActiveChatTasks[sessionId].status === 'aborted') {
-                  delete dbActiveChatTasks[sessionId];
+                if (bridgeAttemptHandled || activeBridgeReq !== bridgeReq) return;
+                bridgeAttemptHandled = true;
+                if (sessionId && (!isTaskCurrent(sessionId, bridgeTaskToken) || dbActiveChatTasks[sessionId]?.status === 'aborted')) {
+                  if (isTaskCurrent(sessionId, bridgeTaskToken)) delete dbActiveChatTasks[sessionId];
+                  if (!res.writableEnded && !res.destroyed) {
+                    try { if (!res.headersSent) sendJSON(res, 499, { aborted: true }); else res.end(); } catch (_) {}
+                  }
                   return;
                 }
                 try {
@@ -13689,12 +14342,14 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   if (isTaskCurrent(sessionId, bridgeTaskToken)) delete dbActiveChatTasks[sessionId];
                   if (clientDisconnected || res.writableEnded) return;
                   if (isStream) {
-                    res.writeHead(200, {
-                      'Content-Type': 'application/x-ndjson; charset=utf-8',
-                      'Cache-Control': 'no-cache',
-                      'Connection': 'keep-alive',
-                      'Access-Control-Allow-Origin': '*'
-                    });
+                    if (!res.headersSent) {
+                      res.writeHead(200, {
+                        'Content-Type': 'application/x-ndjson; charset=utf-8',
+                        'Cache-Control': 'no-cache',
+                        'Connection': 'keep-alive',
+                        'Access-Control-Allow-Origin': '*'
+                      });
+                    }
                     res.write(JSON.stringify({ error: msg }) + '\n');
                     res.end();
                   } else {
@@ -13704,12 +14359,14 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   if (isTaskCurrent(sessionId, bridgeTaskToken)) delete dbActiveChatTasks[sessionId];
                   if (clientDisconnected || res.writableEnded) return;
                   if (isStream) {
-                    res.writeHead(200, {
-                      'Content-Type': 'application/x-ndjson; charset=utf-8',
-                      'Cache-Control': 'no-cache',
-                      'Connection': 'keep-alive',
-                      'Access-Control-Allow-Origin': '*'
-                    });
+                    if (!res.headersSent) {
+                      res.writeHead(200, {
+                        'Content-Type': 'application/x-ndjson; charset=utf-8',
+                        'Cache-Control': 'no-cache',
+                        'Connection': 'keep-alive',
+                        'Access-Control-Allow-Origin': '*'
+                      });
+                    }
                     res.write(JSON.stringify({ error: errBuf || `HTTP ${bStatus}` }) + '\n');
                     res.end();
                   } else {
@@ -13733,8 +14390,13 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               let rawResp = '';
               bridgeRes.on('data', chunk => rawResp += chunk);
               bridgeRes.on('end', () => {
-                if (isTaskCurrent(sessionId, bridgeTaskToken) && dbActiveChatTasks[sessionId].status === 'aborted') {
-                  delete dbActiveChatTasks[sessionId];
+                if (bridgeAttemptHandled || activeBridgeReq !== bridgeReq) return;
+                bridgeAttemptHandled = true;
+                if (sessionId && (!isTaskCurrent(sessionId, bridgeTaskToken) || dbActiveChatTasks[sessionId]?.status === 'aborted')) {
+                  if (isTaskCurrent(sessionId, bridgeTaskToken)) delete dbActiveChatTasks[sessionId];
+                  if (!res.writableEnded && !res.destroyed) {
+                    try { if (!res.headersSent) sendJSON(res, 499, { aborted: true }); else res.end(); } catch (_) {}
+                  }
                   return;
                 }
                 try {
@@ -13837,8 +14499,13 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             });
 
             bridgeRes.on('end', () => {
-              if (isTaskCurrent(sessionId, bridgeTaskToken) && dbActiveChatTasks[sessionId].status === 'aborted') {
-                delete dbActiveChatTasks[sessionId];
+              if (bridgeAttemptHandled || activeBridgeReq !== bridgeReq) return;
+              bridgeAttemptHandled = true;
+              if (sessionId && (!isTaskCurrent(sessionId, bridgeTaskToken) || dbActiveChatTasks[sessionId]?.status === 'aborted')) {
+                if (isTaskCurrent(sessionId, bridgeTaskToken)) delete dbActiveChatTasks[sessionId];
+                if (!res.writableEnded && !res.destroyed) {
+                  try { if (!res.headersSent) sendJSON(res, 499, { aborted: true }); else res.end(); } catch (_) {}
+                }
                 return;
               }
               sseBuffer += bridgeDecoder.end();
@@ -13875,7 +14542,14 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             });
           });
 
+          activeBridgeReq = bridgeReq;
+          if (isTaskCurrent(sessionId, bridgeTaskToken)) {
+            dbActiveChatTasks[sessionId].proxyReq = bridgeReq;
+          }
+
           bridgeReq.on('timeout', () => {
+            if (bridgeAttemptHandled || activeBridgeReq !== bridgeReq) return;
+            bridgeAttemptHandled = true;
             if (!bridgeReq.destroyed) try { bridgeReq.destroy(); } catch (_) {}
             finalizeBridgeTask('Bridge stream timed out (300s)');
             if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
@@ -13891,6 +14565,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           });
 
           bridgeReq.on('error', (err) => {
+            if (bridgeAttemptHandled || activeBridgeReq !== bridgeReq) return;
+            bridgeAttemptHandled = true;
             finalizeBridgeTask(err.message || 'Bridge network error');
             if (!clientDisconnected && !res.writableEnded) {
               if (isStream) {
@@ -13910,10 +14586,6 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             }
           });
 
-          activeBridgeReq = bridgeReq;
-          if (sessionId && dbActiveChatTasks[sessionId]) {
-            dbActiveChatTasks[sessionId].proxyReq = bridgeReq;
-          }
           bridgeReq.write(postData);
           bridgeReq.end();
         };
@@ -14049,6 +14721,18 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
       };
 
+      if (sessionId && isTaskCurrent(sessionId, ollamaTaskToken)) {
+        dbActiveChatTasks[sessionId].abortResponse = () => {
+          clearOllamaKeepAlive();
+          if (!res.writableEnded && !res.destroyed) {
+            try {
+              if (!res.headersSent) sendJSON(res, 499, { aborted: true, error: 'Dibatalkan pengguna' });
+              else res.end();
+            } catch (_) {}
+          }
+        };
+      }
+
       res.on('close', () => {
         clearOllamaKeepAlive();
         if (res.writableEnded && !res.__zozWatchdogTimedOut) return; // penyelesaian normal, bukan disconnect klien
@@ -14093,20 +14777,23 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           upstreamOpts.lookup = createPinnedLookup(pinnedChatIps);
           if (ollamaUrl.protocol === 'https:') upstreamOpts.servername = ollamaUrl.hostname;
         }
+        const canContinueOllamaTask = () => !sessionId || (isTaskCurrent(sessionId, ollamaTaskToken) && dbActiveChatTasks[sessionId]?.status !== 'aborted');
+        let attemptHandled = false;
         const currentReq = client.request(ollamaUrl.toString(), upstreamOpts, (proxyRes) => {
-          if (proxyReq !== currentReq) {
+          if (proxyReq !== currentReq || !canContinueOllamaTask()) {
+            clearOllamaKeepAlive();
             try { proxyRes.resume(); } catch (_) {}
+            if (!currentReq.destroyed) try { currentReq.destroy(); } catch (_) {}
+            if (isTaskCurrent(sessionId, ollamaTaskToken) && dbActiveChatTasks[sessionId]?.status === 'aborted') {
+              delete dbActiveChatTasks[sessionId];
+              if (!res.writableEnded && !res.destroyed) {
+                try { if (!res.headersSent) sendJSON(res, 499, { aborted: true }); else res.end(); } catch (_) {}
+              }
+            }
             return;
           }
           if (isTaskCurrent(sessionId, ollamaTaskToken)) {
             dbActiveChatTasks[sessionId].proxyReq = currentReq;
-          }
-
-          // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
-          if (isTaskCurrent(sessionId, ollamaTaskToken) && dbActiveChatTasks[sessionId]?.status === 'aborted') {
-            if (!currentReq.destroyed) currentReq.destroy();
-            delete dbActiveChatTasks[sessionId];
-            return;
           }
 
           if (clientDisconnected || res.writableEnded || res.destroyed) {
@@ -14141,6 +14828,15 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               if (!clientDisconnected) errData += chunk;
             });
             proxyRes.on('end', async () => {
+              if (attemptHandled || proxyReq !== currentReq) return;
+              attemptHandled = true;
+              if (!canContinueOllamaTask()) {
+                clearCurrentOllamaTask();
+                if (!res.writableEnded && !res.destroyed) {
+                  try { if (!res.headersSent) sendJSON(res, 499, { aborted: true }); else res.end(); } catch (_) {}
+                }
+                return;
+              }
               try {
                 // Auto-retry tanpa tools atau tanpa think jika model lokal tidak mendukung parameter tersebut
                 if (((Array.isArray(body.tools) && body.tools.length > 0 && /tool/i.test(errData)) || (body.think && /think/i.test(errData))) && (statusCode === 400 || statusCode === 422 || statusCode === 500) && !res.headersSent && !clientDisconnected) {
@@ -14193,6 +14889,15 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               }
             });
             proxyRes.on('error', async (err) => {
+              if (attemptHandled || proxyReq !== currentReq) return;
+              attemptHandled = true;
+              if (!canContinueOllamaTask()) {
+                clearCurrentOllamaTask();
+                if (!res.writableEnded && !res.destroyed) {
+                  try { if (!res.headersSent) sendJSON(res, 499, { aborted: true }); else res.end(); } catch (_) {}
+                }
+                return;
+              }
               try {
                 if (canRetryCloud && targetEndpoint.includes('ollama.com') && !res.headersSent && (!clientDisconnected || sessionId)) {
                   console.warn(`[Ollama Cloud Retry] Network glitch on ${targetEndpoint}: ${err.message}. Retrying once...`);
@@ -14249,10 +14954,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           }
 
           proxyRes.on('data', chunk => {
-            if (proxyReq && !proxyReq.destroyed) {
-              try { proxyReq.setTimeout(300000); } catch (_) {}
+            if (hasSplicedRefusal || proxyReq !== currentReq) return;
+            if (!currentReq.destroyed) {
+              try { currentReq.setTimeout(300000); } catch (_) {}
             }
-            if (hasSplicedRefusal) return;
             const safeChunk = reasoningFilter.push(chunk);
             const gateDiag = reasoningFilter.getGateDiagnostics ? reasoningFilter.getGateDiagnostics() : null;
 
@@ -14261,9 +14966,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             // dan sambungkan ke stream kelanjutan secara deterministik!
             if (isStream && gateDiag && gateDiag.refusalDetected && !hasSplicedRefusal) {
               hasSplicedRefusal = true;
-              try { proxyReq.destroy(); } catch (_) {}
+              try { currentReq.destroy(); } catch (_) {}
               const clampedPrefix = textSafety.synthesizeAutoregressivePrefill(userPrompt || '');
-              if (clampedPrefix && !clientDisconnected && !res.writableEnded && !res.destroyed) {
+              if (clampedPrefix) {
                 const anchorFrame = JSON.stringify({
                   model: body.model || 'deepseek-v4.1-flash:cloud',
                   created_at: new Date().toISOString(),
@@ -14271,7 +14976,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   done: false
                 }) + '\n';
                 if (isTaskCurrent(sessionId, ollamaTaskToken)) accumulateChatChunk(sessionId, anchorFrame, 'ollama');
-                try { res.write(anchorFrame); } catch (_) {}
+                if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+                  try { res.write(anchorFrame); } catch (_) {}
+                }
               }
               const splicedBody = {
                 ...body,
@@ -14359,7 +15066,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             if (isTaskCurrent(sessionId, ollamaTaskToken) && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'ollama');
 
             if (clientDisconnected || res.writableEnded || res.destroyed) {
-              if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
+              if (!sessionId && !currentReq.destroyed) currentReq.destroy();
               return;
             }
             try {
@@ -14385,8 +15092,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           });
 
           proxyRes.on('end', () => {
+            if (hasSplicedRefusal || attemptHandled || proxyReq !== currentReq) return;
+            attemptHandled = true;
             clearOllamaKeepAlive();
-            if (hasSplicedRefusal) return;
             const safeTail = reasoningFilter.end();
             if (isTaskCurrent(sessionId, ollamaTaskToken) && safeTail) accumulateChatChunk(sessionId, safeTail, 'ollama');
             if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
@@ -14401,8 +15109,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           });
 
           proxyRes.on('error', (err) => {
+            if (hasSplicedRefusal || attemptHandled || proxyReq !== currentReq) return;
+            attemptHandled = true;
             clearOllamaKeepAlive();
-            if (hasSplicedRefusal) return;
             markChatTaskInterrupted(sessionId, err.message || 'Ollama stream interrupted', ollamaTaskToken);
             if (clientDisconnected || res.writableEnded || res.destroyed) return;
             try {
@@ -14421,10 +15130,18 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
 
         currentReq.on('timeout', async () => {
-          if (proxyReq !== currentReq) return;
+          if (attemptHandled || proxyReq !== currentReq) return;
+          attemptHandled = true;
           clearOllamaKeepAlive();
           if (hasSplicedRefusal) return;
           if (!currentReq.destroyed) currentReq.destroy();
+          if (!canContinueOllamaTask()) {
+            if (isTaskCurrent(sessionId, ollamaTaskToken)) delete dbActiveChatTasks[sessionId];
+            if (!res.writableEnded && !res.destroyed) {
+              try { if (!res.headersSent) sendJSON(res, 499, { aborted: true }); else res.end(); } catch (_) {}
+            }
+            return;
+          }
           if (allowLocalFallback && targetEndpoint.includes('ollama.com') && !isServerlessChat && !res.headersSent && (!clientDisconnected || sessionId)) {
             try {
               const localManifestModel = await resolveLocalDaemonCloudManifest(rawReqModel || targetModel);
@@ -14446,9 +15163,17 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         });
 
         currentReq.on('error', async (err) => {
-          if (proxyReq !== currentReq) return;
+          if (attemptHandled || proxyReq !== currentReq) return;
+          attemptHandled = true;
           clearOllamaKeepAlive();
           if (hasSplicedRefusal) return;
+          if (!canContinueOllamaTask()) {
+            if (isTaskCurrent(sessionId, ollamaTaskToken)) delete dbActiveChatTasks[sessionId];
+            if (!res.writableEnded && !res.destroyed) {
+              try { if (!res.headersSent) sendJSON(res, 499, { aborted: true }); else res.end(); } catch (_) {}
+            }
+            return;
+          }
           if (canRetryCloud && targetEndpoint.includes('ollama.com') && !res.headersSent && (!clientDisconnected || sessionId)) {
             try {
               console.warn(`[Ollama Cloud Retry] Network error on ${targetEndpoint}: ${err.message}. Retrying once with fresh connection...`);
@@ -14479,8 +15204,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           } catch (e) {}
         });
 
-        proxyReq.write(postData);
-        proxyReq.end();
+        currentReq.write(postData);
+        currentReq.end();
       };
 
       const allowLocalFallback = !isServerlessChat && !isCustomRemoteEndpoint;
@@ -14865,6 +15590,16 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       if (sessionId && !orTaskToken) {
         return sendJSON(res, 429, { error: 'Sesi chat sedang aktif digunakan oleh permintaan lain.' });
       }
+      if (isTaskCurrent(sessionId, orTaskToken)) {
+        dbActiveChatTasks[sessionId].abortResponse = () => {
+          if (!res.writableEnded && !res.destroyed) {
+            try {
+              if (!res.headersSent) sendJSON(res, 499, { aborted: true, error: 'Dibatalkan pengguna' });
+              else res.end();
+            } catch (_) {}
+          }
+        };
+      }
 
       // Defense-in-depth: Normalisasi model jika format tanpa slash (misal format Ollama gemma4:31b) dikirim ke OpenRouter
       if (body.model && !body.model.includes('/')) {
@@ -15030,11 +15765,14 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
 
         // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
-        if (isTaskCurrent(sessionId, orTaskToken) && dbActiveChatTasks[sessionId].status === 'aborted') {
+        if (sessionId && (!isTaskCurrent(sessionId, orTaskToken) || dbActiveChatTasks[sessionId]?.status === 'aborted')) {
           clearKeepAlive();
+          try { proxyRes.resume(); } catch (_) {}
           if (!proxyReq.destroyed) proxyReq.destroy();
-          // Clean up aborted task
-          delete dbActiveChatTasks[sessionId];
+          if (isTaskCurrent(sessionId, orTaskToken)) delete dbActiveChatTasks[sessionId];
+          if (!res.writableEnded && !res.destroyed) {
+            try { if (!res.headersSent) sendJSON(res, 499, { aborted: true }); else res.end(); } catch (_) {}
+          }
           return;
         }
 
@@ -15358,6 +16096,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
             task.status = 'aborted';
             if (task.proxyReq && !task.proxyReq.destroyed) {
               try { task.proxyReq.destroy(); } catch (_) {}
+            }
+            if (typeof task.abortResponse === 'function') {
+              try { task.abortResponse(); } catch (_) {}
             }
             if (task.rawBuffer) {
               flushChatTaskBuffer(taskKey, task.provider || 'openrouter');
@@ -15762,7 +16503,9 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
   const pinCheck = validateRemoteTerminalPin(req, reqUrl, null);
   if (!pinCheck.valid) {
     try {
-      socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain\r\n\r\nPIN Invalid');
+      const wsStatus = pinCheck.status || 401;
+      const wsReason = wsStatus === 429 ? 'Too Many Requests' : 'Unauthorized';
+      socket.write(`HTTP/1.1 ${wsStatus} ${wsReason}\r\nContent-Type: text/plain\r\n\r\n${pinCheck.error || 'PIN Invalid'}`);
     } catch (_) {}
     socket.destroy();
     return;
@@ -15794,13 +16537,21 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
     return;
   }
 
-  const sessionId = (reqUrl.searchParams.get('session') || 'default').trim();
+  const sessionId = (reqUrl.searchParams.get('session') || '').trim() || 'default';
   const shellType = (reqUrl.searchParams.get('shell') || 'powershell').toLowerCase();
   let reqCwd = (reqUrl.searchParams.get('cwd') || '').trim();
   while ((reqCwd.startsWith('"') && reqCwd.endsWith('"')) || (reqCwd.startsWith("'") && reqCwd.endsWith("'"))) {
     reqCwd = reqCwd.slice(1, -1).trim();
   }
-  const targetCwd = (reqCwd && fs.existsSync(reqCwd)) ? path.resolve(reqCwd) : DEFAULT_TERMINAL_CWD;
+  let targetCwd = DEFAULT_TERMINAL_CWD;
+  if (reqCwd) {
+    try {
+      const resolvedWsCwd = path.resolve(reqCwd);
+      if (fs.existsSync(resolvedWsCwd) && fs.statSync(resolvedWsCwd).isDirectory()) {
+        targetCwd = resolvedWsCwd;
+      }
+    } catch (_) {}
+  }
   const cols = Math.max(32, Math.min(300, parseInt(reqUrl.searchParams.get('cols') || '100', 10) || 100));
   const rows = Math.max(8, Math.min(100, parseInt(reqUrl.searchParams.get('rows') || '28', 10) || 28));
 
@@ -15970,7 +16721,9 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
           } else if (parsed.type === 'input' && typeof parsed.data === 'string' && session.pty) {
             const safeData = sanitizePtyInputForShell(session, parsed.data);
             markSessionManualInput(session, safeData);
-            session.pty.write(safeData);
+            try { session.pty.write(safeData); } catch (_) {}
+            return;
+          } else if (parsed && typeof parsed === 'object' && typeof parsed.type === 'string') {
             return;
           }
         }
@@ -15978,7 +16731,7 @@ function handleTerminalWebSocketUpgrade(req, socket, head) {
       if (session.pty) {
         const safeStr = typeof str === 'string' ? sanitizePtyInputForShell(session, str) : str;
         markSessionManualInput(session, safeStr);
-        session.pty.write(safeStr);
+        try { session.pty.write(safeStr); } catch (_) {}
       }
     }
   };

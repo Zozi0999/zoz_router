@@ -12,7 +12,7 @@
     'reasoning', 'reasoning_content', 'reasoning_details', 'thought', 'thinking', 'thoughts'
   ]);
 
-  const THINKING_TAG_REGEX = /<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>[\s\S]*?(?:<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)>|$)/gi;
+  const THINKING_TAG_REGEX = /<(think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi;
   const BRACKET_THINK_REGEX = /\[(?:THOUGHT|REASONING)\][\s\S]*?(?:\[\/(?:THOUGHT|REASONING)\]|$)/gi;
   const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|INSTRUKSI FORMAT WAJIB|Instruksi Sistem & Konteks|INTEGRITAS KONTEKS|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):(?:[^\[\]]|\[[^\]]*\])*\](?:\n\n|\s*)/gi;
 
@@ -46,7 +46,7 @@
   const CASUAL_GREETING_ONLY_REGEX = /^\s*(?:halo+|hai+|hi+|hello+|hey+|p|ping|tes|test|selamat\s+(?:pagi|siang|sore|malam)|assalamu'?alaikum|permisi|bro|gan|kak|min|bos|apa\s+kabar|gimana\s+kabarnya|makasih|terima\s+kasih|thanks|thank\s+you|oke|ok|sip|mantap|keren)(?:[!?.~,]*\s+(?:halo+|hai+|hi+|hello+|hey+|p|ping|tes|test|selamat\s+(?:pagi|siang|sore|malam)|assalamu'?alaikum|permisi|bro|gan|kak|min|bos|apa\s+kabar|gimana\s+kabarnya|makasih|terima\s+kasih|thanks|thank\s+you|oke|ok|sip|mantap|keren))*[!?.~,\s]*$/i;
 
   // Klausa pengantar berentropi rendah (dapat muncul berurutan di awal respons)
-  const SINGLE_PREAMBLE_SENTENCE_REGEX = /^(?:\s*(?:(?:halo|hai|hi|hello|selamat\s+(?:pagi|siang|sore|malam))[!,.:\s]+|(?:wah[,.\s]+)?(?:pertanyaan|permintaan|topik|ide)\s+yang\s+(?:sangat\s+)?(?:bagus|menarik|hebat|luar\s+biasa|keren|tepat|kritis)[^.!?\n]*[.!?\n]+|(?:tentu(?:\s+saja)?|baik(?:lah)?|pasti|oke|siap|dengan\s+senang\s+hati|sure|certainly|of\s+course|great|absolutely)[,!.\s]+(?:(?:saya\s+(?:akan|bisa|dapat)|mari\s+kita|berikut\s+(?:ini\s+)?(?:adalah\s+)?|here\s+(?:is|are)\s+|let's\s+|i\s+(?:will|can)\s+)[^\n:.!?]*[:.!?]+\s*)?|(?:berikut\s+(?:ini\s+)?(?:adalah\s+)?(?:penjelasan|analisis|jawaban|ulasan|ringkasan|pembahasan|rincian|uraian|kode|implementasi|daftar|langkah|rumus)[^\n:.!?]*[:.!?]+\s*)|(?:here\s+(?:is|are)\s+(?:the|an?|your)?\s*(?:explanation|analysis|answer|overview|summary|breakdown|code|implementation|guide|list|steps|formula)[^\n:.!?]*[:.!?]+\s*)|(?:sebagai\s+(?:asisten\s+ai|model\s+bahasa|ai)[^,\n]*,\s*saya\s+akan\s+[^\n:.!?]*[:.!?]+\s*)))+/i;
+  const SINGLE_PREAMBLE_SENTENCE_REGEX = /^(?:\s*(?:(?:halo|hai|hi|hello|selamat\s+(?:pagi|siang|sore|malam))[!,.\n:]+\s*|(?:wah[,.\s]+)?(?:pertanyaan|permintaan|topik|ide)\s+yang\s+(?:sangat\s+)?(?:bagus|menarik|hebat|luar\s+biasa|keren|tepat|kritis)[^.!?\n]*[.!?\n]+|(?:tentu(?:\s+saja)?|baik(?:lah)?|pasti|oke|siap|dengan\s+senang\s+hati|sure|certainly|of\s+course|great|absolutely)[,!.\n:]+\s*(?:(?:saya\s+(?:akan|bisa|dapat)|mari\s+kita|berikut\s+(?:ini\s+)?(?:adalah\s+)?|here\s+(?:is|are)\s+|let's\s+|i\s+(?:will|can)\s+)[^\n:.!?]*[:.!?]+\s*)?|(?:berikut\s+(?:ini\s+)?(?:adalah\s+)?(?:penjelasan|analisis|jawaban|ulasan|ringkasan|pembahasan|rincian|uraian|kode|implementasi|daftar|langkah|rumus)[^\n:.!?]*[:.!?]+\s*)|(?:here\s+(?:is|are)\s+(?:the|an?|your)?\s*(?:explanation|analysis|answer|overview|summary|breakdown|code|implementation|guide|list|steps|formula)[^\n:.!?]*[:.!?]+\s*)|(?:sebagai\s+(?:asisten\s+ai|model\s+bahasa|ai)[^,\n]*,\s*saya\s+akan\s+[^\n:.!?]*[:.!?]+\s*)))+/i;
 
   const REFUSAL_DEFLECTION_REGEX = /^\s*(?:(?:maaf|mohon\s+maaf|sorry|i\s+apologize|i'm\s+sorry|unfortunately)[,.\s]+)?(?:sebagai\s+(?:ai|model\s+bahasa|asisten\s+virtual|kecerdasan\s+buatan)|as\s+an\s+(?:ai|artificial\s+intelligence|language\s+model|helpful\s+assistant)|saya\s+tidak\s+(?:bisa|dapat|memiliki\s+(?:akses|kemampuan|opini)|diizinkan)\s+(?:untuk\s+)?(?:memberikan|menjawab|membuat|menganalisis|menjelaskan|memenuhi)|i\s+(?:cannot|can't|am\s+unable\s+to|am\s+not\s+able\s+to)\s+(?:provide|fulfill|answer|generate|create|assist\s+with))/i;
 
@@ -531,8 +531,22 @@
         }
       }
 
-      // Pastikan batas awal dan akhir jendela tercakup dengan baik
+      // Pastikan batas awal dan akhir jendela tercakup dengan baik serta urutan baris monotonik
       if (matchU[0] === -1 || matchU[U.length - 1] === -1) continue;
+      let isMonotonic = true;
+      let prevMatchedLine = -1;
+      for (let u = 0; u < U.length; u++) {
+        const v = matchU[u];
+        if (v !== -1) {
+          const lineIdx = V[v].lineIdx;
+          if (lineIdx <= prevMatchedLine) {
+            isMonotonic = false;
+            break;
+          }
+          prevMatchedLine = lineIdx;
+        }
+      }
+      if (!isMonotonic) continue;
 
       const avgWeight = totalWeight / matchingCardinality;
       const compositeScore = coverageRatio * 0.6 + avgWeight * 0.4;
@@ -647,6 +661,7 @@
     for (let k = maxLineCheck; k >= 1; k--) {
       let match = true;
       let nonBlankCount = 0;
+      let totalNonBlankChars = 0;
       for (let j = 0; j < k; j++) {
         const lineA = aLines[aLines.length - k + j].trim();
         const lineB = bLines[j].trim();
@@ -656,14 +671,15 @@
         }
         if (lineA.length > 0) {
           nonBlankCount++;
+          totalNonBlankChars += lineA.length;
         }
       }
       // Overlap sah jika:
-      // - k >= 2: semua k baris cocok dan terdapat minimal 1 baris non-kosong bermakna
-      // - k === 1: baris tunggal cocok dan memiliki panjang signifikan (>= 8 karakter) untuk mencegah kolisi kurung tunggal '}' atau ';'
+      // - nonBlankCount >= 2: minimal 2 baris non-kosong cocok dengan bobot karakter signifikan
+      // - nonBlankCount === 1: baris tunggal non-kosong memiliki panjang >= 8 karakter (mencegah kolisi '}'/'\n' di akhir chunk)
       const isValidOverlap = match && (
-        (k >= 2 && nonBlankCount >= 1) ||
-        (k === 1 && nonBlankCount >= 1 && aLines[aLines.length - 1].trim().length >= 8)
+        (nonBlankCount >= 2 && totalNonBlankChars >= 6) ||
+        (nonBlankCount === 1 && totalNonBlankChars >= 8)
       );
       if (isValidOverlap) {
         return aLines.concat(bLines.slice(k)).join('\n');
@@ -713,14 +729,14 @@
 
     // Ekstrak seluruh blok kode dari respons model
     const fragments = [];
-    const fenceRe = /```(?:html|css|js|javascript|xml)?[ \t]*\r?\n([\s\S]*?)(?:\r?\n```|$)/gi;
+    const fenceRe = /```(html|css|js|javascript|xml)?[ \t]*\r?\n([\s\S]*?)(?:\r?\n```|$)/gi;
     let m;
     while ((m = fenceRe.exec(raw)) !== null) {
-      if (m[1] && m[1].trim()) fragments.push(m[1].trim());
+      if (m[2] && m[2].trim()) fragments.push({ lang: (m[1] || '').toLowerCase(), code: m[2].trim() });
     }
     if (fragments.length === 0) {
-      const rawTagMatch = raw.match(/(<(?:section|header|footer|nav|main|article|aside|div|style|script)\b[\s\S]*<\/(?:section|header|footer|nav|main|article|aside|div|style|script)>)/i);
-      if (rawTagMatch) fragments.push(rawTagMatch[1].trim());
+      const rawTagMatch = raw.match(/(<(section|header|footer|nav|main|article|aside|div|style|script)\b[\s\S]*<\/\2\s*>)/i);
+      if (rawTagMatch) fragments.push({ lang: '', code: rawTagMatch[1].trim() });
     }
     if (fragments.length === 0) return null;
 
@@ -728,12 +744,34 @@
     const editedRanges = [];
     let graftedCount = 0;
 
-    for (const frag of fragments) {
+    for (const fragItem of fragments) {
+      const fragLang = fragItem.lang || '';
+      const frag = fragItem.code || '';
       // Abaikan jika ini dokumen HTML penuh (ditangani oleh extractFullCode)
       if (/<!DOCTYPE\s+html|<html[\s>]/i.test(frag)) continue;
 
+      // Kasus A-JS: Fragmen JavaScript eksplisit (`js`/`javascript`) atau <script> -> bungkus <script>
+      if ((fragLang === 'js' || fragLang === 'javascript') && !/^<script\b/i.test(frag) && !/^</.test(frag)) {
+        const scriptBlock = `<script>\n${frag}\n</script>`;
+        if (/<\/body\s*>/i.test(working)) {
+          const idx = working.search(/<\/body\s*>/i);
+          const startLine = working.slice(0, idx).split('\n').length;
+          working = working.slice(0, idx) + scriptBlock + '\n' + working.slice(idx);
+          editedRanges.push({ startLine, endLine: startLine + scriptBlock.split('\n').length });
+          graftedCount++;
+          continue;
+        } else if (/<\/head\s*>/i.test(working)) {
+          const idx = working.search(/<\/head\s*>/i);
+          const startLine = working.slice(0, idx).split('\n').length;
+          working = working.slice(0, idx) + scriptBlock + '\n' + working.slice(idx);
+          editedRanges.push({ startLine, endLine: startLine + scriptBlock.split('\n').length });
+          graftedCount++;
+          continue;
+        }
+      }
+
       // Kasus A: Fragmen adalah blok <style>...</style> atau aturan CSS murni
-      if (/^<style\b/i.test(frag) || (!frag.startsWith('<') && /\{[\s\S]*:[\s\S]*\}/.test(frag))) {
+      if (/^<style\b/i.test(frag) || (fragLang !== 'js' && fragLang !== 'javascript' && !frag.startsWith('<') && /\{[\s\S]*:[\s\S]*\}/.test(frag))) {
         const styleBlock = /^<style\b/i.test(frag) ? frag : `<style>\n${frag}\n</style>`;
         if (/<\/head\s*>/i.test(working)) {
           const idx = working.search(/<\/head\s*>/i);
@@ -1127,8 +1165,11 @@
       .replace(/\[\/?(?:THOUGHT|REASONING)\]/gi, '')
       .replace(MODEL_TAG_REGEX, '')
       .trim();
-    if (!cleaned && /<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b/i.test(rawText)) {
-      const inner = rawText.replace(/^[\s\S]*?<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/i, '');
+    if (!cleaned && (/<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b/i.test(rawText) || /\[(?:thought|reasoning)\]/i.test(rawText))) {
+      const inner = rawText
+        .replace(/^[\s\S]*?(?:<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|\[(?:thought|reasoning)\])/i, '')
+        .replace(/<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|\[\/(?:thought|reasoning)\]/gi, '')
+        .trim();
       return extractFallbackConclusionFromUnclosedThought(inner);
     }
     // Bersihkan residu pseudo-cot JSON yang lolos keluar dari tag <think>
@@ -1151,12 +1192,14 @@
 
   function createThinkTagStripper() {
     let inside = false;
+    let activeTag = '';
+    let activeIsBracket = false;
     let pending = '';
     let capturedThought = '';
     let emittedVisibleChars = 0;
 
-    const OPEN_REGEX = /<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|\[(?:thought|reasoning)\]/i;
-    const CLOSE_REGEX = /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|\[\/(?:thought|reasoning)\]/i;
+    const OPEN_REGEX = /<(think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|\[(thought|reasoning)\]/i;
+    const ORPHAN_CLOSE_REGEX = /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|\[\/(?:thought|reasoning)\]/gi;
     const OPEN_PREFIXES = ['<think', '<thought', '<thinking', '<reasoning', '<ant_thought', '<thought_process', '[thought]', '[reasoning]'];
     const CLOSE_TAGS = ['</think>', '</thought>', '</thinking>', '</reasoning>', '</ant_thought>', '</thought_process>', '[/thought]', '[/reasoning]'];
 
@@ -1185,7 +1228,12 @@
 
       while (input.length > 0) {
         if (inside) {
-          const closeMatch = CLOSE_REGEX.exec(input);
+          const closeRe = activeTag
+            ? (activeIsBracket
+              ? new RegExp('\\[/' + activeTag + '\\]', 'i')
+              : new RegExp('</' + activeTag + '\\s*>', 'i'))
+            : /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|\[\/(?:thought|reasoning)\]/i;
+          const closeMatch = closeRe.exec(input);
           if (!closeMatch) {
             const partialIdx = !final ? findPartialTagTailIndex(input, true) : -1;
             if (partialIdx >= 0) {
@@ -1204,6 +1252,8 @@
             output = '';
           }
           inside = false;
+          activeTag = '';
+          activeIsBracket = false;
           continue;
         }
 
@@ -1221,6 +1271,8 @@
 
         output += input.slice(0, openMatch.index);
         input = input.slice(openMatch.index + openMatch[0].length);
+        activeIsBracket = Boolean(openMatch[2]);
+        activeTag = (openMatch[1] || openMatch[2] || '').toLowerCase();
         inside = true;
       }
 
@@ -1228,7 +1280,7 @@
         output += pending;
         pending = '';
       }
-      const cleanOut = output.replace(MODEL_TAG_REGEX, '');
+      const cleanOut = output.replace(ORPHAN_CLOSE_REGEX, '').replace(MODEL_TAG_REGEX, '');
       if (cleanOut.trim()) {
         emittedVisibleChars += cleanOut.trim().length;
       }
@@ -1334,7 +1386,7 @@
     function cleanJson(raw, isSse) {
       try {
         const parsed = JSON.parse(raw);
-        const isFinalRec = Boolean(parsed && (parsed.done === true || (Array.isArray(parsed.choices) && parsed.choices.some(c => c && c.finish_reason))));
+        const isFinalRec = Boolean(mode === 'json' || (parsed && (parsed.done === true || (Array.isArray(parsed.choices) && parsed.choices.some(c => c && c.finish_reason)))));
         const hadOllamaText = Boolean(parsed && parsed.message && typeof parsed.message.content === 'string' && parsed.message.content.length > 0);
         const hadOpenRouterText = Boolean(parsed && Array.isArray(parsed.choices) && parsed.choices.some(c => c && c.delta && typeof c.delta.content === 'string' && c.delta.content.length > 0));
         const clean = sanitizeRecord(parsed, tagStrippers, entropyGate, isFinalRec);
@@ -1951,7 +2003,7 @@
       const asstLines = cleanAsst.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
       candidateOptions.forEach((opt, idx) => {
         const letter = String.fromCharCode(65 + idx);
-        const cOpt = opt.replace(/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)\s-]+|\([1-6]\)\s+|[1-6][.)]\s+)/, '').toLowerCase().trim();
+        const cOpt = opt.replace(/^(?:\(?[A-Fa-f]\)\s+|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+)/, '').toLowerCase().trim();
         if (!cOpt) return;
         const shortAnchor = cOpt.split(/\s+/).slice(0, 6).join(' ');
 
@@ -1975,8 +2027,8 @@
       });
 
       // Jika asisten hanya menjawab dengan huruf eksplisit (misal "A, B, D" atau "Jawaban: C")
-      if (chosenOptions.length === 0) {
-        const letterOnlyMatch = cleanAsst.match(/^(?:jawaban(?:nya)?\s*[:=-]?\s*)?([A-Fa-f](?:\s*(?:,|dan|and|&|\s)\s*[A-Fa-f])*)\s*[.!]*$/i);
+      if (chosenOptions.length === 0 && cleanAsst.length <= 200) {
+        const letterOnlyMatch = cleanAsst.match(/^(?:jawaban(?:nya)?\s*[:=-]?\s*)?([A-Fa-f](?:(?:\s*(?:,|&|\bdan\b|\band\b)\s*|\s+)[A-Fa-f])*)\s*[.!]*$/i);
         if (letterOnlyMatch && letterOnlyMatch[1]) {
           const letters = letterOnlyMatch[1].toUpperCase().match(/[A-F]/g) || [];
           for (const L of letters) {
@@ -2030,8 +2082,8 @@
       const recStr = explicitRecMatch[1].replace(/[*[\]"“”']/g, '').trim();
       if (candidateOptions.length >= 2) {
         const matchedOpt = candidateOptions.find(opt => {
-          const cOpt = opt.replace(/^[A-Fa-f][.)\s-]+/, '').toLowerCase().trim();
-          const cRec = recStr.replace(/^[A-Fa-f][.)\s-]+/, '').toLowerCase().trim();
+          const cOpt = opt.replace(/^(?:\(?[A-Fa-f]\)\s+|[A-Fa-f][.)]\s+)/, '').toLowerCase().trim();
+          const cRec = recStr.replace(/^(?:\(?[A-Fa-f]\)\s+|[A-Fa-f][.)]\s+)/, '').toLowerCase().trim();
           return cOpt === cRec || cOpt.includes(cRec) || cRec.includes(cOpt);
         });
         if (matchedOpt) return matchedOpt;
@@ -2043,7 +2095,7 @@
     if (candidateOptions.length >= 2) {
       const tailSlice = cleanAsst.slice(Math.floor(cleanAsst.length * 0.60)).toLowerCase();
       for (const opt of candidateOptions) {
-        const cOpt = opt.replace(/^[A-Fa-f][.)\s-]+/, '').toLowerCase().trim();
+        const cOpt = opt.replace(/^(?:\(?[A-Fa-f]\)\s+|[A-Fa-f][.)]\s+)/, '').toLowerCase().trim();
         const shortAnchor = cOpt.split(/\s+/).slice(0, 4).join(' ');
         if ((cOpt.length >= 4 && tailSlice.includes(cOpt)) || (shortAnchor.length >= 10 && tailSlice.includes(shortAnchor))) {
           return opt;
@@ -2052,7 +2104,7 @@
       // Fallback ke baris pertama jika baris pertama langsung menyebut salah satu opsi
       const firstLine = cleanAsst.split(/\r?\n/)[0].toLowerCase();
       for (const opt of candidateOptions) {
-        const cOpt = opt.replace(/^[A-Fa-f][.)\s-]+/, '').toLowerCase().trim();
+        const cOpt = opt.replace(/^(?:\(?[A-Fa-f]\)\s+|[A-Fa-f][.)]\s+)/, '').toLowerCase().trim();
         if (cOpt.length >= 4 && firstLine.includes(cOpt)) {
           return opt;
         }
@@ -2141,7 +2193,7 @@
       : (multiSelection.primaryOption || identifyChosenOptionInAssistantTurn(lastAsstMsg, candidateOptions));
 
     const indexedOptions = candidateOptions.map((opt, idx) => {
-      const cleanOpt = opt.replace(/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)\s-]+|\([1-6]\)\s+|[1-6][.)]\s+)/, '').trim();
+      const cleanOpt = opt.replace(/^(?:\(?[A-Fa-f]\)\s+|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+)/, '').trim();
       return `${String.fromCharCode(65 + idx)}. ${cleanOpt}`;
     });
 
@@ -2822,11 +2874,11 @@
         ? parentQuiz.falsifiedAnswers
         : (parentQuiz.previousAnswer ? [parentQuiz.previousAnswer] : []);
       const cleanFalsifiedSet = falsifiedList
-        .map(f => String(f || '').replace(/^[A-Fa-f][.)\s-]+/, '').toLowerCase().trim())
+        .map(f => String(f || '').replace(/^(?:\(?[A-Fa-f]\)\s+|[A-Fa-f][.)]\s+)/, '').toLowerCase().trim())
         .filter(Boolean);
 
       const remainingOptions = parentQuiz.candidateOptions.filter(opt => {
-        const cleanOpt = opt.replace(/^[A-Fa-f][.)\s-]+/, '').toLowerCase().trim();
+        const cleanOpt = opt.replace(/^(?:\(?[A-Fa-f]\)\s+|[A-Fa-f][.)]\s+)/, '').toLowerCase().trim();
         return !cleanFalsifiedSet.some(cf => cleanOpt === cf || (cf.length >= 5 && (cleanOpt.includes(cf) || cf.includes(cleanOpt))));
       });
       const effectiveOpts = remainingOptions.length > 0 ? remainingOptions : parentQuiz.candidateOptions;
@@ -3072,7 +3124,7 @@
 
     const extractedOpts = isDiscreteChoice ? extractCandidateOptionsFromTextBlock(raw, false) : [];
     const indexedOpts = extractedOpts.map((opt, idx) => {
-      const cleanOpt = opt.replace(/^(?:\(?[A-Fa-f]\)|[A-Fa-f][.)\s-]+|\([1-6]\)\s+|[1-6][.)]\s+)/, '').trim();
+      const cleanOpt = opt.replace(/^(?:\(?[A-Fa-f]\)\s+|[A-Fa-f][.)]\s+|\([1-6]\)\s+|[1-6][.)]\s+)/, '').trim();
       return `${String.fromCharCode(65 + idx)}. ${cleanOpt}`;
     });
     const isMultiSelectQuestion = /\b(?:select|choose|pilih(?:lah)?)\s+(?:the\s+)?(?:all|two|three|four|2|3|4|dua|tiga|empat|semua)\b/i.test(raw);
@@ -3266,7 +3318,7 @@
 
     const computeMaxDocSimilarity = (unitText) => {
       const uNgrams = buildCharNgramSet(unitText, 4);
-      if (uNgrams.size === 0) return 0;
+      if (uNgrams.size === 0) return { bestSim: 0, bestDoc: null };
       let bestSim = 0;
       let bestDoc = null;
       for (const d of evidenceDocs) {
@@ -3513,8 +3565,18 @@
 
     // 3. Clean up empty Markdown tables (header + separator with 0 remaining data rows) & orphaned headings
     const cleanedLines = [];
+    let inFenceClean = false;
     for (let i = 0; i < projectedLines.length; i++) {
       const cur = projectedLines[i].trim();
+      if (/^```/.test(cur)) {
+        inFenceClean = !inFenceClean;
+        cleanedLines.push(projectedLines[i]);
+        continue;
+      }
+      if (inFenceClean) {
+        cleanedLines.push(projectedLines[i]);
+        continue;
+      }
       const nxt = (projectedLines[i + 1] || '').trim();
       const nxt2 = (projectedLines[i + 2] || '').trim();
       if (/^\|.*\|$/.test(cur) && /^\|[\s:|-]+\|$/.test(nxt) && !/^\|.*\|$/.test(nxt2)) {
@@ -3527,8 +3589,18 @@
 
     // Remove headings that became completely empty (followed immediately by another heading of same/higher level or EOF)
     const finalLines = [];
+    let inFenceFinal = false;
     for (let i = 0; i < cleanedLines.length; i++) {
       const cur = cleanedLines[i].trim();
+      if (/^```/.test(cur)) {
+        inFenceFinal = !inFenceFinal;
+        finalLines.push(cleanedLines[i]);
+        continue;
+      }
+      if (inFenceFinal) {
+        finalLines.push(cleanedLines[i]);
+        continue;
+      }
       if (/^#{1,4}\s+/.test(cur)) {
         const curLevel = (cur.match(/^#+/) || [''])[0].length;
         let k = i + 1;
@@ -3815,6 +3887,14 @@
     if (!promptText || typeof promptText !== 'string') return null;
     const cleanPrompt = promptText.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').replace(/\s+/g, ' ').trim();
     if (cleanPrompt.length < 3) return null;
+    const isBiographicalIntent = /\b(?:siapa|biografi|kisah\s+hidup|sejarah\s+hidup|riwayat\s+hidup|tokoh|sosok|profil|ceritakan\s+tentang|who\s+(?:is|was)|biography|life\s+story)\b/i.test(cleanPrompt);
+    if (!isBiographicalIntent) return null;
+
+    const hasWholePhrase = (haystack, needle) => {
+      if (!haystack || !needle) return false;
+      const esc = String(needle).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+      return new RegExp(`(?:^|\\s)${esc}(?:\\s|$)`, 'i').test(haystack);
+    };
 
     let bestEntity = null;
     let bestScore = 0;
@@ -3833,12 +3913,13 @@
       let matchedVarForEntity = '';
 
       for (const variant of ent.variants) {
-        if (cleanPrompt.includes(variant)) {
+        if (hasWholePhrase(cleanPrompt, variant)) {
           maxSimForEntity = Math.max(maxSimForEntity, 1.0);
           matchedVarForEntity = variant;
           break;
         }
         for (const ng of ngrams) {
+          if (Math.abs(ng.length - variant.length) > 2) continue;
           const sim = computeNormalizedSimilarity(ng, variant);
           if (sim > maxSimForEntity) {
             maxSimForEntity = sim;
@@ -3850,12 +3931,12 @@
       // Hitung bobot kata kunci pembantu (misal: "matematikawan", "hongaria")
       let kwOverlap = 0;
       for (const kw of ent.keywords) {
-        if (cleanPrompt.includes(kw)) kwOverlap++;
+        if (hasWholePhrase(cleanPrompt, kw)) kwOverlap++;
       }
       const kwBonus = Math.min(0.25, (kwOverlap * 0.12));
       const totalScore = (maxSimForEntity * 0.75) + kwBonus;
 
-      if (totalScore > bestScore && maxSimForEntity >= 0.68) {
+      if (totalScore > bestScore && maxSimForEntity >= 0.78) {
         bestScore = totalScore;
         bestEntity = ent;
         matchedVariant = matchedVarForEntity;
@@ -4094,9 +4175,9 @@
     });
 
     // Penanganan defensif jika blok pembuka terpotong tanpa penutup --- [AKHIR DOKUMEN: ...] ---
-    if (!hasMarkers && /--- \[LAMPIRAN DOKUMEN:/i.test(cleanText)) {
+    if (/--- \[LAMPIRAN DOKUMEN:/i.test(cleanText)) {
       hasMarkers = true;
-      const unclosedMatch = cleanText.match(/--- \[LAMPIRAN DOKUMEN:\s*([^\r\n]+?)\]\s*---[ \t]*\r?\n?([\s\S]*)$/);
+      const unclosedMatch = cleanText.match(/--- \[LAMPIRAN DOKUMEN:\s*([^\r\n]+?)\]\s*---[ \t]*\r?\n?([\s\S]*)$/i);
       if (unclosedMatch) {
         const rawHeader = String(unclosedMatch[1] || '').trim();
         const sizeMatch = rawHeader.match(/^(.*?)\s*\(([^()]+)\)\s*$/);
@@ -4202,15 +4283,15 @@
       if (!dMsg || dMsg.role !== 'user') return;
       const ordinalIdx = userOrdinal++;
       let sMsg = null;
-      if (idx < srcList.length && srcList[idx] && srcList[idx].role === 'user') {
-        sMsg = srcList[idx];
-      } else if (dMsg.id && srcUserById.has(dMsg.id)) {
+      if (dMsg.id && srcUserById.has(dMsg.id)) {
         sMsg = srcUserById.get(dMsg.id);
       } else if (typeof dMsg.content === 'string' && srcUserByContent.has(dMsg.content)) {
         sMsg = srcUserByContent.get(dMsg.content);
+      } else if (idx < srcList.length && srcList[idx] && srcList[idx].role === 'user') {
+        sMsg = srcList[idx];
       } else if (ordinalIdx < srcUserOrdinals.length) {
         const candidate = srcUserOrdinals[ordinalIdx];
-        if (candidate && (candidate.content === dMsg.content || (typeof candidate.displayContent === 'string' && typeof dMsg.content === 'string' && dMsg.content.includes(candidate.displayContent)))) {
+        if (candidate && (candidate.content === dMsg.content || (typeof candidate.displayContent === 'string' && candidate.displayContent.length > 0 && typeof dMsg.content === 'string' && dMsg.content.includes(candidate.displayContent)))) {
           sMsg = candidate;
         }
       }

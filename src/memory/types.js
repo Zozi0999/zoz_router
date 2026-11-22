@@ -16,7 +16,7 @@ function genSecureId(prefix) {
 function validateString(val, fallback = '', maxLen = 10000) {
   if (typeof val !== 'string') return fallback;
   const trimmed = val.trim();
-  return trimmed.slice(0, maxLen);
+  return trimmed ? trimmed.slice(0, maxLen) : fallback;
 }
 
 function validateCategory(cat) {
@@ -27,8 +27,8 @@ function validateCategory(cat) {
 }
 
 function validateScope(scope) {
-  const clean = String(scope || '').toLowerCase().trim();
-  return clean ? clean.replace(/[^a-z0-9_-]/g, '') : 'global';
+  const clean = String(scope || '').toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
+  return clean || 'global';
 }
 
 function createEpisode({

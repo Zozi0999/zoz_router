@@ -26,7 +26,7 @@ function exportMemories(userId, format = 'json') {
 
     const grouped = {};
     for (const m of memories) {
-      if (m && (m.is_active === 0 || m.is_active === false)) continue;
+      if (m && (m.is_active === 0 || m.is_active === false || m.isActive === 0 || m.isActive === false)) continue;
       const cat = m.category || 'general';
       if (!grouped[cat]) grouped[cat] = [];
       grouped[cat].push(m);
@@ -103,6 +103,10 @@ function importMemories(userId, rawContent, format = 'json') {
       return { success: false, imported: 0, skipped: 0, reason: `Invalid JSON: ${e.message}` };
     }
 
+    if (!parsed || typeof parsed !== 'object') {
+      return { success: false, imported: 0, skipped: 0, reason: 'Format JSON impor harus berupa objek atau array.' };
+    }
+
     const items = Array.isArray(parsed.data?.memories) 
       ? parsed.data.memories 
       : (Array.isArray(parsed.memories) 
@@ -110,7 +114,7 @@ function importMemories(userId, rawContent, format = 'json') {
         : (Array.isArray(parsed) ? parsed : []));
     for (const item of items) {
       if (!item || typeof item !== 'object') continue;
-      if (item.is_active === 0 || item.is_active === false || item.isActive === false) {
+      if (item.is_active === 0 || item.is_active === false || item.isActive === 0 || item.isActive === false) {
         skippedCount++;
         continue;
       }

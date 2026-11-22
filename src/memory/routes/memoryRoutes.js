@@ -190,9 +190,14 @@ async function handleMemoryRoutes(req, res, reqUrl, validatedUserId = null) {
     if (method === 'GET' && pathname === '/api/memories/export') {
       const format = (reqUrl.searchParams.get('format') || 'json').toLowerCase();
       const exported = porter.exportMemories(userId, format);
+      if (!res || res.headersSent || res.writableEnded || res.destroyed) return true;
+      const safeFileName = String(exported.fileName || `jozz_memories.${format === 'md' ? 'md' : 'json'}`)
+        .replace(/["\r\n\\;]/g, '_')
+        .slice(0, 128);
       res.writeHead(200, {
         'Content-Type': exported.contentType,
-        'Content-Disposition': `attachment; filename="${exported.fileName}"`,
+        'Content-Disposition': `attachment; filename="${safeFileName}"`,
+        'Cache-Control': 'private, no-store, no-cache, must-revalidate',
         'Access-Control-Allow-Origin': '*'
       });
       res.end(exported.content);

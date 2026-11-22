@@ -386,9 +386,12 @@ class WhatsAppGateway {
 
   saveRawMediaData(immediate = false) {
     if (!this.rawMediaFile) return;
+    const scheduledAt = Date.now();
     const doWrite = () => {
+      if (scheduledAt < (this._lastLogoutAt || 0)) return Promise.resolve();
       const prev = this._rawMediaSaveQueue || Promise.resolve();
       const next = prev.catch(() => {}).then(async () => {
+        if (scheduledAt < (this._lastLogoutAt || 0)) return;
         try {
           const obj = {};
           const entries = Array.from(this.rawMessages.entries()).slice(-600);
@@ -400,9 +403,17 @@ class WhatsAppGateway {
           const nonce = crypto.randomBytes(4).toString('hex');
           const tmpFile = `${this.rawMediaFile}.tmp.${process.pid}.${Date.now()}.${nonce}`;
           await fs.promises.writeFile(tmpFile, payload, 'utf8');
+          if (scheduledAt < (this._lastLogoutAt || 0)) {
+            try { await fs.promises.unlink(tmpFile); } catch (_) {}
+            return;
+          }
           try {
             await fs.promises.rename(tmpFile, this.rawMediaFile);
           } catch (_) {
+            if (scheduledAt < (this._lastLogoutAt || 0)) {
+              try { await fs.promises.unlink(tmpFile); } catch (__) {}
+              return;
+            }
             await fs.promises.writeFile(this.rawMediaFile, payload, 'utf8');
             try { await fs.promises.unlink(tmpFile); } catch (_) {}
           }
@@ -1261,10 +1272,20 @@ class WhatsAppGateway {
     }
 
     let remotePicUrl = null;
+    let profileExplicitlyAbsent = false;
+    let profileTransientError = false;
     try {
       remotePicUrl = await this.sock.profilePictureUrl(jid, 'preview', 6000);
-    } catch (_) {
+      if (!remotePicUrl) profileExplicitlyAbsent = true;
+    } catch (picErr) {
       remotePicUrl = null;
+      const errStatus = picErr?.data || picErr?.output?.statusCode || picErr?.statusCode || 0;
+      const errMsg = String(picErr?.message || picErr || '').toLowerCase();
+      if (errStatus === 404 || errStatus === 401 || /item-not-found|not-authorized|404|401|no profile/i.test(errMsg)) {
+        profileExplicitlyAbsent = true;
+      } else {
+        profileTransientError = true;
+      }
     }
 
     if (remotePicUrl) {
@@ -1281,7 +1302,7 @@ class WhatsAppGateway {
           changed = true;
         }
       }
-    } else {
+    } else if (profileExplicitlyAbsent && !profileTransientError) {
       try {
         const fPath = this.getAvatarFilePath(jid);
         if (fs.existsSync(fPath)) fs.unlinkSync(fPath);
@@ -1802,6 +1823,10 @@ class WhatsAppGateway {
               clearTimeout(this._saveTimer);
               this._saveTimer = null;
             }
+            if (Array.isArray(this._pendingSaveResolvers) && this._pendingSaveResolvers.length > 0) {
+              const pending = this._pendingSaveResolvers.splice(0, this._pendingSaveResolvers.length);
+              for (const fn of pending) { try { fn(); } catch (_) {} }
+            }
             if (this._rawMediaSaveTimer) {
               clearTimeout(this._rawMediaSaveTimer);
               this._rawMediaSaveTimer = null;
@@ -1822,6 +1847,8 @@ class WhatsAppGateway {
             this.recentIncomingEvents = [];
             if (this.rawMessages) this.rawMessages.clear();
             if (this.groupMetadataCache) this.groupMetadataCache.clear();
+            if (this.lidCache) this.lidCache.clear();
+            if (this._groupMetaCooldown) this._groupMetaCooldown.clear();
             this.clearCachedAvatars();
             try { if (fs.existsSync(this.contactsFile)) fs.unlinkSync(this.contactsFile); } catch (_) {}
             try { if (fs.existsSync(this.messagesFile)) fs.unlinkSync(this.messagesFile); } catch (_) {}
@@ -2289,10 +2316,11 @@ class WhatsAppGateway {
               }
               this.rawMessages.set(id, msg);
               this.saveRawMediaData();
-              if (!list[existingIndex].media || !list[existingIndex].media.url) {
-                list[existingIndex].media = { ...(list[existingIndex].media || {}), ...media };
-                this.downloadAndSaveMedia(msg, list[existingIndex]).then(url => {
-                  if (url) this.broadcast('media_ready', { jid, msgId: id, media: list[existingIndex].media });
+              const targetMsg = list[existingIndex];
+              if (targetMsg && (!targetMsg.media || !targetMsg.media.url)) {
+                targetMsg.media = { ...(targetMsg.media || {}), ...media };
+                this.downloadAndSaveMedia(msg, targetMsg).then(url => {
+                  if (url) this.broadcast('media_ready', { jid, msgId: id, media: targetMsg.media });
                 }).catch(() => {});
               }
             }
@@ -2483,11 +2511,21 @@ class WhatsAppGateway {
         clearTimeout(this._saveTimer);
         this._saveTimer = null;
       }
+      if (Array.isArray(this._pendingSaveResolvers) && this._pendingSaveResolvers.length > 0) {
+        const pending = this._pendingSaveResolvers.splice(0, this._pendingSaveResolvers.length);
+        for (const fn of pending) { try { fn(); } catch (_) {} }
+      }
+      if (this._rawMediaSaveTimer) {
+        clearTimeout(this._rawMediaSaveTimer);
+        this._rawMediaSaveTimer = null;
+      }
       this.contacts.clear();
       this.messages.clear();
       this.recentIncomingEvents = [];
       if (this.rawMessages) this.rawMessages.clear();
       if (this.groupMetadataCache) this.groupMetadataCache.clear();
+      if (this.lidCache) this.lidCache.clear();
+      if (this._groupMetaCooldown) this._groupMetaCooldown.clear();
       this.clearCachedAvatars();
       try { if (fs.existsSync(this.contactsFile)) fs.unlinkSync(this.contactsFile); } catch (_) {}
       try { if (fs.existsSync(this.messagesFile)) fs.unlinkSync(this.messagesFile); } catch (_) {}
@@ -2848,6 +2886,10 @@ class WhatsAppGateway {
               if (!this._groupMetaCooldown) this._groupMetaCooldown = new Map();
               const lastAttempt = this._groupMetaCooldown.get(c.id) || 0;
               if (Date.now() - lastAttempt > 60000) {
+                if (!this._groupMetaCooldown.has(c.id) && this._groupMetaCooldown.size >= 500) {
+                  const oldestCooldownKey = this._groupMetaCooldown.keys().next().value;
+                  if (oldestCooldownKey !== undefined) this._groupMetaCooldown.delete(oldestCooldownKey);
+                }
                 this._groupMetaCooldown.set(c.id, Date.now());
                 this.syncGroupMetadata(c.id).catch(() => {});
               }

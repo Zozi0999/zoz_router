@@ -59,9 +59,45 @@ function sendJson(res, status, payload) {
   }
 }
 
+function isTrustedCorsOrigin(origin, req) {
+  if (process.env.ZOX_ALLOW_CROSS_ORIGIN === '1') return true;
+  if (!origin || typeof origin !== 'string') return false;
+  try {
+    const originUrl = new URL(origin);
+    if (originUrl.protocol !== 'http:' && originUrl.protocol !== 'https:') return false;
+    const originHost = originUrl.host.toLowerCase();
+    const originHostname = originUrl.hostname.toLowerCase();
+    const reqHost = String((req && req.headers && req.headers.host) || '').toLowerCase();
+    const forwardHost = String((req && req.headers && req.headers['x-forwarded-host']) || '').toLowerCase();
+    const customDomain = String(process.env.ZOX_CUSTOM_DOMAIN || '').toLowerCase().trim();
+    return Boolean(
+      (reqHost && originHost === reqHost) ||
+      (forwardHost && originHost === forwardHost) ||
+      (customDomain && originHost === customDomain) ||
+      originHost === 'zoz-router.vercel.app' ||
+      originHostname === 'localhost' ||
+      originHostname === '127.0.0.1' ||
+      originHostname === '::1' ||
+      originHostname === '[::1]' ||
+      originHostname === 'zozdocs.com' ||
+      originHostname.endsWith('.zozdocs.com') ||
+      originHostname.endsWith('.trycloudflare.com')
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
 function setCorsHeaders(req, res) {
-  const origin = req.headers?.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
+  const origin = req && req.headers ? req.headers.origin : '';
+  if (!origin) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else if (isTrustedCorsOrigin(origin, req)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  } else {
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Private-Network', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-ollama-endpoint, x-title, X-Title, HTTP-Referer, http-referer, x-serper-key, x-ollama-key, x-api-key, x-openrouter-key, x-auto-router, X-Auto-Router, x-session-id, X-Session-ID, x-user-id, X-User-ID, x-client-id, X-Client-ID, x-user-token, X-User-Token, x-wa-user-id, X-WA-USER-ID, x-wa-pin, X-WA-PIN, x-terminal-pin, X-Terminal-Pin, x-zoz-plan-mode, X-Zoz-Plan-Mode, Access-Control-Request-Private-Network');
@@ -148,34 +184,56 @@ module.exports = async function handler(req, res) {
   }
 
   // 2. Caching Layer untuk Kueri Penelusuran Publik GET (Vercel Edge Network CDN)
+  const isPrivatePath =
+    pathname === '/api/sessions' || pathname.startsWith('/api/sessions/') ||
+    pathname === '/api/memories' || pathname.startsWith('/api/memories/') ||
+    pathname === '/api/memory/search' || pathname === '/api/tools/memory/search' ||
+    pathname === '/api/tools/search-chat-history' || pathname === '/api/tools/chat-history-search' ||
+    pathname === '/api/tools/search-documents' || pathname === '/api/tools/communication-context' ||
+    pathname === '/api/chat/status' ||
+    pathname.startsWith('/api/wa/') ||
+    pathname.startsWith('/api/terminal/');
+
   if (req.method === 'GET') {
     const reqHeaders = req.headers || {};
     const hasUserSpecificHeaders = Boolean(
       reqHeaders.authorization ||
       reqHeaders['x-user-id'] ||
+      reqHeaders['x-user-token'] ||
+      reqHeaders['x-client-id'] ||
       reqHeaders['x-api-key'] ||
       reqHeaders['x-serper-key'] ||
       reqHeaders['x-openrouter-key'] ||
-      reqHeaders['x-ollama-key']
+      reqHeaders['x-ollama-key'] ||
+      reqHeaders['x-wa-user-id'] ||
+      reqHeaders['x-wa-pin'] ||
+      reqHeaders['x-terminal-pin'] ||
+      /[?&](?:userId|userToken)=/i.test(rawUrl)
     );
 
-    if (hasUserSpecificHeaders) {
-      // Jika memuat kredensial atau identitas spesifik: cegah cache pollution lintas pengguna di Edge CDN
+    if (hasUserSpecificHeaders || isPrivatePath) {
+      // Jika memuat kredensial, identitas spesifik, atau rute privat: cegah cache pollution lintas pengguna di Edge CDN
       res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
-      res.setHeader('Vary', 'Accept-Encoding, Authorization, x-user-id, x-api-key, x-serper-key, x-openrouter-key, x-ollama-key');
+      res.setHeader('Vary', 'Origin, Accept-Encoding, Authorization, x-user-id, x-user-token, x-client-id, x-api-key, x-serper-key, x-openrouter-key, x-ollama-key');
     } else {
       // Murni kueri publik anonim bersama: aman di-cache di Vercel Edge CDN
-      res.setHeader('Vary', 'Accept-Encoding');
+      res.setHeader('Vary', 'Origin, Accept-Encoding');
       if (pathname === '/api/tools/search-web' || pathname === '/api/web-search') {
         res.setHeader('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=3600');
       } else if (pathname === '/api/youtube-search' || pathname === '/api/youtube-info') {
         res.setHeader('Cache-Control', 'public, s-maxage=1800, stale-while-revalidate=7200');
       }
     }
+  } else if (isPrivatePath) {
+    res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
   }
 
-  // 3. Streaming SSE Anti-Buffering & Keep-Alive Headers
-  const isStreamingPath = pathname.includes('/chat') || pathname.includes('/stream');
+  // 3. Streaming SSE Anti-Buffering & Keep-Alive Headers (hanya untuk rute chat stream nyata)
+  const isStreamingPath =
+    pathname === '/api/ollama/chat' ||
+    pathname === '/api/openrouter/chat' ||
+    pathname === '/api/chat' ||
+    pathname.includes('/stream');
   if (isStreamingPath) {
     res.setHeader('X-Accel-Buffering', 'no');
     res.setHeader('Cache-Control', 'no-cache, no-transform');

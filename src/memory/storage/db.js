@@ -8,7 +8,11 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const config = require('../config');
-const { createEpisode, createEntity, createRelation, createMemoryItem } = require('../types');
+const { createEpisode, createEntity, createRelation, createMemoryItem, validateCategory, validateScope } = require('../types');
+
+function escapeSqlLike(str) {
+  return String(str || '').replace(/[\\%_]/g, '\\$&');
+}
 
 let dbInstance = null;
 
@@ -29,7 +33,7 @@ function computeFastEmbedding(text, dimension = config.EMBEDDING_DIMENSION) {
   const vec = new Float32Array(dimension);
   if (!text || typeof text !== 'string') return vec;
 
-  const normalized = text.toLowerCase().normalize('NFKD').replace(/[^\w\s]/g, ' ');
+  const normalized = text.toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s_]/gu, ' ');
   const words = normalized.split(/\s+/).filter(Boolean);
   if (words.length === 0) return vec;
 
@@ -491,13 +495,18 @@ function addRelation(relationData, { resolveConflict = true } = {}) {
   return rel;
 }
 
-function traverseActiveGraph(userId, entityId, maxHops = 2) {
+function traverseActiveGraph(userId, entityId, maxHops = 2, scope = null) {
   const instance = initDatabase();
 
   if (instance.mode === 'memory') {
     const visitedNodes = new Set([entityId]);
     const matchedRelations = [];
     let currentTier = [entityId];
+    const isEntityInScope = (eid) => {
+      if (!scope) return true;
+      const ent = memStore.entities.get(eid);
+      return !ent || ent.scope === scope || ent.scope === 'global';
+    };
 
     for (let hop = 0; hop < maxHops; hop++) {
       if (currentTier.length === 0) break;
@@ -505,6 +514,7 @@ function traverseActiveGraph(userId, entityId, maxHops = 2) {
       for (const nodeId of currentTier) {
         for (const r of memStore.relations.values()) {
           if (r.userId === userId && (r.sourceEntityId === nodeId || r.targetEntityId === nodeId) && !r.validUntil) {
+            if (!isEntityInScope(r.sourceEntityId) || !isEntityInScope(r.targetEntityId)) continue;
             if (!matchedRelations.some(m => m.id === r.id)) {
               matchedRelations.push(r);
             }
@@ -530,14 +540,20 @@ function traverseActiveGraph(userId, entityId, maxHops = 2) {
     if (currentTier.length === 0) break;
     const nextTier = [];
     for (const nodeId of currentTier) {
-      const stmt = db.prepare(`
+      let sql = `
         SELECT r.*, e1.name as source_name, e2.name as target_name 
         FROM relations r
         LEFT JOIN entities e1 ON r.source_entity_id = e1.id
         LEFT JOIN entities e2 ON r.target_entity_id = e2.id
         WHERE r.user_id = ? AND (r.source_entity_id = ? OR r.target_entity_id = ?) AND r.valid_until IS NULL
-      `);
-      const rows = queryAll(stmt, userId, nodeId, nodeId);
+      `;
+      const params = [userId, nodeId, nodeId];
+      if (scope) {
+        sql += " AND (e1.scope IS NULL OR e1.scope = ? OR e1.scope = 'global') AND (e2.scope IS NULL OR e2.scope = ? OR e2.scope = 'global')";
+        params.push(scope, scope);
+      }
+      const stmt = db.prepare(sql);
+      const rows = queryAll(stmt, ...params);
       for (const row of rows) {
         if (!matchedRelations.some(m => m.id === row.id)) {
           matchedRelations.push(row);
@@ -605,8 +621,8 @@ function updateMemory(id, { content, category, scope, isActive }, userId = null)
     const trimmedCat = typeof category === 'string' ? category.trim() : '';
     const trimmedScope = typeof scope === 'string' ? scope.trim() : '';
     const newContent = trimmedContent || existing.content;
-    const newCat = trimmedCat || existing.category;
-    const newScope = trimmedScope || existing.scope;
+    const newCat = trimmedCat ? validateCategory(trimmedCat) : existing.category;
+    const newScope = trimmedScope ? validateScope(trimmedScope) : existing.scope;
     const newActive = typeof isActive !== 'undefined' ? (isActive ? 1 : 0) : prevActive;
     const updatedAt = new Date().toISOString();
 
@@ -644,8 +660,8 @@ function updateMemory(id, { content, category, scope, isActive }, userId = null)
   const trimmedCat = typeof category === 'string' ? category.trim() : '';
   const trimmedScope = typeof scope === 'string' ? scope.trim() : '';
   const newContent = trimmedContent || existing.content;
-  const newCat = trimmedCat || existing.category;
-  const newScope = trimmedScope || existing.scope;
+  const newCat = trimmedCat ? validateCategory(trimmedCat) : existing.category;
+  const newScope = trimmedScope ? validateScope(trimmedScope) : existing.scope;
   const newActive = typeof isActive !== 'undefined' ? (isActive ? 1 : 0) : existing.is_active;
   const updatedAt = new Date().toISOString();
 
@@ -682,7 +698,15 @@ function updateMemory(id, { content, category, scope, isActive }, userId = null)
     }
   } catch (_) {}
 
-  return { ...existing, content: newContent, category: newCat, scope: newScope, is_active: newActive, updated_at: updatedAt };
+  return normalizeMemoryRow({
+    ...existing,
+    content: newContent,
+    category: newCat,
+    scope: newScope,
+    is_active: newActive,
+    embedding_json: newEmb,
+    updated_at: updatedAt
+  });
 }
 
 function deleteMemory(id, userId = null) {
@@ -801,8 +825,8 @@ function listMemories(userId, { category = null, scope = null, q = null, limit =
     params.push(scope);
   }
   if (q && q.trim()) {
-    sql += ' AND content LIKE ?';
-    params.push(`%${q.trim()}%`);
+    sql += " AND content LIKE ? ESCAPE '\\'";
+    params.push(`%${escapeSqlLike(q.trim())}%`);
   }
 
   sql += ' ORDER BY created_at DESC LIMIT ?';
@@ -853,10 +877,10 @@ function searchMemoriesFTS5(userId, queryText, scope = 'global', limit = 10) {
     const stmt = db.prepare(`
       SELECT * FROM memories 
       WHERE user_id = ? AND is_active = 1 AND (scope = ? OR scope = 'global')
-        AND (${cleanTokens.map(() => 'content LIKE ?').join(' OR ')})
+        AND (${cleanTokens.map(() => "content LIKE ? ESCAPE '\\'").join(' OR ')})
       ORDER BY created_at DESC LIMIT ?
     `);
-    const likeParams = cleanTokens.map(w => `%${w}%`);
+    const likeParams = cleanTokens.map(w => `%${escapeSqlLike(w)}%`);
     return queryAll(stmt, uid, scope, ...likeParams, limit);
   }
 }
@@ -1032,8 +1056,8 @@ function getInsightsData(userId, scope = null) {
   `;
   const relParams = [uid];
   if (scope) {
-    relSql += " AND (e1.scope IS NULL OR e1.scope = ? OR e1.scope = 'global')";
-    relParams.push(scope);
+    relSql += " AND (e1.scope IS NULL OR e1.scope = ? OR e1.scope = 'global') AND (e2.scope IS NULL OR e2.scope = ? OR e2.scope = 'global')";
+    relParams.push(scope, scope);
   }
   relSql += ' ORDER BY r.valid_from DESC LIMIT 20';
   const activeRelations = queryAll(db.prepare(relSql), ...relParams);

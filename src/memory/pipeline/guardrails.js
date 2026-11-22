@@ -27,14 +27,14 @@ const PII_PATTERNS = [
   },
   {
     name: 'GENERIC_SECRET_TOKEN',
-    regex: /((?:api[_-]?key|secret[_-]?token|bearer|auth[_-]?token)(?:\s+(?:saya|anda|kami|ini|adalah|is|my))?[\s:=]+['"]?)([a-zA-Z0-9_\-\.]{20,})(['"]?)/gi,
+    regex: /((?:\bapi[_-]?key|\bsecret[_-]?token|\bbearer|\bauth[_-]?token)(?:\s+(?:saya|anda|kami|ini|adalah|is|my))?[\s:=]+['"]?)([a-zA-Z0-9_\-\.]{20,})(['"]?)/gi,
     replaceFn: (_match, prefix, _token, suffix) => `${prefix}[REDACTED_SECRET]${suffix || ''}`
   },
 
   // 2. Passwords in Key-Value Pairs
   {
     name: 'PASSWORD_ASSIGNMENT',
-    regex: /((?:password|passwd|kata\s*sandi|pin(?:\s*atm)?)(?:\s+(?:saya|anda|kami|ini|adalah|is|my))*[\s:=]+['"]?)([^'"\s,;]{4,})(['"]?)/gi,
+    regex: /((?:\bpassword|\bpasswd|\bkata\s*sandi|\bpin(?:\s*atm)?)(?:\s+(?:saya|anda|kami|ini|adalah|is|my))*[\s:=]+['"]?)([^'"\s,;]{4,})(['"]?)/gi,
     replaceFn: (_match, prefix, _p, suffix) => `${prefix}[REDACTED_PASSWORD]${suffix || ''}`
   },
 
@@ -60,7 +60,7 @@ const PII_PATTERNS = [
   // 5. Bank Account Numbers in Banking Context
   {
     name: 'BANK_ACCOUNT',
-    regex: /((?:rekening(?:\s*bank)?|no\.?\s*rek|account\s*number|norek)(?:\s+(?:saya|anda|kami|ini|adalah|is|my))*[\s:=]+['"]?)([0-9]{8,18})(['"]?)/gi,
+    regex: /((?:\brekening(?:\s*bank)?|\bno\.?\s*rek|\baccount\s*number|\bnorek)(?:\s+(?:saya|anda|kami|ini|adalah|is|my))*[\s:=]+['"]?)([0-9]{8,18})(['"]?)/gi,
     replaceFn: (_match, prefix, _acc, suffix) => `${prefix}[REDACTED_BANK_ACCOUNT]${suffix || ''}`
   }
 ];

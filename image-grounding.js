@@ -2245,6 +2245,8 @@ function createImageGroundingService(options = {}) {
       timeoutMs: DEFAULT_TIMEOUT_MS
     });
 
+    if (res.headersSent || res.writableEnded || res.destroyed) return;
+
     if (!upstream.ok || !upstream.buffer || upstream.buffer.length === 0) {
       res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({

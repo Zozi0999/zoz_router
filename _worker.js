@@ -957,6 +957,7 @@ export default {
       url.pathname.startsWith('/api/wa/') ||
       url.pathname.startsWith('/api/tunnel/') ||
       url.pathname.startsWith('/api/daemon/') ||
+      url.pathname === '/api/workspace' ||
       url.pathname.startsWith('/api/workspace/') ||
       url.pathname === '/api/ollama/start' ||
       url.pathname.startsWith('/uploads/');
@@ -1086,6 +1087,99 @@ export default {
           success: true,
           data: insightPayload,
           insights: insightPayload
+        }), { status: 200, headers: jsonHeaders });
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/memories/export') {
+        const uid = resolveMemUid();
+        const format = (url.searchParams.get('format') || 'json').toLowerCase() === 'md' ? 'md' : 'json';
+        const userItems = Array.from(memMap.values()).filter(m => isMemActive(m) && getMemOwner(m) === uid);
+        const ts = Date.now();
+        const safeFileName = `jozz_memories_${uid.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32)}_${ts}.${format}`;
+        const bodyContent = format === 'md'
+          ? `# JOZZ MEMORIES VAULT\n*Exported on ${new Date().toISOString()}*\n\n` +
+            userItems.map(m => `### [${m.category || 'general'}] ${m.id}\n- **Scope**: ${m.scope || 'global'}\n- **Dibuat**: ${m.created_at || ''}\n- **Isi**: ${m.content}\n`).join('\n')
+          : JSON.stringify({ version: '1.0', exportedAt: new Date().toISOString(), memories: userItems }, null, 2);
+        return new Response(bodyContent, {
+          status: 200,
+          headers: {
+            'Content-Type': format === 'md' ? 'text/markdown; charset=utf-8' : 'application/json; charset=utf-8',
+            'Content-Disposition': `attachment; filename="${safeFileName}"`,
+            'Cache-Control': 'private, no-store, no-cache, must-revalidate',
+            'Access-Control-Allow-Origin': '*'
+          }
+        });
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/memories/import') {
+        const uid = resolveMemUid();
+        const format = (url.searchParams.get('format') || 'json').toLowerCase();
+        const rawText = await request.text().catch(() => '');
+        let candidates = [];
+        const trimmedRaw = String(rawText || '').trim();
+        if (format === 'json' || trimmedRaw.startsWith('{') || trimmedRaw.startsWith('[')) {
+          try {
+            const parsed = JSON.parse(trimmedRaw || '{}');
+            const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.memories) ? parsed.memories : []);
+            candidates = arr.map(item => ({
+              content: String((item && (item.content || item.fact)) || '').trim().slice(0, 2000),
+              category: String((item && item.category) || 'preference').trim().slice(0, 64) || 'preference',
+              scope: String((item && item.scope) || 'global').trim().slice(0, 64) || 'global'
+            })).filter(c => c.content);
+          } catch (parseErr) {
+            return new Response(JSON.stringify({ success: false, error: `JSON import tidak valid: ${parseErr.message}` }), { status: 400, headers: jsonHeaders });
+          }
+        } else {
+          const lines = trimmedRaw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+          for (const line of lines) {
+            const bulletMatch = line.match(/^(?:[-*]|\d+\.)\s*(?:\*\*\s*Isi\s*\*\*\s*:\s*)?(.+)$/i);
+            const rawFact = bulletMatch ? bulletMatch[1].trim() : (!line.startsWith('#') ? line : '');
+            if (rawFact && rawFact.length >= 4) {
+              candidates.push({ content: rawFact.slice(0, 2000), category: 'preference', scope: 'global' });
+            }
+          }
+        }
+        const existingContents = new Set(
+          Array.from(memMap.values())
+            .filter(m => isMemActive(m) && getMemOwner(m) === uid)
+            .map(m => String(m.content || '').trim().toLowerCase())
+        );
+        let importedCount = 0;
+        let skippedDuplicates = 0;
+        const nowIso = new Date().toISOString();
+        for (const cand of candidates) {
+          const normKey = cand.content.toLowerCase();
+          if (existingContents.has(normKey)) {
+            skippedDuplicates++;
+            continue;
+          }
+          existingContents.add(normKey);
+          const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          if (memMap.size >= 500 && !memMap.has(id)) {
+            const oldestKey = memMap.keys().next().value;
+            if (oldestKey !== undefined) memMap.delete(oldestKey);
+          }
+          memMap.set(id, {
+            id,
+            userId: uid,
+            user_id: uid,
+            content: cand.content,
+            category: cand.category,
+            scope: cand.scope,
+            confidence: 1.0,
+            isActive: 1,
+            is_active: 1,
+            created_at: nowIso,
+            updated_at: nowIso
+          });
+          importedCount++;
+        }
+        const totalMemories = Array.from(memMap.values()).filter(m => isMemActive(m) && getMemOwner(m) === uid).length;
+        return new Response(JSON.stringify({
+          success: true,
+          importedCount,
+          skippedDuplicates,
+          totalMemories
         }), { status: 200, headers: jsonHeaders });
       }
 
@@ -1329,7 +1423,7 @@ export default {
         const envOllamaKey = envKeyAllowed(request, env) ? sanitizeOllamaApiKey(env?.OLLAMA_API_KEY) : null;
         const rawOllamaKey = clientOllamaKey || envOllamaKey;
 
-        const targetEndpoint = body.endpoint || 'https://ollama.com';
+        const targetEndpoint = body.endpoint || request.headers.get('x-ollama-endpoint') || 'https://ollama.com';
         let cleanEndpoint = (targetEndpoint || 'https://ollama.com').trim();
         const isLoopback = !cleanEndpoint || cleanEndpoint.includes('127.0.0.1') || cleanEndpoint.includes('localhost') || cleanEndpoint.includes('::1');
         // Pada Cloudflare Edge, jika endpoint loopback dikirim oleh browser, alihkan ke Ollama Cloud
@@ -1747,7 +1841,7 @@ export default {
       try {
         const key = request.headers.get('x-ollama-key') || request.headers.get('x-api-key') || '';
         const authHeader = request.headers.get('Authorization') || (key ? `Bearer ${String(key).replace(/^Bearer\s+/i, '').trim()}` : '');
-        const endpoint = url.searchParams.get('endpoint') || 'https://ollama.com';
+        const endpoint = url.searchParams.get('endpoint') || request.headers.get('x-ollama-endpoint') || 'https://ollama.com';
         const headers = {
           'Content-Type': 'application/json',
           'User-Agent': 'ZozRouter/1.0 (Windows NT 10.0; Win64; x64)'
@@ -3242,6 +3336,7 @@ export default {
           });
           if (resp.status >= 300 && resp.status < 400) {
             const loc = resp.headers.get('location');
+            try { await resp.body?.cancel(); } catch (_) {}
             if (!loc) break;
             currentProbeUrl = new URL(loc, currentProbeUrl).toString();
             continue;
@@ -3981,6 +4076,7 @@ export default {
               });
               if ([301, 302, 303, 307, 308].includes(hopRes.status)) {
                 const loc = hopRes.headers.get('location');
+                try { await hopRes.body?.cancel(); } catch (_) {}
                 if (!loc) break;
                 const nextUrl = new URL(loc, currentFetchUrl);
                 if (!['http:', 'https:'].includes(nextUrl.protocol) || isPrivateHostname(nextUrl.hostname)) {
@@ -4165,6 +4261,35 @@ export default {
       });
     }
 
+    // Stateless Chat History Search Route for Cloudflare Gateway
+    if ((url.pathname === '/api/tools/search-chat-history' || url.pathname === '/api/tools/chat-history-search') && (request.method === 'GET' || request.method === 'POST')) {
+      let q = url.searchParams.get('query') || url.searchParams.get('q') || url.searchParams.get('keyword') || '';
+      if (request.method === 'POST') {
+        const body = await request.json().catch(() => ({}));
+        const rawQ = body && (body.query ?? body.q ?? body.keyword ?? body.topik ?? body.topic ?? body.cari);
+        if (typeof rawQ === 'string') q = rawQ;
+      }
+      return new Response(JSON.stringify({
+        success: true,
+        stateless: true,
+        tool: 'search_chat_history',
+        mode: 'recent',
+        query: String(q || ''),
+        totalScanned: 0,
+        totalMatched: 0,
+        count: 0,
+        sessions: [],
+        formattedContext: '[HASIL PENCARIAN RIWAYAT OBROLAN ZOZ ROUTER — CLOUD EDGE]\nMode gateway stateless: riwayat obrolan dicari langsung dari penyimpanan lokal peramban.'
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'private, no-store, no-cache, must-revalidate',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+
     // ==================== IMAGE GROUNDING ENDPOINTS (CLOUDFLARE EDGE) ====================
     const edgeCandidateCache = globalThis.__ZOZ_EDGE_CANDIDATES__ || (globalThis.__ZOZ_EDGE_CANDIDATES__ = new Map());
     const EDGE_SPOOF_REGEX = /\b(impersonators?|look-?alikes?|parod(?:y|ies)|caricatures?|wax(?:work|\s+figures?)?|madame\s+tussauds|cosplay(?:ers?)?|memes?|cartoons?|satires?|puppets?|effig(?:y|ies))\b/i;
@@ -4311,21 +4436,27 @@ export default {
       return true;
     };
 
-    const buildSafeImageProxyResponse = (upRes) => {
+    const buildSafeImageProxyResponse = (upRes, isHead = false) => {
       if (!upRes || !upRes.ok) return null;
       const rawCtype = String(upRes.headers.get('content-type') || '').toLowerCase().split(';')[0].trim();
       const SAFE_RASTER_MIMES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
       if (!SAFE_RASTER_MIMES.has(rawCtype)) return null;
-      return new Response(upRes.body, {
+      if (isHead) {
+        try { upRes.body?.cancel(); } catch (_) {}
+      }
+      const headers = {
+        'Content-Type': rawCtype === 'image/jpg' ? 'image/jpeg' : rawCtype,
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'none'; script-src 'none'; sandbox",
+        'Cross-Origin-Resource-Policy': 'cross-origin',
+        'Cache-Control': 'public, max-age=86400, stale-while-revalidate=172800',
+        'Access-Control-Allow-Origin': '*'
+      };
+      const upstreamLen = upRes.headers.get('content-length');
+      if (upstreamLen) headers['Content-Length'] = upstreamLen;
+      return new Response(isHead ? null : upRes.body, {
         status: 200,
-        headers: {
-          'Content-Type': rawCtype === 'image/jpg' ? 'image/jpeg' : rawCtype,
-          'X-Content-Type-Options': 'nosniff',
-          'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'none'; script-src 'none'; sandbox",
-          'Cross-Origin-Resource-Policy': 'cross-origin',
-          'Cache-Control': 'public, max-age=86400, stale-while-revalidate=172800',
-          'Access-Control-Allow-Origin': '*'
-        }
+        headers
       });
     };
 
@@ -4733,14 +4864,15 @@ export default {
     }
 
     // 4. Image Asset Proxy Streamer
-    if (url.pathname.startsWith('/api/tools/image-asset/') && request.method === 'GET') {
+    if (url.pathname.startsWith('/api/tools/image-asset/') && (request.method === 'GET' || request.method === 'HEAD')) {
+      const isHeadRequest = request.method === 'HEAD';
       try {
         const rawToken = decodeURIComponent(url.pathname.replace(/^\/api\/tools\/image-asset\//, ''));
         // A0. Token Cloudflare Edge bertanda tangan HMAC-SHA256 (edge.<payload>.<sig>)
         if (rawToken.startsWith('edge.')) {
           const parts = rawToken.split('.');
           if (parts.length !== 3 || !parts[1] || !parts[2]) {
-            return new Response('Invalid token', { status: 403 });
+            return new Response(isHeadRequest ? null : 'Invalid token', { status: 403 });
           }
           const [, payloadPart, sigPart] = parts;
           try {
@@ -4753,13 +4885,13 @@ export default {
             for (let si = 0; si < sigBin.length; si++) sigBytes[si] = sigBin.charCodeAt(si);
             const isValidSig = await crypto.subtle.verify('HMAC', cryptoKey, sigBytes, new TextEncoder().encode(payloadPart));
             if (!isValidSig) {
-              return new Response('Invalid signature', { status: 403 });
+              return new Response(isHeadRequest ? null : 'Invalid signature', { status: 403 });
             }
             let b64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
             while (b64.length % 4) b64 += '=';
             const decodedEdge = JSON.parse(decodeURIComponent(escape(atob(b64))));
             if (!decodedEdge || (decodedEdge.exp && Date.now() > decodedEdge.exp) || (decodedEdge.ts && Date.now() - decodedEdge.ts > 6 * 3600 * 1000)) {
-              return new Response('Token expired', { status: 410 });
+              return new Response(isHeadRequest ? null : 'Token expired', { status: 410 });
             }
             let targetAssetUrl = null;
             if (decodedEdge.id) {
@@ -4777,25 +4909,26 @@ export default {
                   redirect: 'manual',
                   signal: AbortSignal.timeout(7000)
                 });
-                const safeResp = buildSafeImageProxyResponse(upRes);
+                const safeResp = buildSafeImageProxyResponse(upRes, isHeadRequest);
                 if (safeResp) return safeResp;
               }
             }
           } catch (_) {
-            return new Response('Invalid token', { status: 403 });
+            return new Response(isHeadRequest ? null : 'Invalid token', { status: 403 });
           }
-          return new Response('Asset unavailable', { status: 404 });
+          return new Response(isHeadRequest ? null : 'Asset unavailable', { status: 404 });
         }
 
         // A. Token dari laptop server (membawa signature tanda titik '.')
         if (rawToken.includes('.')) {
           const tunnelBase = TUNNEL_GATEWAY_URL;
           const laptopRes = await fetch(`${tunnelBase}${url.pathname}`, {
+            method: isHeadRequest ? 'HEAD' : 'GET',
             headers: { 'Accept': 'image/*' },
             signal: AbortSignal.timeout(6000)
           }).catch(() => null);
           if (laptopRes && laptopRes.ok) {
-            const safeLaptopResp = buildSafeImageProxyResponse(laptopRes);
+            const safeLaptopResp = buildSafeImageProxyResponse(laptopRes, isHeadRequest);
             if (safeLaptopResp) return safeLaptopResp;
           }
           // Hanya gunakan fallback CDN jika kandidat terdaftar di Edge cache (bukan URL mentah dari payload tak terverifikasi)
@@ -4816,7 +4949,7 @@ export default {
                     redirect: 'manual',
                     signal: AbortSignal.timeout(7000)
                   }).catch(() => null);
-                  const safeResp = buildSafeImageProxyResponse(upRes);
+                  const safeResp = buildSafeImageProxyResponse(upRes, isHeadRequest);
                   if (safeResp) return safeResp;
                 }
               }
@@ -4847,7 +4980,7 @@ export default {
               redirect: 'manual',
               signal: AbortSignal.timeout(7000)
             });
-            const safeResp = buildSafeImageProxyResponse(upRes);
+            const safeResp = buildSafeImageProxyResponse(upRes, isHeadRequest);
             if (safeResp) return safeResp;
           }
         }
@@ -4855,6 +4988,7 @@ export default {
         // C. Fallback: coba alirkan melalui laptop tunnel
         const tunnelFallback = TUNNEL_GATEWAY_URL;
         const fallbackRes = await fetch(`${tunnelFallback}${url.pathname}`, {
+          method: isHeadRequest ? 'HEAD' : 'GET',
           headers: { 'Accept': 'image/*' },
           signal: AbortSignal.timeout(6000)
         }).catch(() => null);
@@ -4862,23 +4996,29 @@ export default {
         if (fallbackRes && fallbackRes.ok) {
           const ct = String(fallbackRes.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
           if (!ct.startsWith('image/') || ct.includes('svg')) {
-            return new Response('Unsupported media type', { status: 415 });
+            return new Response(isHeadRequest ? null : 'Unsupported media type', { status: 415 });
           }
-          return new Response(fallbackRes.body, {
+          if (isHeadRequest) {
+            try { fallbackRes.body?.cancel(); } catch (_) {}
+          }
+          const respHeaders = {
+            'Content-Type': ct,
+            'Cache-Control': 'public, max-age=86400',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'none'; sandbox",
+            'Access-Control-Allow-Origin': '*'
+          };
+          const fbLen = fallbackRes.headers.get('content-length');
+          if (fbLen) respHeaders['Content-Length'] = fbLen;
+          return new Response(isHeadRequest ? null : fallbackRes.body, {
             status: 200,
-            headers: {
-              'Content-Type': ct,
-              'Cache-Control': 'public, max-age=86400',
-              'X-Content-Type-Options': 'nosniff',
-              'Content-Security-Policy': "default-src 'none'; sandbox",
-              'Access-Control-Allow-Origin': '*'
-            }
+            headers: respHeaders
           });
         }
 
-        return new Response('Asset not found or expired', { status: 404 });
+        return new Response(isHeadRequest ? null : 'Asset not found or expired', { status: 404 });
       } catch (_) {
-        return new Response('Asset proxy error', { status: 502 });
+        return new Response(isHeadRequest ? null : 'Asset proxy error', { status: 502 });
       }
     }
 

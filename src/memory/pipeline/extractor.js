@@ -8,9 +8,9 @@ const dbStorage = require('../storage/db');
 const { sanitizeFactCandidate } = require('./guardrails');
 
 const ANAPHORIC_MEMORY_COMMAND_REGEX = /^(?:tolong\s+)?(?:catat(?:kan)?|simpan|ingat(?:kan)?|masukkan|rekam|tambahkan)\s*(?:itu|ini|hal\s+(?:itu|ini)|tadi|hal\s+tadi|informasi\s+(?:itu|ini|tadi)|poin\s+(?:itu|ini|tadi)|percakapan\s+ini|diskusi\s+ini)?\s*(?:ke\s+(?:dalam\s+)?memori|di\s+memori|ke\s+ingatan|ke\s+database)?[\s.!?]*$/i;
-const INLINE_EXPLICIT_MEMORY_REGEX = /^(?:tolong\s+)?(?:ingat\s+bahwa|catat\s+bahwa|simpan\s+bahwa|perlu\s+diingat\s+bahwa|ingat(?:kan)?\s*:\s*|catat(?:kan)?\s*:\s*|simpan\s*:\s*|fakta\s*:\s*|preferensi\s*:\s*|catat\s+(?:itu|ini|hal\s+ini|hal\s+itu)?\s*ke\s+memori\s*(?:bahwa|yaitu|\:)?\s*|simpan\s+(?:itu|ini|hal\s+ini|hal\s+itu)?\s*ke\s+memori\s*(?:bahwa|yaitu|\:)?\s*|\/(?:remember|memori|ingat)\s+)(.+)$/i;
-const EXPLICIT_MEMORY_REGEX = /^(?:tolong\s+)?(?:ingat(?:kan)?|simpan(?:\s+ke\s+memori)?|catat(?:kan)?|ingat\s+bahwa|perlu\s+diingat|preferensi\s+saya|catatan\s+penting|fakta\s+saya)[\s:,-]+(.+)$/i;
-const SLASH_MEMORY_REGEX = /^\/(?:remember|memori|ingat)\s+(.+)$/i;
+const INLINE_EXPLICIT_MEMORY_REGEX = /^(?:tolong\s+)?(?:ingat\s+bahwa|catat\s+bahwa|simpan\s+bahwa|perlu\s+diingat\s+bahwa|ingat(?:kan)?\s*:\s*|catat(?:kan)?\s*:\s*|simpan\s*:\s*|fakta\s*:\s*|preferensi\s*:\s*|catat\s+(?:itu|ini|hal\s+ini|hal\s+itu)?\s*ke\s+memori\s*(?:bahwa|yaitu|\:)?\s*|simpan\s+(?:itu|ini|hal\s+ini|hal\s+itu)?\s*ke\s+memori\s*(?:bahwa|yaitu|\:)?\s*|\/(?:remember|memori|ingat)\s+)([\s\S]+)$/i;
+const EXPLICIT_MEMORY_REGEX = /^(?:tolong\s+)?(?:ingat(?:kan)?|simpan(?:\s+ke\s+memori)?|catat(?:kan)?|ingat\s+bahwa|perlu\s+diingat|preferensi\s+saya|catatan\s+penting|fakta\s+saya)[\s:,-]+([\s\S]+)$/i;
+const SLASH_MEMORY_REGEX = /^\/(?:remember|memori|ingat)\s+([\s\S]+)$/i;
 
 /**
  * Check if user message is an explicit memory command

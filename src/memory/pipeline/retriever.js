@@ -21,7 +21,7 @@ function extractContentTokens(text) {
   if (!text || typeof text !== 'string') return [];
   return [...new Set(
     text.toLowerCase()
-      .replace(/[^\w\s]/g, ' ')
+      .replace(/[^\p{L}\p{N}\s_]/gu, ' ')
       .split(/\s+/)
       .filter(w => w.length >= 3 && !RETRIEVER_STOPWORDS.has(w))
   )];
@@ -56,8 +56,10 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
   if (!q) return { memories: [], receipts: [], systemPromptInjection: '' };
 
   const targetScope = scope || config.DEFAULT_SCOPE;
-  const maxResults = options.maxResults || config.MAX_RECALL_RESULTS;
-  const rrfK = options.rrfK || config.RRF_K;
+  const rawMax = options.maxResults !== undefined ? Number(options.maxResults) : config.MAX_RECALL_RESULTS;
+  const maxResults = Math.max(1, Math.min(100, Number.isFinite(rawMax) ? Math.floor(rawMax) : config.MAX_RECALL_RESULTS));
+  const rawRrfK = options.rrfK !== undefined ? Number(options.rrfK) : config.RRF_K;
+  const rrfK = Math.max(1, Number.isFinite(rawRrfK) ? rawRrfK : config.RRF_K);
 
   // 1. Vector Signal
   const queryVec = dbStorage.computeFastEmbedding(q);
@@ -68,11 +70,12 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
 
   // 3. Graph Signal (Entity match -> Active Relation Traversal, supports punctuation & multi-word entities)
   const graphHits = [];
-  const rawTokens = q
+  const rawTokens = q.slice(0, 2000)
     .replace(/[^\p{L}\p{N}_-]+/gu, ' ')
     .trim()
     .split(/\s+/)
-    .filter(w => w.length >= 2);
+    .filter(w => w.length >= 2)
+    .slice(0, 40);
   const candidateNames = [];
   const seenCand = new Set();
   const pushCand = (s) => {
@@ -93,7 +96,7 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
     const ent = dbStorage.findEntityByName(uid, cand, targetScope);
     if (ent && !matchedEntities.some(e => e.id === ent.id)) {
       matchedEntities.push(ent);
-      const activeRelations = dbStorage.traverseActiveGraph(uid, ent.id, config.GRAPH_MAX_HOPS);
+      const activeRelations = dbStorage.traverseActiveGraph(uid, ent.id, config.GRAPH_MAX_HOPS, targetScope);
       for (const rel of activeRelations) {
         if (!graphHits.some(g => g.id === rel.id)) {
           graphHits.push(rel);
@@ -142,7 +145,7 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
       category: 'technical_stack',
       scope: targetScope,
       confidence: 1.0,
-      episode_id: rel.episode_id,
+      episode_id: rel.episode_id ?? rel.episodeId ?? null,
       is_active: 1
     };
     addRank(syntheticItem, idx + 1, config.WEIGHT_GRAPH, 'graph');
