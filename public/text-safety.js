@@ -13,6 +13,7 @@
   ]);
 
   const THINKING_TAG_REGEX = /<(think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi;
+  const PIPE_THOUGHT_REGEX = /<\|thought\|>[\s\S]*?(?:<\|thought\|>|$)/gi;
   const BRACKET_THINK_REGEX = /\[(?:THOUGHT|REASONING)\][\s\S]*?(?:\[\/(?:THOUGHT|REASONING)\]|$)/gi;
   const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|INSTRUKSI FORMAT WAJIB|Instruksi Sistem & Konteks|INTEGRITAS KONTEKS|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):(?:[^\[\]]|\[[^\]]*\])*\](?:\n\n|\s*)/gi;
 
@@ -1160,15 +1161,17 @@
     if (typeof rawText !== 'string' || !rawText) return '';
     let cleaned = rawText
       .replace(THINKING_TAG_REGEX, '')
+      .replace(PIPE_THOUGHT_REGEX, '')
       .replace(BRACKET_THINK_REGEX, '')
       .replace(/<\/?(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
+      .replace(/<\|thought\|>/gi, '')
       .replace(/\[\/?(?:THOUGHT|REASONING)\]/gi, '')
       .replace(MODEL_TAG_REGEX, '')
       .trim();
-    if (!cleaned && (/<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b/i.test(rawText) || /\[(?:thought|reasoning)\]/i.test(rawText))) {
+    if (!cleaned && (/<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b/i.test(rawText) || /<\|thought\|>/i.test(rawText) || /\[(?:thought|reasoning)\]/i.test(rawText))) {
       const inner = rawText
-        .replace(/^[\s\S]*?(?:<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|\[(?:thought|reasoning)\])/i, '')
-        .replace(/<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|\[\/(?:thought|reasoning)\]/gi, '')
+        .replace(/^[\s\S]*?(?:<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|<\|thought\|>|\[(?:thought|reasoning)\])/i, '')
+        .replace(/<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|<\|thought\|>|\[\/(?:thought|reasoning)\]/gi, '')
         .trim();
       return extractFallbackConclusionFromUnclosedThought(inner);
     }
@@ -1194,14 +1197,15 @@
     let inside = false;
     let activeTag = '';
     let activeIsBracket = false;
+    let activeIsPipe = false;
     let pending = '';
     let capturedThought = '';
     let emittedVisibleChars = 0;
 
-    const OPEN_REGEX = /<(think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|\[(thought|reasoning)\]/i;
-    const ORPHAN_CLOSE_REGEX = /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|\[\/(?:thought|reasoning)\]/gi;
-    const OPEN_PREFIXES = ['<think', '<thought', '<thinking', '<reasoning', '<ant_thought', '<thought_process', '[thought]', '[reasoning]'];
-    const CLOSE_TAGS = ['</think>', '</thought>', '</thinking>', '</reasoning>', '</ant_thought>', '</thought_process>', '[/thought]', '[/reasoning]'];
+    const OPEN_REGEX = /<(think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|\[(thought|reasoning)\]|<\|thought\|>/i;
+    const ORPHAN_CLOSE_REGEX = /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|\[\/(?:thought|reasoning)\]|<\|thought\|>/gi;
+    const OPEN_PREFIXES = ['<think', '<thought', '<thinking', '<reasoning', '<ant_thought', '<thought_process', '<|thought|>', '[thought]', '[reasoning]'];
+    const CLOSE_TAGS = ['</think>', '</thought>', '</thinking>', '</reasoning>', '</ant_thought>', '</thought_process>', '<|thought|>', '[/thought]', '[/reasoning]'];
 
     function findPartialTagTailIndex(s, closingMode) {
       const minPos = Math.max(0, s.length - 128);
@@ -1228,11 +1232,13 @@
 
       while (input.length > 0) {
         if (inside) {
-          const closeRe = activeTag
-            ? (activeIsBracket
-              ? new RegExp('\\[/' + activeTag + '\\]', 'i')
-              : new RegExp('</' + activeTag + '\\s*>', 'i'))
-            : /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|\[\/(?:thought|reasoning)\]/i;
+          const closeRe = activeIsPipe
+            ? /<\|thought\|>/i
+            : (activeTag
+              ? (activeIsBracket
+                ? new RegExp('\\[/' + activeTag + '\\]', 'i')
+                : new RegExp('</' + activeTag + '\\s*>', 'i'))
+              : /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|\[\/(?:thought|reasoning)\]|<\|thought\|>/i);
           const closeMatch = closeRe.exec(input);
           if (!closeMatch) {
             const partialIdx = !final ? findPartialTagTailIndex(input, true) : -1;
@@ -1254,6 +1260,7 @@
           inside = false;
           activeTag = '';
           activeIsBracket = false;
+          activeIsPipe = false;
           continue;
         }
 
@@ -1271,8 +1278,9 @@
 
         output += input.slice(0, openMatch.index);
         input = input.slice(openMatch.index + openMatch[0].length);
+        activeIsPipe = openMatch[0].toLowerCase() === '<|thought|>';
         activeIsBracket = Boolean(openMatch[2]);
-        activeTag = (openMatch[1] || openMatch[2] || '').toLowerCase();
+        activeTag = activeIsPipe ? '|thought|' : (openMatch[1] || openMatch[2] || '').toLowerCase();
         inside = true;
       }
 
@@ -2117,9 +2125,9 @@
   function extractParentQuizContext(sessionOrMessages, fallbackSessions = null) {
     let rawList = Array.isArray(sessionOrMessages?.messages) ? sessionOrMessages.messages : (Array.isArray(sessionOrMessages) ? sessionOrMessages : []);
     // Cross-session bridge: jika sesi baru belum memiliki balasan asisten, ambil konteks dari sesi aktif terakhir sebelumnya
-    if ((!rawList || !rawList.some(m => m && m.role === 'assistant' && m.content)) && Array.isArray(fallbackSessions) && fallbackSessions.length > 0) {
+    if ((!rawList || !rawList.some(m => m && m.role === 'assistant' && !m.isEmptyFallback && m.content)) && Array.isArray(fallbackSessions) && fallbackSessions.length > 0) {
       for (const s of fallbackSessions) {
-        if (s && !s.isIncognito && Array.isArray(s.messages) && s.messages.some(m => m && m.role === 'assistant' && m.content)) {
+        if (s && !s.isIncognito && Array.isArray(s.messages) && s.messages.some(m => m && m.role === 'assistant' && !m.isEmptyFallback && m.content)) {
           rawList = s.messages;
           break;
         }
@@ -2130,7 +2138,7 @@
     let lastAsstMsg = '';
     let lastAsstIdx = -1;
     for (let i = rawList.length - 1; i >= 0; i--) {
-      if (rawList[i] && rawList[i].role === 'assistant' && rawList[i].content) {
+      if (rawList[i] && rawList[i].role === 'assistant' && !rawList[i].isEmptyFallback && rawList[i].content) {
         lastAsstIdx = i;
         lastAsstMsg = String(rawList[i].content).trim();
         break;
@@ -2165,7 +2173,7 @@
     if (candidateOptions.length < 2) {
       const startScanIdx = parentUserIdx !== -1 ? parentUserIdx + 1 : lastAsstIdx;
       for (let j = startScanIdx; j <= lastAsstIdx; j++) {
-        if (rawList[j] && rawList[j].role === 'assistant' && rawList[j].content) {
+        if (rawList[j] && rawList[j].role === 'assistant' && !rawList[j].isEmptyFallback && rawList[j].content) {
           const asstOpts = extractCandidateOptionsFromTextBlock(String(rawList[j].content), true);
           if (asstOpts.length >= 2) {
             candidateOptions = asstOpts;
@@ -2179,7 +2187,7 @@
     const falsifiedAnswers = [];
     const startAsstIdx = parentUserIdx !== -1 ? parentUserIdx + 1 : lastAsstIdx;
     for (let j = startAsstIdx; j <= lastAsstIdx; j++) {
-      if (rawList[j] && rawList[j].role === 'assistant' && rawList[j].content) {
+      if (rawList[j] && rawList[j].role === 'assistant' && !rawList[j].isEmptyFallback && rawList[j].content) {
         const chosen = identifyChosenOptionInAssistantTurn(String(rawList[j].content), candidateOptions);
         if (chosen && !falsifiedAnswers.includes(chosen)) {
           falsifiedAnswers.push(chosen);
@@ -2867,9 +2875,18 @@
     const isRevision = isRevisionQuery(raw);
     const sessionObj = options && (options.session || options.history || options.sessionOrMessages);
     const fallbackSessions = options && options.fallbackSessions;
-    const parentQuiz = isRevision ? extractParentQuizContext(sessionObj, fallbackSessions) : null;
+    const sessionMsgsForRev = Array.isArray(sessionObj?.messages) ? sessionObj.messages : (Array.isArray(sessionObj) ? sessionObj : []);
+    let lastAssistantInSession = null;
+    for (let k = sessionMsgsForRev.length - 1; k >= 0; k--) {
+      if (sessionMsgsForRev[k] && sessionMsgsForRev[k].role === 'assistant') {
+        lastAssistantInSession = sessionMsgsForRev[k];
+        break;
+      }
+    }
+    const effectiveIsRevision = isRevision && !(lastAssistantInSession && lastAssistantInSession.isEmptyFallback);
+    const parentQuiz = effectiveIsRevision ? extractParentQuizContext(sessionObj, fallbackSessions) : null;
 
-    if (isRevision && parentQuiz && parentQuiz.candidateOptions.length >= 2) {
+    if (effectiveIsRevision && parentQuiz && parentQuiz.candidateOptions.length >= 2) {
       const falsifiedList = Array.isArray(parentQuiz.falsifiedAnswers) && parentQuiz.falsifiedAnswers.length > 0
         ? parentQuiz.falsifiedAnswers
         : (parentQuiz.previousAnswer ? [parentQuiz.previousAnswer] : []);
@@ -2921,7 +2938,7 @@
         reconstructedUserPrompt,
         calibrationDirective
       };
-    } else if (isRevision) {
+    } else if (effectiveIsRevision) {
       // Resilien Fallback untuk Revisi Kuis tanpa Format Opsi Standar / Soal Konversasional / Gambar
       const prevAnswerText = parentQuiz?.previousAnswer || 'Jawaban pada giliran sebelumnya';
       const falsifiedList = Array.isArray(parentQuiz?.falsifiedAnswers) && parentQuiz.falsifiedAnswers.length > 0

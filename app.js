@@ -8463,7 +8463,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     for (const pat of monologuePatterns) {
       if (pat.test(trimmed)) {
         const remaining = stripModelInternalMonologuePreamble(trimmed);
-        if (remaining && remaining.length >= 40) {
+        if (remaining && remaining !== trimmed && remaining.length >= 40) {
           return false;
         }
         return true;
@@ -8648,6 +8648,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         model,
         messages: buildWebRescueMessages(question, evidenceText, model),
         stream: true,
+        think: false,
         ...(extraBody || {})
       };
       if (!STATE.settings.useCustomParameters) {
@@ -8657,7 +8658,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           top_p: sampling.topP
         };
       }
-      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
+      let res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
+      if (!res.ok && body.think !== undefined && (res.status === 400 || res.status === 422 || res.status === 500)) {
+        delete body.think;
+        res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
+      }
       if (!res.ok) return '';
       const reader = res.body.getReader();
       const dec = new TextDecoder();
@@ -8679,11 +8684,207 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         lines.forEach(eat);
       }
       eat(buf);
-      out = scrubRawToolCallArtifacts(out).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      out = scrubRawToolCallArtifacts(out).replace(/<(?:think|thought)[^>]*>[\s\S]*?<\/(?:think|thought)>|<\|thought\|>[\s\S]*?(?:<\|thought\|>|$)/gi, '').trim();
       return (out && !isModelInternalMonologue(out)) ? out : '';
     } catch (err) {
       if (err && (err.name === 'AbortError' || (signal && signal.aborted))) throw err;
       return '';
+    }
+  }
+
+  function stripToolDirectivesForRecovery(str) {
+    if (typeof str !== 'string' || !str) return '';
+    return str
+      .replace(/\[SKEMA TOOL EKSTERNAL AKTIF\]:[\s\S]*?(?=(?:\n\[(?:SISTEM|PERSONA|JOZZ MEMORY|KORPUS|MANDAT|PROTOKOL|KALIBRASI)|\]\n\n|$))/gi, '')
+      .replace(/\[4\. ORCHESTRATION & CHAINING[\s\S]*?(?=(?:\n\[(?:SISTEM|PERSONA|JOZZ MEMORY|KORPUS|MANDAT|PROTOKOL|KALIBRASI)|\]\n\n|$))/gi, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function buildCleanEmptyRecoveryMessages(messagesPayload) {
+    const raw = Array.isArray(messagesPayload) ? messagesPayload : [];
+    const cleaned = [];
+    for (const msg of raw) {
+      if (!msg || !msg.role || msg.role === 'tool') continue;
+      if (msg.isEmptyFallback) continue;
+      if (Array.isArray(msg.content)) {
+        const parts = msg.content.map(part => {
+          if (part && part.type === 'text' && typeof part.text === 'string') {
+            return { ...part, text: stripToolDirectivesForRecovery(part.text) };
+          }
+          return part;
+        });
+        cleaned.push({ role: msg.role, content: parts });
+        continue;
+      }
+      const nextText = stripToolDirectivesForRecovery(String(msg.content || ''));
+      if (msg.role === 'assistant' && !nextText) continue;
+      if (msg.role === 'system' && !nextText) continue;
+      const copy = { role: msg.role, content: nextText };
+      if (Array.isArray(msg.images) && msg.images.length > 0) copy.images = msg.images;
+      cleaned.push(copy);
+    }
+    return cleaned;
+  }
+
+  async function recoverEmptyOllamaReply({ chatUrl, headers, modelName, messagesPayload, endpoint, requestBody, sessionId, signal }) {
+    try {
+      const cleanMessages = buildCleanEmptyRecoveryMessages(messagesPayload);
+      if (cleanMessages.length === 0) return { text: '', usage: null, tokenCount: 0 };
+      const retryBody = {
+        model: modelName,
+        messages: cleanMessages,
+        stream: true,
+        think: false,
+        endpoint: endpoint || requestBody?.endpoint || 'https://ollama.com',
+        options: {
+          ...(requestBody?.options || {}),
+          temperature: Math.max(0.45, Number(requestBody?.options?.temperature) || 0.6)
+        }
+      };
+      if (sessionId) retryBody.sessionId = `${sessionId}_retry_1`;
+      if (requestBody?.userId) retryBody.userId = requestBody.userId;
+      if (requestBody?.apiKey) retryBody.apiKey = requestBody.apiKey;
+      if (requestBody?.ollamaApiKey) retryBody.ollamaApiKey = requestBody.ollamaApiKey;
+      if (requestBody?.openRouterKey) retryBody.openRouterKey = requestBody.openRouterKey;
+      if (requestBody?.isAutoRouter) retryBody.isAutoRouter = requestBody.isAutoRouter;
+
+      let res = await fetch(chatUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(retryBody),
+        signal
+      });
+      if (!res.ok && retryBody.think !== undefined && (res.status === 400 || res.status === 422 || res.status === 500)) {
+        delete retryBody.think;
+        res = await fetch(chatUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(retryBody),
+          signal
+        });
+      }
+      if (!res.ok || !res.body) return { text: '', usage: null, tokenCount: 0 };
+
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      let out = '';
+      let usage = null;
+      let tokCount = 0;
+      const eatLine = (ln) => {
+        if (!ln || !ln.trim()) return;
+        try {
+          const p = JSON.parse(ln.trim());
+          if (p.done && (p.eval_count !== undefined || p.prompt_eval_count !== undefined)) {
+            usage = {
+              completion_tokens: p.eval_count,
+              prompt_tokens: p.prompt_eval_count,
+              eval_duration: p.eval_duration,
+              prompt_eval_duration: p.prompt_eval_duration,
+              total_duration: p.total_duration
+            };
+          }
+          const c = p.message?.content || p.response || '';
+          if (c) {
+            out += c;
+            tokCount++;
+          }
+        } catch (_) {}
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          buf += dec.decode();
+          break;
+        }
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        lines.forEach(eatLine);
+      }
+      eatLine(buf);
+      const cleaned = safeAssistantText(scrubRawToolCallArtifacts(out));
+      return { text: cleaned || '', usage, tokenCount: tokCount };
+    } catch (err) {
+      if (err && (err.name === 'AbortError' || (signal && signal.aborted))) throw err;
+      return { text: '', usage: null, tokenCount: 0 };
+    }
+  }
+
+  async function recoverEmptyOpenRouterReply({ endpointUrl, headers, modelName, messagesPayload, basePayload, signal }) {
+    try {
+      const cleanMessages = buildCleanEmptyRecoveryMessages(messagesPayload);
+      if (cleanMessages.length === 0) return { text: '', usage: null, tokenCount: 0 };
+      const retryBody = {
+        ...(basePayload || {}),
+        model: modelName,
+        messages: cleanMessages,
+        stream: true,
+        max_tokens: Math.min(Number(basePayload?.max_tokens) || 4096, 8192),
+        temperature: Math.max(0.45, Number(basePayload?.temperature) || 0.6)
+      };
+      delete retryBody.tools;
+      delete retryBody.tool_choice;
+      delete retryBody.reasoning;
+      delete retryBody.reasoning_effort;
+      if (retryBody.sessionId) retryBody.sessionId = `${retryBody.sessionId}_retry_1`;
+
+      let res = await fetch(endpointUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(retryBody),
+        signal
+      });
+      if (!res.ok && (res.status === 400 || res.status === 422) && retryBody.temperature !== undefined) {
+        delete retryBody.temperature;
+        res = await fetch(endpointUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(retryBody),
+          signal
+        });
+      }
+      if (!res.ok || !res.body) return { text: '', usage: null, tokenCount: 0 };
+
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      let out = '';
+      let usage = null;
+      let tokCount = 0;
+      const eatSse = (ln) => {
+        const t = ln ? ln.trim() : '';
+        if (!t.startsWith('data:')) return;
+        const j = t.replace(/^data:\s*/, '');
+        if (!j || j === '[DONE]') return;
+        try {
+          const p = JSON.parse(j);
+          if (p.usage) usage = p.usage;
+          const d = p.choices?.[0]?.delta?.content || p.choices?.[0]?.message?.content || '';
+          if (d) {
+            out += d;
+            tokCount++;
+          }
+        } catch (_) {}
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          buf += dec.decode();
+          break;
+        }
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        lines.forEach(eatSse);
+      }
+      eatSse(buf);
+      const cleaned = safeAssistantText(scrubRawToolCallArtifacts(out));
+      return { text: cleaned || '', usage, tokenCount: tokCount };
+    } catch (err) {
+      if (err && (err.name === 'AbortError' || (signal && signal.aborted))) throw err;
+      return { text: '', usage: null, tokenCount: 0 };
     }
   }
 
@@ -14235,6 +14436,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       // opts.render === false → batalkan timer dan kembalikan teks jawaban,
       // TANPA menyentuh DOM (jalur completion merender sendiri di bawahnya).
       const shouldRender = opts.render !== false;
+      const allowReasoningFallback = opts.allowReasoningFallback !== false;
       this.isDone = true;
       this.isThinking = false;
       if (this.renderTimer !== null) {
@@ -14252,7 +14454,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         if (tail) this.text += tail;
       }
       // Failsafe matematis: jika teks jawaban kosong tetapi model menghasilkan token penalaran (mis. model Beam/Reflection), ekstrak kesimpulan analitis fallback:
-      if (!this.text.trim() && this.accumulatedReasoning && this.accumulatedReasoning.trim()) {
+      if (allowReasoningFallback && !this.text.trim() && this.accumulatedReasoning && this.accumulatedReasoning.trim()) {
         const tsMod = (typeof ZozTextSafety !== 'undefined') ? ZozTextSafety : ((typeof textSafety !== 'undefined') ? textSafety : null);
         const fallback = (tsMod && typeof tsMod.extractFallbackConclusionFromUnclosedThought === 'function')
           ? tsMod.extractFallbackConclusionFromUnclosedThought(this.accumulatedReasoning)
@@ -37010,6 +37212,7 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
     const carriedImageIdx = findCarriedImageTurnIndex(rawList, currentImages);
 
     rawList.forEach((m, idx) => {
+      if (m && m.role === 'assistant' && m.isEmptyFallback) return;
       const isLatestTurn = (idx === rawList.length - 1);
       const isCarriedTurn = (idx === carriedImageIdx);
       let mImgs = (isLatestTurn && Array.isArray(currentImages) && currentImages.length > 0)
@@ -38191,7 +38394,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               };
             }
             const chunk = parsed.message?.content || parsed.response || '';
-            const reasoningChunk = parsed.message?.reasoning || parsed.reasoning || '';
+            const reasoningChunk = parsed.message?.reasoning || parsed.message?.thinking || parsed.reasoning || parsed.thinking || '';
             if (reasoningChunk) {
               streamRenderer.appendReasoning(reasoningChunk);
             }
@@ -38234,7 +38437,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             };
           }
           const chunk = parsed.message?.content || parsed.response || '';
-          const reasoningChunk = parsed.message?.reasoning || parsed.reasoning || '';
+          const reasoningChunk = parsed.message?.reasoning || parsed.message?.thinking || parsed.reasoning || parsed.thinking || '';
           if (reasoningChunk) {
             streamRenderer.appendReasoning(reasoningChunk);
           }
@@ -38251,7 +38454,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // render:false → render final tunggal ada di bawah (finalRenderedContent),
       // sehingga renderMarkdown + enhanceCodeBlocks/hljs tidak dijalankan dua kali.
-      fullText = safeAssistantText(streamRenderer.finish({ render: false }));
+      fullText = safeAssistantText(streamRenderer.finish({ render: false, allowReasoningFallback: false }));
 
       // ==================== OLLAMA AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = !isPureMathSession;
@@ -38608,8 +38811,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                   receivedOllamaDone = true;
                   if (!doneReason) doneReason = 'stop';
                 }
+                if (dParsed.done && (dParsed.eval_count !== undefined || dParsed.prompt_eval_count !== undefined)) {
+                  ollamaUsage = {
+                    completion_tokens: dParsed.eval_count,
+                    prompt_tokens: dParsed.prompt_eval_count,
+                    eval_duration: dParsed.eval_duration,
+                    prompt_eval_duration: dParsed.prompt_eval_duration,
+                    total_duration: dParsed.total_duration
+                  };
+                }
                 const chunk = dParsed.message?.content || dParsed.response || '';
-                const dReasoning = dParsed.message?.reasoning || dParsed.reasoning || '';
+                const dReasoning = dParsed.message?.reasoning || dParsed.message?.thinking || dParsed.reasoning || dParsed.thinking || '';
                 if (dReasoning) {
                   digestionRenderer.appendReasoning(dReasoning);
                 }
@@ -38642,8 +38854,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 receivedOllamaDone = true;
                 if (!doneReason) doneReason = 'stop';
               }
+              if (dParsed.done && (dParsed.eval_count !== undefined || dParsed.prompt_eval_count !== undefined)) {
+                ollamaUsage = {
+                  completion_tokens: dParsed.eval_count,
+                  prompt_tokens: dParsed.prompt_eval_count,
+                  eval_duration: dParsed.eval_duration,
+                  prompt_eval_duration: dParsed.prompt_eval_duration,
+                  total_duration: dParsed.total_duration
+                };
+              }
               const chunk = dParsed.message?.content || dParsed.response || '';
-              const dReasoning = dParsed.message?.reasoning || dParsed.reasoning || '';
+              const dReasoning = dParsed.message?.reasoning || dParsed.message?.thinking || dParsed.reasoning || dParsed.thinking || '';
               if (dReasoning) {
                 digestionRenderer.appendReasoning(dReasoning);
               }
@@ -38860,8 +39081,6 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (synth) fullText = synth;
             } else if (groundedImageDisplays && groundedImageDisplays.length > 0) {
               fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
-            } else if (preambleHtml) {
-              fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
             }
           }
         }
@@ -38877,6 +39096,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         preambleHtml = '';
       }
 
+      let isEmptyResponseFallback = false;
       if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml) {
         if (STATE.abortController?.signal?.aborted) {
           // H3: dibatalkan sebelum ada teks sama sekali → HAPUS baris & beri tahu
@@ -38892,11 +39112,40 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         } else if (groundedImageDisplays && groundedImageDisplays.length > 0) {
           fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
         } else {
-          fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
+          // Auto-Recovery 1-shot: model menghasilkan 0 teks (mis. seluruh token habis di message.thinking pada gemma4/qwen3/r1).
+          bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-rotate-right fa-spin"></i> <span>Memulihkan jawaban model...</span></div>`;
+          smartScrollChatToBottom(true);
+          const recovered = await recoverEmptyOllamaReply({
+            chatUrl,
+            headers,
+            modelName,
+            messagesPayload,
+            endpoint: ep,
+            requestBody,
+            sessionId: session?.id || null,
+            signal: STATE.abortController?.signal
+          });
+          if (recovered && recovered.text && recovered.text.trim()) {
+            fullText = recovered.text;
+            if (recovered.usage) ollamaUsage = recovered.usage;
+            if (recovered.tokenCount) tokenCount = recovered.tokenCount;
+          } else if (streamRenderer && streamRenderer.accumulatedReasoning && /(?:kesimpulan|jawaban(?:\s+akhir|\s+yang\s+benar)?|final\s+answer|jadi\s+jawabannya)\s*[:=-]/i.test(streamRenderer.accumulatedReasoning)) {
+            const tsMod = (typeof ZozTextSafety !== 'undefined') ? ZozTextSafety : null;
+            const thoughtFallback = (tsMod && typeof tsMod.extractFallbackConclusionFromUnclosedThought === 'function')
+              ? tsMod.extractFallbackConclusionFromUnclosedThought(streamRenderer.accumulatedReasoning)
+              : '';
+            if (thoughtFallback && !isModelInternalMonologue(thoughtFallback) && !isInternalSystemPayload(thoughtFallback)) {
+              fullText = thoughtFallback;
+            }
+          }
         }
       }
 
       fullText = safeAssistantText(fullText);
+      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && (!groundedImageDisplays || groundedImageDisplays.length === 0)) {
+        isEmptyResponseFallback = true;
+        fullText = 'Maaf, model tidak menghasilkan teks jawaban untuk permintaan ini. Silakan klik **Ulangi** atau kirim ulang pesan Anda.';
+      }
       const evalTokens = (ollamaUsage && typeof ollamaUsage.completion_tokens === 'number')
         ? ollamaUsage.completion_tokens
         : Math.max(tokenCount, estimateBpeTokens(fullText));
@@ -39041,6 +39290,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           planMode: normalizePlanMode(runOptions.planMode || getActivePlanMode(session)),
           websiteMode: runOptions.websiteMode,
           isCommunicationAnalysis: isCommAnalysisTurn || undefined,
+          isEmptyFallback: isEmptyResponseFallback || undefined,
           docFormat: runOptions.docFormat,
           sources: webSources,
           memoryReceipts: (jozzMemoryRecall?.receipts?.length > 0) ? jozzMemoryRecall.receipts : undefined,
@@ -39061,7 +39311,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         renderChatHistory(els.searchHistoryInput?.value || '');
 
         // Pillar 1: Hybrid Memory Capture (Counterfactual Error-Learning + Cross-Session Episodic Distillation)
-        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && !hasExplicitNoMemoryDirective && fullText && fullText.trim().length >= 1) {
+        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && !hasExplicitNoMemoryDirective && !isEmptyResponseFallback && fullText && fullText.trim().length >= 1) {
           const capturedLocal = (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.captureTurnMemory === 'function')
             ? LocalMemoryVault.captureTurnMemory({
                 userId: STATE.userId || 'default',
@@ -39096,7 +39346,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const isOllamaStreamIncomplete = Boolean(!receivedOllamaDone && tokenCount > 0 && currentRoundNativeCalls.length === 0 && (autonomousRound > 0 || accumulatedToolCalls.length === 0));
 
       // SEAMLESS AUTO-CONTINUATION: Jika output terpotong, sambung otomatis dan perbarui alasan berhenti terkini
-      const ollamaContRes = await resolvePostStreamContinuation(assistantRow, {
+      const ollamaContRes = isEmptyResponseFallback ? { continued: false } : await resolvePostStreamContinuation(assistantRow, {
         session,
         modelName,
         engine: 'ollama',
@@ -39891,6 +40141,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       let activeEndpoint = '';
       let activeHeaders = {};
       let activeRouteType = '';
+      let activeBasePayload = null;
       let resolvedMaxTokensOr = 16384;
       let finishReason = null;
       let openRouterUsage = null;
@@ -40173,6 +40424,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             activeEndpoint = targetUrl;
             activeHeaders = targetHeaders;
             activeRouteType = routeType;
+            activeBasePayload = targetBody;
             resolvedMaxTokensOr = initialMaxTokensOr;
             activeMessagesPayload = currentMessagesPayload;
 
@@ -40288,9 +40540,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                     });
                   }
 
-                  const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning 
-                    || parsed.choices?.[0]?.delta?.reasoning_content 
-                    || parsed.choices?.[0]?.delta?.thought 
+                  const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning
+                    || parsed.choices?.[0]?.delta?.reasoning_content
+                    || parsed.choices?.[0]?.delta?.thought
+                    || parsed.choices?.[0]?.delta?.thinking
                     || '';
                   if (reasoningDelta) {
                     if (!firstTokenTime) firstTokenTime = performance.now();
@@ -40371,9 +40624,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                           }
                         });
                       }
-                      const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning 
-                        || parsed.choices?.[0]?.delta?.reasoning_content 
-                        || parsed.choices?.[0]?.delta?.thought 
+                      const reasoningDelta = parsed.choices?.[0]?.delta?.reasoning
+                        || parsed.choices?.[0]?.delta?.reasoning_content
+                        || parsed.choices?.[0]?.delta?.thought
+                        || parsed.choices?.[0]?.delta?.thinking
                         || '';
                       if (reasoningDelta) {
                         if (!firstTokenTime) firstTokenTime = performance.now();
@@ -40487,7 +40741,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // render:false → render final tunggal ada di bawah (finalRenderedContent),
       // sehingga renderMarkdown + enhanceCodeBlocks/hljs tidak dijalankan dua kali.
-      fullText = safeAssistantText(streamRenderer.finish({ render: false }));
+      fullText = safeAssistantText(streamRenderer.finish({ render: false, allowReasoningFallback: false }));
 
       // ==================== UNIVERSAL AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = !isPureMathSession;
@@ -40885,9 +41139,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 if (dParsed.choices?.[0]?.finish_reason) {
                   finishReason = dParsed.choices[0].finish_reason;
                 }
-                const dReasoning = dParsed.choices?.[0]?.delta?.reasoning 
-                  || dParsed.choices?.[0]?.delta?.reasoning_content 
-                  || dParsed.choices?.[0]?.delta?.thought 
+                const dReasoning = dParsed.choices?.[0]?.delta?.reasoning
+                  || dParsed.choices?.[0]?.delta?.reasoning_content
+                  || dParsed.choices?.[0]?.delta?.thought
+                  || dParsed.choices?.[0]?.delta?.thinking
                   || '';
                 if (dReasoning) {
                   tokenCount++;
@@ -40949,9 +41204,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 if (dParsed.choices?.[0]?.finish_reason) {
                   finishReason = dParsed.choices[0].finish_reason;
                 }
-                const dReasoning = dParsed.choices?.[0]?.delta?.reasoning 
-                  || dParsed.choices?.[0]?.delta?.reasoning_content 
-                  || dParsed.choices?.[0]?.delta?.thought 
+                const dReasoning = dParsed.choices?.[0]?.delta?.reasoning
+                  || dParsed.choices?.[0]?.delta?.reasoning_content
+                  || dParsed.choices?.[0]?.delta?.thought
+                  || dParsed.choices?.[0]?.delta?.thinking
                   || '';
                 if (dReasoning) {
                   tokenCount++;
@@ -41210,8 +41466,6 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (synth) fullText = synth;
             } else if ((collectedImages && collectedImages.length > 0) || (groundedImageDisplays && groundedImageDisplays.length > 0)) {
               fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
-            } else if (preambleHtml) {
-              fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
             }
           }
         }
@@ -41227,6 +41481,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         preambleHtml = '';
       }
 
+      let isEmptyResponseFallback = false;
       if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && collectedImages.length === 0 && groundedImageDisplays.length === 0) {
         if (STATE.abortController?.signal?.aborted) {
           // H3: sama seperti Ollama — jangan simpan gelembung kosong sebagai jawaban.
@@ -41240,11 +41495,48 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         } else if ((collectedImages && collectedImages.length > 0) || (groundedImageDisplays && groundedImageDisplays.length > 0)) {
           fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
         } else {
-          fullText = 'Model telah menyelesaikan penelusuran komprehensif atas kueri Anda.';
+          // Auto-Recovery 1-shot tanpa tools & tanpa reasoning agar model langsung menjawab ke konten utama
+          bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-rotate-right fa-spin"></i> <span>Memulihkan jawaban model...</span></div>`;
+          smartScrollChatToBottom(true);
+          const recDirect = activeRouteType === 'direct' || (Boolean(STATE.settings.openRouterKey) && !activeEndpoint);
+          const recUrl = activeEndpoint || (recDirect ? 'https://openrouter.ai/api/v1/chat/completions' : getUniversalApiUrl('/api/openrouter/chat'));
+          const recHeaders = (activeHeaders && Object.keys(activeHeaders).length > 0) ? activeHeaders : {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${STATE.settings.openRouterKey || ''}`,
+            'HTTP-Referer': location.origin || 'https://z21.zozdocs.com',
+            'X-Title': 'ZOZ Router'
+          };
+          const recovered = await recoverEmptyOpenRouterReply({
+            endpointUrl: recUrl,
+            headers: recHeaders,
+            modelName: actualModelUsed || modelName,
+            messagesPayload: activeMessagesPayload || messagesPayload,
+            basePayload: activeBasePayload,
+            signal: STATE.abortController?.signal
+          });
+          if (recovered && recovered.text && recovered.text.trim()) {
+            fullText = recovered.text;
+            if (recovered.usage) openRouterUsage = recovered.usage;
+            if (recovered.tokenCount) tokenCount = recovered.tokenCount;
+            isStreamInterrupted = false;
+          } else if (streamRenderer && streamRenderer.accumulatedReasoning && /(?:kesimpulan|jawaban(?:\s+akhir|\s+yang\s+benar)?|final\s+answer|jadi\s+jawabannya)\s*[:=-]/i.test(streamRenderer.accumulatedReasoning)) {
+            const tsMod = (typeof ZozTextSafety !== 'undefined') ? ZozTextSafety : null;
+            const thoughtFallback = (tsMod && typeof tsMod.extractFallbackConclusionFromUnclosedThought === 'function')
+              ? tsMod.extractFallbackConclusionFromUnclosedThought(streamRenderer.accumulatedReasoning)
+              : '';
+            if (thoughtFallback && !isModelInternalMonologue(thoughtFallback) && !isInternalSystemPayload(thoughtFallback)) {
+              fullText = thoughtFallback;
+              isStreamInterrupted = false;
+            }
+          }
         }
       }
 
       fullText = safeAssistantText(fullText);
+      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && collectedImages.length === 0 && groundedImageDisplays.length === 0) {
+        isEmptyResponseFallback = true;
+        fullText = 'Maaf, model tidak menghasilkan teks jawaban untuk permintaan ini. Silakan klik **Ulangi** atau kirim ulang pesan Anda.';
+      }
       const evalTokens = (openRouterUsage && typeof openRouterUsage.completion_tokens === 'number')
         ? openRouterUsage.completion_tokens
         : Math.max(tokenCount, estimateBpeTokens(fullText));
@@ -41462,6 +41754,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           planMode: normalizePlanMode(runOptions.planMode || getActivePlanMode(session)),
           websiteMode: runOptions.websiteMode,
           isCommunicationAnalysis: isCommAnalysisTurn || undefined,
+          isEmptyFallback: isEmptyResponseFallback || undefined,
           docFormat: runOptions.docFormat,
           images: collectedImages.length > 0 ? collectedImages : undefined,
           imageDisplays: groundedImageDisplays.length > 0 ? groundedImageDisplays : undefined,
@@ -41484,7 +41777,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         renderChatHistory(els.searchHistoryInput?.value || '');
 
         // Pillar 1: Hybrid Memory Capture (Counterfactual Error-Learning + Cross-Session Episodic Distillation)
-        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && !hasExplicitNoMemoryDirective && fullText && fullText.trim().length >= 1) {
+        if (!STATE.isIncognito && STATE.settings.enableJozzMemory !== false && !hasExplicitNoMemoryDirective && !isEmptyResponseFallback && fullText && fullText.trim().length >= 1) {
           const capturedLocal = (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.captureTurnMemory === 'function')
             ? LocalMemoryVault.captureTurnMemory({
                 userId: STATE.userId || 'default',
@@ -41516,7 +41809,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // SEAMLESS AUTO-CONTINUATION: Hanya picu auto-continuation jika output terpotong, stream terputus, atau tidak tuntas secara matematis
-      const orContRes = await resolvePostStreamContinuation(assistantRow, {
+      const orContRes = isEmptyResponseFallback ? { continued: false } : await resolvePostStreamContinuation(assistantRow, {
         session,
         modelName: actualModelUsed || displayModel,
         engine: engineMode,
@@ -62978,9 +63271,6 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       STATE.settings.personaMode = 'off';
       savePersistedState({ immediate: true });
       this.syncUI();
-      if (!silent) {
-        showToast('Persona AI dimatikan (mode murni tanpa direktif persona).', 'info');
-      }
       if (closeAfter) {
         closeModal('zozPersonaModal');
       }
@@ -62994,14 +63284,8 @@ Gunakan format Markdown lengkap dengan struktur berikut:
         savePersistedState({ immediate: true });
         this.setModalTab(resumeMode);
         this.syncUI();
-        showToast(
-          resumeMode === 'custom'
-            ? `Persona Custom "${st.title || 'Persona Custom'}" diaktifkan kembali.`
-            : 'Persona AI Formal diaktifkan kembali.',
-          'success'
-        );
       } else {
-        this.deactivatePersonaMode({ closeAfter: false, silent: false });
+        this.deactivatePersonaMode({ closeAfter: false, silent: true });
       }
     },
 
@@ -63011,9 +63295,6 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       this.setModalTab('formal');
       savePersistedState({ immediate: true });
       this.syncUI();
-      if (!silent) {
-        showToast('Persona diatur ke Non-Custom (AI Formal).', 'success');
-      }
       if (closeAfter) {
         closeModal('zozPersonaModal');
       }
@@ -63041,12 +63322,11 @@ Gunakan format Markdown lengkap dengan struktur berikut:
         savePersistedState({ immediate: true });
         this.syncUI();
         closeModal('zozPersonaModal');
-        showToast(`Persona Custom "${cleanTitle || 'Persona Custom'}" diaktifkan.`, 'success');
         return true;
       }
 
       // Jangan timpa draf custom ketika pengguna menerapkan mode Non-Custom (AI Formal)
-      this.activateFormalMode({ closeAfter: true, silent: false });
+      this.activateFormalMode({ closeAfter: true, silent: true });
       return true;
     },
 
@@ -63122,7 +63402,6 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       STATE.settings.personaCustomPrompt = found.prompt || '';
       savePersistedState({ immediate: true });
       this.syncUI();
-      showToast(`Profil Custom "${found.title}" dimuat & diaktifkan.`, 'success');
       return true;
     },
 
@@ -63323,7 +63602,6 @@ Gunakan format Markdown lengkap dengan struktur berikut:
           STATE.settings.personaLastActiveMode = 'custom';
           savePersistedState({ immediate: true });
           this.syncUI();
-          showToast(`Persona Custom "${st.title || 'Persona Custom'}" diaktifkan.`, 'success');
         } else {
           this.openPersonaModal('custom', { fromSettings: true });
         }

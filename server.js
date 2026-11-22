@@ -14839,7 +14839,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
               }
               try {
                 // Auto-retry tanpa tools atau tanpa think jika model lokal tidak mendukung parameter tersebut
-                if (((Array.isArray(body.tools) && body.tools.length > 0 && /tool/i.test(errData)) || (body.think && /think/i.test(errData))) && (statusCode === 400 || statusCode === 422 || statusCode === 500) && !res.headersSent && !clientDisconnected) {
+                if (((Array.isArray(body.tools) && body.tools.length > 0 && /tool/i.test(errData)) || (body.think !== undefined && /think/i.test(errData))) && (statusCode === 400 || statusCode === 422 || statusCode === 500) && !res.headersSent && !clientDisconnected) {
                   if (/tool/i.test(errData)) {
                     delete body.tools;
                     delete body.tool_choice;

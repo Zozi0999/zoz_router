@@ -1794,6 +1794,9 @@ export default {
         if (body.format) {
           outBody.format = body.format;
         }
+        if (typeof body.think === 'boolean' || typeof body.think === 'string') {
+          outBody.think = body.think;
+        }
 
         let res = await fetch(targetUrl.toString(), {
           method: 'POST',
@@ -1802,6 +1805,20 @@ export default {
           redirect: 'manual',
           signal: request.signal
         });
+
+        if (!res.ok && outBody.think !== undefined && (res.status === 400 || res.status === 422 || res.status === 500)) {
+          const errTextProbe = await res.clone().text().catch(() => '');
+          if (/think/i.test(errTextProbe)) {
+            delete outBody.think;
+            res = await fetch(targetUrl.toString(), {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(outBody),
+              redirect: 'manual',
+              signal: request.signal
+            });
+          }
+        }
 
         if (!res.ok) {
           const errData = await res.json().catch(() => null);
