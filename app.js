@@ -7,7 +7,7 @@
   'use strict';
 
   const TEXT_SAFETY = window.ZozTextSafety || null;
-  const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|INSTRUKSI FORMAT WAJIB|Instruksi Sistem & Konteks|INTEGRITAS KONTEKS|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine|DATA HASIL PENELUSURAN INTERNAL|DATA PENELUSURAN FAKTA|HASIL prepare_image_display|HASIL search_images|HASIL search_web|INSTRUKSI PENYAJIAN JAWABAN AKHIR|SPESIFIKASI SINTESIS BUKTI|ALUR VERIFIKASI VISUAL AKTIF|HASIL EKSEKUSI TOOL):?(?:[^\[\]]|\[[^\]]*\])*\](?:\n\n|\s*)/gi;
+  const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|INSTRUKSI FORMAT WAJIB|Instruksi Sistem & Konteks|INTEGRITAS KONTEKS|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine|DATA HASIL PENELUSURAN INTERNAL|DATA PENELUSURAN FAKTA|HASIL prepare_image_display|HASIL search_images|HASIL search_web|HASIL render_weather_ui|HASIL fetch_weather_data|HASIL get_current_coordinates|HASIL request_location_permission|HASIL DATA CUACA REAL-TIME|IZIN LOKASI DIBERIKAN PENGGUNA|AKSES LOKASI DITOLAK PENGGUNA|KOORDINAT & PENCOCOKAN LOKASI|ALUR CUACA & LOKASI AKTIF|INSTRUKSI PENYAJIAN JAWABAN AKHIR|SPESIFIKASI SINTESIS BUKTI|ALUR VERIFIKASI VISUAL AKTIF|HASIL EKSEKUSI TOOL):?(?:[^\[\]]|\[[^\]]*\])*\](?:\n\n|\s*)/gi;
   const stripModelTags = (str) => {
     if (typeof str !== 'string' || !str) return '';
     let res = str.replace(MODEL_TAG_REGEX, '');
@@ -46,8 +46,10 @@
     if (typeof text !== 'string' || !text) return '';
     let out = TEXT_SAFETY ? TEXT_SAFETY.stripReasoningText(text) : text
       .replace(/<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>[\s\S]*?(?:<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)>|$)/gi, '')
+      .replace(/<\|thought\|>[\s\S]*?(?:<\|thought\|>|$)/gi, '')
       .replace(/\[(?:THOUGHT|REASONING)\][\s\S]*?(?:\[\/(?:THOUGHT|REASONING)\]|$)/gi, '')
       .replace(/<\/?(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
+      .replace(/<\|thought\|>/gi, '')
       .replace(/\[\/?(?:THOUGHT|REASONING)\]/gi, '');
     out = stripModelTags(out);
     out = cleanPseudoCotJsonFallback(out);
@@ -316,7 +318,12 @@
            lower.includes('sistem menyelesaikan penelusuran') ||
            trimmed.includes('Model telah menyelesaikan penelusuran komprehensif') ||
            lower.includes('model telah menyelesaikan penelusuran komprehensif') ||
-           (/^\[\[?ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]+\]?\]?$/i.test(trimmed));
+           (/^\[\[?ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]+\]?\]?$/i.test(trimmed)) ||
+           trimmed.startsWith('[IZIN LOKASI') ||
+           trimmed.startsWith('[AKSES LOKASI') ||
+           trimmed.startsWith('[KOORDINAT & PENCOCOKAN LOKASI') ||
+           trimmed.startsWith('[ALUR CUACA') ||
+           (/^\[\[?ZOZ_WEATHER_DISPLAY:wth_[a-zA-Z0-9_-]+\]?\]?$/i.test(trimmed));
   }
 
   function sanitizeOllamaApiKey(rawKey) {
@@ -2033,7 +2040,7 @@
 
           for (let mIdx = msgs.length - 1; mIdx >= 0; mIdx--) {
             const msg = msgs[mIdx];
-            if (!msg || msg.role !== 'assistant' || !msg.content) continue;
+            if (!msg || msg.role !== 'assistant' || !msg.content || msg.isEmptyFallback) continue;
             // Cari pesan user pasangannya
             let prevUser = null;
             for (let uIdx = mIdx - 1; uIdx >= 0; uIdx--) {
@@ -3974,8 +3981,12 @@
         this.textAnomalies = (this.textAnomalies || []).filter(a => a.id !== id && (!id || a.label !== id));
       } else if (type === 'tool') {
         this.toolIssues = (this.toolIssues || []).filter(t => t.id !== id && (!id || t.toolName !== id));
+      } else if (type === 'tool_success') {
+        this.toolSuccesses = (this.toolSuccesses || []).filter(ts => ts.id !== id && (!id || ts.toolName !== id));
       } else if (type === 'hallucination') {
-        this.hallucinationIssues = (this.hallucinationIssues || []).filter(h => h.id !== id);
+        this.hallucinationIssues = (this.hallucinationIssues || []).filter(h => h.id !== id && (!id || h.model !== id));
+      } else if (type === 'skill') {
+        this.agentSkillAudits = (this.agentSkillAudits || []).filter(sk => sk.id !== id && (!id || sk.skill !== id));
       } else if (type === 'viewport') {
         this.viewportIssues = (this.viewportIssues || []).filter(v => v.id !== id && v.selector !== id);
       } else if (type === 'button') {
@@ -3983,7 +3994,7 @@
       } else if (type === 'gateway') {
         this.gatewayIssues = (this.gatewayIssues || []).filter(g => g.id !== id && g.selector !== id);
       } else if (type === 'connectome') {
-        this.isolatedNodes = [];
+        this.isolatedNodes = id ? (this.isolatedNodes || []).filter(n => n !== id && n.slice(0, 60) !== id) : [];
       }
       this.recalculateStress();
       this.updateUI();
@@ -4324,6 +4335,7 @@
       if (this.activeSubTab === 'all' || this.activeSubTab === 'connectome') {
         (this.isolatedNodes || []).forEach(err => {
           allActiveIssues.push({
+            id: err,
             type: 'connectome',
             badge: 'Simpul DOM',
             badgeClass: 'badge-connectome',
@@ -4341,6 +4353,7 @@
       if (this.activeSubTab === 'all' || this.activeSubTab === 'model') {
         (this.modelErrors || []).forEach(err => {
           allActiveIssues.push({
+            id: err.id || err.model,
             type: 'model',
             badge: 'Model Call',
             badgeClass: 'badge-model',
@@ -4358,6 +4371,7 @@
       if (this.activeSubTab === 'all' || this.activeSubTab === 'text') {
         (this.textAnomalies || []).forEach(anom => {
           allActiveIssues.push({
+            id: anom.id || anom.label,
             type: 'text',
             badge: 'Teks Rusak',
             badgeClass: 'badge-text',
@@ -4375,6 +4389,7 @@
       if (this.activeSubTab === 'all' || this.activeSubTab === 'viewport') {
         (this.viewportIssues || []).forEach(vp => {
           allActiveIssues.push({
+            id: vp.id || vp.selector,
             type: 'viewport',
             badge: 'Layar & Layout',
             badgeClass: 'badge-viewport',
@@ -4392,6 +4407,7 @@
       if (this.activeSubTab === 'all' || this.activeSubTab === 'button') {
         (this.buttonIssues || []).forEach(btn => {
           allActiveIssues.push({
+            id: btn.id || btn.selector,
             type: 'button',
             badge: 'Tombol Terhalang',
             badgeClass: 'badge-button',
@@ -4409,6 +4425,7 @@
       if (this.activeSubTab === 'all' || this.activeSubTab === 'gateway') {
         (this.gatewayIssues || []).forEach(gw => {
           allActiveIssues.push({
+            id: gw.id || gw.selector,
             type: 'gateway',
             badge: 'Gateway & State',
             badgeClass: 'badge-gateway',
@@ -4426,6 +4443,7 @@
       if (this.activeSubTab === 'all' || this.activeSubTab === 'tool') {
         (this.toolIssues || []).forEach(t => {
           allActiveIssues.push({
+            id: t.id || t.toolName,
             type: 'tool',
             badge: t.isSoftMiss ? 'Info Tool' : 'Tool Error',
             badgeClass: t.isSoftMiss ? 'badge-model' : 'badge-tool',
@@ -4441,6 +4459,7 @@
         // Tampilkan juga eksekusi tool sukses (Dopamin & Endorfin terkonfirmasi)
         (this.toolSuccesses || []).slice(0, 5).forEach(ts => {
           allActiveIssues.push({
+            id: ts.id || ts.toolName,
             type: 'tool_success',
             badge: 'Tool Terverifikasi',
             badgeClass: 'badge-gateway',
@@ -4458,6 +4477,7 @@
       if (this.activeSubTab === 'all' || this.activeSubTab === 'hallucination') {
         (this.hallucinationIssues || []).forEach(h => {
           allActiveIssues.push({
+            id: h.id || h.model,
             type: 'hallucination',
             badge: 'Halusinasi Data',
             badgeClass: 'badge-hallucination',
@@ -4475,6 +4495,7 @@
       if (this.activeSubTab === 'all' || this.activeSubTab === 'skill') {
         (this.agentSkillAudits || []).filter(sk => this.activeSubTab === 'skill' || sk.score < 60).forEach(sk => {
           allActiveIssues.push({
+            id: sk.id || sk.skill,
             type: 'skill',
             badge: `Nilai Guna ${sk.grade}`,
             badgeClass: sk.score >= 80 ? 'badge-gateway' : (sk.score >= 60 ? 'badge-model' : 'badge-hallucination'),
@@ -7217,7 +7238,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
                 const isDiskFresh = !memTime || diskTime >= memTime;
                 const isDiskImageDisplaysChanged = Boolean(
                   diskLast && memLast &&
-                  JSON.stringify(diskLast.imageDisplays || null) !== JSON.stringify(memLast.imageDisplays || null)
+                  (
+                    JSON.stringify(diskLast.imageDisplays || null) !== JSON.stringify(memLast.imageDisplays || null) ||
+                    JSON.stringify(diskLast.weatherDisplays || null) !== JSON.stringify(memLast.weatherDisplays || null)
+                  )
                 );
                 const isDiskContentChanged = Boolean(
                   diskLast && memLast && (diskLast.content !== memLast.content || isDiskImageDisplaysChanged)
@@ -7966,6 +7990,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
               slot: m.slot,
               sources: m.sources,
               imageDisplays: (Array.isArray(m.imageDisplays) && m.imageDisplays.length > 0) ? m.imageDisplays : undefined,
+              weatherDisplays: (Array.isArray(m.weatherDisplays) && m.weatherDisplays.length > 0) ? m.weatherDisplays : undefined,
               memoryReceipts: (Array.isArray(m.memoryReceipts) && m.memoryReceipts.length > 0) ? m.memoryReceipts : undefined,
               chatHistoryRefs: (Array.isArray(m.chatHistoryRefs) && m.chatHistoryRefs.length > 0) ? m.chatHistoryRefs : undefined,
               videoIds: (Array.isArray(m.videoIds) && m.videoIds.length > 0) ? m.videoIds : undefined,
@@ -8172,8 +8197,173 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       .trim();
   }
 
+  function synthesizeWeatherDetailedSummary(weatherData, question = '', placementToken = '') {
+    if (!weatherData || typeof weatherData !== 'object') return '';
+    const loc = weatherData.location || {};
+    const cur = weatherData.current || {};
+    const daily = weatherData.daily || {};
+    const hourly = Array.isArray(weatherData.hourly) ? weatherData.hourly : [];
+    const dailyForecast = Array.isArray(weatherData.dailyForecast) ? weatherData.dailyForecast : [];
+    const displayLoc = loc.displayName || loc.city || 'lokasi Anda';
+    const cond = cur.condition || 'Berawan';
+    const temp = cur.tempC ?? '-';
+    const feelsLike = cur.feelsLikeC ?? temp;
+    const minT = daily.tempMinC ?? '-';
+    const maxT = daily.tempMaxC ?? '-';
+    const hum = cur.humidity ?? '-';
+    const wind = cur.windKmh ?? '-';
+    const windDir = cur.windDirection ? ` dari arah **${cur.windDirection}**` : '';
+    const cloud = cur.cloudCover ?? null;
+    const rainProb = cur.rainProbNow ?? daily.precipProbMax ?? 0;
+    const precipMm = cur.precipitationMm ?? 0;
+    const obsTime = cur.observedAt ? String(cur.observedAt).replace('T', ' pukul ') : '';
+    const tzAbbr = cur.timezoneAbbr ? ` ${cur.timezoneAbbr}` : '';
+    const timeSpec = (typeof WeatherController !== 'undefined' && typeof WeatherController.resolveTargetTimeSpec === 'function')
+      ? WeatherController.resolveTargetTimeSpec(question)
+      : {
+          dayOffset: /\b(?:besok|esok|tomorrow)\b/i.test(String(question || '')) ? 1 : (/\b(?:lusa|day\s+after\s+tomorrow)\b/i.test(String(question || '')) ? 2 : 0),
+          dayLabel: /\b(?:besok|esok|tomorrow)\b/i.test(String(question || '')) ? 'Besok' : (/\b(?:lusa|day\s+after\s+tomorrow)\b/i.test(String(question || '')) ? 'Lusa' : 'Hari Ini'),
+          subperiod: ''
+        };
+    const targetDayItem = timeSpec.dayOffset > 0
+      ? (dailyForecast.find((d, ix) => Number(d?.dayOffset ?? ix) === timeSpec.dayOffset) || dailyForecast[timeSpec.dayOffset] || null)
+      : null;
+
+    const lines = [];
+    if (targetDayItem) {
+      lines.push(`Berikut prakiraan cuaca lengkap **${targetDayItem.dayLabel || timeSpec.dayLabel}**${targetDayItem.date ? ` (${targetDayItem.date})` : ''} dan ringkasan kondisi atmosfer terkini untuk **${displayLoc}**:`);
+    } else {
+      lines.push(`Berikut laporan cuaca lengkap dan analisis kondisi atmosfer terkini untuk **${displayLoc}**${obsTime ? ` *(data observasi ${obsTime}${tzAbbr})*` : ''}:`);
+    }
+    if (placementToken) {
+      lines.push('');
+      lines.push(placementToken);
+    }
+
+    if (targetDayItem) {
+      const tdLabel = targetDayItem.dayLabel || timeSpec.dayLabel || 'Besok';
+      lines.push('');
+      lines.push(`### Prakiraan ${tdLabel} (${targetDayItem.date || tdLabel})`);
+      lines.push(
+        `Untuk **${tdLabel.toLowerCase()}** di **${displayLoc}**, cuaca diprakirakan **${targetDayItem.condition}** dengan suhu perkiraan sekitar **${targetDayItem.tempC ?? '-'}°C** (rentang harian **${targetDayItem.tempMinC ?? '-'}°C – ${targetDayItem.tempMaxC ?? '-'}°C**), kelembapan sekitar **${targetDayItem.humidity ?? hum}%**, angin **${targetDayItem.windKmh ?? wind} km/j**, dan peluang hujan maksimal **${targetDayItem.precipProbMax ?? 0}%**` +
+        `${targetDayItem.uvIndexMax !== null && targetDayItem.uvIndexMax !== undefined ? ` *(indeks UV maks **${targetDayItem.uvIndexMax}**)*` : ''}.`
+      );
+      if (Array.isArray(targetDayItem.hourly) && targetDayItem.hourly.length > 0) {
+        targetDayItem.hourly.forEach(h => {
+          lines.push(`- **${h.hourLabel}:** ${h.tempC}°C — **${h.condition}** (peluang hujan **${h.precipProb}%**)`);
+        });
+      }
+    }
+
+    lines.push('');
+    lines.push('### Kondisi & Parameter Cuaca Saat Ini');
+    lines.push(`- **Kondisi Langit & Suhu:** Saat ini cuaca dalam kondisi **${cond}** dengan suhu aktual **${temp}°C** dan terasa seperti **${feelsLike}°C** (rentang suhu hari ini **${minT}°C – ${maxT}°C**).`);
+    lines.push(`- **Kelembapan & Tutupan Awan:** Tingkat kelembapan udara berada di angka **${hum}%**${cloud !== null ? ` dengan tutupan awan sebesar **${cloud}%**` : ''}${Number(hum) >= 80 ? ' — udara terasa cukup lembap' : ''}.`);
+    lines.push(`- **Angin & Curah Hujan:** Angin bertiup dengan kecepatan **${wind} km/j**${windDir}. Peluang hujan saat ini tercatat **${rainProb}%** dengan curah hujan terukur **${precipMm} mm**${cur.pressureHpa ? ` serta tekanan permukaan **${cur.pressureHpa} hPa**` : ''}.`);
+    if (daily.uvIndexMax !== null || daily.sunrise || daily.sunset) {
+      const sunParts = [];
+      if (daily.uvIndexMax !== null && daily.uvIndexMax !== undefined) sunParts.push(`Indeks UV maks: **${daily.uvIndexMax}**`);
+      if (daily.sunrise || daily.sunset) sunParts.push(`Matahari terbit/terbenam: **${daily.sunrise || '-'} / ${daily.sunset || '-'}**`);
+      lines.push(`- **Radiasi UV & Siklus Harian:** ${sunParts.join(' | ')}.`);
+    }
+
+    if (hourly.length > 0) {
+      lines.push('');
+      lines.push('### Tren Prakiraan 5 Jam Ke Depan');
+      hourly.forEach(h => {
+        lines.push(`- **${h.hourLabel}:** ${h.tempC}°C — **${h.condition}** (peluang hujan **${h.precipProb}%**)`);
+      });
+    }
+
+    if (dailyForecast.length > 1) {
+      lines.push('');
+      lines.push('### Ringkasan Harian (Hari Ini – Lusa)');
+      dailyForecast.forEach(d => {
+        lines.push(`- **${d.dayLabel}** *(${d.date})*: **${d.condition}**, suhu **${d.tempMinC ?? '-'}°C – ${d.tempMaxC ?? '-'}°C**, peluang hujan maks **${d.precipProbMax ?? 0}%**`);
+      });
+    }
+
+    lines.push('');
+    lines.push('### Rekomendasi Praktis');
+    lines.push(cur.advice || 'Pantau perkembangan cuaca lokal secara berkala sebelum beraktivitas di luar ruangan.');
+    return lines.join('\n');
+  }
+
+  function resolveRescueEvidenceContext({
+    fullText = '',
+    groundedWeatherDisplays = [],
+    weatherData = null,
+    allAccumulatedToolResponsesText = '',
+    webSources = [],
+    hadSearchOrVideoToolRound = false
+  } = {}) {
+    const probeText = scrubRawToolCallArtifacts(fullText || '').trim();
+    const probeWithoutCards = probeText.replace(/\[\[?ZOZ_(?:WEATHER|IMAGE)_DISPLAY:[^\]]+\]?\]?/gi, '').trim();
+    const hasWeather = Boolean(groundedWeatherDisplays.length > 0 || weatherData?.success);
+    const isGenericWeatherBoilerplate = /Open-Meteo Weather API|wttr\.in Weather|MET Norway Weather|topik utama yang dibahas adalah Open-Meteo/i.test(probeWithoutCards);
+    const needsWeatherDetailRescue = Boolean(
+      hasWeather &&
+      (!probeWithoutCards || probeWithoutCards.length < 180 || isGenericWeatherBoilerplate)
+    );
+    const shouldRescue = Boolean(
+      !probeText ||
+      isModelInternalMonologue(probeText) ||
+      isAutonomousFallbackText(probeText) ||
+      isInternalSystemPayload(probeText) ||
+      (hadSearchOrVideoToolRound && isLinkOnlyOrUnexplainedSearchOutput(probeText)) ||
+      needsWeatherDetailRescue
+    );
+    let evidenceText = allAccumulatedToolResponsesText || (webSources && webSources.length > 0 ? synthesizeAutonomousWebSummary('', webSources) : '');
+    if (needsWeatherDetailRescue && weatherData?.success) {
+      const tokenHint = groundedWeatherDisplays[0]?.placement_token
+        ? ` Cantumkan token ${groundedWeatherDisplays[0].placement_token} pada baris tersendiri.`
+        : '';
+      evidenceText = `${weatherData.formattedContext || ''}\n\n[MANDAT PENJELASAN CUACA MENDETAIL]: JANGAN hanya menampilkan kartu atau ringkasan singkat 1 kalimat! Susun penjelasan cuaca yang LENGKAP, DETAIL, dan INFORMATIF dalam Bahasa Indonesia: bahas kondisi atmosfer & lokasi observasi, suhu aktual vs terasa seperti, rentang suhu min/maks, kelembapan (%), tutupan awan (%), kecepatan & arah angin, peluang/curah hujan, indeks UV & matahari terbit/terbenam, tren prakiraan 5 jam ke depan, prakiraan besok jika relevan, serta saran aktivitas praktis.${tokenHint}`;
+    }
+    return { shouldRescue, needsWeatherDetailRescue, evidenceText };
+  }
+
+  function finalizeWeatherProseOutput(fullText = '', weatherData = null, groundedWeatherDisplays = [], promptText = '') {
+    let out = String(fullText || '').trim();
+    const firstToken = (groundedWeatherDisplays || []).find(w => w && w.placement_token)?.placement_token
+      || (groundedWeatherDisplays?.[0]?.display_id ? `[[ZOZ_WEATHER_DISPLAY:${groundedWeatherDisplays[0].display_id}]]` : '');
+
+    if (groundedWeatherDisplays && groundedWeatherDisplays.length > 0) {
+      for (const wDisp of groundedWeatherDisplays) {
+        if (wDisp && wDisp.display_id) {
+          const wToken = `[[ZOZ_WEATHER_DISPLAY:${wDisp.display_id}]]`;
+          if (out && !out.includes(wToken)) {
+            const paras = out.split(/\n\s*\n/);
+            if (paras.length > 1) {
+              paras.splice(1, 0, wToken);
+              out = paras.join('\n\n');
+            } else {
+              out = `${out}\n\n${wToken}\n`;
+            }
+          }
+        }
+      }
+    }
+
+    const proseOnly = out.replace(/\[\[?ZOZ_(?:WEATHER|IMAGE)_DISPLAY:[^\]]+\]?\]?/gi, '').trim();
+    const isGenericBoilerplate = /Open-Meteo Weather API|wttr\.in Weather|MET Norway Weather|topik utama yang dibahas adalah Open-Meteo/i.test(proseOnly);
+    if (weatherData?.success && (!proseOnly || proseOnly.length < 180 || isGenericBoilerplate)) {
+      return synthesizeWeatherDetailedSummary(weatherData, promptText, firstToken);
+    }
+    return out;
+  }
+
   function synthesizeAutonomousWebSummary(rawToolResponsesText, sources) {
     const rawText = String(rawToolResponsesText || '');
+
+    const activeWeatherData = (typeof WeatherController !== 'undefined' && WeatherController._activeTurnCtx?.weatherData?.success)
+      ? WeatherController._activeTurnCtx.weatherData
+      : null;
+    if (activeWeatherData || rawText.includes('[HASIL DATA CUACA REAL-TIME')) {
+      if (activeWeatherData) {
+        return synthesizeWeatherDetailedSummary(activeWeatherData, '', '');
+      }
+    }
 
     // Cek apakah data ini adalah respon rekomendasi video dari find_related_videos (seluruh video di bumi)
     const isVideoRecommendation = rawText.includes('[HASIL PENCARIAN & REKOMENDASI VIDEO TERKAIT') ||
@@ -8565,20 +8755,23 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       ];
     }
 
+    const isWeatherEvidence = evidenceText.includes('[HASIL DATA CUACA REAL-TIME') || evidenceText.includes('[MANDAT PENJELASAN CUACA MENDETAIL]');
     return [
       {
         role: 'system',
         content: isPersonaOff
-          ? `Jawab pertanyaan pengguna secara faktual dan lengkap ${langInstruction} berdasarkan korpus bukti terverifikasi di bawah (UTC ${isoDate}). Jangan hanya menampilkan daftar link URL tanpa penjelasan, dan jangan mencetak blok tool call.`
+          ? `Jawab pertanyaan pengguna secara faktual dan lengkap ${langInstruction} berdasarkan korpus bukti terverifikasi di bawah (UTC ${isoDate}).${isWeatherEvidence ? ' Uraikan secara detail kondisi cuaca, suhu aktual & terasa, kelembapan, angin, peluang hujan, prakiraan 5 jam ke depan/besok, dan saran praktis (jangan hanya menampilkan kartu saja).' : ''} Jangan hanya menampilkan daftar link URL tanpa penjelasan, dan jangan mencetak blok tool call.`
           : `${personaPrefix}[SPESIFIKASI SINTESIS BUKTI TERVERIFIKASI — UTC ${isoDate}]\n` +
             `1. Jawab pertanyaan pengguna dengan PENJELASAN YANG MENDALAM, JELAS, DAN LENGKAP ${langInstruction} menggunakan korpus bukti di bawah (entitas, konsep, angka, mekanisme, dan fakta).\n` +
-            `2. Jika korpus berupa daftar video, jelaskan topik/isi masing-masing video (berdasarkan judul, deskripsi, kanal, durasi) serta mengapa video tersebut relevan untuk ditonton, lalu sertakan tautan video lengkap agar pemutar chat bekerja.\n` +
-            `3. DILARANG KERAS hanya menampilkan daftar link URL atau daftar sumber saja tanpa uraian penjelasan yang memadai!\n` +
+            (isWeatherEvidence
+              ? `2. Karena data merupakan telemetri cuaca real-time, WAJIB jelaskan secara rinci lokasi, waktu observasi, kondisi langit, suhu aktual vs terasa, suhu min/maks, kelembapan, tutupan awan, kecepatan & arah angin, peluang/curah hujan, indeks UV & matahari terbit/terbenam, tren 5 jam ke depan, prakiraan besok bila relevan, serta saran aktivitas praktis. Tetap pertahankan token [[ZOZ_WEATHER_DISPLAY:...]] jika tersedia.\n`
+              : `2. Jika korpus berupa daftar video, jelaskan topik/isi masing-masing video (berdasarkan judul, deskripsi, kanal, durasi) serta mengapa video tersebut relevan untuk ditonton, lalu sertakan tautan video lengkap agar pemutar chat bekerja.\n`) +
+            `3. DILARANG KERAS hanya menampilkan daftar link URL, daftar sumber saja, atau kartu visualisasi saja tanpa uraian penjelasan yang memadai!\n` +
             `4. Jangan mencetak blok tool call atau monolog internal.`
       },
       {
         role: 'user',
-        content: `Kueri: ${String(question || '').slice(0, 1000)}\n\n[KORPUS BUKTI TERVERIFIKASI]:\n${String(evidenceText || '').slice(0, 16000)}\n\nSusun penjelasan faktual yang menyeluruh berdasarkan bukti di atas (bukan hanya daftar link).`
+        content: `Kueri: ${String(question || '').slice(0, 1000)}\n\n[KORPUS BUKTI TERVERIFIKASI]:\n${String(evidenceText || '').slice(0, 16000)}\n\nSusun penjelasan faktual yang menyeluruh berdasarkan bukti di atas (jangan hanya daftar link atau kartu singkat).`
       }
     ];
   }
@@ -8701,7 +8894,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       .trim();
   }
 
-  function buildCleanEmptyRecoveryMessages(messagesPayload) {
+  function buildCleanEmptyRecoveryMessages(messagesPayload, toolContextText = '') {
     const raw = Array.isArray(messagesPayload) ? messagesPayload : [];
     const cleaned = [];
     for (const msg of raw) {
@@ -8724,12 +8917,21 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       if (Array.isArray(msg.images) && msg.images.length > 0) copy.images = msg.images;
       cleaned.push(copy);
     }
+    const extraToolCtx = typeof toolContextText === 'string' ? toolContextText.trim().slice(0, 6000) : '';
+    if (extraToolCtx && cleaned.length > 0) {
+      const ctxNote = `[DATA HASIL TOOL TERVERIFIKASI UNTUK MENJAWAB PERTANYAAN PENGGUNA]:\n${extraToolCtx}`;
+      if (cleaned[0] && cleaned[0].role === 'system' && typeof cleaned[0].content === 'string') {
+        cleaned[0].content = `${cleaned[0].content}\n\n${ctxNote}`.trim();
+      } else {
+        cleaned.unshift({ role: 'system', content: ctxNote });
+      }
+    }
     return cleaned;
   }
 
-  async function recoverEmptyOllamaReply({ chatUrl, headers, modelName, messagesPayload, endpoint, requestBody, sessionId, signal }) {
+  async function recoverEmptyOllamaReply({ chatUrl, headers, modelName, messagesPayload, endpoint, requestBody, sessionId, toolContextText = '', signal }) {
     try {
-      const cleanMessages = buildCleanEmptyRecoveryMessages(messagesPayload);
+      const cleanMessages = buildCleanEmptyRecoveryMessages(messagesPayload, toolContextText);
       if (cleanMessages.length === 0) return { text: '', usage: null, tokenCount: 0 };
       const retryBody = {
         model: modelName,
@@ -8812,9 +9014,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     }
   }
 
-  async function recoverEmptyOpenRouterReply({ endpointUrl, headers, modelName, messagesPayload, basePayload, signal }) {
+  async function recoverEmptyOpenRouterReply({ endpointUrl, headers, modelName, messagesPayload, basePayload, toolContextText = '', signal }) {
     try {
-      const cleanMessages = buildCleanEmptyRecoveryMessages(messagesPayload);
+      const cleanMessages = buildCleanEmptyRecoveryMessages(messagesPayload, toolContextText);
       if (cleanMessages.length === 0) return { text: '', usage: null, tokenCount: 0 };
       const retryBody = {
         ...(basePayload || {}),
@@ -10467,6 +10669,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     let result = walk(container, { inPre: false, listDepth: 0 });
     result = result
       .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
+      .replace(/\[\[ZOZ_WEATHER_DISPLAY:wth_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
       .replace(/\r\n/g, '\n')
       .replace(/[ \t]+\n/g, '\n')
       .replace(/\n{3,}/g, '\n\n')
@@ -10487,6 +10690,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     if (!rawMarkdown || typeof rawMarkdown !== 'string') return '';
     let out = safeAssistantText(rawMarkdown)
       .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
+      .replace(/\[\[ZOZ_WEATHER_DISPLAY:wth_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
       .trim();
 
     // Lindungi blok kode terlebih dahulu
@@ -11254,6 +11458,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     // Mendukung double brackets [[...]], single brackets [...], backtick code <code>...</code>, dan plain text
     result = result.replace(/(?:<p\b[^>]*>\s*)?(?:<code>\s*)?\[{0,2}ZOZ_IMAGE_DISPLAY:(disp_[a-zA-Z0-9_-]{4,64})\]{0,2}(?:\s*<\/code>)?(?:\s*<\/p>)?/gi, (_m, dispId) => {
       return `<div class="zoz-image-display-slot" data-display-id="${escapeHtml(dispId)}"></div>`;
+    });
+    result = result.replace(/(?:<p\b[^>]*>\s*)?(?:<code>\s*)?\[{0,2}ZOZ_WEATHER_DISPLAY:(wth_[a-zA-Z0-9_-]{4,64})\]{0,2}(?:\s*<\/code>)?(?:\s*<\/p>)?/gi, (_m, weatherId) => {
+      return `<div class="zoz-weather-display-slot" data-weather-id="${escapeHtml(weatherId)}"></div>`;
     });
 
     // Render nomor sitasi dan daftar sumber menjadi tautan aktif interaktif ke URL rujukan asli
@@ -13954,6 +14161,1705 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     return { status: mountedCount > 0 ? 'mounted' : 'empty', renderedCount: mountedCount };
   }
 
+  // ==================== LOCATION CONSENT GATE & WEATHER VISUALIZATION ENGINE ====================
+  const WeatherController = {
+    _CONSENT_STORAGE_KEY: 'zoz_weather_location_consent_v1',
+    _bound: false,
+    _pendingPromise: null,
+    _pendingResolver: null,
+    _activeAbortCleanup: null,
+    _activeTurnCtx: null,
+
+    _loadPersistedConsent() {
+      try {
+        if (typeof localStorage === 'undefined') return null;
+        const raw = localStorage.getItem(this._CONSENT_STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return null;
+        if (parsed.status !== 'granted' && parsed.status !== 'manual_city') return null;
+        return parsed;
+      } catch (_) {
+        return null;
+      }
+    },
+
+    _savePersistedConsent(patch = {}) {
+      try {
+        if (typeof localStorage === 'undefined') return;
+        const prev = this._loadPersistedConsent() || {};
+        const next = {
+          status: patch.status || prev.status || 'granted',
+          grantedAt: patch.grantedAt || prev.grantedAt || Date.now(),
+          updatedAt: Date.now(),
+          manualCity: patch.manualCity !== undefined ? patch.manualCity : (prev.manualCity || ''),
+          coords: patch.coords || prev.coords || null,
+          location: patch.location || prev.location || null
+        };
+        localStorage.setItem(this._CONSENT_STORAGE_KEY, JSON.stringify(next));
+      } catch (_) {}
+    },
+
+    clearPersistedConsent() {
+      try {
+        if (typeof localStorage !== 'undefined') localStorage.removeItem(this._CONSENT_STORAGE_KEY);
+      } catch (_) {}
+      if (this._activeTurnCtx) {
+        this._activeTurnCtx.permissionStatus = 'prompt';
+        this._activeTurnCtx.coords = null;
+        this._activeTurnCtx.manualCity = '';
+        this._activeTurnCtx.matchedLocation = null;
+      }
+    },
+
+    hasPersistedApproval() {
+      return Boolean(this._loadPersistedConsent());
+    },
+
+    _hydrateTurnCtxFromStorage(turnCtx) {
+      if (!turnCtx || typeof turnCtx !== 'object') return turnCtx;
+      const saved = this._loadPersistedConsent();
+      if (!saved) return turnCtx;
+      turnCtx.permissionStatus = saved.status;
+      turnCtx.approvedAt = saved.grantedAt || saved.updatedAt || Date.now();
+      if (saved.manualCity && !turnCtx.manualCity) turnCtx.manualCity = saved.manualCity;
+      if (saved.location && !turnCtx.matchedLocation) turnCtx.matchedLocation = saved.location;
+      if (saved.status === 'manual_city' && saved.coords && !turnCtx.coords) {
+        turnCtx.coords = saved.coords;
+      }
+      return turnCtx;
+    },
+
+    resolveTargetTimeSpec(promptOrText = '', explicitArgs = null) {
+      const parseExplicitDayOffset = (raw) => {
+        if (raw === null || raw === undefined) return null;
+        if (typeof raw === 'number' && Number.isFinite(raw)) {
+          const n = Math.round(raw);
+          return n >= 0 && n <= 2 ? n : null;
+        }
+        const s = String(raw).trim().toLowerCase();
+        if (!s || s === 'auto') return null;
+        if (/^(?:0|today|hari[_\s-]*ini|sekarang|saat[_\s-]*ini|now)$/.test(s)) return 0;
+        if (/^(?:1|tomorrow|besok|esok)$/.test(s)) return 1;
+        if (/^(?:2|day[_\s-]*after(?:[_\s-]*tomorrow)?|lusa|besok[_\s-]*lusa)$/.test(s)) return 2;
+        return null;
+      };
+      const parsePromptDayOffset = (txt) => {
+        const q = String(txt || '');
+        if (!q) return null;
+        if (/\b(?:besok|esok|tomorrow)\b/i.test(q)) return 1;
+        if (/\b(?:lusa|day\s+after\s+tomorrow|2\s*hari\s*(?:lagi|ke\s*depan)|dua\s*hari\s*(?:lagi|ke\s*depan))\b/i.test(q)) return 2;
+        if (/\b(?:hari\s+ini|sekarang|saat\s+ini|today)\b/i.test(q)) return 0;
+        return null;
+      };
+      const parseSubperiod = (raw) => {
+        const s = String(raw || '').toLowerCase();
+        if (/\bpagi\b|\bmorning\b/.test(s)) return 'pagi';
+        if (/\bsiang\b|\bmidday\b|\bnoon\b/.test(s)) return 'siang';
+        if (/\bsore\b|\bpetang\b|\bafternoon\b|\bevening\b/.test(s)) return 'sore';
+        if (/\bmalam\b|\bnight\b|\bdini\s*hari\b/.test(s)) return 'malam';
+        return '';
+      };
+
+      const safeArgs = (explicitArgs && typeof explicitArgs === 'object') ? explicitArgs : {};
+      const argOffset = parseExplicitDayOffset(safeArgs.day_offset ?? safeArgs.dayOffset ?? safeArgs.target_day ?? safeArgs.targetDay ?? safeArgs.day ?? safeArgs.hari);
+      const promptOffset = parsePromptDayOffset(promptOrText);
+
+      // Bila prompt eksplisit menyebut besok/lusa, jangan biarkan argumen default "today" menurunkan visualisasi ke hari ini
+      let dayOffset = 0;
+      if (promptOffset !== null && promptOffset > 0) {
+        dayOffset = (argOffset !== null && argOffset > 0) ? argOffset : promptOffset;
+      } else {
+        dayOffset = argOffset !== null ? argOffset : (promptOffset ?? 0);
+      }
+
+      const subperiod = parseSubperiod(safeArgs.time_of_day || safeArgs.subperiod || safeArgs.waktu || '') || parseSubperiod(promptOrText);
+      const dayLabels = ['Hari Ini', 'Besok', 'Lusa'];
+      const targetParams = ['today', 'tomorrow', 'day_after'];
+      return {
+        dayOffset,
+        dayLabel: dayLabels[dayOffset] || 'Hari Ini',
+        targetDayParam: targetParams[dayOffset] || 'today',
+        subperiod
+      };
+    },
+
+    initTurnContext(promptText = '') {
+      if (/\b(?:reset|hapus|cabut|ubah|ganti)\s+(?:izin\s+)?(?:akses\s+)?lokasi\b/i.test(String(promptText || ''))) {
+        this.clearPersistedConsent();
+      }
+      const targetTimeSpec = this.resolveTargetTimeSpec(promptText);
+      const ctx = {
+        turnId: 'wturn_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        permissionStatus: 'prompt',
+        approvedAt: 0,
+        coords: null,
+        manualCity: '',
+        matchedLocation: null,
+        weatherData: null,
+        rawPrompt: String(promptText || ''),
+        targetTimeSpec
+      };
+      this._hydrateTurnCtxFromStorage(ctx);
+      this._activeTurnCtx = ctx;
+      return ctx;
+    },
+
+    init() {
+      if (this._bound || typeof document === 'undefined') return;
+      this._bound = true;
+
+      const modal = document.getElementById('locationConsentModal');
+      const approveBtn = document.getElementById('btnApproveLocationConsent');
+      const denyBtn = document.getElementById('btnDenyLocationConsent');
+      const closeBtn = document.getElementById('btnCloseLocationConsentModal');
+      const cityBtn = document.getElementById('btnLocationConsentUseCity');
+      const cityInput = document.getElementById('locationConsentManualCity');
+
+      approveBtn?.addEventListener('click', () => {
+        AudioEngine?.click?.();
+        this.handleApproveLocationClick();
+      });
+      denyBtn?.addEventListener('click', () => {
+        AudioEngine?.click?.();
+        this.dismissConsentModalWithRejection('[AKSES LOKASI DITOLAK PENGGUNA]: Pengguna memilih tombol Tolak untuk permintaan akses lokasi.');
+      });
+      closeBtn?.addEventListener('click', () => {
+        AudioEngine?.click?.();
+        this.dismissConsentModalWithRejection('[AKSES LOKASI DITOLAK PENGGUNA]: Pengguna menutup dialog izin lokasi.');
+      });
+      cityBtn?.addEventListener('click', () => {
+        AudioEngine?.click?.();
+        this.handleManualCitySubmit();
+      });
+      cityInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          AudioEngine?.click?.();
+          this.handleManualCitySubmit();
+        }
+      });
+      modal?.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          AudioEngine?.click?.();
+          this.dismissConsentModalWithRejection('[AKSES LOKASI DITOLAK PENGGUNA]: Pengguna menutup jendela izin lokasi.');
+        }
+      });
+    },
+
+    _setStatus(message = '', isError = false) {
+      const box = document.getElementById('locationConsentStatusNote');
+      if (!box) return;
+      if (!message) {
+        box.textContent = '';
+        box.hidden = true;
+        box.classList.remove('is-error');
+        return;
+      }
+      box.textContent = message;
+      box.hidden = false;
+      box.classList.toggle('is-error', Boolean(isError));
+    },
+
+    _setBusy(busy = false) {
+      const approveBtn = document.getElementById('btnApproveLocationConsent');
+      const denyBtn = document.getElementById('btnDenyLocationConsent');
+      const cityBtn = document.getElementById('btnLocationConsentUseCity');
+      if (approveBtn) {
+        approveBtn.disabled = Boolean(busy);
+        approveBtn.innerHTML = busy
+          ? '<i class="fa-solid fa-spinner fa-spin"></i> Mendeteksi Lokasi...'
+          : '<i class="fa-solid fa-location-arrow"></i> Izinkan Lokasi';
+      }
+      if (denyBtn) denyBtn.disabled = false;
+      if (cityBtn) cityBtn.disabled = Boolean(busy);
+    },
+
+    _closeModalDom() {
+      const modal = document.getElementById('locationConsentModal');
+      if (modal) {
+        modal.classList.remove('show');
+        if (modal.style && modal.style.display) {
+          modal.style.removeProperty('display');
+        }
+        if (typeof syncBodyModalState === 'function') syncBodyModalState();
+      }
+      this._setBusy(false);
+    },
+
+    _resolvePending(payload) {
+      if (this._activeAbortCleanup) {
+        try { this._activeAbortCleanup(); } catch (_) {}
+        this._activeAbortCleanup = null;
+      }
+      const resolver = this._pendingResolver;
+      this._pendingResolver = null;
+      this._pendingPromise = null;
+      this._closeModalDom();
+      if (typeof resolver === 'function') {
+        try { resolver(payload); } catch (_) {}
+      }
+    },
+
+    dismissConsentModalWithRejection(reasonText = '[AKSES LOKASI DITOLAK PENGGUNA]: Pengguna menolak akses lokasi.') {
+      const turnCtx = this._activeTurnCtx;
+      if (turnCtx) turnCtx.permissionStatus = 'denied';
+      if (!this._pendingResolver) {
+        this._closeModalDom();
+        return;
+      }
+      this._resolvePending({
+        approved: false,
+        permission: 'denied',
+        denied: true,
+        success: false,
+        text: reasonText
+      });
+    },
+
+    _acquireBrowserPosition(options = { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }) {
+      return new Promise((resolve, reject) => {
+        if (typeof navigator === 'undefined' || !navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== 'function') {
+          reject(Object.assign(new Error('Geolocation API tidak didukung oleh peramban ini.'), { code: 2 }));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(resolve, reject, options);
+      });
+    },
+
+    async handleApproveLocationClick() {
+      if (!this._pendingResolver) return;
+      this._setBusy(true);
+      this._setStatus('Meminta izin lokasi perangkat & mendeteksi koordinat GPS...', false);
+
+      try {
+        let pos = null;
+        try {
+          pos = await this._acquireBrowserPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
+        } catch (firstErr) {
+          if (firstErr && (firstErr.code === 3 || firstErr.code === 2)) {
+            this._setStatus('Mencoba metode deteksi lokasi jaringan...', false);
+            pos = await this._acquireBrowserPosition({ enableHighAccuracy: false, timeout: 6000, maximumAge: 120000 });
+          } else {
+            throw firstErr;
+          }
+        }
+
+        if (!this._pendingResolver) return;
+        const lat = Math.round(Number(pos?.coords?.latitude) * 10000) / 10000;
+        const lon = Math.round(Number(pos?.coords?.longitude) * 10000) / 10000;
+        const accuracy = Number.isFinite(Number(pos?.coords?.accuracy)) ? Math.round(Number(pos.coords.accuracy)) : null;
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+          throw new Error('Koordinat perangkat yang dikembalikan tidak valid.');
+        }
+
+        const coords = { lat, lon, accuracy_m: accuracy, source: 'device_gps' };
+        const approvedAt = Date.now();
+        if (this._activeTurnCtx) {
+          this._activeTurnCtx.permissionStatus = 'granted';
+          this._activeTurnCtx.approvedAt = approvedAt;
+          this._activeTurnCtx.coords = coords;
+        }
+        this._savePersistedConsent({
+          status: 'granted',
+          grantedAt: approvedAt,
+          coords
+        });
+
+        this._resolvePending({
+          approved: true,
+          permission: 'granted',
+          success: true,
+          coords,
+          text: `[IZIN LOKASI DIBERIKAN PENGGUNA]: Pengguna telah menyetujui akses lokasi perangkat (tersimpan sekali agar tidak ditanyakan ulang; status: granted, lat: ${coords.lat}, lon: ${coords.lon}). Panggil tool get_current_coordinates({}) atau fetch_weather_data({"lat": ${coords.lat}, "lon": ${coords.lon}}) sekarang.`
+        });
+      } catch (err) {
+        if (!this._pendingResolver) return;
+        this._setBusy(false);
+        const isInsecure = typeof window !== 'undefined' && window.isSecureContext === false && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+        let msg = 'Tidak dapat membaca GPS perangkat saat ini.';
+        if (err && err.code === 1) {
+          msg = isInsecure
+            ? 'Browser memblokir GPS pada koneksi non-HTTPS. Silakan ketik nama kota Anda secara manual di bawah atau gunakan localhost/HTTPS.'
+            : 'Izin lokasi ditolak oleh pengaturan peramban. Aktifkan izin lokasi di browser atau ketik nama kota Anda di bawah.';
+        } else if (err && err.code === 3) {
+          msg = 'Waktu tunggu sinyal GPS habis. Anda dapat mencoba lagi atau langsung mengetikkan nama kota Anda di bawah.';
+        } else if (err && err.message) {
+          msg = `${err.message} Anda bisa langsung mengetikkan nama kota Anda di bawah.`;
+        }
+        this._setStatus(msg, true);
+        const cityInput = document.getElementById('locationConsentManualCity');
+        cityInput?.focus?.();
+      }
+    },
+
+    _resolveWmoMetaClient(code, isDay = true) {
+      const c = Number.isFinite(Number(code)) ? Number(code) : 0;
+      const d = Boolean(isDay);
+      if (c === 0) return d ? { condition: 'Cerah', iconKey: 'sunny', visualTheme: 'sunny', advice: 'Cuaca cerah, tetap gunakan tabir surya jika beraktivitas di luar ruangan.' } : { condition: 'Cerah Berbintang', iconKey: 'clear-night', visualTheme: 'night', advice: 'Langit malam cerah dan nyaman untuk aktivitas luar ruangan.' };
+      if (c === 1) return d ? { condition: 'Umumnya Cerah', iconKey: 'partly-cloudy', visualTheme: 'sunny', advice: 'Cuaca cenderung cerah berawan dan bersahabat.' } : { condition: 'Cerah Berawan', iconKey: 'partly-cloudy-night', visualTheme: 'night', advice: 'Langit malam sebagian cerah dengan sedikit awan.' };
+      if (c === 2) return d ? { condition: 'Cerah Berawan', iconKey: 'partly-cloudy', visualTheme: 'partly_cloudy', advice: 'Suhu terasa nyaman dengan tutupan awan parsial.' } : { condition: 'Berawan Sebagian', iconKey: 'partly-cloudy-night', visualTheme: 'night', advice: 'Malam berawan ringan.' };
+      if (c === 3) return { condition: 'Mendung / Berawan', iconKey: 'cloudy', visualTheme: 'cloudy', advice: 'Langit tertutup awan tebal, pantau potensi gerimis jika hendak bepergian.' };
+      if (c === 45 || c === 48) return { condition: 'Berkabut', iconKey: 'fog', visualTheme: 'fog', advice: 'Jarak pandang berkurang karena kabut, berhati-hati saat berkendara.' };
+      if ([51, 53, 55, 56, 57].includes(c)) return { condition: 'Gerimis', iconKey: 'drizzle', visualTheme: 'rain', advice: 'Sediakan payung atau jas hujan ringan sebelum keluar ruangan.' };
+      if ([61, 80].includes(c)) return { condition: 'Hujan Ringan', iconKey: 'rain-light', visualTheme: 'rain', advice: 'Jangan lupa bawa payung atau jas hujan jika berencana keluar ruangan.' };
+      if ([63, 81].includes(c)) return { condition: 'Hujan Sedang', iconKey: 'rain', visualTheme: 'rain', advice: 'Hujan cukup merata; gunakan payung atau kendaraan tertutup.' };
+      if ([65, 66, 67, 82].includes(c)) return { condition: 'Hujan Lebat', iconKey: 'rain-heavy', visualTheme: 'rain', advice: 'Curah hujan tinggi; utamakan keamanan perjalanan.' };
+      if ([71, 73, 75, 77, 85, 86].includes(c)) return { condition: 'Salju / Hujan Es', iconKey: 'snow', visualTheme: 'snow', advice: 'Kenakan pakaian hangat tahan air dan waspadai permukaan licin.' };
+      if ([95, 96, 99].includes(c)) return { condition: 'Hujan Petir', iconKey: 'storm', visualTheme: 'storm', advice: 'Hindari area terbuka dan pohon tinggi saat badai petir berlangsung.' };
+      return d
+        ? { condition: 'Berawan', iconKey: 'cloudy', visualTheme: 'cloudy', advice: 'Pantau perubahan cuaca lokal sebelum bepergian.' }
+        : { condition: 'Malam Berawan', iconKey: 'cloudy-night', visualTheme: 'night', advice: 'Pantau kondisi cuaca malam sebelum keluar rumah.' };
+    },
+
+    _mapWttrDescToWmo(desc = '', wttrCode = 0) {
+      const s = String(desc || '').toLowerCase();
+      const w = Number(wttrCode);
+      if (/thunder|storm|petir|guntur|badai/.test(s) || [200, 386, 389, 392, 395].includes(w)) return 95;
+      if (/heavy rain|torrential|lebat/.test(s) || [308, 305, 356, 359].includes(w)) return 65;
+      if (/moderate rain|hujan sedang/.test(s) || [302, 299].includes(w)) return 63;
+      if (/rain|shower|hujan/.test(s) || [293, 296, 353, 176, 266, 263].includes(w)) return 61;
+      if (/drizzle|gerimis/.test(s) || [281, 284].includes(w)) return 51;
+      if (/snow|sleet|blizzard|ice|salju/.test(s) || [179, 182, 185, 227, 230, 323, 326, 329, 332, 335, 338, 368, 371].includes(w)) return 71;
+      if (/fog|mist|haze|kabut/.test(s) || [143, 248, 260].includes(w)) return 45;
+      if (/overcast|mendung/.test(s) || w === 122) return 3;
+      if (/cloudy|berawan/.test(s) || w === 119 || w === 116) return 2;
+      if (/sunny|clear|cerah/.test(s) || w === 113) return 0;
+      return 2;
+    },
+
+    _formatWindDir(deg) {
+      if (!Number.isFinite(Number(deg))) return '-';
+      const dirs = ['Utara', 'Timur Laut', 'Timur', 'Tenggara', 'Selatan', 'Barat Daya', 'Barat', 'Barat Laut'];
+      return dirs[Math.round(((Number(deg) % 360) + 360) % 360 / 45) % 8];
+    },
+
+    _buildNormalizedWeatherPayload({ provider = 'open-meteo-direct', safeLat, safeLon, locationInfo, currentData, dailySummary, hourlyForecast, dailyForecast = [] }) {
+      const hourlyLines = (hourlyForecast || []).map(h => `  • ${h.hourLabel}: ${h.tempC}°C (${h.condition}, peluang hujan ${h.precipProb}%)`).join('\n');
+      const dailyLines = (dailyForecast || []).map(d => `  • ${d.dayLabel} (${d.date}): ${d.condition}, suhu ${d.tempMinC ?? '-'}°C–${d.tempMaxC ?? '-'}°C, peluang hujan maks ${d.precipProbMax ?? 0}%`).join('\n');
+      const formattedContext = [
+        `[HASIL DATA CUACA REAL-TIME — ${String(provider || 'open-meteo').toUpperCase()}]`,
+        `- Lokasi Cocok: ${locationInfo.displayName || locationInfo.city}`,
+        `- Kota / Wilayah: ${locationInfo.city}${locationInfo.region ? `, ${locationInfo.region}` : ''}`,
+        `- Koordinat: ${safeLat}, ${safeLon} (Zona Waktu: ${currentData.timezone || 'auto'}${currentData.timezoneAbbr ? ` ${currentData.timezoneAbbr}` : ''})`,
+        `- Kondisi Saat Ini: ${currentData.condition} (WMO ${currentData.weatherCode ?? 0})`,
+        `- Suhu Aktual: ${currentData.tempC}°C (Terasa seperti ${currentData.feelsLikeC}°C | Min/Max hari ini: ${dailySummary.tempMinC ?? '-'}°C / ${dailySummary.tempMaxC ?? '-'}°C)`,
+        `- Kelembapan: ${currentData.humidity}% | Angin: ${currentData.windKmh} km/j (${currentData.windDirection || '-'}) | Tutupan Awan: ${currentData.cloudCover ?? 0}%`,
+        `- Peluang Hujan Saat Ini: ${currentData.rainProbNow ?? 0}% | Curah Hujan: ${currentData.precipitationMm ?? 0} mm${dailySummary.uvIndexMax !== null && dailySummary.uvIndexMax !== undefined ? ` | UV Maks: ${dailySummary.uvIndexMax}` : ''}`,
+        (dailySummary.sunrise || dailySummary.sunset) ? `- Matahari Terbit / Terbenam: ${dailySummary.sunrise || '-'} / ${dailySummary.sunset || '-'}` : '',
+        hourlyLines ? `- Prakiraan 5 Jam Ke Depan:\n${hourlyLines}` : '',
+        dailyLines ? `- Prakiraan Harian (Hari Ini, Besok & Lusa):\n${dailyLines}` : '',
+        `- Saran Praktis: ${currentData.advice}`
+      ].filter(Boolean).join('\n');
+      return {
+        success: true,
+        tool: 'fetch_weather_data',
+        provider,
+        coordinates: { lat: safeLat, lon: safeLon },
+        location: locationInfo,
+        current: currentData,
+        daily: dailySummary,
+        dailyForecast,
+        hourly: hourlyForecast,
+        formattedContext
+      };
+    },
+
+    _buildCandidateBackendUrls(path) {
+      const cleanPath = path.startsWith('/') ? path : `/${path}`;
+      const list = [];
+      const pushUnique = (u) => {
+        if (u && typeof u === 'string' && !list.includes(u)) list.push(u);
+      };
+      pushUnique(typeof getUniversalApiUrl === 'function' ? getUniversalApiUrl(cleanPath) : cleanPath);
+      if (typeof IS_CLOUD_HOSTED !== 'undefined' && IS_CLOUD_HOSTED) {
+        pushUnique(cleanPath); // Cloudflare Edge _worker.js pada z21.zozdocs.com
+      }
+      const tunnelBase = typeof getActiveTunnelUrl === 'function' ? getActiveTunnelUrl() : '';
+      if (tunnelBase && /^https?:\/\//i.test(tunnelBase)) {
+        pushUnique(tunnelBase.replace(/\/+$/, '') + cleanPath);
+      }
+      return list;
+    },
+
+    async _geocodeDirectBrowser({ lat = NaN, lon = NaN, city = '', signal = null } = {}) {
+      const round4 = (v) => Math.round(Number(v) * 10000) / 10000;
+      const sig = signal || AbortSignal.timeout(7000);
+      if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lon))) {
+        const sLat = round4(lat);
+        const sLon = round4(lon);
+        try {
+          const bdcRes = await fetch(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(sLat)}&longitude=${encodeURIComponent(sLon)}&localityLanguage=id`,
+            { signal: sig }
+          );
+          if (bdcRes && bdcRes.ok) {
+            const bdc = await bdcRes.json().catch(() => null);
+            if (bdc) {
+              const cityLabel = String(bdc.city || bdc.locality || '').trim();
+              const regionLabel = String(bdc.principalSubdivision || '').trim();
+              const countryLabel = String(bdc.countryName || '').trim();
+              const parts = [cityLabel, regionLabel, countryLabel].filter(Boolean);
+              if (parts.length > 0) {
+                return {
+                  success: true,
+                  coordinates: { lat: sLat, lon: sLon },
+                  location: {
+                    city: cityLabel || parts[0],
+                    sublocality: String(bdc.locality || '').trim(),
+                    region: regionLabel,
+                    country: countryLabel,
+                    displayName: parts.join(', '),
+                    source: 'bigdatacloud-browser'
+                  }
+                };
+              }
+            }
+          }
+        } catch (_) {}
+        return null;
+      }
+
+      const q = String(city || '').trim();
+      if (!q) return null;
+      for (const lang of ['id', 'en']) {
+        try {
+          const gRes = await fetch(
+            `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=3&language=${lang}&format=json`,
+            { signal: sig }
+          );
+          if (gRes && gRes.ok) {
+            const gJson = await gRes.json().catch(() => null);
+            if (gJson && Array.isArray(gJson.results) && gJson.results.length > 0) {
+              const hit = gJson.results[0];
+              const parts = [hit.name, hit.admin1, hit.country].filter(Boolean);
+              return {
+                success: true,
+                coordinates: { lat: round4(hit.latitude), lon: round4(hit.longitude) },
+                location: {
+                  city: hit.name || q,
+                  sublocality: hit.admin2 || '',
+                  region: hit.admin1 || '',
+                  country: hit.country || '',
+                  timezone: hit.timezone || 'auto',
+                  displayName: parts.join(', '),
+                  source: 'open-meteo-geocoding-browser'
+                }
+              };
+            }
+          }
+        } catch (_) {}
+      }
+      return null;
+    },
+
+    async _fetchGeocodeWithFallback({ lat = NaN, lon = NaN, city = '', action = 'reverse_geocode', signal = null } = {}) {
+      const urls = this._buildCandidateBackendUrls('/api/tools/weather/geocode');
+      for (const targetUrl of urls) {
+        try {
+          const res = await fetch(targetUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...(Number.isFinite(Number(lat)) ? { lat: Number(lat) } : {}),
+              ...(Number.isFinite(Number(lon)) ? { lon: Number(lon) } : {}),
+              ...(city ? { city } : {}),
+              action
+            }),
+            signal: signal || AbortSignal.timeout(7000)
+          });
+          if (res && res.ok) {
+            const gJson = await res.json().catch(() => null);
+            if (gJson && gJson.success && (gJson.location || gJson.coordinates)) {
+              return gJson;
+            }
+          }
+        } catch (_) {}
+      }
+      return await this._geocodeDirectBrowser({ lat, lon, city, signal });
+    },
+
+    async _fetchWeatherDirectBrowser({ lat = NaN, lon = NaN, city = '', matchedLocation = null, signal = null } = {}) {
+      const round4 = (v) => Math.round(Number(v) * 10000) / 10000;
+      const sig = signal || AbortSignal.timeout(12000);
+      let safeLat = Number(lat);
+      let safeLon = Number(lon);
+      let resolvedLoc = matchedLocation || null;
+
+      if (!Number.isFinite(safeLat) || !Number.isFinite(safeLon)) {
+        if (!city) return null;
+        const geoDirect = await this._geocodeDirectBrowser({ city, signal: sig });
+        if (!geoDirect || !geoDirect.coordinates) return null;
+        safeLat = geoDirect.coordinates.lat;
+        safeLon = geoDirect.coordinates.lon;
+        resolvedLoc = resolvedLoc || geoDirect.location;
+      } else {
+        safeLat = round4(safeLat);
+        safeLon = round4(safeLon);
+      }
+
+      const locPromise = (resolvedLoc && resolvedLoc.source !== 'coordinates_only')
+        ? Promise.resolve({ location: resolvedLoc })
+        : this._geocodeDirectBrowser({ lat: safeLat, lon: safeLon, signal: sig }).catch(() => null);
+
+      const fUrl = `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(safeLat)}&longitude=${encodeURIComponent(safeLon)}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,weather_code,cloud_cover,surface_pressure,wind_speed_10m,wind_direction_10m&hourly=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation_probability,weather_code,wind_speed_10m,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max&forecast_days=3&timezone=auto`;
+
+      const [locRes, omRes] = await Promise.allSettled([
+        locPromise,
+        fetch(fUrl, { headers: { 'Accept': 'application/json' }, signal: sig })
+      ]);
+
+      const locInfo = (locRes.status === 'fulfilled' && locRes.value?.location)
+        ? locRes.value.location
+        : (resolvedLoc || { city: `${safeLat}, ${safeLon}`, displayName: `${safeLat}, ${safeLon}`, region: '', country: '', source: 'coordinates_only' });
+
+      if (omRes.status === 'fulfilled' && omRes.value && omRes.value.ok) {
+        const raw = await omRes.value.json().catch(() => null);
+        if (raw && raw.current) {
+          const cur = raw.current;
+          const isDay = cur.is_day === undefined ? true : Boolean(Number(cur.is_day));
+          const wmoCode = Number.isFinite(Number(cur.weather_code)) ? Number(cur.weather_code) : 0;
+          const wmoMeta = this._resolveWmoMetaClient(wmoCode, isDay);
+          const curTimeStr = String(cur.time || '');
+          const curPrefix = curTimeStr.slice(0, 13);
+          const hObj = raw.hourly || {};
+          const hTimes = Array.isArray(hObj.time) ? hObj.time : [];
+          let startIdx = curPrefix ? hTimes.findIndex(t => String(t || '').startsWith(curPrefix)) : 0;
+          if (startIdx < 0) startIdx = 0;
+
+          const buildOmHourSlot = (idx, isNowLabel = false) => {
+            const tStr = String(hTimes[idx] || '');
+            const hIsDay = Array.isArray(hObj.is_day) && hObj.is_day[idx] !== undefined ? Boolean(Number(hObj.is_day[idx])) : isDay;
+            const hCode = Array.isArray(hObj.weather_code) ? Number(hObj.weather_code[idx] ?? wmoCode) : wmoCode;
+            const hMeta = this._resolveWmoMetaClient(hCode, hIsDay);
+            return {
+              time: tStr,
+              hourLabel: isNowLabel ? 'Sekarang' : (tStr.length >= 16 ? tStr.slice(11, 16) : tStr),
+              tempC: Math.round(Number(hObj.temperature_2m?.[idx] ?? cur.temperature_2m ?? 0)),
+              feelsLikeC: hObj.apparent_temperature?.[idx] !== undefined ? Math.round(Number(hObj.apparent_temperature[idx])) : null,
+              precipProb: Math.round(Number(hObj.precipitation_probability?.[idx] ?? 0)),
+              humidity: hObj.relative_humidity_2m?.[idx] !== undefined ? Math.round(Number(hObj.relative_humidity_2m[idx])) : null,
+              windKmh: hObj.wind_speed_10m?.[idx] !== undefined ? Math.round(Number(hObj.wind_speed_10m[idx])) : null,
+              weatherCode: hCode,
+              condition: hMeta.condition,
+              iconKey: hMeta.iconKey,
+              isDay: hIsDay
+            };
+          };
+
+          const hourlyForecast = [];
+          for (let i = startIdx; i < Math.min(hTimes.length, startIdx + 6); i++) {
+            hourlyForecast.push(buildOmHourSlot(i, i === startIdx));
+          }
+
+          const dObj = raw.daily || {};
+          const dailySummary = {
+            tempMaxC: Array.isArray(dObj.temperature_2m_max) && dObj.temperature_2m_max[0] !== undefined ? Math.round(Number(dObj.temperature_2m_max[0])) : null,
+            tempMinC: Array.isArray(dObj.temperature_2m_min) && dObj.temperature_2m_min[0] !== undefined ? Math.round(Number(dObj.temperature_2m_min[0])) : null,
+            precipProbMax: Array.isArray(dObj.precipitation_probability_max) && dObj.precipitation_probability_max[0] !== undefined ? Math.round(Number(dObj.precipitation_probability_max[0])) : null,
+            uvIndexMax: Array.isArray(dObj.uv_index_max) && dObj.uv_index_max[0] !== undefined ? Number(Number(dObj.uv_index_max[0]).toFixed(1)) : null,
+            sunrise: Array.isArray(dObj.sunrise) && dObj.sunrise[0] ? String(dObj.sunrise[0]).slice(11, 16) : null,
+            sunset: Array.isArray(dObj.sunset) && dObj.sunset[0] ? String(dObj.sunset[0]).slice(11, 16) : null
+          };
+          const liveTemp = Math.round(Number(cur.temperature_2m ?? 0));
+          const liveFeels = Math.round(Number(cur.apparent_temperature ?? cur.temperature_2m ?? 0));
+          const liveHum = Math.round(Number(cur.relative_humidity_2m ?? 0));
+          const liveWind = Math.round(Number(cur.wind_speed_10m ?? 0));
+          const dTimes = Array.isArray(dObj.time) ? dObj.time : [];
+          const dayNames = ['Hari Ini', 'Besok', 'Lusa'];
+          const targetHours = [6, 9, 12, 15, 18, 21];
+          const dailyForecast = [];
+          for (let dIdx = 0; dIdx < Math.min(dTimes.length, 3); dIdx++) {
+            const dStr = String(dTimes[dIdx] || '');
+            const dCode = Array.isArray(dObj.weather_code) ? Number(dObj.weather_code[dIdx] ?? wmoCode) : wmoCode;
+            const dMeta = this._resolveWmoMetaClient(dCode, dIdx === 0 ? isDay : true);
+            const tMax = Array.isArray(dObj.temperature_2m_max) && dObj.temperature_2m_max[dIdx] !== undefined ? Math.round(Number(dObj.temperature_2m_max[dIdx])) : null;
+            const tMin = Array.isArray(dObj.temperature_2m_min) && dObj.temperature_2m_min[dIdx] !== undefined ? Math.round(Number(dObj.temperature_2m_min[dIdx])) : null;
+            let dayHourly = [];
+            if (dIdx === 0) {
+              dayHourly = hourlyForecast;
+            } else if (dStr) {
+              const idxPool = [];
+              for (let hi = 0; hi < hTimes.length; hi++) {
+                if (String(hTimes[hi] || '').startsWith(dStr)) idxPool.push(hi);
+              }
+              const picked = targetHours
+                .map(hr => idxPool.find(hi => Number(String(hTimes[hi] || '').slice(11, 13)) === hr))
+                .filter(v => v !== undefined);
+              const finalIndices = picked.length >= 4 ? picked : idxPool.slice(0, 6);
+              dayHourly = finalIndices.map(hi => buildOmHourSlot(hi, false));
+            }
+            const middaySlot = dayHourly.find(h => String(h.hourLabel || '').startsWith('12') || String(h.hourLabel || '').startsWith('15')) || dayHourly[Math.floor(dayHourly.length / 2)] || dayHourly[0] || null;
+            const repTemp = dIdx === 0 ? liveTemp : (middaySlot && Number.isFinite(middaySlot.tempC) ? middaySlot.tempC : (tMax !== null && tMin !== null ? Math.round((tMax + tMin) / 2) : liveTemp));
+            const repFeels = dIdx === 0 ? liveFeels : (middaySlot && middaySlot.feelsLikeC !== null ? middaySlot.feelsLikeC : repTemp);
+            const repHum = dIdx === 0 ? liveHum : (middaySlot && middaySlot.humidity !== null ? middaySlot.humidity : liveHum);
+            const repWind = dIdx === 0 ? liveWind : (middaySlot && middaySlot.windKmh !== null ? middaySlot.windKmh : liveWind);
+            dailyForecast.push({
+              date: dStr,
+              dayLabel: dayNames[dIdx] || `Hari +${dIdx}`,
+              dayOffset: dIdx,
+              weatherCode: dCode,
+              condition: dMeta.condition,
+              iconKey: dMeta.iconKey,
+              visualTheme: dMeta.visualTheme,
+              advice: dMeta.advice,
+              isDay: dIdx === 0 ? isDay : true,
+              tempC: repTemp,
+              feelsLikeC: repFeels,
+              tempMaxC: tMax,
+              tempMinC: tMin,
+              humidity: repHum,
+              windKmh: repWind,
+              precipProbMax: Array.isArray(dObj.precipitation_probability_max) && dObj.precipitation_probability_max[dIdx] !== undefined ? Math.round(Number(dObj.precipitation_probability_max[dIdx])) : null,
+              uvIndexMax: Array.isArray(dObj.uv_index_max) && dObj.uv_index_max[dIdx] !== undefined ? Number(Number(dObj.uv_index_max[dIdx]).toFixed(1)) : null,
+              sunrise: Array.isArray(dObj.sunrise) && dObj.sunrise[dIdx] ? String(dObj.sunrise[dIdx]).slice(11, 16) : null,
+              sunset: Array.isArray(dObj.sunset) && dObj.sunset[dIdx] ? String(dObj.sunset[dIdx]).slice(11, 16) : null,
+              hourly: dayHourly
+            });
+          }
+
+          const currentData = {
+            tempC: liveTemp,
+            tempExactC: Number(cur.temperature_2m ?? 0),
+            feelsLikeC: liveFeels,
+            humidity: liveHum,
+            windKmh: liveWind,
+            windDirection: this._formatWindDir(cur.wind_direction_10m),
+            precipitationMm: Number(cur.precipitation ?? 0),
+            cloudCover: Math.round(Number(cur.cloud_cover ?? 0)),
+            pressureHpa: cur.surface_pressure !== undefined ? Math.round(Number(cur.surface_pressure)) : null,
+            rainProbNow: hourlyForecast[0] ? hourlyForecast[0].precipProb : (dailySummary.precipProbMax ?? 0),
+            weatherCode: wmoCode,
+            condition: wmoMeta.condition,
+            iconKey: wmoMeta.iconKey,
+            visualTheme: wmoMeta.visualTheme,
+            advice: wmoMeta.advice,
+            isDay,
+            observedAt: curTimeStr,
+            timezone: raw.timezone || 'auto',
+            timezoneAbbr: raw.timezone_abbreviation || ''
+          };
+
+          return this._buildNormalizedWeatherPayload({
+            provider: 'open-meteo-browser',
+            safeLat,
+            safeLon,
+            locationInfo: locInfo,
+            currentData,
+            dailySummary,
+            hourlyForecast,
+            dailyForecast
+          });
+        }
+      }
+
+      // Direct Browser Backup: wttr.in JSON
+      try {
+        const qTarget = city && (!Number.isFinite(safeLat) || !Number.isFinite(safeLon)) ? city : `${safeLat},${safeLon}`;
+        const wtRes = await fetch(`https://wttr.in/${encodeURIComponent(qTarget)}?format=j1`, { signal: sig });
+        const wtJson = (wtRes && wtRes.ok) ? await wtRes.json().catch(() => null) : null;
+        const cc = Array.isArray(wtJson?.current_condition) ? wtJson.current_condition[0] : null;
+        if (cc) {
+          const todayW = Array.isArray(wtJson?.weather) ? wtJson.weather[0] : {};
+          const desc = cc.weatherDesc?.[0]?.value || '';
+          const wmoCode = this._mapWttrDescToWmo(desc, cc.weatherCode);
+          const hrNow = new Date().getHours();
+          const isDay = hrNow >= 6 && hrNow < 18;
+          const wmoMeta = this._resolveWmoMetaClient(wmoCode, isDay);
+          const buildWttrClientHours = (wd, dIdx) => {
+            const dHoursAll = Array.isArray(wd?.hourly) ? wd.hourly : [];
+            const pickIdx = [2, 3, 4, 5, 6, 7].filter(ix => ix < dHoursAll.length);
+            const indices = dIdx === 0
+              ? dHoursAll.map((_, ix) => ix).slice(0, 6)
+              : (pickIdx.length >= 4 ? pickIdx : dHoursAll.map((_, ix) => ix).slice(0, 6));
+            return indices.map((ix, i) => {
+              const h = dHoursAll[ix] || {};
+              const hNum = parseInt(String(h.time || i * 300), 10);
+              const hh = String(Math.floor((Number.isFinite(hNum) ? hNum : i * 300) / 100)).padStart(2, '0');
+              const hW = this._mapWttrDescToWmo(h.weatherDesc?.[0]?.value || desc, h.weatherCode || cc.weatherCode);
+              const hDay = Number(hh) >= 6 && Number(hh) < 18;
+              const hM = this._resolveWmoMetaClient(hW, hDay);
+              return {
+                time: `${wd?.date || ''}T${hh}:00`,
+                hourLabel: dIdx === 0 && i === 0 ? 'Sekarang' : `${hh}:00`,
+                tempC: Math.round(Number(h.tempC ?? cc.temp_C ?? 0)),
+                feelsLikeC: h.FeelsLikeC !== undefined ? Math.round(Number(h.FeelsLikeC)) : null,
+                precipProb: Math.round(Number(h.chanceofrain ?? 0)),
+                humidity: h.humidity !== undefined ? Math.round(Number(h.humidity)) : null,
+                windKmh: h.windspeedKmph !== undefined ? Math.round(Number(h.windspeedKmph)) : null,
+                weatherCode: hW,
+                condition: hM.condition,
+                iconKey: hM.iconKey,
+                isDay: hDay
+              };
+            });
+          };
+          const hourlyForecast = buildWttrClientHours(todayW, 0);
+          const dailySummary = {
+            tempMaxC: todayW?.maxtempC !== undefined ? Math.round(Number(todayW.maxtempC)) : null,
+            tempMinC: todayW?.mintempC !== undefined ? Math.round(Number(todayW.mintempC)) : null,
+            precipProbMax: hourlyForecast.reduce((m, x) => Math.max(m, x.precipProb || 0), 0),
+            uvIndexMax: cc.uvIndex !== undefined ? Number(cc.uvIndex) : null,
+            sunrise: todayW?.astronomy?.[0]?.sunrise || null,
+            sunset: todayW?.astronomy?.[0]?.sunset || null
+          };
+          const currentData = {
+            tempC: Math.round(Number(cc.temp_C ?? 0)),
+            tempExactC: Number(cc.temp_C ?? 0),
+            feelsLikeC: Math.round(Number(cc.FeelsLikeC ?? cc.temp_C ?? 0)),
+            humidity: Math.round(Number(cc.humidity ?? 0)),
+            windKmh: Math.round(Number(cc.windspeedKmph ?? 0)),
+            windDirection: Number.isFinite(Number(cc.winddirDegree)) ? this._formatWindDir(cc.winddirDegree) : String(cc.winddir16Point || '-'),
+            precipitationMm: Number(cc.precipMM ?? 0),
+            cloudCover: Math.round(Number(cc.cloudcover ?? 0)),
+            pressureHpa: cc.pressure !== undefined ? Math.round(Number(cc.pressure)) : null,
+            rainProbNow: hourlyForecast[0] ? hourlyForecast[0].precipProb : (dailySummary.precipProbMax ?? 0),
+            weatherCode: wmoCode,
+            condition: wmoMeta.condition,
+            iconKey: wmoMeta.iconKey,
+            visualTheme: wmoMeta.visualTheme,
+            advice: wmoMeta.advice,
+            isDay,
+            observedAt: cc.localObsDateTime || new Date().toISOString(),
+            timezone: 'auto',
+            timezoneAbbr: ''
+          };
+          const wtDailyForecast = (Array.isArray(wtJson?.weather) ? wtJson.weather : []).slice(0, 3).map((wd, dIdx) => {
+            const dayLabels = ['Hari Ini', 'Besok', 'Lusa'];
+            const dSlice = buildWttrClientHours(wd, dIdx);
+            const midday = dSlice.find(h => h.hourLabel.startsWith('12') || h.hourLabel.startsWith('15')) || dSlice[0] || {};
+            const repWmo = midday.weatherCode ?? wmoCode;
+            const repMeta = this._resolveWmoMetaClient(repWmo, dIdx === 0 ? isDay : true);
+            return {
+              date: String(wd?.date || ''),
+              dayLabel: dayLabels[dIdx] || `Hari +${dIdx}`,
+              dayOffset: dIdx,
+              weatherCode: repWmo,
+              condition: repMeta.condition,
+              iconKey: repMeta.iconKey,
+              visualTheme: repMeta.visualTheme,
+              advice: repMeta.advice,
+              isDay: dIdx === 0 ? isDay : true,
+              tempC: dIdx === 0 ? currentData.tempC : (Number.isFinite(midday.tempC) ? midday.tempC : Math.round(Number(wd?.maxtempC ?? currentData.tempC))),
+              feelsLikeC: dIdx === 0 ? currentData.feelsLikeC : (midday.feelsLikeC ?? midday.tempC ?? currentData.feelsLikeC),
+              tempMaxC: wd?.maxtempC !== undefined ? Math.round(Number(wd.maxtempC)) : null,
+              tempMinC: wd?.mintempC !== undefined ? Math.round(Number(wd.mintempC)) : null,
+              humidity: dIdx === 0 ? currentData.humidity : (midday.humidity ?? currentData.humidity),
+              windKmh: dIdx === 0 ? currentData.windKmh : (midday.windKmh ?? currentData.windKmh),
+              precipProbMax: dSlice.reduce((m, x) => Math.max(m, x.precipProb || 0), 0),
+              uvIndexMax: wd?.uvIndex !== undefined ? Number(wd.uvIndex) : (cc.uvIndex !== undefined ? Number(cc.uvIndex) : null),
+              sunrise: wd?.astronomy?.[0]?.sunrise || null,
+              sunset: wd?.astronomy?.[0]?.sunset || null,
+              hourly: dSlice
+            };
+          });
+          return this._buildNormalizedWeatherPayload({
+            provider: 'wttr.in-browser',
+            safeLat,
+            safeLon,
+            locationInfo: locInfo,
+            currentData,
+            dailySummary,
+            hourlyForecast,
+            dailyForecast: wtDailyForecast
+          });
+        }
+      } catch (_) {}
+
+      return null;
+    },
+
+    async fetchWeatherResilient({ lat, lon, city = '', turnCtx = null, signal = null } = {}) {
+      const urls = this._buildCandidateBackendUrls('/api/tools/weather');
+      let lastErrorMsg = '';
+      for (const targetUrl of urls) {
+        try {
+          const res = await fetch(targetUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...(Number.isFinite(Number(lat)) && Number.isFinite(Number(lon)) ? { lat: Number(lat), lon: Number(lon) } : {}),
+              ...(city ? { city } : {})
+            }),
+            signal: signal || AbortSignal.timeout(10000)
+          });
+          if (STATE.abortController?.signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+          const json = await res.json().catch(() => null);
+          if (res.ok && json && json.success) {
+            if (turnCtx?.matchedLocation && turnCtx.matchedLocation.source !== 'coordinates_only' && (!json.location || json.location.source === 'coordinates_only')) {
+              json.location = turnCtx.matchedLocation;
+            }
+            return json;
+          }
+          if (json && json.error) lastErrorMsg = json.error;
+          else if (!res.ok) lastErrorMsg = `HTTP ${res.status}`;
+        } catch (err) {
+          if (err && (err.name === 'AbortError' || STATE.abortController?.signal?.aborted)) throw err;
+          lastErrorMsg = err?.message || String(err);
+        }
+      }
+
+      // Direct Browser CORS Fallback jika backend/gateway mengembalikan 404/502 atau Open-Meteo server-side gagal
+      const directResult = await this._fetchWeatherDirectBrowser({
+        lat,
+        lon,
+        city,
+        matchedLocation: turnCtx?.matchedLocation || null,
+        signal
+      }).catch(() => null);
+      if (directResult && directResult.success) {
+        return directResult;
+      }
+
+      return {
+        success: false,
+        error: lastErrorMsg || 'Layanan cuaca tidak dapat dijangkau dari server maupun langsung dari browser.'
+      };
+    },
+
+    async handleManualCitySubmit() {
+      if (!this._pendingResolver) return;
+      const cityInput = document.getElementById('locationConsentManualCity');
+      const city = String(cityInput?.value || '').trim();
+      if (!city || city.length < 2) {
+        this._setStatus('Masukkan nama kota yang valid (minimal 2 karakter).', true);
+        cityInput?.focus?.();
+        return;
+      }
+
+      this._setBusy(true);
+      this._setStatus(`Mencocokkan lokasi "${city}"...`, false);
+      try {
+        const geoData = await this._fetchGeocodeWithFallback({
+          city,
+          action: 'reverse_geocode',
+          signal: AbortSignal.timeout(8000)
+        });
+        if (!this._pendingResolver) return;
+
+        if (geoData && geoData.success && geoData.coordinates) {
+          const coords = {
+            lat: geoData.coordinates.lat,
+            lon: geoData.coordinates.lon,
+            accuracy_m: null,
+            source: 'manual_city'
+          };
+          const matchedLoc = geoData.location || { city, displayName: city };
+          const approvedAt = Date.now();
+          if (this._activeTurnCtx) {
+            this._activeTurnCtx.permissionStatus = 'manual_city';
+            this._activeTurnCtx.approvedAt = approvedAt;
+            this._activeTurnCtx.manualCity = city;
+            this._activeTurnCtx.coords = coords;
+            this._activeTurnCtx.matchedLocation = matchedLoc;
+          }
+          this._savePersistedConsent({
+            status: 'manual_city',
+            grantedAt: approvedAt,
+            manualCity: city,
+            coords,
+            location: matchedLoc
+          });
+          this._resolvePending({
+            approved: true,
+            permission: 'manual_city',
+            success: true,
+            manualCity: city,
+            coords,
+            location: matchedLoc,
+            text: `[IZIN LOKASI DIBERIKAN PENGGUNA — KOTA MANUAL]: Pengguna memberikan lokasi "${matchedLoc.displayName || city}". Izin tersimpan sekali agar tidak ditanyakan ulang. Panggil fetch_weather_data({"lat": ${coords.lat}, "lon": ${coords.lon}}) untuk mengambil cuaca.`
+          });
+          return;
+        }
+        this._setBusy(false);
+        this._setStatus(geoData?.error || `Kota "${city}" tidak ditemukan. Periksa ejaan nama kota.`, true);
+      } catch (e) {
+        if (!this._pendingResolver) return;
+        this._setBusy(false);
+        this._setStatus(`Gagal mencocokkan kota: ${e?.message || e}`, true);
+      }
+    },
+
+    async _acquireDeviceCoordsSilently(savedFallbackCoords = null) {
+      try {
+        let pos = null;
+        try {
+          pos = await this._acquireBrowserPosition({ enableHighAccuracy: true, timeout: 7000, maximumAge: 60000 });
+        } catch (firstErr) {
+          if (firstErr && (firstErr.code === 2 || firstErr.code === 3)) {
+            pos = await this._acquireBrowserPosition({ enableHighAccuracy: false, timeout: 5500, maximumAge: 180000 });
+          } else {
+            throw firstErr;
+          }
+        }
+        const lat = Math.round(Number(pos?.coords?.latitude) * 10000) / 10000;
+        const lon = Math.round(Number(pos?.coords?.longitude) * 10000) / 10000;
+        const accuracy = Number.isFinite(Number(pos?.coords?.accuracy)) ? Math.round(Number(pos.coords.accuracy)) : null;
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          return { coords: { lat, lon, accuracy_m: accuracy, source: 'device_gps' }, osDenied: false };
+        }
+      } catch (err) {
+        if (err && err.code === 1) {
+          return { coords: null, osDenied: true, error: err };
+        }
+        if (savedFallbackCoords && Number.isFinite(Number(savedFallbackCoords.lat)) && Number.isFinite(Number(savedFallbackCoords.lon))) {
+          return { coords: { ...savedFallbackCoords, source: 'cached_device_gps' }, osDenied: false };
+        }
+        return { coords: null, osDenied: false, error: err };
+      }
+      if (savedFallbackCoords && Number.isFinite(Number(savedFallbackCoords.lat)) && Number.isFinite(Number(savedFallbackCoords.lon))) {
+        return { coords: { ...savedFallbackCoords, source: 'cached_device_gps' }, osDenied: false };
+      }
+      return { coords: null, osDenied: false };
+    },
+
+    async requestPermissionWithConsent({ reason = '', turnCtx = null } = {}) {
+      this.init();
+      const activeCtx = turnCtx || this._activeTurnCtx || {};
+      this._activeTurnCtx = activeCtx;
+
+      if (activeCtx.permissionStatus === 'prompt' || !activeCtx.permissionStatus) {
+        this._hydrateTurnCtxFromStorage(activeCtx);
+      }
+
+      if (activeCtx.permissionStatus === 'granted' || activeCtx.permissionStatus === 'manual_city') {
+        if (activeCtx.permissionStatus === 'granted' && !activeCtx.coords) {
+          const saved = this._loadPersistedConsent();
+          const silentRes = await this._acquireDeviceCoordsSilently(saved?.coords || null);
+          if (silentRes.osDenied) {
+            this.clearPersistedConsent();
+            activeCtx.permissionStatus = 'prompt';
+            activeCtx.coords = null;
+          } else if (silentRes.coords) {
+            activeCtx.coords = silentRes.coords;
+            this._savePersistedConsent({ status: 'granted', coords: silentRes.coords, location: activeCtx.matchedLocation || saved?.location || null });
+          }
+        }
+        if (activeCtx.permissionStatus === 'granted' || activeCtx.permissionStatus === 'manual_city') {
+          const coordsNote = activeCtx.coords
+            ? ` (lat: ${activeCtx.coords.lat}, lon: ${activeCtx.coords.lon}). Langsung panggil fetch_weather_data({"lat": ${activeCtx.coords.lat}, "lon": ${activeCtx.coords.lon}}) atau get_current_coordinates.`
+            : '. Panggil get_current_coordinates atau fetch_weather_data.';
+          return {
+            approved: true,
+            alreadyGranted: true,
+            permission: activeCtx.permissionStatus,
+            success: true,
+            coords: activeCtx.coords || null,
+            manualCity: activeCtx.manualCity || '',
+            location: activeCtx.matchedLocation || null,
+            text: `[IZIN LOKASI SUDAH AKTIF (TERSIMPAN SEKALI)]: Izin akses lokasi sudah disetujui sebelumnya${coordsNote}`
+          };
+        }
+      }
+      if (activeCtx.permissionStatus === 'denied') {
+        return {
+          approved: false,
+          permission: 'denied',
+          denied: true,
+          success: false,
+          text: '[AKSES LOKASI DITOLAK PENGGUNA]: Pengguna telah menolak akses lokasi pada giliran ini.'
+        };
+      }
+
+      if (this._pendingPromise) {
+        return this._pendingPromise;
+      }
+
+      if (STATE.abortController?.signal?.aborted) {
+        return { approved: false, permission: 'aborted', aborted: true, success: false, text: 'Permintaan lokasi dibatalkan oleh pengguna.' };
+      }
+
+      this._pendingPromise = new Promise((resolve) => {
+        this._pendingResolver = resolve;
+
+        const reasonEl = document.getElementById('locationConsentReasonText');
+        if (reasonEl) {
+          reasonEl.textContent = (reason && String(reason).trim())
+            ? String(reason).trim()
+            : 'Koordinat GPS perangkat hanya dipakai untuk mencocokkan nama wilayah Anda dan mengambil data suhu, kelembapan, serta prakiraan cuaca. Cukup izinkan sekali dan preferensi Anda akan diingat.';
+        }
+        const cityInput = document.getElementById('locationConsentManualCity');
+        if (cityInput) cityInput.value = '';
+        this._setStatus('', false);
+        this._setBusy(false);
+
+        const sig = STATE.abortController?.signal;
+        if (sig) {
+          const onAbort = () => {
+            this._resolvePending({
+              approved: false,
+              permission: 'aborted',
+              aborted: true,
+              success: false,
+              text: 'Permintaan izin lokasi dihentikan oleh pengguna.'
+            });
+          };
+          sig.addEventListener('abort', onAbort, { once: true });
+          this._activeAbortCleanup = () => sig.removeEventListener('abort', onAbort);
+        }
+
+        const modal = document.getElementById('locationConsentModal');
+        if (modal) {
+          if (modal.style && modal.style.display === 'none') {
+            modal.style.removeProperty('display');
+          }
+          modal.classList.add('show');
+          if (typeof syncBodyModalState === 'function') syncBodyModalState();
+          setTimeout(() => document.getElementById('btnApproveLocationConsent')?.focus?.(), 60);
+        } else {
+          // Headless/fallback environment without DOM modal: fallback cleanly to manual error
+          this._resolvePending({
+            approved: false,
+            permission: 'unavailable',
+            denied: true,
+            success: false,
+            text: '[AKSES LOKASI DITOLAK PENGGUNA]: Antarmuka dialog izin lokasi tidak tersedia.'
+          });
+        }
+      });
+
+      return this._pendingPromise;
+    },
+
+    async resolveCoordinatesAndMatch(turnCtx = null) {
+      const ctx = turnCtx || this._activeTurnCtx || {};
+      this._activeTurnCtx = ctx;
+
+      if (ctx.permissionStatus === 'prompt' || !ctx.permissionStatus) {
+        this._hydrateTurnCtxFromStorage(ctx);
+      }
+
+      if (ctx.permissionStatus === 'denied') {
+        return {
+          success: false,
+          denied: true,
+          text: '[AKSES LOKASI DITOLAK PENGGUNA]: Tidak dapat mengambil koordinat karena izin lokasi ditolak. Tawarkan untuk mengecek cuaca berdasarkan nama kota yang diketik pengguna.'
+        };
+      }
+
+      if (ctx.permissionStatus !== 'granted' && ctx.permissionStatus !== 'manual_city') {
+        const consentRes = await this.requestPermissionWithConsent({
+          reason: 'Mengambil koordinat perangkat real-time untuk mencocokkan kota & prakiraan cuaca.',
+          turnCtx: ctx
+        });
+        if (!consentRes || !consentRes.approved) {
+          return {
+            success: false,
+            denied: Boolean(consentRes?.denied),
+            text: consentRes?.text || '[AKSES LOKASI DITOLAK PENGGUNA]: Pengguna menolak memberikan akses lokasi.'
+          };
+        }
+      }
+
+      const savedConsent = this._loadPersistedConsent();
+      let coords = ctx.coords || null;
+      if (!coords && ctx.permissionStatus === 'granted') {
+        const silentRes = await this._acquireDeviceCoordsSilently(savedConsent?.coords || null);
+        if (silentRes.osDenied) {
+          this.clearPersistedConsent();
+          ctx.permissionStatus = 'prompt';
+          return {
+            success: false,
+            denied: true,
+            text: 'Error: Izin GPS ditolak oleh pengaturan peramban. Minta pengguna mengizinkan lokasi lagi atau menyebutkan nama kotanya secara manual.'
+          };
+        }
+        if (silentRes.coords) {
+          coords = silentRes.coords;
+          ctx.coords = coords;
+        } else {
+          return {
+            success: false,
+            text: `Error: Gagal membaca koordinat GPS perangkat (${silentRes.error?.message || 'timeout'}). Minta pengguna menyebutkan nama kotanya secara manual.`
+          };
+        }
+      }
+
+      if (!coords || !Number.isFinite(Number(coords.lat)) || !Number.isFinite(Number(coords.lon))) {
+        return {
+          success: false,
+          text: 'Error: Koordinat lokasi belum tersedia. Pastikan pengguna telah menyetujui izin lokasi atau memasukkan nama kota.'
+        };
+      }
+
+      if (!ctx.matchedLocation || ctx.matchedLocation.source === 'coordinates_only') {
+        try {
+          const geoSig = STATE.abortController?.signal
+            ? AbortSignal.any([AbortSignal.timeout(8000), STATE.abortController.signal])
+            : AbortSignal.timeout(8000);
+          const gJson = await this._fetchGeocodeWithFallback({
+            lat: coords.lat,
+            lon: coords.lon,
+            city: ctx.manualCity || '',
+            action: 'reverse_geocode',
+            signal: geoSig
+          });
+          if (gJson && gJson.success && gJson.location) {
+            ctx.matchedLocation = gJson.location;
+          }
+        } catch (_) {}
+      }
+
+      const loc = ctx.matchedLocation || {
+        city: `${coords.lat}, ${coords.lon}`,
+        displayName: `Koordinat ${coords.lat}, ${coords.lon}`,
+        region: '',
+        country: ''
+      };
+
+      if (ctx.permissionStatus === 'granted' || ctx.permissionStatus === 'manual_city') {
+        this._savePersistedConsent({
+          status: ctx.permissionStatus,
+          manualCity: ctx.manualCity || '',
+          coords,
+          location: loc
+        });
+      }
+
+      const formatted = [
+        `[KOORDINAT & PENCOCOKAN LOKASI REAL-TIME]`,
+        `- Latitude: ${coords.lat}`,
+        `- Longitude: ${coords.lon}`,
+        `- Sumber Koordinat: ${coords.source === 'manual_city' ? 'Kota Pilihan Pengguna' : 'GPS Perangkat Real-Time'}${coords.accuracy_m ? ` (akurasi ±${coords.accuracy_m}m)` : ''}`,
+        `- Lokasi Cocok: ${loc.displayName || loc.city}`,
+        `- Kota/Wilayah Utama: ${loc.city}`,
+        `- Langkah Selanjutnya: Panggil fetch_weather_data({"lat": ${coords.lat}, "lon": ${coords.lon}}) untuk mengambil data cuaca real-time.`
+      ].join('\n');
+
+      return {
+        success: true,
+        coordinates: coords,
+        location: loc,
+        text: formatted
+      };
+    }
+  };
+  window.WeatherController = WeatherController;
+
+  function resolveWeatherVisualThemeClient(condition = '', isDay = true) {
+    const c = String(condition || '').toLowerCase();
+    if (/petir|badai|thunder|storm/.test(c)) return { iconKey: 'storm', visualTheme: 'storm' };
+    if (/lebat|deras|heavy rain/.test(c)) return { iconKey: 'rain-heavy', visualTheme: 'rain' };
+    if (/hujan|gerimis|rain|drizzle|shower/.test(c)) return { iconKey: 'rain-light', visualTheme: 'rain' };
+    if (/salju|snow|es|hail/.test(c)) return { iconKey: 'snow', visualTheme: 'snow' };
+    if (/kabut|fog|mist/.test(c)) return { iconKey: 'fog', visualTheme: 'fog' };
+    if (/mendung|overcast/.test(c)) return { iconKey: 'cloudy', visualTheme: 'cloudy' };
+    if (/berawan|partly|cloudy/.test(c)) {
+      return isDay ? { iconKey: 'partly-cloudy', visualTheme: 'partly_cloudy' } : { iconKey: 'partly-cloudy-night', visualTheme: 'night' };
+    }
+    if (/cerah|clear|sunny/.test(c)) {
+      return isDay ? { iconKey: 'sunny', visualTheme: 'sunny' } : { iconKey: 'clear-night', visualTheme: 'night' };
+    }
+    return isDay ? { iconKey: 'partly-cloudy', visualTheme: 'partly_cloudy' } : { iconKey: 'cloudy-night', visualTheme: 'night' };
+  }
+
+  function buildWeatherSvgIconMarkup(iconKey = 'sunny') {
+    const k = String(iconKey || 'sunny');
+    if (k === 'sunny') {
+      return `<svg class="zoz-weather-svg-icon" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <g class="zoz-weather-anim-sun">
+          <circle cx="32" cy="32" r="13" fill="#FBBF24"/>
+          <circle cx="32" cy="32" r="17" fill="#FDE047" opacity="0.25"/>
+          <path d="M32 6v7M32 51v7M6 32h7M51 32h7M13.6 13.6l5 5M45.4 45.4l5 5M50.4 13.6l-5 5M18.6 45.4l-5 5" stroke="#FDE047" stroke-width="3.2" stroke-linecap="round"/>
+        </g>
+      </svg>`;
+    }
+    if (k === 'clear-night') {
+      return `<svg class="zoz-weather-svg-icon" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <path d="M40.5 14.5a18 18 0 1 0 10.5 32.5 15 15 0 0 1-10.5-32.5Z" fill="#FDE68A" stroke="#FCD34D" stroke-width="2" stroke-linejoin="round"/>
+        <circle cx="46" cy="18" r="2" fill="#E0F2FE"/>
+        <circle cx="51" cy="27" r="1.5" fill="#BAE6FD"/>
+      </svg>`;
+    }
+    if (k === 'partly-cloudy' || k === 'partly-cloudy-night') {
+      const orb = k === 'partly-cloudy-night'
+        ? `<path d="M23 13a10 10 0 1 0 9 14 8.5 8.5 0 0 1-9-14Z" fill="#FDE68A"/>`
+        : `<circle cx="22" cy="22" r="9.5" fill="#FBBF24"/><path d="M22 8v3.5M8 22h3.5M12.1 12.1l2.5 2.5M31.9 12.1l-2.5 2.5" stroke="#FDE047" stroke-width="2.5" stroke-linecap="round"/>`;
+      return `<svg class="zoz-weather-svg-icon" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        ${orb}
+        <g class="zoz-weather-anim-cloud">
+          <path d="M20 46h25a9 9 0 0 0 1.4-17.9A13 13 0 0 0 21 26a10 10 0 0 0-1 20Z" fill="#F1F5F9" opacity="0.96"/>
+        </g>
+      </svg>`;
+    }
+    if (k === 'rain-light' || k === 'drizzle' || k === 'rain' || k === 'rain-heavy') {
+      const drops = k === 'rain-heavy'
+        ? `<line class="zoz-weather-anim-drop" x1="22" y1="44" x2="19" y2="54" stroke="#7DD3FC" stroke-width="3" stroke-linecap="round"/>
+           <line class="zoz-weather-anim-drop delay-1" x1="32" y1="45" x2="29" y2="56" stroke="#38BDF8" stroke-width="3" stroke-linecap="round"/>
+           <line class="zoz-weather-anim-drop delay-2" x1="42" y1="44" x2="39" y2="54" stroke="#7DD3FC" stroke-width="3" stroke-linecap="round"/>`
+        : `<line class="zoz-weather-anim-drop" x1="24" y1="45" x2="21.5" y2="53.5" stroke="#7DD3FC" stroke-width="2.8" stroke-linecap="round"/>
+           <line class="zoz-weather-anim-drop delay-1" x1="34" y1="45" x2="31.5" y2="54" stroke="#38BDF8" stroke-width="2.8" stroke-linecap="round"/>
+           <line class="zoz-weather-anim-drop delay-2" x1="43" y1="45" x2="40.5" y2="53" stroke="#7DD3FC" stroke-width="2.8" stroke-linecap="round"/>`;
+      return `<svg class="zoz-weather-svg-icon" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <g class="zoz-weather-anim-cloud">
+          <path d="M18 40h28a9 9 0 0 0 1.2-17.9A13.5 13.5 0 0 0 21.5 20 10 10 0 0 0 18 40Z" fill="#CBD5E1"/>
+        </g>
+        ${drops}
+      </svg>`;
+    }
+    if (k === 'storm') {
+      return `<svg class="zoz-weather-svg-icon" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <g class="zoz-weather-anim-cloud">
+          <path d="M18 39h28a9 9 0 0 0 1.2-17.9A13.5 13.5 0 0 0 21.5 19 10 10 0 0 0 18 39Z" fill="#94A3B8"/>
+        </g>
+        <path class="zoz-weather-anim-bolt" d="M35 37l-7 10h6l-3 10 10-12h-6l4-8Z" fill="#FACC15" stroke="#FEF08A" stroke-width="1" stroke-linejoin="round"/>
+      </svg>`;
+    }
+    if (k === 'snow') {
+      return `<svg class="zoz-weather-svg-icon" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <g class="zoz-weather-anim-cloud">
+          <path d="M18 39h28a9 9 0 0 0 1.2-17.9A13.5 13.5 0 0 0 21.5 19 10 10 0 0 0 18 39Z" fill="#E2E8F0"/>
+        </g>
+        <circle class="zoz-weather-anim-drop" cx="24" cy="48" r="2.6" fill="#E0F2FE"/>
+        <circle class="zoz-weather-anim-drop delay-1" cx="34" cy="51" r="2.6" fill="#BAE6FD"/>
+        <circle class="zoz-weather-anim-drop delay-2" cx="43" cy="48" r="2.6" fill="#E0F2FE"/>
+      </svg>`;
+    }
+    if (k === 'fog') {
+      return `<svg class="zoz-weather-svg-icon" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <g class="zoz-weather-anim-cloud">
+          <path d="M18 35h28a8.5 8.5 0 0 0 1.2-16.9A13 13 0 0 0 21.5 16 9.5 9.5 0 0 0 18 35Z" fill="#CBD5E1"/>
+        </g>
+        <path d="M14 42h36M18 48h28M22 54h20" stroke="#E2E8F0" stroke-width="3" stroke-linecap="round" opacity="0.8"/>
+      </svg>`;
+    }
+    return `<svg class="zoz-weather-svg-icon" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <g class="zoz-weather-anim-cloud">
+        <path d="M18 44h28a9 9 0 0 0 1.2-17.9A13.5 13.5 0 0 0 21.5 24 10 10 0 0 0 18 44Z" fill="#E2E8F0"/>
+      </g>
+    </svg>`;
+  }
+
+  function buildWeatherSparklineMarkup(hourlyList = []) {
+    const pts = (Array.isArray(hourlyList) ? hourlyList : []).filter(h => Number.isFinite(Number(h?.tempC)));
+    if (pts.length < 2) return '';
+    const temps = pts.map(p => Number(p.tempC));
+    const minT = Math.min(...temps);
+    const maxT = Math.max(...temps);
+    const span = Math.max(1, maxT - minT);
+    const w = 320;
+    const h = 42;
+    const padX = 14;
+    const padY = 8;
+    const coords = temps.map((t, i) => {
+      const x = padX + (i / (temps.length - 1)) * (w - padX * 2);
+      const y = h - padY - ((t - minT) / span) * (h - padY * 2);
+      return { x: Number(x.toFixed(1)), y: Number(y.toFixed(1)), t };
+    });
+    const linePath = coords.map((c, idx) => `${idx === 0 ? 'M' : 'L'}${c.x},${c.y}`).join(' ');
+    const areaPath = `${linePath} L${coords[coords.length - 1].x},${h} L${coords[0].x},${h} Z`;
+    const gradId = `wgrad_${Math.random().toString(36).slice(2, 8)}`;
+    const dots = coords.map(c => `<circle cx="${c.x}" cy="${c.y}" r="3.2" fill="#FFFFFF" stroke="#38BDF8" stroke-width="1.6"/>`).join('');
+    return `<svg class="zoz-weather-sparkline-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.42"/>
+          <stop offset="100%" stop-color="#38BDF8" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <path d="${areaPath}" fill="url(#${gradId})"/>
+      <path d="${linePath}" fill="none" stroke="#7DD3FC" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      ${dots}
+    </svg>`;
+  }
+
+  function buildWeatherDisplayElement(disp) {
+    if (!disp || typeof disp !== 'object' || typeof document === 'undefined') return null;
+
+    const allowedThemes = new Set(['sunny', 'partly_cloudy', 'cloudy', 'rain', 'storm', 'fog', 'snow', 'night']);
+    const dailyForecast = Array.isArray(disp.dailyForecast) ? disp.dailyForecast : [];
+    const liveSnap = (disp.liveCurrent && typeof disp.liveCurrent === 'object') ? disp.liveCurrent : disp;
+    const subperiodLabels = { pagi: 'Pagi', siang: 'Siang', sore: 'Sore', malam: 'Malam' };
+    const initialSubperiod = String(disp.targetSubperiod || '').toLowerCase();
+    const initialOffset = Number.isFinite(Number(disp.targetDayOffset))
+      ? Math.max(0, Math.min(2, Math.round(Number(disp.targetDayOffset))))
+      : 0;
+
+    const pickActiveHourIdx = (hourlyList, dayOffset) => {
+      if (!Array.isArray(hourlyList) || hourlyList.length === 0) return -1;
+      const getHourNum = (slot) => {
+        const rawT = String(slot?.time || '');
+        if (rawT.length >= 13 && rawT[10] === 'T') {
+          const parsed = Number(rawT.slice(11, 13));
+          if (Number.isFinite(parsed)) return parsed;
+        }
+        const m = String(slot?.hourLabel || '').match(/^(\d{1,2})[:.]/);
+        return m ? Number(m[1]) : null;
+      };
+      const subRanges = { pagi: [5, 10], siang: [11, 14], sore: [15, 18], malam: [19, 23] };
+      if (dayOffset === initialOffset && initialSubperiod && subRanges[initialSubperiod]) {
+        const [lo, hi] = subRanges[initialSubperiod];
+        const foundSub = hourlyList.findIndex(s => {
+          const hr = getHourNum(s);
+          return hr !== null && ((hr >= lo && hr <= hi) || (initialSubperiod === 'malam' && hr >= 0 && hr <= 4));
+        });
+        if (foundSub >= 0) return foundSub;
+      }
+      if (dayOffset === 0) return 0;
+      const middayIdx = hourlyList.findIndex(s => {
+        const lbl = String(s?.hourLabel || '');
+        return lbl.startsWith('12') || lbl.startsWith('15');
+      });
+      return middayIdx >= 0 ? middayIdx : Math.floor(hourlyList.length / 2);
+    };
+
+    const resolveDaySnapshot = (dayOffset) => {
+      const safeOffset = Math.max(0, Math.min(2, Number(dayOffset) || 0));
+      const matchedDay = dailyForecast.find((d, ix) => Number(d?.dayOffset ?? ix) === safeOffset)
+        || (safeOffset < dailyForecast.length ? dailyForecast[safeOffset] : null);
+      const dayLabels = ['Hari Ini', 'Besok', 'Lusa'];
+      const dayLabel = String(matchedDay?.dayLabel || dayLabels[safeOffset] || `Hari +${safeOffset}`);
+      const subTxt = (safeOffset === initialOffset && subperiodLabels[initialSubperiod]) ? subperiodLabels[initialSubperiod] : '';
+      const tzSuffix = disp.timezoneAbbr ? ` (${disp.timezoneAbbr})` : '';
+
+      if (safeOffset === 0) {
+        const cond = String(liveSnap.condition || matchedDay?.condition || disp.condition || 'Cerah Berawan');
+        const isDay = liveSnap.isDay !== undefined ? liveSnap.isDay !== false : (disp.isDay !== false);
+        const themeMeta = resolveWeatherVisualThemeClient(cond, isDay);
+        const visualTheme = allowedThemes.has(liveSnap.visualTheme) ? liveSnap.visualTheme : themeMeta.visualTheme;
+        const iconKey = liveSnap.iconKey || themeMeta.iconKey;
+        const tempC = Number.isFinite(Number(liveSnap.tempC)) ? Math.round(Number(liveSnap.tempC)) : (Number.isFinite(Number(matchedDay?.tempC)) ? Math.round(Number(matchedDay.tempC)) : null);
+        const tempMinC = liveSnap.tempMinC ?? matchedDay?.tempMinC ?? disp.tempMinC ?? null;
+        const tempMaxC = liveSnap.tempMaxC ?? matchedDay?.tempMaxC ?? disp.tempMaxC ?? null;
+        const feelsLikeC = Number.isFinite(Number(liveSnap.feelsLikeC)) ? Math.round(Number(liveSnap.feelsLikeC)) : tempC;
+        const obsTime = liveSnap.observedAt ? String(liveSnap.observedAt).replace('T', ' ') : 'Real-Time';
+        const hourly = Array.isArray(liveSnap.hourly) && liveSnap.hourly.length > 0
+          ? liveSnap.hourly.slice(0, 6)
+          : (Array.isArray(matchedDay?.hourly) ? matchedDay.hourly.slice(0, 6) : []);
+        return {
+          dayOffset: 0,
+          dayLabel: 'Hari Ini',
+          condition: cond,
+          isDay,
+          visualTheme,
+          iconKey,
+          tempC,
+          tempMinC,
+          tempMaxC,
+          feelsLikeC,
+          humidity: liveSnap.humidity ?? matchedDay?.humidity ?? null,
+          windKmh: liveSnap.windKmh ?? matchedDay?.windKmh ?? null,
+          rainProb: liveSnap.rainProbNow ?? matchedDay?.precipProbMax ?? null,
+          uvIndexMax: liveSnap.uvIndexMax ?? matchedDay?.uvIndexMax ?? disp.uvIndexMax ?? null,
+          cloudCover: liveSnap.cloudCover ?? disp.cloudCover ?? null,
+          sunrise: liveSnap.sunrise || matchedDay?.sunrise || disp.sunrise || null,
+          sunset: liveSnap.sunset || matchedDay?.sunset || disp.sunset || null,
+          advice: String(liveSnap.advice || matchedDay?.advice || disp.advice || themeMeta.advice || '').trim(),
+          badgeText: subTxt ? `HARI INI ${subTxt.toUpperCase()} • ${obsTime}${tzSuffix}` : `${obsTime}${tzSuffix}`,
+          feelsText: `Terasa seperti ${feelsLikeC !== null ? feelsLikeC : '--'}°C${disp.city ? ` • ${disp.city}` : ''}`,
+          forecastTitle: 'Prakiraan 5 Jam Ke Depan',
+          hourly,
+          activeHourIdx: pickActiveHourIdx(hourly, 0)
+        };
+      }
+
+      const src = matchedDay || disp;
+      const cond = String(src.condition || 'Cerah Berawan');
+      const isDay = matchedDay ? (matchedDay.isDay !== false) : true;
+      const themeMeta = resolveWeatherVisualThemeClient(cond, isDay);
+      const visualTheme = allowedThemes.has(src.visualTheme) ? src.visualTheme : themeMeta.visualTheme;
+      const iconKey = src.iconKey || themeMeta.iconKey;
+      const tMin = src.tempMinC ?? disp.tempMinC ?? null;
+      const tMax = src.tempMaxC ?? disp.tempMaxC ?? null;
+      const fallbackMid = (Number.isFinite(Number(tMin)) && Number.isFinite(Number(tMax)))
+        ? Math.round((Number(tMin) + Number(tMax)) / 2)
+        : null;
+      const tempC = Number.isFinite(Number(src.tempC)) ? Math.round(Number(src.tempC)) : fallbackMid;
+      const feelsLikeC = Number.isFinite(Number(src.feelsLikeC)) ? Math.round(Number(src.feelsLikeC)) : tempC;
+      const dStr = String(matchedDay?.date || disp.targetDate || '').trim();
+      const rangeStr = (Number.isFinite(Number(tMin)) && Number.isFinite(Number(tMax)))
+        ? `Rentang ${Math.round(Number(tMin))}°–${Math.round(Number(tMax))}°C`
+        : `Terasa ~${feelsLikeC !== null ? feelsLikeC : '--'}°C`;
+      const hourly = Array.isArray(matchedDay?.hourly) && matchedDay.hourly.length > 0
+        ? matchedDay.hourly.slice(0, 6)
+        : (safeOffset === initialOffset && Array.isArray(disp.hourly) ? disp.hourly.slice(0, 6) : []);
+
+      return {
+        dayOffset: safeOffset,
+        dayLabel,
+        condition: cond,
+        isDay,
+        visualTheme,
+        iconKey,
+        tempC,
+        tempMinC: tMin,
+        tempMaxC: tMax,
+        feelsLikeC,
+        humidity: matchedDay?.humidity ?? liveSnap.humidity ?? null,
+        windKmh: matchedDay?.windKmh ?? liveSnap.windKmh ?? null,
+        rainProb: matchedDay?.precipProbMax ?? matchedDay?.rainProbNow ?? src.rainProbNow ?? disp.rainProbNow ?? null,
+        uvIndexMax: matchedDay?.uvIndexMax ?? disp.uvIndexMax ?? null,
+        cloudCover: src.cloudCover ?? liveSnap.cloudCover ?? null,
+        sunrise: matchedDay?.sunrise || disp.sunrise || null,
+        sunset: matchedDay?.sunset || disp.sunset || null,
+        advice: String(matchedDay?.advice || themeMeta.advice || disp.advice || '').trim(),
+        badgeText: `PRAKIRAAN ${dayLabel.toUpperCase()}${subTxt ? ` ${subTxt.toUpperCase()}` : ''}${dStr ? ` • ${dStr}` : ''}${tzSuffix}`,
+        feelsText: `${dayLabel}${dStr ? ` (${dStr})` : ''} • ${rangeStr}${disp.city ? ` • ${disp.city}` : ''}`,
+        forecastTitle: `Prakiraan Per Jam — ${dayLabel}`,
+        hourly,
+        activeHourIdx: pickActiveHourIdx(hourly, safeOffset)
+      };
+    };
+
+    const section = document.createElement('section');
+    section.className = 'zoz-weather-display zoz-weather-theme-sunny';
+    if (disp.display_id) section.dataset.weatherId = String(disp.display_id);
+
+    const fxLayer = document.createElement('div');
+    fxLayer.className = 'zoz-weather-fx-layer';
+    const fxGlow = document.createElement('div');
+    fxGlow.className = 'zoz-weather-fx-glow';
+    fxLayer.appendChild(fxGlow);
+    const fxRain = document.createElement('div');
+    fxRain.className = 'zoz-weather-fx-rain';
+    section.appendChild(fxLayer);
+
+    const content = document.createElement('div');
+    content.className = 'zoz-weather-content';
+
+    // Top bar: Location pill + Timestamp / Target forecast badge
+    const topbar = document.createElement('div');
+    topbar.className = 'zoz-weather-topbar';
+    const locPill = document.createElement('div');
+    locPill.className = 'zoz-weather-location-pill';
+    const pinIcon = document.createElement('i');
+    pinIcon.className = 'fa-solid fa-location-dot';
+    pinIcon.style.color = '#38bdf8';
+    const locSpan = document.createElement('span');
+    locSpan.textContent = String(disp.displayLocation || disp.city || 'Lokasi Terdeteksi');
+    locPill.appendChild(pinIcon);
+    locPill.appendChild(locSpan);
+    topbar.appendChild(locPill);
+
+    const metaEl = document.createElement('div');
+    metaEl.className = 'zoz-weather-time-meta';
+    topbar.appendChild(metaEl);
+    content.appendChild(topbar);
+
+    // Day-switcher tabs ([Hari Ini] [Besok] [Lusa]) when multi-day forecast is available
+    const tabButtons = [];
+    if (dailyForecast.length > 1) {
+      const tabsBar = document.createElement('div');
+      tabsBar.className = 'zoz-weather-day-tabs';
+      tabsBar.setAttribute('role', 'tablist');
+      dailyForecast.slice(0, 3).forEach((dItem, ix) => {
+        const dOffset = Number.isFinite(Number(dItem?.dayOffset)) ? Number(dItem.dayOffset) : ix;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'zoz-weather-day-tab';
+        btn.dataset.dayOffset = String(dOffset);
+        btn.textContent = String(dItem?.dayLabel || ['Hari Ini', 'Besok', 'Lusa'][ix] || `Hari +${ix}`);
+        if (dItem?.date) btn.title = String(dItem.date);
+        btn.addEventListener('click', () => applyDayView(dOffset));
+        tabButtons.push({ btn, dayOffset: dOffset });
+        tabsBar.appendChild(btn);
+      });
+      content.appendChild(tabsBar);
+    }
+
+    // Hero block
+    const hero = document.createElement('div');
+    hero.className = 'zoz-weather-hero';
+
+    const heroLeft = document.createElement('div');
+    heroLeft.className = 'zoz-weather-hero-left';
+
+    const tempRow = document.createElement('div');
+    tempRow.className = 'zoz-weather-temp-row';
+    const tempMain = document.createElement('div');
+    tempMain.className = 'zoz-weather-temp-main';
+    const hiLow = document.createElement('div');
+    hiLow.className = 'zoz-weather-hilow';
+    tempRow.appendChild(tempMain);
+    tempRow.appendChild(hiLow);
+    heroLeft.appendChild(tempRow);
+
+    const condLabel = document.createElement('div');
+    condLabel.className = 'zoz-weather-condition-label';
+    heroLeft.appendChild(condLabel);
+
+    const feelsEl = document.createElement('div');
+    feelsEl.className = 'zoz-weather-feels-like';
+    heroLeft.appendChild(feelsEl);
+
+    const heroIcon = document.createElement('div');
+    heroIcon.className = 'zoz-weather-hero-icon';
+
+    hero.appendChild(heroLeft);
+    hero.appendChild(heroIcon);
+    content.appendChild(hero);
+
+    // 4 Metrics grid
+    const metricsGrid = document.createElement('div');
+    metricsGrid.className = 'zoz-weather-metrics-grid';
+    const metricSlots = [
+      { icon: 'fa-droplet', label: 'Kelembapan' },
+      { icon: 'fa-wind', label: 'Angin' },
+      { icon: 'fa-cloud-rain', label: 'Peluang Hujan' },
+      { icon: 'fa-sun', label: 'UV / Awan' }
+    ].map((m) => {
+      const card = document.createElement('div');
+      card.className = 'zoz-weather-metric-item';
+      const lbl = document.createElement('div');
+      lbl.className = 'zoz-weather-metric-label';
+      const ic = document.createElement('i');
+      ic.className = `fa-solid ${m.icon}`;
+      const lblTxt = document.createElement('span');
+      lblTxt.textContent = m.label;
+      lbl.appendChild(ic);
+      lbl.appendChild(lblTxt);
+      const val = document.createElement('div');
+      val.className = 'zoz-weather-metric-value';
+      card.appendChild(lbl);
+      card.appendChild(val);
+      metricsGrid.appendChild(card);
+      return val;
+    });
+    content.appendChild(metricsGrid);
+
+    // Hourly Forecast + Sparkline box
+    const fBox = document.createElement('div');
+    fBox.className = 'zoz-weather-forecast-box';
+    const fHead = document.createElement('div');
+    fHead.className = 'zoz-weather-forecast-head';
+    const fTitle = document.createElement('span');
+    const fSub = document.createElement('span');
+    fHead.appendChild(fTitle);
+    fHead.appendChild(fSub);
+    fBox.appendChild(fHead);
+    const sparkWrap = document.createElement('div');
+    sparkWrap.className = 'zoz-weather-sparkline-wrap';
+    fBox.appendChild(sparkWrap);
+    const strip = document.createElement('div');
+    strip.className = 'zoz-weather-hourly-strip';
+    fBox.appendChild(strip);
+    content.appendChild(fBox);
+
+    // Advice bar
+    const adv = document.createElement('div');
+    adv.className = 'zoz-weather-advice-bar';
+    const advIc = document.createElement('i');
+    advIc.className = 'fa-solid fa-circle-info';
+    advIc.style.marginTop = '2px';
+    const advTxt = document.createElement('span');
+    adv.appendChild(advIc);
+    adv.appendChild(advTxt);
+    content.appendChild(adv);
+
+    function applyDayView(dayOffset) {
+      const snap = resolveDaySnapshot(dayOffset);
+      section.className = `zoz-weather-display zoz-weather-theme-${snap.visualTheme}`;
+      section.dataset.activeDayOffset = String(snap.dayOffset);
+      if (snap.visualTheme === 'rain' || snap.visualTheme === 'storm') {
+        if (!fxRain.parentNode) fxLayer.appendChild(fxRain);
+      } else if (fxRain.parentNode) {
+        fxRain.parentNode.removeChild(fxRain);
+      }
+
+      tabButtons.forEach(({ btn, dayOffset: btnOffset }) => {
+        btn.classList.toggle('is-active', btnOffset === snap.dayOffset);
+        btn.setAttribute('aria-selected', btnOffset === snap.dayOffset ? 'true' : 'false');
+      });
+
+      metaEl.textContent = snap.badgeText;
+      tempMain.textContent = snap.tempC !== null ? `${snap.tempC}°C` : '--°C';
+      if (Number.isFinite(Number(snap.tempMinC)) && Number.isFinite(Number(snap.tempMaxC))) {
+        hiLow.textContent = `${Math.round(Number(snap.tempMinC))}° / ${Math.round(Number(snap.tempMaxC))}°`;
+        hiLow.style.display = '';
+      } else {
+        hiLow.style.display = 'none';
+      }
+      condLabel.textContent = snap.condition;
+      feelsEl.textContent = snap.feelsText;
+      heroIcon.innerHTML = buildWeatherSvgIconMarkup(snap.iconKey);
+
+      metricSlots[0].textContent = Number.isFinite(Number(snap.humidity)) ? `${Math.round(Number(snap.humidity))}%` : '-';
+      metricSlots[1].textContent = Number.isFinite(Number(snap.windKmh)) ? `${Math.round(Number(snap.windKmh))} km/j` : '-';
+      metricSlots[2].textContent = Number.isFinite(Number(snap.rainProb)) ? `${Math.round(Number(snap.rainProb))}%` : '-';
+      metricSlots[3].textContent = snap.uvIndexMax !== undefined && snap.uvIndexMax !== null
+        ? `UV ${snap.uvIndexMax}`
+        : (Number.isFinite(Number(snap.cloudCover)) ? `${Math.round(Number(snap.cloudCover))}%` : '-');
+
+      if (snap.hourly.length > 0) {
+        fBox.style.display = '';
+        fTitle.textContent = snap.forecastTitle;
+        fSub.textContent = snap.sunrise && snap.sunset ? `🌅 ${snap.sunrise} • 🌇 ${snap.sunset}` : 'Grafik Suhu (°C)';
+        const sparkMarkup = buildWeatherSparklineMarkup(snap.hourly);
+        sparkWrap.innerHTML = sparkMarkup || '';
+        sparkWrap.style.display = sparkMarkup ? '' : 'none';
+        strip.innerHTML = '';
+        snap.hourly.forEach((slot, idx) => {
+          const sDiv = document.createElement('div');
+          sDiv.className = 'zoz-weather-hour-slot' + (idx === snap.activeHourIdx ? ' is-now' : '');
+          const tDiv = document.createElement('div');
+          tDiv.className = 'zoz-weather-hour-time';
+          tDiv.textContent = String(slot.hourLabel || '');
+          const iDiv = document.createElement('div');
+          iDiv.className = 'zoz-weather-hour-icon';
+          iDiv.innerHTML = buildWeatherSvgIconMarkup(slot.iconKey || snap.iconKey);
+          const tmpDiv = document.createElement('div');
+          tmpDiv.className = 'zoz-weather-hour-temp';
+          tmpDiv.textContent = Number.isFinite(Number(slot.tempC)) ? `${Math.round(Number(slot.tempC))}°` : '--';
+          const rDiv = document.createElement('div');
+          rDiv.className = 'zoz-weather-hour-rain';
+          rDiv.textContent = `💧 ${Number.isFinite(Number(slot.precipProb)) ? Math.round(Number(slot.precipProb)) : 0}%`;
+          sDiv.appendChild(tDiv);
+          sDiv.appendChild(iDiv);
+          sDiv.appendChild(tmpDiv);
+          sDiv.appendChild(rDiv);
+          strip.appendChild(sDiv);
+        });
+      } else {
+        fBox.style.display = 'none';
+      }
+
+      if (snap.advice) {
+        adv.style.display = '';
+        advTxt.textContent = snap.advice;
+      } else {
+        adv.style.display = 'none';
+      }
+    }
+
+    applyDayView(initialOffset);
+    section.appendChild(content);
+    return section;
+  }
+
+  function renderWeatherDisplaysForRow(row, weatherDisplays) {
+    if (!row || typeof document === 'undefined') return { status: 'renderer_unavailable', renderedCount: 0 };
+    if (!Array.isArray(weatherDisplays) || weatherDisplays.length === 0) return { status: 'idle', renderedCount: 0 };
+
+    const textContainer = row.querySelector('.msg-text-content') || row.querySelector('.message-bubble') || row;
+    textContainer.querySelectorAll('.zoz-weather-display').forEach((el) => el.remove());
+
+    let mountedCount = 0;
+    weatherDisplays.forEach((disp) => {
+      const cardEl = buildWeatherDisplayElement(disp);
+      if (!cardEl) return;
+
+      const explicitSlot = disp.display_id
+        ? textContainer.querySelector(`.zoz-weather-display-slot[data-weather-id="${CSS.escape(String(disp.display_id))}"]`)
+        : null;
+      if (explicitSlot && explicitSlot.parentNode) {
+        explicitSlot.replaceWith(cardEl);
+        mountedCount++;
+        return;
+      }
+
+      const paragraphs = Array.from(textContainer.querySelectorAll(':scope > p'));
+      if (paragraphs.length > 0) {
+        paragraphs[0].insertAdjacentElement('afterend', cardEl);
+      } else {
+        textContainer.appendChild(cardEl);
+      }
+      mountedCount++;
+    });
+
+    textContainer.querySelectorAll('.zoz-weather-display-slot').forEach((slot) => slot.remove());
+    return { status: mountedCount > 0 ? 'mounted' : 'empty', renderedCount: mountedCount };
+  }
+
   function fallbackCopyText(text, onSuccess) {
     if (typeof text !== 'string') text = String(text || '');
     const textarea = document.createElement('textarea');
@@ -14379,6 +16285,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         if (!this.isDone) {
           streamSafeText = streamSafeText
             .replace(/<(?:tool_call|function_call)\b[\s\S]*$/i, '')
+            .replace(/<\|(?:tool_call|tool_response)\b[\s\S]*$/i, '')
             .replace(/\[TOOL_CALLS\][\s\S]*$/i, '')
             .replace(/```(?:tool_call|json)?\s*\{\s*"(?:tool|name|function)"\s*:[\s\S]*$/i, '')
             .replace(/^\s*\{\s*"(?:tool|name|function)"\s*:\s*"[\s\S]*$/i, '');
@@ -15782,9 +17689,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         renderTaskTrackerUI();
       }
 
-      // Temukan pesan target & pertahankan serat visual (imageDisplays) agar operator sambungan komutatif dengan grounding
+      // Temukan pesan target & pertahankan serat visual (imageDisplays & weatherDisplays) agar operator sambungan komutatif dengan grounding
       let targetMsg = null;
-      const stripDisplaySlots = (txt) => String(txt || '').replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '');
+      const stripDisplaySlots = (txt) => String(txt || '')
+        .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
+        .replace(/\[\[ZOZ_WEATHER_DISPLAY:wth_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '');
       const cleanBasePrefix = stripDisplaySlots(rawBaseText).substring(0, 50);
       if (Array.isArray(session.messages)) {
         for (let i = session.messages.length - 1; i >= 0; i--) {
@@ -15805,6 +17714,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         : (Array.isArray(targetMsg?.imageDisplays) && targetMsg.imageDisplays.length > 0
           ? targetMsg.imageDisplays
           : (Array.isArray(fallbackLastMsg?.imageDisplays) ? fallbackLastMsg.imageDisplays : []));
+      const activeWeatherDisplays = (Array.isArray(options.weatherDisplays) && options.weatherDisplays.length > 0)
+        ? options.weatherDisplays
+        : (Array.isArray(targetMsg?.weatherDisplays) && targetMsg.weatherDisplays.length > 0
+          ? targetMsg.weatherDisplays
+          : (Array.isArray(fallbackLastMsg?.weatherDisplays) ? fallbackLastMsg.weatherDisplays : []));
 
       if (activeImageDisplays.length > 0 && finalExtracted.files.length === 0) {
         for (const disp of activeImageDisplays) {
@@ -15817,6 +17731,22 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
                 currentAccumulated = paras.join('\n\n');
               } else {
                 currentAccumulated = `${currentAccumulated}\n\n${displayToken}\n`;
+              }
+            }
+          }
+        }
+      }
+      if (activeWeatherDisplays.length > 0 && finalExtracted.files.length === 0) {
+        for (const wDisp of activeWeatherDisplays) {
+          if (wDisp && wDisp.display_id) {
+            const wToken = `[[ZOZ_WEATHER_DISPLAY:${wDisp.display_id}]]`;
+            if (currentAccumulated && !currentAccumulated.includes(wToken)) {
+              const paras = currentAccumulated.split(/\n\s*\n/);
+              if (paras.length > 1) {
+                paras.splice(1, 0, wToken);
+                currentAccumulated = paras.join('\n\n');
+              } else {
+                currentAccumulated = `${currentAccumulated}\n\n${wToken}\n`;
               }
             }
           }
@@ -15847,6 +17777,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       if (bubbleText) {
         if (row && activeImageDisplays.length > 0) {
           renderGroundedImageDisplaysForRow(row, activeImageDisplays);
+        }
+        if (row && activeWeatherDisplays.length > 0) {
+          renderWeatherDisplaysForRow(row, activeWeatherDisplays);
         }
         enhanceCodeBlocks(bubbleText);
         enhanceChatImages(bubbleText);
@@ -15902,12 +17835,14 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         targetMsg.planMode = activeContPlan;
         if (contRunOptions.websiteMode) targetMsg.websiteMode = contRunOptions.websiteMode;
         if (activeImageDisplays.length > 0) targetMsg.imageDisplays = activeImageDisplays;
+        if (activeWeatherDisplays.length > 0) targetMsg.weatherDisplays = activeWeatherDisplays;
         if (finalExtracted.files.length > 0) targetMsg.files = finalExtracted.files;
       } else if (fallbackLastMsg) {
         fallbackLastMsg.content = finalPersistedContent;
         fallbackLastMsg.planMode = activeContPlan;
         if (contRunOptions.websiteMode) fallbackLastMsg.websiteMode = contRunOptions.websiteMode;
         if (activeImageDisplays.length > 0) fallbackLastMsg.imageDisplays = activeImageDisplays;
+        if (activeWeatherDisplays.length > 0) fallbackLastMsg.weatherDisplays = activeWeatherDisplays;
         if (finalExtracted.files.length > 0) fallbackLastMsg.files = finalExtracted.files;
       }
       if (row) row.dataset.fullContent = finalPersistedContent;
@@ -16002,6 +17937,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       finishReason,
       isFileIncomplete,
       groundedImageDisplays,
+      groundedWeatherDisplays,
       isWebTask,
       isAborted,
       isAutoContinuation,
@@ -16024,12 +17960,16 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           engine,
           previousText: finalText,
           imageDisplays: groundedImageDisplays,
+          weatherDisplays: groundedWeatherDisplays,
           isWebsite: isWebTask,
           forceTakeover: true,
           isAutoContinue: true
         });
         if (groundedImageDisplays && groundedImageDisplays.length > 0) {
           renderGroundedImageDisplaysForRow(assistantRow, groundedImageDisplays);
+        }
+        if (groundedWeatherDisplays && groundedWeatherDisplays.length > 0) {
+          renderWeatherDisplaysForRow(assistantRow, groundedWeatherDisplays);
         }
         if (contResult && typeof contResult.text === 'string') {
           finalText = contResult.text;
@@ -16114,7 +18054,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       }
 
       // Konteks Lengkap Autoregresif: pertahankan seluruh riwayat dan tail tanpa membocorkan token slot UI internal
-      const stripUiSlotTokens = (s) => String(s || '').replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '');
+      const stripUiSlotTokens = (s) => String(s || '')
+        .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
+        .replace(/\[\[ZOZ_WEATHER_DISPLAY:wth_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '');
       let effectiveTail = stripUiSlotTokens(currentFullText || '');
 
       historyMessages.forEach((m, idx) => {
@@ -16422,7 +18364,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     }
 
     // Konteks Lengkap Autoregresif untuk Ollama: pertahankan seluruh token konteks tanpa membocorkan token slot UI internal
-    const stripOllamaUiSlotTokens = (s) => String(s || '').replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '');
+    const stripOllamaUiSlotTokens = (s) => String(s || '')
+      .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
+      .replace(/\[\[ZOZ_WEATHER_DISPLAY:wth_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '');
     let effectiveTail = stripOllamaUiSlotTokens(currentFullText || '');
 
     historyMessages.forEach((m, idx) => {
@@ -18451,7 +20395,10 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         const memTime = targetSession.updatedAt ? new Date(targetSession.updatedAt).getTime() : 0;
         const isDiskImageDisplaysChanged = Boolean(
           diskLast && memLast &&
-          JSON.stringify(diskLast.imageDisplays || null) !== JSON.stringify(memLast.imageDisplays || null)
+          (
+            JSON.stringify(diskLast.imageDisplays || null) !== JSON.stringify(memLast.imageDisplays || null) ||
+            JSON.stringify(diskLast.weatherDisplays || null) !== JSON.stringify(memLast.weatherDisplays || null)
+          )
         );
         const isDiskContentChanged = Boolean(
           diskLast && memLast && (diskLast.content !== memLast.content || isDiskImageDisplaysChanged)
@@ -20279,6 +22226,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       } else {
         textToCopy = String(rawText || '')
           .replace(/\[\[ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
+          .replace(/\[\[ZOZ_WEATHER_DISPLAY:wth_[a-zA-Z0-9_-]{4,64}\]\]\s*/gi, '')
           .trim();
       }
       copyTextToClipboard(textToCopy, () => {
@@ -20310,6 +22258,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     renderMessageFiles(row, extraMeta && extraMeta.files);
     if (extraMeta && Array.isArray(extraMeta.imageDisplays) && extraMeta.imageDisplays.length > 0) {
       renderGroundedImageDisplaysForRow(row, extraMeta.imageDisplays);
+    }
+    if (extraMeta && Array.isArray(extraMeta.weatherDisplays) && extraMeta.weatherDisplays.length > 0) {
+      renderWeatherDisplaysForRow(row, extraMeta.weatherDisplays);
     }
     return row;
   }
@@ -30544,6 +32495,10 @@ ${blocks}
     }
 
     // 1. Tolak kueri coding, matematika simbolik, perintah studio/dokumen, atau obrolan emosional/basa-basi abstrak
+    if (/\b(?:cuaca|prakiraan\s+cuaca|suhu\s+(?:saat\s+ini|sekarang)|weather|forecast)\b/i.test(pTrim) &&
+        !/\b(?:foto|fhoto|gambar|photo|picture|image)\b/i.test(pTrim)) {
+      return null;
+    }
     if (/\b(?:function|def |class |const |let |var |import |SELECT |UPDATE |DELETE |INSERT |<script|<html>|<\?php|print\(|console\.log|regex|fourier|integral|diferensial|turunan|matriks|eigen|debug|error|bug|syntax)\b/i.test(pTrim)) {
       return null;
     }
@@ -30823,6 +32778,8 @@ ${blocks}
     return Boolean(isLoopback && !IS_GITHUB_PAGES && !IS_VERCEL);
   }
 
+  const WA_CHANNEL_TOKEN_REGEX_SOURCE = String.raw`(?:w(?:ha|a|h)?t?s+a+p+t?|wats?a+p+|wasap+|\bwa\b)`;
+
   function isCommunicationContextPrompt(text) {
     if (!text || typeof text !== 'string') return false;
     const trimmed = text.trim();
@@ -30830,9 +32787,9 @@ ${blocks}
     if (/^\/(?:forge|z21|website|webapp|landing)\b/i.test(trimmed)) return false;
     if (/fetch_communication_context/i.test(trimmed)) return true;
 
-    const hasChannel = /\b(?:whatsap+t?|watsap+p?|wasap|whtsap+p?|whastapp|wa|email|e-?mail|surel|inbox|kotak\s+masuk|chat\s+(?:tim|grup|group|wa|whatsap+t?|klien|pelanggan|dari|dengan|sama|kontak|nomor|masuk|terbaru|terakhir|baru)|pesan\s+(?:tim|grup|group|masuk|terbaru|terakhir|baru|belum\s+dibaca|wa|whatsap+t?|dari|dengan|sama|kontak|nomor)|obrolan\s+(?:wa|whatsap+t?|grup|tim|dari|dengan|terbaru|baru)|riwayat\s+(?:chat|pesan|email|komunikasi|obrolan|tiket)|catatan\s+tiket|tiket|ticket|slack|discord|teams|notulen|kontak\s+(?:wa|whatsap+t?)|draft\s+balasan|balasan\s+(?:chat|pesan|wa|email))\b/i.test(trimmed);
-    const hasActionVerb = /\b(?:analis(?:a|is)|rangkum(?:an|kan)?|ringkas(?:an|kan)?|rekap|cek|periksa|ambil(?:kan)?|cari(?:kan)?|lihat|baca(?:kan)?|tampilkan|tunjuk(?:kan)?|tindak\s*lanjut(?:i|nya)?|follow[\s-]*up|action\s*item|summary|summarize|review|audit|evaluasi|pantau|lacak|track|ekstrak|sentimen|balas(?:an)?|draft|status|terbaru|terkini|terakhir|baru|belum\s+(?:dibaca|dibalas)|ada\s+(?:chat|pesan)|siapa\s+yang\s+(?:baru\s+)?(?:nge)?chat|siapa\s+yang\s+(?:chat|pesan|email|kirim)|apa\s+isi|isi\s+(?:chat|pesan|email|tiket)|apa\s+yang\s+(?:sedang\s+|terakhir(?:\s+kali)?\s+)?di\s*bahas|terakhir(?:\s+kali)?\s+di\s*bahas|bahas\s+apa|ngobrol(?:in)?\s+apa|diskusi\s+apa|notif)\b/i.test(trimmed);
-    const hasNewChatInquiry = /\b(?:ada\s+(?:chat|pesan)\s+(?:baru|masuk|terbaru|belum\s+dibaca)|(?:chat|pesan)\s+(?:baru|terbaru|terakhir|masuk|hari\s+ini|barusan|tadi|dari|dengan)|(?:lihat|cek|baca|periksa|ambil|cari|tampilkan|apa)\s+(?:isi\s+)?(?:chat|pesan)\s+(?:terbaru|baru|terakhir|masuk|dari|di|grup|group|wa|whatsap+t?)|apa\s+yang\s+(?:sedang\s+|terakhir(?:\s+kali)?\s+)?di\s*bahas|terakhir(?:\s+kali)?\s+di\s*bahas|(?:di|do)\s+[a-z0-9\s-]{2,25}\s+apa\s+yang\s+.*di\s*bahas|siapa\s+yang\s+(?:baru\s+)?(?:nge)?chat|belum\s+(?:dibaca|dibalas)|cek\s+(?:chat|pesan|inbox|notif))\b/i.test(trimmed);
+    const hasChannel = /\b(?:w(?:ha|a|h)?t?s+a+p+t?|whast+a+p+t?|whtsa+p+t?|wats?a+p+t?|wasap+|wa|email|e-?mail|surel|inbox|kotak\s+masuk|chat\s+(?:tim|grup|group|wa|w(?:ha|a|h)?t?s+a+p+t?|whast+a+p+t?|klien|pelanggan|dari|dengan|sama|kontak|nomor|masuk|terbaru|terakhir|baru)|pesan\s+(?:tim|grup|group|masuk|terbaru|terakhir|baru|belum\s+dibaca|wa|w(?:ha|a|h)?t?s+a+p+t?|whast+a+p+t?|dari|dengan|sama|kontak|nomor)|obrolan\s+(?:wa|w(?:ha|a|h)?t?s+a+p+t?|whast+a+p+t?|grup|tim|dari|dengan|terbaru|baru)|riwayat\s+(?:chat|pesan|email|komunikasi|obrolan|tiket)|catatan\s+tiket|tiket|ticket|slack|discord|teams|notulen|kontak\s+(?:wa|w(?:ha|a|h)?t?s+a+p+t?|whast+a+p+t?)|draft\s+balasan|balasan\s+(?:chat|pesan|wa|email))\b/i.test(trimmed);
+    const hasActionVerb = /\b(?:analis(?:a|is)|menganalis(?:a|is)|rangkum(?:an|kan)?|merangkum|dirangkum|ringkas(?:an|kan)?|meringkas|diringkas|rekap|(?:menge|nge|di)?cek|periksa|memeriksa|diperiksa|ambil(?:kan)?|mengambil|cari(?:kan)?|mencari|(?:me|di)?lihat|(?:mem|di)?baca(?:kan)?|membacakan|tampil(?:kan)?|menampilkan|ditampilkan|tunjuk(?:kan)?|tindak\s*lanjut(?:i|nya)?|follow[\s-]*up|action\s*item|summary|summarize|review|audit|evaluasi|pantau|lacak|track|ekstrak|sentimen|balas(?:an)?|draft|status|terbaru|terkini|terakhir|baru|belum\s+(?:dibaca|dibalas)|ada\s+(?:chat|pesan)|siapa\s+yang\s+(?:baru\s+)?(?:menge|nge)?chat|siapa\s+yang\s+(?:chat|pesan|email|kirim)|apa\s+isi|isi\s+(?:chat|pesan|email|tiket)|apa\s+yang\s+(?:sedang\s+|terakhir(?:\s+kali)?\s+)?di\s*bahas|terakhir(?:\s+kali)?\s+di\s*bahas|bahas\s+apa|ngobrol(?:in)?\s+apa|diskusi\s+apa|notif)\b/i.test(trimmed);
+    const hasNewChatInquiry = /\b(?:ada\s+(?:chat|pesan)\s+(?:baru|masuk|terbaru|belum\s+dibaca)|(?:chat|pesan)\s+(?:baru|terbaru|terakhir|masuk|hari\s+ini|barusan|tadi|dari|dengan)|(?:(?:me|di)?lihat|(?:menge|nge|di)?cek|(?:mem|di)?baca|periksa|memeriksa|ambil|cari|tampil(?:kan)?|menampilkan|apa)\s+(?:isi\s+)?(?:chat|pesan)\s+(?:terbaru|baru|terakhir|masuk|dari|di|grup|group|wa|w(?:ha|a|h)?t?s+a+p+t?|whast+a+p+t?)|apa\s+yang\s+(?:sedang\s+|terakhir(?:\s+kali)?\s+)?di\s*bahas|terakhir(?:\s+kali)?\s+di\s*bahas|(?:di|do)\s+[a-z0-9\s-]{2,25}\s+apa\s+yang\s+.*di\s*bahas|siapa\s+yang\s+(?:baru\s+)?(?:menge|nge)?chat|belum\s+(?:dibaca|dibalas)|(?:menge|nge)?cek\s+(?:chat|pesan|inbox|notif))\b/i.test(trimmed);
     const hasExplicitId = /\b(?:TICKET|TKT|INC|BUG|ISSUE|JIRA|CASE|REQ|SR)[-_#]?\d+\b/i.test(trimmed) ||
       /\b(?:08|628)\d{7,12}\b/.test(trimmed) ||
       /@(?:s\.whatsapp\.net|g\.us)\b/i.test(trimmed) ||
@@ -30851,6 +32808,25 @@ ${blocks}
       }
     }
     return false;
+  }
+
+  function matchesWhatsAppChannelVariant(text) {
+    return /\b(?:w(?:ha|a|h)?t?s+a+p+t?|whast+a+p+t?|whtsa+p+t?|wats?a+p+t?|wasap+|wa)\b/i.test(String(text || ''));
+  }
+
+  function computeAutonomousToolTrigger(promptText, opts = {}) {
+    if (opts.isPureMathSession) return false;
+    const text = String(promptText || '');
+    return Boolean(
+      opts.canRunAutonomous ||
+      opts.isCommAnalysisTurn ||
+      opts.isDocKnowledgeTurn ||
+      opts.isChatHistoryTurn ||
+      (opts.epistemicSearchTrigger || 0) >= 0.72 ||
+      matchesWhatsAppChannelVariant(text) ||
+      /\b(?:cari(?:kan)?|search|searching|telusuri|pencarian|tool\s+pencarian|browse|browsing|googling|tampilkan\s+(?:foto|gambar|visual|video)|unsplash|wikimedia|summarize_whatsapp_chat|read_whatsapp_chat|baca_whatsapp|rangkum_whatsapp|whatsapp_summary|fetch_communication_context|cek_whatsapp|cari_chat_whatsapp|(?:ada\s+)?(?:chat|pesan)\s+(?:terbaru|baru|masuk|belum\s+dibaca)|(?:(?:menge|nge)?cek|periksa|memeriksa|(?:mem)?baca|(?:me)?lihat|merangkum|meringkas)\s+(?:chat|pesan)|sop\b|regulasi|kebijakan|dokumen|search_documents|retrieve_knowledge|search_chat_history|conversation_search|recent_chats|cari_riwayat_obrolan|cuaca\w*|cuacda|cuacax|prakiraan\w*|prkiraan\w*|hujan\w*|hujaan\w*|suhu\w*|temperatur\w*|weather|forecast|iklim|mendung|badai|kelembapan|(?:lokasi|tempat|posisi|daerah|kota|wilayah|sekitar)\s*(?:saya|ku|ini|saat\s+ini|sekarang)|lokasiku|tempatku|sekitarku|request_location_permission|get_current_coordinates|fetch_weather_data|render_weather_ui|generate_weather_visual|jalankan\s+(?:kode|python)|hitung\s+dengan\s+python|simpan\s+(?:ke\s+)?memori|ingat\s+ini)\b/i.test(text) ||
+      (!opts.hasAttachedWebDocs && /https?:\/\//i.test(text))
+    );
   }
 
   function isLocalTimeOrClockPrompt(text) {
@@ -30983,6 +32959,7 @@ ${blocks}
       .replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY)[\s\S]*?(?:<<<END_ZOZ_(?:FILE|EDIT|MODIFY)>>>|$)/gi, '[Berkas/Artefak]')
       .replace(/data:image\/[^;\s]+;base64,[A-Za-z0-9+/=]+/gi, '[Gambar]')
       .replace(/<(?:tool_call|function_call|think|reasoning|thought)>[\s\S]*?<\/(?:tool_call|function_call|think|reasoning|thought)>/gi, '')
+      .replace(/<\|thought\|>[\s\S]*?(?:<\|thought\|>|$)/gi, '')
       .replace(/\[(?:KONTEKS|DIREKTIF|HASIL|SPESIFIKASI|BATASAN|LIVE PULSE|HASIL RAG)[^\]]*\][^\n]*/gi, '');
     if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.stripInjectedSystemTagsFromUserText === 'function') {
       cleaned = ZozTextSafety.stripInjectedSystemTagsFromUserText(cleaned);
@@ -31182,7 +33159,8 @@ ${blocks}
       const cleanMsgs = rawMsgs.map((m, idx) => ({
         idx,
         role: m?.role === 'assistant' ? 'assistant' : 'user',
-        text: cleanClientChatHistoryMessageText(m),
+        text: m?.isEmptyFallback ? '' : cleanClientChatHistoryMessageText(m),
+        isEmptyFallback: Boolean(m?.isEmptyFallback),
         timestamp: m?.timestamp || obj.updatedAt || obj.createdAt || ''
       }));
 
@@ -31484,20 +33462,40 @@ ${blocks}
   }
 
   const CLIENT_COMM_META_STOPWORDS = new Set([
-    'whatsapp', 'whatsap', 'whatsapt', 'watsap', 'watsapp', 'wasap', 'whtsapp', 'whastapp', 'wa',
-    'chat', 'chats', 'pesan', 'obrolan', 'percakapan', 'baru', 'terbaru', 'terkini', 'terakhir', 'masuk',
+    'whatsapp', 'whatsap', 'whatsaap', 'whatssap', 'whatsapt', 'whatapp', 'watsap', 'watsaap', 'watsapp', 'wasap', 'whasap', 'whastap', 'whtsap', 'whtsapp', 'whastapp', 'wa',
+    'chat', 'chats', 'chatnya', 'pesan', 'pesannya', 'obrolan', 'obrolannya', 'percakapan', 'baru', 'terbaru', 'terkini', 'terakhir', 'masuk', 'masuknya',
     'hari', 'ini', 'kemarin', 'minggu', 'bulan', 'sekarang', 'tadi', 'barusan', 'belum', 'dibaca',
-    'dibalas', 'unread', 'new', 'latest', 'recent', 'message', 'messages', 'all', 'semua', 'cek',
-    'periksa', 'lihat', 'baca', 'bacakan', 'tampilkan', 'tunjuk', 'tunjukkan', 'ambil', 'ambilkan',
-    'cari', 'carikan', 'analisa', 'analisis', 'rangkum', 'ringkas', 'rekap', 'tindak', 'lanjut',
-    'kontak', 'grup', 'group', 'email', 'tiket', 'ticket', 'komunikasi', 'riwayat', 'ada', 'gak',
-    'nggak', 'tidak', 'yang', 'dari', 'soal', 'tentang', 'dong', 'tolong', 'saya', 'aku', 'nya',
-    'anda', 'kamu', 'bisa', 'coba', 'bagaimana', 'bagaimaana', 'gimana', 'kalau', 'kalo', 'jika',
-    'apakah', 'siapakah', 'dimana', 'kapan', 'kenapa', 'mengapa', 'isi', 'kasih', 'tahu', 'info',
-    'infokan', 'beritahu', 'jelaskan', 'jam', 'berapa', 'waktu', 'tanggal', 'siapa', 'ngechat',
+    'dibalas', 'unread', 'new', 'latest', 'recent', 'message', 'messages', 'all', 'semua', 'cek', 'mengecek', 'ngecek', 'dicek',
+    'periksa', 'memeriksa', 'diperiksa', 'lihat', 'melihat', 'dilihat', 'baca', 'membaca', 'membacakan', 'bacakan', 'tampilkan', 'menampilkan', 'ditampilkan',
+    'tunjuk', 'tunjukkan', 'menunjukkan', 'ambil', 'mengambil', 'ngambil', 'ambilkan',
+    'cari', 'mencari', 'carikan', 'analisa', 'menganalisa', 'analisis', 'menganalisis', 'dianalisis',
+    'rangkum', 'merangkum', 'dirangkum', 'ringkas', 'meringkas', 'diringkas', 'rekap', 'tindak', 'lanjut',
+    'kontak', 'kontaknya', 'grup', 'group', 'email', 'tiket', 'ticket', 'komunikasi', 'riwayat', 'ada', 'gak', 'nggak', 'tidak', 'ngga', 'ga',
+    'yang', 'dari', 'soal', 'tentang', 'dong', 'lah', 'kah', 'nih', 'yah', 'kok', 'aja', 'saja', 'tolong', 'saya', 'aku', 'nya',
+    'anda', 'kamu', 'bisa', 'coba', 'mau', 'ingin', 'minta', 'suruh', 'disuruh', 'ai', 'bagaimana', 'bagaimaana', 'gimana', 'kalau', 'kalo', 'jika',
+    'apakah', 'siapakah', 'dimana', 'kapan', 'kenapa', 'mengapa', 'isi', 'isinya', 'kasih', 'tahu', 'info',
+    'infokan', 'beritahu', 'jelaskan', 'menjelaskan', 'jam', 'berapa', 'waktu', 'tanggal', 'siapa', 'ngechat', 'mengechat',
     'sama', 'dengan', 'untuk', 'pada', 'apa', 'atau', 'dan', 'ke', 'di', 'do', 'kali', 'bahas',
-    'dibahas', 'membahas', 'pembahasan', 'topik', 'ngobrol', 'ngobrolin', 'diskusi', 'diskusikan'
+    'dibahas', 'membahas', 'pembahasan', 'topik', 'ngobrol', 'ngobrolin', 'diskusi', 'diskusikan',
+    'check', 'read', 'summary', 'summarize'
   ]);
+
+  function isClientCommMetaStopword(tok) {
+    if (!tok) return true;
+    if (CLIENT_COMM_META_STOPWORDS.has(tok)) return true;
+    if (/^w(?:ha|a|h)?t?s+a+p+p?t?$/i.test(tok)) return true;
+    return false;
+  }
+
+  function normalizeClientCommPhoneVariants(str) {
+    if (!str) return [];
+    const digits = String(str).replace(/\D/g, '');
+    if (digits.length < 5) return [];
+    const variants = new Set([digits]);
+    if (digits.startsWith('0') && digits.length >= 9) variants.add('62' + digits.slice(1));
+    if (digits.startsWith('62') && digits.length >= 10) variants.add('0' + digits.slice(2));
+    return Array.from(variants);
+  }
 
   function normalizeClientCommPhrase(str) {
     if (!str) return '';
@@ -31581,24 +33579,34 @@ ${blocks}
     };
   }
 
-  async function collectCommunicationContextClientFallback(payload = {}, reqHeaders = {}, signal = undefined, session = null) {
-    if (!canUseZ21LocalCommunicationTool(payload?.planMode, session)) return null;
+  /**
+   * Pengumpul data WhatsApp read-only (markAsRead: false) yang dipakai bersama oleh:
+   * - Mode Z21 fallback (`collectCommunicationContextClientFallback`)
+   * - Mode In-Chat WA Reader (`WhatsAppController.fetchLatestChatsForAiTool`) tanpa memunculkan popup modal.
+   */
+  async function collectWhatsAppContextData({
+    source = 'whatsapp',
+    targetId = '',
+    query = '',
+    limit = 6,
+    maxMessages = 25,
+    days = 0,
+    sinceMinutes = 0,
+    isLivePulse = false,
+    unreadOnly = false,
+    reqHeaders = {},
+    signal = undefined,
+    headerLabel = '[KONTEKS KOMUNIKASI LOKAL — MODE Z21 LOCALHOST]'
+  } = {}) {
     const nowMs = Date.now();
     const serverTime = buildClientLocalClockInfo(nowMs);
-    const source = String(payload.source || 'auto').trim().toLowerCase();
-    const targetId = String(payload.target_id || '').trim();
-    const query = String(payload.query || '').trim();
-    const limit = Math.max(1, Math.min(15, parseInt(payload.limit, 10) || 6));
-    const maxMessages = Math.max(3, Math.min(80, parseInt(payload.max_messages, 10) || 25));
-    const days = Math.max(0, Math.min(365, parseInt(payload.days, 10) || 0));
-    const sinceMinutes = Math.max(0, Math.min(10080, parseInt(payload.since_minutes, 10) || 0));
-    const isLivePulse = String(payload.mode || '').toLowerCase() === 'live_pulse';
-    const unreadOnly = Boolean(payload.unread_only);
     const cutoffMs = sinceMinutes > 0 ? (nowMs - sinceMinutes * 60000) : (days > 0 ? (nowMs - days * 86400000) : 0);
 
-    const targetLower = targetId.toLowerCase();
-    const queryLower = query.toLowerCase();
-    const normTargetPhrase = normalizeClientCommPhrase(targetId);
+    const cleanTargetId = String(targetId || '').trim();
+    const cleanQuery = String(query || '').trim();
+    const targetLower = cleanTargetId.toLowerCase();
+    const queryLower = cleanQuery.toLowerCase();
+    const normTargetPhrase = normalizeClientCommPhrase(cleanTargetId);
     const searchTokens = Array.from(new Set(
       `${targetLower} ${queryLower}`
         .replace(/[^\p{L}\p{N}_@.\-#+]/gu, ' ')
@@ -31606,9 +33614,13 @@ ${blocks}
         .map(t => t.replace(/^[^a-zA-Z0-9\p{L}\p{N}]+|[^a-zA-Z0-9\p{L}\p{N}]+$/gu, ''))
         .filter(t => t.length >= 1)
     )).slice(0, 14);
-    const substantiveTokens = searchTokens.filter(t => !CLIENT_COMM_META_STOPWORDS.has(t));
+    const substantiveTokens = searchTokens.filter(t => !isClientCommMetaStopword(t));
     const normSubstantivePhrase = normalizeClientCommPhrase(substantiveTokens.join(' '));
-    const hasSubstantiveFilter = Boolean(targetId || substantiveTokens.length > 0);
+    const phoneVariants = Array.from(new Set([
+      ...normalizeClientCommPhoneVariants(cleanTargetId),
+      ...normalizeClientCommPhoneVariants(cleanQuery)
+    ]));
+    const hasSubstantiveFilter = Boolean(cleanTargetId || substantiveTokens.length > 0 || phoneVariants.length > 0);
     const effectiveUnreadOnly = unreadOnly || /\b(?:belum\s+(?:dibaca|dibalas)|unread)\b/i.test(queryLower);
 
     const apiUrl = (p) => (typeof getUniversalApiUrl === 'function') ? getUniversalApiUrl(p) : p;
@@ -31617,21 +33629,41 @@ ${blocks}
     let contacts = (wantsWaSource && typeof WhatsAppController !== 'undefined' && Array.isArray(WhatsAppController.contacts) && WhatsAppController.contacts.length > 0)
       ? [...WhatsAppController.contacts]
       : [];
+    let authRejected = false;
+    let authErrorMsg = '';
 
     if (signal?.aborted) return null;
 
     if (wantsWaSource) {
+      const fetchJson = async (endpoint) => {
+        if (typeof WhatsAppController !== 'undefined' && typeof WhatsAppController.waFetch === 'function') {
+          try {
+            return await WhatsAppController.waFetch(endpoint, { headers: reqHeaders, signal }, 1);
+          } catch (_) {
+            return null;
+          }
+        }
+        return await fetch(apiUrl(endpoint), { headers: reqHeaders, signal }).catch(() => null);
+      };
       try {
         const [stRes, ctRes] = await Promise.all([
-          fetch(apiUrl('/api/wa/status'), { headers: reqHeaders, signal }).catch(() => null),
-          fetch(apiUrl('/api/wa/contacts'), { headers: reqHeaders, signal }).catch(() => null)
+          fetchJson('/api/wa/status'),
+          fetchJson('/api/wa/contacts')
         ]);
         if (signal?.aborted) return null;
-        if (stRes && stRes.ok) {
+        if (stRes && (stRes.status === 401 || stRes.status === 403)) {
+          const stErr = await stRes.json().catch(() => null);
+          authRejected = true;
+          authErrorMsg = stErr?.error || 'PIN/Otorisasi WhatsApp diperlukan.';
+        } else if (stRes && stRes.ok) {
           const stData = await stRes.json().catch(() => null);
           if (stData && typeof stData.connected === 'boolean') waConnected = stData.connected;
         }
-        if (ctRes && ctRes.ok) {
+        if (ctRes && (ctRes.status === 401 || ctRes.status === 403)) {
+          const ctErr = await ctRes.json().catch(() => null);
+          authRejected = true;
+          authErrorMsg = authErrorMsg || ctErr?.error || 'PIN/Otorisasi WhatsApp diperlukan.';
+        } else if (ctRes && ctRes.ok) {
           const ctData = await ctRes.json().catch(() => null);
           if (ctData && Array.isArray(ctData.contacts) && ctData.contacts.length > 0) {
             contacts = ctData.contacts;
@@ -31644,10 +33676,10 @@ ${blocks}
     const totalContacts = contacts.length;
     const unreadChats = contacts.filter(c => (c?.unreadCount || 0) > 0).length;
     const directoryPreview = [...contacts]
-      .sort((a, b) => (parseClientCommTimestampMs(b?.lastTimestamp) - parseClientCommTimestampMs(a?.lastTimestamp)) || ((b?.unreadCount || 0) - (a?.unreadCount || 0)))
+      .sort((a, b) => (parseClientCommTimestampMs(b?.lastTimestamp || b?.timestamp) - parseClientCommTimestampMs(a?.lastTimestamp || a?.timestamp)) || ((b?.unreadCount || 0) - (a?.unreadCount || 0)))
       .slice(0, 10)
       .map(c => {
-        const tsMs = parseClientCommTimestampMs(c.lastTimestamp);
+        const tsMs = parseClientCommTimestampMs(c.lastTimestamp || c.timestamp);
         return {
           id: c.id,
           name: c.name || c.notify || c.phone || c.id,
@@ -31663,7 +33695,7 @@ ${blocks}
     const scoredContacts = [];
     for (const c of contacts) {
       if (!c || !c.id) continue;
-      const tsMs = parseClientCommTimestampMs(c.lastTimestamp);
+      const tsMs = parseClientCommTimestampMs(c.lastTimestamp || c.timestamp);
       if (cutoffMs > 0 && tsMs > 0 && tsMs < cutoffMs) continue;
       const jidLower = String(c.id || '').toLowerCase();
       const nameLower = String(c.name || '').toLowerCase();
@@ -31671,12 +33703,14 @@ ${blocks}
       const normName = normalizeClientCommPhrase(c.name);
       const normNotify = normalizeClientCommPhrase(c.notify);
       const normWords = new Set(`${normName} ${normNotify}`.split(/\s+/).filter(Boolean));
+      const phoneDigits = String(c.phone || String(c.id).split('@')[0] || '').replace(/\D/g, '');
       const lastMsgLower = String(c.lastMessage || '').toLowerCase();
 
       let score = 0;
       let contactMatchedDirectly = false;
       if (targetLower) {
         if (jidLower === targetLower) { score += 130; contactMatchedDirectly = true; }
+        else if (phoneVariants.some(pv => phoneDigits && (phoneDigits === pv || phoneDigits.endsWith(pv) || (phoneDigits.length >= 6 && pv.endsWith(phoneDigits))))) { score += 110; contactMatchedDirectly = true; }
         else if (nameLower.includes(targetLower) || notifyLower.includes(targetLower) || (normTargetPhrase && (normName.includes(normTargetPhrase) || normNotify.includes(normTargetPhrase)))) { score += 105; contactMatchedDirectly = true; }
         else if (jidLower.includes(targetLower)) { score += 70; contactMatchedDirectly = true; }
       }
@@ -31684,6 +33718,13 @@ ${blocks}
         if (normName === normSubstantivePhrase || normNotify === normSubstantivePhrase) { score += 115; contactMatchedDirectly = true; }
         else if (normName.includes(normSubstantivePhrase) || normNotify.includes(normSubstantivePhrase)) { score += 95; contactMatchedDirectly = true; }
         else if (substantiveTokens.length >= 2 && substantiveTokens.every(t => normWords.has(t))) { score += 85; contactMatchedDirectly = true; }
+      }
+      for (const pv of phoneVariants) {
+        if (phoneDigits && (phoneDigits === pv || phoneDigits.endsWith(pv))) {
+          score += 45;
+          contactMatchedDirectly = true;
+          break;
+        }
       }
       for (const tok of substantiveTokens) {
         if (tok.length >= 2 && (nameLower.includes(tok) || notifyLower.includes(tok))) score += 28;
@@ -31723,10 +33764,10 @@ ${blocks}
       const savedUnread = c.unreadCount || 0;
       let rawMsgs = [];
       try {
-        const mRes = await fetch(apiUrl(`/api/wa/messages?jid=${encodeURIComponent(c.id)}&markAsRead=false`), {
-          headers: reqHeaders,
-          signal
-        }).catch(() => null);
+        const msgPath = `/api/wa/messages?jid=${encodeURIComponent(c.id)}&markAsRead=false`;
+        const mRes = (typeof WhatsAppController !== 'undefined' && typeof WhatsAppController.waFetch === 'function')
+          ? await WhatsAppController.waFetch(msgPath, { headers: reqHeaders, signal }, 1).catch(() => null)
+          : await fetch(apiUrl(msgPath), { headers: reqHeaders, signal }).catch(() => null);
         if (signal?.aborted) return null;
         if (mRes && mRes.ok) {
           const mData = await mRes.json().catch(() => null);
@@ -31767,6 +33808,7 @@ ${blocks}
           text: String(c.lastMessage || '').slice(0, 600)
         });
       }
+      const lastMsgTsMs = formattedMessages.length > 0 ? (formattedMessages[formattedMessages.length - 1].timestampMs || entry.tsMs) : entry.tsMs;
       return {
         source: 'whatsapp',
         id: c.id,
@@ -31775,9 +33817,9 @@ ${blocks}
         isGroup: Boolean(c.isGroup || String(c.id).endsWith('@g.us')),
         unreadCount: savedUnread,
         totalMessages: filteredMsgs.length || formattedMessages.length,
-        timestampMs: entry.tsMs,
-        lastTimestamp: formatClientCommTimestamp(entry.tsMs),
-        relativeAge: formatClientCommRelativeAge(entry.tsMs, nowMs),
+        timestampMs: lastMsgTsMs,
+        lastTimestamp: formatClientCommTimestamp(lastMsgTsMs),
+        relativeAge: formatClientCommRelativeAge(lastMsgTsMs, nowMs),
         score: entry.score,
         messages: formattedMessages
       };
@@ -31816,10 +33858,14 @@ ${blocks}
     };
 
     const lines = [];
-    lines.push(`[KONTEKS KOMUNIKASI LOKAL — MODE Z21 LOCALHOST]`);
+    lines.push(headerLabel);
     lines.push(`Waktu Server Lokal Sekarang: ${serverTime.summaryLine} | ISO: ${serverTime.isoUtc}`);
-    lines.push(`Parameter: source=${source} | target_id=${targetId || '(semua)'} | query=${query || '(tanpa filter)'}`);
+    lines.push(`Parameter: source=${source} | target_id=${cleanTargetId || '(semua)'} | query=${cleanQuery || '(tanpa filter)'}`);
     lines.push(`Statistik Sumber: WhatsApp(${totalContacts} kontak, ${unreadChats} belum dibaca, ${items.length} cocok, status=${waConnected ? 'Terhubung' : 'Arsip Lokal'})`);
+
+    if (authRejected && totalContacts === 0) {
+      lines.push(`\n[CATATAN OTORISASI]: ${authErrorMsg}`);
+    }
 
     if (recentIncoming.length > 0) {
       lines.push(`\n[PESAN WHATSAPP BARU MASUK LIVE (REAL-TIME)]:`);
@@ -31850,14 +33896,34 @@ ${blocks}
     return {
       success: true,
       fallbackUsed: true,
+      authRejected,
+      authErrorMsg,
       serverTime,
-      query: { source, targetId, query, limit, maxMessages, days, sinceMinutes, unreadOnly },
+      query: { source, targetId: cleanTargetId, query: cleanQuery, limit, maxMessages, days, sinceMinutes, unreadOnly },
       stats,
       recentIncoming,
       items,
       directoryPreview,
       formattedContext: lines.join('\n').slice(0, 18000)
     };
+  }
+
+  async function collectCommunicationContextClientFallback(payload = {}, reqHeaders = {}, signal = undefined, session = null) {
+    if (!canUseZ21LocalCommunicationTool(payload?.planMode, session)) return null;
+    return await collectWhatsAppContextData({
+      source: String(payload.source || 'auto').trim().toLowerCase(),
+      targetId: String(payload.target_id || '').trim(),
+      query: String(payload.query || '').trim(),
+      limit: Math.max(1, Math.min(15, parseInt(payload.limit, 10) || 6)),
+      maxMessages: Math.max(3, Math.min(80, parseInt(payload.max_messages, 10) || 25)),
+      days: Math.max(0, Math.min(365, parseInt(payload.days, 10) || 0)),
+      sinceMinutes: Math.max(0, Math.min(10080, parseInt(payload.since_minutes, 10) || 0)),
+      isLivePulse: String(payload.mode || '').toLowerCase() === 'live_pulse',
+      unreadOnly: Boolean(payload.unread_only),
+      reqHeaders,
+      signal,
+      headerLabel: '[KONTEKS KOMUNIKASI LOKAL — MODE Z21 LOCALHOST]'
+    });
   }
 
   async function requestZ21CommunicationContext(payload, reqHeaders, signal, session = null) {
@@ -31909,8 +33975,10 @@ ${blocks}
       };
       if (STATE.userToken) reqHeaders['X-User-Token'] = STATE.userToken;
       if (typeof WhatsAppController !== 'undefined') {
-        if (WhatsAppController.userId) reqHeaders['X-WA-User-ID'] = WhatsAppController.userId;
-        if (WhatsAppController.pin) reqHeaders['X-WA-PIN'] = WhatsAppController.pin;
+        const waUid = (typeof WhatsAppController.getUserId === 'function' ? WhatsAppController.getUserId() : WhatsAppController.userId) || '';
+        const waPin = (typeof WhatsAppController.getPin === 'function' ? WhatsAppController.getPin() : WhatsAppController.pin) || '';
+        if (waUid) reqHeaders['X-WA-User-ID'] = waUid;
+        if (waPin) reqHeaders['X-WA-PIN'] = waPin;
       }
 
       let pulseSignal;
@@ -33174,17 +35242,17 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       type: 'function',
       function: {
         name: 'summarize_whatsapp_chat',
-        description: 'Membaca dan merangkum obrolan WhatsApp dari nomor atau kontak/grup spesifik dengan gerbang persetujuan (Consent Gate) keamanan pengguna. Tool ini TIDAK membaca seluruh chat WhatsApp secara membabi buta, melainkan akan memunculkan pop-up persetujuan kepada pengguna untuk memilih/menyetujui nomor WhatsApp mana saja yang boleh diakses dan dirangkum oleh AI, lalu menampilkan hasil rangkumannya di pop-up khusus.',
+        description: 'Mengecek, membaca, dan merangkum pesan/chat WhatsApp terbaru atau dari kontak/grup spesifik secara pasif (read-only, tanpa mengubah status belum dibaca) untuk langsung dijelaskan di percakapan AI utama. JANGAN menyebutkan atau membuka pop-up UI terpisah; kembalikan langsung isi pesan, pengirim, waktu, dan tindak lanjut ke chat pengguna. Kosongkan target_number_or_name untuk mengecek chat WhatsApp terbaru secara umum.',
         parameters: {
           type: 'object',
           properties: {
             target_number_or_name: {
               type: 'string',
-              description: 'Nama kontak, nama grup, atau nomor WhatsApp spesifik yang ingin dirangkum (opsional, contoh: "almairaa" atau "6287899163076"). Kosongkan jika ingin pengguna memilih langsung di pop-up persetujuan.'
+              description: 'Opsional: Nama kontak, nama grup, atau nomor WhatsApp spesifik yang ingin dicek/dibaca (contoh: "almairaa" atau "6287899163076"). Kosongkan ("") jika pengguna ingin mengecek daftar chat WhatsApp terbaru secara keseluruhan.'
             },
             focus_topic: {
               type: 'string',
-              description: 'Fokus rangkuman atau pertanyaan spesifik tentang isi chat (opsional, contoh: "Siapa saja yang sudah mengumpulkan tugas dokumen?").'
+              description: 'Opsional: Kata kunci topik atau fokus pengecekan (contoh: "pesan terbaru", "belum dibaca", atau topik berkas tertentu).'
             }
           }
         }
@@ -33499,10 +35567,113 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           additionalProperties: false
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'request_location_permission',
+        description: 'Langkah 1 Alur Cuaca (Consent Gate Privasi): Meminta izin eksplisit pengguna untuk mengakses GPS/Lokasi perangkat sebelum mengambil koordinat. Wajib dipanggil terlebih dahulu saat pengguna menanyakan cuaca di lokasi mereka saat ini.',
+        parameters: {
+          type: 'object',
+          properties: {
+            reason: {
+              type: 'string',
+              description: 'Penjelasan singkat dan ramah mengapa izin lokasi diperlukan (misal: untuk mendeteksi kota Anda dan menampilkan prakiraan cuaca lokal saat ini).'
+            }
+          },
+          required: [],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_current_coordinates',
+        description: 'Langkah 2 Alur Cuaca: Mengambil koordinat latitude dan longitude real-time dari perangkat pengguna (setelah izin diberikan pada request_location_permission) dan mencocokkannya menjadi nama wilayah/kota serta zona waktu.',
+        parameters: {
+          type: 'object',
+          properties: {
+            include_address: {
+              type: 'boolean',
+              default: true,
+              description: 'Mencocokkan koordinat dengan nama kecamatan/kota/provinsi melalui reverse geocoding.'
+            }
+          },
+          required: [],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'fetch_weather_data',
+        description: 'Langkah 3 Alur Cuaca: Mengambil data cuaca terkini (suhu, rasa suhu, kelembapan, angin, kode cuaca, peluang hujan) beserta prakiraan 5 jam ke depan dari API cuaca global Open-Meteo berdasarkan koordinat lat/lon atau nama kota opsional.',
+        parameters: {
+          type: 'object',
+          properties: {
+            lat: {
+              type: 'number',
+              description: 'Koordinat latitude dari get_current_coordinates.'
+            },
+            lon: {
+              type: 'number',
+              description: 'Koordinat longitude dari get_current_coordinates.'
+            },
+            city: {
+              type: 'string',
+              description: 'Opsional: Nama kota eksplisit jika pengguna menyebut kota tertentu (contoh: "Bandung", "Tokyo").'
+            },
+            target_day: {
+              type: 'string',
+              enum: ['today', 'tomorrow', 'day_after'],
+              description: 'Opsional: Fokus waktu yang ditanyakan pengguna ("today" = hari ini/sekarang, "tomorrow" = besok, "day_after" = lusa).'
+            }
+          },
+          required: [],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'render_weather_ui',
+        description: 'Langkah 4 Alur Cuaca (Visual Synthesis): Menampilkan komponen kartu visualisasi cuaca interaktif di layar chat sesuai target waktu yang ditanyakan (hari ini, besok, atau lusa), lengkap dengan ikon animasi, suhu, kelembapan, angin, dan grafik prakiraan per jam.',
+        parameters: {
+          type: 'object',
+          properties: {
+            condition: {
+              type: 'string',
+              description: 'Kondisi cuaca pada target waktu yang ditanyakan dalam Bahasa Indonesia (misal: "Hujan Ringan", "Cerah Berawan", "Cerah").'
+            },
+            temp: {
+              type: 'number',
+              description: 'Suhu pada target waktu yang ditanyakan dalam derajat Celcius (misal: 24).'
+            },
+            city: {
+              type: 'string',
+              description: 'Nama kota/wilayah yang cocok dengan koordinat pengguna (misal: "Jakarta Selatan").'
+            },
+            target_day: {
+              type: 'string',
+              enum: ['today', 'tomorrow', 'day_after'],
+              description: 'Target hari visualisasi yang cocok dengan pertanyaan pengguna: "today" (sekarang/hari ini), "tomorrow" (besok), atau "day_after" (lusa).'
+            },
+            advice: {
+              type: 'string',
+              description: 'Opsional: Saran singkat untuk pengguna sesuai kondisi cuaca (misal: bawa payung bila hujan).'
+            }
+          },
+          required: ['condition', 'temp', 'city'],
+          additionalProperties: false
+        }
+      }
     }
   ];
 
-  // Seluruh tool otonom (Pencarian Web Real-Time Terbuka, Pembacaan URL, Visual Image Grounding, Rekomendasi Video, Memori SQLite, Python, WhatsApp Consent, Konteks Komunikasi Z21 Localhost, RAG Dinamis search_documents & Pencarian Riwayat Obrolan search_chat_history)
+  // Seluruh tool otonom (Pencarian Web Real-Time Terbuka, Pembacaan URL, Visual Image Grounding, Rekomendasi Video, Memori SQLite, Python, WhatsApp Consent, Konteks Komunikasi Z21 Localhost, RAG Dinamis search_documents, Pencarian Riwayat Obrolan search_chat_history, & Alur Cuaca Lokasi Berizin)
   const LOCAL_UTILITY_TOOL_NAMES = [
     'search_web', 'web_search', 'search', 'google_search', 'internet_search', 'pencarian_web', 'cari_web',
     'pencarian', 'tool_pencarian', 'cari', 'penelusuran', 'penelusuran_web', 'search_internet', 'google', 'duckduckgo', 'bing',
@@ -33511,8 +35682,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     'search_memory', 'cari_memori', 'query_memory',
     'search_documents', 'retrieve_knowledge', 'search_knowledge', 'retrieve_documents', 'search_internal_docs', 'rag_search', 'cari_dokumen', 'ambil_pengetahuan', 'cari_sop', 'search_doc', 'retrieve_doc',
     'search_chat_history', 'conversation_search', 'recent_chats', 'search_conversations', 'chat_history_search', 'cari_riwayat_obrolan', 'cari_percakapan', 'cari_chat_lama', 'riwayat_obrolan',
+    'request_location_permission', 'request_location', 'izinkan_lokasi', 'minta_izin_lokasi',
+    'get_current_coordinates', 'get_location', 'get_coordinates', 'ambil_koordinat', 'cek_lokasi',
+    'fetch_weather_data', 'get_weather', 'cek_cuaca', 'ambil_cuaca', 'weather_search',
+    'render_weather_ui', 'generate_weather_visual', 'visualisasi_cuaca', 'tampilkan_cuaca',
     'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python',
-    'summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary',
+    'summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary', 'baca_chat_whatsapp', 'cek_chat_whatsapp',
     'fetch_communication_context', 'communication_context', 'analyze_whatsapp_chat', 'analisis_whatsapp', 'analisis_komunikasi', 'cek_whatsapp', 'cari_chat_whatsapp', 'fetch_whatsapp_context', 'fetch_email_context', 'fetch_ticket_context', 'cek_tiket', 'cek_email', 'riwayat_komunikasi',
     'find_related_videos', 'search_related_videos', 'recommend_related_videos', 'recommend_videos', 'cari_video_terkait', 'rekomendasi_video', 'related_videos',
     'search_images', 'cari_gambar',
@@ -33530,8 +35705,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     'search_memory', 'cari_memori', 'query_memory',
     'search_documents', 'retrieve_knowledge', 'search_knowledge', 'retrieve_documents', 'search_internal_docs', 'rag_search', 'cari_dokumen', 'ambil_pengetahuan', 'cari_sop', 'search_doc', 'retrieve_doc',
     'search_chat_history', 'conversation_search', 'recent_chats', 'search_conversations', 'chat_history_search', 'cari_riwayat_obrolan', 'cari_percakapan', 'cari_chat_lama', 'riwayat_obrolan',
+    'request_location_permission', 'request_location', 'izinkan_lokasi', 'minta_izin_lokasi',
+    'get_current_coordinates', 'get_location', 'get_coordinates', 'ambil_koordinat', 'cek_lokasi',
+    'fetch_weather_data', 'get_weather', 'cek_cuaca', 'ambil_cuaca', 'weather_search',
+    'render_weather_ui', 'generate_weather_visual', 'visualisasi_cuaca', 'tampilkan_cuaca',
     'execute_python_code', 'execute_code', 'run_code', 'python_code', 'run_python', 'python',
-    'summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary',
+    'summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary', 'baca_chat_whatsapp', 'cek_chat_whatsapp',
     'fetch_communication_context', 'communication_context', 'analyze_whatsapp_chat', 'analisis_whatsapp', 'analisis_komunikasi', 'cek_whatsapp', 'cari_chat_whatsapp', 'fetch_whatsapp_context', 'fetch_email_context', 'fetch_ticket_context', 'cek_tiket', 'cek_email', 'riwayat_komunikasi',
     'find_related_videos', 'search_related_videos', 'recommend_related_videos', 'recommend_videos', 'cari_video_terkait', 'rekomendasi_video', 'related_videos',
     'search_images', 'cari_gambar',
@@ -33565,7 +35744,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       'riwayat_obrolan'
     ].includes(n)) return 'search_chat_history';
     if (['execute_python_code', 'execute_code', 'run_python', 'run_code', 'python_code', 'python'].includes(n)) return 'execute_python_code';
-    if (['summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary'].includes(n)) return 'summarize_whatsapp_chat';
+    if (['summarize_whatsapp_chat', 'read_whatsapp_chat', 'rangkum_whatsapp', 'baca_whatsapp', 'whatsapp_summary', 'baca_chat_whatsapp', 'cek_chat_whatsapp'].includes(n)) return 'summarize_whatsapp_chat';
     if ([
       'fetch_communication_context', 'communication_context', 'analyze_whatsapp_chat', 'analisis_whatsapp',
       'analisis_komunikasi', 'cek_whatsapp', 'cari_chat_whatsapp', 'fetch_whatsapp_context',
@@ -33575,6 +35754,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (['search_images', 'cari_gambar'].includes(n)) return 'search_images';
     if (['inspect_image', 'periksa_gambar'].includes(n)) return 'inspect_image';
     if (['prepare_image_display', 'tampilkan_gambar'].includes(n)) return 'prepare_image_display';
+    if (['request_location_permission', 'request_location', 'izinkan_lokasi', 'minta_izin_lokasi'].includes(n)) return 'request_location_permission';
+    if (['get_current_coordinates', 'get_location', 'get_coordinates', 'ambil_koordinat', 'cek_lokasi'].includes(n)) return 'get_current_coordinates';
+    if (['fetch_weather_data', 'get_weather', 'cek_cuaca', 'ambil_cuaca', 'weather_search'].includes(n)) return 'fetch_weather_data';
+    if (['render_weather_ui', 'generate_weather_visual', 'visualisasi_cuaca', 'tampilkan_cuaca'].includes(n)) return 'render_weather_ui';
     return n;
   }
 
@@ -33705,6 +35888,24 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const lay = (raw && typeof raw === 'object') ? (raw.layout || 'single') : 'single';
       const plc = (raw && typeof raw === 'object') ? (raw.placement || 'after_intro') : 'after_intro';
       return `img_prepare:${ids}:${lay}:${plc}`;
+    }
+    if (toolName === 'request_location_permission') {
+      return 'weather_consent:prompt';
+    }
+    if (toolName === 'get_current_coordinates') {
+      return 'weather_coords:current';
+    }
+    if (toolName === 'fetch_weather_data') {
+      const latS = (raw && typeof raw === 'object' && raw.lat !== undefined) ? String(raw.lat).slice(0, 8) : '';
+      const lonS = (raw && typeof raw === 'object' && raw.lon !== undefined) ? String(raw.lon).slice(0, 8) : '';
+      const cityS = (raw && typeof raw === 'object' && (raw.city || raw.location)) ? String(raw.city || raw.location).trim().toLowerCase() : '';
+      return `weather_fetch:${latS}:${lonS}:${cityS}`;
+    }
+    if (toolName === 'render_weather_ui') {
+      const cS = (raw && typeof raw === 'object' && raw.condition) ? String(raw.condition).trim().toLowerCase() : '';
+      const tS = (raw && typeof raw === 'object' && raw.temp !== undefined) ? String(raw.temp) : '';
+      const ctS = (raw && typeof raw === 'object' && raw.city) ? String(raw.city).trim().toLowerCase() : '';
+      return `weather_ui:${cS}:${tS}:${ctS}`;
     }
     let url = '';
     if (raw && typeof raw === 'object') url = raw.url || raw.target || raw.link || raw.href || raw.targetUrl || raw.tautan || raw.alamat || '';
@@ -34314,6 +36515,15 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         if (tName === 'search_chat_history') {
           return { query: s };
         }
+        if (tName === 'request_location_permission') {
+          return { reason: s };
+        }
+        if (tName === 'fetch_weather_data') {
+          return { city: s };
+        }
+        if (tName === 'render_weather_ui') {
+          return { condition: s };
+        }
         // search_web & search_memory memakai query
         return { query: s };
       };
@@ -34390,6 +36600,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       } else if (toolName === 'search_chat_history') {
         canonicalTool = 'search_chat_history';
         canonicalArg = ''; // Riwayat obrolan harus selalu segar lintas sesi terbaru
+      } else if (['request_location_permission', 'get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(toolName)) {
+        canonicalTool = toolName;
+        canonicalArg = ''; // Alur izin lokasi & telemetri cuaca selalu real-time per giliran
       } else if (toolName === 'find_related_videos') {
         canonicalTool = 'find_related_videos';
         const u = String(args.video_url || args.url || args.link || '').trim().toLowerCase();
@@ -34401,7 +36614,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       }
 
       const cacheKey = `${canonicalTool}:${canonicalArg}`;
-      const cachedEntry = (canonicalTool !== 'fetch_communication_context' && canonicalTool !== 'search_documents' && canonicalTool !== 'search_chat_history' && canonicalArg)
+      const cachedEntry = (!['fetch_communication_context', 'search_documents', 'search_chat_history', 'request_location_permission', 'get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(canonicalTool) && canonicalArg)
         ? AUTONOMOUS_TOOL_CACHE.get(cacheKey)
         : null;
       if (cachedEntry) {
@@ -34897,8 +37110,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         };
         if (STATE.userToken) reqHeaders['X-User-Token'] = STATE.userToken;
         if (typeof WhatsAppController !== 'undefined') {
-          if (WhatsAppController.userId) reqHeaders['X-WA-User-ID'] = WhatsAppController.userId;
-          if (WhatsAppController.pin) reqHeaders['X-WA-PIN'] = WhatsAppController.pin;
+          const waUid = (typeof WhatsAppController.getUserId === 'function' ? WhatsAppController.getUserId() : WhatsAppController.userId) || '';
+          const waPin = (typeof WhatsAppController.getPin === 'function' ? WhatsAppController.getPin() : WhatsAppController.pin) || '';
+          if (waUid) reqHeaders['X-WA-User-ID'] = waUid;
+          if (waPin) reqHeaders['X-WA-PIN'] = waPin;
         }
 
         try {
@@ -35044,7 +37259,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             .toLowerCase()
             .replace(/[^\p{L}\p{N}_.\-#]/gu, ' ')
             .split(/\s+/)
-            .filter(t => t.length >= 2 && !CLIENT_COMM_META_STOPWORDS.has(t))
+            .filter(t => t.length >= 2 && !isClientCommMetaStopword(t))
         )).slice(0, 12);
 
         const buildClientRagChunks = () => {
@@ -35443,24 +37658,349 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         };
       }
 
+      if (toolName === 'request_location_permission') {
+        const turnCtx = toolContext?.weatherTurnCtx || WeatherController._activeTurnCtx || null;
+        const reasonText = String((args && typeof args === 'object' && (args.reason || args.alasan || args.message)) || '').trim();
+        const consentOutcome = await WeatherController.requestPermissionWithConsent({
+          reason: reasonText,
+          turnCtx
+        });
+        if (STATE.abortController?.signal?.aborted || consentOutcome?.aborted) {
+          return { text: 'Permintaan izin lokasi dibatalkan oleh pengguna.', sources: [], success: false, denied: true };
+        }
+        if (consentOutcome && consentOutcome.approved) {
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+            BioEndocrine.registerToolSuccess({ toolName: 'request_location_permission', details: `Izin lokasi disetujui (${consentOutcome.permission})` });
+          }
+          return {
+            text: consentOutcome.text,
+            data: consentOutcome,
+            sources: [],
+            success: true
+          };
+        }
+        return {
+          text: consentOutcome?.text || '[AKSES LOKASI DITOLAK PENGGUNA]: Pengguna menolak memberikan izin lokasi. Sampaikan secara sopan bahwa privasi mereka dihormati dan tawarkan untuk mengecek cuaca jika mereka ingin mengetikkan nama kotanya.',
+          data: consentOutcome || { approved: false, denied: true },
+          denied: true,
+          sources: [],
+          success: false
+        };
+      }
+
+      if (toolName === 'get_current_coordinates') {
+        const turnCtx = toolContext?.weatherTurnCtx || WeatherController._activeTurnCtx || null;
+        const coordRes = await WeatherController.resolveCoordinatesAndMatch(turnCtx);
+        if (STATE.abortController?.signal?.aborted) {
+          return { text: 'Pengambilan koordinat dihentikan oleh pengguna.', sources: [], success: false };
+        }
+        if (coordRes && coordRes.success) {
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+            BioEndocrine.registerToolSuccess({ toolName: 'get_current_coordinates', details: `Lokasi cocok: ${coordRes.location?.city || '-'}` });
+          }
+          return {
+            text: coordRes.text,
+            data: coordRes,
+            sources: [],
+            success: true
+          };
+        }
+        return {
+          text: coordRes?.text || 'Error: Gagal mengambil koordinat lokasi perangkat.',
+          data: coordRes,
+          denied: Boolean(coordRes?.denied),
+          sources: [],
+          success: false
+        };
+      }
+
+      if (toolName === 'fetch_weather_data') {
+        const turnCtx = toolContext?.weatherTurnCtx || WeatherController._activeTurnCtx || null;
+        const safeArgs = (args && typeof args === 'object') ? args : {};
+        let latNum = (safeArgs.lat !== undefined && safeArgs.lat !== null && safeArgs.lat !== '') ? Number(safeArgs.lat)
+          : ((safeArgs.latitude !== undefined && safeArgs.latitude !== null && safeArgs.latitude !== '') ? Number(safeArgs.latitude) : NaN);
+        let lonNum = (safeArgs.lon !== undefined && safeArgs.lon !== null && safeArgs.lon !== '') ? Number(safeArgs.lon)
+          : ((safeArgs.lng !== undefined && safeArgs.lng !== null && safeArgs.lng !== '') ? Number(safeArgs.lng)
+            : ((safeArgs.longitude !== undefined && safeArgs.longitude !== null && safeArgs.longitude !== '') ? Number(safeArgs.longitude) : NaN));
+        let explicitCity = String(safeArgs.city || safeArgs.location || safeArgs.kota || '').trim();
+
+        const hasValidArgsCoords = Number.isFinite(latNum) && Number.isFinite(lonNum) && latNum >= -90 && latNum <= 90 && lonNum >= -180 && lonNum <= 180;
+        const asksOwnDeviceLocation = !explicitCity && /\b(?:lokasi\s+(?:saya|ku|saat\s+ini|sekarang)|di\s+tempatku|tempat\s+saya|lokasiku|sekitarku|di\s+sini|gps)\b/i.test(String(promptContext || ''));
+
+        // Jamin gerbang privasi Consent Gate tidak pernah terlewati bila mengambil lokasi pengguna saat ini
+        if ((!hasValidArgsCoords && !explicitCity) || (asksOwnDeviceLocation && turnCtx && (turnCtx.permissionStatus === 'prompt' || turnCtx.permissionStatus === 'denied'))) {
+          if (turnCtx && turnCtx.permissionStatus === 'denied') {
+            return {
+              text: '[AKSES LOKASI DITOLAK PENGGUNA]: Pengguna telah menolak akses lokasi. Tawarkan pengguna untuk mengetikkan nama kota jika tetap ingin mengetahui cuaca.',
+              denied: true,
+              sources: [],
+              success: false
+            };
+          }
+          if (!turnCtx?.coords || turnCtx.permissionStatus === 'prompt') {
+            const coordRes = await WeatherController.resolveCoordinatesAndMatch(turnCtx);
+            if (!coordRes || !coordRes.success) {
+              return {
+                text: coordRes?.text || '[AKSES LOKASI DITOLAK PENGGUNA]: Gagal memperoleh izin atau koordinat lokasi pengguna.',
+                denied: Boolean(coordRes?.denied),
+                sources: [],
+                success: false
+              };
+            }
+          }
+          if (turnCtx?.coords) {
+            latNum = turnCtx.coords.lat;
+            lonNum = turnCtx.coords.lon;
+          } else if (turnCtx?.manualCity) {
+            explicitCity = turnCtx.manualCity;
+          }
+        }
+        // Pastikan koordinat / kota dari turnCtx tetap terisi bila argumen model kosong/parsial
+        if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
+          if (!explicitCity && turnCtx?.coords) {
+            latNum = turnCtx.coords.lat;
+            lonNum = turnCtx.coords.lon;
+          } else if (!explicitCity && turnCtx?.manualCity) {
+            explicitCity = turnCtx.manualCity;
+          }
+        }
+
+        try {
+          const wJson = await WeatherController.fetchWeatherResilient({
+            lat: Number.isFinite(latNum) ? latNum : undefined,
+            lon: Number.isFinite(lonNum) ? lonNum : undefined,
+            city: explicitCity,
+            turnCtx,
+            signal: makeToolSignal(14000)
+          });
+          if (STATE.abortController?.signal?.aborted) {
+            return { text: 'Pengambilan data cuaca dihentikan oleh pengguna.', sources: [], success: false };
+          }
+          if (!wJson || !wJson.success) {
+            const locCityHint = String(explicitCity || turnCtx?.matchedLocation?.city || turnCtx?.manualCity || '').trim();
+            if (locCityHint && !locCityHint.includes(',')) {
+              try {
+                const webFallback = await executeAutonomousWebTool('search_web', {
+                  query: `prakiraan cuaca ${locCityHint} hari ini suhu kelembapan`,
+                  max_results: 5
+                }, promptContext, session, toolContext);
+                if (webFallback && Array.isArray(webFallback.sources) && webFallback.sources.length > 0) {
+                  return {
+                    text: `[DATA CUACA VIA PENCARIAN WEB — ${locCityHint}]:\n${webFallback.text || ''}`,
+                    sources: webFallback.sources,
+                    success: true
+                  };
+                }
+              } catch (_) {}
+            }
+            const errMsg = wJson?.error || 'Semua penyedia data cuaca (backend & langsung) tidak merespons.';
+            return { text: `Error: ${errMsg}`, denied: false, sources: [], success: false };
+          }
+
+          if (turnCtx) {
+            turnCtx.weatherData = wJson;
+            if (wJson.location && wJson.location.source !== 'coordinates_only') {
+              turnCtx.matchedLocation = wJson.location;
+            }
+          }
+          WeatherController._lastWeatherData = wJson;
+
+          if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+            BioEndocrine.registerToolSuccess({
+              toolName: 'fetch_weather_data',
+              details: `Cuaca ${wJson.location?.city || 'lokal'}: ${wJson.current?.condition || '-'} ${wJson.current?.tempC ?? '-'}°C (${wJson.provider || 'open-meteo'})`
+            });
+          }
+
+          const cur = wJson.current || {};
+          const fSpec = WeatherController.resolveTargetTimeSpec(promptContext, safeArgs);
+          const fDay = fSpec.dayOffset > 0 && Array.isArray(wJson.dailyForecast)
+            ? (wJson.dailyForecast.find((d, ix) => Number(d?.dayOffset ?? ix) === fSpec.dayOffset) || wJson.dailyForecast[fSpec.dayOffset] || null)
+            : null;
+          const hintCond = fDay?.condition || cur.condition || 'Cerah Berawan';
+          const hintTemp = Number(fDay?.tempC ?? cur.tempC ?? 25);
+          const hintAdvice = fDay?.advice || cur.advice || '';
+          const cityArg = String(wJson.location?.city || explicitCity || 'Lokasi Anda');
+          const provUrl = String(wJson.provider || '').includes('wttr')
+            ? { title: 'wttr.in Weather Telemetry (Real-Time)', url: 'https://wttr.in/', domain: 'wttr.in' }
+            : (String(wJson.provider || '').includes('met.no')
+              ? { title: 'MET Norway Weather API (Real-Time)', url: 'https://api.met.no/', domain: 'api.met.no' }
+              : { title: 'Open-Meteo Weather API (Real-Time)', url: 'https://open-meteo.com/', domain: 'open-meteo.com' });
+          const nextHint = `\n\n[LANGKAH WAJIB BERIKUTNYA]: Panggil render_weather_ui({"condition": ${JSON.stringify(hintCond)}, "temp": ${hintTemp}, "city": ${JSON.stringify(cityArg)}, "target_day": ${JSON.stringify(fSpec.targetDayParam)}, "advice": ${JSON.stringify(hintAdvice)}}) untuk menampilkan kartu visualisasi cuaca interaktif (${fSpec.dayLabel}) di layar chat.`;
+          return {
+            text: `${wJson.formattedContext || ''}${nextHint}`,
+            data: wJson,
+            sources: [provUrl],
+            success: true
+          };
+        } catch (wErr) {
+          if (STATE.abortController?.signal?.aborted || wErr?.name === 'AbortError') {
+            return { text: 'Pengambilan data cuaca dihentikan oleh pengguna.', sources: [], success: false };
+          }
+          return { text: `Error mengambil data cuaca: ${wErr?.message || wErr}`, denied: false, sources: [], success: false };
+        }
+      }
+
+      if (toolName === 'render_weather_ui') {
+        const turnCtx = toolContext?.weatherTurnCtx || WeatherController._activeTurnCtx || null;
+        const safeArgs = (args && typeof args === 'object') ? args : {};
+        const cachedWeather = turnCtx?.weatherData || null;
+        const wCur = cachedWeather?.current || {};
+        const wLoc = cachedWeather?.location || {};
+        const wDaily = cachedWeather?.daily || {};
+        const wDailyForecast = Array.isArray(cachedWeather?.dailyForecast) ? cachedWeather.dailyForecast : [];
+        const wHourly = Array.isArray(cachedWeather?.hourly) ? cachedWeather.hourly : [];
+        const effectivePrompt = promptContext || turnCtx?.rawPrompt || '';
+        const timeSpec = WeatherController.resolveTargetTimeSpec(effectivePrompt, safeArgs);
+        const targetDayOffset = timeSpec.dayOffset;
+        const selectedDay = targetDayOffset > 0
+          ? (wDailyForecast.find((d, ix) => Number(d?.dayOffset ?? ix) === targetDayOffset) || wDailyForecast[targetDayOffset] || null)
+          : null;
+
+        // Prioritaskan telemetri sensor real-time bila tersedia agar angka kartu & grafik per jam konsisten 100%
+        const hasLiveTelemetry = Number.isFinite(Number(wCur.tempC)) && Boolean(wCur.condition);
+        const liveCondition = String((hasLiveTelemetry ? wCur.condition : (safeArgs.condition || wCur.condition)) || 'Cerah Berawan').trim();
+        const rawLiveTemp = hasLiveTelemetry
+          ? Number(wCur.tempC)
+          : (safeArgs.temp !== undefined ? Number(safeArgs.temp) : (safeArgs.temperature !== undefined ? Number(safeArgs.temperature) : wCur.tempC));
+        const liveTempC = Number.isFinite(rawLiveTemp) ? Math.round(rawLiveTemp) : 26;
+        const liveIsDay = wCur.isDay !== false;
+        const liveThemeMeta = resolveWeatherVisualThemeClient(liveCondition, liveIsDay);
+        const liveSnap = {
+          condition: liveCondition,
+          tempC: liveTempC,
+          feelsLikeC: Number.isFinite(Number(wCur.feelsLikeC)) ? Math.round(Number(wCur.feelsLikeC)) : liveTempC,
+          tempMinC: wDaily.tempMinC ?? wDailyForecast[0]?.tempMinC ?? null,
+          tempMaxC: wDaily.tempMaxC ?? wDailyForecast[0]?.tempMaxC ?? null,
+          humidity: wCur.humidity ?? null,
+          windKmh: wCur.windKmh ?? null,
+          windDirection: wCur.windDirection || null,
+          rainProbNow: wCur.rainProbNow ?? null,
+          cloudCover: wCur.cloudCover ?? null,
+          uvIndexMax: wDaily.uvIndexMax ?? null,
+          sunrise: wDaily.sunrise || null,
+          sunset: wDaily.sunset || null,
+          isDay: liveIsDay,
+          iconKey: wCur.iconKey || liveThemeMeta.iconKey,
+          visualTheme: wCur.visualTheme || liveThemeMeta.visualTheme,
+          advice: String((hasLiveTelemetry ? wCur.advice : (safeArgs.advice || wCur.advice)) || liveThemeMeta.advice || '').trim(),
+          observedAt: wCur.observedAt || '',
+          hourly: wHourly
+        };
+
+        const viewSrc = selectedDay || liveSnap;
+        const viewIsDay = selectedDay ? (selectedDay.isDay !== false) : liveIsDay;
+        const viewCondition = String(viewSrc.condition || liveCondition).trim();
+        const viewFallbackTemp = (selectedDay && Number.isFinite(Number(selectedDay.tempMinC)) && Number.isFinite(Number(selectedDay.tempMaxC)))
+          ? Math.round((Number(selectedDay.tempMinC) + Number(selectedDay.tempMaxC)) / 2)
+          : liveTempC;
+        const viewTempC = Number.isFinite(Number(viewSrc.tempC)) ? Math.round(Number(viewSrc.tempC)) : viewFallbackTemp;
+        const viewThemeMeta = resolveWeatherVisualThemeClient(viewCondition, viewIsDay);
+        const viewHourly = (selectedDay && Array.isArray(selectedDay.hourly) && selectedDay.hourly.length > 0)
+          ? selectedDay.hourly
+          : (targetDayOffset > 0 ? [] : wHourly);
+
+        const city = String(wLoc.city || safeArgs.city || safeArgs.location || 'Lokasi Anda').trim();
+        const display_id = `wth_${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 6)}`;
+        const placement_token = `[[ZOZ_WEATHER_DISPLAY:${display_id}]]`;
+        const weatherDisplay = {
+          display_id,
+          placement_token,
+          city,
+          displayLocation: wLoc.displayName || city,
+          targetDayOffset,
+          targetDayLabel: selectedDay?.dayLabel || timeSpec.dayLabel,
+          targetSubperiod: timeSpec.subperiod || '',
+          targetDate: selectedDay?.date || wDailyForecast[0]?.date || '',
+          condition: viewCondition,
+          tempC: viewTempC,
+          feelsLikeC: Number.isFinite(Number(viewSrc.feelsLikeC)) ? Math.round(Number(viewSrc.feelsLikeC)) : viewTempC,
+          tempMinC: viewSrc.tempMinC ?? liveSnap.tempMinC,
+          tempMaxC: viewSrc.tempMaxC ?? liveSnap.tempMaxC,
+          humidity: viewSrc.humidity ?? liveSnap.humidity,
+          windKmh: viewSrc.windKmh ?? liveSnap.windKmh,
+          windDirection: liveSnap.windDirection,
+          rainProbNow: selectedDay ? (selectedDay.precipProbMax ?? liveSnap.rainProbNow) : liveSnap.rainProbNow,
+          cloudCover: liveSnap.cloudCover,
+          uvIndexMax: viewSrc.uvIndexMax ?? liveSnap.uvIndexMax,
+          sunrise: viewSrc.sunrise || liveSnap.sunrise,
+          sunset: viewSrc.sunset || liveSnap.sunset,
+          isDay: viewIsDay,
+          iconKey: viewSrc.iconKey || viewThemeMeta.iconKey,
+          visualTheme: viewSrc.visualTheme || viewThemeMeta.visualTheme,
+          advice: String(viewSrc.advice || viewThemeMeta.advice || liveSnap.advice || '').trim(),
+          observedAt: targetDayOffset > 0 ? (selectedDay?.date || '') : liveSnap.observedAt,
+          timezoneAbbr: wCur.timezoneAbbr || '',
+          hourly: viewHourly,
+          dailyForecast: wDailyForecast,
+          liveCurrent: liveSnap,
+          coordinates: cachedWeather?.coordinates || null
+        };
+
+        if (typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+          BioEndocrine.registerToolSuccess({
+            toolName: 'render_weather_ui',
+            details: `Visualisasi cuaca ${weatherDisplay.targetDayLabel} (${weatherDisplay.city}: ${weatherDisplay.condition}, ${weatherDisplay.tempC}°C) siap dirender`
+          });
+        }
+
+        const formatted = [
+          `[HASIL render_weather_ui (status: ready, display_id: ${display_id}, focus_hari: ${weatherDisplay.targetDayLabel})]:`,
+          `- Kota: ${weatherDisplay.displayLocation} | Fokus Kartu: ${weatherDisplay.targetDayLabel}${weatherDisplay.targetDate ? ` (${weatherDisplay.targetDate})` : ''} | Kondisi: ${weatherDisplay.condition} | Suhu: ${weatherDisplay.tempC}°C (Min/Maks ${weatherDisplay.tempMinC ?? '-'}°C/${weatherDisplay.tempMaxC ?? '-'}°C) | Kelembapan: ${weatherDisplay.humidity ?? '-'}% | Angin: ${weatherDisplay.windKmh ?? '-'} km/j | Peluang Hujan: ${weatherDisplay.rainProbNow ?? '-'}%`,
+          `- placement_token: ${placement_token}`,
+          `- ATURAN PENYAJIAN WAJIB: JANGAN HANYA menampilkan kartu visualisasi! Kartu visualisasi saat ini menampilkan **${weatherDisplay.targetDayLabel}**${weatherDisplay.targetDate ? ` (${weatherDisplay.targetDate})` : ''}. Wajib tulis penjelasan cuaca yang LENGKAP, DETAIL, dan terstruktur dalam Bahasa Indonesia sesuai pertanyaan pengguna (prioritaskan detail untuk **${weatherDisplay.targetDayLabel}** bila yang ditanyakan adalah besok/lusa, plus ringkasan kondisi saat ini ${liveSnap.tempC}°C / ${liveSnap.condition}, kelembapan, arah & kecepatan angin, peluang hujan, tren prakiraan per jam, serta saran praktis). Cantumkan token ${placement_token} pada baris tersendiri.`
+        ].join('\n');
+
+        return {
+          text: formatted,
+          data: weatherDisplay,
+          weatherDisplay,
+          display_id,
+          placement_token,
+          sources: [],
+          success: true
+        };
+      }
+
       if (toolName === 'summarize_whatsapp_chat') {
         const target = (args && typeof args === 'object')
           ? (args.target_number_or_name || args.target || args.contact || args.number || args.phone || args.jid || args.query || '')
           : String(rawArgs || '');
         const focus = (args && typeof args === 'object')
-          ? (args.focus_topic || args.focus || args.topic || '')
+          ? (args.focus_topic || args.focus || args.topic || args.query || '')
           : '';
+        const cleanTarget = String(target || '').trim();
+        const cleanFocus = String(focus || '').trim();
 
-        if (typeof WhatsAppController !== 'undefined' && typeof WhatsAppController.requestAiToolSummaryWithConsent === 'function') {
-          const waRes = await WhatsAppController.requestAiToolSummaryWithConsent({
-            targetQuery: String(target || '').trim(),
-            focusTopic: String(focus || '').trim(),
-            promptContext
+        // Pada Mode Z21 Localhost, alihkan senyap ke fetch_communication_context tanpa pernah memunculkan popup fitur Ringkas Chat WA
+        if (canUseZ21LocalCommunicationTool(toolContext?.planMode, session)) {
+          return await executeAutonomousWebTool('fetch_communication_context', {
+            source: 'whatsapp',
+            target_id: cleanTarget,
+            query: cleanFocus,
+            sort_by: 'recent'
+          }, promptContext, session, toolContext);
+        }
+
+        // Pada Mode Chat AI biasa / non-Z21: baca langsung pesan WhatsApp terbaru secara read-only TANPA membuka modal popup UI
+        if (typeof WhatsAppController !== 'undefined' && typeof WhatsAppController.fetchLatestChatsForAiTool === 'function') {
+          const waRes = await WhatsAppController.fetchLatestChatsForAiTool({
+            targetQuery: cleanTarget,
+            focusTopic: cleanFocus,
+            promptContext,
+            signal: makeToolSignal(12000)
           });
+          if (waRes && waRes.success && typeof BioEndocrine !== 'undefined' && typeof BioEndocrine.registerToolSuccess === 'function') {
+            BioEndocrine.registerToolSuccess({
+              toolName: 'summarize_whatsapp_chat',
+              count: Array.isArray(waRes.items) ? waRes.items.length : 1,
+              details: 'Riwayat chat WhatsApp terbaru berhasil dibaca langsung ke AI Chat'
+            });
+          }
           return waRes;
         }
         return {
-          text: 'Error: Modul WhatsAppController belum siap untuk mengakses obrolan.',
+          text: 'Error: Modul WhatsAppController belum siap untuk memeriksa obrolan.',
           sources: [],
           success: false
         };
@@ -35977,7 +38517,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         name = 'search_documents';
       } else if (p.video_url || (p.query && (p.platform || p.limit !== undefined))) {
         name = 'find_related_videos';
-      } else if (p.target_number_or_name || (p.focus_topic && (p.target || p.contact))) {
+      } else if (p.target_number_or_name !== undefined || p.focus_topic !== undefined) {
         name = 'summarize_whatsapp_chat';
       } else if (Array.isArray(p.image_ids) && (p.layout || p.placement || Array.isArray(p.alt_texts))) {
         name = 'prepare_image_display';
@@ -35985,6 +38525,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         name = 'inspect_image';
       } else if (p.query && (p.image_type || p.orientation || p.safe_search !== undefined)) {
         name = 'search_images';
+      } else if (p.condition !== undefined && (p.temp !== undefined || p.temperature !== undefined) && p.city !== undefined) {
+        name = 'render_weather_ui';
+      } else if (p.lat !== undefined && p.lon !== undefined) {
+        name = 'fetch_weather_data';
       }
     }
     return name;
@@ -36072,11 +38616,16 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const fencedCandidateRegex = /```(tool_call|json)?\s*([\{\[](?:(?!```)[\s\S])*?[\}\]])\s*```/gi;
     const callPreambleRegex = new RegExp(`(?:we will call|calling tool|memanggil tool|i will search|saya akan mencari)\\s+(?:${strictToolPattern})[\\s\\S]*?(?:\\.|\\n|$)`, 'gi');
     const funcCallEmptyRegex = new RegExp(`\\b(?:${strictToolPattern})\\s*\\(\\s*\\)`, 'gi');
-    const funcCallArgsRegex = new RegExp(`\\b(?:${strictToolPattern})\\s*\\(\\s*(?:(?:query|url|q|code|topic|content|script|link|target|target_id|source|sumber|kontak|nomor|isi|kata_kunci|topik|doc_id|category|top_k)\\s*[:=]\\s*)?(["'\`])[\\s\\S]*?\\1\\s*\\)`, 'gi');
+    const funcCallArgsRegex = new RegExp(`\\b(?:${strictToolPattern})\\s*\\(\\s*(?:(?:query|url|q|code|topic|content|script|link|target|target_id|source|sumber|kontak|nomor|isi|kata_kunci|topik|doc_id|category|top_k|reason|city|location|kota|condition)\\s*[:=]\\s*)?(["'\`])[\\s\\S]*?\\1\\s*\\)`, 'gi');
     const funcCallTwoArgsRegex = /\b(?:save_memory|simpan_memori|store_memory)\s*\(\s*(?:[a-zA-Z_]+\s*[:=]\s*)?(["'`])[\s\S]*?\1\s*,\s*(?:[a-zA-Z_]+\s*[:=]\s*)?(["'`])[\s\S]*?\2\s*\)/gi;
+
+    const bareCallScrubRegex = new RegExp(`\\bcall:(?:${fullToolPattern})\\s*(?:\\{[\\s\\S]*?\\}|\\(\\s*\\))`, 'gi');
 
     let cleaned = text
       .replace(/<(?:tool_call|function_call)>[\s\S]*?<\/(?:tool_call|function_call)>/gi, '')
+      .replace(/<\|tool_call\|?>[\s\S]*?(?:<\|?tool_call\|?>|<\|\/tool_call\|?>|$)/gi, '')
+      .replace(/<\|tool_response\|?>[\s\S]*?(?:<\|?tool_response\|?>|<\|\/tool_response\|?>|$)/gi, '')
+      .replace(bareCallScrubRegex, '')
       .replace(invokeRegex, '')
       .replace(/\[TOOL_CALLS\][\s\S]*?(?:\[\/TOOL_CALLS\]|(?=\n\n)|$)/gi, '')
       .replace(fencedCandidateRegex, (fullMatch, lang, inner) => {
@@ -36105,7 +38654,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       .replace(/\[HASIL RAG DINAMIS[^\]]*\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '')
       .replace(/^\s*\[DIREKTIF PERSONA CUSTOM[^\]]*\]:?\n-\s*Identitas \/ Peran:[^\n]*\n-\s*Nada & Pendekatan Komunikasi:[^\n]*(?:\n-\s*Instruksi Karakteristik & Struktur:[\s\S]*?)?\n-\s*Catatan Integritas Sistem:[^\n]*\s*/gim, '')
       .replace(/^\s*\[DIREKTIF PERSONA (?:NON-CUSTOM|CUSTOM)[^\]]*\]:?(?:\n(?:Gunakan gaya komunikasi AI Formal[^\n]*|-\s*(?:Identitas \/ Peran|Nada & Pendekatan Komunikasi|Instruksi Karakteristik & Struktur|Catatan Integritas Sistem):[^\n]*))*\s*/gim, '')
-      .replace(/\[HASIL prepare_image_display[^\]]*\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '')
+      .replace(/\[HASIL prepare_image_display[^\]]*\][\s\S]*?(?=(?:\n\n\s*(?:\[\[ZOZ_|[A-Z0-9#*>]))|$)/gi, '')
+      .replace(/\[HASIL (?:render_weather_ui|fetch_weather_data|get_current_coordinates|request_location_permission|DATA CUACA REAL-TIME)[^\]]*\][\s\S]*?(?=(?:\n\n\s*(?:\[\[ZOZ_|[A-Z0-9#*>]))|$)/gi, '')
+      .replace(/\[(?:IZIN LOKASI DIBERIKAN PENGGUNA|AKSES LOKASI DITOLAK PENGGUNA|KOORDINAT & PENCOCOKAN LOKASI|ALUR CUACA & LOKASI AKTIF)[^\]]*\][\s\S]*?(?=(?:\n\n\s*(?:\[\[ZOZ_|[A-Z0-9#*>]))|$)/gi, '')
       .replace(/\[INSTRUKSI PENYAJIAN JAWABAN AKHIR\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '')
       .replace(/\[SPESIFIKASI SINTESIS BUKTI[^\]]*\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '')
       .replace(/\[ALUR VERIFIKASI VISUAL AKTIF\][\s\S]*?(?=(?:\n\n[A-Z0-9#])|$)/gi, '')
@@ -36175,6 +38726,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             parsedArgs = { url: trimmed };
           } else if (normalizedName === 'save_memory') {
             parsedArgs = { topic: 'catatan', content: trimmed };
+          } else if (normalizedName === 'request_location_permission') {
+            parsedArgs = { reason: trimmed };
+          } else if (normalizedName === 'get_current_coordinates') {
+            parsedArgs = {};
+          } else if (normalizedName === 'fetch_weather_data') {
+            parsedArgs = { city: trimmed };
+          } else if (normalizedName === 'render_weather_ui') {
+            parsedArgs = { condition: trimmed };
           } else if (normalizedName === 'execute_python_code') {
             parsedArgs = { code: trimmed };
           } else {
@@ -36255,6 +38814,31 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           ...(parsedArgs.before || parsedArgs.until || parsedArgs.to_date ? { before: String(parsedArgs.before || parsedArgs.until || parsedArgs.to_date).trim() } : {}),
           sort_by: ['auto', 'relevance', 'recent'].includes(sortVal) ? sortVal : 'auto'
         };
+      } else if (normalizedName === 'render_weather_ui') {
+        const condVal = parsedArgs.condition || parsedArgs.kondisi || parsedArgs.weather || '';
+        const tempVal = parsedArgs.temp !== undefined ? Number(parsedArgs.temp) : (parsedArgs.temperature !== undefined ? Number(parsedArgs.temperature) : (parsedArgs.suhu !== undefined ? Number(parsedArgs.suhu) : undefined));
+        const cityVal = parsedArgs.city || parsedArgs.location || parsedArgs.kota || '';
+        parsedArgs = {
+          condition: String(condVal).trim() || 'Cerah Berawan',
+          ...(Number.isFinite(tempVal) ? { temp: Math.round(tempVal) } : {}),
+          city: String(cityVal).trim() || 'Lokasi Anda',
+          ...(parsedArgs.advice || parsedArgs.saran ? { advice: String(parsedArgs.advice || parsedArgs.saran).trim() } : {})
+        };
+      } else if (normalizedName === 'fetch_weather_data') {
+        const latVal = parsedArgs.lat !== undefined ? Number(parsedArgs.lat) : (parsedArgs.latitude !== undefined ? Number(parsedArgs.latitude) : NaN);
+        const lonVal = parsedArgs.lon !== undefined ? Number(parsedArgs.lon) : (parsedArgs.lng !== undefined ? Number(parsedArgs.lng) : (parsedArgs.longitude !== undefined ? Number(parsedArgs.longitude) : NaN));
+        const cityVal = String(parsedArgs.city || parsedArgs.location || parsedArgs.kota || parsedArgs.query || '').trim();
+        parsedArgs = {
+          ...(Number.isFinite(latVal) ? { lat: latVal } : {}),
+          ...(Number.isFinite(lonVal) ? { lon: lonVal } : {}),
+          ...(cityVal ? { city: cityVal } : {})
+        };
+      } else if (normalizedName === 'request_location_permission') {
+        parsedArgs = {
+          ...(parsedArgs.reason || parsedArgs.alasan ? { reason: String(parsedArgs.reason || parsedArgs.alasan).trim() } : {})
+        };
+      } else if (normalizedName === 'get_current_coordinates') {
+        parsedArgs = { include_address: parsedArgs.include_address !== false };
       } else if (normalizedName === 'execute_python_code') {
         const codeVal = parsedArgs.code || parsedArgs.script || parsedArgs.python || (typeof parsedArgs === 'string' ? parsedArgs : '');
         parsedArgs = { code: String(codeVal).trim() };
@@ -36340,11 +38924,54 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       }
     }
 
+    function parseLooseGemmaArgsObject(rawInner = '') {
+      let s = String(rawInner || '').trim();
+      if (!s) return {};
+      if (!s.startsWith('{')) s = `{${s}}`;
+      s = s.replace(/<\|"\|>/g, '"');
+      try {
+        const direct = JSON.parse(s);
+        if (direct && typeof direct === 'object' && !Array.isArray(direct)) return direct;
+      } catch (_) {}
+      try {
+        const normalized = s
+          .replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":')
+          .replace(/'([^'\\]*)'/g, '"$1"')
+          .replace(/,\s*}/g, '}');
+        const parsed = JSON.parse(normalized);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+      } catch (_) {}
+      const out = {};
+      const kvRe = /["']?([a-zA-Z0-9_]+)["']?\s*:\s*(?:"([^"]*)"|'([^']*)'|(-?\d+(?:\.\d+)?)|(true|false)|null)/g;
+      let m;
+      while ((m = kvRe.exec(s)) !== null) {
+        const k = m[1];
+        if (m[2] !== undefined) out[k] = m[2];
+        else if (m[3] !== undefined) out[k] = m[3];
+        else if (m[4] !== undefined) out[k] = Number(m[4]);
+        else if (m[5] !== undefined) out[k] = m[5] === 'true';
+        else out[k] = null;
+      }
+      return out;
+    }
+
     // 1. Tag <tool_call>...</tool_call> and <function_call>...</function_call> (mendukung Parallel Tool Calling multi-objek)
     const tagRegex = /<(?:tool_call|function_call)>\s*([\s\S]*?)\s*<\/(?:tool_call|function_call)>/gi;
     let tm;
     while ((tm = tagRegex.exec(text)) !== null) {
       parseAndAddMultiToolJsonBlock(tm[1], tm[0], true);
+    }
+
+    // 1b. Gemma 4 native token delimiters: <|tool_call>call:fn{key:val}<tool_call|> / <|tool_call|>...<|/tool_call|>
+    const gemmaPipeCallRegex = /<\|tool_call\|?>\s*(?:call:)?([a-zA-Z0-9_]+)\s*(?:\{([\s\S]*?)\}|\(\s*\))?\s*(?:<\|?tool_call\|?>|<\|\/tool_call\|?>|$)/gi;
+    let gpm;
+    while ((gpm = gemmaPipeCallRegex.exec(text)) !== null) {
+      const fnName = (gpm[1] || '').trim();
+      if (isKnownAutonomousTool(fnName)) {
+        addCall(fnName, parseLooseGemmaArgsObject(gpm[2] || ''), gpm[0]);
+      } else {
+        parseAndAddMultiToolJsonBlock(gpm[0].replace(/<\/?\|?tool_call\|?>/gi, ''), gpm[0], true);
+      }
     }
 
     // 2. Mistral format: [TOOL_CALLS] [{"name": "search_web", "arguments": ...}]
@@ -36409,6 +39036,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (u && /^https?:\/\//i.test(u)) {
         addCall('browse_web_page', { url: u }, gbm[0]);
       }
+    }
+    const gemmaBareCallBraceRegex = new RegExp(`\\bcall:(${toolPattern})\\s*(?:\\{([\\s\\S]*?)\\}|\\(\\s*\\))`, 'gi');
+    let gbc;
+    while ((gbc = gemmaBareCallBraceRegex.exec(text)) !== null) {
+      addCall(gbc[1], parseLooseGemmaArgsObject(gbc[2] || ''), gbc[0]);
     }
 
     // Strip file blocks, raw HTML dokumen, fenced code blocks dan inline code sebelum menjalankan regex teks biasa (5, 6, 7, 8)
@@ -36490,7 +39122,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     }
 
     // 7b. Single-argument function call syntax: search_web("query") or search_documents(doc_id="SOP-01") or search_chat_history(mode="recent")
-    const funcRegex = new RegExp(`\\b(${strictToolPattern})\\s*\\(\\s*(?:(query|url|video_url|q|link|target|target_id|source|sumber|kontak|nomor|code|topic|content|isi|kata_kunci|topik|script|cari|tautan|konten|doc_id|category|top_k|mode)\\s*[:=]\\s*)?(["'\`])([\\s\\S]*?)\\3\\s*\\)`, 'gi');
+    const funcRegex = new RegExp(`\\b(${strictToolPattern})\\s*\\(\\s*(?:(query|url|video_url|q|link|target|target_id|source|sumber|kontak|nomor|code|topic|content|isi|kata_kunci|topik|script|cari|tautan|konten|doc_id|category|top_k|mode|reason|city|location|kota|condition)\\s*[:=]\\s*)?(["'\`])([\\s\\S]*?)\\3\\s*\\)`, 'gi');
     let fm;
     while ((fm = funcRegex.exec(textWithoutCode)) !== null) {
       const name = fm[1];
@@ -36503,8 +39135,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         const isCodeTool = ['execute_python_code', 'run_python', 'python'].includes(normName);
         const isSaveMem = normName === 'save_memory';
         const isVideoTool = normName === 'find_related_videos';
-        if (paramKey && ['doc_id', 'category', 'top_k', 'target_id', 'source', 'mode'].includes(paramKey)) {
+        if (paramKey && ['doc_id', 'category', 'top_k', 'target_id', 'source', 'mode', 'reason', 'city', 'location', 'condition'].includes(paramKey)) {
           addCall(name, { [paramKey]: val }, fm[0]);
+        } else if (paramKey === 'kota') {
+          addCall(name, { city: val }, fm[0]);
         } else if (paramKey && ['sumber'].includes(paramKey)) {
           addCall(name, { source: val }, fm[0]);
         } else if (paramKey && ['kontak', 'nomor'].includes(paramKey)) {
@@ -36517,18 +39151,35 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           addCall(name, { topic: 'catatan', content: val }, fm[0]);
         } else if (isVideoTool) {
           addCall(name, /^https?:\/\//i.test(val) ? { video_url: val } : { query: val }, fm[0]);
+        } else if (normName === 'fetch_weather_data') {
+          addCall(name, { city: val }, fm[0]);
+        } else if (normName === 'request_location_permission') {
+          addCall(name, { reason: val }, fm[0]);
         } else {
           addCall(name, { query: val }, fm[0]);
         }
       }
     }
 
-    // 7c. Zero-argument chat history browse calls: recent_chats(), search_chat_history(), riwayat_obrolan()
+    // 7c. Zero-argument calls: recent_chats(), search_chat_history(), request_location_permission(), get_current_coordinates()
     const zeroArgChatHistoryRegex = /\b(search_chat_history|recent_chats|riwayat_obrolan|cari_riwayat_obrolan)\s*\(\s*\)/gi;
     let zcm;
     while ((zcm = zeroArgChatHistoryRegex.exec(textWithoutCode)) !== null) {
       if (isLongCompleteText && zcm.index > 220) continue;
       addCall(zcm[1], { mode: 'recent', sort_by: 'recent' }, zcm[0]);
+    }
+    const zeroArgWeatherLocRegex = /\b(request_location_permission|request_location|izinkan_lokasi|minta_izin_lokasi|get_current_coordinates|get_location|get_coordinates|ambil_koordinat|cek_lokasi)\s*\(\s*\)/gi;
+    let zwm;
+    while ((zwm = zeroArgWeatherLocRegex.exec(textWithoutCode)) !== null) {
+      if (isLongCompleteText && zwm.index > 220) continue;
+      addCall(zwm[1], {}, zwm[0]);
+    }
+    const zeroArgWaRegex = /\b(summarize_whatsapp_chat|read_whatsapp_chat|rangkum_whatsapp|baca_whatsapp|whatsapp_summary|baca_chat_whatsapp|cek_chat_whatsapp|fetch_communication_context|cek_whatsapp)\s*\(\s*\)/gi;
+    let zwam;
+    while ((zwam = zeroArgWaRegex.exec(textWithoutCode)) !== null) {
+      if (isLongCompleteText && zwam.index > 220) continue;
+      const tn = normalizeToolName(zwam[1]);
+      addCall(zwam[1], tn === 'fetch_communication_context' ? { source: 'whatsapp', sort_by: 'recent' } : { target_number_or_name: '' }, zwam[0]);
     }
 
     // 8. Conversational triggers: "We will call search_web for <query>"
@@ -36560,8 +39211,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const allowZ21LocalComm = canUseZ21LocalCommunicationTool(options?.planMode, options?.session);
     const allowChatHistory = canUseChatHistorySearch(options?.session);
     const commToolDoc = allowZ21LocalComm
-      ? `  7. \`fetch_communication_context({"source": "auto|all|whatsapp|email|team_chat|ticket|session|memory", "query": "<kata kunci>", "target_id": "<opsional: nomor HP/JID/nama kontak/ID tiket>", "limit": 6, "max_messages": 25, "days": 0, "since_minutes": 0, "sort_by": "auto|recent|relevance", "unread_only": false})\`: KHUSUS MODE Z21 LOCALHOST — Mengambil riwayat chat WhatsApp terbaru (termasuk pesan baru masuk real-time, kontak, grup, lampiran, timestamp HH:mm:ss & status unread), email lokal, pesan chat tim/notulen, catatan tiket, riwayat sesi AI, dan memori lokal untuk dirangkum atau ditindaklanjuti secara langsung. Gunakan sort_by="recent" atau since_minutes (mis. 60) untuk melihat chat terbaru.`
-      : `  7. \`summarize_whatsapp_chat({"target_number_or_name": "<nama/nomor>", "focus_topic": "<fokus>"})\`: Rangkuman obrolan WhatsApp dengan gerbang persetujuan pengguna.`;
+      ? `  7. \`fetch_communication_context({"source": "auto|all|whatsapp|email|team_chat|ticket|session|memory", "query": "<kata kunci>", "target_id": "<opsional: nomor HP/JID/nama kontak/ID tiket>", "limit": 6, "max_messages": 25, "days": 0, "since_minutes": 0, "sort_by": "auto|recent|relevance", "unread_only": false})\`: KHUSUS MODE Z21 LOCALHOST — Mengambil riwayat chat WhatsApp terbaru (termasuk pesan baru masuk real-time, kontak, grup, lampiran, timestamp HH:mm:ss & status unread), email lokal, pesan chat tim/notulen, catatan tiket, riwayat sesi AI, dan memori lokal untuk dirangkum atau ditindaklanjuti secara langsung di chat tanpa membuka pop-up UI terpisah. Gunakan sort_by="recent" atau since_minutes (mis. 60) untuk melihat chat terbaru.`
+      : `  7. \`summarize_whatsapp_chat({"target_number_or_name": "", "focus_topic": "<fokus opsional>"})\`: Mengecek, membaca, & merangkum chat WhatsApp terbaru atau dari kontak/grup spesifik secara pasif (read-only) untuk langsung disajikan di percakapan AI tanpa membuka pop-up UI terpisah. Kosongkan target_number_or_name bila pengguna ingin melihat semua chat terbaru.`;
     const chatHistoryDoc = allowChatHistory
       ? `\n  10. \`search_chat_history({"query": "<kata kunci topik lama>", "mode": "auto|search|recent", "limit": 5, "max_snippets": 3, "days": 0, "after": "YYYY-MM-DD", "before": "YYYY-MM-DD", "sort_by": "auto|relevance|recent"})\` (alias \`conversation_search\`, \`recent_chats\`): Mencari detail spesifik, keputusan, kode, atau cuplikan percakapan pengguna-AI terdahulu di luar sesi aktif saat pengguna menyinggung obrolan lama.`
       : '';
@@ -36577,6 +39228,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 ${commToolDoc}
   8. \`search_documents({"query": "<kata kunci SOP/laporan/regulasi/kebijakan>", "category": "auto|all|sop|laporan|regulasi|kebijakan|panduan|vector_db|workspace", "doc_id": "<opsional: ID/nama berkas>", "top_k": 5})\` (atau alias \`retrieve_knowledge({"query": "...", "category": "auto", "top_k": 5})\`): Mencari dan mengambil potongan dokumen relevan (SOP, laporan, regulasi, kebijakan, panduan) dari vector database (Hybrid Vector Cosine Similarity + SQLite FTS5 BM25 + Knowledge Graph RRF) atau sistem manajemen dokumen internal secara real-time (RAG dinamis).
   9. \`search_images({"query": "<kata kunci bahasa Inggris>", "per_page": 3, "sources": ["unsplash"], "orientation": "any", "image_type": "photo", "safe_search": true})\` -> \`inspect_image({"image_id": "<id>"})\` -> \`prepare_image_display({"image_ids": ["<id1>", "<id2>", "<id3>"], "layout": "collage", "placement": "after_intro", "alt_texts": ["<deskripsi>"]})\`: Siklus pencarian dan perenderan 3 foto paling relevan untuk mendukung jawaban visual. ATURAN PEMROSESAN: (1) Analisis pertanyaan pengguna dan tentukan visual apa yang paling cocok mendukung jawaban; (2) Terjemahkan kata kunci tersebut ke Bahasa Inggris agar pencarian Unsplash akurat (contoh: "kopi hangat" menjadi "hot coffee"); (3) Ambil per_page: 3 dari ["unsplash"] untuk objek/kuliner/alam/sejarah umum atau ["wikimedia_commons"] khusus potret tokoh bernama spesifik, lalu sisipkan token \`[[ZOZ_IMAGE_DISPLAY:disp_...]]\` di dekat pembahasan tanpa menampilkan JSON mentah.${chatHistoryDoc}
+  11. **Alur Cuaca Real-Time Berizin Lokasi (Consent-Gated Weather Workflow)**: ${WeatherController.hasPersistedApproval()
+    ? 'Izin lokasi pengguna SUDAH DIBERIKAN sebelumnya (tersimpan aman — JANGAN meminta izin ulang lewat popup!). Saat pengguna menanyakan cuaca di lokasi mereka saat ini/besok, langsung panggil `get_current_coordinates({})` -> `fetch_weather_data({"lat": <lat>, "lon": <lon>})` -> `render_weather_ui({"condition": "<kondisi>", "temp": <angka>, "city": "<kota>"})` (alias `generate_weather_visual`), lalu susun penjelasan cuaca yang LENGKAP & DETAIL (suhu aktual & terasa, kelembapan, angin, peluang hujan, tren 5 jam ke depan/besok, serta saran) di samping token `[[ZOZ_WEATHER_DISPLAY:...]]`.'
+    : 'Saat pengguna menanyakan cuaca di lokasi mereka saat ini ("Bagaimana cuaca di tempatku/lokasiku sekarang?"), jalankan alur berantai berurutan demi privasi (izin hanya diminta sekali lalu diingat otomatis): (a) `request_location_permission({"reason": "..."})` (tunggu persetujuan [Izinkan]/[Tolak] pengguna; jangan pernah menebak koordinat!) -> (b) `get_current_coordinates({})` (ambil lat/lon & cocokkan nama wilayah/kota) -> (c) `fetch_weather_data({"lat": <lat>, "lon": <lon>})` (ambil suhu, kelembapan, angin, prakiraan 5 jam ke depan & harian; jika pengguna menyebut kota tertentu secara eksplisit seperti "cuaca di Bandung", boleh langsung panggil `fetch_weather_data({"city": "Bandung"})`) -> (d) `render_weather_ui({"condition": "<kondisi>", "temp": <angka>, "city": "<kota>"})` (alias `generate_weather_visual`) untuk merender kartu visualisasi cuaca interaktif, diikuti penjelasan teks Bahasa Indonesia yang LENGKAP dan DETAIL.'}
 
 [4. ORCHESTRATION & CHAINING (MULTI-STEP TOOL CALLING)]:
 - **Parallel Tool Calling**: Anda dapat memanggil beberapa tool sekaligus dalam satu giliran (baik beberapa item pada array \`tool_calls\` maupun beberapa blok \`<tool_call>...</tool_call>\` berurutan dalam satu respons) untuk mengambil beberapa sumber sekaligus secara paralel (contoh: mengambil data transaksi/riwayat dari \`${allowZ21LocalComm ? 'fetch_communication_context' : 'search_memory'}\` + mengambil kebijakan diskon/SOP dari \`search_documents\` / \`retrieve_knowledge\` dalam satu giliran) sebelum menyusun jawaban.
@@ -36633,12 +39287,48 @@ ${commToolDoc}
         </div>
       `;
     }
+    if (norm === 'request_location_permission') {
+      return `
+        <div class="autonomous-search-status" style="border-color: rgba(0, 240, 255, 0.48); background: rgba(8, 47, 73, 0.36); color: #67e8f9;">
+          <span class="typing-cursor"></span>
+          <i class="fa-solid fa-shield-halved fa-beat-fade"></i>
+          <span>Meminta izin akses lokasi perangkat Anda...</span>
+        </div>
+      `;
+    }
+    if (norm === 'get_current_coordinates') {
+      return `
+        <div class="autonomous-search-status" style="border-color: rgba(16, 185, 129, 0.48); background: rgba(6, 78, 59, 0.32); color: #6ee7b7;">
+          <span class="typing-cursor"></span>
+          <i class="fa-solid fa-location-crosshairs fa-spin"></i>
+          <span>Mendeteksi koordinat GPS &amp; mencocokkan wilayah Anda...</span>
+        </div>
+      `;
+    }
+    if (norm === 'fetch_weather_data') {
+      return `
+        <div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.5); background: rgba(12, 74, 110, 0.34); color: #7dd3fc;">
+          <span class="typing-cursor"></span>
+          <i class="fa-solid fa-cloud-sun-rain fa-beat-fade"></i>
+          <span>Mengambil data cuaca terkini &amp; prakiraan 5 jam ke depan...</span>
+        </div>
+      `;
+    }
+    if (norm === 'render_weather_ui') {
+      return `
+        <div class="autonomous-search-status" style="border-color: rgba(125, 211, 252, 0.5); background: rgba(30, 58, 95, 0.4); color: #bae6fd;">
+          <span class="typing-cursor"></span>
+          <i class="fa-solid fa-wand-magic-sparkles fa-spin"></i>
+          <span>Menyiapkan kartu visualisasi cuaca interaktif...</span>
+        </div>
+      `;
+    }
     if (norm === 'summarize_whatsapp_chat') {
       return `
         <div class="autonomous-search-status" style="border-color: rgba(16, 185, 129, 0.45); background: rgba(6, 78, 59, 0.25); color: #6ee7b7;">
           <span class="typing-cursor"></span>
           <i class="fa-brands fa-whatsapp fa-spin"></i>
-          <span>Menunggu persetujuan nomor WhatsApp & menyiapkan rangkuman AI...</span>
+          <span>Memeriksa &amp; membaca riwayat chat WhatsApp terbaru...</span>
         </div>
       `;
     }
@@ -36986,16 +39676,40 @@ ${commToolDoc}
     const hasExecutedPython = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'execute_python_code');
     const hasExecutedMemory = detectedAutonomousCalls.some(c => c && c.function && ['save_memory', 'search_memory'].includes(normalizeToolName(c.function.name)));
     const hasExecutedCommunication = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'fetch_communication_context');
+    const hasExecutedWaRead = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'summarize_whatsapp_chat');
     const hasExecutedDocuments = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'search_documents');
     const hasExecutedChatHistory = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'search_chat_history');
     const hasExecutedVideo = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'find_related_videos');
     const hasExecutedImageSearch = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'search_images');
     const hasExecutedImageInspect = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'inspect_image');
     const hasExecutedImagePrepare = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'prepare_image_display');
+    const hasExecutedLocationConsent = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'request_location_permission');
+    const hasExecutedCoords = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'get_current_coordinates');
+    const hasExecutedWeatherFetch = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'fetch_weather_data');
+    const hasSucceededWeatherFetch = Boolean(
+      Array.isArray(toolExecResults) &&
+      toolExecResults.some(r => normalizeToolName(r?.toolName || '') === 'fetch_weather_data' && r?.toolExecRes?.success)
+    );
+    const hasExecutedWeatherRender = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'render_weather_ui');
+    const weatherConsentDenied = Boolean(
+      Array.isArray(toolExecResults) &&
+      toolExecResults.some(r => {
+        const tn = normalizeToolName(r?.toolName || '');
+        if (!['request_location_permission', 'get_current_coordinates', 'fetch_weather_data'].includes(tn)) return false;
+        if (r?.toolExecRes?.denied) return true;
+        return ['request_location_permission', 'get_current_coordinates'].includes(tn) && !r?.toolExecRes?.success;
+      })
+    );
+    const weatherFetchFailed = Boolean(
+      !weatherConsentDenied &&
+      Array.isArray(toolExecResults) &&
+      toolExecResults.some(r => normalizeToolName(r?.toolName || '') === 'fetch_weather_data' && !r?.toolExecRes?.success)
+    );
     const isParallelRound = detectedAutonomousCalls.length > 1;
     const hasGroundedSearchSources = Boolean(webSources && webSources.length > 0);
     const isMidImagePipeline = (hasExecutedImageSearch || hasExecutedImageInspect) && !hasExecutedImagePrepare;
-    const isLastRound = circuitBreakerTripped || hasExecutedImagePrepare || (!isMidImagePipeline && hasExecutedVideo) || (autonomousRound >= maxAutonomousRounds - 1);
+    const isMidWeatherPipeline = !weatherConsentDenied && !weatherFetchFailed && (hasExecutedLocationConsent || hasExecutedCoords || hasSucceededWeatherFetch) && !hasExecutedWeatherRender;
+    const isLastRound = circuitBreakerTripped || hasExecutedImagePrepare || hasExecutedWeatherRender || weatherConsentDenied || weatherFetchFailed || (!isMidImagePipeline && !isMidWeatherPipeline && hasExecutedVideo) || (autonomousRound >= maxAutonomousRounds - 1);
 
     const currentDateObj = new Date();
     const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -37007,6 +39721,20 @@ ${commToolDoc}
     let evidenceDirective = '';
     if (circuitBreakerTripped) {
       evidenceDirective = 'MANDAT JAWABAN DEDUKTIF: Penelusuran selesai. Berikan penjelasan komprehensif, langsung, dan objektif atas pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian atau menyalin catatan sistem internal ini.';
+    } else if (hasExecutedWeatherRender) {
+      evidenceDirective = 'MANDAT PENYAJIAN CUACA & VISUALISASI INTERAKTIF: JANGAN HANYA menampilkan kartu visualisasi cuaca! Susun penjelasan cuaca yang LENGKAP, DETAIL, hangat, dan terstruktur dalam Bahasa Indonesia berdasarkan seluruh telemetri real-time di atas: (1) Cantumkan token [[ZOZ_WEATHER_DISPLAY:wth_...]] persis pada baris tersendiri, (2) Jelaskan kondisi atmosfer & wilayah/kota yang terdeteksi (waktu & zona waktu), (3) Jabarkan suhu aktual vs suhu terasa, rentang suhu min/maks hari ini, kelembapan udara (%), tutupan awan (%), kecepatan & arah angin, peluang/curah hujan, indeks UV serta matahari terbit/terbenam, (4) Uraikan tren prakiraan 5 jam ke depan (serta prakiraan besok/lusa dari data harian jika pengguna menanyakan besok), dan (5) Berikan saran aktivitas/perlengkapan praktis.';
+    } else if (weatherConsentDenied && (hasExecutedLocationConsent || hasExecutedCoords || hasExecutedWeatherFetch)) {
+      evidenceDirective = 'IZIN LOKASI DITOLAK / BELUM TERSEDIA: Hormati keputusan privasi pengguna dengan sopan. Jelaskan singkat bahwa akses lokasi tidak diaktifkan sehingga koordinat perangkat tidak diambil, lalu tawarkan untuk mengecek cuaca bila pengguna mengetikkan nama kotanya secara manual.';
+    } else if (weatherFetchFailed) {
+      evidenceDirective = 'KENDALA LAYANAN API CUACA EKSTERNAL: Izin & koordinat pengguna SUDAH berhasil diverifikasi, namun server prakiraan cuaca eksternal sedang gagal dijangkau dari lingkungan ini. Jelaskan dengan jujur dan singkat lokasi yang berhasil dideteksi (jangan pernah menyatakan akses lokasi ditolak atau meminta ulang nama kota yang sudah diketahui), serta sampaikan kendala jaringan ke penyedia cuaca secara akurat.';
+    } else if (isMidWeatherPipeline) {
+      if (hasSucceededWeatherFetch) {
+        evidenceDirective = `ALUR CUACA AKTIF (TAHAP 4 — VISUALISASI): Data cuaca lengkap telah diperoleh. Panggil render_weather_ui({"condition": "<kondisi>", "temp": <angka_suhu>, "city": "<kota>"}) sekarang untuk menampilkan kartu visualisasi cuaca interaktif di chat.${inlineChainHint}`;
+      } else if (hasExecutedCoords) {
+        evidenceDirective = `ALUR CUACA AKTIF (TAHAP 3 — AMBIL DATA CUACA): Koordinat & nama wilayah berhasil dicocokkan. Panggil fetch_weather_data({"lat": <lat>, "lon": <lon>}) sekarang untuk mengambil telemetri suhu, kelembapan, dan prakiraan 5 jam ke depan.${inlineChainHint}`;
+      } else {
+        evidenceDirective = `ALUR CUACA AKTIF (TAHAP 2 — AMBIL KOORDINAT): Pengguna telah menyetujui izin akses lokasi. Panggil get_current_coordinates({}) sekarang untuk membaca koordinat GPS & mencocokkan kota pengguna.${inlineChainHint}`;
+      }
     } else if (hasExecutedImagePrepare) {
       evidenceDirective = 'MANDAT ANALISIS FAKTIK & PENYAJIAN VISUAL: Susun jawaban akhir dengan format: (1) Penjelasan pembuka yang lugas dan tajam selaras dengan persona Anda, (2) Baris token penempatan komponen gambar [[ZOZ_IMAGE_DISPLAY:disp_...]] persis pada baris tersendiri, (3) Analisis faktual terstruktur dengan poin-poin bernomor padat, serta (4) Kredit gambar dan tautan halaman sumber.';
     } else if (isParallelRound) {
@@ -37021,10 +39749,12 @@ ${commToolDoc}
       evidenceDirective = isLastRound
         ? 'PENCARIAN RIWAYAT OBROLAN (SEARCH_CHAT_HISTORY): Susun jawaban yang akurat berdasarkan cuplikan sesi percakapan terdahulu di atas. Sebutkan judul/waktu diskusi terdahulu bila relevan, jelaskan poin spesifik yang dulu dibahas atau diputuskan, dan JANGAN mengarang detail yang tidak tertulis pada cuplikan.'
         : `PENCARIAN RIWAYAT OBROLAN & SEQUENTIAL CHAINING: Gunakan cuplikan percakapan terdahulu di atas untuk menjawab atau melanjutkan diskusi. Bila perlu mempersempit rentang waktu atau kata kunci lain pada percakapan lama, atau butuh kalkulasi Python / pencocokan dokumen, panggil tool berikutnya sekarang.${inlineChainHint} Jika sudah lengkap, sajikan jawaban akhir secara jelas.`;
-    } else if (hasExecutedCommunication && !hasExecutedSearch) {
-      evidenceDirective = isLastRound
-        ? 'ANALISIS KOMUNIKASI LOKAL (MODE Z21): Susun rangkuman & analisis terstruktur berdasarkan data riwayat komunikasi lokal di atas (cantumkan pengirim, waktu, ID/JID/berkas asli, inti pembicaraan, poin penting/isu terbuka, serta daftar tindak lanjut / action items konkret beserta opsi draf balasan bila diminta). Dilarang keras mengarang isi pesan di luar data tool.'
-        : `ANALISIS KOMUNIKASI LOKAL & SEQUENTIAL CHAINING (MODE Z21): Jika data di atas sudah cukup untuk menjawab kebutuhan pengguna, susun rangkuman lengkap beserta analisis thread, poin keputusan/risiko, dan daftar tindak lanjut (action items) terprioritas. Apabila perlu pendalaman kontak lain, pencocokan dengan dokumen SOP (search_documents), atau kalkulasi (execute_python_code), Anda boleh memanggil tool berikutnya.${inlineChainHint}`;
+    } else if ((hasExecutedCommunication || hasExecutedWaRead) && !hasExecutedSearch) {
+      evidenceDirective = hasExecutedWaRead && !hasExecutedCommunication
+        ? 'PEMERIKSAAN & RANGKUMAN CHAT WHATSAPP: Susun laporan langsung di percakapan ini berdasarkan data pesan WhatsApp di atas (sebutkan nama kontak/grup pengirim, waktu lokal, status belum dibaca, inti isi pesan terbaru, serta lampiran berkas bila ada). JANGAN menyuruh pengguna membuka pop-up UI fitur ringkas chat WhatsApp, dan dilarang keras mengarang isi pesan di luar data tool.'
+        : (isLastRound
+          ? 'ANALISIS KOMUNIKASI LOKAL (MODE Z21): Susun rangkuman & analisis terstruktur berdasarkan data riwayat komunikasi lokal di atas (cantumkan pengirim, waktu, ID/JID/berkas asli, inti pembicaraan, poin penting/isu terbuka, serta daftar tindak lanjut / action items konkret beserta opsi draf balasan bila diminta). Dilarang keras mengarang isi pesan di luar data tool.'
+          : `ANALISIS KOMUNIKASI LOKAL & SEQUENTIAL CHAINING (MODE Z21): Jika data di atas sudah cukup untuk menjawab kebutuhan pengguna, susun rangkuman lengkap beserta analisis thread, poin keputusan/risiko, dan daftar tindak lanjut (action items) terprioritas. Apabila perlu pendalaman kontak lain, pencocokan dengan dokumen SOP (search_documents), atau kalkulasi (execute_python_code), Anda boleh memanggil tool berikutnya.${inlineChainHint}`);
     } else if (hasBrowsedWeb) {
       evidenceDirective = isLastRound
         ? 'Susun PENJELASAN LENGKAP dan mendalam yang menjawab pertanyaan pengguna berdasarkan teks halaman web di atas dengan sitasi [1], [2]. DILARANG KERAS hanya menampilkan daftar link tanpa penjelasan isi.'
@@ -37043,10 +39773,12 @@ ${commToolDoc}
     if (isMidImagePipeline) {
       roundInstruction = `[ALUR VERIFIKASI VISUAL AKTIF]:
 ${hasExecutedImageSearch ? '1. Pilih 3–6 image_id yang paling cocok secara subjek dari daftar kandidat di atas, lalu panggil inspect_image({"image_id": "..."}) terlebih dahulu (apabila native tool tidak tersedia, keluarkan blok <tool_call>{"name":"inspect_image","arguments":{"image_id":"..."}}</tool_call>).' : '1. Untuk seluruh kandidat yang lolos verifikasi (accessible: true dan usage_status: "allowed"), panggil prepare_image_display({"image_ids": [...], "layout": "collage"|"gallery", "placement": "after_intro"|"within_section", "alt_texts": [...]}) untuk menyajikan banyak contoh foto sekaligus dalam format kolase. Jika semua kandidat ditolak, jawab langsung pertanyaan pengguna secara faktual tanpa mengarang URL gambar.'}`;
-    } else if (hasExecutedSearch && !hasGroundedSearchSources && !hasBrowsedWeb && !hasExecutedImagePrepare && !hasExecutedVideo && !hasExecutedCommunication && !hasExecutedDocuments && !hasExecutedChatHistory) {
+    } else if (isMidWeatherPipeline) {
+      roundInstruction = `[ALUR CUACA & LOKASI AKTIF]:\n${evidenceDirective}`;
+    } else if (hasExecutedSearch && !hasGroundedSearchSources && !hasBrowsedWeb && !hasExecutedImagePrepare && !hasExecutedWeatherRender && !hasExecutedVideo && !hasExecutedCommunication && !hasExecutedWaRead && !hasExecutedDocuments && !hasExecutedChatHistory) {
       roundInstruction = `[INSTRUKSI JAWABAN LANGSUNG]:
 Berikan jawaban akhir yang akurat, objektif, terstruktur, dan langsung menjawab inti persoalan sesuai bahasa pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Jangan menyebutkan catatan tool internal, jangan mengeluh bahwa sumber tidak relevan, dan jangan mengarang URL tautan.`;
-    } else if (isLastRound || hasExecutedImagePrepare || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedCommunication || hasExecutedDocuments || hasExecutedChatHistory || hasExecutedVideo || hasBrowsedWeb) {
+    } else if (isLastRound || hasExecutedImagePrepare || hasExecutedWeatherRender || weatherConsentDenied || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedCommunication || hasExecutedWaRead || hasExecutedDocuments || hasExecutedChatHistory || hasExecutedVideo || hasBrowsedWeb) {
       roundInstruction = `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:\n${evidenceDirective}`;
     } else {
       roundInstruction = `[HASIL EKSEKUSI TOOL]:
@@ -37054,7 +39786,7 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir yang menjelaskan hasilny
     }
 
     let claimConstraint = '';
-    if (hasExecutedCommunication || hasExecutedDocuments) {
+    if (hasExecutedCommunication || hasExecutedWaRead || hasExecutedDocuments) {
       claimConstraint = `BATASAN ANALISIS KOMUNIKASI & RAG DOKUMEN INTERNAL:
 1. Seluruh nama pengirim, nomor/ID, waktu, kutipan pesan, status unread, kode SOP/dokumen, pasal/bagian, dan angka kebijakan WAJIB bersumber persis dari data di atas (tanggal referensi hari ini: ${currentFormattedDate}). Dilarang keras mengarang isi pesan, aturan SOP, atau ID yang tidak tercatat di data.
 2. Sajikan jawaban yang langsung dapat ditindaklanjuti: (a) Ringkasan Eksekutif, (b) Analisis detail per sumber/dokumen/thread, (c) Hasil kalkulasi/perbandingan aturan SOP bila ada, dan (d) Daftar Tindak Lanjut (Action Items) terprioritas.
@@ -37142,7 +39874,7 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
           } else if (res.text) {
             resultObj = {
               status: 'complete',
-              text: formatToolText(res.text, (hasExecutedCommunication || hasExecutedDocuments) ? 14000 : 6500)
+              text: formatToolText(res.text, (hasExecutedCommunication || hasExecutedWaRead || hasExecutedDocuments) ? 14000 : 6500)
             };
             if (res.display_id) resultObj.display_id = res.display_id;
             if (res.placement_token) resultObj.placement_token = res.placement_token;
@@ -37177,7 +39909,7 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
 
       const effectiveToolPayload = (circuitBreakerTripped && (!webSources || webSources.length === 0))
         ? '[STATUS PENELUSURAN]: Selesai. Lanjutkan dengan sintesis deduktif penuh berdasarkan pengetahuan analitis Anda.'
-        : roundToolResponsesText.substring(0, (hasExecutedCommunication || hasExecutedDocuments) ? 14000 : 12000);
+        : roundToolResponsesText.substring(0, (hasExecutedCommunication || hasExecutedWaRead || hasExecutedDocuments) ? 14000 : 12000);
 
       conversationChain.push({
         role: 'user',
@@ -37191,14 +39923,21 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
       hasExecutedPython,
       hasExecutedMemory,
       hasExecutedCommunication,
+      hasExecutedWaRead,
       hasExecutedDocuments,
       isParallelRound,
       hasExecutedVideo,
       hasExecutedImageSearch,
       hasExecutedImageInspect,
       hasExecutedImagePrepare,
+      hasExecutedLocationConsent,
+      hasExecutedCoords,
+      hasExecutedWeatherFetch,
+      hasSucceededWeatherFetch,
+      hasExecutedWeatherRender,
       hasGroundedSearchSources,
       isMidImagePipeline,
+      isMidWeatherPipeline,
       isLastRound
     };
   }
@@ -37861,7 +40600,7 @@ $$
           } else {
             const isMetaQuery = (typeof LocalMemoryVault !== 'undefined' && LocalMemoryVault.CROSS_SESSION_RECALL_REGEX.test(promptText)) || promptText.trim().length <= 45;
             if (isMetaQuery && session && Array.isArray(session.messages) && session.messages.length >= 2) {
-              const lastAssistant = session.messages.filter(m => m.role === 'assistant').slice(-1)[0];
+              const lastAssistant = session.messages.filter(m => m.role === 'assistant' && !m.isEmptyFallback).slice(-1)[0];
               const lastUser = session.messages.filter(m => m.role === 'user' && m.content !== promptText).slice(-1)[0];
               const contextSnippets = [];
               if (lastAssistant && lastAssistant.content) {
@@ -37955,7 +40694,8 @@ $$
         /\[Web:[^\]]+\]/i.test(promptText)
       );
 
-      const z21ToolCtx = { planMode: webCtx?.planMode, session };
+      const weatherTurnCtxOr = WeatherController.initTurnContext(promptText);
+      const z21ToolCtx = { planMode: webCtx?.planMode, session, weatherTurnCtx: weatherTurnCtxOr };
       const isZ21LocalCommEnabled = canUseZ21LocalCommunicationTool(webCtx?.planMode, session);
       const isCommAnalysisTurn = Boolean(isZ21LocalCommEnabled && (webCtx?.isCommunicationAnalysis || isCommunicationContextPrompt(promptText)));
       const isLocalTimeTurn = Boolean(isZ21LocalCommEnabled && (webCtx?.isLocalTimeQuery || isLocalTimeOrClockPrompt(promptText)));
@@ -37982,15 +40722,15 @@ $$
       }
 
       // Direktif tool pencarian/rekomendasi video & utilitas otonom disuntikkan hanya bila relevan secara matematis (I(Q; Tools) > 0)
-      const hasExplicitToolTrigger = !isPureMathSession && Boolean(
-        canRunAutonomous ||
-        isCommAnalysisTurn ||
-        isDocKnowledgeTurn ||
-        isChatHistoryTurn ||
-        temporalRecencyProfile.epistemicSearchTrigger >= 0.72 ||
-        /\b(?:cari(?:kan)?|search|searching|telusuri|pencarian|tool\s+pencarian|browse|browsing|googling|tampilkan\s+(?:foto|gambar|visual|video)|unsplash|wikimedia|whatsap+t?|watsap+|wasap|\bwa\b|sop\b|regulasi|kebijakan|dokumen|search_documents|retrieve_knowledge|search_chat_history|conversation_search|recent_chats|cari_riwayat_obrolan|jalankan\s+(?:kode|python)|hitung\s+dengan\s+python|simpan\s+(?:ke\s+)?memori|ingat\s+ini)/i.test(promptText) ||
-        (!hasAttachedWebDocs && /https?:\/\//i.test(promptText))
-      );
+      const hasExplicitToolTrigger = computeAutonomousToolTrigger(promptText, {
+        isPureMathSession,
+        canRunAutonomous,
+        isCommAnalysisTurn,
+        isDocKnowledgeTurn,
+        isChatHistoryTurn,
+        epistemicSearchTrigger: temporalRecencyProfile.epistemicSearchTrigger,
+        hasAttachedWebDocs
+      });
       if (hasExplicitToolTrigger) {
         const autoDirective = getAutonomousSystemDirective(z21ToolCtx);
         systemContent = systemContent ? `${systemContent}\n\n${autoDirective}` : autoDirective;
@@ -38458,11 +41198,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // ==================== OLLAMA AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = !isPureMathSession;
-      const maxAutonomousRounds = 5;
+      const maxAutonomousRounds = 6;
       let autonomousRound = 0;
       let consecutiveFailedRounds = 0;
       let preambleHtml = '';
       const groundedImageDisplays = [];
+      const groundedWeatherDisplays = [];
       const foundYouTubeIds = [];
       const conversationChain = [...messagesPayload];
       let currentRoundText = fullText;
@@ -38560,7 +41301,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         toolTaskItems.forEach(item => toolSummaryList.push(item.summary));
 
         // Tampilkan status visual proses penelusuran latar belakang secara bersih tanpa metadata teknis
-        const primaryLoadingTool = toolTaskItems.find(t => ['fetch_communication_context', 'search_documents', 'search_chat_history'].includes(normalizeToolName(t.toolName))) || toolTaskItems[0];
+        const primaryLoadingTool = toolTaskItems.find(t => ['fetch_communication_context', 'search_documents', 'search_chat_history', 'request_location_permission', 'get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(normalizeToolName(t.toolName))) || toolTaskItems[0];
         bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + createAutonomousToolHudHtml(primaryLoadingTool?.toolName || 'search_web', primaryLoadingTool?.previewArg || '', 'loading', toolTaskItems);
         smartScrollChatToBottom(true);
 
@@ -38589,6 +41330,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           }
           if (toolExecRes.imageDisplay && Array.isArray(toolExecRes.imageDisplay.display_items) && toolExecRes.imageDisplay.display_items.length > 0) {
             groundedImageDisplays.push(toolExecRes.imageDisplay);
+          }
+          if (toolExecRes.weatherDisplay && toolExecRes.weatherDisplay.display_id) {
+            if (!groundedWeatherDisplays.some(w => w.display_id === toolExecRes.weatherDisplay.display_id)) {
+              groundedWeatherDisplays.push(toolExecRes.weatherDisplay);
+            }
           }
           if (Array.isArray(toolExecRes.videoIds)) {
             toolExecRes.videoIds.forEach((vid) => {
@@ -38673,6 +41419,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           hasExecutedSearch,
           hasExecutedVideo,
           isMidImagePipeline,
+          isMidWeatherPipeline,
+          hasExecutedWeatherFetch,
+          hasSucceededWeatherFetch,
           isLastRound
         } = buildAutonomousToolDigestionStep({
           detectedAutonomousCalls,
@@ -38686,7 +41435,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           autonomousRound,
           maxAutonomousRounds,
           circuitBreakerTripped,
-          conversationChain
+          conversationChain,
+          allowInlineToolFallback: validNativeCalls.length === 0
         });
         if (hasExecutedSearch || hasExecutedVideo || hasBrowsedWeb) {
           hadSearchOrVideoToolRound = true;
@@ -38710,10 +41460,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             top_p: optSampling.topP
           };
         }
-        if (!isLastRound && (isMidImagePipeline || !hasExecutedVideo) && selectedOllamaTools && selectedOllamaTools.length > 0) {
+        if (!isLastRound && (isMidImagePipeline || isMidWeatherPipeline || !hasExecutedVideo) && selectedOllamaTools && selectedOllamaTools.length > 0) {
           const availableTools = selectedOllamaTools.filter(t => {
             const tName = normalizeToolName(t?.function?.name || t?.name || '');
             if (isMidImagePipeline) return ['inspect_image', 'prepare_image_display'].includes(tName);
+            if (isMidWeatherPipeline) {
+              return hasSucceededWeatherFetch
+                ? ['render_weather_ui'].includes(tName)
+                : ['get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(tName);
+            }
             if (hasExecutedSearch && ['search_web', 'web_search', 'search'].includes(tName)) return false;
             return true;
           });
@@ -38878,7 +41633,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               }
             } catch (_) {}
           }
-          const finishedDigestion = digestionRenderer.finish({ render: false });
+          const finishedDigestion = digestionRenderer.finish({ render: false, allowReasoningFallback: false });
           if (finishedDigestion) currentRoundText = finishedDigestion;
           fullText = currentRoundText;
           if (digestionRenderer.isLoopTerminated) {
@@ -38946,10 +41701,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       }
 
-      // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah / link-only → minta model menyusun jawaban bersih =====
+      // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah / link-only / kartu cuaca tanpa penjelasan rinci → minta model menyusun jawaban bersih =====
       if (autonomousRound > 0 && !isPureMathSession && !STATE.abortController?.signal?.aborted) {
-        const probeText = scrubRawToolCallArtifacts(fullText || '').trim();
-        if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText) || isInternalSystemPayload(probeText) || (hadSearchOrVideoToolRound && isLinkOnlyOrUnexplainedSearchOutput(probeText))) {
+        const rescuePlan = resolveRescueEvidenceContext({
+          fullText,
+          groundedWeatherDisplays,
+          weatherData: weatherTurnCtxOr?.weatherData,
+          allAccumulatedToolResponsesText,
+          webSources,
+          hadSearchOrVideoToolRound
+        });
+        if (rescuePlan.shouldRescue) {
           try {
             bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyusun penjelasan komprehensif dari hasil penelusuran...</span></div>`;
             smartScrollChatToBottom(true);
@@ -38965,7 +41727,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               headers,
               model: modelName,
               question: promptText,
-              evidenceText: allAccumulatedToolResponsesText || (webSources && webSources.length > 0 ? synthesizeAutonomousWebSummary('', webSources) : ''),
+              evidenceText: rescuePlan.evidenceText,
               extraBody: rescueExtra,
               signal: STATE.abortController?.signal
             });
@@ -39111,6 +41873,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           fullText = `**Jawaban revisi yang tepat: ${bestAlt}**\n\nPilihan sebelumnya telah difalsifikasi ($P=0$). Berdasarkan evaluasi hipotesis alternatif, opsi **${bestAlt}** merupakan kandidat paling tepat untuk kuis ini.`;
         } else if (groundedImageDisplays && groundedImageDisplays.length > 0) {
           fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
+        } else if (groundedWeatherDisplays && groundedWeatherDisplays.length > 0) {
+          const w0 = groundedWeatherDisplays[0];
+          fullText = `Lokasi Anda terdeteksi di **${w0.displayLocation || w0.city}**. Saat ini cuacanya **${w0.condition}** dengan suhu **${w0.tempC}°C**${w0.humidity !== null ? ` dan kelembapan **${w0.humidity}%**` : ''}.${w0.advice ? ` ${w0.advice}` : ''}`;
         } else {
           // Auto-Recovery 1-shot: model menghasilkan 0 teks (mis. seluruh token habis di message.thinking pada gemma4/qwen3/r1).
           bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-rotate-right fa-spin"></i> <span>Memulihkan jawaban model...</span></div>`;
@@ -39123,6 +41888,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             endpoint: ep,
             requestBody,
             sessionId: session?.id || null,
+            toolContextText: allAccumulatedToolResponsesText,
             signal: STATE.abortController?.signal
           });
           if (recovered && recovered.text && recovered.text.trim()) {
@@ -39142,7 +41908,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       fullText = safeAssistantText(fullText);
-      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && (!groundedImageDisplays || groundedImageDisplays.length === 0)) {
+      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && (!groundedImageDisplays || groundedImageDisplays.length === 0) && (!groundedWeatherDisplays || groundedWeatherDisplays.length === 0)) {
         isEmptyResponseFallback = true;
         fullText = 'Maaf, model tidak menghasilkan teks jawaban untuk permintaan ini. Silakan klik **Ulangi** atau kirim ulang pesan Anda.';
       }
@@ -39162,7 +41928,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // ===== GERBANG VISUAL GROUNDING OTONOM (OLLAMA - FINAL TURN) =====
       // Analisis pertanyaan pengguna -> terjemahkan kata kunci ke Bahasa Inggris -> ambil 3 foto paling relevan via API Unsplash (per_page: 3).
       const visualSpecOllama = resolveVisualSearchSpec(promptText, fullText);
-      if (groundedImageDisplays.length === 0 && visualSpecOllama && !wantsFile && !isDocRequest && !isStudioIsolated && !isCommAnalysisTurn && !isLocalTimeTurn && !isDocKnowledgeTurn && !isChatHistoryTurn && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
+      if (!isEmptyResponseFallback && groundedImageDisplays.length === 0 && groundedWeatherDisplays.length === 0 && visualSpecOllama && !wantsFile && !isDocRequest && !isStudioIsolated && !isCommAnalysisTurn && !isLocalTimeTurn && !isDocKnowledgeTurn && !isChatHistoryTurn && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
           const existingGeneratedHtml = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
           bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari 3 foto relevan untuk "${escapeHtml(visualSpecOllama.englishQuery)}"...</span></div>`;
@@ -39220,6 +41986,23 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       }
 
+      // Fallback otomatis jika fetch_weather_data sukses tetapi model lupa memanggil render_weather_ui
+      if (groundedWeatherDisplays.length === 0 && weatherTurnCtxOr.weatherData?.success && !STATE.abortController?.signal?.aborted) {
+        try {
+          const wAutoSpec = WeatherController.resolveTargetTimeSpec(promptText);
+          const wAuto = await executeAutonomousWebTool('render_weather_ui', {
+            condition: weatherTurnCtxOr.weatherData.current?.condition || 'Cerah Berawan',
+            temp: weatherTurnCtxOr.weatherData.current?.tempC ?? 25,
+            city: weatherTurnCtxOr.weatherData.location?.city || 'Lokasi Anda',
+            target_day: wAutoSpec.targetDayParam,
+            advice: weatherTurnCtxOr.weatherData.current?.advice || ''
+          }, promptText, session, z21ToolCtx);
+          if (wAuto?.weatherDisplay && wAuto.weatherDisplay.display_id) {
+            groundedWeatherDisplays.push(wAuto.weatherDisplay);
+          }
+        } catch (_) {}
+      }
+
       // Jamin token penempatan display selalu tersemat di posisi yang tepat pada fullText
       if (groundedImageDisplays.length > 0) {
         for (const disp of groundedImageDisplays) {
@@ -39237,6 +42020,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           }
         }
       }
+      if (groundedWeatherDisplays.length > 0) {
+        fullText = finalizeWeatherProseOutput(fullText, weatherTurnCtxOr?.weatherData, groundedWeatherDisplays, promptText);
+      }
 
       if (preambleHtml && isInternalSystemPayload(preambleHtml)) {
         preambleHtml = '';
@@ -39246,6 +42032,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       bubbleText.innerHTML = finalRenderedContent.trim();
       if (groundedImageDisplays.length > 0) {
         renderGroundedImageDisplaysForRow(assistantRow, groundedImageDisplays);
+      }
+      if (groundedWeatherDisplays.length > 0) {
+        renderWeatherDisplaysForRow(assistantRow, groundedWeatherDisplays);
       }
       enhanceCodeBlocks(bubbleText);
       enhanceChatImages(bubbleText);
@@ -39296,6 +42085,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           memoryReceipts: (jozzMemoryRecall?.receipts?.length > 0) ? jozzMemoryRecall.receipts : undefined,
           chatHistoryRefs: collectedChatHistoryRefs.length > 0 ? collectedChatHistoryRefs : undefined,
           imageDisplays: groundedImageDisplays.length > 0 ? groundedImageDisplays : undefined,
+          weatherDisplays: groundedWeatherDisplays.length > 0 ? groundedWeatherDisplays : undefined,
           videoIds: foundYouTubeIds.length > 0 ? foundYouTubeIds : undefined,
           files: (generatedFiles.length > 0 && !hasNegativePreview) ? generatedFiles : undefined,
           stats: { duration: totalTime, tps: tps, tokens: tokenCount },
@@ -39354,6 +42144,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         finishReason: isOllamaStreamIncomplete ? 'incomplete' : doneReason,
         isFileIncomplete: isFileStillIncomplete,
         groundedImageDisplays,
+        groundedWeatherDisplays,
         isWebTask,
         isAborted: Boolean(STATE.abortController?.signal?.aborted),
         isAutoContinuation: Boolean(runOptions._isAutoContinuation),
@@ -39877,7 +42668,7 @@ $$
           } else {
             const isMetaQuery = (typeof LocalMemoryVault !== 'undefined' && LocalMemoryVault.CROSS_SESSION_RECALL_REGEX.test(promptText)) || promptText.trim().length <= 45;
             if (isMetaQuery && session && Array.isArray(session.messages) && session.messages.length >= 2) {
-              const lastAssistant = session.messages.filter(m => m.role === 'assistant').slice(-1)[0];
+              const lastAssistant = session.messages.filter(m => m.role === 'assistant' && !m.isEmptyFallback).slice(-1)[0];
               const lastUser = session.messages.filter(m => m.role === 'user' && m.content !== promptText).slice(-1)[0];
               const contextSnippets = [];
               if (lastAssistant && lastAssistant.content) {
@@ -39971,7 +42762,8 @@ $$
         /\[Web:[^\]]+\]/i.test(promptText)
       );
 
-      const z21ToolCtx = { planMode: webCtx?.planMode, session };
+      const weatherTurnCtxOr = WeatherController.initTurnContext(promptText);
+      const z21ToolCtx = { planMode: webCtx?.planMode, session, weatherTurnCtx: weatherTurnCtxOr };
       const isZ21LocalCommEnabled = canUseZ21LocalCommunicationTool(webCtx?.planMode, session);
       const isCommAnalysisTurn = Boolean(isZ21LocalCommEnabled && (webCtx?.isCommunicationAnalysis || isCommunicationContextPrompt(promptText)));
       const isLocalTimeTurn = Boolean(isZ21LocalCommEnabled && (webCtx?.isLocalTimeQuery || isLocalTimeOrClockPrompt(promptText)));
@@ -39998,15 +42790,15 @@ $$
       }
 
       // Direktif tool pencarian/rekomendasi video & utilitas otonom disuntikkan hanya bila relevan secara matematis (I(Q; Tools) > 0)
-      const hasExplicitToolTrigger = !isPureMathSession && Boolean(
-        canRunAutonomous ||
-        isCommAnalysisTurn ||
-        isDocKnowledgeTurn ||
-        isChatHistoryTurn ||
-        temporalRecencyProfile.epistemicSearchTrigger >= 0.72 ||
-        /\b(?:cari(?:kan)?|search|searching|telusuri|pencarian|tool\s+pencarian|browse|browsing|googling|tampilkan\s+(?:foto|gambar|visual|video)|unsplash|wikimedia|whatsap+t?|watsap+|wasap|\bwa\b|sop\b|regulasi|kebijakan|dokumen|search_documents|retrieve_knowledge|search_chat_history|conversation_search|recent_chats|cari_riwayat_obrolan|jalankan\s+(?:kode|python)|hitung\s+dengan\s+python|simpan\s+(?:ke\s+)?memori|ingat\s+ini)/i.test(promptText) ||
-        (!hasAttachedWebDocs && /https?:\/\//i.test(promptText))
-      );
+      const hasExplicitToolTrigger = computeAutonomousToolTrigger(promptText, {
+        isPureMathSession,
+        canRunAutonomous,
+        isCommAnalysisTurn,
+        isDocKnowledgeTurn,
+        isChatHistoryTurn,
+        epistemicSearchTrigger: temporalRecencyProfile.epistemicSearchTrigger,
+        hasAttachedWebDocs
+      });
       if (hasExplicitToolTrigger) {
         const autoDirective = getAutonomousSystemDirective(z21ToolCtx);
         systemContent = systemContent ? `${systemContent}\n\n${autoDirective}` : autoDirective;
@@ -40745,11 +43537,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
       // ==================== UNIVERSAL AUTONOMOUS LIVE WEB SEARCH DIGESTION ENGINE ====================
       const canRunAutonomousSearch = !isPureMathSession;
-      const maxAutonomousRounds = 5;
+      const maxAutonomousRounds = 6;
       let autonomousRound = 0;
       let consecutiveFailedRounds = 0;
       let preambleHtml = '';
       const groundedImageDisplays = [];
+      const groundedWeatherDisplays = [];
       const foundYouTubeIds = [];
       const conversationChain = [...(activeMessagesPayload || messagesPayload)];
       let currentRoundText = fullText;
@@ -40847,7 +43640,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         toolTaskItems.forEach(item => toolSummaryList.push(item.summary));
 
         // Tampilkan status visual proses penelusuran latar belakang secara bersih tanpa metadata teknis
-        const primaryLoadingTool = toolTaskItems.find(t => ['fetch_communication_context', 'search_documents', 'search_chat_history'].includes(normalizeToolName(t.toolName))) || toolTaskItems[0];
+        const primaryLoadingTool = toolTaskItems.find(t => ['fetch_communication_context', 'search_documents', 'search_chat_history', 'request_location_permission', 'get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(normalizeToolName(t.toolName))) || toolTaskItems[0];
         bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + createAutonomousToolHudHtml(primaryLoadingTool?.toolName || 'search_web', primaryLoadingTool?.previewArg || '', 'loading', toolTaskItems);
         smartScrollChatToBottom(true);
 
@@ -40876,6 +43669,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           }
           if (toolExecRes.imageDisplay && Array.isArray(toolExecRes.imageDisplay.display_items) && toolExecRes.imageDisplay.display_items.length > 0) {
             groundedImageDisplays.push(toolExecRes.imageDisplay);
+          }
+          if (toolExecRes.weatherDisplay && toolExecRes.weatherDisplay.display_id) {
+            if (!groundedWeatherDisplays.some(w => w.display_id === toolExecRes.weatherDisplay.display_id)) {
+              groundedWeatherDisplays.push(toolExecRes.weatherDisplay);
+            }
           }
           if (Array.isArray(toolExecRes.videoIds)) {
             toolExecRes.videoIds.forEach((vid) => {
@@ -40971,6 +43769,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           hasExecutedSearch,
           hasExecutedVideo,
           isMidImagePipeline,
+          isMidWeatherPipeline,
+          hasExecutedWeatherFetch,
+          hasSucceededWeatherFetch,
           isLastRound
         } = buildAutonomousToolDigestionStep({
           detectedAutonomousCalls,
@@ -41001,11 +43802,16 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             allow_fallbacks: isAutoRouterActive
           }
         };
-        if (!isLastRound && (isMidImagePipeline || !hasExecutedVideo) && (!isDigestionFree || validNativeCalls.length > 0) && canDigestionUseTools && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
+        if (!isLastRound && (isMidImagePipeline || isMidWeatherPipeline || !hasExecutedVideo) && (!isDigestionFree || validNativeCalls.length > 0) && canDigestionUseTools && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
           const validFunctionTools = selectedAutonomousTools.filter(t => {
             if (!t || t.type !== 'function' || !t.function?.name) return false;
             const tName = normalizeToolName(t.function.name);
             if (isMidImagePipeline) return ['inspect_image', 'prepare_image_display'].includes(tName);
+            if (isMidWeatherPipeline) {
+              return hasSucceededWeatherFetch
+                ? ['render_weather_ui'].includes(tName)
+                : ['get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(tName);
+            }
             if (hasExecutedSearch && ['search_web', 'web_search', 'search'].includes(tName)) return false;
             return true;
           });
@@ -41250,7 +44056,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           if (!digestionSseDone && !finishReason && tokenCount > 0 && currentRoundNativeCalls.length === 0) {
             isStreamInterrupted = true;
           }
-          currentRoundText = digestionRenderer.finish({ render: false });
+          currentRoundText = digestionRenderer.finish({ render: false, allowReasoningFallback: false });
           fullText = currentRoundText;
           if (digestionRenderer.isLoopTerminated) {
             break;
@@ -41323,10 +44129,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       }
 
-      // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah / link-only → minta model menyusun jawaban bersih =====
+      // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah / link-only / kartu cuaca tanpa penjelasan rinci → minta model menyusun jawaban bersih =====
       if (autonomousRound > 0 && !isPureMathSession && !STATE.abortController?.signal?.aborted) {
-        const probeText = scrubRawToolCallArtifacts(fullText || '').trim();
-        if (!probeText || isModelInternalMonologue(probeText) || isAutonomousFallbackText(probeText) || isInternalSystemPayload(probeText) || (hadSearchOrVideoToolRound && isLinkOnlyOrUnexplainedSearchOutput(probeText))) {
+        const rescuePlan = resolveRescueEvidenceContext({
+          fullText,
+          groundedWeatherDisplays,
+          weatherData: weatherTurnCtxOr?.weatherData,
+          allAccumulatedToolResponsesText,
+          webSources,
+          hadSearchOrVideoToolRound
+        });
+        if (rescuePlan.shouldRescue) {
           try {
             bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyusun penjelasan komprehensif dari hasil penelusuran...</span></div>`;
             smartScrollChatToBottom(true);
@@ -41350,7 +44163,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               headers: rescueHeaders,
               model: rescueModel,
               question: promptText,
-              evidenceText: allAccumulatedToolResponsesText || (webSources && webSources.length > 0 ? synthesizeAutonomousWebSummary('', webSources) : ''),
+              evidenceText: rescuePlan.evidenceText,
               extraBody: rescueExtra,
               signal: STATE.abortController?.signal
             });
@@ -41482,7 +44295,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       let isEmptyResponseFallback = false;
-      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && collectedImages.length === 0 && groundedImageDisplays.length === 0) {
+      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && collectedImages.length === 0 && groundedImageDisplays.length === 0 && groundedWeatherDisplays.length === 0) {
         if (STATE.abortController?.signal?.aborted) {
           // H3: sama seperti Ollama — jangan simpan gelembung kosong sebagai jawaban.
           assistantRow.remove();
@@ -41494,6 +44307,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           fullText = `**Jawaban revisi yang tepat: ${bestAlt}**\n\nPilihan sebelumnya telah difalsifikasi ($P=0$). Berdasarkan evaluasi hipotesis alternatif, opsi **${bestAlt}** merupakan kandidat paling tepat untuk kuis ini.`;
         } else if ((collectedImages && collectedImages.length > 0) || (groundedImageDisplays && groundedImageDisplays.length > 0)) {
           fullText = 'Berikut materi visual yang telah berhasil ditelusuri dan disajikan untuk kueri Anda:';
+        } else if (groundedWeatherDisplays && groundedWeatherDisplays.length > 0) {
+          const w0 = groundedWeatherDisplays[0];
+          fullText = `Lokasi Anda terdeteksi di **${w0.displayLocation || w0.city}**. Saat ini cuacanya **${w0.condition}** dengan suhu **${w0.tempC}°C**${w0.humidity !== null ? ` dan kelembapan **${w0.humidity}%**` : ''}.${w0.advice ? ` ${w0.advice}` : ''}`;
         } else {
           // Auto-Recovery 1-shot tanpa tools & tanpa reasoning agar model langsung menjawab ke konten utama
           bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-rotate-right fa-spin"></i> <span>Memulihkan jawaban model...</span></div>`;
@@ -41509,9 +44325,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           const recovered = await recoverEmptyOpenRouterReply({
             endpointUrl: recUrl,
             headers: recHeaders,
-            modelName: actualModelUsed || modelName,
+            modelName: actualModelUsed || activeBasePayload?.model || effectiveInitialModel || modelName,
             messagesPayload: activeMessagesPayload || messagesPayload,
             basePayload: activeBasePayload,
+            toolContextText: allAccumulatedToolResponsesText,
             signal: STATE.abortController?.signal
           });
           if (recovered && recovered.text && recovered.text.trim()) {
@@ -41533,7 +44350,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       fullText = safeAssistantText(fullText);
-      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && collectedImages.length === 0 && groundedImageDisplays.length === 0) {
+      if (!fullText.trim() && generatedFiles.length === 0 && !preambleHtml && collectedImages.length === 0 && groundedImageDisplays.length === 0 && groundedWeatherDisplays.length === 0) {
         isEmptyResponseFallback = true;
         fullText = 'Maaf, model tidak menghasilkan teks jawaban untuk permintaan ini. Silakan klik **Ulangi** atau kirim ulang pesan Anda.';
       }
@@ -41550,7 +44367,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // ===== GERBANG VISUAL GROUNDING OTONOM (OPENROUTER - FINAL TURN) =====
       // Analisis pertanyaan pengguna -> terjemahkan kata kunci ke Bahasa Inggris -> ambil 3 foto paling relevan via API Unsplash (per_page: 3).
       const visualSpecOpenRouter = resolveVisualSearchSpec(promptText, fullText);
-      if (groundedImageDisplays.length === 0 && visualSpecOpenRouter && !wantsFile && !isDocRequest && !isStudioIsolated && !isCommAnalysisTurn && !isLocalTimeTurn && !isDocKnowledgeTurn && !isChatHistoryTurn && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
+      if (!isEmptyResponseFallback && groundedImageDisplays.length === 0 && groundedWeatherDisplays.length === 0 && visualSpecOpenRouter && !wantsFile && !isDocRequest && !isStudioIsolated && !isCommAnalysisTurn && !isLocalTimeTurn && !isDocKnowledgeTurn && !isChatHistoryTurn && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
           const existingGeneratedHtml = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
           bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari 3 foto relevan untuk "${escapeHtml(visualSpecOpenRouter.englishQuery)}"...</span></div>`;
@@ -41608,6 +44425,23 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       }
 
+      // Fallback otomatis jika fetch_weather_data sukses tetapi model lupa memanggil render_weather_ui (OpenRouter)
+      if (groundedWeatherDisplays.length === 0 && weatherTurnCtxOr.weatherData?.success && !STATE.abortController?.signal?.aborted) {
+        try {
+          const wAutoSpec = WeatherController.resolveTargetTimeSpec(promptText);
+          const wAuto = await executeAutonomousWebTool('render_weather_ui', {
+            condition: weatherTurnCtxOr.weatherData.current?.condition || 'Cerah Berawan',
+            temp: weatherTurnCtxOr.weatherData.current?.tempC ?? 25,
+            city: weatherTurnCtxOr.weatherData.location?.city || 'Lokasi Anda',
+            target_day: wAutoSpec.targetDayParam,
+            advice: weatherTurnCtxOr.weatherData.current?.advice || ''
+          }, promptText, session, z21ToolCtx);
+          if (wAuto?.weatherDisplay && wAuto.weatherDisplay.display_id) {
+            groundedWeatherDisplays.push(wAuto.weatherDisplay);
+          }
+        } catch (_) {}
+      }
+
       // Jamin token penempatan display selalu tersemat di posisi yang tepat pada fullText
       if (groundedImageDisplays.length > 0) {
         for (const disp of groundedImageDisplays) {
@@ -41624,6 +44458,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             }
           }
         }
+      }
+      if (groundedWeatherDisplays.length > 0) {
+        fullText = finalizeWeatherProseOutput(fullText, weatherTurnCtxOr?.weatherData, groundedWeatherDisplays, promptText);
       }
 
       if (webSources && webSources.length > 0) { ACTIVE_CHAT_SOURCES = webSources; assistantRow._webSources = webSources; }
@@ -41650,6 +44487,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       bubbleText.innerHTML = finalRenderedContent.trim();
       if (groundedImageDisplays.length > 0) {
         renderGroundedImageDisplaysForRow(assistantRow, groundedImageDisplays);
+      }
+      if (groundedWeatherDisplays.length > 0) {
+        renderWeatherDisplaysForRow(assistantRow, groundedWeatherDisplays);
       }
       enhanceCodeBlocks(bubbleText);
       enhanceChatImages(bubbleText);
@@ -41716,6 +44556,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 if (groundedImageDisplays.length > 0) {
                   renderGroundedImageDisplaysForRow(assistantRow, groundedImageDisplays);
                 }
+                if (groundedWeatherDisplays.length > 0) {
+                  renderWeatherDisplaysForRow(assistantRow, groundedWeatherDisplays);
+                }
                 enhanceCodeBlocks(bubbleText);
                 enhanceChatImages(bubbleText);
                 if (collectedImages.length > 0) {
@@ -41758,6 +44601,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           docFormat: runOptions.docFormat,
           images: collectedImages.length > 0 ? collectedImages : undefined,
           imageDisplays: groundedImageDisplays.length > 0 ? groundedImageDisplays : undefined,
+          weatherDisplays: groundedWeatherDisplays.length > 0 ? groundedWeatherDisplays : undefined,
           videoIds: foundYouTubeIds.length > 0 ? foundYouTubeIds : undefined,
           files: (generatedFiles.length > 0 && !hasNegativePreview) ? generatedFiles : undefined,
           imageUrl: collectedImages[0] || undefined,
@@ -41817,6 +44661,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         finishReason: isStreamInterrupted ? 'incomplete' : finishReason,
         isFileIncomplete: isFileStillIncomplete,
         groundedImageDisplays,
+        groundedWeatherDisplays,
         isWebTask,
         isAborted: Boolean(STATE.abortController?.signal?.aborted),
         isAutoContinuation: Boolean(runOptions._isAutoContinuation),
@@ -46753,8 +49598,14 @@ Aturan:
     if (modalId === 'modalWaSummaryResult' && typeof WhatsAppController !== 'undefined' && typeof WhatsAppController.dismissSummaryModalWithRejection === 'function') {
       WhatsAppController.dismissSummaryModalWithRejection('[AKSES DITOLAK PENGGUNA]: Pengguna menutup modal rangkuman WhatsApp.');
     }
+    if (modalId === 'locationConsentModal' && typeof WeatherController !== 'undefined' && typeof WeatherController.dismissConsentModalWithRejection === 'function') {
+      WeatherController.dismissConsentModalWithRejection('[AKSES LOKASI DITOLAK PENGGUNA]: Pengguna menutup modal izin lokasi.');
+    }
     if (modalId === 'zozPersonaModal' && typeof ZozPersonaController !== 'undefined') {
       ZozPersonaController._openedFromSettingsInWa = false;
+    }
+    if (modalId === 'modalWaEditContactName' && typeof WhatsAppController !== 'undefined') {
+      WhatsAppController.editingContactForCustomName = null;
     }
     if (modalId === 'terminalModal' && typeof TerminalManager !== 'undefined') {
       try {
@@ -49573,15 +52424,9 @@ Aturan:
       if (openModals.length > 0) {
         const dismissModalCleanly = (m) => {
           if (!m) return;
-          if (m.id === 'aiFileStudioModal') {
-            closeModal('aiFileStudioModal', false);
+          if (m.id && typeof closeModal === 'function') {
+            closeModal(m.id, false);
             return;
-          }
-          if (m.id === 'termQrScannerModal' && typeof TerminalManager !== 'undefined' && typeof TerminalManager.stopQrScanner === 'function') {
-            TerminalManager.stopQrScanner();
-          }
-          if (m.id === 'zozPersonaModal' && typeof ZozPersonaController !== 'undefined') {
-            ZozPersonaController._openedFromSettingsInWa = false;
           }
           m.classList.remove('show');
         };
@@ -61466,12 +64311,18 @@ Aturan:
       if (!contact || !contact.id) return;
       this.renderProfileModalContent(contact);
       this.toggleProfileThemeCustomizer(Boolean(opts.openCustomizer));
+      modal.classList.add('show');
       modal.style.display = 'flex';
+      if (typeof syncBodyModalState === 'function') syncBodyModalState();
     },
 
     closeProfileModal() {
       const modal = document.getElementById('waProfileModal');
-      if (modal) modal.style.display = 'none';
+      if (modal) {
+        modal.classList.remove('show');
+        modal.style.display = 'none';
+      }
+      if (typeof syncBodyModalState === 'function') syncBodyModalState();
     },
 
     // =========================================================================
@@ -61700,16 +64551,20 @@ Aturan:
         els.inputWaCustomContactName.value = existingCustom || '';
       }
       if (els.modalWaEditContactName) {
+        els.modalWaEditContactName.classList.add('show');
         els.modalWaEditContactName.style.display = 'flex';
+        if (typeof syncBodyModalState === 'function') syncBodyModalState();
         setTimeout(() => els.inputWaCustomContactName?.focus(), 120);
       }
     },
 
     closeEditContactNameModal() {
       if (els.modalWaEditContactName) {
+        els.modalWaEditContactName.classList.remove('show');
         els.modalWaEditContactName.style.display = 'none';
       }
       this.editingContactForCustomName = null;
+      if (typeof syncBodyModalState === 'function') syncBodyModalState();
     },
 
     async saveCustomContactName() {
@@ -61809,7 +64664,7 @@ Aturan:
     populateSummaryContactDropdown(selectEl, selectedJid = '') {
       if (!selectEl) return;
       const list = Array.isArray(this.contacts) ? [...this.contacts] : [];
-      list.sort((a, b) => (b.lastTimestamp || b.timestamp || 0) - (a.lastTimestamp || a.timestamp || 0));
+      list.sort((a, b) => parseClientCommTimestampMs(b?.lastTimestamp || b?.timestamp) - parseClientCommTimestampMs(a?.lastTimestamp || a?.timestamp));
 
       let html = '<option value="__all__">⭐ Semua Obrolan Terkini (Rangkuman Kolektif)</option>';
       for (let i = 0; i < list.length; i++) {
@@ -62174,6 +65029,7 @@ Aturan:
       if (modal) {
         modal.style.display = 'flex';
         modal.classList.add('show');
+        if (typeof syncBodyModalState === 'function') syncBodyModalState();
       }
 
       const {
@@ -62316,6 +65172,9 @@ Aturan:
       }
       this.summaryAbortCtrl = new AbortController();
       const signal = this.summaryAbortCtrl.signal;
+      const sumFetchSignal = (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any === 'function' && typeof AbortSignal.timeout === 'function')
+        ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
+        : signal;
 
       try {
         const res = await this.waFetch('/api/wa/summarize', {
@@ -62328,7 +65187,7 @@ Aturan:
             userId: this.getUserId(),
             pin: this.getPin()
           }),
-          signal: AbortSignal.timeout(15000)
+          signal: sumFetchSignal
         }, 1);
 
         const data = await res.json().catch(() => null);
@@ -62478,6 +65337,9 @@ Gunakan format Markdown lengkap dengan struktur berikut:
           fallback: true
         };
       } catch (err) {
+        if (signal?.aborted) {
+          return { success: false, aborted: true, error: 'Dibatalkan pengguna' };
+        }
         console.warn('[WA-Summary] Gagal proses rangkuman:', err.message);
 
         let localFallbackSummary = '';
@@ -62543,6 +65405,67 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       }
     },
 
+    // Pembaca chat WhatsApp pasif (read-only) untuk tool calling AI Chat tanpa membuka pop-up Fitur Ringkas Chat
+    async fetchLatestChatsForAiTool({ targetQuery = '', focusTopic = '', promptContext = '', limit = 6, maxMessages = 15, signal = null } = {}) {
+      const effectivePin = this.getPin();
+      const effectiveUid = this.getUserId();
+      const isLocal = this.isAllowedAccess();
+      const hasTunnelAuth = Boolean(effectivePin && (this.isLocalHostOrTunnelOrigin() || this.isMaster));
+      if (!isLocal && !hasTunnelAuth) {
+        return {
+          success: false,
+          sources: [],
+          text: '[AKSES WHATSAPP TERBATAS]: Pengecekan chat WhatsApp melalui AI hanya tersedia pada host lokal atau perangkat yang terautentikasi PIN WhatsApp. Jelaskan hal ini secara jujur kepada pengguna tanpa memunculkan popup.'
+        };
+      }
+
+      const reqHeaders = this.getAuthHeaders({
+        'X-User-ID': (typeof STATE !== 'undefined' && STATE.userId) ? STATE.userId : 'default',
+        ...(typeof STATE !== 'undefined' && STATE.userToken ? { 'X-User-Token': STATE.userToken } : {}),
+        ...(effectiveUid ? { 'X-WA-User-ID': effectiveUid } : {}),
+        ...(effectivePin ? { 'X-WA-PIN': effectivePin } : {})
+      });
+
+      const effectiveQuery = String(focusTopic || (!targetQuery ? promptContext : '') || '').trim();
+      const res = await collectWhatsAppContextData({
+        source: 'whatsapp',
+        targetId: String(targetQuery || '').trim(),
+        query: effectiveQuery,
+        limit,
+        maxMessages,
+        unreadOnly: /\b(?:belum\s+(?:dibaca|dibalas)|unread)\b/i.test(`${effectiveQuery} ${promptContext || ''}`),
+        reqHeaders,
+        signal,
+        headerLabel: '[DATA CHAT WHATSAPP TERBARU — READ-ONLY AI CHAT]'
+      });
+
+      if (!res || !res.success) {
+        return {
+          success: false,
+          sources: [],
+          text: 'Pengambilan data chat WhatsApp dibatalkan atau gateway tidak merespons.'
+        };
+      }
+
+      if (res.authRejected && (!res.items || res.items.length === 0) && (!res.directoryPreview || res.directoryPreview.length === 0)) {
+        return {
+          success: false,
+          sources: [],
+          text: `[OTORISASI WHATSAPP DIPERLUKAN]: ${res.authErrorMsg || 'PIN WhatsApp belum terautentikasi.'} Sarankan pengguna memeriksa PIN di pengaturan WhatsApp tanpa membuka popup otomatis.`
+        };
+      }
+
+      const instructionTail = '\n\n[INSTRUKSI PENYAJIAN AI]: Susun laporan chat WhatsApp langsung di gelembung chat ini secara jelas & terstruktur (kontak/grup, waktu lokal, jumlah belum dibaca, pengirim, isi pesan terbaru, serta lampiran berkas bila ada). DILARANG mengarang pesan atau memunculkan/menyebut tampilan fitur ringkas chat WhatsApp.';
+      return {
+        success: true,
+        items: res.items,
+        recentIncoming: res.recentIncoming,
+        stats: res.stats,
+        text: `${res.formattedContext}${instructionTail}`,
+        sources: []
+      };
+    },
+
     // Backward-compatibility aliases
     openToolConsentModal(options = {}) {
       const pre = Array.isArray(options.preselectedJids) && options.preselectedJids.length > 0 ? options.preselectedJids[0] : '';
@@ -62565,12 +65488,10 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     },
 
     async requestAiToolSummaryWithConsent({ targetQuery = '', focusTopic = '', promptContext = null } = {}) {
-      showToast('🛡️ AI meminta persetujuan obrolan WhatsApp yang akan dirangkum...', 'info');
-      return this.openSummaryModal({
+      return await this.fetchLatestChatsForAiTool({
         targetQuery,
         focusTopic,
-        fromAiTool: true,
-        autoStart: false
+        promptContext: promptContext || ''
       });
     }
   };
@@ -62597,6 +65518,7 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     StudioEndocrineDiagnostics.init();
     StudioAutonomousAgent.init();
     WhatsAppController.init();
+    WeatherController.init();
     AiChatThemeManager.init();
     JozzMemoryUI.init();
     

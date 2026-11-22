@@ -3984,6 +3984,49 @@
     </div>
   </div>
 
+  <!-- ==================== 24. LOCATION CONSENT GATE MODAL (WEATHER WORKFLOW) ==================== -->
+  <div class="modal-backdrop" id="locationConsentModal" role="dialog" aria-modal="true" aria-labelledby="locationConsentTitle">
+    <div class="modal-card zoz-location-consent-card">
+      <div class="modal-header zoz-location-consent-header">
+        <div class="modal-title" id="locationConsentTitle">
+          <span class="zoz-location-consent-badge-icon"><i class="fa-solid fa-location-crosshairs"></i></span>
+          <span>Izin Akses Lokasi (Cuaca Real-Time)</span>
+        </div>
+        <button type="button" class="modal-close-btn" id="btnCloseLocationConsentModal" aria-label="Tutup dialog izin lokasi" title="Tolak & Tutup"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body zoz-location-consent-body">
+        <p class="zoz-location-consent-question">
+          Bolehkan saya mengakses lokasi Anda untuk memberikan info cuaca yang akurat?
+        </p>
+        <div class="zoz-location-consent-reason" id="locationConsentReasonText">
+          Koordinat GPS perangkat hanya dipakai sekali untuk mencocokkan nama wilayah Anda dan mengambil data suhu, kelembapan, serta prakiraan cuaca 5 jam ke depan.
+        </div>
+        <div class="zoz-location-consent-privacy">
+          <i class="fa-solid fa-shield-halved"></i>
+          <span>Privasi terlindungi: izin cukup diberikan sekali (tersimpan aman di perangkat Anda) dan hanya digunakan saat Anda meminta info cuaca.</span>
+        </div>
+        <div class="zoz-location-consent-status" id="locationConsentStatusNote" hidden></div>
+        <div class="zoz-location-manual-box" id="locationConsentManualBox">
+          <label for="locationConsentManualCity" class="zoz-location-manual-label">Atau masukkan nama kota secara manual (jika GPS nonaktif):</label>
+          <div class="zoz-location-manual-row">
+            <input type="text" id="locationConsentManualCity" class="settings-input zoz-location-manual-input" placeholder="Contoh: Jakarta Selatan, Bandung, Surabaya..." autocomplete="off" />
+            <button type="button" class="btn btn-sm zoz-location-manual-btn" id="btnLocationConsentUseCity">
+              <i class="fa-solid fa-city"></i> Pakai Kota
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer zoz-location-consent-footer">
+        <button type="button" class="btn btn-sm zoz-location-deny-btn" id="btnDenyLocationConsent">
+          <i class="fa-solid fa-ban"></i> Tolak
+        </button>
+        <button type="button" class="btn btn-sm btn-primary-neon zoz-location-allow-btn" id="btnApproveLocationConsent">
+          <i class="fa-solid fa-location-arrow"></i> Izinkan Lokasi
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
@@ -4003,6 +4046,6 @@
   <!-- Reasoning suppression & Bayesian calibration engine (must load before app.js) -->
   <script src="text-safety.js?v=20261120_v807" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=20261120_v807" defer></script>
+  <script src="app.js?v=v20261120_v807" defer></script>
 </body>
 </html>

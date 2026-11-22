@@ -189,6 +189,7 @@ module.exports = async function handler(req, res) {
     pathname === '/api/memories' || pathname.startsWith('/api/memories/') ||
     pathname === '/api/memory/search' || pathname === '/api/tools/memory/search' ||
     pathname === '/api/tools/search-chat-history' || pathname === '/api/tools/chat-history-search' ||
+    pathname === '/api/tools/weather' || pathname === '/api/tools/weather/geocode' || pathname === '/api/tools/geocode' ||
     pathname === '/api/tools/search-documents' || pathname === '/api/tools/communication-context' ||
     pathname === '/api/chat/status' ||
     pathname.startsWith('/api/wa/') ||

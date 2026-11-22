@@ -1114,7 +1114,8 @@
     };
   }
 
-  function extractFallbackConclusionFromUnclosedThought(thoughtBody) {
+  function extractFallbackConclusionFromUnclosedThought(thoughtBody, options = {}) {
+    const requireExplicitMarker = Boolean(options && options.requireExplicitMarker);
     const raw = String(thoughtBody || '').replace(MODEL_TAG_REGEX, '').trim();
     if (!raw) return '';
     const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -1124,6 +1125,7 @@
       const m = l.match(/(?:kesimpulan|jawaban(?:\s+akhir|\s+yang\s+benar)?|final\s+answer|therefore|jadi\s+jawabannya)\s*[:=-]\s*(.+)$/i);
       if (m && m[1].trim()) return m[1].trim();
     }
+    if (requireExplicitMarker) return '';
     return lines.length > 0 ? lines[lines.length - 1] : '';
   }
 
@@ -1173,7 +1175,7 @@
         .replace(/^[\s\S]*?(?:<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|<\|thought\|>|\[(?:thought|reasoning)\])/i, '')
         .replace(/<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|<\|thought\|>|\[\/(?:thought|reasoning)\]/gi, '')
         .trim();
-      return extractFallbackConclusionFromUnclosedThought(inner);
+      return extractFallbackConclusionFromUnclosedThought(inner, { requireExplicitMarker: true });
     }
     // Bersihkan residu pseudo-cot JSON yang lolos keluar dari tag <think>
     cleaned = cleanPseudoCotJson(cleaned);
@@ -1293,7 +1295,7 @@
         emittedVisibleChars += cleanOut.trim().length;
       }
       if (final && inside && emittedVisibleChars === 0 && capturedThought.trim()) {
-        const fallback = extractFallbackConclusionFromUnclosedThought(capturedThought);
+        const fallback = extractFallbackConclusionFromUnclosedThought(capturedThought, { requireExplicitMarker: true });
         capturedThought = '';
         return fallback;
       }
@@ -4043,8 +4045,8 @@
     let out = stripReasoningText(text);
 
     // 1. Bersihkan segala bentuk residu internal tool / pseudotool / status penelusuran sistem
-    out = out.replace(/^\[(?:Pencarian selesai|STATUS PENELUSURAN|Mengeksekusi penelusuran|DATA PENELUSURAN|HASIL|PANDUAN SINTESIS|ALUR VERIFIKASI|SPESIFIKASI SINTESIS)[^\]]*\]\.?\s*/gim, '');
-    out = out.replace(/\[(?:Pencarian selesai|STATUS PENELUSURAN|Mengeksekusi penelusuran|DATA PENELUSURAN FAKTA|DATA HASIL PENELUSURAN INTERNAL|HASIL prepare_image_display|HASIL search_images|HASIL eksekusi|ALUR VERIFIKASI VISUAL AKTIF|SPESIFIKASI SINTESIS BUKTI|HASIL EKSEKUSI TOOL|BATASAN DOMAIN KLAIM)[^\]]*\]/gi, '');
+    out = out.replace(/^\[(?:Pencarian selesai|STATUS PENELUSURAN|Mengeksekusi penelusuran|DATA PENELUSURAN|HASIL|PANDUAN SINTESIS|ALUR VERIFIKASI|SPESIFIKASI SINTESIS|IZIN LOKASI|AKSES LOKASI|KOORDINAT & PENCOCOKAN LOKASI|ALUR CUACA)[^\]]*\]\.?\s*/gim, '');
+    out = out.replace(/\[(?:Pencarian selesai|STATUS PENELUSURAN|Mengeksekusi penelusuran|DATA PENELUSURAN FAKTA|DATA HASIL PENELUSURAN INTERNAL|HASIL prepare_image_display|HASIL search_images|HASIL render_weather_ui|HASIL fetch_weather_data|HASIL get_current_coordinates|HASIL request_location_permission|HASIL eksekusi|ALUR VERIFIKASI VISUAL AKTIF|ALUR CUACA & LOKASI AKTIF|SPESIFIKASI SINTESIS BUKTI|HASIL EKSEKUSI TOOL|BATASAN DOMAIN KLAIM)[^\]]*\]/gi, '');
     out = out.replace(/(?:^|\n)\s*Sistem menyelesaikan penelusuran\.?\s*(?:\n|$)/gi, '\n');
     out = out.replace(/(?:^|\n)\s*Model telah menyelesaikan penelusuran komprehensif atas kueri Anda\.?\s*(?:\n|$)/gi, '\n');
     out = out.replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks):[^\]]*\]\s*/gi, '');
@@ -4055,8 +4057,11 @@
     out = out.replace(/^(?:Saya\s+tidak\s+memiliki\s+persona|I\s+do\s+not\s+have\s+a\s+persona)[^,\n.]*[,.]\s*/i, '');
     out = out.replace(/^(?:Mohon\s+maaf,\s+)?(?:saya\s+tidak\s+dapat\s+berperan\s+sebagai|saya\s+hanya\s+bisa\s+membantu\s+sebagai\s+AI)[^,\n.]*[,.]\s*/i, '');
 
-    // 3. Bersihkan sisa token display tunggal yang tertinggal tanpa teks
+    // 3. Bersihkan sisa token display tunggal serta residu blok Gemma 4 <|tool_call> / <|tool_response> yang tertinggal
+    out = out.replace(/<\|tool_call\|?>[\s\S]*?(?:<\|?tool_call\|?>|$)/gi, '');
+    out = out.replace(/<\|tool_response\|?>[\s\S]*?(?:<\|?tool_response\|?>|$)/gi, '');
     out = out.replace(/^\[\[?ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]+\]?\]?\s*$/gim, '');
+    out = out.replace(/^\[\[?ZOZ_WEATHER_DISPLAY:wth_[a-zA-Z0-9_-]+\]?\]?\s*$/gim, '');
 
     return out.trim();
   }

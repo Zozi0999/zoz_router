@@ -78,7 +78,8 @@ function resolveOllamaCloudModel(modelId) {
   return modelId.trim();
 }
 
-function extractFallbackConclusionFromUnclosedThought(thoughtBody) {
+function extractFallbackConclusionFromUnclosedThought(thoughtBody, options = {}) {
+  const requireExplicitMarker = Boolean(options && options.requireExplicitMarker);
   const raw = String(thoughtBody || '').replace(/\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan):[^\]]*\]\s*/gi, '').trim();
   if (!raw) return '';
   const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -88,6 +89,7 @@ function extractFallbackConclusionFromUnclosedThought(thoughtBody) {
     const m = l.match(/(?:kesimpulan|jawaban(?:\s+akhir|\s+yang\s+benar)?|final\s+answer|therefore|jadi\s+jawabannya)\s*[:=-]\s*(.+)$/i);
     if (m && m[1].trim()) return m[1].trim();
   }
+  if (requireExplicitMarker) return '';
   return lines.length > 0 ? lines[lines.length - 1] : '';
 }
 
@@ -1577,7 +1579,7 @@ export default {
             let textContent = data.choices?.[0]?.message?.content || '';
             const reasoningContent = data.choices?.[0]?.message?.reasoning || data.choices?.[0]?.message?.reasoning_content || '';
             if (!textContent.trim() && reasoningContent.trim()) {
-              textContent = extractFallbackConclusionFromUnclosedThought(reasoningContent);
+              textContent = extractFallbackConclusionFromUnclosedThought(reasoningContent, { requireExplicitMarker: true });
             }
             const msgPayload = { role: 'assistant', content: textContent };
             if (reasoningContent) msgPayload.reasoning = reasoningContent;
@@ -1613,7 +1615,7 @@ export default {
               const dataStr = trimmed.slice(5).trim();
               if (dataStr === '[DONE]') {
                 if (!accumulatedContent.trim() && accumulatedReasoning.trim()) {
-                  const fallback = extractFallbackConclusionFromUnclosedThought(accumulatedReasoning);
+                  const fallback = extractFallbackConclusionFromUnclosedThought(accumulatedReasoning, { requireExplicitMarker: true });
                   if (fallback) {
                     await writer.write(encoder.encode(JSON.stringify({
                       model: body.model || 'qwen2.5:1.5b',
@@ -1675,7 +1677,7 @@ export default {
               }
               if (!sentDone) {
                 if (!accumulatedContent.trim() && accumulatedReasoning.trim()) {
-                  const fallback = extractFallbackConclusionFromUnclosedThought(accumulatedReasoning);
+                  const fallback = extractFallbackConclusionFromUnclosedThought(accumulatedReasoning, { requireExplicitMarker: true });
                   if (fallback) {
                     await writer.write(encoder.encode(JSON.stringify({
                       model: body.model || 'qwen2.5:1.5b',
@@ -4305,6 +4307,437 @@ export default {
           'Access-Control-Allow-Origin': '*'
         }
       });
+    }
+
+    // Real-Time Weather & Reverse Geocode Grounding (Cloudflare Edge, Zero-API-Key)
+    if ((url.pathname === '/api/tools/weather' || url.pathname === '/api/tools/weather/geocode' || url.pathname === '/api/tools/geocode') && (request.method === 'GET' || request.method === 'POST')) {
+      const jsonEdgeResp = (payload, status = 200) => new Response(JSON.stringify(payload), {
+        status,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'private, no-store, no-cache, must-revalidate',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+      try {
+        let body = {};
+        if (request.method === 'POST') {
+          body = await request.json().catch(() => ({}));
+        }
+        const isGeocodePath = url.pathname === '/api/tools/weather/geocode' || url.pathname === '/api/tools/geocode';
+        const action = String(body.action ?? url.searchParams.get('action') ?? (isGeocodePath ? 'reverse_geocode' : 'forecast')).toLowerCase();
+        const rawLat = body.lat ?? body.latitude ?? url.searchParams.get('lat') ?? url.searchParams.get('latitude');
+        const rawLon = body.lon ?? body.lng ?? body.longitude ?? url.searchParams.get('lon') ?? url.searchParams.get('lng') ?? url.searchParams.get('longitude');
+        const rawCity = String(body.city ?? body.location ?? body.kota ?? body.q ?? url.searchParams.get('city') ?? url.searchParams.get('location') ?? url.searchParams.get('q') ?? '').trim();
+
+        const round4 = (n) => Math.round(Number(n) * 10000) / 10000;
+        let lat = rawLat !== undefined && rawLat !== null && rawLat !== '' ? Number(rawLat) : NaN;
+        let lon = rawLon !== undefined && rawLon !== null && rawLon !== '' ? Number(rawLon) : NaN;
+        let matchedLoc = null;
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+          if (!rawCity) {
+            return jsonEdgeResp({ success: false, error: 'Koordinat atau nama kota yang valid diperlukan.' }, 400);
+          }
+          for (const lang of ['id', 'en']) {
+            const gRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(rawCity)}&count=3&language=${lang}&format=json`, {
+              headers: { 'Accept': 'application/json' },
+              signal: AbortSignal.timeout(6000)
+            }).catch(() => null);
+            if (gRes && gRes.ok) {
+              const gJson = await gRes.json().catch(() => null);
+              if (gJson && Array.isArray(gJson.results) && gJson.results.length > 0) {
+                const hit = gJson.results[0];
+                lat = round4(hit.latitude);
+                lon = round4(hit.longitude);
+                matchedLoc = {
+                  city: hit.name || rawCity,
+                  sublocality: hit.admin2 || '',
+                  region: hit.admin1 || '',
+                  country: hit.country || '',
+                  timezone: hit.timezone || 'auto',
+                  displayName: [hit.name, hit.admin1, hit.country].filter(Boolean).join(', '),
+                  source: 'open-meteo-geocoding'
+                };
+                break;
+              }
+            }
+          }
+          if (!matchedLoc) {
+            const nomSearch = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(rawCity)}&limit=3&accept-language=id&addressdetails=1`, {
+              headers: { 'Accept': 'application/json', 'User-Agent': 'ZozRouter-WeatherTool/1.0 (+https://zozdocs.com)' },
+              signal: AbortSignal.timeout(6000)
+            }).catch(() => null);
+            if (nomSearch && nomSearch.ok) {
+              const nArr = await nomSearch.json().catch(() => null);
+              if (Array.isArray(nArr) && nArr.length > 0) {
+                const hit = nArr[0];
+                const addr = hit.address || {};
+                const cityLabel = addr.city || addr.town || addr.municipality || addr.county || hit.name || rawCity;
+                const regionLabel = addr.state || addr.province || '';
+                const countryLabel = addr.country || '';
+                lat = round4(hit.lat);
+                lon = round4(hit.lon);
+                matchedLoc = {
+                  city: cityLabel,
+                  sublocality: addr.suburb || addr.village || '',
+                  region: regionLabel,
+                  country: countryLabel,
+                  timezone: 'auto',
+                  displayName: [cityLabel, regionLabel, countryLabel].filter(Boolean).join(', ') || hit.display_name || rawCity,
+                  source: 'nominatim-search'
+                };
+              }
+            }
+          }
+          if (!matchedLoc) {
+            return jsonEdgeResp({ success: false, error: `Lokasi "${rawCity}" tidak ditemukan.` }, 400);
+          }
+        }
+
+        const safeLat = round4(lat);
+        const safeLon = round4(lon);
+
+        const resolveEdgeWmo = (code, isDay = true) => {
+          const c = Number.isFinite(Number(code)) ? Number(code) : 0;
+          const d = Boolean(isDay);
+          if (c === 0) return d ? { condition: 'Cerah', iconKey: 'sunny', visualTheme: 'sunny', advice: 'Cuaca cerah, tetap gunakan tabir surya jika beraktivitas di luar ruangan.' } : { condition: 'Cerah Berbintang', iconKey: 'clear-night', visualTheme: 'night', advice: 'Langit malam cerah dan nyaman untuk aktivitas luar ruangan.' };
+          if (c === 1) return d ? { condition: 'Umumnya Cerah', iconKey: 'partly-cloudy', visualTheme: 'sunny', advice: 'Cuaca cenderung cerah berawan dan bersahabat.' } : { condition: 'Cerah Berawan', iconKey: 'partly-cloudy-night', visualTheme: 'night', advice: 'Langit malam sebagian cerah dengan sedikit awan.' };
+          if (c === 2) return d ? { condition: 'Cerah Berawan', iconKey: 'partly-cloudy', visualTheme: 'partly_cloudy', advice: 'Suhu terasa nyaman dengan tutupan awan parsial.' } : { condition: 'Berawan Sebagian', iconKey: 'partly-cloudy-night', visualTheme: 'night', advice: 'Malam berawan ringan.' };
+          if (c === 3) return { condition: 'Mendung / Berawan', iconKey: 'cloudy', visualTheme: 'cloudy', advice: 'Langit tertutup awan tebal, pantau potensi gerimis jika hendak bepergian.' };
+          if (c === 45 || c === 48) return { condition: 'Berkabut', iconKey: 'fog', visualTheme: 'fog', advice: 'Jarak pandang berkurang karena kabut, berhati-hati saat berkendara.' };
+          if ([51, 53, 55, 56, 57].includes(c)) return { condition: 'Gerimis', iconKey: 'drizzle', visualTheme: 'rain', advice: 'Sediakan payung atau jas hujan ringan sebelum keluar ruangan.' };
+          if ([61, 80].includes(c)) return { condition: 'Hujan Ringan', iconKey: 'rain-light', visualTheme: 'rain', advice: 'Jangan lupa bawa payung atau jas hujan jika berencana keluar ruangan.' };
+          if ([63, 81].includes(c)) return { condition: 'Hujan Sedang', iconKey: 'rain', visualTheme: 'rain', advice: 'Hujan cukup merata; gunakan payung atau kendaraan tertutup.' };
+          if ([65, 66, 67, 82].includes(c)) return { condition: 'Hujan Lebat', iconKey: 'rain-heavy', visualTheme: 'rain', advice: 'Curah hujan tinggi; utamakan keamanan perjalanan.' };
+          if ([71, 73, 75, 77, 85, 86].includes(c)) return { condition: 'Salju / Hujan Es', iconKey: 'snow', visualTheme: 'snow', advice: 'Kenakan pakaian hangat tahan air dan waspadai permukaan licin.' };
+          if ([95, 96, 99].includes(c)) return { condition: 'Hujan Petir', iconKey: 'storm', visualTheme: 'storm', advice: 'Hindari area terbuka dan pohon tinggi saat badai petir berlangsung.' };
+          return { condition: 'Berawan', iconKey: 'cloudy', visualTheme: 'cloudy', advice: 'Pantau perubahan cuaca lokal sebelum bepergian.' };
+        };
+
+        const resolveReverseLoc = async () => {
+          if (matchedLoc) return matchedLoc;
+          const [bdcRes, nomRes] = await Promise.allSettled([
+            fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(safeLat)}&longitude=${encodeURIComponent(safeLon)}&localityLanguage=id`, { signal: AbortSignal.timeout(4500) }).then(r => r.ok ? r.json() : null),
+            fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(safeLat)}&lon=${encodeURIComponent(safeLon)}&accept-language=id&zoom=14`, {
+              headers: { 'User-Agent': 'ZozRouter-WeatherTool/1.0 (+https://zozdocs.com)' },
+              signal: AbortSignal.timeout(4500)
+            }).then(r => r.ok ? r.json() : null)
+          ]);
+          const bdc = bdcRes.status === 'fulfilled' ? bdcRes.value : null;
+          const nom = nomRes.status === 'fulfilled' ? nomRes.value : null;
+          const addr = (nom && nom.address) ? nom.address : {};
+          const sublocality = String(addr.suburb || addr.city_district || addr.neighbourhood || addr.village || (bdc && bdc.locality) || '').trim();
+          let city = String(addr.city || addr.town || addr.municipality || addr.county || (bdc && (bdc.city || bdc.locality)) || '').trim();
+          if (addr.city_district && /jakarta\s+(?:selatan|pusat|barat|timur|utara)/i.test(String(addr.city_district))) {
+            city = String(addr.city_district).trim();
+          } else if (!city && sublocality) {
+            city = sublocality;
+          }
+          const region = String(addr.state || addr.province || (bdc && bdc.principalSubdivision) || '').trim();
+          const country = String(addr.country || (bdc && bdc.countryName) || '').trim();
+          const parts = [];
+          if (city) parts.push(city);
+          if (region && !parts.some(p => p.toLowerCase() === region.toLowerCase())) parts.push(region);
+          if (country && !parts.some(p => p.toLowerCase() === country.toLowerCase())) parts.push(country);
+          return {
+            city: city || `${safeLat}, ${safeLon}`,
+            sublocality,
+            region,
+            country,
+            displayName: parts.join(', ') || `Koordinat ${safeLat}, ${safeLon}`,
+            source: nom ? 'nominatim' : 'bigdatacloud'
+          };
+        };
+
+        if (action === 'reverse_geocode' || action === 'geocode') {
+          const loc = await resolveReverseLoc();
+          return jsonEdgeResp({
+            success: true,
+            tool: 'get_current_coordinates',
+            coordinates: { lat: safeLat, lon: safeLon },
+            location: loc
+          });
+        }
+
+        const fUrl = `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(safeLat)}&longitude=${encodeURIComponent(safeLon)}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,showers,weather_code,cloud_cover,surface_pressure,wind_speed_10m,wind_direction_10m&hourly=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation_probability,weather_code,wind_speed_10m,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max&forecast_days=3&timezone=auto`;
+        const [locResolved, fRes] = await Promise.allSettled([
+          resolveReverseLoc(),
+          fetch(fUrl, { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(9000) })
+        ]);
+        const locInfo = locResolved.status === 'fulfilled' ? locResolved.value : { city: `${safeLat}, ${safeLon}`, displayName: `${safeLat}, ${safeLon}` };
+        const resp = fRes.status === 'fulfilled' ? fRes.value : null;
+        if (!resp || !resp.ok) {
+          // Edge fallback provider: wttr.in JSON
+          const wtRes = await fetch(`https://wttr.in/${encodeURIComponent(rawCity || `${safeLat},${safeLon}`)}?format=j1`, {
+            headers: { 'Accept': 'application/json', 'Accept-Language': 'id,en;q=0.8' },
+            signal: AbortSignal.timeout(8000)
+          }).catch(() => null);
+          const wtJson = (wtRes && wtRes.ok) ? await wtRes.json().catch(() => null) : null;
+          const cc = Array.isArray(wtJson?.current_condition) ? wtJson.current_condition[0] : null;
+          if (!cc) {
+            return jsonEdgeResp({ success: false, error: 'Gagal menghubungi API Open-Meteo maupun wttr.in dari Cloud Edge.' }, 502);
+          }
+          const todayW = Array.isArray(wtJson?.weather) ? wtJson.weather[0] : {};
+          const desc = String(cc.weatherDesc?.[0]?.value || '').toLowerCase();
+          const wCodeNum = Number(cc.weatherCode || 0);
+          const mapWttrWmo = (d, c) => (/thunder|storm|petir/.test(d) || [200, 386, 389, 392, 395].includes(c)) ? 95
+            : (/heavy rain|lebat/.test(d) || [308, 305, 356, 359].includes(c)) ? 65
+            : (/moderate rain|hujan sedang/.test(d) || [302, 299].includes(c)) ? 63
+            : (/rain|shower/.test(d) || [293, 296, 353, 176, 266, 263].includes(c)) ? 61
+            : (/drizzle/.test(d) || [281, 284].includes(c)) ? 51
+            : (/fog|mist/.test(d) || [143, 248, 260].includes(c)) ? 45
+            : (/overcast/.test(d) || c === 122) ? 3
+            : (/cloudy/.test(d) || c === 119 || c === 116) ? 2
+            : (/sunny|clear/.test(d) || c === 113) ? 0 : 2;
+          const hrNow = new Date().getHours();
+          const wtDay = hrNow >= 6 && hrNow < 18;
+          const wtWmo = mapWttrWmo(desc, wCodeNum);
+          const wtMeta = resolveEdgeWmo(wtWmo, wtDay);
+          const buildWttrEdgeHours = (wd, dIdx) => {
+            const dHoursAll = Array.isArray(wd?.hourly) ? wd.hourly : [];
+            const pickIdx = [2, 3, 4, 5, 6, 7].filter(ix => ix < dHoursAll.length);
+            const indices = dIdx === 0
+              ? dHoursAll.map((_, ix) => ix).slice(0, 6)
+              : (pickIdx.length >= 4 ? pickIdx : dHoursAll.map((_, ix) => ix).slice(0, 6));
+            return indices.map((ix, i) => {
+              const h = dHoursAll[ix] || {};
+              const hNum = parseInt(String(h.time || i * 300), 10);
+              const hh = String(Math.floor((Number.isFinite(hNum) ? hNum : i * 300) / 100)).padStart(2, '0');
+              const hW = mapWttrWmo(String(h.weatherDesc?.[0]?.value || desc).toLowerCase(), Number(h.weatherCode || wCodeNum));
+              const hIsDay = Number(hh) >= 6 && Number(hh) < 18;
+              const hM = resolveEdgeWmo(hW, hIsDay);
+              return {
+                time: `${wd?.date || ''}T${hh}:00`,
+                hourLabel: dIdx === 0 && i === 0 ? 'Sekarang' : `${hh}:00`,
+                tempC: Math.round(Number(h.tempC ?? cc.temp_C ?? 0)),
+                feelsLikeC: Number.isFinite(Number(h.FeelsLikeC)) ? Math.round(Number(h.FeelsLikeC)) : null,
+                precipProb: Math.round(Number(h.chanceofrain ?? 0)),
+                humidity: h.humidity !== undefined ? Math.round(Number(h.humidity)) : null,
+                windKmh: h.windspeedKmph !== undefined ? Math.round(Number(h.windspeedKmph)) : null,
+                weatherCode: hW,
+                condition: hM.condition,
+                iconKey: hM.iconKey,
+                isDay: hIsDay
+              };
+            });
+          };
+          const wtHours = buildWttrEdgeHours(todayW, 0);
+          const curW = {
+            tempC: Math.round(Number(cc.temp_C ?? 0)),
+            tempExactC: Number(cc.temp_C ?? 0),
+            feelsLikeC: Math.round(Number(cc.FeelsLikeC ?? cc.temp_C ?? 0)),
+            humidity: Math.round(Number(cc.humidity ?? 0)),
+            windKmh: Math.round(Number(cc.windspeedKmph ?? 0)),
+            windDirection: String(cc.winddir16Point || '-'),
+            precipitationMm: Number(cc.precipMM ?? 0),
+            cloudCover: Math.round(Number(cc.cloudcover ?? 0)),
+            pressureHpa: cc.pressure !== undefined ? Math.round(Number(cc.pressure)) : null,
+            rainProbNow: wtHours[0] ? wtHours[0].precipProb : 0,
+            weatherCode: wtWmo,
+            condition: wtMeta.condition,
+            iconKey: wtMeta.iconKey,
+            visualTheme: wtMeta.visualTheme,
+            advice: wtMeta.advice,
+            isDay: wtDay,
+            observedAt: cc.localObsDateTime || new Date().toISOString(),
+            timezone: 'auto',
+            timezoneAbbr: ''
+          };
+          const dW = {
+            tempMaxC: todayW?.maxtempC !== undefined ? Math.round(Number(todayW.maxtempC)) : null,
+            tempMinC: todayW?.mintempC !== undefined ? Math.round(Number(todayW.mintempC)) : null,
+            precipProbMax: wtHours.reduce((m, x) => Math.max(m, x.precipProb || 0), 0),
+            uvIndexMax: cc.uvIndex !== undefined ? Number(cc.uvIndex) : null,
+            sunrise: todayW?.astronomy?.[0]?.sunrise || null,
+            sunset: todayW?.astronomy?.[0]?.sunset || null
+          };
+          const wtDailyForecast = (Array.isArray(wtJson?.weather) ? wtJson.weather : []).slice(0, 3).map((wd, dIdx) => {
+            const dayLabels = ['Hari Ini', 'Besok', 'Lusa'];
+            const dSlice = buildWttrEdgeHours(wd, dIdx);
+            const midday = dSlice.find(h => h.hourLabel.startsWith('12') || h.hourLabel.startsWith('15')) || dSlice[0] || {};
+            const repWmo = midday.weatherCode ?? wtWmo;
+            const repMeta = resolveEdgeWmo(repWmo, true);
+            return {
+              date: String(wd?.date || ''),
+              dayLabel: dayLabels[dIdx] || `Hari +${dIdx}`,
+              dayOffset: dIdx,
+              weatherCode: repWmo,
+              condition: repMeta.condition,
+              iconKey: repMeta.iconKey,
+              visualTheme: repMeta.visualTheme,
+              advice: repMeta.advice,
+              isDay: true,
+              tempC: dIdx === 0 ? curW.tempC : (Number.isFinite(midday.tempC) ? midday.tempC : Math.round(Number(wd?.maxtempC ?? curW.tempC))),
+              feelsLikeC: dIdx === 0 ? curW.feelsLikeC : (midday.feelsLikeC ?? midday.tempC ?? curW.feelsLikeC),
+              tempMaxC: wd?.maxtempC !== undefined ? Math.round(Number(wd.maxtempC)) : null,
+              tempMinC: wd?.mintempC !== undefined ? Math.round(Number(wd.mintempC)) : null,
+              humidity: dIdx === 0 ? curW.humidity : (midday.humidity ?? curW.humidity),
+              windKmh: dIdx === 0 ? curW.windKmh : (midday.windKmh ?? curW.windKmh),
+              precipProbMax: dSlice.reduce((m, x) => Math.max(m, x.precipProb || 0), 0),
+              uvIndexMax: wd?.uvIndex !== undefined ? Number(wd.uvIndex) : (cc.uvIndex !== undefined ? Number(cc.uvIndex) : null),
+              sunrise: wd?.astronomy?.[0]?.sunrise || null,
+              sunset: wd?.astronomy?.[0]?.sunset || null,
+              hourly: dSlice
+            };
+          });
+          const hLines = wtHours.map(h => `  • ${h.hourLabel}: ${h.tempC}°C (${h.condition}, peluang hujan ${h.precipProb}%)`).join('\n');
+          const dLines = wtDailyForecast.map(d => `  • ${d.dayLabel} (${d.date}): ${d.condition}, ${d.tempMinC ?? '-'}°C..${d.tempMaxC ?? '-'}°C (peluang hujan ${d.precipProbMax}%)`).join('\n');
+          return jsonEdgeResp({
+            success: true,
+            tool: 'fetch_weather_data',
+            provider: 'wttr.in-edge',
+            coordinates: { lat: safeLat, lon: safeLon },
+            location: locInfo,
+            current: curW,
+            daily: dW,
+            dailyForecast: wtDailyForecast,
+            hourly: wtHours,
+            formattedContext: `[HASIL DATA CUACA REAL-TIME — WTTR.IN]\n- Lokasi Cocok: ${locInfo.displayName || locInfo.city}\n- Kondisi Saat Ini: ${curW.condition} | Suhu: ${curW.tempC}°C (Terasa ${curW.feelsLikeC}°C)\n- Kelembapan: ${curW.humidity}% | Angin: ${curW.windKmh} km/j\n- Prakiraan 5 Jam Ke Depan:\n${hLines}${dLines ? `\n- Prakiraan Harian (Hari Ini, Besok & Lusa):\n${dLines}` : ''}\n- Saran: ${curW.advice}`
+          });
+        }
+        const raw = await resp.json();
+        const cur = raw.current || {};
+        const isDay = cur.is_day === undefined ? true : Boolean(Number(cur.is_day));
+        const wmoCode = Number.isFinite(Number(cur.weather_code)) ? Number(cur.weather_code) : 0;
+        const wmoMeta = resolveEdgeWmo(wmoCode, isDay);
+        const curTimeStr = String(cur.time || '');
+        const curPrefix = curTimeStr.slice(0, 13);
+        const hObj = raw.hourly || {};
+        const hTimes = Array.isArray(hObj.time) ? hObj.time : [];
+        let startIdx = curPrefix ? hTimes.findIndex(t => String(t || '').startsWith(curPrefix)) : 0;
+        if (startIdx < 0) startIdx = 0;
+        const hourlyForecast = [];
+        for (let i = startIdx; i < Math.min(hTimes.length, startIdx + 6); i++) {
+          const tStr = String(hTimes[i] || '');
+          const hIsDay = Array.isArray(hObj.is_day) && hObj.is_day[i] !== undefined ? Boolean(Number(hObj.is_day[i])) : isDay;
+          const hCode = Array.isArray(hObj.weather_code) ? Number(hObj.weather_code[i] ?? wmoCode) : wmoCode;
+          const hMeta = resolveEdgeWmo(hCode, hIsDay);
+          hourlyForecast.push({
+            time: tStr,
+            hourLabel: i === startIdx ? 'Sekarang' : (tStr.length >= 16 ? tStr.slice(11, 16) : tStr),
+            tempC: Math.round(Number(hObj.temperature_2m?.[i] ?? cur.temperature_2m ?? 0)),
+            feelsLikeC: hObj.apparent_temperature?.[i] !== undefined ? Math.round(Number(hObj.apparent_temperature[i])) : null,
+            precipProb: Math.round(Number(hObj.precipitation_probability?.[i] ?? 0)),
+            weatherCode: hCode,
+            condition: hMeta.condition,
+            iconKey: hMeta.iconKey,
+            isDay: hIsDay
+          });
+        }
+        const dObj = raw.daily || {};
+        const dailySummary = {
+          tempMaxC: Array.isArray(dObj.temperature_2m_max) && dObj.temperature_2m_max[0] !== undefined ? Math.round(Number(dObj.temperature_2m_max[0])) : null,
+          tempMinC: Array.isArray(dObj.temperature_2m_min) && dObj.temperature_2m_min[0] !== undefined ? Math.round(Number(dObj.temperature_2m_min[0])) : null,
+          precipProbMax: Array.isArray(dObj.precipitation_probability_max) && dObj.precipitation_probability_max[0] !== undefined ? Math.round(Number(dObj.precipitation_probability_max[0])) : null,
+          uvIndexMax: Array.isArray(dObj.uv_index_max) && dObj.uv_index_max[0] !== undefined ? Number(Number(dObj.uv_index_max[0]).toFixed(1)) : null,
+          sunrise: Array.isArray(dObj.sunrise) && dObj.sunrise[0] ? String(dObj.sunrise[0]).slice(11, 16) : null,
+          sunset: Array.isArray(dObj.sunset) && dObj.sunset[0] ? String(dObj.sunset[0]).slice(11, 16) : null
+        };
+        const dTimes = Array.isArray(dObj.time) ? dObj.time : [];
+        const dayNames = ['Hari Ini', 'Besok', 'Lusa'];
+        const dailyForecast = [];
+        for (let dIdx = 0; dIdx < Math.min(dTimes.length, 3); dIdx++) {
+          const dateStr = String(dTimes[dIdx] || '');
+          const dCode = Array.isArray(dObj.weather_code) ? Number(dObj.weather_code[dIdx] ?? wmoCode) : wmoCode;
+          const dMeta = resolveEdgeWmo(dCode, true);
+          const dayHourIndices = [];
+          for (let hIdx = 0; hIdx < hTimes.length; hIdx++) {
+            if (String(hTimes[hIdx] || '').startsWith(dateStr)) dayHourIndices.push(hIdx);
+          }
+          const targetHoursSet = new Set(['06', '09', '12', '15', '18', '21']);
+          let chosenIdx = dayHourIndices.filter(hi => targetHoursSet.has(String(hTimes[hi] || '').slice(11, 13)));
+          if (chosenIdx.length < 4) chosenIdx = dayHourIndices.filter((_, p) => p % 4 === 0).slice(0, 6);
+          const dayHourly = dIdx === 0
+            ? hourlyForecast
+            : chosenIdx.slice(0, 6).map(hi => {
+                const tStr = String(hTimes[hi] || '');
+                const hhMm = tStr.length >= 16 ? tStr.slice(11, 16) : tStr;
+                const hIsDay = Array.isArray(hObj.is_day) && hObj.is_day[hi] !== undefined ? Boolean(Number(hObj.is_day[hi])) : true;
+                const hCode = Array.isArray(hObj.weather_code) ? Number(hObj.weather_code[hi] ?? dCode) : dCode;
+                const hMeta = resolveEdgeWmo(hCode, hIsDay);
+                return {
+                  time: tStr,
+                  hourLabel: hhMm,
+                  tempC: Math.round(Number(hObj.temperature_2m?.[hi] ?? cur.temperature_2m ?? 0)),
+                  feelsLikeC: hObj.apparent_temperature?.[hi] !== undefined ? Math.round(Number(hObj.apparent_temperature[hi])) : null,
+                  precipProb: Math.round(Number(hObj.precipitation_probability?.[hi] ?? 0)),
+                  humidity: hObj.relative_humidity_2m?.[hi] !== undefined ? Math.round(Number(hObj.relative_humidity_2m[hi])) : null,
+                  windKmh: hObj.wind_speed_10m?.[hi] !== undefined ? Math.round(Number(hObj.wind_speed_10m[hi])) : null,
+                  weatherCode: hCode,
+                  condition: hMeta.condition,
+                  iconKey: hMeta.iconKey,
+                  isDay: hIsDay
+                };
+              });
+          const middaySlot = dayHourly.find(h => h.hourLabel.startsWith('12') || h.hourLabel.startsWith('15')) || dayHourly[Math.floor(dayHourly.length / 2)] || {};
+          const dMin = Array.isArray(dObj.temperature_2m_min) && dObj.temperature_2m_min[dIdx] !== undefined ? Math.round(Number(dObj.temperature_2m_min[dIdx])) : null;
+          const dMax = Array.isArray(dObj.temperature_2m_max) && dObj.temperature_2m_max[dIdx] !== undefined ? Math.round(Number(dObj.temperature_2m_max[dIdx])) : null;
+          const dHumVals = chosenIdx.map(hi => Number(hObj.relative_humidity_2m?.[hi])).filter(Number.isFinite);
+          const dWindVals = chosenIdx.map(hi => Number(hObj.wind_speed_10m?.[hi])).filter(Number.isFinite);
+          dailyForecast.push({
+            date: dateStr,
+            dayLabel: dayNames[dIdx] || `Hari +${dIdx}`,
+            dayOffset: dIdx,
+            weatherCode: dCode,
+            condition: dMeta.condition,
+            iconKey: dMeta.iconKey,
+            visualTheme: dMeta.visualTheme,
+            advice: dMeta.advice,
+            isDay: dIdx === 0 ? isDay : true,
+            tempC: dIdx === 0 ? Math.round(Number(cur.temperature_2m ?? 0)) : (Number.isFinite(middaySlot.tempC) ? middaySlot.tempC : (dMax ?? dMin ?? Math.round(Number(cur.temperature_2m ?? 0)))),
+            feelsLikeC: dIdx === 0 ? Math.round(Number(cur.apparent_temperature ?? cur.temperature_2m ?? 0)) : (middaySlot.feelsLikeC ?? middaySlot.tempC ?? dMax ?? null),
+            tempMaxC: dMax,
+            tempMinC: dMin,
+            humidity: dIdx === 0 ? Math.round(Number(cur.relative_humidity_2m ?? 0)) : (dHumVals.length ? Math.round(dHumVals.reduce((a, b) => a + b, 0) / dHumVals.length) : Math.round(Number(cur.relative_humidity_2m ?? 0))),
+            windKmh: dIdx === 0 ? Math.round(Number(cur.wind_speed_10m ?? 0)) : (dWindVals.length ? Math.round(dWindVals.reduce((a, b) => a + b, 0) / dWindVals.length) : Math.round(Number(cur.wind_speed_10m ?? 0))),
+            precipProbMax: Array.isArray(dObj.precipitation_probability_max) && dObj.precipitation_probability_max[dIdx] !== undefined ? Math.round(Number(dObj.precipitation_probability_max[dIdx])) : null,
+            uvIndexMax: Array.isArray(dObj.uv_index_max) && dObj.uv_index_max[dIdx] !== undefined ? Number(Number(dObj.uv_index_max[dIdx]).toFixed(1)) : null,
+            sunrise: Array.isArray(dObj.sunrise) && dObj.sunrise[dIdx] ? String(dObj.sunrise[dIdx]).slice(11, 16) : null,
+            sunset: Array.isArray(dObj.sunset) && dObj.sunset[dIdx] ? String(dObj.sunset[dIdx]).slice(11, 16) : null,
+            hourly: dayHourly
+          });
+        }
+        const dirs = ['Utara', 'Timur Laut', 'Timur', 'Tenggara', 'Selatan', 'Barat Daya', 'Barat', 'Barat Laut'];
+        const windDirLabel = Number.isFinite(Number(cur.wind_direction_10m)) ? dirs[Math.round(((Number(cur.wind_direction_10m) % 360) + 360) % 360 / 45) % 8] : '-';
+        const currentData = {
+          tempC: Math.round(Number(cur.temperature_2m ?? 0)),
+          tempExactC: Number(cur.temperature_2m ?? 0),
+          feelsLikeC: Math.round(Number(cur.apparent_temperature ?? cur.temperature_2m ?? 0)),
+          humidity: Math.round(Number(cur.relative_humidity_2m ?? 0)),
+          windKmh: Math.round(Number(cur.wind_speed_10m ?? 0)),
+          windDirection: windDirLabel,
+          precipitationMm: Number(cur.precipitation ?? 0),
+          cloudCover: Math.round(Number(cur.cloud_cover ?? 0)),
+          pressureHpa: cur.surface_pressure !== undefined ? Math.round(Number(cur.surface_pressure)) : null,
+          rainProbNow: hourlyForecast[0] ? hourlyForecast[0].precipProb : (dailySummary.precipProbMax ?? 0),
+          weatherCode: wmoCode,
+          condition: wmoMeta.condition,
+          iconKey: wmoMeta.iconKey,
+          visualTheme: wmoMeta.visualTheme,
+          advice: wmoMeta.advice,
+          isDay,
+          observedAt: curTimeStr,
+          timezone: raw.timezone || 'auto',
+          timezoneAbbr: raw.timezone_abbreviation || ''
+        };
+        const hourlyLines = hourlyForecast.map(h => `  • ${h.hourLabel}: ${h.tempC}°C (${h.condition}, peluang hujan ${h.precipProb}%)`).join('\n');
+        const dailyLines = dailyForecast.map(d => `  • ${d.dayLabel} (${d.date}): ${d.condition}, suhu ${d.tempMinC ?? '-'}°C–${d.tempMaxC ?? '-'}°C, peluang hujan maks ${d.precipProbMax ?? 0}%`).join('\n');
+        return jsonEdgeResp({
+          success: true,
+          tool: 'fetch_weather_data',
+          provider: 'open-meteo-edge',
+          coordinates: { lat: safeLat, lon: safeLon },
+          location: locInfo,
+          current: currentData,
+          daily: dailySummary,
+          dailyForecast,
+          hourly: hourlyForecast,
+          formattedContext: `[HASIL DATA CUACA REAL-TIME — OPEN-METEO]\n- Lokasi Cocok: ${locInfo.displayName || locInfo.city}\n- Kondisi Saat Ini: ${currentData.condition} | Suhu: ${currentData.tempC}°C (Terasa ${currentData.feelsLikeC}°C)\n- Kelembapan: ${currentData.humidity}% | Angin: ${currentData.windKmh} km/j (${currentData.windDirection}) | Awan: ${currentData.cloudCover}%\n- Prakiraan 5 Jam Ke Depan:\n${hourlyLines}${dailyLines ? `\n- Prakiraan Harian (Hari Ini, Besok & Lusa):\n${dailyLines}` : ''}\n- Saran: ${currentData.advice}`
+        });
+      } catch (e) {
+        return jsonEdgeResp({ success: false, error: 'Gagal memproses data cuaca: ' + (e?.message || e) }, 502);
+      }
     }
 
     // ==================== IMAGE GROUNDING ENDPOINTS (CLOUDFLARE EDGE) ====================

@@ -2958,8 +2958,18 @@ class WhatsAppGateway {
         about: c.about || ''
       };
     }).sort((a, b) => {
-      const tsA = a.lastTimestamp || 0;
-      const tsB = b.lastTimestamp || 0;
+      const toTsMs = (v) => {
+        if (typeof v === 'number' && Number.isFinite(v)) return v > 0 && v < 1e12 ? v * 1000 : v;
+        if (v) {
+          const n = Number(v);
+          if (Number.isFinite(n) && n > 0) return n < 1e12 ? n * 1000 : n;
+          const p = Date.parse(String(v));
+          if (Number.isFinite(p) && p > 0) return p;
+        }
+        return 0;
+      };
+      const tsA = toTsMs(a.lastTimestamp || a.timestamp);
+      const tsB = toTsMs(b.lastTimestamp || b.timestamp);
       if (tsA > 0 || tsB > 0) return tsB - tsA;
       return (a.name || '').localeCompare(b.name || '');
     });
