@@ -874,6 +874,20 @@
     <!-- Sidebar Backdrop for Mobile/Offcanvas Click-to-Dismiss -->
     <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
+    <!-- Sidebar-Adjacent Vertical Persona Dock (Visible Only When Sidebar Is Open: 1-Click ON/OFF + Persona Studio Trigger) -->
+    <div class="zoz-persona-vertical-dock" id="zozPersonaVerticalDock" role="region" aria-label="Kontrol Cepat Persona AI">
+      <div class="zoz-persona-vertical-capsule">
+        <button type="button" class="zoz-persona-vert-power-btn" id="btnPersonaVerticalPowerToggle" aria-pressed="true" aria-label="Matikan Persona AI (1-Klik)" title="Persona Aktif — Klik untuk mematikan Persona AI">
+          <i class="fa-solid fa-power-off" aria-hidden="true"></i>
+        </button>
+        <button class="composer-btn zoz-persona-composer-btn" id="btnComposerPersonaMenu" type="button" title="Menu Persona AI: Non-Custom (AI Formal)" aria-label="Buka Menu Persona AI" aria-haspopup="dialog">
+          <span class="zoz-persona-btn-dot" id="zozPersonaComposerDot" aria-hidden="true"></span>
+          <span class="zoz-persona-btn-label" id="zozPersonaComposerLabel">AI Formal</span>
+          <i class="fa-solid fa-user-tie zoz-persona-btn-icon" id="zozPersonaComposerIcon" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
+
     <!-- MAIN CHAT & WORKSPACE -->
     <main class="main-content flex-1 flex flex-col justify-between relative overflow-hidden bg-gradient-to-b from-[#090b12] to-[#06070b]" id="mainContent">
       <!-- Global Drag & Drop File Overlay -->
@@ -939,20 +953,6 @@
               <span class="btn-badge"><i class="fa-solid fa-wand-magic-sparkles"></i> New Chat</span>
             </button>
           </div>
-        </div>
-      </div>
-
-      <!-- Right-Middle Vertical Persona Dock (1-Click ON/OFF Power Cap + Vertical Upward Persona Studio Trigger) -->
-      <div class="zoz-persona-vertical-dock" id="zozPersonaVerticalDock" role="region" aria-label="Kontrol Cepat Persona AI">
-        <div class="zoz-persona-vertical-capsule">
-          <button type="button" class="zoz-persona-vert-power-btn" id="btnPersonaVerticalPowerToggle" aria-pressed="true" aria-label="Matikan Persona AI (1-Klik)" title="Persona Aktif — Klik untuk mematikan Persona AI">
-            <i class="fa-solid fa-power-off" aria-hidden="true"></i>
-          </button>
-          <button class="composer-btn zoz-persona-composer-btn" id="btnComposerPersonaMenu" type="button" title="Menu Persona AI: Non-Custom (AI Formal)" aria-label="Buka Menu Persona AI" aria-haspopup="dialog">
-            <span class="zoz-persona-btn-dot" id="zozPersonaComposerDot" aria-hidden="true"></span>
-            <span class="zoz-persona-btn-label" id="zozPersonaComposerLabel">AI Formal</span>
-            <i class="fa-solid fa-user-tie zoz-persona-btn-icon" id="zozPersonaComposerIcon" aria-hidden="true"></i>
-          </button>
         </div>
       </div>
 

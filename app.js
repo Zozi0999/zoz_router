@@ -20321,6 +20321,20 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     hideMobileSidebarAndBackdrop(true);
   }
 
+  function isMobile() {
+    return window.innerWidth <= 768;
+  }
+
+  function isSidebarCurrentlyOpen() {
+    const sidebarEl = els.sidebar || document.getElementById('sidebar');
+    const appEl = els.appContainer || document.getElementById('appContainer');
+    if (!sidebarEl) return !isMobile();
+    if (isMobile()) {
+      return sidebarEl.classList.contains('open');
+    }
+    return !(appEl?.classList.contains('sidebar-collapsed') || sidebarEl.classList.contains('collapsed'));
+  }
+
   function hideMobileSidebarAndBackdrop(triggerHistoryBack = true) {
     const hasOpenState = Boolean(
       els.sidebar?.classList.contains('open') ||
@@ -20331,6 +20345,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     els.sidebar?.classList.remove('open');
     els.sidebarBackdrop?.classList.remove('active', 'show');
     document.body.classList.remove('mobile-sidebar-open');
+    if (typeof ZozPersonaController !== 'undefined' && typeof ZozPersonaController.syncUI === 'function') {
+      ZozPersonaController.syncUI();
+    }
     if (hasOpenState && triggerHistoryBack && history.state?.modal === 'sidebar') {
       try { history.back(); } catch (_) {}
     }
@@ -52056,10 +52073,6 @@ Aturan:
     });
 
     // ==================== SIDEBAR HELPERS (Desktop Collapse & Mobile Drawer) ====================
-    function isMobile() {
-      return window.innerWidth <= 768;
-    }
-
     let _lastSidebarToggleAt = 0;
     function openMobileSidebar() {
       _lastSidebarToggleAt = Date.now();
@@ -52071,6 +52084,9 @@ Aturan:
       els.sidebar?.classList.add('open');
       els.sidebarBackdrop?.classList.add('active', 'show');
       document.body.classList.add('mobile-sidebar-open');
+      if (typeof ZozPersonaController !== 'undefined' && typeof ZozPersonaController.syncUI === 'function') {
+        ZozPersonaController.syncUI();
+      }
       if (history.state?.modal !== 'sidebar') {
         try { history.pushState({ modal: 'sidebar' }, ''); } catch (_) {}
       }
@@ -52086,6 +52102,9 @@ Aturan:
     function toggleDesktopSidebar() {
       const isCollapsed = els.appContainer?.classList.toggle('sidebar-collapsed');
       els.sidebar?.classList.toggle('collapsed', isCollapsed);
+      if (typeof ZozPersonaController !== 'undefined' && typeof ZozPersonaController.syncUI === 'function') {
+        ZozPersonaController.syncUI();
+      }
       if (!isCollapsed) {
         renderChatHistory(els.searchHistoryInput?.value || '');
       }
@@ -52131,7 +52150,13 @@ Aturan:
     document.addEventListener('click', (e) => {
       if (isMobile() && els.sidebar?.classList.contains('open')) {
         if (Date.now() - _lastSidebarToggleAt < 180) return;
-        if (!els.sidebar.contains(e.target) && !els.toggleSidebarBtn?.contains(e.target)) {
+        const vertDockEl = els.zozPersonaVerticalDock || document.getElementById('zozPersonaVerticalDock');
+        if (
+          !els.sidebar.contains(e.target) &&
+          !els.toggleSidebarBtn?.contains(e.target) &&
+          !(vertDockEl && vertDockEl.contains(e.target)) &&
+          !(e.target && typeof e.target.closest === 'function' && e.target.closest('#zozPersonaVerticalDock, #zozPersonaModal'))
+        ) {
           closeMobileSidebar(true);
         }
       }
@@ -53999,6 +54024,12 @@ Aturan:
     // Adapt textarea sizing on window resize
     window.addEventListener('resize', () => {
       if (document.hidden || document.visibilityState === 'hidden') return;
+      if (typeof isMobile === 'function' && !isMobile() && els.sidebar?.classList.contains('open') && typeof hideMobileSidebarAndBackdrop === 'function') {
+        hideMobileSidebarAndBackdrop(false);
+      }
+      if (typeof ZozPersonaController !== 'undefined' && typeof ZozPersonaController.syncUI === 'function') {
+        ZozPersonaController.syncUI();
+      }
       syncMobileAppContainerHeight();
       autoResizeTextarea(els.promptInput);
     });
@@ -63114,6 +63145,7 @@ Aturan:
         STATE.chatMode = 'ai';
         try { localStorage.setItem('zoz_chat_mode', 'ai'); } catch (_) {}
         if (els.mainContent) els.mainContent.classList.remove('is-wa-chat-mode');
+        if (els.appContainer) els.appContainer.classList.remove('is-wa-chat-mode');
         if (typeof document !== 'undefined' && document.body) document.body.setAttribute('data-chat-mode', 'ai');
         this.updateModeButtonsUI('ai');
         if (typeof ZozPersonaController !== 'undefined' && typeof ZozPersonaController.syncUI === 'function') {
@@ -63127,6 +63159,7 @@ Aturan:
 
       const isAi = mode === 'ai';
       if (els.mainContent) els.mainContent.classList.toggle('is-wa-chat-mode', !isAi);
+      if (els.appContainer) els.appContainer.classList.toggle('is-wa-chat-mode', !isAi);
       if (typeof document !== 'undefined' && document.body) document.body.setAttribute('data-chat-mode', mode);
       if (els.btnChatModeAi) els.btnChatModeAi.classList.toggle('active', isAi);
       if (els.btnChatModeWa) els.btnChatModeWa.classList.toggle('active', !isAi);
@@ -66605,6 +66638,10 @@ Gunakan format Markdown lengkap dengan struktur berikut:
       document.body.classList.remove('mobile-sidebar-open');
     }
 
+    if (typeof ZozPersonaController !== 'undefined' && typeof ZozPersonaController.syncUI === 'function') {
+      ZozPersonaController.syncUI();
+    }
+
     console.log('⚡ ZOZ ROUTER INITIALIZED // READY IN 0MS');
     if (window.lucide && typeof window.lucide.createIcons === 'function') {
       try { window.lucide.createIcons(); } catch (_) {}
@@ -66705,6 +66742,7 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     applyTheme() {
       const theme = this.loadTheme();
       const mainContent = document.getElementById('mainContent');
+      const appContainer = els.appContainer || document.getElementById('appContainer');
       const isAiMode = typeof STATE === 'undefined' || STATE.chatMode !== 'whatsapp';
       if (mainContent) {
         if (isAiMode && theme !== 'default') {
@@ -66713,6 +66751,15 @@ Gunakan format Markdown lengkap dengan struktur berikut:
         } else {
           mainContent.classList.remove('ai-nature-themed');
           mainContent.removeAttribute('data-ai-chat-theme');
+        }
+      }
+      if (appContainer) {
+        if (isAiMode && theme !== 'default') {
+          appContainer.classList.add('ai-nature-themed');
+          appContainer.setAttribute('data-ai-chat-theme', theme);
+        } else {
+          appContainer.classList.remove('ai-nature-themed');
+          appContainer.removeAttribute('data-ai-chat-theme');
         }
       }
 
@@ -66945,16 +66992,21 @@ Gunakan format Markdown lengkap dengan struktur berikut:
         }
       }
 
-      // 1. Right-Middle Vertical Persona Dock (1-Click ON/OFF Power Cap + Vertical Upward Studio Trigger)
+      // 1. Sidebar-Adjacent Vertical Persona Dock (Visible Only When Sidebar Open: 1-Click ON/OFF + Studio Trigger)
       const vertDock = els.zozPersonaVerticalDock || document.getElementById('zozPersonaVerticalDock');
       const vertPowerBtn = els.btnPersonaVerticalPowerToggle || document.getElementById('btnPersonaVerticalPowerToggle');
       const compBtn = els.btnComposerPersonaMenu || document.getElementById('btnComposerPersonaMenu');
       const compLabel = els.zozPersonaComposerLabel || document.getElementById('zozPersonaComposerLabel');
       const compIcon = els.zozPersonaComposerIcon || document.getElementById('zozPersonaComposerIcon');
+      const sidebarOpen = typeof isSidebarCurrentlyOpen === 'function' ? isSidebarCurrentlyOpen() : true;
+      const isDockVisible = isAiChatMode && sidebarOpen;
       if (vertDock) {
         vertDock.style.display = isAiChatMode ? 'flex' : 'none';
+        vertDock.classList.toggle('is-sidebar-hidden', !sidebarOpen);
         vertDock.classList.toggle('is-custom-mode', isCustom);
         vertDock.classList.toggle('is-off-mode', isOff);
+        vertDock.setAttribute('aria-hidden', isDockVisible ? 'false' : 'true');
+        if ('inert' in vertDock) vertDock.inert = !isDockVisible;
       }
       if (vertPowerBtn) {
         const vertPowerAria = isOff ? 'Aktifkan Persona AI (1-Klik)' : 'Matikan Persona AI (1-Klik)';
@@ -66963,11 +67015,13 @@ Gunakan format Markdown lengkap dengan struktur berikut:
         vertPowerBtn.title = isOff
           ? 'Persona Nonaktif — Klik untuk mengaktifkan kembali Persona AI'
           : 'Persona Aktif — Klik untuk mematikan Persona AI';
+        vertPowerBtn.tabIndex = isDockVisible ? 0 : -1;
         vertPowerBtn.classList.toggle('is-persona-off', isOff);
         vertPowerBtn.classList.toggle('is-custom-mode', isCustom && !isOff);
       }
       if (compBtn) {
         compBtn.style.display = isAiChatMode ? 'inline-flex' : 'none';
+        compBtn.tabIndex = isDockVisible ? 0 : -1;
         compBtn.classList.toggle('is-custom-mode', isCustom);
         compBtn.classList.toggle('is-off-mode', isOff);
         compBtn.title = isOff
@@ -67166,6 +67220,9 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     openPersonaModal(preferredTab = null, { fromSettings = false } = {}) {
       closeModelOptionsMenuPopup();
       closeAttachmentDropdown();
+      if (typeof isMobile === 'function' && isMobile() && typeof hideMobileSidebarAndBackdrop === 'function') {
+        hideMobileSidebarAndBackdrop(false);
+      }
       this._openedFromSettingsInWa = Boolean(fromSettings && typeof STATE !== 'undefined' && STATE.chatMode === 'whatsapp');
       const replaceSettingsHistory = Boolean(
         fromSettings &&

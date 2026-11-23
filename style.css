@@ -2170,6 +2170,12 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   }
 }
 
+@media (min-width: 769px) and (max-width: 1280px) {
+  .app-container:not(.sidebar-collapsed) #mainContent:not(.wa-chat-themed):not(.is-wa-chat-mode) .chat-messages-container {
+    padding-left: 54px;
+  }
+}
+
 /* ==================== WELCOME HERO (Clean Minimalist Cyberpunk Hub) ==================== */
 .welcome-hero {
   display: flex;
@@ -21932,22 +21938,46 @@ svg.lucide,
    EXECUTIVE PERSONA STUDIO (NON-CUSTOM: AI FORMAL ONLY + CUSTOM PERSONA)
    ========================================================================= */
 
-/* 1. Right-Middle Vertical Persona Dock & Upward Trigger Pill */
+/* 1. Sidebar-Adjacent Vertical Persona Dock (Visible Only When Sidebar Open) */
 .zoz-persona-vertical-dock {
   position: absolute;
-  right: 14px;
+  left: calc(var(--sidebar-width) + 10px);
+  right: auto;
   top: 50%;
   transform: translateY(-50%);
-  z-index: 36;
+  z-index: 105;
   display: flex;
   flex-direction: column;
   align-items: center;
   pointer-events: none;
   user-select: none;
+  opacity: 1;
+  visibility: visible;
+  max-height: calc(100dvh - 24px);
+  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+              visibility 0.22s ease,
+              left 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app-container.sidebar-collapsed .zoz-persona-vertical-dock,
+.sidebar.collapsed ~ .zoz-persona-vertical-dock,
+.zoz-persona-vertical-dock.is-sidebar-hidden {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  transform: translate(-14px, -50%) scale(0.92) !important;
+}
+
+.app-container.sidebar-collapsed .zoz-persona-vertical-dock .zoz-persona-vertical-capsule,
+.sidebar.collapsed ~ .zoz-persona-vertical-dock .zoz-persona-vertical-capsule,
+.zoz-persona-vertical-dock.is-sidebar-hidden .zoz-persona-vertical-capsule {
+  pointer-events: none !important;
 }
 
 #mainContent.wa-chat-themed .zoz-persona-vertical-dock,
 #mainContent.is-wa-chat-mode .zoz-persona-vertical-dock,
+#appContainer.is-wa-chat-mode .zoz-persona-vertical-dock,
 body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
   display: none !important;
 }
@@ -22148,7 +22178,10 @@ body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
 /* Light Nature Theme Adaptations for Vertical Persona Dock */
 #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .zoz-persona-vertical-capsule,
 #mainContent.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .zoz-persona-vertical-capsule,
-#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .zoz-persona-vertical-capsule {
+#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .zoz-persona-vertical-capsule,
+#appContainer.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .zoz-persona-vertical-capsule,
+#appContainer.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .zoz-persona-vertical-capsule,
+#appContainer.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .zoz-persona-vertical-capsule {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(241, 245, 249, 0.97) 100%);
   border-color: rgba(14, 165, 233, 0.38);
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14), 0 0 14px rgba(14, 165, 233, 0.1);
@@ -22156,7 +22189,10 @@ body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
 
 #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-btn.zoz-persona-composer-btn,
 #mainContent.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .composer-btn.zoz-persona-composer-btn,
-#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .composer-btn.zoz-persona-composer-btn {
+#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .composer-btn.zoz-persona-composer-btn,
+#appContainer.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-btn.zoz-persona-composer-btn,
+#appContainer.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .composer-btn.zoz-persona-composer-btn,
+#appContainer.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .composer-btn.zoz-persona-composer-btn {
   background: rgba(241, 245, 249, 0.92);
   border-color: rgba(14, 165, 233, 0.32);
   color: #0f172a;
@@ -22164,7 +22200,10 @@ body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
 
 #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-btn.zoz-persona-composer-btn.is-custom-mode,
 #mainContent.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .composer-btn.zoz-persona-composer-btn.is-custom-mode,
-#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .composer-btn.zoz-persona-composer-btn.is-custom-mode {
+#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .composer-btn.zoz-persona-composer-btn.is-custom-mode,
+#appContainer.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-btn.zoz-persona-composer-btn.is-custom-mode,
+#appContainer.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .composer-btn.zoz-persona-composer-btn.is-custom-mode,
+#appContainer.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .composer-btn.zoz-persona-composer-btn.is-custom-mode {
   background: rgba(237, 233, 254, 0.94);
   border-color: rgba(139, 92, 246, 0.45);
   color: #4c1d95;
@@ -22172,7 +22211,10 @@ body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
 
 #mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-btn.zoz-persona-composer-btn.is-off-mode,
 #mainContent.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .composer-btn.zoz-persona-composer-btn.is-off-mode,
-#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .composer-btn.zoz-persona-composer-btn.is-off-mode {
+#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .composer-btn.zoz-persona-composer-btn.is-off-mode,
+#appContainer.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .composer-btn.zoz-persona-composer-btn.is-off-mode,
+#appContainer.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .composer-btn.zoz-persona-composer-btn.is-off-mode,
+#appContainer.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .composer-btn.zoz-persona-composer-btn.is-off-mode {
   background: rgba(226, 232, 240, 0.88);
   border-color: rgba(100, 116, 139, 0.35);
   color: #475569;
@@ -23201,8 +23243,25 @@ body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
     padding: 11px 14px;
   }
   .zoz-persona-vertical-dock {
-    right: 5px;
-    top: 46%;
+    position: fixed !important;
+    left: min(calc(min(290px, 85vw) + 8px), calc(100vw - 36px)) !important;
+    right: auto !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    z-index: 1005 !important;
+  }
+  #sidebar:not(.open) ~ .zoz-persona-vertical-dock,
+  body:not(.mobile-sidebar-open) .zoz-persona-vertical-dock,
+  .zoz-persona-vertical-dock.is-sidebar-hidden {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    transform: translate(-18px, -50%) scale(0.9) !important;
+  }
+  #sidebar:not(.open) ~ .zoz-persona-vertical-dock .zoz-persona-vertical-capsule,
+  body:not(.mobile-sidebar-open) .zoz-persona-vertical-dock .zoz-persona-vertical-capsule,
+  .zoz-persona-vertical-dock.is-sidebar-hidden .zoz-persona-vertical-capsule {
+    pointer-events: none !important;
   }
   .zoz-persona-vertical-capsule {
     width: 30px;
@@ -23238,6 +23297,12 @@ body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
   }
   .zoz-persona-mode-switcher {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .zoz-persona-vertical-dock {
+    left: min(calc(min(288px, 82vw) + 8px), calc(100vw - 36px)) !important;
   }
 }
 
