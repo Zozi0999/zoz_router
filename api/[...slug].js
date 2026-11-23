@@ -193,7 +193,11 @@ module.exports = async function handler(req, res) {
     pathname === '/api/tools/search-documents' || pathname === '/api/tools/communication-context' ||
     pathname === '/api/chat/status' ||
     pathname.startsWith('/api/wa/') ||
-    pathname.startsWith('/api/terminal/');
+    pathname.startsWith('/api/terminal/') ||
+    pathname.startsWith('/api/z21/') ||
+    pathname === '/api/tools/z21-document-builder' ||
+    pathname === '/api/workspace' ||
+    pathname.startsWith('/api/workspace/');
 
   if (req.method === 'GET') {
     const reqHeaders = req.headers || {};

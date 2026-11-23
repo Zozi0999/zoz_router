@@ -2414,6 +2414,13 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
   box-shadow: 0 0 14px rgba(0, 240, 255, 0.35);
 }
 
+.message-row.user.is-incognito .message-avatar,
+.message-row.user .message-avatar.incognito-avatar {
+  background: linear-gradient(135deg, #7c3aed 0%, #a855f7 55%, #c084fc 100%);
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(168, 85, 247, 0.48), inset 0 0 0 1px rgba(233, 213, 255, 0.42);
+}
+
 .message-row.assistant .message-avatar {
   background: linear-gradient(135deg, #00F0FF, #00FFC2);
   color: #08090D;
@@ -2455,6 +2462,24 @@ button.brand-logo-wrap.active .auto-router-quantum-dot {
 .message-row.user .message-meta {
   justify-content: flex-end;
   color: rgba(0, 240, 255, 0.88);
+}
+
+.message-row.user.is-incognito .message-meta {
+  color: rgba(216, 180, 254, 0.94);
+}
+
+body.light-theme .message-row.user.is-incognito .message-meta {
+  color: #7c3aed;
+}
+
+body.zoz-incognito-active #mainContent:not(.wa-chat-themed) .composer-box:not(.studio-composer-box) {
+  border-color: rgba(168, 85, 247, 0.34);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(168, 85, 247, 0.28), 0 0 18px rgba(168, 85, 247, 0.12);
+}
+
+body.zoz-incognito-active #mainContent:not(.wa-chat-themed) .composer-box:not(.studio-composer-box):focus-within {
+  border-color: rgba(192, 132, 252, 0.58);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(192, 132, 252, 0.48), 0 0 22px rgba(168, 85, 247, 0.2);
 }
 
 .meta-model-badge {
@@ -8099,15 +8124,30 @@ div.msg-sources-section button.msg-sources-title span {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 14px;
+  padding: 12px 14px;
   background: rgba(14, 17, 27, 0.94);
   border: 1px solid rgba(0, 240, 255, 0.35);
   border-radius: var(--radius-md, 10px);
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4), 0 0 16px rgba(0, 240, 255, 0.10);
   transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
-  max-width: 560px;
+  max-width: 620px;
   width: 100%;
   box-sizing: border-box;
+}
+
+.ai-file-card.is-pdf-card {
+  border-color: rgba(239, 68, 68, 0.38);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.42), 0 0 16px rgba(239, 68, 68, 0.08);
+}
+
+.ai-file-card.is-docx-card {
+  border-color: rgba(59, 130, 246, 0.38);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.42), 0 0 16px rgba(59, 130, 246, 0.08);
+}
+
+.ai-file-card.is-xlsx-card {
+  border-color: rgba(16, 185, 129, 0.38);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.42), 0 0 16px rgba(16, 185, 129, 0.08);
 }
 
 .ai-file-card:hover {
@@ -8126,7 +8166,25 @@ div.msg-sources-section button.msg-sources-title span {
   background: linear-gradient(135deg, rgba(0, 240, 255, 0.16), rgba(0, 255, 194, 0.10));
   border: 1px solid rgba(0, 240, 255, 0.3);
   color: var(--neon-cyan, #00f0ff);
-  font-size: 1.1rem;
+  font-size: 1.15rem;
+}
+
+.ai-file-icon.is-pdf {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.20), rgba(220, 38, 38, 0.10));
+  border-color: rgba(239, 68, 68, 0.38);
+  color: #f87171;
+}
+
+.ai-file-icon.is-docx {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.20), rgba(37, 99, 235, 0.10));
+  border-color: rgba(59, 130, 246, 0.38);
+  color: #60a5fa;
+}
+
+.ai-file-icon.is-xlsx {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.20), rgba(5, 150, 105, 0.10));
+  border-color: rgba(16, 185, 129, 0.38);
+  color: #34d399;
 }
 
 .ai-file-info {
@@ -8134,22 +8192,34 @@ div.msg-sources-section button.msg-sources-title span {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .ai-file-name {
-  font-size: 0.86rem;
+  font-size: 0.88rem;
   font-weight: 700;
   color: #fff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.3;
+  word-break: break-word;
 }
 
 .ai-file-meta {
-  font-size: 0.68rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
   color: var(--text-dim);
   font-family: var(--font-code);
+}
+
+body.light-theme .ai-file-card {
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+}
+
+body.light-theme .ai-file-name {
+  color: #0f172a;
 }
 
 .ai-file-desc {
@@ -10820,6 +10890,16 @@ body.is-assistant-dragging #aiFileStudioFrame {
 .zoz-cot-rail-item.is-active .zoz-cot-rail-node {
   color: var(--neon-cyan, #38bdf8);
   animation: zozSparkPulse 1.6s ease-in-out infinite;
+}
+
+.zoz-cot-rail-item.is-running .zoz-cot-rail-node {
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.28);
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.zoz-cot-rail-item.is-running.is-weather .zoz-cot-rail-node {
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.34);
+  background: rgba(251, 191, 36, 0.14);
 }
 
 .zoz-cot-rail-item.is-web .zoz-cot-rail-node {
@@ -13555,6 +13635,12 @@ body.page-paused *::after {
   color: var(--neon-teal);
 }
 
+.file-workspace-tag.z21-artifact-tag {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.42);
+  color: #38bdf8;
+}
+
 .ai-file-btn.allow-pending {
   background: rgba(0, 255, 194, 0.15) !important;
   border-color: rgba(0, 255, 194, 0.4) !important;
@@ -14655,6 +14741,14 @@ body.mermaid-has-fullscreen {
 }
 .ai-file-btn.download-docx:hover {
   background: rgba(59, 130, 246, 0.25) !important;
+}
+.ai-file-btn.download-xlsx {
+  background: rgba(16, 185, 129, 0.14) !important;
+  color: #34d399 !important;
+  border: 1px solid rgba(16, 185, 129, 0.38) !important;
+}
+.ai-file-btn.download-xlsx:hover {
+  background: rgba(16, 185, 129, 0.28) !important;
 }
 .ai-file-btn.view-code {
   background: rgba(168, 85, 247, 0.12) !important;
@@ -21138,6 +21232,37 @@ svg.lucide,
   min-width: 0;
 }
 
+.forge-quick-dl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 9999px;
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.22), rgba(0, 240, 255, 0.14));
+  color: #34d399;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+}
+
+.forge-quick-dl-btn:hover {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.34), rgba(0, 240, 255, 0.22));
+  border-color: rgba(52, 211, 153, 0.72);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+@media (max-width: 540px) {
+  .forge-quick-dl-btn {
+    padding: 0 10px;
+    font-size: 0.75rem;
+  }
+}
+
 .forge-circle-btn {
   width: 40px;
   height: 40px;
@@ -23901,6 +24026,185 @@ body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
   }
   .zoz-weather-hourly-strip {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ==================== Z21 COMMANDER SWARM TELEMETRY CARD ==================== */
+.zoz-z21-swarm-card {
+  margin: 8px 0 12px 0;
+  border: 1px solid rgba(244, 63, 94, 0.34);
+  background: linear-gradient(160deg, rgba(24, 12, 22, 0.86) 0%, rgba(12, 16, 29, 0.92) 100%);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.zoz-z21-swarm-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #fecdd3;
+}
+
+.zoz-z21-swarm-summary::-webkit-details-marker {
+  display: none;
+}
+
+.zoz-z21-swarm-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.zoz-z21-swarm-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: rgba(244, 63, 94, 0.18);
+  border: 1px solid rgba(251, 113, 133, 0.45);
+  color: #fda4af;
+  flex-shrink: 0;
+}
+
+.zoz-z21-swarm-meta {
+  font-size: 0.75rem;
+  color: #cbd5e1;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.zoz-z21-swarm-chevron {
+  font-size: 0.72rem;
+  color: #fda4af;
+  transition: transform 0.2s ease;
+  margin-left: 4px;
+}
+
+.zoz-z21-swarm-card[open] .zoz-z21-swarm-chevron {
+  transform: rotate(180deg);
+}
+
+.zoz-z21-swarm-body {
+  padding: 0 14px 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.zoz-z21-wave-block {
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.zoz-z21-wave-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.zoz-z21-wave-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.zoz-z21-wave-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f43f5e, #fb923c, #34d399);
+  transition: width 0.2s ease;
+}
+
+.zoz-z21-agent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.zoz-z21-agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.72);
+  color: #e2e8f0;
+  max-width: 100%;
+}
+
+.zoz-z21-agent-chip.is-running {
+  border-color: rgba(56, 189, 248, 0.45);
+  color: #7dd3fc;
+}
+
+.zoz-z21-agent-chip.is-done {
+  border-color: rgba(16, 185, 129, 0.42);
+  color: #6ee7b7;
+}
+
+.zoz-z21-agent-chip.is-error {
+  border-color: rgba(244, 63, 94, 0.5);
+  color: #fda4af;
+}
+
+.zoz-z21-agent-role {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 175px;
+}
+
+body.light-theme .zoz-z21-swarm-card {
+  background: linear-gradient(160deg, rgba(255, 241, 242, 0.96) 0%, rgba(248, 250, 252, 0.98) 100%);
+  border-color: rgba(244, 63, 94, 0.3);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
+body.light-theme .zoz-z21-swarm-summary,
+body.light-theme .zoz-z21-wave-header {
+  color: #0f172a;
+}
+
+body.light-theme .zoz-z21-swarm-meta {
+  color: #475569;
+}
+
+body.light-theme .zoz-z21-agent-chip {
+  background: rgba(255, 255, 255, 0.92);
+  color: #1e293b;
+}
+
+@media (max-width: 768px) {
+  .zoz-z21-swarm-summary {
+    flex-wrap: wrap;
+    padding: 9px 11px;
+  }
+  .zoz-z21-agent-role {
+    max-width: 130px;
   }
 }
 

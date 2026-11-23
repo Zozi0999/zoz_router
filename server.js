@@ -91,6 +91,20 @@ const WORKSPACE_ROOT = (process.env.ZOZ_WORKSPACE_ROOT && fs.existsSync(process.
 const USER_HOME = process.env.USERPROFILE || os.homedir() || WORKSPACE_ROOT;
 const DEFAULT_TERMINAL_CWD = (!Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) && fs.existsSync(USER_HOME)) ? USER_HOME : WORKSPACE_ROOT;
 const SNAPSHOTS_DIR = path.join(WORKSPACE_ROOT, '.zoz-snapshots');
+// Serialized per-file mutex queue di level modul agar penulisan/patching paralel antar sub-agen Z21 tidak pernah saling menimpa
+const __workspaceFileLocks = new Map();
+function withWorkspaceFileLock(fullPath, fn) {
+  const lockKey = process.platform === 'win32' ? String(fullPath || '').toLowerCase() : String(fullPath || '');
+  const prev = __workspaceFileLocks.get(lockKey) || Promise.resolve();
+  const run = prev.catch(() => {}).then(fn);
+  const tail = run.finally(() => {
+    if (__workspaceFileLocks.get(lockKey) === tail) {
+      __workspaceFileLocks.delete(lockKey);
+    }
+  });
+  __workspaceFileLocks.set(lockKey, tail);
+  return run;
+}
 
 // =========================================================================
 // CLOUDFLARE TUNNEL REMOTE ACCESS (WAN Mobile-to-Desktop) STATE & ENGINE
@@ -7511,6 +7525,1832 @@ function executePythonSandbox(code, timeoutMs = 5000) {
   });
 }
 
+// ==================== MODE Z21 DOCUMENT & SPREADSHEET SANDBOX ENGINE ====================
+const Z21_DOC_CONTAINERS_ROOT = path.join(os.tmpdir(), 'zoz_z21_doc_containers');
+const Z21_ARTIFACT_REGISTRY = new Map();
+const MAX_Z21_ARTIFACTS = 60;
+
+try {
+  if (!fs.existsSync(Z21_DOC_CONTAINERS_ROOT)) {
+    fs.mkdirSync(Z21_DOC_CONTAINERS_ROOT, { recursive: true });
+  }
+} catch (_) {}
+
+function registerZ21Artifact(entry) {
+  if (!entry || !entry.id) return;
+  Z21_ARTIFACT_REGISTRY.set(entry.id, entry);
+  if (Z21_ARTIFACT_REGISTRY.size > MAX_Z21_ARTIFACTS) {
+    const oldestKey = Z21_ARTIFACT_REGISTRY.keys().next().value;
+    if (oldestKey) Z21_ARTIFACT_REGISTRY.delete(oldestKey);
+  }
+}
+
+function sanitizeZ21ArtifactFilename(rawName, formatHint = '') {
+  let clean = path.basename(String(rawName || '').trim() || 'dokumen_z21').replace(/[^a-zA-Z0-9._-]/g, '_');
+  clean = clean.replace(/^\.+/, '') || 'dokumen_z21';
+  const hint = String(formatHint || '').toLowerCase().replace(/^\./, '');
+  if (hint && ['pdf', 'docx', 'xlsx', 'csv'].includes(hint)) {
+    if (!clean.toLowerCase().endsWith('.' + hint)) {
+      clean = clean.replace(/\.[a-z0-9]+$/i, '') + '.' + hint;
+    }
+  } else if (!/\.(?:pdf|docx|xlsx|csv)$/i.test(clean)) {
+    clean += '.pdf';
+  }
+  return clean;
+}
+
+function getZ21ArtifactMime(ext) {
+  const e = String(ext || '').toLowerCase().replace(/^\./, '');
+  if (e === 'pdf') return 'application/pdf';
+  if (e === 'docx') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (e === 'xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (e === 'csv') return 'text/csv';
+  return 'application/octet-stream';
+}
+
+function validateZ21DocumentPythonSafety(code) {
+  if (!code || typeof code !== 'string') return { safe: false, reason: 'Skrip Python kosong' };
+  const normalizedCode = code.normalize('NFKC');
+  const strippedCode = normalizedCode
+    .replace(
+      /(?:#.*$|"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/gm,
+      (match) => (match.startsWith('#') || match.startsWith('"""') || match.startsWith("'''")) ? ' ' : match
+    )
+    .replace(/\\\r?\n/g, ' ');
+
+  const blockedModules = [
+    'subprocess', 'socket', 'pty', 'ctypes', 'winreg', 'multiprocessing',
+    'urllib', 'http', 'requests', 'ftplib', 'smtplib', 'imaplib', 'poplib',
+    'webbrowser', 'signal', 'pickle', 'shelve', 'marshal', 'importlib', 'runpy',
+    'code', 'codeop', 'pdb', 'bdb', 'venv', 'ensurepip', '_posixsubprocess', '_winapi'
+  ];
+  const blockedPattern = blockedModules.join('|');
+  if (new RegExp(`^[ \\t]*import\\s+[^\\r\\n;#]*\\b(?:${blockedPattern})\\b`, 'im').test(strippedCode)) {
+    return { safe: false, reason: 'Modul sistem/jaringan terlarang pada pernyataan import.' };
+  }
+  if (new RegExp(`\\bfrom\\s+(?:${blockedPattern})(?:\\.[\\w.]+)?\\s+import\\b`, 'i').test(strippedCode)) {
+    return { safe: false, reason: 'Modul sistem/jaringan terlarang pada pernyataan from ... import.' };
+  }
+  if (/\b(?:__import__|eval|exec|compile|breakpoint|getattr|setattr|delattr|load_module)\b/i.test(strippedCode)) {
+    return { safe: false, reason: 'Fungsi eksekusi/refleksi dinamis (__import__, eval, exec, compile, getattr, setattr) diblokir.' };
+  }
+  if (/\b(?:__subclasses__|__builtins__|__globals__|__bases__|__base__|__mro__|__loader__|__spec__|gi_frame|cr_frame|ag_frame|f_builtins|f_globals|f_locals|f_back|tb_frame)\b/i.test(strippedCode)) {
+    return { safe: false, reason: 'Refleksi hierarki objek internal diblokir.' };
+  }
+  if (/\b(?:input|help)\s*\(/i.test(strippedCode)) {
+    return { safe: false, reason: 'Fungsi interaktif input()/help() diblokir.' };
+  }
+  if (/\brmtree\b/i.test(strippedCode)) {
+    return { safe: false, reason: 'Operasi destruktif rmtree diblokir.' };
+  }
+  return { safe: true };
+}
+
+// Pure Node.js CRC32 + PKZIP builder (Zero external dependencies for .docx & .xlsx)
+const ZOZ_ZIP_CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) {
+      c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32Buffer(buf) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) {
+    crc = ZOZ_ZIP_CRC_TABLE[(crc ^ buf[i]) & 0xFF] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function buildZozNativeZipBuffer(entries) {
+  const localChunks = [];
+  const centralChunks = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    const nameBuf = Buffer.from(String(entry.name || 'file.txt').replace(/^\/+/, ''), 'utf8');
+    const rawBuf = Buffer.isBuffer(entry.data) ? entry.data : Buffer.from(String(entry.data || ''), 'utf8');
+    const compBuf = zlib.deflateRawSync(rawBuf);
+    const crc = crc32Buffer(rawBuf);
+
+    const localHeader = Buffer.alloc(30 + nameBuf.length);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0x0800, 6);
+    localHeader.writeUInt16LE(8, 8); // deflate
+    localHeader.writeUInt16LE(0, 10);
+    localHeader.writeUInt16LE(0, 12);
+    localHeader.writeUInt32LE(crc, 14);
+    localHeader.writeUInt32LE(compBuf.length, 18);
+    localHeader.writeUInt32LE(rawBuf.length, 22);
+    localHeader.writeUInt16LE(nameBuf.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+    nameBuf.copy(localHeader, 30);
+
+    const centralHeader = Buffer.alloc(46 + nameBuf.length);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0x0800, 8);
+    centralHeader.writeUInt16LE(8, 10); // deflate
+    centralHeader.writeUInt16LE(0, 12);
+    centralHeader.writeUInt16LE(0, 14);
+    centralHeader.writeUInt32LE(crc, 16);
+    centralHeader.writeUInt32LE(compBuf.length, 20);
+    centralHeader.writeUInt32LE(rawBuf.length, 24);
+    centralHeader.writeUInt16LE(nameBuf.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(offset, 42);
+    nameBuf.copy(centralHeader, 46);
+
+    localChunks.push(localHeader, compBuf);
+    centralChunks.push(centralHeader);
+    offset += localHeader.length + compBuf.length;
+  }
+
+  const centralSize = centralChunks.reduce((acc, b) => acc + b.length, 0);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(0, 4);
+  eocd.writeUInt16LE(0, 6);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(centralSize, 12);
+  eocd.writeUInt32LE(offset, 16);
+  eocd.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...localChunks, ...centralChunks, eocd]);
+}
+
+function escapeZozXml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function colIdxToA1(zeroBasedCol) {
+  let col = zeroBasedCol + 1;
+  let out = '';
+  while (col > 0) {
+    const rem = (col - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    col = Math.floor((col - 1) / 26);
+  }
+  return out;
+}
+
+function cleanZ21ResidueLines(str) {
+  return String(str ?? '')
+    .replace(/^\s*>\s*Dirender\s+oleh\s+[^\r\n]*(?:\r?\n|$)/gim, '')
+    .replace(/^\s*(?:\/\/|#)\s*(?:Berkas|File|Filename|Nama\s+Berkas)\s*:[^\r\n]*(?:\r?\n|$)/gim, '')
+    .replace(/\[\[ZOZ_(?:WEATHER|IMAGE)_DISPLAY:[^\]]+\]\]/gi, '')
+    .replace(/\[(?:System Note|DATA [^\]\n]+|HASIL [^\]\n]+)\][^\r\n]*/gi, '')
+    .trim();
+}
+
+const Z21_SUP_MAP = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '+': '⁺', '-': '⁻' };
+const Z21_SUB_MAP = {
+  '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+  '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎',
+  'a': 'ₐ', 'e': 'ₑ', 'h': 'ₕ', 'i': 'ᵢ', 'j': 'ⱼ', 'k': 'ₖ', 'l': 'ₗ', 'm': 'ₘ', 'n': 'ₙ',
+  'o': 'ₒ', 'p': 'ₚ', 'r': 'ᵣ', 's': 'ₛ', 't': 'ₜ', 'u': 'ᵤ', 'v': 'ᵥ', 'x': 'ₓ'
+};
+
+function toZ21Superscript(str) {
+  return String(str || '').split('').map(ch => Z21_SUP_MAP[ch] || ch).join('');
+}
+
+function toZ21Subscript(str) {
+  return String(str || '').split('').map(ch => Z21_SUB_MAP[ch] || Z21_SUB_MAP[ch.toLowerCase()] || ch).join('');
+}
+
+function normalizeZ21ScientificText(rawText) {
+  let s = cleanZ21ResidueLines(rawText);
+  if (!s) return '';
+
+  // Rapikan pemecahan spasi aneh dari ekstraksi teks matematis LLM/PDF ("H I =", "R H =", "N T B", "Real- Time", "94 %")
+  s = s
+    .replace(/\bReal-\s+Time\b/gi, 'Real-Time')
+    .replace(/\bN\s+T\s+B\b/g, 'NTB')
+    .replace(/\bH\s+I\s*(?==)/g, 'HI ')
+    .replace(/\bR\s+H\s*(?==)/g, 'RH ')
+    .replace(/(\d+(?:[.,]\d+)?)\s+%/g, '$1%')
+    .replace(/\(\s*([^\s()]+)\s+%\s*\)/g, '($1%)')
+    .replace(/([A-Za-z0-9)])\s+\^(\{?[0-9+-]+\}?|[0-9])/g, '$1^$2');
+
+  // Strip wrapper LaTeX $$, $, \( \), \[ \] sambil menjaga baris terpisah bila $$
+  s = s
+    .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, (_, eq) => eq.trim())
+    .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (_, eq) => eq.trim())
+    .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, (_, eq) => eq.trim())
+    .replace(/(^|[^\w\\])\$([^$\n]{1,220})\$(?!\d)/g, '$1$2');
+
+  // Konversi LaTeX umum ke Unicode matematika yang tajam & bersih
+  s = s
+    .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '($1 / $2)')
+    .replace(/\\sqrt\s*\{([^{}]+)\}/g, '√($1)')
+    .replace(/\\mathbb\s*\{R\}/g, 'ℝ')
+    .replace(/\\mathbb\s*\{N\}/g, 'ℕ')
+    .replace(/\\mathbb\s*\{Z\}/g, 'ℤ')
+    .replace(/\\vec\s*\{([^{}]+)\}/g, '$1')
+    .replace(/\\hat\s*\{([^{}]+)\}/g, '$1')
+    .replace(/\\(?:text|mathrm|mathbf|mathit|operatorname)\s*\{([^{}]*)\}/g, '$1')
+    .replace(/\^\\circ\s*([CFcf])\b/g, '°$1')
+    .replace(/\\circ\b/g, '°')
+    .replace(/\\theta\b/g, 'θ')
+    .replace(/\\alpha\b/g, 'α')
+    .replace(/\\beta\b/g, 'β')
+    .replace(/\\gamma\b/g, 'γ')
+    .replace(/\\delta\b/g, 'δ')
+    .replace(/\\Delta\b/g, 'Δ')
+    .replace(/\\pi\b/g, 'π')
+    .replace(/\\sigma\b/g, 'σ')
+    .replace(/\\Sigma\b/g, 'Σ')
+    .replace(/\\lambda\b/g, 'λ')
+    .replace(/\\mu\b/g, 'μ')
+    .replace(/\\omega\b/g, 'ω')
+    .replace(/\\Omega\b/g, 'Ω')
+    .replace(/\\times\b/g, '×')
+    .replace(/\\cdot\b/g, '·')
+    .replace(/\\approx\b/g, '≈')
+    .replace(/\\neq\b/g, '≠')
+    .replace(/\\leq\b/g, '≤')
+    .replace(/\\geq\b/g, '≥')
+    .replace(/\\pm\b/g, '±')
+    .replace(/\\infty\b/g, '∞')
+    .replace(/\\sum\b/g, '∑')
+    .replace(/\\int\b/g, '∫')
+    .replace(/\\partial\b/g, '∂')
+    .replace(/\\nabla\b/g, '∇')
+    .replace(/\\in\b/g, '∈')
+    .replace(/\\cos\b/g, 'cos')
+    .replace(/\\sin\b/g, 'sin')
+    .replace(/\\tan\b/g, 'tan')
+    .replace(/\\log\b/g, 'log')
+    .replace(/\\ln\b/g, 'ln')
+    .replace(/\\exp\b/g, 'exp');
+
+  // Pulihkan simbol derajat yang hilang pada satuan suhu ("Suhu 24 C", "24C", "suhu (F)", "( F )")
+  s = s
+    .replace(/(\b(?:Suhu|Temperatur|Temp|T)\s*[:=]?\s*-?\d+(?:[.,]\d+)?)\s*°?\s*([CF])(?![A-Za-z0-9_])/gi, (_, pre, u) => `${pre}°${u.toUpperCase()}`)
+    .replace(/\b(-?\d+(?:[.,]\d+)?)\s+([CF])(?=[,.;:)\s]|$)/g, '$1°$2')
+    .replace(/\(\s*(°?\s*[CF])\s*\)/g, (_, u) => `(°${u.replace(/[°\s]/g, '').toUpperCase()})`);
+
+  // Superscript (^2, ^{2}, ^n) & subscript eksplisit (c_1, e_s, x_{12})
+  s = s
+    .replace(/\^\{([0-9+-]+)\}/g, (_, d) => toZ21Superscript(d))
+    .replace(/\^([0-9])(?![0-9])/g, (_, d) => toZ21Superscript(d))
+    .replace(/_\{([0-9a-zA-Z+-]+)\}/g, (_, d) => toZ21Subscript(d))
+    .replace(/_([0-9a-zA-Z])(?![a-zA-Z0-9])/g, (_, d) => toZ21Subscript(d));
+
+  // Subscript alami pada koefisien polinomial & variabel meteorologi: c1..c9 dan es (tekanan uap jenuh)
+  s = s
+    .replace(/\bc([1-9])\b(?=\s*(?:[+\-×*/=]|T|R|\(|$|[⁰¹²³⁴⁵⁶⁷⁸⁹]))/g, (_, d) => `c${toZ21Subscript(d)}`)
+    .replace(/([+\-=/(]\s*)c([1-9])(?=[TR\s+\-*/=]|$)/g, (_, p, d) => `${p}c${toZ21Subscript(d)}`)
+    .replace(/(\/\s*|\(\s*)es\b/g, '$1eₛ')
+    .replace(/\bes(?=\s*=|\s*\))/g, 'eₛ');
+
+  // Operator perkalian matematika (* -> ×) ketika mengapit dua operan matematis
+  s = s.replace(/([A-Za-z0-9₀-₉⁰-⁹ₛ)])\s*\*\s*([A-Za-z0-9₀-₉⁰-⁹ₛ(])/g, '$1 × $2');
+
+  return s;
+}
+
+function isZ21FormulaLine(line) {
+  const t = String(line || '').trim();
+  if (!t) return false;
+  if (/^(?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}:/i.test(t)) {
+    return true;
+  }
+  if (/^[A-Za-z][A-Za-z0-9_₀-₉ₛ()]{0,18}\s*=\s*.+/.test(t) && /[+\-×*/²³⁴₀-₉ₛθΔπ]|cos|sin|log|exp|limit/i.test(t)) {
+    return t.length <= 160;
+  }
+  return false;
+}
+
+function parseZ21FormulaParts(line) {
+  const t = normalizeZ21ScientificText(line).trim();
+  const labelMatch = t.match(/^((?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}):\s*(.+)$/i);
+  if (labelMatch) {
+    return { label: labelMatch[1].trim(), expr: labelMatch[2].trim() };
+  }
+  return { label: 'Persamaan Matematis', expr: t };
+}
+
+function isZ21NumberedSectionHeading(line) {
+  const t = String(line || '').trim();
+  const m = t.match(/^(\d+)\.\s+([A-ZÀ-ÖØ-Þ].{3,92})$/);
+  if (!m) return false;
+  const body = m[2].trim();
+  if (/[.:;]$/.test(body)) return false;
+  if (/^\d/.test(body)) return false;
+  return true;
+}
+
+function splitZ21ContentSections(rawSections = [], fallbackHeading = 'Ringkasan Utama') {
+  const out = [];
+  for (const sec of (Array.isArray(rawSections) ? rawSections : [])) {
+    if (!sec || typeof sec !== 'object') continue;
+    const initialHeading = sec.heading ? normalizeZ21ScientificText(sec.heading) : fallbackHeading;
+    const rawLines = String(sec.content || '').split(/\r?\n/);
+    let cur = {
+      heading: initialHeading,
+      contentLines: [],
+      bullets: Array.isArray(sec.bullets) ? sec.bullets.map(b => normalizeZ21ScientificText(b)).filter(Boolean) : [],
+      table: sec.table || undefined
+    };
+    let usedInitial = false;
+
+    for (const rawLn of rawLines) {
+      const cleanLn = normalizeZ21ScientificText(rawLn.trim());
+      if (!cleanLn) continue;
+      if (isZ21NumberedSectionHeading(cleanLn) || /^#{2,4}\s+/.test(cleanLn)) {
+        const nextHeading = cleanLn.replace(/^#{2,4}\s+/, '').trim();
+        if (cur.contentLines.length > 0 || cur.bullets.length > 0 || cur.table || usedInitial) {
+          out.push({
+            heading: cur.heading,
+            content: cur.contentLines.join('\n'),
+            bullets: cur.bullets,
+            ...(cur.table ? { table: cur.table } : {})
+          });
+          cur = { heading: nextHeading, contentLines: [], bullets: [], table: undefined };
+        } else {
+          cur.heading = nextHeading;
+        }
+        usedInitial = true;
+      } else {
+        cur.contentLines.push(cleanLn);
+      }
+    }
+    if (cur.contentLines.length > 0 || cur.bullets.length > 0 || cur.table || (cur.heading && cur.heading !== fallbackHeading)) {
+      out.push({
+        heading: cur.heading,
+        content: cur.contentLines.join('\n'),
+        bullets: cur.bullets,
+        ...(cur.table ? { table: cur.table } : {})
+      });
+    }
+  }
+  return out;
+}
+
+function stripZ21MarkdownInline(str) {
+  return normalizeZ21ScientificText(str)
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/(^|\s)\*([^*\n]+)\*(\s|$)/g, '$1$2$3')
+    .replace(/`([^`]+)`/g, '$1')
+    .trim();
+}
+
+function normalizeZ21DocSpec(rawSpec = {}) {
+  const spec = { ...rawSpec };
+  const py = String(spec.python_code || '');
+  let format = String(spec.format || '').toLowerCase().trim().replace(/^\./, '');
+  const fnRaw = String(spec.filename || '').trim();
+  if (!format && /\.(pdf|docx|xlsx|csv)$/i.test(fnRaw)) {
+    format = fnRaw.match(/\.(pdf|docx|xlsx|csv)$/i)[1].toLowerCase();
+  }
+  if (!format && py) {
+    if (/\.xlsx\b|openpyxl|xlsxwriter/i.test(py)) format = 'xlsx';
+    else if (/\.docx\b|python-docx|\bdocx\b/i.test(py)) format = 'docx';
+    else if (/\.csv\b|csv\.writer/i.test(py)) format = 'csv';
+    else format = 'pdf';
+  }
+  if (!['pdf', 'docx', 'xlsx', 'csv'].includes(format)) format = 'pdf';
+  spec.format = format;
+  spec.filename = sanitizeZ21ArtifactFilename(fnRaw || `Dokumen_Z21.${format}`, format);
+
+  if (!spec.title) {
+    const mTitle = py.match(/(?:heading|title|suptitle)\s*\(\s*["']([^"'\n]{3,80})["']/i);
+    spec.title = mTitle ? mTitle[1] : spec.filename.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ');
+  }
+  spec.title = stripZ21MarkdownInline(spec.title);
+  if (spec.subtitle) spec.subtitle = stripZ21MarkdownInline(spec.subtitle);
+
+  if (Array.isArray(spec.sections)) {
+    const preNormalizedSections = spec.sections.map((s) => {
+      if (!s || typeof s !== 'object') return s;
+      const cleanSec = { ...s };
+      if (cleanSec.heading) cleanSec.heading = stripZ21MarkdownInline(cleanSec.heading);
+      if (cleanSec.content) cleanSec.content = normalizeZ21ScientificText(cleanSec.content).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+      if (Array.isArray(cleanSec.bullets)) {
+        cleanSec.bullets = cleanSec.bullets.map((b) => stripZ21MarkdownInline(b)).filter(Boolean);
+      }
+      if (cleanSec.table && typeof cleanSec.table === 'object') {
+        cleanSec.table = {
+          ...cleanSec.table,
+          title: cleanSec.table.title ? stripZ21MarkdownInline(cleanSec.table.title) : cleanSec.table.title,
+          headers: Array.isArray(cleanSec.table.headers) ? cleanSec.table.headers.map(stripZ21MarkdownInline) : [],
+          rows: Array.isArray(cleanSec.table.rows) ? cleanSec.table.rows.map(r => Array.isArray(r) ? r.map(c => normalizeZ21ScientificText(c).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1')) : r) : []
+        };
+      }
+      return cleanSec;
+    }).filter(s => s && (s.heading || s.content || (Array.isArray(s.bullets) && s.bullets.length > 0) || s.table));
+    spec.sections = splitZ21ContentSections(preNormalizedSections, spec.title || 'Ringkasan Utama');
+  }
+
+  if (Array.isArray(spec.tables)) {
+    spec.tables = spec.tables.map((t) => {
+      if (!t || typeof t !== 'object') return t;
+      return {
+        ...t,
+        title: t.title ? stripZ21MarkdownInline(t.title) : t.title,
+        headers: Array.isArray(t.headers) ? t.headers.map(stripZ21MarkdownInline) : [],
+        rows: Array.isArray(t.rows) ? t.rows.map(r => Array.isArray(r) ? r.map(c => normalizeZ21ScientificText(c).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1')) : r) : []
+      };
+    });
+  }
+
+  if ((!Array.isArray(spec.sections) || spec.sections.length === 0) && (!Array.isArray(spec.sheets) || spec.sheets.length === 0) && (!Array.isArray(spec.tables) || spec.tables.length === 0)) {
+    if (spec.content && typeof spec.content === 'string') {
+      spec.sections = splitZ21ContentSections([{ heading: spec.title, content: normalizeZ21ScientificText(spec.content) }], spec.title);
+    } else if (py) {
+      const literalStrings = [];
+      const reStr = /["']([^"'\n]{4,140})["']/g;
+      let sm;
+      while ((sm = reStr.exec(py)) !== null && literalStrings.length < 24) {
+        if (!/^(?:[A-Z]:|\/|[a-z0-9_.-]+\.(?:pdf|docx|xlsx|csv)|Helvetica|Arial|Table Grid)$/i.test(sm[1])) {
+          literalStrings.push(sm[1]);
+        }
+      }
+      spec.sections = [{
+        heading: spec.title,
+        content: literalStrings.length > 0 ? normalizeZ21ScientificText(literalStrings.join('\n')) : 'Dokumen dihasilkan oleh Zoz Router Z21 Document Engine.'
+      }];
+    } else {
+      spec.sections = [{ heading: spec.title, content: 'Dokumen Z21 berhasil dibuat.' }];
+    }
+  }
+  return spec;
+}
+
+function pdfAsciiSafe(s) {
+  let out = '';
+  const cleaned = normalizeZ21ScientificText(s).normalize('NFC');
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    const cp = cleaned.charCodeAt(i);
+    if (ch === '\\') { out += '\\\\'; continue; }
+    if (ch === '(') { out += '\\('; continue; }
+    if (ch === ')') { out += '\\)'; continue; }
+    if (cp >= 0x20 && cp <= 0x7E) { out += ch; continue; }
+    // WinAnsiEncoding byte mapping (° ± ² ³ ¹ × • – —)
+    if (cp === 0x00B0) { out += String.fromCharCode(0xB0); continue; } // °
+    if (cp === 0x00B1) { out += String.fromCharCode(0xB1); continue; } // ±
+    if (cp === 0x00B2) { out += String.fromCharCode(0xB2); continue; } // ²
+    if (cp === 0x00B3) { out += String.fromCharCode(0xB3); continue; } // ³
+    if (cp === 0x00B9) { out += String.fromCharCode(0xB9); continue; } // ¹
+    if (cp === 0x00D7) { out += 'x'; continue; } // × fallback safe visible x in Type1 Helvetica if D7 font glyph differs
+    if (cp === 0x00B7) { out += String.fromCharCode(0xB7); continue; } // ·
+    if (cp === 0x2022) { out += String.fromCharCode(0x95); continue; } // •
+    if (cp === 0x2013) { out += String.fromCharCode(0x96); continue; } // –
+    if (cp === 0x2014) { out += String.fromCharCode(0x97); continue; } // —
+    if (cp === 0x2018 || cp === 0x2019) { out += "'"; continue; }
+    if (cp === 0x201C || cp === 0x201D) { out += '"'; continue; }
+    if (cp === 0x2026) { out += '...'; continue; }
+    // Unicode subscripts & math symbols mapped cleanly for Type1 Helvetica fallback
+    if (cp >= 0x2080 && cp <= 0x2089) { out += String(cp - 0x2080); continue; } // ₀-₉
+    if (cp === 0x209B) { out += 's'; continue; } // ₛ
+    if (cp === 0x03B8) { out += 'theta'; continue; } // θ
+    if (cp === 0x03B1) { out += 'alpha'; continue; } // α
+    if (cp === 0x03B2) { out += 'beta'; continue; } // β
+    if (cp === 0x03B3) { out += 'gamma'; continue; } // γ
+    if (cp === 0x0394) { out += 'Delta'; continue; } // Δ
+    if (cp === 0x03C0) { out += 'pi'; continue; } // π
+    if (cp === 0x211D) { out += 'R'; continue; } // ℝ
+    if (cp === 0x2248) { out += '~='; continue; } // ≈
+    if (cp === 0x2260) { out += '!='; continue; } // ≠
+    if (cp === 0x2264) { out += '<='; continue; } // ≤
+    if (cp === 0x2265) { out += '>='; continue; } // ≥
+    if (cp >= 0xA0 && cp <= 0xFF) { out += String.fromCharCode(cp); continue; }
+    out += ' ';
+  }
+  return out;
+}
+
+function wrapPdfLine(str, maxChars = 84) {
+  const words = String(str || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  if (words.length === 0) return [''];
+  const lines = [];
+  let cur = '';
+  for (const w of words) {
+    if (!cur) {
+      cur = w;
+    } else if ((cur.length + 1 + w.length) <= maxChars) {
+      cur += ' ' + w;
+    } else {
+      lines.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+function buildZozNativePdfBuffer(rawSpec) {
+  const spec = normalizeZ21DocSpec(rawSpec);
+  const drawOps = [];
+  let y = 780;
+
+  const pagesOps = [];
+  const pushPageBreakIfNeeded = (neededHeight = 20) => {
+    if ((y - neededHeight) < 58) {
+      pagesOps.push(drawOps.join('\n'));
+      drawOps.length = 0;
+      y = 780;
+    }
+  };
+
+  // Executive header band
+  const titleLines = wrapPdfLine(spec.title, 54).slice(0, 2);
+  const headerH = 28 + (titleLines.length * 18);
+  const headerBottom = 802 - headerH;
+  drawOps.push(`0.06 0.09 0.16 rg 40 ${headerBottom} 515 ${headerH} re f`);
+  drawOps.push(`0.22 0.74 0.97 rg 40 ${headerBottom} 515 3 re f`);
+  titleLines.forEach((tl, ti) => {
+    const ty = 802 - 24 - (ti * 18);
+    drawOps.push(`1 1 1 rg BT /F2 15 Tf 54 ${ty} Td (${pdfAsciiSafe(tl)}) Tj ET`);
+  });
+  y = headerBottom - 18;
+
+  if (spec.subtitle) {
+    for (const subLine of wrapPdfLine(spec.subtitle, 86)) {
+      pushPageBreakIfNeeded(16);
+      drawOps.push(`0.35 0.42 0.52 rg BT /F1 10 Tf 40 ${y} Td (${pdfAsciiSafe(subLine)}) Tj ET`);
+      y -= 15;
+    }
+    y -= 6;
+  }
+
+  const drawNativePdfTable = (tbl) => {
+    const headers = Array.isArray(tbl.headers) ? tbl.headers : [];
+    const rows = Array.isArray(tbl.rows) ? tbl.rows : [];
+    const colCount = Math.max(1, headers.length || (rows[0] && Array.isArray(rows[0]) ? rows[0].length : 1));
+    const tableX = 40;
+    const tableW = 515;
+    const colW = tableW / colCount;
+    const maxCharsPerCell = Math.max(14, Math.floor((colW - 12) / 5.1));
+
+    const drawGridRow = (cells, isHeader, rowIdx) => {
+      const wrappedCols = [];
+      let maxLines = 1;
+      for (let c = 0; c < colCount; c++) {
+        const lines = wrapPdfLine(cells[c] ?? '', maxCharsPerCell);
+        wrappedCols.push(lines);
+        if (lines.length > maxLines) maxLines = lines.length;
+      }
+      const rowH = Math.max(20, (maxLines * 12) + 8);
+      pushPageBreakIfNeeded(rowH + 6);
+      const rowBottom = y - rowH;
+      if (isHeader) {
+        drawOps.push(`0.12 0.16 0.23 rg ${tableX} ${rowBottom} ${tableW} ${rowH} re f`);
+      } else if (rowIdx % 2 === 1) {
+        drawOps.push(`0.97 0.98 0.99 rg ${tableX} ${rowBottom} ${tableW} ${rowH} re f`);
+      } else {
+        drawOps.push(`1 1 1 rg ${tableX} ${rowBottom} ${tableW} ${rowH} re f`);
+      }
+      drawOps.push(`0.80 0.84 0.88 RG 0.5 w ${tableX} ${rowBottom} ${tableW} ${rowH} re S`);
+      for (let c = 1; c < colCount; c++) {
+        const vx = (tableX + c * colW).toFixed(2);
+        drawOps.push(`${vx} ${rowBottom} m ${vx} ${y} l S`);
+      }
+      for (let c = 0; c < colCount; c++) {
+        const cx = (tableX + c * colW + 6).toFixed(2);
+        const fontTag = isHeader ? '/F2' : '/F1';
+        const rgb = isHeader ? '1 1 1 rg' : '0.12 0.16 0.23 rg';
+        wrappedCols[c].forEach((ln, li) => {
+          const ly = y - 13 - (li * 12);
+          drawOps.push(`${rgb} BT ${fontTag} 9 Tf ${cx} ${ly} Td (${pdfAsciiSafe(ln)}) Tj ET`);
+        });
+      }
+      y = rowBottom;
+    };
+
+    if (headers.length > 0) drawGridRow(headers, true, 0);
+    rows.forEach((r, ri) => drawGridRow(Array.isArray(r) ? r : [r], false, ri));
+    y -= 10;
+  };
+
+  for (const sec of (Array.isArray(spec.sections) ? spec.sections : [])) {
+    if (sec.heading && sec.heading !== spec.title) {
+      pushPageBreakIfNeeded(24);
+      y -= 4;
+      drawOps.push(`0.06 0.16 0.38 rg BT /F2 12 Tf 40 ${y} Td (${pdfAsciiSafe(sec.heading).slice(0, 82)}) Tj ET`);
+      drawOps.push(`0.88 0.91 0.94 rg 40 ${y - 4} 515 1 re f`);
+      y -= 18;
+    }
+    if (sec.content) {
+      for (const para of String(sec.content).split(/\r?\n/)) {
+        const pTrim = para.trim();
+        if (!pTrim) continue;
+        if (isZ21FormulaLine(pTrim)) {
+          const { label, expr } = parseZ21FormulaParts(pTrim);
+          const exprLines = wrapPdfLine(expr, 74);
+          const boxH = 22 + (exprLines.length * 14);
+          pushPageBreakIfNeeded(boxH + 8);
+          const boxBot = y - boxH;
+          drawOps.push(`0.94 0.98 1.00 rg 40 ${boxBot} 515 ${boxH} re f`);
+          drawOps.push(`0.01 0.52 0.78 rg 40 ${boxBot} 3 ${boxH} re f`);
+          drawOps.push(`0.73 0.90 0.99 RG 0.5 w 40 ${boxBot} 515 ${boxH} re S`);
+          drawOps.push(`0.01 0.41 0.63 rg BT /F2 9 Tf 52 ${y - 13} Td (${pdfAsciiSafe(label)}) Tj ET`);
+          exprLines.forEach((el, ei) => {
+            drawOps.push(`0.06 0.09 0.16 rg BT /F2 10.5 Tf 52 ${y - 27 - (ei * 14)} Td (${pdfAsciiSafe(el)}) Tj ET`);
+          });
+          y = boxBot - 8;
+          continue;
+        }
+        for (const line of wrapPdfLine(pTrim, 86)) {
+          pushPageBreakIfNeeded(15);
+          drawOps.push(`0.15 0.20 0.28 rg BT /F1 10 Tf 40 ${y} Td (${pdfAsciiSafe(line)}) Tj ET`);
+          y -= 14;
+        }
+        y -= 3;
+      }
+    }
+    if (Array.isArray(sec.bullets)) {
+      for (const b of sec.bullets) {
+        const lines = wrapPdfLine(String(b || ''), 82);
+        lines.forEach((line, li) => {
+          pushPageBreakIfNeeded(15);
+          const prefix = li === 0 ? `${String.fromCharCode(0x95)} ` : '  ';
+          drawOps.push(`0.15 0.20 0.28 rg BT /F1 10 Tf 48 ${y} Td (${prefix}${pdfAsciiSafe(line)}) Tj ET`);
+          y -= 14;
+        });
+      }
+      if (sec.bullets.length > 0) y -= 4;
+    }
+    if (sec.table && Array.isArray(sec.table.rows)) {
+      drawNativePdfTable(sec.table);
+    }
+  }
+
+  for (const tbl of (Array.isArray(spec.tables) ? spec.tables : [])) {
+    if (tbl.title && !(Array.isArray(spec.sections) && spec.sections.some(s => s.heading === tbl.title))) {
+      pushPageBreakIfNeeded(22);
+      drawOps.push(`0.06 0.16 0.38 rg BT /F2 11.5 Tf 40 ${y} Td (${pdfAsciiSafe(tbl.title).slice(0, 82)}) Tj ET`);
+      y -= 16;
+    }
+    drawNativePdfTable(tbl);
+  }
+
+  pagesOps.push(drawOps.join('\n'));
+
+  // Footer with page count on every page
+  const totalPages = pagesOps.length;
+  for (let pi = 0; pi < totalPages; pi++) {
+    pagesOps[pi] += `\n0.88 0.91 0.94 rg 40 42 515 0.7 re f\n0.55 0.60 0.68 rg BT /F1 8.5 Tf 255 28 Td (Halaman ${pi + 1} dari ${totalPages}) Tj ET`;
+  }
+
+  const objects = [];
+  const addObj = (bodyStr) => {
+    objects.push(bodyStr);
+    return objects.length;
+  };
+  const catalogId = addObj('');
+  const pagesId = addObj('');
+  const font1Id = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+  const font2Id = addObj('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+
+  const pageIds = [];
+  for (const opStr of pagesOps) {
+    const streamBuf = Buffer.from(opStr, 'latin1');
+    const contentId = addObj(`<< /Length ${streamBuf.length} >>\nstream\n${opStr}\nendstream`);
+    const pageId = addObj(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${font1Id} 0 R /F2 ${font2Id} 0 R >> >> /Contents ${contentId} 0 R >>`);
+    pageIds.push(pageId);
+  }
+  objects[catalogId - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
+  objects[pagesId - 1] = `<< /Type /Pages /Kids [${pageIds.map(id => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`;
+
+  const chunks = [Buffer.from('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n', 'latin1')];
+  const offsets = [0];
+  let bytePos = chunks[0].length;
+  for (let i = 0; i < objects.length; i++) {
+    offsets.push(bytePos);
+    const objChunk = Buffer.from(`${i + 1} 0 obj\n${objects[i]}\nendobj\n`, 'latin1');
+    chunks.push(objChunk);
+    bytePos += objChunk.length;
+  }
+  const xrefOffset = bytePos;
+  let xrefStr = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i <= objects.length; i++) {
+    xrefStr += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+  }
+  const trailer = `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  chunks.push(Buffer.from(xrefStr + trailer, 'latin1'));
+  return Buffer.concat(chunks);
+}
+
+function buildZozNativeDocxBuffer(rawSpec) {
+  const spec = normalizeZ21DocSpec(rawSpec);
+  const bodyNodes = [];
+
+  bodyNodes.push(`<w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>${escapeZozXml(spec.title)}</w:t></w:r></w:p>`);
+  if (spec.subtitle) {
+    bodyNodes.push(`<w:p><w:r><w:rPr><w:color w:val="64748B"/><w:i/></w:rPr><w:t>${escapeZozXml(spec.subtitle)}</w:t></w:r></w:p>`);
+  }
+
+  const pushTable = (tbl) => {
+    const rowsXml = [];
+    const headers = Array.isArray(tbl.headers) ? tbl.headers : [];
+    const rows = Array.isArray(tbl.rows) ? tbl.rows : [];
+    if (headers.length > 0) {
+      const cells = headers.map(h =>
+        `<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="1E293B"/></w:tcPr><w:p><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:t>${escapeZozXml(h)}</w:t></w:r></w:p></w:tc>`
+      ).join('');
+      rowsXml.push(`<w:tr>${cells}</w:tr>`);
+    }
+    for (const r of rows) {
+      const arr = Array.isArray(r) ? r : [r];
+      const cells = arr.map(c =>
+        `<w:tc><w:p><w:r><w:t>${escapeZozXml(c)}</w:t></w:r></w:p></w:tc>`
+      ).join('');
+      rowsXml.push(`<w:tr>${cells}</w:tr>`);
+    }
+    if (rowsXml.length > 0) {
+      bodyNodes.push(`<w:tbl><w:tblPr><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="CBD5E1"/><w:left w:val="single" w:sz="4" w:space="0" w:color="CBD5E1"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="CBD5E1"/><w:right w:val="single" w:sz="4" w:space="0" w:color="CBD5E1"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="E2E8F0"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="E2E8F0"/></w:tblBorders></w:tblPr>${rowsXml.join('')}</w:tbl>`);
+    }
+  };
+
+  for (const sec of (Array.isArray(spec.sections) ? spec.sections : [])) {
+    if (sec.heading && sec.heading !== spec.title) {
+      bodyNodes.push(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>${escapeZozXml(sec.heading)}</w:t></w:r></w:p>`);
+    }
+    if (sec.content) {
+      for (const line of String(sec.content).split(/\r?\n/)) {
+        const tLine = line.trim();
+        if (!tLine) continue;
+        if (isZ21FormulaLine(tLine)) {
+          const { label, expr } = parseZ21FormulaParts(tLine);
+          bodyNodes.push(`<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:ind w:left="240" w:right="240"/><w:spacing w:before="100" w:after="100"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t>${escapeZozXml(label)}: </w:t></w:r><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/></w:rPr><w:t xml:space="preserve">${escapeZozXml(expr)}</w:t></w:r></w:p>`);
+          continue;
+        }
+        const kvMatch = tLine.match(/^((?:Lokasi|Tanggal|Parameter\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\s*:)\s*(.+)$/i);
+        if (kvMatch) {
+          bodyNodes.push(`<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${escapeZozXml(kvMatch[1])} </w:t></w:r><w:r><w:t xml:space="preserve">${escapeZozXml(kvMatch[2])}</w:t></w:r></w:p>`);
+          continue;
+        }
+        bodyNodes.push(`<w:p><w:r><w:t xml:space="preserve">${escapeZozXml(tLine)}</w:t></w:r></w:p>`);
+      }
+    }
+    if (Array.isArray(sec.bullets)) {
+      for (const b of sec.bullets) {
+        bodyNodes.push(`<w:p><w:r><w:t xml:space="preserve">• ${escapeZozXml(b)}</w:t></w:r></w:p>`);
+      }
+    }
+    if (sec.table) pushTable(sec.table);
+  }
+
+  for (const tbl of (Array.isArray(spec.tables) ? spec.tables : [])) {
+    if (tbl.title) {
+      bodyNodes.push(`<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>${escapeZozXml(tbl.title)}</w:t></w:r></w:p>`);
+    }
+    pushTable(tbl);
+  }
+
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>`;
+
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`;
+
+  const wordRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:rPr><w:b/><w:sz w:val="36"/><w:color w:val="0F172A"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:rPr><w:b/><w:sz w:val="28"/><w:color w:val="1E293B"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:rPr><w:b/><w:sz w:val="24"/><w:color w:val="334155"/></w:rPr></w:style>
+</w:styles>`;
+
+  const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>${bodyNodes.join('')}<w:sectPr/></w:body>
+</w:document>`;
+
+  return buildZozNativeZipBuffer([
+    { name: '[Content_Types].xml', data: contentTypes },
+    { name: '_rels/.rels', data: rels },
+    { name: 'word/_rels/document.xml.rels', data: wordRels },
+    { name: 'word/styles.xml', data: stylesXml },
+    { name: 'word/document.xml', data: docXml }
+  ]);
+}
+
+function buildZozNativeXlsxBuffer(rawSpec) {
+  const spec = normalizeZ21DocSpec(rawSpec);
+  const sheets = (Array.isArray(spec.sheets) && spec.sheets.length > 0)
+    ? spec.sheets
+    : (Array.isArray(spec.tables) && spec.tables.length > 0)
+      ? spec.tables.map((t, i) => ({ name: t.title || `Sheet${i + 1}`, headers: t.headers || [], rows: t.rows || [], formulas: t.formulas || [] }))
+      : [{ name: 'Data', headers: ['Kolom', 'Nilai'], rows: [['Judul', spec.title || 'Data Z21']], formulas: [] }];
+
+  const sheetEntries = [];
+  const wbSheetsXml = [];
+  const wbRelsXml = [];
+  const ctOverrides = [];
+
+  sheets.forEach((sh, sIdx) => {
+    const sheetNum = sIdx + 1;
+    const sheetName = escapeZozXml(String(sh.name || `Sheet${sheetNum}`).replace(/[:\\/?*\[\]]/g, '').slice(0, 30) || `Sheet${sheetNum}`);
+    const rowsXml = [];
+    let rowNum = 1;
+
+    const makeCellXml = (rIdx, cIdx, val, isHeader = false) => {
+      const ref = `${colIdxToA1(cIdx)}${rIdx}`;
+      const styleAttr = isHeader ? ' s="1"' : '';
+      const rawStr = val === null || val === undefined ? '' : String(val);
+      if (rawStr.startsWith('=')) {
+        return `<c r="${ref}"${styleAttr}><f>${escapeZozXml(rawStr.slice(1))}</f></c>`;
+      }
+      if (typeof val === 'number' && Number.isFinite(val)) {
+        return `<c r="${ref}"${styleAttr} t="n"><v>${val}</v></c>`;
+      }
+      if (/^-?\d+(?:\.\d+)?$/.test(rawStr.trim()) && rawStr.trim().length <= 15 && !isHeader) {
+        return `<c r="${ref}"${styleAttr} t="n"><v>${rawStr.trim()}</v></c>`;
+      }
+      return `<c r="${ref}"${styleAttr} t="inlineStr"><is><t>${escapeZozXml(rawStr)}</t></is></c>`;
+    };
+
+    if (Array.isArray(sh.headers) && sh.headers.length > 0) {
+      const cells = sh.headers.map((h, ci) => makeCellXml(rowNum, ci, h, true)).join('');
+      rowsXml.push(`<row r="${rowNum}">${cells}</row>`);
+      rowNum++;
+    }
+    for (const r of (Array.isArray(sh.rows) ? sh.rows : [])) {
+      const arr = Array.isArray(r) ? r : [r];
+      const cells = arr.map((c, ci) => makeCellXml(rowNum, ci, c, false)).join('');
+      rowsXml.push(`<row r="${rowNum}">${cells}</row>`);
+      rowNum++;
+    }
+    if (Array.isArray(sh.formulas) && sh.formulas.length > 0) {
+      const fRowCells = [];
+      for (const fItem of sh.formulas) {
+        if (fItem && typeof fItem === 'object') {
+          const fStr = String(fItem.formula || fItem.value || '').startsWith('=') ? String(fItem.formula || fItem.value) : ('=' + String(fItem.formula || fItem.value || 'SUM(A1:A1)'));
+          if (fItem.label) fRowCells.push(makeCellXml(rowNum, 0, fItem.label, true));
+          const targetCol = Number.isInteger(fItem.col) ? fItem.col : (fRowCells.length > 0 ? 1 : 0);
+          fRowCells.push(makeCellXml(rowNum, targetCol, fStr, false));
+        }
+      }
+      if (fRowCells.length > 0) {
+        rowsXml.push(`<row r="${rowNum}">${fRowCells.join('')}</row>`);
+      }
+    }
+
+    const wsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>${rowsXml.join('')}</sheetData>
+</worksheet>`;
+    sheetEntries.push({ name: `xl/worksheets/sheet${sheetNum}.xml`, data: wsXml });
+    wbSheetsXml.push(`<sheet name="${sheetName}" sheetId="${sheetNum}" r:id="rId${sheetNum}"/>`);
+    wbRelsXml.push(`<Relationship Id="rId${sheetNum}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${sheetNum}.xml"/>`);
+    ctOverrides.push(`<Override PartName="/xl/worksheets/sheet${sheetNum}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`);
+  });
+
+  const stylesRelId = `rId${sheets.length + 1}`;
+  wbRelsXml.push(`<Relationship Id="${stylesRelId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`);
+
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  ${ctOverrides.join('\n  ')}
+</Types>`;
+
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+
+  const wbXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>${wbSheetsXml.join('')}</sheets>
+</workbook>`;
+
+  const wbRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  ${wbRelsXml.join('\n  ')}
+</Relationships>`;
+
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font></fonts>
+  <fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1E293B"/></patternFill></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>
+</styleSheet>`;
+
+  return buildZozNativeZipBuffer([
+    { name: '[Content_Types].xml', data: contentTypes },
+    { name: '_rels/.rels', data: rels },
+    { name: 'xl/workbook.xml', data: wbXml },
+    { name: 'xl/_rels/workbook.xml.rels', data: wbRels },
+    { name: 'xl/styles.xml', data: stylesXml },
+    ...sheetEntries
+  ]);
+}
+
+function buildZozNativeCsvBuffer(rawSpec) {
+  const spec = normalizeZ21DocSpec(rawSpec);
+  const sh = (Array.isArray(spec.sheets) && spec.sheets[0]) || (Array.isArray(spec.tables) && spec.tables[0]) || { headers: ['Judul', 'Keterangan'], rows: [[spec.title || 'Dokumen', spec.content || '']] };
+  const escCsv = (v) => {
+    const s = String(v ?? '');
+    return /[",\r\n]/.test(s) ? ('"' + s.replace(/"/g, '""') + '"') : s;
+  };
+  const lines = [];
+  if (Array.isArray(sh.headers) && sh.headers.length > 0) lines.push(sh.headers.map(escCsv).join(','));
+  for (const r of (Array.isArray(sh.rows) ? sh.rows : [])) {
+    lines.push((Array.isArray(r) ? r : [r]).map(escCsv).join(','));
+  }
+  return Buffer.from('\uFEFF' + lines.join('\r\n'), 'utf8');
+}
+
+function compileZ21DocumentArtifactNode(rawSpec, outputDir) {
+  const spec = normalizeZ21DocSpec(rawSpec);
+  let buf;
+  if (spec.format === 'docx') buf = buildZozNativeDocxBuffer(spec);
+  else if (spec.format === 'xlsx') buf = buildZozNativeXlsxBuffer(spec);
+  else if (spec.format === 'csv') buf = buildZozNativeCsvBuffer(spec);
+  else buf = buildZozNativePdfBuffer(spec);
+
+  const filePath = path.join(outputDir, spec.filename);
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(filePath, buf);
+  return {
+    filePath,
+    filename: spec.filename,
+    ext: spec.format,
+    mime: getZ21ArtifactMime(spec.format),
+    byteSize: buf.length,
+    engine: 'zoz-native-compiler'
+  };
+}
+
+function buildZ21PreviewMarkdown(spec, filename, ext, librariesUsed, engine) {
+  const parts = [];
+  parts.push(`# ${spec.title || filename}`);
+  if (spec.subtitle) parts.push(`*${spec.subtitle}*`);
+
+  for (const sec of (Array.isArray(spec.sections) ? spec.sections : [])) {
+    if (sec.heading && sec.heading !== spec.title) parts.push(`## ${normalizeZ21ScientificText(sec.heading)}`);
+    if (sec.content) parts.push(normalizeZ21ScientificText(sec.content));
+    if (Array.isArray(sec.bullets) && sec.bullets.length > 0) {
+      parts.push(sec.bullets.map(b => `- ${normalizeZ21ScientificText(b)}`).join('\n'));
+    }
+    if (sec.table && Array.isArray(sec.table.headers)) {
+      const hdr = sec.table.headers.map(h => String(h ?? ''));
+      parts.push('| ' + hdr.join(' | ') + ' |\n| ' + hdr.map(() => '---').join(' | ') + ' |\n' +
+        (sec.table.rows || []).map(r => '| ' + (Array.isArray(r) ? r : [r]).map(c => String(c ?? '')).join(' | ') + ' |').join('\n'));
+    }
+  }
+  for (const tbl of (Array.isArray(spec.tables) ? spec.tables : [])) {
+    if (tbl.title && !(Array.isArray(spec.sections) && spec.sections.some(s => s.heading === tbl.title))) {
+      parts.push(`## ${tbl.title}`);
+    }
+    const hdr = Array.isArray(tbl.headers) ? tbl.headers : [];
+    if (hdr.length > 0) {
+      parts.push('| ' + hdr.join(' | ') + ' |\n| ' + hdr.map(() => '---').join(' | ') + ' |\n' +
+        (tbl.rows || []).map(r => '| ' + (Array.isArray(r) ? r : [r]).map(c => String(c ?? '')).join(' | ') + ' |').join('\n'));
+    }
+  }
+  for (const sh of (Array.isArray(spec.sheets) ? spec.sheets : [])) {
+    parts.push(`## Sheet: ${sh.name || 'Data'}`);
+    const hdr = Array.isArray(sh.headers) ? sh.headers : [];
+    if (hdr.length > 0) {
+      parts.push('| ' + hdr.join(' | ') + ' |\n| ' + hdr.map(() => '---').join(' | ') + ' |\n' +
+        (sh.rows || []).map(r => '| ' + (Array.isArray(r) ? r : [r]).map(c => String(c ?? '')).join(' | ') + ' |').join('\n'));
+    }
+    if (Array.isArray(sh.formulas) && sh.formulas.length > 0) {
+      parts.push('**Rumus Formula:** ' + sh.formulas.map(f => `\`${f.label ? f.label + ': ' : ''}${f.formula || f.value || ''}\``).join(', '));
+    }
+  }
+  return parts.join('\n\n');
+}
+
+const ZOZ_DOC_SANDBOX_PRELUDE_PY = [
+  'import os, sys, json, re, csv, math, zipfile, zlib, struct, io, builtins, types, importlib.util',
+  'ZOZ_OUTPUT_DIR = os.path.abspath(os.environ.get("ZOZ_OUTPUT_DIR", os.getcwd()))',
+  'os.chdir(ZOZ_OUTPUT_DIR)',
+  '_orig_open = builtins.open',
+  'def _zoz_safe_open(file, mode="r", *args, **kwargs):',
+  '    if isinstance(file, (str, os.PathLike)):',
+  '        fpath = os.fspath(file)',
+  '        bname = os.path.basename(fpath)',
+  '        if not bname.startswith("_zoz_") and any(m in str(mode) for m in ("w", "a", "x", "+")):',
+  '            abs_cand = os.path.abspath(fpath)',
+  '            if not abs_cand.startswith(ZOZ_OUTPUT_DIR):',
+  '                fpath = os.path.join(ZOZ_OUTPUT_DIR, bname or "output.bin")',
+  '            parent = os.path.dirname(os.path.abspath(fpath))',
+  '            if parent and not os.path.exists(parent):',
+  '                os.makedirs(parent, exist_ok=True)',
+  '            return _orig_open(fpath, mode, *args, **kwargs)',
+  '    return _orig_open(file, mode, *args, **kwargs)',
+  'builtins.open = _zoz_safe_open',
+  'def _zoz_fallback_pdf_bytes(title, blocks):',
+  '    if importlib.util.find_spec("reportlab") is not None:',
+  '        from reportlab.lib.pagesizes import A4',
+  '        from reportlab.lib import colors',
+  '        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle',
+  '        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle',
+  '        buf = io.BytesIO()',
+  '        doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=42, rightMargin=42, topMargin=42, bottomMargin=42)',
+  '        styles = getSampleStyleSheet()',
+  '        h_style = ParagraphStyle("ZozH", parent=styles["Heading1"], textColor=colors.HexColor("#0f172a"))',
+  '        story = []',
+  '        if title: story.append(Paragraph(str(title), h_style))',
+  '        for b in blocks:',
+  '            if isinstance(b, dict) and b.get("type") == "table":',
+  '                tdata = b.get("rows") or []',
+  '                if tdata:',
+  '                    t = Table(tdata)',
+  '                    t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1e293b")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.5,colors.HexColor("#cbd5e1")),("FONTSIZE",(0,0),(-1,-1),9)]))',
+  '                    story.append(t)',
+  '                    story.append(Spacer(1, 8))',
+  '            elif isinstance(b, dict) and b.get("type") == "heading":',
+  '                story.append(Paragraph(str(b.get("text") or ""), styles["Heading2"]))',
+  '            else:',
+  '                txt = str(b.get("text") if isinstance(b, dict) else b)',
+  '                if txt.strip(): story.append(Paragraph(txt.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"), styles["Normal"]))',
+  '                story.append(Spacer(1, 5))',
+  '        if not story: story.append(Paragraph("ZOZ Document", styles["Normal"]))',
+  '        doc.build(story)',
+  '        return buf.getvalue()',
+  '    lines = [str(b.get("text") if isinstance(b, dict) else b) for b in blocks if b]',
+  '    ops = "BT /F1 11 Tf 40 780 Td (" + str(title or "ZOZ PDF").replace("\\\\","\\\\\\\\").replace("(","\\\\(").replace(")","\\\\)")[:80] + ") Tj ET\\n"',
+  '    y = 755',
+  '    for ln in lines[:45]:',
+  '        safe_ln = ln.encode("ascii", "replace").decode("ascii").replace("\\\\","\\\\\\\\").replace("(","\\\\(").replace(")","\\\\)")[:85]',
+  '        ops += f"BT /F1 10 Tf 40 {y} Td ({safe_ln}) Tj ET\\n"',
+  '        y -= 14',
+  '    stream = ops.encode("latin1")',
+  '    objs = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>", b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>", b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", f"<< /Length {len(stream)} >>\\nstream\\n".encode("latin1") + stream + b"\\nendstream"]',
+  '    out = io.BytesIO()',
+  '    out.write(b"%PDF-1.4\\n")',
+  '    offs = []',
+  '    for idx, ob in enumerate(objs, 1):',
+  '        offs.append(out.tell())',
+  '        out.write(f"{idx} 0 obj\\n".encode("latin1") + ob + b"\\nendobj\\n")',
+  '    xr = out.tell()',
+  '    out.write(f"xref\\n0 {len(objs)+1}\\n0000000000 65535 f \\n".encode("latin1"))',
+  '    for o in offs: out.write(f"{o:010d} 00000 n \\n".encode("latin1"))',
+  '    out.write(f"trailer\\n<< /Size {len(objs)+1} /Root 1 0 R >>\\nstartxref\\n{xr}\\n%%EOF\\n".encode("latin1"))',
+  '    return out.getvalue()',
+  'if importlib.util.find_spec("fpdf") is None:',
+  '    _fpdf_mod = types.ModuleType("fpdf")',
+  '    class _ZozFPDF:',
+  '        def __init__(self, orientation="P", unit="mm", format="A4"):',
+  '            self._blocks = []',
+  '            self._title = ""',
+  '            self._is_bold = False',
+  '        def add_page(self): pass',
+  '        def set_auto_page_break(self, auto, margin=0): pass',
+  '        def set_font(self, family, style="", size=12): self._is_bold = "B" in str(style).upper()',
+  '        def set_text_color(self, *args): pass',
+  '        def set_fill_color(self, *args): pass',
+  '        def set_draw_color(self, *args): pass',
+  '        def set_xy(self, x, y): pass',
+  '        def set_x(self, x): pass',
+  '        def set_y(self, y): pass',
+  '        def ln(self, h=None): pass',
+  '        def image(self, *args, **kwargs): pass',
+  '        def cell(self, w, h=0, txt="", border=0, ln=0, align="", fill=False, link="", text=None):',
+  '            val = str(text if text is not None else txt or "").strip()',
+  '            if val:',
+  '                if not self._title and self._is_bold: self._title = val',
+  '                else: self._blocks.append({"type": "heading" if self._is_bold else "para", "text": val})',
+  '        def multi_cell(self, w, h=0, txt="", border=0, align="J", fill=False, text=None):',
+  '            val = str(text if text is not None else txt or "").strip()',
+  '            if val: self._blocks.append({"type": "para", "text": val})',
+  '        def output(self, name="", dest=""):',
+  '            data = _zoz_fallback_pdf_bytes(self._title, self._blocks)',
+  '            if dest == "S" or not name: return data',
+  '            target = os.path.join(ZOZ_OUTPUT_DIR, os.path.basename(str(name)))',
+  '            with _orig_open(target, "wb") as fh: fh.write(data)',
+  '            return target',
+  '    _fpdf_mod.FPDF = _ZozFPDF',
+  '    sys.modules["fpdf"] = _fpdf_mod',
+  'if importlib.util.find_spec("weasyprint") is None:',
+  '    _wp_mod = types.ModuleType("weasyprint")',
+  '    class _ZozWP_CSS:',
+  '        def __init__(self, string="", filename=None): self.string = string',
+  '    class _ZozWP_HTML:',
+  '        def __init__(self, string=None, filename=None, base_url=None):',
+  '            if filename and os.path.exists(filename):',
+  '                with _orig_open(filename, "r", encoding="utf-8", errors="ignore") as f: self.html = f.read()',
+  '            else:',
+  '                self.html = str(string or "")',
+  '        def write_pdf(self, target=None, stylesheets=None):',
+  '            clean = re.sub(r"<(style|script)[\\s\\S]*?</\\1>", " ", self.html, flags=re.I)',
+  '            tm = re.search(r"<h1[^>]*>([\\s\\S]*?)</h1>|<title[^>]*>([\\s\\S]*?)</title>", clean, flags=re.I)',
+  '            title = re.sub(r"<[^>]+>", "", (tm.group(1) or tm.group(2)) if tm else "WeasyPrint Z21 PDF").strip()',
+  '            blocks = []',
+  '            for tbl_m in re.finditer(r"<table[^>]*>([\\s\\S]*?)</table>", clean, flags=re.I):',
+  '                rows = []',
+  '                for tr_m in re.finditer(r"<tr[^>]*>([\\s\\S]*?)</tr>", tbl_m.group(1), flags=re.I):',
+  '                    cells = [re.sub(r"<[^>]+>", "", c).strip() for c in re.findall(r"<t[hd][^>]*>([\\s\\S]*?)</t[hd]>", tr_m.group(1), flags=re.I)]',
+  '                    if cells: rows.append(cells)',
+  '                if rows: blocks.append({"type": "table", "rows": rows})',
+  '            no_tbl = re.sub(r"<table[^>]*>[\\s\\S]*?</table>", "\\n", clean, flags=re.I)',
+  '            for seg in re.findall(r"<(?:h[2-4]|p|li|div)[^>]*>([\\s\\S]*?)</(?:h[2-4]|p|li|div)>", no_tbl, flags=re.I):',
+  '                txt = re.sub(r"<[^>]+>", "", seg).strip()',
+  '                if txt: blocks.append({"type": "para", "text": txt})',
+  '            if not blocks:',
+  '                txt = re.sub(r"<[^>]+>", " ", no_tbl).strip()',
+  '                if txt: blocks.append({"type": "para", "text": txt})',
+  '            data = _zoz_fallback_pdf_bytes(title, blocks)',
+  '            if target is None: return data',
+  '            if hasattr(target, "write"): target.write(data); return None',
+  '            out_path = os.path.join(ZOZ_OUTPUT_DIR, os.path.basename(str(target)))',
+  '            with _orig_open(out_path, "wb") as fh: fh.write(data)',
+  '            return out_path',
+  '    _wp_mod.HTML = _ZozWP_HTML',
+  '    _wp_mod.CSS = _ZozWP_CSS',
+  '    sys.modules["weasyprint"] = _wp_mod',
+  'if importlib.util.find_spec("xlsxwriter") is None:',
+  '    _xw_mod = types.ModuleType("xlsxwriter")',
+  '    class _ZozXWFormat:',
+  '        def __init__(self, props=None): self.props = dict(props or {})',
+  '        def set_bold(self, v=True): self.props["bold"] = v',
+  '        def set_bg_color(self, c): self.props["bg_color"] = c',
+  '        def set_font_color(self, c): self.props["font_color"] = c',
+  '        def set_num_format(self, f): self.props["num_format"] = f',
+  '    class _ZozXWChart:',
+  '        def __init__(self, opts=None):',
+  '            self.type = (opts or {}).get("type", "column")',
+  '            self.series = []',
+  '            self.title_text = ""',
+  '        def add_series(self, s): self.series.append(dict(s or {}))',
+  '        def set_title(self, t): self.title_text = (t or {}).get("name", "")',
+  '        def set_x_axis(self, x): pass',
+  '        def set_y_axis(self, y): pass',
+  '    class _ZozXWWorksheet:',
+  '        def __init__(self, ws): self._ws = ws',
+  '        def _coord_to_rc(self, r_or_a1, c=None):',
+  '            if isinstance(r_or_a1, str) and c is None:',
+  '                from openpyxl.utils.cell import coordinate_to_tuple',
+  '                return coordinate_to_tuple(r_or_a1)',
+  '            return (int(r_or_a1) + 1, int(c) + 1)',
+  '        def write(self, r, c_or_val, val=None, fmt=None):',
+  '            if isinstance(r, str):',
+  '                rr, cc = self._coord_to_rc(r); value = c_or_val; f_obj = val',
+  '            else:',
+  '                rr, cc = int(r) + 1, int(c_or_val) + 1; value = val; f_obj = fmt',
+  '            if isinstance(value, str) and value.startswith("="):',
+  '                return self.write_formula(rr - 1, cc - 1, value, f_obj)',
+  '            cell = self._ws.cell(row=rr, column=cc, value=value)',
+  '            self._apply_fmt(cell, f_obj)',
+  '        def write_string(self, r, c, s, fmt=None): self.write(r, c, str(s), fmt)',
+  '        def write_number(self, r, c, n, fmt=None): self.write(r, c, n, fmt)',
+  '        def write_formula(self, r, c, formula, fmt=None):',
+  '            f = str(formula or "")',
+  '            if not f.startswith("="): f = "=" + f',
+  '            cell = self._ws.cell(row=int(r)+1, column=int(c)+1, value=f)',
+  '            self._apply_fmt(cell, fmt)',
+  '        def write_row(self, r, c, data, fmt=None):',
+  '            for idx, item in enumerate(data or []): self.write(r, c + idx, item, fmt)',
+  '        def write_column(self, r, c, data, fmt=None):',
+  '            for idx, item in enumerate(data or []): self.write(r + idx, c, item, fmt)',
+  '        def set_column(self, *args, **kwargs): pass',
+  '        def set_row(self, *args, **kwargs): pass',
+  '        def merge_range(self, r1, c1, r2, c2, data="", fmt=None):',
+  '            self._ws.merge_cells(start_row=r1+1, start_column=c1+1, end_row=r2+1, end_column=c2+1)',
+  '            self.write(r1, c1, data, fmt)',
+  '        def _apply_fmt(self, cell, f_obj):',
+  '            if f_obj is None or not hasattr(f_obj, "props"): return',
+  '            from openpyxl.styles import Font, PatternFill',
+  '            p = f_obj.props',
+  '            if p.get("bold") or p.get("font_color"):',
+  '                fc = str(p.get("font_color") or "000000").lstrip("#")',
+  '                cell.font = Font(bold=bool(p.get("bold")), color=fc if len(fc)==6 else "000000")',
+  '            if p.get("bg_color"):',
+  '                bg = str(p.get("bg_color")).lstrip("#")',
+  '                if len(bg) == 6: cell.fill = PatternFill("solid", fgColor=bg)',
+  '        def insert_chart(self, cell_ref, chart, options=None):',
+  '            try:',
+  '                from openpyxl.chart import BarChart, LineChart, PieChart',
+  '                ch = LineChart() if chart.type == "line" else (PieChart() if chart.type == "pie" else BarChart())',
+  '                if chart.title_text: ch.title = chart.title_text',
+  '                for s in chart.series:',
+  '                    vals = s.get("values")',
+  '                    if isinstance(vals, str) and "!" in vals:',
+  '                        ch.add_data(vals, titles_from_data=False)',
+  '                self._ws.add_chart(ch, cell_ref if isinstance(cell_ref, str) else "E2")',
+  '            except Exception: pass',
+  '    class _ZozXWWorkbook:',
+  '        def __init__(self, filename, options=None):',
+  '            import openpyxl',
+  '            self._filename = os.path.join(ZOZ_OUTPUT_DIR, os.path.basename(str(filename)))',
+  '            self._wb = openpyxl.Workbook()',
+  '            self._used_default = False',
+  '        def add_worksheet(self, name=None):',
+  '            if not self._used_default:',
+  '                self._used_default = True',
+  '                ws = self._wb.active',
+  '                if name: ws.title = str(name)[:31]',
+  '            else:',
+  '                ws = self._wb.create_sheet(title=str(name or "Sheet")[:31])',
+  '            return _ZozXWWorksheet(ws)',
+  '        def add_format(self, props=None): return _ZozXWFormat(props)',
+  '        def add_chart(self, opts=None): return _ZozXWChart(opts)',
+  '        def close(self): self._wb.save(self._filename)',
+  '    _xw_mod.Workbook = _ZozXWWorkbook',
+  '    sys.modules["xlsxwriter"] = _xw_mod',
+].join('\n');
+
+function synthesizeZ21DocumentPythonScript(rawSpec) {
+  const spec = normalizeZ21DocSpec(rawSpec);
+  const ext = spec.format;
+  if (ext === 'pdf') {
+    return `import os, json, re
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+with open(os.environ["ZOZ_DOC_SPEC_PATH"], "r", encoding="utf-8") as _sf:
+    spec = json.load(_sf)
+
+# Daftarkan font TrueType Unicode agar simbol matematika, Yunani, dan subskrip/superskrip tampil sempurna
+FONT_REG = "Helvetica"
+FONT_BOLD = "Helvetica-Bold"
+FONT_ITALIC = "Helvetica-Oblique"
+SYM_FONT = None
+
+for _reg_p, _bold_p, _ital_p in [
+    ("C:/Windows/Fonts/calibri.ttf", "C:/Windows/Fonts/calibrib.ttf", "C:/Windows/Fonts/calibrii.ttf"),
+    ("C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/segoeuib.ttf", "C:/Windows/Fonts/segoeuii.ttf"),
+    ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf"),
+    ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf"),
+]:
+    if os.path.exists(_reg_p):
+        try:
+            pdfmetrics.registerFont(TTFont("ZozSans", _reg_p))
+            _b = _bold_p if os.path.exists(_bold_p) else _reg_p
+            _i = _ital_p if os.path.exists(_ital_p) else _reg_p
+            pdfmetrics.registerFont(TTFont("ZozSans-Bold", _b))
+            pdfmetrics.registerFont(TTFont("ZozSans-Italic", _i))
+            pdfmetrics.registerFontFamily("ZozSans", normal="ZozSans", bold="ZozSans-Bold", italic="ZozSans-Italic", boldItalic="ZozSans-Bold")
+            FONT_REG = "ZozSans"
+            FONT_BOLD = "ZozSans-Bold"
+            FONT_ITALIC = "ZozSans-Italic"
+            break
+        except Exception:
+            pass
+
+for _sym_p in [
+    "C:/Windows/Fonts/seguisym.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+]:
+    if os.path.exists(_sym_p):
+        try:
+            pdfmetrics.registerFont(TTFont("ZozMathSym", _sym_p))
+            SYM_FONT = "ZozMathSym"
+            break
+        except Exception:
+            pass
+
+out_name = spec["filename"]
+doc = SimpleDocTemplate(out_name, pagesize=A4, leftMargin=42, rightMargin=42, topMargin=40, bottomMargin=40)
+styles = getSampleStyleSheet()
+title_style = ParagraphStyle("ZozTitle", parent=styles["Title"], fontName=FONT_BOLD, textColor=colors.HexColor("#0f172a"), fontSize=18, leading=22, spaceAfter=6)
+sub_style = ParagraphStyle("ZozSub", parent=styles["Italic"], fontName=FONT_ITALIC, textColor=colors.HexColor("#475569"), fontSize=10, leading=14, spaceAfter=10)
+h_style = ParagraphStyle("ZozH2", parent=styles["Heading2"], fontName=FONT_BOLD, textColor=colors.HexColor("#1e3a8a"), fontSize=12.5, leading=16, spaceBefore=14, spaceAfter=6)
+p_style = ParagraphStyle("ZozBody", parent=styles["Normal"], fontName=FONT_REG, fontSize=10, leading=14.8, textColor=colors.HexColor("#1e293b"), spaceAfter=5)
+eq_label_style = ParagraphStyle("ZozEqLbl", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=9.2, leading=13, textColor=colors.HexColor("#0369a1"), spaceAfter=2)
+eq_expr_style = ParagraphStyle("ZozEqExpr", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=10.8, leading=15.5, textColor=colors.HexColor("#0f172a"))
+th_style = ParagraphStyle("ZozTh", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=9.5, leading=12.5, textColor=colors.white)
+td_style = ParagraphStyle("ZozTd", parent=styles["Normal"], fontName=FONT_REG, fontSize=9.2, leading=12.5, textColor=colors.HexColor("#1e293b"))
+
+def esc_p(v):
+    return str(v or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+def safe_pdf_chars(v):
+    s = esc_p(v).replace("\u2022", "&bull;").replace("\u2013", "-").replace("\u2014", "-")
+    if SYM_FONT:
+        s = re.sub(r"([\u211d\u2115\u2124\u2208\u2202\u2207\u2211\u222b])", lambda m: f'<font name="{SYM_FONT}">{m.group(1)}</font>', s)
+    if FONT_REG == "Helvetica":
+        # Fallback aman bila berjalan di kontainer Linux minimal tanpa TTF
+        _sub_tr = str.maketrans("\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089\u209b", "0123456789s")
+        s = s.translate(_sub_tr).replace("\u03b8", "theta").replace("\u211d", "R").replace("\u00d7", "&times;")
+    return s
+
+def is_formula_line_py(txt):
+    t = str(txt or "").strip()
+    if not t:
+        return False
+    if re.match(r"^(?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}:", t, re.I):
+        return True
+    if len(t) <= 160 and re.match(r"^[A-Za-z][A-Za-z0-9_\\u2080-\\u2089\\u209b()]{0,18}\\s*=\\s*.+", t):
+        if re.search(r"[+\\-\\u00d7*/\\u00b2\\u00b3\\u2074\\u2080-\\u2089\\u209b\\u03b8\\u0394\\u03c0]|cos|sin|log|exp", t, re.I):
+            return True
+    return False
+
+def split_formula_line_py(txt):
+    t = str(txt or "").strip()
+    m = re.match(r"^((?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}):\\s*(.+)$", t, re.I)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    return "Persamaan Matematis", t
+
+story = [Paragraph(safe_pdf_chars(spec.get("title") or out_name), title_style)]
+if spec.get("subtitle"):
+    story.append(Paragraph(safe_pdf_chars(spec["subtitle"]), sub_style))
+story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#38bdf8"), spaceBefore=2, spaceAfter=12))
+
+PAGE_CONTENT_W = 511.0
+
+def render_equation_box(raw_line):
+    lbl, expr = split_formula_line_py(raw_line)
+    cell_flowables = [
+        Paragraph(safe_pdf_chars(lbl), eq_label_style),
+        Paragraph(safe_pdf_chars(expr), eq_expr_style),
+    ]
+    eq_tbl = Table([[cell_flowables]], colWidths=[PAGE_CONTENT_W])
+    eq_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f0f9ff")),
+        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#bae6fd")),
+        ("LINEBEFORE", (0, 0), (0, -1), 3.2, colors.HexColor("#0284c7")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 12),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(Spacer(1, 4))
+    story.append(eq_tbl)
+    story.append(Spacer(1, 7))
+
+def render_body_para(raw_line):
+    t = str(raw_line or "").strip()
+    if not t:
+        return
+    if is_formula_line_py(t):
+        render_equation_box(t)
+        return
+    m_kv = re.match(r"^((?:Lokasi|Tanggal|Parameter\\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\\s*:)\\s*(.+)$", t, re.I)
+    if m_kv:
+        html = f"<b>{safe_pdf_chars(m_kv.group(1))}</b> {safe_pdf_chars(m_kv.group(2))}"
+        story.append(Paragraph(html, p_style))
+        return
+    story.append(Paragraph(safe_pdf_chars(t), p_style))
+
+def render_tbl(tbl):
+    headers = tbl.get("headers") or []
+    body_rows = tbl.get("rows") or []
+    col_count = max(1, len(headers) if headers else (len(body_rows[0]) if body_rows and isinstance(body_rows[0], list) else 1))
+    rows = []
+    if headers:
+        rows.append([Paragraph(safe_pdf_chars(h), th_style) for h in headers[:col_count]])
+    for r in body_rows:
+        arr = r if isinstance(r, list) else [r]
+        padded = [arr[i] if i < len(arr) else "" for i in range(col_count)]
+        rows.append([Paragraph(safe_pdf_chars(c), td_style) for c in padded])
+    if rows:
+        col_widths = [PAGE_CONTENT_W / col_count] * col_count
+        if col_count == 2:
+            col_widths = [PAGE_CONTENT_W * 0.42, PAGE_CONTENT_W * 0.58]
+        t = Table(rows, colWidths=col_widths, repeatRows=1 if headers else 0)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e293b")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6)
+        ]))
+        story.append(t)
+        story.append(Spacer(1, 10))
+
+seen_headings = set()
+for sec in (spec.get("sections") or []):
+    sh = str(sec.get("heading") or "").strip()
+    if sh and sh != spec.get("title"):
+        seen_headings.add(sh)
+        story.append(Paragraph(safe_pdf_chars(sh), h_style))
+    if sec.get("content"):
+        for para in str(sec["content"]).splitlines():
+            if para.strip():
+                render_body_para(para)
+    for b in (sec.get("bullets") or []):
+        story.append(Paragraph("&bull; " + safe_pdf_chars(b), p_style))
+    if sec.get("table"):
+        render_tbl(sec["table"])
+
+for tbl in (spec.get("tables") or []):
+    tt = str(tbl.get("title") or "").strip()
+    if tt and tt not in seen_headings:
+        story.append(Paragraph(safe_pdf_chars(tt), h_style))
+    render_tbl(tbl)
+
+doc.build(story)
+print(f"PDF_CREATED:{out_name}")`;
+  }
+  if (ext === 'docx') {
+    return `import os, json, re
+from docx import Document
+from docx.shared import Pt, RGBColor, Inches
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
+
+with open(os.environ["ZOZ_DOC_SPEC_PATH"], "r", encoding="utf-8") as _sf:
+    spec = json.load(_sf)
+
+out_name = spec["filename"]
+doc = Document()
+title_p = doc.add_heading(str(spec.get("title") or out_name), level=0)
+if spec.get("subtitle"):
+    sp = doc.add_paragraph()
+    r = sp.add_run(str(spec["subtitle"]))
+    r.italic = True
+    r.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
+
+def is_formula_line_dx(txt):
+    t = str(txt or "").strip()
+    if not t:
+        return False
+    if re.match(r"^(?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}:", t, re.I):
+        return True
+    if len(t) <= 160 and re.match(r"^[A-Za-z][A-Za-z0-9_\\u2080-\\u2089\\u209b()]{0,18}\\s*=\\s*.+", t):
+        if re.search(r"[+\\-\\u00d7*/\\u00b2\\u00b3\\u2074\\u2080-\\u2089\\u209b\\u03b8\\u0394\\u03c0]|cos|sin|log|exp", t, re.I):
+            return True
+    return False
+
+def add_formatted_para(txt):
+    t = str(txt or "").strip()
+    if not t:
+        return
+    if is_formula_line_dx(t):
+        m = re.match(r"^((?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}):\\s*(.+)$", t, re.I)
+        lbl, expr = (m.group(1).strip(), m.group(2).strip()) if m else ("Persamaan Matematis", t)
+        p = doc.add_paragraph()
+        p.paragraph_format.left_indent = Inches(0.22)
+        p.paragraph_format.space_before = Pt(6)
+        p.paragraph_format.space_after = Pt(6)
+        p_pr = p._p.get_or_add_pPr()
+        p_pr.append(parse_xml(f'<w:shd {nsdecls("w")} w:val="clear" w:color="auto" w:fill="F0F9FF"/>'))
+        p_pr.append(parse_xml(f'<w:pBdr {nsdecls("w")}><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr>'))
+        r1 = p.add_run(lbl + ": ")
+        r1.bold = True
+        r1.font.size = Pt(10)
+        r1.font.color.rgb = RGBColor(0x03, 0x69, 0xA1)
+        r2 = p.add_run(expr)
+        r2.bold = True
+        r2.font.size = Pt(11)
+        r2.font.color.rgb = RGBColor(0x0F, 0x17, 0x2A)
+        return
+    m_kv = re.match(r"^((?:Lokasi|Tanggal|Parameter\\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\\s*:)\\s*(.+)$", t, re.I)
+    if m_kv:
+        p = doc.add_paragraph()
+        r1 = p.add_run(m_kv.group(1) + " ")
+        r1.bold = True
+        p.add_run(m_kv.group(2))
+        return
+    doc.add_paragraph(t)
+
+def add_doc_table(tbl):
+    headers = tbl.get("headers") or []
+    rows = tbl.get("rows") or []
+    col_cnt = len(headers) if headers else (len(rows[0]) if rows and isinstance(rows[0], list) else 1)
+    if col_cnt <= 0:
+        return
+    t = doc.add_table(rows=(1 if headers else 0) + len(rows), cols=col_cnt)
+    t.style = "Table Grid"
+    r_idx = 0
+    if headers:
+        for ci, h in enumerate(headers):
+            cell = t.rows[0].cells[ci]
+            cell.text = ""
+            run = cell.paragraphs[0].add_run(str(h or ""))
+            run.bold = True
+        r_idx = 1
+    for r in rows:
+        arr = r if isinstance(r, list) else [r]
+        for ci in range(min(col_cnt, len(arr))):
+            t.rows[r_idx].cells[ci].text = str(arr[ci] if arr[ci] is not None else "")
+        r_idx += 1
+    doc.add_paragraph()
+
+for sec in (spec.get("sections") or []):
+    if sec.get("heading") and sec["heading"] != spec.get("title"):
+        doc.add_heading(str(sec["heading"]), level=1)
+    if sec.get("content"):
+        for para in str(sec["content"]).splitlines():
+            if para.strip():
+                add_formatted_para(para)
+    for b in (sec.get("bullets") or []):
+        doc.add_paragraph(str(b), style="List Bullet")
+    if sec.get("table"):
+        add_doc_table(sec["table"])
+
+for tbl in (spec.get("tables") or []):
+    if tbl.get("title"):
+        doc.add_heading(str(tbl["title"]), level=2)
+    add_doc_table(tbl)
+
+doc.save(out_name)
+print(f"DOCX_CREATED:{out_name}")`;
+  }
+  if (ext === 'xlsx') {
+    return `import os, json
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.chart import BarChart, LineChart, PieChart, Reference
+
+with open(os.environ["ZOZ_DOC_SPEC_PATH"], "r", encoding="utf-8") as _sf:
+    spec = json.load(_sf)
+
+out_name = spec["filename"]
+wb = openpyxl.Workbook()
+sheets = spec.get("sheets") or [{"name": (t.get("title") or f"Sheet{i+1}"), "headers": t.get("headers") or [], "rows": t.get("rows") or [], "formulas": t.get("formulas") or []} for i, t in enumerate(spec.get("tables") or [])]
+if not sheets:
+    sheets = [{"name": "Data", "headers": ["Item", "Keterangan"], "rows": [[spec.get("title") or "Dokumen Z21", spec.get("content") or "Selesai"]], "formulas": []}]
+
+hdr_fill = PatternFill("solid", fgColor="1E293B")
+hdr_font = Font(bold=True, color="FFFFFF")
+
+for idx, sh in enumerate(sheets):
+    ws = wb.active if idx == 0 else wb.create_sheet()
+    ws.title = str(sh.get("name") or f"Sheet{idx+1}")[:31]
+    headers = sh.get("headers") or []
+    rows = sh.get("rows") or []
+    start_row = 1
+    if headers:
+        ws.append(headers)
+        for ci in range(1, len(headers) + 1):
+            c = ws.cell(row=1, column=ci)
+            c.fill = hdr_fill
+            c.font = hdr_font
+            c.alignment = Alignment(horizontal="center")
+        start_row = 2
+    for r in rows:
+        arr = r if isinstance(r, list) else [r]
+        parsed_arr = []
+        for v in arr:
+            if isinstance(v, (int, float)):
+                parsed_arr.append(v)
+            elif isinstance(v, str) and not v.startswith("="):
+                try:
+                    parsed_arr.append(float(v) if "." in v else int(v))
+                except Exception:
+                    parsed_arr.append(v)
+            else:
+                parsed_arr.append(v)
+        ws.append(parsed_arr)
+    for f_item in (sh.get("formulas") or []):
+        if isinstance(f_item, dict) and f_item.get("formula"):
+            f_str = str(f_item["formula"])
+            if not f_str.startswith("="):
+                f_str = "=" + f_str
+            next_r = ws.max_row + 1
+            if f_item.get("label"):
+                ws.cell(row=next_r, column=1, value=str(f_item["label"])).font = Font(bold=True)
+            t_col = int(f_item.get("col", 2 if f_item.get("label") else 1))
+            ws.cell(row=next_r, column=max(1, t_col), value=f_str)
+    chart_cfg = sh.get("chart")
+    if isinstance(chart_cfg, dict) and rows:
+        ctype = str(chart_cfg.get("type") or "bar").lower()
+        ch = LineChart() if ctype == "line" else (PieChart() if ctype == "pie" else BarChart())
+        ch.title = str(chart_cfg.get("title") or ws.title)
+        d_col = int(chart_cfg.get("data_col") or min(2, max(1, len(headers))))
+        c_col = int(chart_cfg.get("category_col") or 1)
+        max_r = start_row + len(rows) - 1
+        data_ref = Reference(ws, min_col=d_col, min_row=1 if headers else start_row, max_row=max_r)
+        cats_ref = Reference(ws, min_col=c_col, min_row=start_row, max_row=max_r)
+        ch.add_data(data_ref, titles_from_data=bool(headers))
+        ch.set_categories(cats_ref)
+        ws.add_chart(ch, chart_cfg.get("position") or "F2")
+    for col in ws.columns:
+        max_len = max((len(str(cell.value or "")) for cell in col), default=8)
+        ws.column_dimensions[col[0].column_letter].width = min(42, max(12, max_len + 4))
+
+wb.save(out_name)
+print(f"XLSX_CREATED:{out_name}")`;
+  }
+  return `import os, json, csv
+with open(os.environ["ZOZ_DOC_SPEC_PATH"], "r", encoding="utf-8") as _sf:
+    spec = json.load(_sf)
+out_name = spec["filename"]
+sh = (spec.get("sheets") or spec.get("tables") or [{"headers": ["Judul", "Isi"], "rows": [[spec.get("title") or "Data", spec.get("content") or ""]]}])[0]
+with open(out_name, "w", newline="", encoding="utf-8-sig") as f:
+    w = csv.writer(f)
+    if sh.get("headers"): w.writerow(sh["headers"])
+    for r in (sh.get("rows") or []):
+        w.writerow(r if isinstance(r, list) else [r])
+print(f"CSV_CREATED:{out_name}")`;
+}
+
+function executeZ21DocumentBuilderSandbox(rawPayload = {}, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    const spec = normalizeZ21DocSpec(rawPayload);
+    const runId = 'z21_doc_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
+    const containerDir = path.join(Z21_DOC_CONTAINERS_ROOT, runId);
+    fs.mkdirSync(containerDir, { recursive: true });
+
+    const userPy = String(rawPayload.python_code || '').trim();
+    const effectivePy = userPy || synthesizeZ21DocumentPythonScript(spec);
+    const librariesUsed = [];
+    if (/\breportlab\b/i.test(effectivePy)) librariesUsed.push('reportlab');
+    if (/\bfpdf\b/i.test(effectivePy)) librariesUsed.push('fpdf');
+    if (/\bweasyprint\b/i.test(effectivePy)) librariesUsed.push('weasyprint');
+    if (/\bdocx\b/i.test(effectivePy)) librariesUsed.push('python-docx');
+    if (/\bopenpyxl\b/i.test(effectivePy)) librariesUsed.push('openpyxl');
+    if (/\bpandas\b/i.test(effectivePy)) librariesUsed.push('pandas');
+    if (/\bxlsxwriter\b/i.test(effectivePy)) librariesUsed.push('xlsxwriter');
+    if (librariesUsed.length === 0) librariesUsed.push(spec.format);
+
+    const finalizeWithOutputFiles = (pyOutcome) => {
+      let producedFiles = [];
+      try {
+        producedFiles = fs.readdirSync(containerDir)
+          .filter(fn => !fn.startsWith('_zoz_'))
+          .map(fn => path.join(containerDir, fn))
+          .filter(fp => {
+            try {
+              const st = fs.statSync(fp);
+              return st.isFile() && st.size > 0 && st.size <= 15 * 1024 * 1024;
+            } catch (_) {
+              return false;
+            }
+          });
+      } catch (_) {}
+
+      let engine = pyOutcome.success && producedFiles.length > 0 ? 'python-container-sandbox' : 'zoz-native-compiler';
+      if (producedFiles.length === 0) {
+        const nativeRes = compileZ21DocumentArtifactNode(spec, containerDir);
+        producedFiles = [nativeRes.filePath];
+        engine = nativeRes.engine;
+      }
+
+      const artifacts = producedFiles.map((fp) => {
+        const buf = fs.readFileSync(fp);
+        const fname = path.basename(fp);
+        const ext = (fname.split('.').pop() || spec.format || 'pdf').toLowerCase();
+        const mime = getZ21ArtifactMime(ext);
+        const artifactId = 'art_' + Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex');
+        const usedLibs = engine === 'zoz-native-compiler' ? ['zoz-native'] : librariesUsed;
+        registerZ21Artifact({
+          id: artifactId,
+          name: fname,
+          mime,
+          ext,
+          buffer: buf,
+          byteSize: buf.length,
+          createdAt: new Date().toISOString(),
+          engine,
+          librariesUsed: usedLibs
+        });
+        let previewText = buildZ21PreviewMarkdown(spec, fname, ext, usedLibs, engine);
+        if (ext === 'csv') {
+          try { previewText = buf.toString('utf8').replace(/^\uFEFF/, ''); } catch (_) {}
+        }
+        return {
+          artifactId,
+          name: fname,
+          mime,
+          ext,
+          byteSize: buf.length,
+          size: buf.length < 1024 ? `${buf.length} B` : `${(buf.length / 1024).toFixed(1)} KB`,
+          base64: buf.toString('base64'),
+          downloadUrl: `/api/z21/artifacts/${artifactId}`,
+          previewText,
+          pythonScript: effectivePy,
+          engine,
+          librariesUsed: usedLibs
+        };
+      });
+
+      resolve({
+        success: true,
+        engine,
+        librariesUsed: engine === 'zoz-native-compiler' ? ['zoz-native'] : librariesUsed,
+        stdout: pyOutcome.stdout || '',
+        stderr: pyOutcome.stderr || '',
+        pythonFallbackReason: pyOutcome.fallbackReason || undefined,
+        executionTimeMs: Date.now() - startTime,
+        containerDir,
+        files: artifacts
+      });
+    };
+
+    const forceNative = Boolean(rawPayload.forceNative === true || rawPayload.library === 'zoz-native');
+    if (forceNative) {
+      return finalizeWithOutputFiles({ success: false, stdout: '', stderr: '', fallbackReason: 'forceNative' });
+    }
+
+    const safety = validateZ21DocumentPythonSafety(effectivePy);
+    if (!safety.safe) {
+      return resolve({
+        success: false,
+        error: `Keamanan Sandbox Z21: ${safety.reason}`,
+        executionTimeMs: Date.now() - startTime,
+        files: []
+      });
+    }
+
+    const specPath = path.join(containerDir, '_zoz_spec.json');
+    const runnerPath = path.join(containerDir, '_zoz_runner.py');
+    fs.writeFileSync(specPath, JSON.stringify(spec), 'utf8');
+    fs.writeFileSync(runnerPath, ZOZ_DOC_SANDBOX_PRELUDE_PY + '\n\n# --- USER SCRIPT ---\n' + effectivePy + '\n', 'utf8');
+
+    const pythonExec = process.env.PYTHON_EXEC || 'python';
+    const safeEnv = {
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1',
+      PYTHONUNBUFFERED: '1',
+      ZOZ_OUTPUT_DIR: containerDir,
+      ZOZ_DOC_SPEC_PATH: specPath,
+      PATH: process.env.PATH || process.env.Path || '',
+      Path: process.env.Path || process.env.PATH || '',
+      SYSTEMROOT: process.env.SYSTEMROOT || 'C:\\Windows',
+      WINDIR: process.env.WINDIR || 'C:\\Windows',
+      TEMP: containerDir,
+      TMP: containerDir,
+      HOME: containerDir,
+      USERPROFILE: containerDir
+    };
+
+    let proc;
+    try {
+      proc = spawn(pythonExec, ['-u', runnerPath], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: containerDir,
+        windowsHide: true,
+        env: safeEnv
+      });
+    } catch (spawnErr) {
+      return finalizeWithOutputFiles({ success: false, stdout: '', stderr: spawnErr.message, fallbackReason: 'spawn_error' });
+    }
+
+    let stdoutData = '';
+    let stderrData = '';
+    let finished = false;
+    const timer = setTimeout(() => {
+      if (!finished) {
+        finished = true;
+        try { proc.kill(); } catch (_) {}
+        finalizeWithOutputFiles({ success: false, stdout: stdoutData, stderr: stderrData, fallbackReason: 'timeout' });
+      }
+    }, Math.min(Math.max(Number(timeoutMs) || 15000, 2000), 30000));
+
+    proc.stdout.on('data', (chunk) => {
+      if (stdoutData.length < 12000) stdoutData += chunk.toString('utf8');
+    });
+    proc.stderr.on('data', (chunk) => {
+      if (stderrData.length < 8000) stderrData += chunk.toString('utf8');
+    });
+    proc.on('error', (err) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      finalizeWithOutputFiles({ success: false, stdout: stdoutData, stderr: err.message, fallbackReason: 'proc_error' });
+    });
+    proc.on('close', (code) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      finalizeWithOutputFiles({
+        success: code === 0,
+        stdout: stdoutData.trim(),
+        stderr: stderrData.trim(),
+        fallbackReason: code !== 0 ? `exit_${code}` : undefined
+      });
+    });
+  });
+}
+
+
 // OpenRouter Models In-Memory Optimization & CDN Cache (module-scoped to avoid sync disk I/O per request)
 const OPENROUTER_MODELS_CACHE_FILE = path.join(DATA_DIR, 'openrouter-models-cache.json');
 const OPENROUTER_MODELS_CACHE_TTL = 10 * 60 * 1000; // 10 menit
@@ -11404,6 +13244,35 @@ async function requestHandler(req, res) {
     }
   }
 
+  // Mode Z21 Document & Spreadsheet File Artifact Builder Sandbox Endpoint
+  if ((pathname === '/api/z21/document-builder' || pathname === '/api/tools/z21-document-builder') && method === 'POST') {
+    try {
+      const body = await safeParseBody(req);
+      if (!body) return;
+      if (!requireRemoteHostPin(req, res, reqUrl, body)) return;
+      const timeoutMs = Math.min(Math.max(parseInt(body.timeoutMs || '15000', 10) || 15000, 2000), 30000);
+      const buildRes = await executeZ21DocumentBuilderSandbox(body, timeoutMs);
+      return sendJSON(res, buildRes.success ? 200 : 400, buildRes);
+    } catch (e) {
+      return sendJSON(res, 500, { success: false, error: 'Gagal merender dokumen Z21: ' + e.message });
+    }
+  }
+
+  if (pathname.startsWith('/api/z21/artifacts/') && method === 'GET') {
+    const artId = pathname.slice('/api/z21/artifacts/'.length).trim();
+    const item = Z21_ARTIFACT_REGISTRY.get(artId);
+    if (!item || !item.buffer) {
+      return sendJSON(res, 404, { success: false, error: 'Artifact dokumen tidak ditemukan atau sudah kedaluwarsa.' });
+    }
+    const safeName = sanitizeZ21ArtifactFilename(item.name, item.ext);
+    res.setHeader('Content-Type', item.mime || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
+    res.setHeader('Content-Length', String(item.buffer.length));
+    res.writeHead(200);
+    res.end(item.buffer);
+    return;
+  }
+
   // =========================================================================
   // NATIVE CLAUDE-CODE PARITY WORKSPACE FILE SYSTEM API
   // Mengizinkan modifikasi langsung file fisik di direktori lokal tanpa unduh
@@ -12016,9 +13885,22 @@ async function requestHandler(req, res) {
       if (shellType === 'cmd' || shellType === 'cmd.exe') {
         executable = isWin ? 'cmd.exe' : 'sh';
         args = isWin ? ['/v:on', '/c', `${cmd} & set "__zoz_ec=!ERRORLEVEL!" & echo ${sentinel} & cd & exit /b !__zoz_ec!`] : ['-c', `${cmd}\n__zoz_ec=$?\necho "${sentinel}"\npwd\nexit $__zoz_ec`];
-      } else if (shellType === 'wsl' || shellType === 'bash' || shellType === 'ubuntu-wsl') {
+      } else if (shellType === 'wsl' || shellType === 'ubuntu-wsl') {
         executable = isWin ? 'wsl.exe' : (fs.existsSync('/bin/bash') ? '/bin/bash' : 'sh');
         args = isWin ? ['-e', 'bash', '-c', `${cmd}\n__zoz_ec=$?\necho "${sentinel}"\npwd\nexit $__zoz_ec`] : ['-c', `${cmd}\n__zoz_ec=$?\necho "${sentinel}"\npwd\nexit $__zoz_ec`];
+      } else if (shellType === 'bash' || shellType === 'sh') {
+        if (isWin) {
+          const gitBashPaths = ['C:\\Program Files\\Git\\bin\\bash.exe', 'C:\\Program Files (x86)\\Git\\bin\\bash.exe'];
+          const gitBash = gitBashPaths.find(p => fs.existsSync(p));
+          if (shellType === 'bash' && gitBash) {
+            executable = gitBash;
+            args = ['-c', `${cmd}\n__zoz_ec=$?\necho "${sentinel}"\npwd\nexit $__zoz_ec`];
+          }
+          // Jika Git Bash tidak ditemukan di Windows, pertahankan powershell default di atas (hindari crash jika WSL tidak terpasang)
+        } else {
+          executable = (shellType === 'bash' && fs.existsSync('/bin/bash')) ? '/bin/bash' : 'sh';
+          args = ['-c', `${cmd}\n__zoz_ec=$?\necho "${sentinel}"\npwd\nexit $__zoz_ec`];
+        }
       } else if (shellType === 'node') {
         executable = process.execPath;
         args = ['-e', cmd];
@@ -12026,6 +13908,9 @@ async function requestHandler(req, res) {
         executable = isWin ? 'python' : 'python3';
         args = ['-c', cmd];
       }
+
+      const rawTimeoutMs = parseInt(body.timeout_ms || body.timeoutMs, 10);
+      const execTimeoutMs = Number.isFinite(rawTimeoutMs) ? Math.max(1000, Math.min(60000, rawTimeoutMs)) : 20000;
 
       // Validasi CWD agar aman dan tidak memicu ENOENT di Linux Cloud container
       let safeCwd = targetCwd;
@@ -12058,11 +13943,12 @@ async function requestHandler(req, res) {
       let stdout = '';
       let stderr = '';
       let timedOut = false;
+      let responded = false;
 
       const timer = setTimeout(() => {
         timedOut = true;
         try { proc.kill(); } catch (_) {}
-      }, 15000);
+      }, execTimeoutMs);
 
       proc.stdout.on('data', chunk => {
         stdout += chunk.toString();
@@ -12080,18 +13966,22 @@ async function requestHandler(req, res) {
 
       proc.on('error', err => {
         clearTimeout(timer);
+        if (responded) return;
+        responded = true;
         return sendJSON(res, 200, {
           success: false,
           output: `Gagal menjalankan shell: ${err.message}`,
           stdout: '',
           stderr: `Gagal menjalankan shell: ${err.message}`,
-          cwd: targetCwd,
+          cwd: safeCwd,
           exitCode: 1
         });
       });
 
       proc.on('close', code => {
         clearTimeout(timer);
+        if (responded) return;
+        responded = true;
 
         // Ekstraksi sentinel CWD agar direktori aktif selalu tersinkronisasi
         let finalCwd = targetCwd;
@@ -12114,7 +14004,7 @@ async function requestHandler(req, res) {
           finalOut += (finalOut ? '\n' : '') + stderr;
         }
         if (timedOut) {
-          finalOut += '\n[Eksekusi dibatalkan: batas waktu 15 detik tercapai]';
+          finalOut += `\n[Eksekusi dibatalkan: batas waktu ${Math.round(execTimeoutMs / 1000)} detik tercapai]`;
         }
 
         if (IS_VERCEL_ENV && /^\s*agy\b/i.test(cmd)) {
@@ -13409,12 +15299,22 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
   if ((pathname === '/api/workspace/files' || pathname === '/api/workspace/tree') && method === 'GET') {
     if (!requireRemoteHostPin(req, res, reqUrl)) return;
     try {
-      const files = await scanWorkspaceDirectory(WORKSPACE_ROOT);
+      const prefix = String(reqUrl.searchParams?.get('prefix') || '').trim().replace(/^[/\\]+/, '').replace(/\\/g, '/').toLowerCase();
+      const rawLimit = parseInt(reqUrl.searchParams?.get('limit') || '0', 10);
+      let files = await scanWorkspaceDirectory(WORKSPACE_ROOT);
+      if (prefix) {
+        files = files.filter(f => f && typeof f.path === 'string' && f.path.toLowerCase().startsWith(prefix));
+      }
+      const totalMatched = files.length;
+      if (Number.isFinite(rawLimit) && rawLimit > 0) {
+        files = files.slice(0, Math.min(rawLimit, 1000));
+      }
       return sendJSON(res, 200, {
         success: true,
         root: WORKSPACE_ROOT,
         dirName: path.basename(WORKSPACE_ROOT),
         count: files.length,
+        total: totalMatched,
         files: files
       });
     } catch (err) {
@@ -13422,7 +15322,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     }
   }
 
-  // 3. Workspace Read File
+  // 3. Workspace Read File (Mendukung full file maupun pembacaan presisi rentang baris)
   if ((pathname === '/api/workspace/read' || pathname === '/api/workspace/file') && method === 'GET') {
     if (!requireRemoteHostPin(req, res, reqUrl)) return;
     const targetPath = (reqUrl.searchParams && reqUrl.searchParams.get('path')) ||
@@ -13435,6 +15335,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     if (!fullPath) {
       return sendJSON(res, 403, { error: 'Akses ditolak: path di luar direktori kerja proyek.' });
     }
+    const relDisplayPath = path.relative(WORKSPACE_ROOT, fullPath).replace(/\\/g, '/') || targetPath.replace(/^[/\\]+/, '');
     try {
       if (!fs.existsSync(fullPath)) {
         return sendJSON(res, 404, { error: 'Berkas tidak ditemukan di direktori proyek: ' + targetPath });
@@ -13443,21 +15344,61 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       if (stat.isDirectory()) {
         return sendJSON(res, 400, { error: 'Target adalah direktori, bukan berkas.' });
       }
-      const content = await fsp.readFile(fullPath, 'utf8');
+      const rawContent = await fsp.readFile(fullPath, 'utf8');
+      const rawStart = parseInt(reqUrl.searchParams?.get('start_line') || reqUrl.searchParams?.get('startLine') || '0', 10);
+      const rawEnd = parseInt(reqUrl.searchParams?.get('end_line') || reqUrl.searchParams?.get('endLine') || '0', 10);
+      const hasLineSlice = (Number.isFinite(rawStart) && rawStart > 0) || (Number.isFinite(rawEnd) && rawEnd > 0);
+      const lines = rawContent.split(/\r?\n/);
+      const totalLines = lines.length;
+
+      if (hasLineSlice) {
+        const startLine = Math.max(1, Math.min(totalLines, rawStart > 0 ? rawStart : 1));
+        const defaultSpan = startLine + 299;
+        const requestedEnd = rawEnd > 0 ? Math.min(rawEnd, startLine + 499) : defaultSpan;
+        const endLine = Math.max(startLine, Math.min(totalLines, requestedEnd));
+        const sliced = lines.slice(startLine - 1, endLine);
+        const numberedLines = sliced.map((ln, idx) => `${startLine + idx}: ${ln}`);
+        let joinedContent = sliced.join('\n');
+        let joinedNumbered = numberedLines.join('\n');
+        let truncated = endLine < totalLines;
+        if (joinedContent.length > 46080) {
+          joinedContent = joinedContent.slice(0, 46080);
+          joinedNumbered = joinedNumbered.slice(0, 46080);
+          truncated = true;
+        }
+        return sendJSON(res, 200, {
+          success: true,
+          path: relDisplayPath,
+          name: path.basename(fullPath),
+          size: stat.size,
+          lastModified: stat.mtimeMs,
+          total_lines: totalLines,
+          start_line: startLine,
+          end_line: endLine,
+          truncated,
+          content: joinedContent,
+          numbered_content: joinedNumbered
+        });
+      }
+
       return sendJSON(res, 200, {
         success: true,
-        path: targetPath.replace(/^[/\\]+/, ''),
+        path: relDisplayPath,
         name: path.basename(fullPath),
         size: stat.size,
         lastModified: stat.mtimeMs,
-        content: content
+        total_lines: totalLines,
+        start_line: 1,
+        end_line: totalLines,
+        truncated: false,
+        content: rawContent
       });
     } catch (err) {
       return sendJSON(res, 500, { error: 'Gagal membaca berkas: ' + err.message });
     }
   }
 
-  // 4. Workspace Write / Edit File (CLAUDE-CODE PARITY LIVE DISK MODIFICATION)
+  // 4. Workspace Write / Edit File (CLAUDE-CODE PARITY LIVE DISK MODIFICATION + FILE LOCK)
   if ((pathname === '/api/workspace/write' || pathname === '/api/workspace/edit') && method === 'POST') {
     const body = await safeParseBody(req);
     if (!body) return;
@@ -13475,51 +15416,194 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
     const shouldBackup = body.backup !== false;
 
     try {
-      let backupCreated = false;
-      let prevContent = null;
-      if (fs.existsSync(fullPath)) {
-        if (shouldBackup) {
+      const writeResult = await withWorkspaceFileLock(fullPath, async () => {
+        let backupCreated = false;
+        let prevContent = null;
+        if (fs.existsSync(fullPath)) {
+          if (shouldBackup) {
+            try {
+              if (!fs.existsSync(SNAPSHOTS_DIR)) {
+                await fsp.mkdir(SNAPSHOTS_DIR, { recursive: true });
+              }
+              prevContent = await fsp.readFile(fullPath, 'utf8');
+              const safeBase = path.basename(fullPath).replace(/[^a-zA-Z0-9._-]/g, '_');
+              const snapPath = path.join(SNAPSHOTS_DIR, `${Date.now()}_${safeBase}`);
+              await fsp.writeFile(snapPath, prevContent, 'utf8');
+              backupCreated = true;
+            } catch (bErr) {
+              console.warn('Gagal membuat backup snapshot berkas:', bErr.message);
+            }
+          }
+        } else {
+          const parentDir = path.dirname(fullPath);
+          if (!fs.existsSync(parentDir)) {
+            await fsp.mkdir(parentDir, { recursive: true });
+          }
+        }
+
+        if (body.encoding === 'base64') {
+          const binBuf = Buffer.from(content, 'base64');
+          await fsp.writeFile(fullPath, binBuf);
+        } else {
+          await fsp.writeFile(fullPath, content, 'utf8');
+        }
+        const stat = await fsp.stat(fullPath);
+        return {
+          success: true,
+          message: `Berkas "${cleanRelPath}" berhasil dimodifikasi langsung di disk!`,
+          path: cleanRelPath,
+          name: path.basename(fullPath),
+          size: stat.size,
+          total_lines: body.encoding === 'base64' ? undefined : content.split(/\r?\n/).length,
+          lastModified: stat.mtimeMs,
+          backupCreated
+        };
+      });
+      return sendJSON(res, 200, writeResult);
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Gagal menulis berkas ke disk: ' + err.message });
+    }
+  }
+
+  // 4b. Workspace Precision Patch File (Surgical search-and-replace / hunk edits dengan file lock)
+  if (pathname === '/api/workspace/patch' && method === 'POST') {
+    const body = await safeParseBody(req);
+    if (!body) return;
+    if (!requireRemoteHostPin(req, res, reqUrl, body)) return;
+    const targetPath = body.path || body.name || body.fileName;
+    if (!targetPath || typeof targetPath !== 'string') {
+      return sendJSON(res, 400, { error: 'Parameter `path` atau `name` diperlukan.' });
+    }
+    const fullPath = getSafeWorkspaceFullPath(targetPath);
+    if (!fullPath) {
+      return sendJSON(res, 403, { error: 'Akses ditolak: path di luar direktori kerja proyek.' });
+    }
+    const cleanRelPath = path.relative(WORKSPACE_ROOT, fullPath).replace(/\\/g, '/') || targetPath.trim().replace(/^[/\\]+/, '');
+    let parsedBodyEdits = body.edits;
+    if (typeof parsedBodyEdits === 'string') {
+      try { parsedBodyEdits = JSON.parse(parsedBodyEdits); } catch (_) { parsedBodyEdits = null; }
+    }
+    const edits = Array.isArray(parsedBodyEdits) && parsedBodyEdits.length > 0
+      ? parsedBodyEdits
+      : [{
+          target: body.target !== undefined ? body.target : (body.old_str !== undefined ? body.old_str : body.oldString),
+          replacement: body.replacement !== undefined ? body.replacement : (body.new_str !== undefined ? body.new_str : (body.newString !== undefined ? body.newString : '')),
+          replace_all: Boolean(body.replace_all || body.replaceAll),
+          start_line: body.start_line || body.startLine,
+          end_line: body.end_line || body.endLine
+        }];
+    if (!edits.length || edits.some(ed => typeof ed.target !== 'string' || ed.target.length === 0)) {
+      return sendJSON(res, 400, { error: 'Parameter `target` (teks lama yang akan ditambal) wajib berupa string non-kosong.' });
+    }
+
+    try {
+      const patchResult = await withWorkspaceFileLock(fullPath, async () => {
+        if (!fs.existsSync(fullPath)) {
+          return { status: 404, payload: { success: false, error: `Berkas tidak ditemukan: ${cleanRelPath}` } };
+        }
+        const statBefore = await fsp.stat(fullPath);
+        if (statBefore.isDirectory()) {
+          return { status: 400, payload: { success: false, error: 'Target adalah direktori, bukan berkas.' } };
+        }
+        const originalContent = await fsp.readFile(fullPath, 'utf8');
+        const usesCrlf = originalContent.includes('\r\n');
+        let workingContent = originalContent;
+        let totalReplacements = 0;
+
+        for (let idx = 0; idx < edits.length; idx++) {
+          const ed = edits[idx];
+          const rawTarget = String(ed.target);
+          const rawReplacement = ed.replacement !== undefined ? String(ed.replacement) : '';
+          const allowAll = Boolean(ed.replace_all || ed.replaceAll);
+          let effectiveTarget = rawTarget;
+          let effectiveRepl = rawReplacement;
+
+          if (usesCrlf && !workingContent.includes(effectiveTarget)) {
+            const crlfTarget = rawTarget.replace(/\r?\n/g, '\r\n');
+            if (workingContent.includes(crlfTarget)) {
+              effectiveTarget = crlfTarget;
+              effectiveRepl = rawReplacement.replace(/\r?\n/g, '\r\n');
+            }
+          }
+
+          let searchRegion = workingContent;
+          let regionPrefix = '';
+          let regionSuffix = '';
+          const sLine = parseInt(ed.start_line || ed.startLine || '0', 10);
+          const eLine = parseInt(ed.end_line || ed.endLine || '0', 10);
+          if ((Number.isFinite(sLine) && sLine > 0) || (Number.isFinite(eLine) && eLine > 0)) {
+            const eol = usesCrlf ? '\r\n' : '\n';
+            const allLines = workingContent.split(/\r?\n/);
+            const fromIdx = Math.max(0, (sLine > 0 ? sLine : 1) - 1);
+            const toIdx = eLine > 0 ? Math.min(allLines.length, eLine) : allLines.length;
+            regionPrefix = fromIdx > 0 ? allLines.slice(0, fromIdx).join(eol) + eol : '';
+            searchRegion = allLines.slice(fromIdx, toIdx).join(eol);
+            regionSuffix = toIdx < allLines.length ? eol + allLines.slice(toIdx).join(eol) : '';
+          }
+
+          const occurrences = searchRegion.split(effectiveTarget).length - 1;
+          if (occurrences === 0) {
+            return {
+              status: 409,
+              payload: {
+                success: false,
+                error: `Patch hunk #${idx + 1} gagal: teks target persis tidak ditemukan pada "${cleanRelPath}". Gunakan read_file untuk memverifikasi baris terkini.`
+              }
+            };
+          }
+          if (occurrences > 1 && !allowAll) {
+            return {
+              status: 409,
+              payload: {
+                success: false,
+                error: `Patch hunk #${idx + 1} bersifat ambigu (${occurrences} kemunculan cocok di "${cleanRelPath}"). Berikan konteks baris lebih spesifik, tentukan start_line/end_line, atau atur replace_all: true.`
+              }
+            };
+          }
+
+          const updatedRegion = allowAll
+            ? searchRegion.split(effectiveTarget).join(effectiveRepl)
+            : (() => {
+                const pos = searchRegion.indexOf(effectiveTarget);
+                return searchRegion.slice(0, pos) + effectiveRepl + searchRegion.slice(pos + effectiveTarget.length);
+              })();
+          workingContent = regionPrefix + updatedRegion + regionSuffix;
+          totalReplacements += allowAll ? occurrences : 1;
+        }
+
+        let backupCreated = false;
+        if (body.backup !== false) {
           try {
             if (!fs.existsSync(SNAPSHOTS_DIR)) {
               await fsp.mkdir(SNAPSHOTS_DIR, { recursive: true });
             }
-            prevContent = await fsp.readFile(fullPath, 'utf8');
             const safeBase = path.basename(fullPath).replace(/[^a-zA-Z0-9._-]/g, '_');
             const snapPath = path.join(SNAPSHOTS_DIR, `${Date.now()}_${safeBase}`);
-            await fsp.writeFile(snapPath, prevContent, 'utf8');
+            await fsp.writeFile(snapPath, originalContent, 'utf8');
             backupCreated = true;
-          } catch (bErr) {
-            console.warn('Gagal membuat backup snapshot berkas:', bErr.message);
+          } catch (_) {}
+        }
+
+        await fsp.writeFile(fullPath, workingContent, 'utf8');
+        const statAfter = await fsp.stat(fullPath);
+        return {
+          status: 200,
+          payload: {
+            success: true,
+            message: `Patch berhasil diterapkan pada "${cleanRelPath}" (${totalReplacements} perubahan).`,
+            path: cleanRelPath,
+            name: path.basename(fullPath),
+            replacements: totalReplacements,
+            size: statAfter.size,
+            total_lines: workingContent.split(/\r?\n/).length,
+            lastModified: statAfter.mtimeMs,
+            backupCreated
           }
-        }
-      } else {
-        // Buat folder induk jika belum ada
-        const parentDir = path.dirname(fullPath);
-        if (!fs.existsSync(parentDir)) {
-          await fsp.mkdir(parentDir, { recursive: true });
-        }
-      }
-
-      // Tulis langsung ke disk fisik (In-place edit tanpa unduh, mendukung teks & biner base64)
-      if (body.encoding === 'base64') {
-        const binBuf = Buffer.from(content, 'base64');
-        await fsp.writeFile(fullPath, binBuf);
-      } else {
-        await fsp.writeFile(fullPath, content, 'utf8');
-      }
-      const stat = await fsp.stat(fullPath);
-
-      return sendJSON(res, 200, {
-        success: true,
-        message: `Berkas "${cleanRelPath}" berhasil dimodifikasi langsung di disk!`,
-        path: cleanRelPath,
-        name: path.basename(fullPath),
-        size: stat.size,
-        lastModified: stat.mtimeMs,
-        backupCreated: backupCreated
+        };
       });
+      return sendJSON(res, patchResult.status, patchResult.payload);
     } catch (err) {
-      return sendJSON(res, 500, { error: 'Gagal menulis berkas ke disk: ' + err.message });
+      return sendJSON(res, 500, { error: 'Gagal menerapkan patch pada berkas: ' + err.message });
     }
   }
 
@@ -15440,7 +17524,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
       }
 
-      if (sessionId) {
+      const isSubagentReq = req.headers['x-zoz-subagent'] === '1';
+      if (sessionId && !isSubagentReq) {
         ollamaTaskToken = registerActiveChatTask(sessionId, {
           userId: chatUserId,
           model: body.model || 'Ollama Model',
@@ -16331,14 +18416,17 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       delete body.sessionId;
       delete body.userId; // Cegah error Pydantic / upstream validation di OpenRouter
 
-      orTaskToken = registerActiveChatTask(sessionId, {
-        userId: chatUserId,
-        model: body.model || 'OpenRouter Model',
-        provider: 'openrouter',
-        userPrompt: userPrompt || null,
-        userImages: userImages || null
-      });
-      if (sessionId && !orTaskToken) {
+      const isSubagentOrReq = req.headers['x-zoz-subagent'] === '1';
+      orTaskToken = (sessionId && !isSubagentOrReq)
+        ? registerActiveChatTask(sessionId, {
+            userId: chatUserId,
+            model: body.model || 'OpenRouter Model',
+            provider: 'openrouter',
+            userPrompt: userPrompt || null,
+            userImages: userImages || null
+          })
+        : null;
+      if (sessionId && !isSubagentOrReq && !orTaskToken) {
         return sendJSON(res, 429, { error: 'Sesi chat sedang aktif digunakan oleh permintaan lain.' });
       }
       if (isTaskCurrent(sessionId, orTaskToken)) {
@@ -17633,3 +19721,15 @@ if (require.main === module && !process.env.VERCEL) {
 module.exports = server;
 module.exports.requestHandler = requestHandler;
 module.exports._pdfHelpers = { extractPdfTextFromBuffer, consumeHttpDocumentStream };
+module.exports._z21DocHelpers = {
+  normalizeZ21DocSpec,
+  normalizeZ21ScientificText,
+  isZ21FormulaLine,
+  parseZ21FormulaParts,
+  validateZ21DocumentPythonSafety,
+  buildZozNativeZipBuffer,
+  compileZ21DocumentArtifactNode,
+  synthesizeZ21DocumentPythonScript,
+  executeZ21DocumentBuilderSandbox,
+  Z21_ARTIFACT_REGISTRY
+};
