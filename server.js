@@ -7740,6 +7740,15 @@ function normalizeZ21ScientificText(rawText) {
   let s = cleanZ21ResidueLines(rawText);
   if (!s) return '';
 
+  // Pulihkan urutan LaTeX yang korup oleh JSON.parse (mis. \right -> \r+ight, \frac -> \f+rac, \theta -> \t+heta, \beta -> \b+eta, \neq -> \n+eq)
+  s = s
+    .replace(/\uFFFD/g, '')
+    .replace(/\r(?=ight\b)/g, '\\r')
+    .replace(/\f(?=rac\b)/g, '\\f')
+    .replace(/\t(?=(?:heta|imes|ext|an|au)\b)/g, '\\t')
+    .replace(/[\b](?=(?:eta|ar|inom)\b)/g, '\\b')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
   // Rapikan pemecahan spasi aneh dari ekstraksi teks matematis LLM/PDF ("H I =", "R H =", "N T B", "Real- Time", "94 %")
   s = s
     .replace(/\bReal-\s+Time\b/gi, 'Real-Time')
@@ -7748,14 +7757,20 @@ function normalizeZ21ScientificText(rawText) {
     .replace(/\bR\s+H\s*(?==)/g, 'RH ')
     .replace(/(\d+(?:[.,]\d+)?)\s+%/g, '$1%')
     .replace(/\(\s*([^\s()]+)\s+%\s*\)/g, '($1%)')
-    .replace(/([A-Za-z0-9)])\s+\^(\{?[0-9+-]+\}?|[0-9])/g, '$1^$2');
+    .replace(/([A-Za-z0-9)])\s+\^(\{[^{}]+\}|[0-9])/g, '$1^$2');
 
-  // Strip wrapper LaTeX $$, $, \( \), \[ \] sambil menjaga baris terpisah bila $$
+  // Strip wrapper LaTeX $$, $, \( \), \[ \] sambil menjaga isi rumus
   s = s
     .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, (_, eq) => eq.trim())
     .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (_, eq) => eq.trim())
     .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, (_, eq) => eq.trim())
     .replace(/(^|[^\w\\])\$([^$\n]{1,220})\$(?!\d)/g, '$1$2');
+
+  // Strip \left dan \right pembatas kurung LaTeX (baik single maupun double-backslash) agar ekspresi tetap bersih
+  s = s
+    .replace(/\\+left\s*\\?([([{|])/g, '$1')
+    .replace(/\\+right\s*\\?([)\]}|])/g, '$1')
+    .replace(/\\+(?:left|right)\b\s*\.?/g, '');
 
   // Konversi LaTeX umum ke Unicode matematika yang tajam & bersih
   s = s
@@ -7782,10 +7797,26 @@ function normalizeZ21ScientificText(rawText) {
     .replace(/\\mu\b/g, 'μ')
     .replace(/\\omega\b/g, 'ω')
     .replace(/\\Omega\b/g, 'Ω')
+    .replace(/\\tau\b/g, 'τ')
+    .replace(/\\rho\b/g, 'ρ')
+    .replace(/\\phi\b/g, 'φ')
+    .replace(/\\Phi\b/g, 'Φ')
+    .replace(/\\psi\b/g, 'ψ')
+    .replace(/\\Psi\b/g, 'Ψ')
+    .replace(/\\eta\b/g, 'η')
+    .replace(/\\zeta\b/g, 'ζ')
+    .replace(/\\xi\b/g, 'ξ')
+    .replace(/\\nu\b/g, 'ν')
+    .replace(/\\kappa\b/g, 'κ')
+    .replace(/\\varepsilon\b/g, 'ε')
+    .replace(/\\epsilon\b/g, 'ε')
     .replace(/\\times\b/g, '×')
+    .replace(/\\div\b/g, '÷')
     .replace(/\\cdot\b/g, '·')
     .replace(/\\approx\b/g, '≈')
     .replace(/\\neq\b/g, '≠')
+    .replace(/\\equiv\b/g, '≡')
+    .replace(/\\propto\b/g, '∝')
     .replace(/\\leq\b/g, '≤')
     .replace(/\\geq\b/g, '≥')
     .replace(/\\pm\b/g, '±')
@@ -7795,12 +7826,11 @@ function normalizeZ21ScientificText(rawText) {
     .replace(/\\partial\b/g, '∂')
     .replace(/\\nabla\b/g, '∇')
     .replace(/\\in\b/g, '∈')
-    .replace(/\\cos\b/g, 'cos')
-    .replace(/\\sin\b/g, 'sin')
-    .replace(/\\tan\b/g, 'tan')
-    .replace(/\\log\b/g, 'log')
-    .replace(/\\ln\b/g, 'ln')
-    .replace(/\\exp\b/g, 'exp');
+    .replace(/\\forall\b/g, '∀')
+    .replace(/\\exists\b/g, '∃')
+    .replace(/\\(?:rightarrow|to)\b/g, '→')
+    .replace(/\\Rightarrow\b/g, '⇒')
+    .replace(/\\(cos|sin|tan|log|ln|exp|lim)\b/g, '$1');
 
   // Pulihkan simbol derajat yang hilang pada satuan suhu ("Suhu 24 C", "24C", "suhu (F)", "( F )")
   s = s
@@ -7808,12 +7838,21 @@ function normalizeZ21ScientificText(rawText) {
     .replace(/\b(-?\d+(?:[.,]\d+)?)\s+([CF])(?=[,.;:)\s]|$)/g, '$1°$2')
     .replace(/\(\s*(°?\s*[CF])\s*\)/g, (_, u) => `(°${u.replace(/[°\s]/g, '').toUpperCase()})`);
 
-  // Superscript (^2, ^{2}, ^n) & subscript eksplisit (c_1, e_s, x_{12})
+  // Superscript (^2, ^{0.16}, ^n) & subscript eksplisit (c_1, c_2T -> c₂T, e_s, x_{12}, T_{d})
   s = s
     .replace(/\^\{([0-9+-]+)\}/g, (_, d) => toZ21Superscript(d))
+    .replace(/\^\{\s*([^{}]+?)\s*\}/g, '^{$1}')
     .replace(/\^([0-9])(?![0-9])/g, (_, d) => toZ21Superscript(d))
-    .replace(/_\{([0-9a-zA-Z+-]+)\}/g, (_, d) => toZ21Subscript(d))
-    .replace(/_([0-9a-zA-Z])(?![a-zA-Z0-9])/g, (_, d) => toZ21Subscript(d));
+    .replace(/_([0-9]+)/g, (_, d) => toZ21Subscript(d))
+    .replace(/_\{\s*([0-9a-zA-Z+-]+)\s*\}/g, (full, d) => {
+      const mapped = d.split('').map(c => Z21_SUB_MAP[c] || Z21_SUB_MAP[c.toLowerCase()] || '').join('');
+      return mapped.length === d.length ? mapped : `_{${d}}`;
+    })
+    .replace(/_([a-zA-Z])(?![a-zA-Z0-9])/g, (_, d) => {
+      const m = Z21_SUB_MAP[d] || Z21_SUB_MAP[d.toLowerCase()];
+      return m ? m : `_{${d}}`;
+    })
+    .replace(/\bTd\b(?=\s*=)/g, 'T_{d}');
 
   // Subscript alami pada koefisien polinomial & variabel meteorologi: c1..c9 dan es (tekanan uap jenuh)
   s = s
@@ -7834,8 +7873,8 @@ function isZ21FormulaLine(line) {
   if (/^(?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}:/i.test(t)) {
     return true;
   }
-  if (/^[A-Za-z][A-Za-z0-9_₀-₉ₛ()]{0,18}\s*=\s*.+/.test(t) && /[+\-×*/²³⁴₀-₉ₛθΔπ]|cos|sin|log|exp|limit/i.test(t)) {
-    return t.length <= 160;
+  if (/^[A-Za-z\u0370-\u03FF][A-Za-z0-9\u0370-\u03FF_₀-₉⁰-⁹ₛ,{}\s()]{0,28}\s*=\s*.+/.test(t) && /(?:\s[+\-×*/]\s|[²³⁴₀-₉ₛθΔπγ]|\b(?:cos|sin|log|ln|exp|limit)\s*\(|\^\{|_\{)/i.test(t)) {
+    return t.length <= 220;
   }
   return false;
 }
@@ -7846,7 +7885,7 @@ function parseZ21FormulaParts(line) {
   if (labelMatch) {
     return { label: labelMatch[1].trim(), expr: labelMatch[2].trim() };
   }
-  return { label: 'Persamaan Matematis', expr: t };
+  return { label: '', expr: t };
 }
 
 function isZ21NumberedSectionHeading(line) {
@@ -8160,15 +8199,18 @@ function buildZozNativePdfBuffer(rawSpec) {
         if (isZ21FormulaLine(pTrim)) {
           const { label, expr } = parseZ21FormulaParts(pTrim);
           const exprLines = wrapPdfLine(expr, 74);
-          const boxH = 22 + (exprLines.length * 14);
+          const boxH = (label ? 22 : 12) + (exprLines.length * 14);
           pushPageBreakIfNeeded(boxH + 8);
           const boxBot = y - boxH;
           drawOps.push(`0.94 0.98 1.00 rg 40 ${boxBot} 515 ${boxH} re f`);
           drawOps.push(`0.01 0.52 0.78 rg 40 ${boxBot} 3 ${boxH} re f`);
           drawOps.push(`0.73 0.90 0.99 RG 0.5 w 40 ${boxBot} 515 ${boxH} re S`);
-          drawOps.push(`0.01 0.41 0.63 rg BT /F2 9 Tf 52 ${y - 13} Td (${pdfAsciiSafe(label)}) Tj ET`);
+          if (label) {
+            drawOps.push(`0.01 0.41 0.63 rg BT /F2 9 Tf 52 ${y - 13} Td (${pdfAsciiSafe(label)}) Tj ET`);
+          }
+          const startExprY = label ? (y - 27) : (y - 16);
           exprLines.forEach((el, ei) => {
-            drawOps.push(`0.06 0.09 0.16 rg BT /F2 10.5 Tf 52 ${y - 27 - (ei * 14)} Td (${pdfAsciiSafe(el)}) Tj ET`);
+            drawOps.push(`0.06 0.09 0.16 rg BT /F2 10.5 Tf 52 ${startExprY - (ei * 14)} Td (${pdfAsciiSafe(el)}) Tj ET`);
           });
           y = boxBot - 8;
           continue;
@@ -8295,7 +8337,8 @@ function buildZozNativeDocxBuffer(rawSpec) {
         if (!tLine) continue;
         if (isZ21FormulaLine(tLine)) {
           const { label, expr } = parseZ21FormulaParts(tLine);
-          bodyNodes.push(`<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:ind w:left="240" w:right="240"/><w:spacing w:before="100" w:after="100"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t>${escapeZozXml(label)}: </w:t></w:r><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/></w:rPr><w:t xml:space="preserve">${escapeZozXml(expr)}</w:t></w:r></w:p>`);
+          const lblRun = label ? `<w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t>${escapeZozXml(label)}: </w:t></w:r>` : '';
+          bodyNodes.push(`<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:ind w:left="240" w:right="240"/><w:spacing w:before="100" w:after="100"/></w:pPr>${lblRun}<w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/></w:rPr><w:t xml:space="preserve">${escapeZozXml(expr)}</w:t></w:r></w:p>`);
           continue;
         }
         const kvMatch = tLine.match(/^((?:Lokasi|Tanggal|Parameter\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\s*:)\s*(.+)$/i);
@@ -8855,12 +8898,14 @@ def esc_p(v):
 
 def safe_pdf_chars(v):
     s = esc_p(v).replace("\u2022", "&bull;").replace("\u2013", "-").replace("\u2014", "-")
+    s = re.sub(r"\\^\\{([^{}]+)\\}", r'<super rise="3" size="7.2">\\1</super>', s)
+    s = re.sub(r"_\\{([^{}]+)\\}", r'<sub rise="-2" size="7.2">\\1</sub>', s)
     if SYM_FONT:
         s = re.sub(r"([\u211d\u2115\u2124\u2208\u2202\u2207\u2211\u222b])", lambda m: f'<font name="{SYM_FONT}">{m.group(1)}</font>', s)
     if FONT_REG == "Helvetica":
         # Fallback aman bila berjalan di kontainer Linux minimal tanpa TTF
         _sub_tr = str.maketrans("\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089\u209b", "0123456789s")
-        s = s.translate(_sub_tr).replace("\u03b8", "theta").replace("\u211d", "R").replace("\u00d7", "&times;")
+        s = s.translate(_sub_tr).replace("\u03b8", "theta").replace("\u03b3", "gamma").replace("\u211d", "R").replace("\u00d7", "&times;")
     return s
 
 def is_formula_line_py(txt):
@@ -8869,8 +8914,8 @@ def is_formula_line_py(txt):
         return False
     if re.match(r"^(?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}:", t, re.I):
         return True
-    if len(t) <= 160 and re.match(r"^[A-Za-z][A-Za-z0-9_\\u2080-\\u2089\\u209b()]{0,18}\\s*=\\s*.+", t):
-        if re.search(r"[+\\-\\u00d7*/\\u00b2\\u00b3\\u2074\\u2080-\\u2089\\u209b\\u03b8\\u0394\\u03c0]|cos|sin|log|exp", t, re.I):
+    if len(t) <= 220 and re.match(r"^[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_\\u2080-\\u2089\\u209b,{}\\s()]{0,28}\\s*=\\s*.+", t):
+        if re.search(r"(?:\\s[+\\-\\u00d7*/]\\s|[\\u00b2\\u00b3\\u2074\\u2080-\\u2089\\u209b\\u03b8\\u0394\\u03c0\\u03b3]|\\b(?:cos|sin|log|ln|exp)\\s*\\(|\\^\\{|_\\{)", t, re.I):
             return True
     return False
 
@@ -8879,7 +8924,7 @@ def split_formula_line_py(txt):
     m = re.match(r"^((?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}):\\s*(.+)$", t, re.I)
     if m:
         return m.group(1).strip(), m.group(2).strip()
-    return "Persamaan Matematis", t
+    return "", t
 
 story = [Paragraph(safe_pdf_chars(spec.get("title") or out_name), title_style)]
 if spec.get("subtitle"):
@@ -8890,10 +8935,10 @@ PAGE_CONTENT_W = 511.0
 
 def render_equation_box(raw_line):
     lbl, expr = split_formula_line_py(raw_line)
-    cell_flowables = [
-        Paragraph(safe_pdf_chars(lbl), eq_label_style),
-        Paragraph(safe_pdf_chars(expr), eq_expr_style),
-    ]
+    cell_flowables = []
+    if lbl:
+        cell_flowables.append(Paragraph(safe_pdf_chars(lbl), eq_label_style))
+    cell_flowables.append(Paragraph(safe_pdf_chars(expr), eq_expr_style))
     eq_tbl = Table([[cell_flowables]], colWidths=[PAGE_CONTENT_W])
     eq_tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f0f9ff")),
@@ -8908,19 +8953,23 @@ def render_equation_box(raw_line):
     story.append(eq_tbl)
     story.append(Spacer(1, 7))
 
-def render_body_para(raw_line):
+def render_body_para(raw_line, is_bullet=False):
     t = str(raw_line or "").strip()
     if not t:
         return
     if is_formula_line_py(t):
         render_equation_box(t)
         return
+    m_def = re.match(r"^([A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_{}\\u2080-\\u2089\\u209b()\\s]{0,14})\\s*=\\s*(.+)$", t)
+    if m_def and is_bullet:
+        story.append(Paragraph(f"&bull; <b>{safe_pdf_chars(m_def.group(1).strip())}</b> = {safe_pdf_chars(m_def.group(2))}", p_style))
+        return
     m_kv = re.match(r"^((?:Lokasi|Tanggal|Parameter\\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\\s*:)\\s*(.+)$", t, re.I)
     if m_kv:
         html = f"<b>{safe_pdf_chars(m_kv.group(1))}</b> {safe_pdf_chars(m_kv.group(2))}"
-        story.append(Paragraph(html, p_style))
+        story.append(Paragraph(("&bull; " if is_bullet else "") + html, p_style))
         return
-    story.append(Paragraph(safe_pdf_chars(t), p_style))
+    story.append(Paragraph(("&bull; " if is_bullet else "") + safe_pdf_chars(t), p_style))
 
 def render_tbl(tbl):
     headers = tbl.get("headers") or []
@@ -8963,7 +9012,7 @@ for sec in (spec.get("sections") or []):
             if para.strip():
                 render_body_para(para)
     for b in (sec.get("bullets") or []):
-        story.append(Paragraph("&bull; " + safe_pdf_chars(b), p_style))
+        render_body_para(b, is_bullet=True)
     if sec.get("table"):
         render_tbl(sec["table"])
 
@@ -9001,18 +9050,38 @@ def is_formula_line_dx(txt):
         return False
     if re.match(r"^(?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}:", t, re.I):
         return True
-    if len(t) <= 160 and re.match(r"^[A-Za-z][A-Za-z0-9_\\u2080-\\u2089\\u209b()]{0,18}\\s*=\\s*.+", t):
-        if re.search(r"[+\\-\\u00d7*/\\u00b2\\u00b3\\u2074\\u2080-\\u2089\\u209b\\u03b8\\u0394\\u03c0]|cos|sin|log|exp", t, re.I):
+    if len(t) <= 220 and re.match(r"^[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_\\u2080-\\u2089\\u209b,{}\\s()]{0,28}\\s*=\\s*.+", t):
+        if re.search(r"(?:\\s[+\\-\\u00d7*/]\\s|[\\u00b2\\u00b3\\u2074\\u2080-\\u2089\\u209b\\u03b8\\u0394\\u03c0\\u03b3]|\\b(?:cos|sin|log|ln|exp)\\s*\\(|\\^\\{|_\\{)", t, re.I):
             return True
     return False
 
-def add_formatted_para(txt):
+def append_math_runs(p, text, bold=False, size_pt=None, color_rgb=None):
+    parts = re.split(r"(\\^\\{[^{}]+\\}|_\\{[^{}]+\\})", str(text or ""))
+    for part in parts:
+        if not part:
+            continue
+        is_sup = part.startswith("^{") and part.endswith("}")
+        is_sub = part.startswith("_{") and part.endswith("}")
+        val = part[2:-1] if (is_sup or is_sub) else part
+        r = p.add_run(val)
+        if bold:
+            r.bold = True
+        if is_sup:
+            r.font.superscript = True
+        elif is_sub:
+            r.font.subscript = True
+        if size_pt:
+            r.font.size = Pt(size_pt)
+        if color_rgb:
+            r.font.color.rgb = color_rgb
+
+def add_formatted_para(txt, as_bullet=False):
     t = str(txt or "").strip()
     if not t:
         return
     if is_formula_line_dx(t):
         m = re.match(r"^((?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}):\\s*(.+)$", t, re.I)
-        lbl, expr = (m.group(1).strip(), m.group(2).strip()) if m else ("Persamaan Matematis", t)
+        lbl, expr = (m.group(1).strip(), m.group(2).strip()) if m else ("", t)
         p = doc.add_paragraph()
         p.paragraph_format.left_indent = Inches(0.22)
         p.paragraph_format.space_before = Pt(6)
@@ -9020,23 +9089,21 @@ def add_formatted_para(txt):
         p_pr = p._p.get_or_add_pPr()
         p_pr.append(parse_xml(f'<w:shd {nsdecls("w")} w:val="clear" w:color="auto" w:fill="F0F9FF"/>'))
         p_pr.append(parse_xml(f'<w:pBdr {nsdecls("w")}><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr>'))
-        r1 = p.add_run(lbl + ": ")
-        r1.bold = True
-        r1.font.size = Pt(10)
-        r1.font.color.rgb = RGBColor(0x03, 0x69, 0xA1)
-        r2 = p.add_run(expr)
-        r2.bold = True
-        r2.font.size = Pt(11)
-        r2.font.color.rgb = RGBColor(0x0F, 0x17, 0x2A)
+        if lbl:
+            r1 = p.add_run(lbl + ": ")
+            r1.bold = True
+            r1.font.size = Pt(10)
+            r1.font.color.rgb = RGBColor(0x03, 0x69, 0xA1)
+        append_math_runs(p, expr, bold=True, size_pt=11, color_rgb=RGBColor(0x0F, 0x17, 0x2A))
         return
+    p = doc.add_paragraph(style="List Bullet") if as_bullet else doc.add_paragraph()
     m_kv = re.match(r"^((?:Lokasi|Tanggal|Parameter\\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\\s*:)\\s*(.+)$", t, re.I)
     if m_kv:
-        p = doc.add_paragraph()
         r1 = p.add_run(m_kv.group(1) + " ")
         r1.bold = True
-        p.add_run(m_kv.group(2))
+        append_math_runs(p, m_kv.group(2))
         return
-    doc.add_paragraph(t)
+    append_math_runs(p, t)
 
 def add_doc_table(tbl):
     headers = tbl.get("headers") or []
@@ -9069,7 +9136,7 @@ for sec in (spec.get("sections") or []):
             if para.strip():
                 add_formatted_para(para)
     for b in (sec.get("bullets") or []):
-        doc.add_paragraph(str(b), style="List Bullet")
+        add_formatted_para(str(b), as_bullet=True)
     if sec.get("table"):
         add_doc_table(sec["table"])
 
