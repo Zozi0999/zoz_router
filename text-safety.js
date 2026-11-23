@@ -1195,14 +1195,27 @@
     return typeof text === 'string' ? text : '';
   }
 
-  function createThinkTagStripper() {
+  function createThinkTagStripper(options = {}) {
     let inside = false;
     let activeTag = '';
     let activeIsBracket = false;
     let activeIsPipe = false;
     let pending = '';
     let capturedThought = '';
+    let extractedThoughtQueue = '';
     let emittedVisibleChars = 0;
+    const onThoughtDelta = (options && typeof options.onThoughtDelta === 'function') ? options.onThoughtDelta : null;
+    const captureThought = Boolean((options && options.captureThought) || onThoughtDelta);
+
+    const recordThought = (slice) => {
+      if (!slice || !captureThought) return;
+      if (extractedThoughtQueue.length < 24000) {
+        extractedThoughtQueue += slice;
+      }
+      if (onThoughtDelta) {
+        try { onThoughtDelta(slice); } catch (_) {}
+      }
+    };
 
     const OPEN_REGEX = /<(think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|\[(thought|reasoning)\]|<\|thought\|>/i;
     const ORPHAN_CLOSE_REGEX = /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|\[\/(?:thought|reasoning)\]|<\|thought\|>/gi;
@@ -1245,13 +1258,18 @@
           if (!closeMatch) {
             const partialIdx = !final ? findPartialTagTailIndex(input, true) : -1;
             if (partialIdx >= 0) {
-              if (capturedThought.length < 6000) capturedThought += input.slice(0, partialIdx);
+              const safeThoughtSlice = input.slice(0, partialIdx);
+              if (capturedThought.length < 6000) capturedThought += safeThoughtSlice;
+              recordThought(safeThoughtSlice);
               pending = input.slice(partialIdx);
-            } else if (capturedThought.length < 6000) {
-              capturedThought += input;
+            } else {
+              if (capturedThought.length < 6000) capturedThought += input;
+              recordThought(input);
             }
             break;
           }
+          const closedThoughtSlice = input.slice(0, closeMatch.index);
+          recordThought(closedThoughtSlice);
           capturedThought = '';
           input = input.slice(closeMatch.index + closeMatch[0].length);
           // Buang whitespace pembatas tepat setelah </think> jika belum ada teks jawaban sebelumnya
@@ -1302,23 +1320,48 @@
       return cleanOut;
     }
 
-    return { push, isInsideThought: () => inside };
+    function drainThought() {
+      const out = extractedThoughtQueue;
+      extractedThoughtQueue = '';
+      return out;
+    }
+
+    return { push, isInsideThought: () => inside, drainThought };
   }
 
-  function sanitizeRecord(record, tagStrippers, entropyGate = null, isFinalRecord = false) {
-    if (Array.isArray(record)) return record.map(item => sanitizeRecord(item, tagStrippers, entropyGate, isFinalRecord));
+  function hasStructuredReasoningPayload(obj) {
+    if (!obj || typeof obj !== 'object') return false;
+    return Boolean(
+      obj.reasoning ||
+      obj.reasoning_content ||
+      obj.thinking ||
+      obj.thought ||
+      obj.thoughts ||
+      (Array.isArray(obj.reasoning_details) && obj.reasoning_details.length > 0)
+    );
+  }
+
+  function sanitizeRecord(record, tagStrippers, entropyGate = null, isFinalRecord = false, options = {}) {
+    if (Array.isArray(record)) return record.map(item => sanitizeRecord(item, tagStrippers, entropyGate, isFinalRecord, options));
     if (!record || typeof record !== 'object') return record;
+    const preserveReasoning = Boolean(options && options.preserveReasoningFields);
     const localFinal = Boolean(isFinalRecord || record.done === true || record.finish_reason);
     const out = {};
+    let extractedThoughtBuf = '';
     for (const [key, value] of Object.entries(record)) {
-      // Hapus kunci reasoning/thought agar pemikiran internal tidak bocor ke output klien/penyimpanan
+      // Hapus kunci reasoning/thought kecuali jalur stream reasoning terstruktur diaktifkan klien
       if (REASONING_KEYS.has(key.toLowerCase())) {
+        if (preserveReasoning) out[key] = value;
         continue;
       }
       if ((key === 'content' || key === 'response' || key === 'text') && typeof value === 'string') {
         const id = key + ':' + (record.index ?? record.id ?? record.model ?? 'default');
-        if (!tagStrippers.has(id)) tagStrippers.set(id, createThinkTagStripper());
-        let cleaned = tagStrippers.get(id).push(value, localFinal);
+        if (!tagStrippers.has(id)) tagStrippers.set(id, createThinkTagStripper({ captureThought: preserveReasoning }));
+        const stripper = tagStrippers.get(id);
+        let cleaned = stripper.push(value, localFinal);
+        if (preserveReasoning && typeof stripper.drainThought === 'function') {
+          extractedThoughtBuf += stripper.drainThought();
+        }
         if (entropyGate) {
           cleaned = localFinal
             ? (entropyGate.push(cleaned, true) + entropyGate.flush())
@@ -1329,8 +1372,12 @@
         out[key] = value.map((part, index) => {
           if (part && typeof part === 'object' && typeof part.text === 'string') {
             const id = `part:${record.index ?? record.id ?? 'default'}:${index}`;
-            if (!tagStrippers.has(id)) tagStrippers.set(id, createThinkTagStripper());
-            let cleaned = tagStrippers.get(id).push(part.text, localFinal);
+            if (!tagStrippers.has(id)) tagStrippers.set(id, createThinkTagStripper({ captureThought: preserveReasoning }));
+            const stripper = tagStrippers.get(id);
+            let cleaned = stripper.push(part.text, localFinal);
+            if (preserveReasoning && typeof stripper.drainThought === 'function') {
+              extractedThoughtBuf += stripper.drainThought();
+            }
             if (entropyGate) {
               cleaned = localFinal
                 ? (entropyGate.push(cleaned, true) + entropyGate.flush())
@@ -1338,23 +1385,35 @@
             }
             return { ...part, text: cleaned };
           }
-          return sanitizeRecord(part, tagStrippers, entropyGate, localFinal);
+          return sanitizeRecord(part, tagStrippers, entropyGate, localFinal, options);
         });
       } else if (value && typeof value === 'object') {
-        out[key] = sanitizeRecord(value, tagStrippers, entropyGate, localFinal);
+        out[key] = sanitizeRecord(value, tagStrippers, entropyGate, localFinal, options);
       } else {
         out[key] = value;
       }
     }
+    if (preserveReasoning && extractedThoughtBuf && !hasStructuredReasoningPayload(out)) {
+      out.reasoning = extractedThoughtBuf;
+    }
     // Jika record OpenRouter memiliki finish_reason pada choice tetapi delta.content tidak ada, flush sisa tagStripper & gate
     if (localFinal && out.delta && typeof out.delta === 'object' && typeof out.delta.content !== 'string') {
       let rem = '';
-      for (const stripper of tagStrippers.values()) rem += stripper.push('', true);
+      let remThought = '';
+      for (const stripper of tagStrippers.values()) {
+        rem += stripper.push('', true);
+        if (preserveReasoning && typeof stripper.drainThought === 'function') {
+          remThought += stripper.drainThought();
+        }
+      }
       tagStrippers.clear();
       if (entropyGate) {
         rem = entropyGate.push(rem, true) + entropyGate.flush();
       }
       if (rem) out.delta.content = rem;
+      if (preserveReasoning && remThought && !hasStructuredReasoningPayload(out.delta)) {
+        out.delta.reasoning = remThought;
+      }
     }
     return out;
   }
@@ -1363,19 +1422,27 @@
     let buffer = '';
     const decoder = typeof TextDecoder !== 'undefined' ? new TextDecoder() : null;
     const tagStrippers = new Map();
+    const preserveReasoningFields = Boolean(options && options.preserveReasoningFields);
     const entropyGate = (options && options.userPrompt)
       ? createEntropyStreamGate(options.userPrompt, options)
       : null;
 
-    const finishTagStrippers = () => {
+    const finishTagStrippersDetailed = () => {
       let tail = '';
-      for (const stripper of tagStrippers.values()) tail += stripper.push('', true);
+      let thoughtTail = '';
+      for (const stripper of tagStrippers.values()) {
+        tail += stripper.push('', true);
+        if (preserveReasoningFields && typeof stripper.drainThought === 'function') {
+          thoughtTail += stripper.drainThought();
+        }
+      }
       tagStrippers.clear();
       if (entropyGate) {
         tail = entropyGate.push(tail, true) + entropyGate.flush();
       }
-      return tail;
+      return { content: tail, thought: thoughtTail };
     };
+    const finishTagStrippers = () => finishTagStrippersDetailed().content;
     const isOpenRouter = provider === 'openrouter';
     const isJsonSequence = provider === 'ollama' && mode === 'stream';
     const outputQueue = [];
@@ -1399,12 +1466,12 @@
         const isFinalRec = Boolean(mode === 'json' || (parsed && (parsed.done === true || (Array.isArray(parsed.choices) && parsed.choices.some(c => c && c.finish_reason)))));
         const hadOllamaText = Boolean(parsed && parsed.message && typeof parsed.message.content === 'string' && parsed.message.content.length > 0);
         const hadOpenRouterText = Boolean(parsed && Array.isArray(parsed.choices) && parsed.choices.some(c => c && c.delta && typeof c.delta.content === 'string' && c.delta.content.length > 0));
-        const clean = sanitizeRecord(parsed, tagStrippers, entropyGate, isFinalRec);
+        const clean = sanitizeRecord(parsed, tagStrippers, entropyGate, isFinalRec, { preserveReasoningFields });
         if (!isFinalRec) {
-          if (hadOllamaText && clean && clean.message && clean.message.content === '' && !clean.message.tool_calls && !clean.message.images) {
+          if (hadOllamaText && clean && clean.message && clean.message.content === '' && !clean.message.tool_calls && !clean.message.images && !(preserveReasoningFields && hasStructuredReasoningPayload(clean.message))) {
             return '';
           }
-          if (hadOpenRouterText && clean && Array.isArray(clean.choices) && clean.choices.every(c => !c || !c.delta || (c.delta.content === '' && !c.delta.tool_calls && !c.delta.images))) {
+          if (hadOpenRouterText && clean && Array.isArray(clean.choices) && clean.choices.every(c => !c || !c.delta || (c.delta.content === '' && !c.delta.tool_calls && !c.delta.images && !(preserveReasoningFields && hasStructuredReasoningPayload(c.delta))))) {
             return '';
           }
         }
@@ -1424,9 +1491,12 @@
         const payload = trimmed.replace(/^data:\s*/, '');
         if (payload === '[DONE]') {
           let prefixFrame = '';
-          const flushed = finishTagStrippers();
-          if (flushed) {
-            prefixFrame = 'data: ' + JSON.stringify({ choices: [{ index: 0, delta: { content: flushed } }] }) + eol + eol;
+          const flushed = finishTagStrippersDetailed();
+          if (flushed.content || flushed.thought) {
+            const deltaObj = {};
+            if (flushed.content) deltaObj.content = flushed.content;
+            if (flushed.thought) deltaObj.reasoning = flushed.thought;
+            prefixFrame = 'data: ' + JSON.stringify({ choices: [{ index: 0, delta: deltaObj }] }) + eol + eol;
           }
           return prefixFrame + 'data: [DONE]' + eol;
         }
@@ -1477,12 +1547,18 @@
         output += processLine(buffer, '');
         buffer = '';
       }
-      const leftover = finishTagStrippers();
-      if (leftover && mode === 'stream') {
+      const flushedEnd = finishTagStrippersDetailed();
+      if ((flushedEnd.content || flushedEnd.thought) && mode === 'stream') {
         if (isJsonSequence) {
-          output += JSON.stringify({ message: { role: 'assistant', content: leftover }, done: false }) + '\n';
+          const msgObj = { role: 'assistant' };
+          if (flushedEnd.content) msgObj.content = flushedEnd.content;
+          if (flushedEnd.thought) msgObj.reasoning = flushedEnd.thought;
+          output += JSON.stringify({ message: msgObj, done: false }) + '\n';
         } else if (isOpenRouter) {
-          output += 'data: ' + JSON.stringify({ choices: [{ index: 0, delta: { content: leftover } }] }) + '\n\n';
+          const deltaObj = {};
+          if (flushedEnd.content) deltaObj.content = flushedEnd.content;
+          if (flushedEnd.thought) deltaObj.reasoning = flushedEnd.thought;
+          output += 'data: ' + JSON.stringify({ choices: [{ index: 0, delta: deltaObj }] }) + '\n\n';
         }
       }
       return output;

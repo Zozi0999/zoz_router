@@ -125,8 +125,9 @@ function normalizeMessagesForOpenRouter(messages, { normalizeTools = false, incl
       if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
         const textContent = m.content || '[Mengeksekusi alat penelusuran otonom]';
         const baseM = { role: 'assistant', content: textContent };
-        if (includeReasoningPrior) {
-          baseM.reasoning_content = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${String(textContent).slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+        const priorReasoning = m.reasoning_content || m.reasoning || m.thinking;
+        if (includeReasoningPrior || priorReasoning) {
+          baseM.reasoning_content = priorReasoning || `Evaluasi analitis dan penalaran konseptual: ${String(textContent).slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
         }
         return baseM;
       }
@@ -137,9 +138,16 @@ function normalizeMessagesForOpenRouter(messages, { normalizeTools = false, incl
     delete cleanMsg.images;
     delete cleanMsg.image;
 
-    if (includeReasoningPrior && cleanMsg.role === 'assistant') {
+    if (cleanMsg.role === 'assistant') {
       const rawTxt = typeof cleanMsg.content === 'string' ? cleanMsg.content : '';
-      cleanMsg.reasoning_content = cleanMsg.reasoning || cleanMsg.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${rawTxt.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+      const existingReasoning = cleanMsg.reasoning_content || cleanMsg.reasoning || cleanMsg.thinking;
+      if (existingReasoning) {
+        cleanMsg.reasoning_content = existingReasoning;
+      } else if (includeReasoningPrior) {
+        cleanMsg.reasoning_content = `Evaluasi analitis dan penalaran konseptual: ${rawTxt.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+      }
+      delete cleanMsg.reasoning;
+      delete cleanMsg.thinking;
     }
 
     if (imgs.length > 0 && cleanMsg.role === 'user' && !Array.isArray(cleanMsg.content)) {
@@ -1494,8 +1502,13 @@ export default {
             max_tokens: initialMaxTokens,
             provider: { allow_fallbacks: true }
           };
-          if (targetModel.includes('beam') || targetModel.includes('reflection')) {
+          if (body.reasoning) {
+            openRouterPayload.reasoning = body.reasoning;
+          } else if (targetModel.includes('beam') || targetModel.includes('reflection')) {
             openRouterPayload.reasoning = { effort: 'medium' };
+          }
+          if (body.include_reasoning !== undefined && body.include_reasoning !== false) {
+            openRouterPayload.include_reasoning = body.include_reasoning;
           }
           if (body.options?.temperature !== undefined) openRouterPayload.temperature = body.options.temperature;
           if (body.options?.top_p !== undefined) openRouterPayload.top_p = body.options.top_p;
@@ -1577,12 +1590,14 @@ export default {
           if (!isStream) {
             const data = await orRes.json().catch(() => ({}));
             let textContent = data.choices?.[0]?.message?.content || '';
-            const reasoningContent = data.choices?.[0]?.message?.reasoning || data.choices?.[0]?.message?.reasoning_content || '';
+            const reasoningContent = data.choices?.[0]?.message?.reasoning || data.choices?.[0]?.message?.reasoning_content || data.choices?.[0]?.message?.thinking || '';
+            const reasoningDetails = data.choices?.[0]?.message?.reasoning_details;
             if (!textContent.trim() && reasoningContent.trim()) {
               textContent = extractFallbackConclusionFromUnclosedThought(reasoningContent, { requireExplicitMarker: true });
             }
             const msgPayload = { role: 'assistant', content: textContent };
             if (reasoningContent) msgPayload.reasoning = reasoningContent;
+            if (reasoningDetails) msgPayload.reasoning_details = reasoningDetails;
             if (data.choices?.[0]?.message?.tool_calls) {
               msgPayload.tool_calls = data.choices[0].message.tool_calls;
             }
@@ -1640,13 +1655,15 @@ export default {
                 const ch = parsed.choices?.[0];
                 if (ch?.finish_reason) lastFinishReason = ch.finish_reason;
                 const deltaContent = ch?.delta?.content || '';
-                const deltaReasoning = ch?.delta?.reasoning || ch?.delta?.reasoning_content || '';
+                const deltaReasoning = ch?.delta?.reasoning || ch?.delta?.reasoning_content || ch?.delta?.thinking || '';
+                const deltaReasoningDetails = ch?.delta?.reasoning_details;
                 const deltaToolCalls = ch?.delta?.tool_calls;
                 if (deltaContent) accumulatedContent += deltaContent;
                 if (deltaReasoning) accumulatedReasoning += deltaReasoning;
-                if (deltaContent || deltaReasoning || deltaToolCalls) {
+                if (deltaContent || deltaReasoning || deltaReasoningDetails || deltaToolCalls) {
                   const msgPayload = { role: 'assistant', content: deltaContent };
                   if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
+                  if (deltaReasoningDetails) msgPayload.reasoning_details = deltaReasoningDetails;
                   if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
                   await writer.write(encoder.encode(JSON.stringify({
                     model: body.model || 'qwen2.5:1.5b',

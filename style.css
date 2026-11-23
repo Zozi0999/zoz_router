@@ -10639,35 +10639,42 @@ body.is-assistant-dragging #aiFileStudioFrame {
   padding: 0;
 }
 
-/* ==================== AI REASONING / THOUGHT PROCESS BLOCK ==================== */
+/* ==================== AI REASONING / THOUGHT PROCESS BLOCK (ZOZ GEMINI-INSPIRED STEPPER) ==================== */
 .reasoning-block {
-  margin: 10px 0 14px 0;
+  margin: 0 0 10px 0;
   border-radius: 10px;
-  border: 1px solid rgba(168, 85, 247, 0.28);
-  background: rgba(168, 85, 247, 0.05);
-  overflow: hidden;
-  transition: all 0.25s ease;
+  border: none;
+  background: transparent;
+  overflow: visible;
+  transition: opacity 0.2s ease;
 }
 
 .reasoning-block[open] {
-  border-color: rgba(168, 85, 247, 0.45);
-  background: rgba(168, 85, 247, 0.08);
+  border: none;
+  background: transparent;
 }
 
 .reasoning-summary {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 9px 14px;
+  justify-content: flex-start;
+  padding: 5px 8px;
+  margin: 0 0 2px -8px;
+  border-radius: 9px;
   cursor: pointer;
   user-select: none;
-  font-size: 0.94rem;
-  color: var(--neon-purple, #c084fc);
-  font-weight: 600;
+  font-size: 0.89rem;
+  color: var(--text-main, #f0f4fc);
+  font-weight: 500;
   list-style: none;
   gap: 8px;
   outline: none;
-  background: rgba(168, 85, 247, 0.04);
+  background: transparent;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+.reasoning-summary:hover {
+  background: rgba(148, 163, 184, 0.12);
 }
 
 .reasoning-summary::-webkit-details-marker {
@@ -10675,51 +10682,444 @@ body.is-assistant-dragging #aiFileStudioFrame {
 }
 
 .reasoning-title {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  line-height: 1.35;
 }
 
-.reasoning-title i {
-  font-size: 0.9rem;
-  color: var(--neon-purple, #a855f7);
+.zoz-cot-spark-icon {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  color: var(--neon-cyan, #38bdf8);
+  opacity: 0.92;
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+
+.zoz-cot-spark-icon.is-streaming {
+  animation: zozSparkPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes zozSparkPulse {
+  0%, 100% {
+    opacity: 0.65;
+    transform: scale(0.95);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+.zoz-cot-summary-meta {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--text-muted, #94a3b8);
+  opacity: 0.82;
+}
+
+.zoz-cot-chevron {
+  font-size: 0.74rem;
+  color: var(--text-muted, #94a3b8);
+  opacity: 0.78;
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  margin-left: 1px;
+}
+
+.reasoning-block[open] .zoz-cot-chevron {
+  transform: rotate(90deg);
 }
 
 .reasoning-badge {
-  font-size: 0.72rem;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.reasoning-badge.thinking {
-  background: rgba(168, 85, 247, 0.2);
-  color: #e9d5ff;
-  border: 1px solid rgba(168, 85, 247, 0.35);
-}
-
-.reasoning-badge.done {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
-  border: 1px solid rgba(34, 197, 94, 0.25);
+  display: none;
 }
 
 .reasoning-content {
-  padding: 12px 16px;
-  border-top: 1px dashed rgba(168, 85, 247, 0.2);
+  padding: 6px 0 6px 2px;
+  border-top: none;
   font-family: var(--font-reading);
-  font-size: 1.02rem;
-  line-height: 1.68;
-  color: #B4C0D3;
-  max-height: 480px;
+  font-size: 0.89rem;
+  line-height: 1.56;
+  color: var(--text-secondary, #cbd5e1);
+  max-height: 460px;
   overflow-y: auto;
 }
 
 .reasoning-content p {
-  margin: 8px 0;
+  margin: 4px 0;
+}
+
+/* ==================== COMPACT VERTICAL STEPPER RAIL (LIVE & EXPANDED) ==================== */
+.zoz-cot-timeline {
+  margin: 0 0 8px 0;
+  border: none;
+  background: transparent;
+}
+
+.zoz-cot-timeline[open] + .zoz-cot-live-rail {
+  display: none;
+}
+
+.zoz-cot-live-rail {
+  display: flex;
+  flex-direction: column;
+  margin: 2px 0 12px 2px;
+  padding: 0;
+}
+
+.zoz-cot-rail-item {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 5px 0 9px 0;
+  min-width: 0;
+}
+
+.zoz-cot-rail-item:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 9.5px;
+  top: 25px;
+  bottom: -2px;
+  width: 1.5px;
+  background: rgba(148, 163, 184, 0.24);
+  pointer-events: none;
+}
+
+.zoz-cot-rail-node {
+  position: relative;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  font-size: 0.78rem;
+  color: var(--text-muted, #94a3b8);
+}
+
+.zoz-cot-rail-item.is-past {
+  opacity: 0.56;
+}
+
+.zoz-cot-rail-item.is-active {
+  opacity: 1;
+}
+
+.zoz-cot-rail-item.is-active .zoz-cot-rail-node {
+  color: var(--neon-cyan, #38bdf8);
+  animation: zozSparkPulse 1.6s ease-in-out infinite;
+}
+
+.zoz-cot-rail-item.is-web .zoz-cot-rail-node {
+  color: #38bdf8;
+}
+
+.zoz-cot-rail-item.is-memory .zoz-cot-rail-node {
+  color: #a78bfa;
+}
+
+.zoz-cot-rail-item.is-code .zoz-cot-rail-node {
+  color: #34d399;
+}
+
+.zoz-cot-rail-item.is-weather .zoz-cot-rail-node {
+  color: #fbbf24;
+}
+
+.zoz-cot-rail-item.is-error-note .zoz-cot-rail-node {
+  color: #f59e0b;
+}
+
+.zoz-cot-rail-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.88rem;
+  line-height: 1.46;
+  color: var(--text-main, #f0f4fc);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.zoz-cot-rail-item.is-past .zoz-cot-rail-text {
+  color: var(--text-secondary, #94a3b8);
+}
+
+.zoz-cot-rail-item.is-active .zoz-cot-rail-text {
+  font-weight: 500;
+}
+
+/* Expanded Detailed Drawer: Sleek vertical spine instead of heavy card boxes */
+.zoz-cot-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 2px;
+}
+
+.zoz-cot-step {
+  position: relative;
+  padding: 4px 4px 12px 26px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.zoz-cot-step::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(168, 85, 247, 0.78);
+  box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.14);
+}
+
+.zoz-cot-step.is-interleaved::before {
+  background: rgba(56, 189, 248, 0.88);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.16);
+}
+
+.zoz-cot-step.is-final::before {
+  background: rgba(52, 211, 153, 0.88);
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.16);
+}
+
+.zoz-cot-step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 9.25px;
+  top: 22px;
+  bottom: -4px;
+  width: 1.5px;
+  background: rgba(148, 163, 184, 0.22);
+}
+
+.zoz-cot-step-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.zoz-cot-step-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #c4b5fd;
+}
+
+.zoz-cot-step.is-interleaved .zoz-cot-step-label {
+  color: #7dd3fc;
+}
+
+.zoz-cot-step.is-final .zoz-cot-step-label {
+  color: #6ee7b7;
+}
+
+.zoz-cot-step-phase {
+  font-size: 0.69rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-muted, #94a3b8);
+  font-weight: 500;
+}
+
+.zoz-cot-step-thought {
+  font-size: 0.86rem;
+  line-height: 1.56;
+  color: var(--text-secondary, #cbd5e1);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.zoz-cot-step-thought p:first-child {
+  margin-top: 0;
+}
+
+.zoz-cot-step-thought p:last-child {
+  margin-bottom: 0;
+}
+
+.zoz-cot-step-tools {
+  margin-top: 7px;
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.zoz-cot-tool-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.06);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  font-size: 0.77rem;
+}
+
+.zoz-cot-tool-call {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text-main, #f0f4fc);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.zoz-cot-tool-code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.71rem;
+  color: var(--text-muted, #94a3b8);
+  background: rgba(148, 163, 184, 0.1);
+  border: none;
+  padding: 1px 6px;
+  border-radius: 5px;
+  opacity: 0.88;
+}
+
+.zoz-cot-tool-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.zoz-cot-tool-status.is-running {
+  background: rgba(56, 189, 248, 0.16);
+  color: #7dd3fc;
+}
+
+.zoz-cot-tool-status.is-ok {
+  background: rgba(34, 197, 94, 0.14);
+  color: #4ade80;
+}
+
+.zoz-cot-tool-status.is-error {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fbbf24;
+}
+
+.zoz-cot-tool-outcome {
+  width: 100%;
+  font-size: 0.74rem;
+  line-height: 1.42;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 2px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+body.light-theme .reasoning-summary {
+  color: #0f172a;
+}
+
+body.light-theme .reasoning-summary:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+body.light-theme .zoz-cot-spark-icon {
+  color: #0284c7;
+}
+
+body.light-theme .zoz-cot-summary-meta,
+body.light-theme .zoz-cot-chevron {
+  color: #475569;
+}
+
+body.light-theme .zoz-cot-rail-item:not(:last-child)::after,
+body.light-theme .zoz-cot-step:not(:last-child)::after {
+  background: rgba(15, 23, 42, 0.14);
+}
+
+body.light-theme .zoz-cot-rail-text {
+  color: #0f172a;
+}
+
+body.light-theme .zoz-cot-rail-item.is-past .zoz-cot-rail-text {
+  color: #475569;
+}
+
+body.light-theme .zoz-cot-rail-item.is-active .zoz-cot-rail-node {
+  color: #0284c7;
+}
+
+body.light-theme .zoz-cot-step {
+  background: transparent;
+}
+
+body.light-theme .zoz-cot-step-label {
+  color: #6d28d9;
+}
+
+body.light-theme .zoz-cot-step.is-interleaved .zoz-cot-step-label {
+  color: #0369a1;
+}
+
+body.light-theme .zoz-cot-step.is-final .zoz-cot-step-label {
+  color: #047857;
+}
+
+body.light-theme .zoz-cot-step-phase {
+  background: rgba(15, 23, 42, 0.07);
+  color: #475569;
+}
+
+body.light-theme .zoz-cot-step-thought {
+  color: #1e293b;
+}
+
+body.light-theme .zoz-cot-tool-item {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.11);
+}
+
+body.light-theme .zoz-cot-tool-call {
+  color: #0f172a;
+}
+
+body.light-theme .zoz-cot-tool-code {
+  color: #475569;
+}
+
+body.light-theme .zoz-cot-tool-status.is-running {
+  background: rgba(2, 132, 199, 0.12);
+  color: #0369a1;
+}
+
+body.light-theme .zoz-cot-tool-status.is-ok {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+}
+
+body.light-theme .zoz-cot-tool-status.is-error {
+  background: rgba(217, 119, 6, 0.14);
+  color: #b45309;
+}
+
+body.light-theme .zoz-cot-tool-outcome {
+  color: #475569;
 }
 
 .reasoning-only-notice {

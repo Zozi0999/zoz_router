@@ -16151,7 +16151,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       this.isDone = false;
       this.isLoopTerminated = false;
       this.thinkStripper = (typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.createThinkTagStripper === 'function')
-        ? TEXT_SAFETY.createThinkTagStripper()
+        ? TEXT_SAFETY.createThinkTagStripper({
+            onThoughtDelta: (thoughtChunk) => {
+              if (thoughtChunk && !this.isLoopTerminated && !this.isDone) {
+                this.appendReasoning(thoughtChunk);
+              }
+            }
+          })
         : null;
       this.transportGate = (!this.options.skipEntropyGate && typeof TEXT_SAFETY !== 'undefined' && TEXT_SAFETY && typeof TEXT_SAFETY.createEntropyStreamGate === 'function')
         ? TEXT_SAFETY.createEntropyStreamGate(this.options.userPrompt || '', this.options)
@@ -16165,7 +16171,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     appendReasoning(reasoningDelta) {
       if (this.isLoopTerminated || this.isDone) return;
       if (reasoningDelta) {
-        this.accumulatedReasoning = (this.accumulatedReasoning || '') + String(reasoningDelta);
+        const deltaStr = String(reasoningDelta);
+        this.accumulatedReasoning = (this.accumulatedReasoning || '') + deltaStr;
+        if (this.options && typeof this.options.onReasoningDelta === 'function') {
+          try { this.options.onReasoningDelta(deltaStr); } catch (_) {}
+        }
       }
       // Jangan pernah masukkan pemikiran AI ke teks jawaban.
       // Hanya tampilkan status berpikir jika teks jawaban utama belum mengalir.
@@ -16237,7 +16247,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         }
         str = stripped;
       }
-      this.isThinking = false;
+      if (str.trim() || this.text.trim()) {
+        this.isThinking = false;
+      }
 
       if (this.transportGate) {
         const gated = this.transportGate.push(str, false);
@@ -16276,8 +16288,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
     render() {
       if (!this.el) return;
+      const suppressThinkingPlaceholder = Boolean(this.options && this.options.suppressThinkingPlaceholder);
       let displayText = this.text ? safeAssistantText(this.text) : '';
-      if (!displayText && this.isThinking && !this.isDone) {
+      if (!displayText && this.isThinking && !this.isDone && !suppressThinkingPlaceholder) {
         displayText = '*Sedang berpikir...*';
       }
       if (displayText && typeof scrubRawToolCallArtifacts === 'function') {
@@ -16292,7 +16305,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         }
         const scrubbed = scrubRawToolCallArtifacts(streamSafeText);
         if (!scrubbed.trim() && displayText.trim()) {
-          displayText = '*Membaca dan menyintesis data web...*';
+          displayText = suppressThinkingPlaceholder ? '' : '*Membaca dan menyintesis data web...*';
         } else if (scrubbed.trim()) {
           displayText = scrubbed;
         }
@@ -16313,6 +16326,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const hasForgeCodeStarted = isForgeStreaming && /<<<ZOZ_(?:FILE|EDIT|MODIFY)|<!DOCTYPE\s+html|<html\b|```(?:html|htm|jsx|tsx)\b|```[^\n]*\n(?:<!DOCTYPE\s+html|<html\b|<form\b)/i.test(displayText);
       const forgeBuildHtml = hasForgeCodeStarted ? buildZozForgeStreamingCardHtml(displayText, this.options) : '';
       const displayOpts = hasForgeCodeStarted ? { ...this.options, stripForgeWebForStream: true } : this.options;
+      if (suppressThinkingPlaceholder && !displayText.trim() && !forgeBuildHtml && !this.prefixHtml) {
+        this.el.innerHTML = '';
+        return;
+      }
       const renderedProse = renderMarkdown(hideFileBlocksForDisplay(displayText, displayOpts), true, currentStreamSources);
       this.el.innerHTML = (this.prefixHtml || '') + forgeBuildHtml + appendInlineTypingCursor(renderedProse);
       if (this.onScroll && !userScrolledUp) this.onScroll();
@@ -16344,18 +16361,19 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       // TANPA menyentuh DOM (jalur completion merender sendiri di bawahnya).
       const shouldRender = opts.render !== false;
       const allowReasoningFallback = opts.allowReasoningFallback !== false;
-      this.isDone = true;
-      this.isThinking = false;
       if (this.renderTimer !== null) {
         clearTimeout(this.renderTimer);
         this.renderTimer = null;
       }
+      // Flush thinkStripper SEBELUM menandai this.isDone = true agar ekor <think> yang belum ditutup tetap terkirim ke onReasoningDelta.
       if (this.thinkStripper) {
         const rem = this.thinkStripper.push('', true);
         if (rem) {
           this.text += this.transportGate ? this.transportGate.push(rem, true) : rem;
         }
       }
+      this.isDone = true;
+      this.isThinking = false;
       if (this.transportGate) {
         const tail = this.transportGate.flush();
         if (tail) this.text += tail;
@@ -21903,6 +21921,13 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       sourcesHtml = buildSourcesSectionHtml(sources, true);
     }
 
+    const savedReasoningSteps = (role === 'assistant' && typeof normalizeSavedReasoningSteps === 'function')
+      ? normalizeSavedReasoningSteps(safeMeta)
+      : [];
+    const savedCotTimelineHtml = (role === 'assistant' && savedReasoningSteps.length > 0 && typeof buildInterleavedReasoningTimelineHtml === 'function')
+      ? buildInterleavedReasoningTimelineHtml(savedReasoningSteps, { isStreaming: false, modelName: model || '' })
+      : '';
+
     const metaContent = `<strong>${roleLabel}</strong> ${statsHtml}`;
     const shouldRenderBubble = (role === 'assistant') || (role === 'user' && hasText);
 
@@ -21916,6 +21941,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         ${role === 'user' && docsHtml ? docsHtml : ''}
         ${shouldRenderBubble ? `
           <div class="message-bubble">
+            ${role === 'assistant' ? savedCotTimelineHtml : ''}
             <div class="msg-text-content" ${textDisplayStyle}>${renderedBody}</div>
             ${role === 'assistant' ? assistantGeneratedImagesHtml : ''}
             ${role === 'assistant' ? assistantMediaHtml : ''}
@@ -31910,6 +31936,8 @@ ${blocks}
             const hasAudioOutput = isOpenRouterAudioModel(m);
             const supportedParams = Array.isArray(m.supported_parameters) ? m.supported_parameters : [];
             const supportsTools = supportedParams.includes('tools');
+            const supportsReasoning = supportedParams.includes('reasoning') || supportedParams.includes('include_reasoning') || Boolean(m.reasoning);
+            const reasoningDefaultEffort = (m.reasoning && typeof m.reasoning.default_effort === 'string') ? m.reasoning.default_effort : null;
             return {
               id: m.id,
               name: m.name || m.id,
@@ -31918,6 +31946,8 @@ ${blocks}
               hasImageOutput: hasImageOutput,
               hasAudioOutput: hasAudioOutput,
               supportsTools: supportsTools,
+              supportsReasoning: supportsReasoning,
+              reasoningDefaultEffort: reasoningDefaultEffort,
               tag: (m.id.includes(':free') || m.id.endsWith('/free') || m.id === 'openrouter/free' || (m.pricing && parseFloat(m.pricing.prompt) === 0 && parseFloat(m.pricing.completion) === 0)) ? 'Free' : 'Cloud',
               cat: (m.id.includes(':free') || m.id.endsWith('/free') || m.id === 'openrouter/free' || (m.pricing && parseFloat(m.pricing.prompt) === 0 && parseFloat(m.pricing.completion) === 0)) ? 'free' : 'flagship'
             };
@@ -35126,6 +35156,53 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       lower.includes('cohere') ||
       /\/o[134]\b/.test(lower)
     );
+  }
+
+  function doesModelSupportReasoning(modelName, engine = 'openrouter') {
+    if (!modelName || typeof modelName !== 'string') return false;
+    const lower = modelName.toLowerCase();
+    if (engine === 'openrouter') {
+      const liveModel = (STATE.openRouterModels || []).find(m => m.id === modelName);
+      if (liveModel && typeof liveModel.supportsReasoning === 'boolean') {
+        return liveModel.supportsReasoning;
+      }
+    } else {
+      const ollamaModel = (STATE.ollamaModels || []).find(m => (typeof m === 'string' ? m === modelName : (m.name === modelName || m.model === modelName)));
+      if (ollamaModel && Array.isArray(ollamaModel.capabilities) && ollamaModel.capabilities.includes('thinking')) {
+        return true;
+      }
+    }
+    return (
+      lower.includes('claude-') ||
+      lower.includes('kimi') ||
+      lower.includes('moonshot') ||
+      lower.includes('deepseek-r') ||
+      lower.includes('deepseek-v3') ||
+      lower.includes('deepseek-v4') ||
+      lower.includes('deepseek-reasoner') ||
+      lower.includes('qwen3') ||
+      lower.includes('qwq') ||
+      lower.includes('glm-4.5') ||
+      lower.includes('glm-5') ||
+      lower.includes('gemini-2.5') ||
+      lower.includes('gemini-3') ||
+      lower.includes('gpt-oss') ||
+      lower.includes('gpt-5') ||
+      lower.includes('gpt-6') ||
+      lower.includes('nemotron') ||
+      lower.includes('beam') ||
+      lower.includes('reflection') ||
+      lower.includes('magistral') ||
+      lower.includes('step-') ||
+      lower.includes('cogito') ||
+      lower.includes('minimax') ||
+      /\/o[134]\b|\bo[134](?:-|$)/i.test(lower)
+    );
+  }
+
+  function doesModelSupportToolInterleavedThink(modelName, engine = 'openrouter') {
+    if (!modelName || /nemotron|beam|reflection/i.test(modelName)) return false;
+    return doesModelSupportTools(modelName) && doesModelSupportReasoning(modelName, engine);
   }
 
   // ==================== AUTONOMOUS WEB SEARCH, WHITELIST GROUNDING & LOCAL UTILITY TOOLS ====================
@@ -39232,7 +39309,10 @@ ${commToolDoc}
     ? 'Izin lokasi pengguna SUDAH DIBERIKAN sebelumnya (tersimpan aman — JANGAN meminta izin ulang lewat popup!). Saat pengguna menanyakan cuaca di lokasi mereka saat ini/besok, langsung panggil `get_current_coordinates({})` -> `fetch_weather_data({"lat": <lat>, "lon": <lon>})` -> `render_weather_ui({"condition": "<kondisi>", "temp": <angka>, "city": "<kota>"})` (alias `generate_weather_visual`), lalu susun penjelasan cuaca yang LENGKAP & DETAIL (suhu aktual & terasa, kelembapan, angin, peluang hujan, tren 5 jam ke depan/besok, serta saran) di samping token `[[ZOZ_WEATHER_DISPLAY:...]]`.'
     : 'Saat pengguna menanyakan cuaca di lokasi mereka saat ini ("Bagaimana cuaca di tempatku/lokasiku sekarang?"), jalankan alur berantai berurutan demi privasi (izin hanya diminta sekali lalu diingat otomatis): (a) `request_location_permission({"reason": "..."})` (tunggu persetujuan [Izinkan]/[Tolak] pengguna; jangan pernah menebak koordinat!) -> (b) `get_current_coordinates({})` (ambil lat/lon & cocokkan nama wilayah/kota) -> (c) `fetch_weather_data({"lat": <lat>, "lon": <lon>})` (ambil suhu, kelembapan, angin, prakiraan 5 jam ke depan & harian; jika pengguna menyebut kota tertentu secara eksplisit seperti "cuaca di Bandung", boleh langsung panggil `fetch_weather_data({"city": "Bandung"})`) -> (d) `render_weather_ui({"condition": "<kondisi>", "temp": <angka>, "city": "<kota>"})` (alias `generate_weather_visual`) untuk merender kartu visualisasi cuaca interaktif, diikuti penjelasan teks Bahasa Indonesia yang LENGKAP dan DETAIL.'}
 
-[4. ORCHESTRATION & CHAINING (MULTI-STEP TOOL CALLING)]:
+[4. ORCHESTRATION & CHAINING (MULTI-STEP TOOL CALLING & INTERLEAVED REASONING)]:
+- **Interleaved Reasoning & Self-Correction (Think -> Act -> Observe -> Re-Think)**: Sebelum memanggil tool DAN di setiap jeda setelah menerima output tool, lakukan evaluasi singkat di dalam blok penalaran internal Anda (\`<think>\` / reasoning):
+  1. Cek apakah output tool sebelumnya sudah menjawab seluruh sub-pertanyaan, masih parsial/kosong, atau mengembalikan error.
+  2. Jika hasil tool memengaruhi strategi (mis. prakiraan cuaca menunjukkan hujan lebat sehingga pencarian akomodasi wajib difokuskan ke hotel dengan fasilitas aula/ballroom indoor), atau jika tool gagal/tidak ditemukan, **koreksi parameter/kueri atau pilih tool alternatif** secara dinamis pada langkah berikutnya sebelum menyusun jawaban akhir.
 - **Parallel Tool Calling**: Anda dapat memanggil beberapa tool sekaligus dalam satu giliran (baik beberapa item pada array \`tool_calls\` maupun beberapa blok \`<tool_call>...</tool_call>\` berurutan dalam satu respons) untuk mengambil beberapa sumber sekaligus secara paralel (contoh: mengambil data transaksi/riwayat dari \`${allowZ21LocalComm ? 'fetch_communication_context' : 'search_memory'}\` + mengambil kebijakan diskon/SOP dari \`search_documents\` / \`retrieve_knowledge\` dalam satu giliran) sebelum menyusun jawaban.
 - **Sequential Chaining**: Anda dapat menggunakan output dari satu putaran tool sebagai input untuk tool berikutnya pada putaran selanjutnya (contoh: \`${allowZ21LocalComm ? 'fetch_communication_context' : 'search_memory'}\` / \`search_documents\` -> \`execute_python_code\` untuk kalkulasi presisi -> menyusun laporan akhir atau berkas dokumen).`;
   }
@@ -39611,8 +39691,9 @@ ${commToolDoc}
 
   // Normalisasi skema pesan role: 'tool' dan assistant tool_calls menjadi teks user turn
   // untuk backend Ollama dan model Cloud Bridge/OpenRouter yang tidak mendukung native function calling
-  function convertToolMessagesToUserRole(messages) {
+  function convertToolMessagesToUserRole(messages, options = {}) {
     if (!Array.isArray(messages)) return [];
+    const stripReasoning = Boolean(options && options.stripReasoning);
     const mapped = messages.map(m => {
       if (!m) return m;
       if (m.role === 'tool') {
@@ -39626,9 +39707,15 @@ ${commToolDoc}
         const copy = { ...m };
         if (Array.isArray(copy.tool_calls) && copy.tool_calls.length > 0) {
           delete copy.tool_calls;
+          delete copy.reasoning_details;
           if (!copy.content || !copy.content.trim()) {
             copy.content = '[Mengeksekusi alat penelusuran otonom]';
           }
+        }
+        if (stripReasoning) {
+          delete copy.reasoning_content;
+          delete copy.reasoning;
+          delete copy.reasoning_details;
         }
         return copy;
       }
@@ -39652,6 +39739,642 @@ ${commToolDoc}
     return Array.isArray(messages) && messages.some(m => m && (m.role === 'tool' || (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0)));
   }
 
+  function isToolExecResultFailure(r) {
+    if (!r || !r.toolExecRes) return true;
+    if (r.toolExecRes.success === false) return true;
+    if (r.toolExecRes.success === true) return false;
+    const t = String(r.toolExecRes.text || '').trim();
+    if (t.startsWith('Error:') || t.startsWith('Error eksekusi:') || t.startsWith('Error Keamanan:') || t.includes('Gagal membaca URL')) return true;
+    if (t.includes('tidak ditemukan video') || t.includes('Tidak ditemukan hasil spesifik')) return true;
+    return false;
+  }
+
+  /** Ekstrak teks prompt pengguna terakhir dari chain percakapan atau string eksplisit. */
+  function extractLatestUserPromptText(conversationChain, explicitPrompt = '') {
+    if (explicitPrompt && typeof explicitPrompt === 'string' && explicitPrompt.trim()) {
+      return explicitPrompt.trim();
+    }
+    if (!Array.isArray(conversationChain)) return '';
+    for (let i = conversationChain.length - 1; i >= 0; i--) {
+      const m = conversationChain[i];
+      if (!m || m.role !== 'user') continue;
+      if (typeof m.content === 'string' && m.content.trim()) {
+        return m.content.trim();
+      }
+      if (Array.isArray(m.content)) {
+        const txt = m.content
+          .filter(p => p && p.type === 'text' && typeof p.text === 'string')
+          .map(p => p.text)
+          .join(' ')
+          .trim();
+        if (txt) return txt;
+      }
+    }
+    return '';
+  }
+
+  /** Deteksi apakah prompt pengguna meminta tindak lanjut/aksi lain setelah tool cuaca/gambar/video. */
+  function hasSecondaryTaskAfterPrimaryTool(promptStr = '') {
+    const p = String(promptStr || '').trim();
+    if (!p) return false;
+    return /\b(?:hotel|penginapan|resort|villa|ballroom|aula|meeting\s*room|ruang\s*rapat|venue|gedung|restoran|resto|kafe|cafe|rute|transportasi|tiket|acara\s+(?:outdoor|indoor)|fasilitas\s+indoor|rekomendasi(?:kan)?\s+(?:hotel|tempat|venue|penginapan|resto|acara|kegiatan|alternatif)|bandingkan|compare)\b/i.test(p)
+      || /(?:,|\bdan\b|\bserta\b|\blalu\b|\bjika\b|\bkalau\b|\bbila\b|\bapabila\b)[^.?!]{0,80}\b(?:cari(?:kan)?|rekomendasi(?:kan)?|temukan|hitung(?:kan)?|cek\s+harga|jadwal|pesankan|siapkan|cari\s+tahu)\b/i.test(p);
+  }
+
+  function summarizeToolOutcomeForTimeline(toolExecRes) {
+    if (!toolExecRes || typeof toolExecRes !== 'object') return 'Selesai dieksekusi.';
+    if (Array.isArray(toolExecRes.sources) && toolExecRes.sources.length > 0) {
+      return `${toolExecRes.sources.length} sumber/hasil ditemukan.`;
+    }
+    const raw = String(toolExecRes.text || toolExecRes.message || '').replace(/\s+/g, ' ').trim();
+    if (raw) {
+      return raw.length > 150 ? `${raw.slice(0, 147)}...` : raw;
+    }
+    if (toolExecRes.success === false) return 'Gagal mengembalikan data.';
+    return 'Selesai dieksekusi.';
+  }
+
+  function normalizeSavedReasoningSteps(meta) {
+    if (!meta || typeof meta !== 'object') return [];
+    if (Array.isArray(meta.reasoningSteps) && meta.reasoningSteps.length > 0) {
+      return meta.reasoningSteps
+        .filter(s => s && typeof s === 'object')
+        .map((s, idx) => ({
+          round: Number.isFinite(s.round) ? s.round : idx,
+          phase: s.phase || (idx === 0 ? 'initial' : 'interleaved'),
+          thought: typeof s.thought === 'string' ? s.thought : '',
+          toolCalls: Array.isArray(s.toolCalls) ? s.toolCalls : [],
+          toolResults: Array.isArray(s.toolResults) ? s.toolResults : [],
+          allToolsFailed: Boolean(s.allToolsFailed),
+          status: s.status || 'completed'
+        }))
+        .filter(s => Boolean((s.thought && s.thought.trim()) || s.toolCalls.length > 0));
+    }
+    const fallbackReasoning = String(meta.reasoning || meta.reasoning_content || '').trim();
+    if (!fallbackReasoning) return [];
+    return [{
+      round: 0,
+      phase: 'initial',
+      thought: fallbackReasoning,
+      toolCalls: [],
+      toolResults: [],
+      allToolsFailed: false,
+      status: 'completed'
+    }];
+  }
+
+  const ZOZ_COT_SPARK_SVG = '<svg class="zoz-cot-spark-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2.5L13.9 8.6L20 10.5L13.9 12.4L12 18.5L10.1 12.4L4 10.5L10.1 8.6L12 2.5Z" fill="currentColor"/><circle cx="18.5" cy="18.5" r="2" fill="currentColor" opacity="0.72"/></svg>';
+
+  /** Bersihkan argumen tool menjadi potongan teks ringkas yang ramah dibaca manusia. */
+  function extractNaturalCotArg(argsPreview = '') {
+    let raw = String(argsPreview || '').trim();
+    if (!raw) return '';
+    if (raw.startsWith('{') && raw.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          raw = parsed.query || parsed.q || parsed.topic || parsed.topik || parsed.city || parsed.location || parsed.kota || parsed.url || '';
+        }
+      } catch (_) {}
+    }
+    raw = String(raw || '').replace(/^\s*["'{]+|["'}]+\s*$/g, '').replace(/\s+/g, ' ').trim();
+    if (raw.length > 68) raw = `${raw.slice(0, 65)}...`;
+    return raw;
+  }
+
+  /** Petakan nama tool ke ikon semantik ZOZ & kalimat tindakan Bahasa Indonesia yang alami. */
+  function getCotToolMeta(toolName, argsPreview = '', resItem = null, isRunning = false) {
+    const norm = (typeof normalizeToolName === 'function') ? normalizeToolName(toolName) : String(toolName || '').toLowerCase();
+    const argClean = extractNaturalCotArg(argsPreview);
+    const hasFailed = Boolean(resItem && resItem.ok === false);
+    const suffix = isRunning ? '...' : '.';
+
+    let iconClass = 'fa-solid fa-wand-magic-sparkles';
+    let toneClass = 'is-thought';
+    let label = '';
+
+    if (norm === 'search_web' || norm === 'web_search' || norm === 'search') {
+      iconClass = 'fa-solid fa-globe';
+      toneClass = 'is-web';
+      label = argClean ? `Mencari "${argClean}" di web${suffix}` : `Menelusuri informasi terkini di web${suffix}`;
+    } else if (norm === 'browse_web_page' || norm === 'extract_web') {
+      iconClass = 'fa-regular fa-file-lines';
+      toneClass = 'is-web';
+      let hostLabel = argClean;
+      try {
+        if (/^https?:\/\//i.test(argClean)) hostLabel = new URL(argClean).hostname.replace(/^www\./, '');
+      } catch (_) {}
+      label = hostLabel ? `Membaca halaman ${hostLabel}${suffix}` : `Membaca detail halaman sumber${suffix}`;
+    } else if (norm === 'execute_python_code') {
+      iconClass = 'fa-solid fa-terminal';
+      toneClass = 'is-code';
+      label = isRunning ? 'Menjalankan perhitungan dan analisis di Python...' : 'Menghitung dan memproses data dengan Python.';
+    } else if (norm === 'search_memory') {
+      iconClass = 'fa-regular fa-bookmark';
+      toneClass = 'is-memory';
+      label = argClean ? `Memeriksa "${argClean}" dari memori proyek${suffix}` : `Memeriksa konteks yang tersimpan di memori${suffix}`;
+    } else if (norm === 'save_memory') {
+      iconClass = 'fa-solid fa-floppy-disk';
+      toneClass = 'is-memory';
+      label = argClean ? `Menyimpan "${argClean}" ke memori proyek${suffix}` : `Menyimpan hasil akhir ke memori proyek${suffix}`;
+    } else if (norm === 'fetch_weather_data') {
+      iconClass = 'fa-solid fa-cloud-sun';
+      toneClass = 'is-weather';
+      label = argClean ? `Mengambil data cuaca real-time untuk ${argClean}${suffix}` : `Mengambil data prakiraan cuaca real-time${suffix}`;
+    } else if (norm === 'get_current_coordinates' || norm === 'request_location_permission') {
+      iconClass = 'fa-solid fa-location-dot';
+      toneClass = 'is-weather';
+      label = norm === 'request_location_permission'
+        ? `Meminta konfirmasi izin akses lokasi${suffix}`
+        : `Mencocokkan koordinat lokasi Anda${suffix}`;
+    } else if (norm === 'render_weather_ui') {
+      iconClass = 'fa-solid fa-sun';
+      toneClass = 'is-weather';
+      label = `Menyiapkan tampilan ringkasan cuaca${suffix}`;
+    } else if (norm === 'search_documents') {
+      iconClass = 'fa-regular fa-folder-open';
+      toneClass = 'is-docs';
+      label = argClean ? `Menelusuri dokumen terkait "${argClean}"${suffix}` : `Menelusuri dokumen internal dan basis pengetahuan${suffix}`;
+    } else if (norm === 'search_chat_history') {
+      iconClass = 'fa-solid fa-clock-rotate-left';
+      toneClass = 'is-history';
+      label = argClean ? `Memeriksa riwayat obrolan tentang "${argClean}"${suffix}` : `Memeriksa riwayat percakapan terdahulu${suffix}`;
+    } else if (norm === 'fetch_communication_context' || norm === 'summarize_whatsapp_chat') {
+      iconClass = 'fa-regular fa-comments';
+      toneClass = 'is-comm';
+      label = `Memeriksa konteks percakapan WhatsApp${suffix}`;
+    } else if (norm === 'search_images' || norm === 'inspect_image' || norm === 'prepare_image_display') {
+      iconClass = 'fa-regular fa-images';
+      toneClass = 'is-media';
+      label = `Mencari dan memverifikasi visual pendukung${suffix}`;
+    } else if (norm === 'find_related_videos') {
+      iconClass = 'fa-regular fa-circle-play';
+      toneClass = 'is-media';
+      label = `Mencari referensi video terkait${suffix}`;
+    } else {
+      label = argClean ? `Menjalankan ${toolName}: ${argClean}${suffix}` : `Menjalankan ${toolName}${suffix}`;
+    }
+
+    if (hasFailed) {
+      toneClass = 'is-error-note';
+      iconClass = 'fa-solid fa-rotate';
+      label = `${label.replace(/[.]+$/, '')} — beralih ke strategi alternatif.`;
+    }
+    return { iconClass, toneClass, label };
+  }
+
+  /** Ringkas teks pemikiran menjadi satu baris bersih untuk rail stepper langsung. */
+  function summarizeCotThoughtLine(thoughtStr = '', { phase = 'interleaved', isLastRound = false } = {}) {
+    const clean = String(thoughtStr || '')
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/[*_`#>]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (clean) {
+      const firstSentence = clean.split(/(?<=[.!?])\s+/)[0] || clean;
+      const snippet = firstSentence.length > 118 ? `${firstSentence.slice(0, 115)}...` : firstSentence;
+      return snippet;
+    }
+    if (phase === 'initial') return 'Menganalisis permintaan dan menyusun rencana...';
+    if (phase === 'final' || isLastRound) return 'Mengevaluasi seluruh bukti dan menyusun jawaban akhir...';
+    return 'Mengevaluasi hasil dan menentukan langkah berikutnya...';
+  }
+
+  /** Bangun live vertical milestone rail bergaya Gemini dengan identitas ZOZ Router selama streaming. */
+  function buildLiveCotRailHtml(steps, options = {}) {
+    if (!options || !options.isStreaming || !Array.isArray(steps) || steps.length === 0) return '';
+    const railItems = [];
+    const lastIdx = steps.length - 1;
+
+    steps.forEach((step, sIdx) => {
+      if (!step) return;
+      const calls = Array.isArray(step.toolCalls) ? step.toolCalls : [];
+      const results = Array.isArray(step.toolResults) ? step.toolResults : [];
+      const isLastStep = sIdx === lastIdx;
+
+      if (calls.length > 0) {
+        calls.forEach((c, cIdx) => {
+          const resItem = results[cIdx] || null;
+          const isRunning = step.status === 'running_tools' && !resItem;
+          const meta = getCotToolMeta(c.name, c.argsPreview, resItem, isRunning);
+          railItems.push({
+            iconClass: meta.iconClass,
+            toneClass: meta.toneClass,
+            text: meta.label,
+            isActive: isRunning
+          });
+        });
+      } else {
+        const thoughtPreview = summarizeCotThoughtLine(step.thought || '', {
+          phase: step.phase || (sIdx === 0 ? 'initial' : 'interleaved'),
+          isLastRound: Boolean(step.isLastRound)
+        });
+        railItems.push({
+          iconClass: 'fa-solid fa-sparkles',
+          toneClass: 'is-thought',
+          text: thoughtPreview,
+          isActive: isLastStep,
+          isSpark: true
+        });
+      }
+    });
+
+    if (railItems.length === 0) return '';
+    if (!railItems.some(it => it.isActive)) {
+      railItems[railItems.length - 1].isActive = true;
+    }
+
+    const itemsHtml = railItems.map(it => {
+      const stateCls = it.isActive ? 'is-active' : 'is-past';
+      const nodeIcon = it.isSpark ? ZOZ_COT_SPARK_SVG : `<i class="${it.iconClass}" aria-hidden="true"></i>`;
+      return `
+        <div class="zoz-cot-rail-item ${stateCls} ${it.toneClass}">
+          <span class="zoz-cot-rail-node">${nodeIcon}</span>
+          <span class="zoz-cot-rail-text">${escapeHtml(it.text)}</span>
+        </div>
+      `;
+    }).join('');
+
+    return `<div class="zoz-cot-live-rail" aria-live="polite">${itemsHtml}</div>`;
+  }
+
+  function buildInterleavedReasoningTimelineHtml(steps, options = {}) {
+    if (!Array.isArray(steps) || steps.length === 0) return '';
+    const isStreaming = Boolean(options.isStreaming);
+    const preserveOpen = Boolean(options.preserveOpen);
+    const totalTools = steps.reduce((sum, s) => sum + (Array.isArray(s.toolCalls) ? s.toolCalls.length : 0), 0);
+    const hasInterleaved = steps.length > 1 || totalTools > 0;
+    const summaryLabel = hasInterleaved ? 'Alur Penalaran' : 'Proses Berpikir';
+    const metaParts = [];
+    if (steps.length > 1) metaParts.push(`${steps.length} langkah`);
+    if (totalTools > 0) metaParts.push(`${totalTools} alat`);
+    const metaHtml = metaParts.length > 0
+      ? `<span class="zoz-cot-summary-meta">· ${escapeHtml(metaParts.join(' · '))}</span>`
+      : '';
+    const sparkMarkup = ZOZ_COT_SPARK_SVG.replace(
+      'class="zoz-cot-spark-icon"',
+      `class="zoz-cot-spark-icon${isStreaming ? ' is-streaming' : ''}"`
+    );
+
+    const stepsHtml = steps.map((step, idx) => {
+      const phase = step.phase || (idx === 0 ? 'initial' : 'interleaved');
+      const stepClass = phase === 'final' ? 'is-final' : (idx > 0 || phase === 'interleaved' ? 'is-interleaved' : 'is-initial');
+      const phaseBadge = phase === 'final'
+        ? 'Sintesis Akhir'
+        : (idx === 0 ? 'Penalaran Awal' : (step.allToolsFailed ? 'Evaluasi & Koreksi' : 'Evaluasi Interleaved'));
+      const thoughtStr = String(step.thought || '').trim();
+      const renderedThought = thoughtStr
+        ? renderMarkdown(thoughtStr, isStreaming && idx === steps.length - 1, [])
+        : `<p style="opacity:0.75; font-style:italic;">${escapeHtml(summarizeCotThoughtLine('', { phase, isLastRound: Boolean(step.isLastRound) }))}</p>`;
+      const calls = Array.isArray(step.toolCalls) ? step.toolCalls : [];
+      const results = Array.isArray(step.toolResults) ? step.toolResults : [];
+      let toolsHtml = '';
+      if (calls.length > 0) {
+        toolsHtml = `<div class="zoz-cot-step-tools">${calls.map((c, cIdx) => {
+          const resItem = results[cIdx] || null;
+          const isRunning = step.status === 'running_tools' && !resItem;
+          const isOk = resItem ? resItem.ok !== false : false;
+          const statusCls = isRunning ? 'is-running' : (isOk ? 'is-ok' : 'is-error');
+          const statusLabel = isRunning
+            ? '<i class="fa-solid fa-spinner fa-spin"></i> Berjalan'
+            : (isOk ? '<i class="fa-solid fa-check"></i> Selesai' : '<i class="fa-solid fa-rotate"></i> Koreksi');
+          const meta = getCotToolMeta(c.name, c.argsPreview, resItem, isRunning);
+          const cleanArg = extractNaturalCotArg(c.argsPreview);
+          const codeHint = `${escapeHtml(String(c.name || 'tool'))}${cleanArg ? `(${escapeHtml(cleanArg)})` : '()'}`;
+          const outcomeText = resItem && resItem.summary
+            ? `<div class="zoz-cot-tool-outcome">${escapeHtml(String(resItem.summary))}</div>`
+            : '';
+          return `
+            <div class="zoz-cot-tool-item">
+              <span class="zoz-cot-tool-call"><i class="${meta.iconClass}" aria-hidden="true"></i> <span>${escapeHtml(meta.label)}</span> <span class="zoz-cot-tool-code">${codeHint}</span></span>
+              <span class="zoz-cot-tool-status ${statusCls}">${statusLabel}</span>
+              ${outcomeText}
+            </div>
+          `;
+        }).join('')}</div>`;
+      }
+      return `
+        <div class="zoz-cot-step ${stepClass}" data-cot-round="${Number(step.round ?? idx)}">
+          <div class="zoz-cot-step-header">
+            <span class="zoz-cot-step-label">Langkah ${idx + 1}</span>
+            <span class="zoz-cot-step-phase">${escapeHtml(phaseBadge)}</span>
+          </div>
+          <div class="zoz-cot-step-thought">${renderedThought}</div>
+          ${toolsHtml}
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <details class="reasoning-block zoz-cot-timeline"${preserveOpen ? ' open' : ''}>
+        <summary class="reasoning-summary">
+          <span class="reasoning-title">${sparkMarkup}<span>${escapeHtml(summaryLabel)}</span>${metaHtml ? ` ${metaHtml}` : ''}<i class="fa-solid fa-chevron-right zoz-cot-chevron" aria-hidden="true"></i></span>
+        </summary>
+        <div class="reasoning-content">
+          <div class="zoz-cot-steps">${stepsHtml}</div>
+        </div>
+      </details>
+    `.trim();
+  }
+
+  function syncMessageReasoningTimeline(assistantRow, steps, options = {}) {
+    if (!assistantRow || typeof assistantRow.querySelector !== 'function') return;
+    const bubble = assistantRow.querySelector('.message-bubble');
+    if (!bubble) return;
+    const validSteps = Array.isArray(steps)
+      ? steps.filter(s => s && ((s.thought && s.thought.trim()) || (Array.isArray(s.toolCalls) && s.toolCalls.length > 0) || (options.isStreaming && s.status === 'thinking')))
+      : [];
+    const bubbleChildren = bubble.children ? Array.from(bubble.children) : [];
+    const existing = bubbleChildren.find(ch => ch && ch.classList && ch.classList.contains('zoz-cot-timeline')) || null;
+    const existingRail = bubbleChildren.find(ch => ch && ch.classList && ch.classList.contains('zoz-cot-live-rail')) || null;
+    if (validSteps.length === 0) {
+      if (existing && typeof existing.remove === 'function') existing.remove();
+      if (existingRail && typeof existingRail.remove === 'function') existingRail.remove();
+      return;
+    }
+    const preserveOpen = existing ? Boolean(existing.open) : Boolean(assistantRow._cotExpanded);
+    const html = buildInterleavedReasoningTimelineHtml(validSteps, { ...options, preserveOpen });
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    const nextEl = temp.firstElementChild || (temp.children && temp.children[0]) || null;
+    if (!nextEl) return;
+    if (typeof nextEl.addEventListener === 'function') {
+      nextEl.addEventListener('toggle', () => {
+        assistantRow._cotExpanded = Boolean(nextEl.open);
+      });
+    }
+    const textNode = bubbleChildren.find(ch => ch && ch.classList && ch.classList.contains('msg-text-content')) || bubble.querySelector('.msg-text-content');
+    if (existing) {
+      const prevScrollTop = existing.querySelector?.('.reasoning-content')?.scrollTop || 0;
+      if (typeof existing.replaceWith === 'function') {
+        existing.replaceWith(nextEl);
+      } else if (typeof bubble.replaceChild === 'function') {
+        bubble.replaceChild(nextEl, existing);
+      } else {
+        bubble.insertBefore(nextEl, existing);
+        if (typeof existing.remove === 'function') existing.remove();
+      }
+      const nextContent = nextEl.querySelector?.('.reasoning-content');
+      if (nextContent && preserveOpen) nextContent.scrollTop = prevScrollTop;
+    } else {
+      if (textNode && textNode.parentNode === bubble) bubble.insertBefore(nextEl, textNode);
+      else if (typeof bubble.prepend === 'function') bubble.prepend(nextEl);
+      else bubble.insertBefore(nextEl, bubble.firstChild || null);
+    }
+
+    const liveRailHtml = (options.isStreaming && !preserveOpen) ? buildLiveCotRailHtml(validSteps, options) : '';
+    if (liveRailHtml && typeof document.createElement === 'function') {
+      const railWrap = document.createElement('div');
+      railWrap.innerHTML = liveRailHtml;
+      const nextRail = railWrap.firstElementChild || (railWrap.children && railWrap.children[0]) || null;
+      if (nextRail) {
+        if (existingRail && typeof existingRail.replaceWith === 'function') {
+          existingRail.replaceWith(nextRail);
+        } else if (existingRail && typeof bubble.replaceChild === 'function') {
+          bubble.replaceChild(nextRail, existingRail);
+        } else {
+          if (existingRail && typeof existingRail.remove === 'function') existingRail.remove();
+          if (textNode && textNode.parentNode === bubble) bubble.insertBefore(nextRail, textNode);
+          else bubble.appendChild?.(nextRail);
+        }
+      }
+    } else if (existingRail && typeof existingRail.remove === 'function') {
+      existingRail.remove();
+    }
+  }
+
+  function mergeReasoningDetailsDeltas(targetArr, deltaDetails) {
+    if (!Array.isArray(targetArr) || !Array.isArray(deltaDetails)) return;
+    deltaDetails.forEach((d, pos) => {
+      if (!d || typeof d !== 'object') return;
+      const idx = Number.isInteger(d.index) ? d.index : pos;
+      if (!targetArr[idx] || targetArr[idx].type !== d.type) {
+        targetArr[idx] = { ...d };
+        return;
+      }
+      const cur = targetArr[idx];
+      if (typeof d.text === 'string') cur.text = (cur.text || '') + d.text;
+      if (typeof d.summary === 'string') cur.summary = (cur.summary || '') + d.summary;
+      if (typeof d.data === 'string') cur.data = (cur.data || '') + d.data;
+      if (typeof d.signature === 'string') cur.signature = d.signature;
+      if (typeof d.id === 'string') cur.id = d.id;
+      if (typeof d.format === 'string') cur.format = d.format;
+    });
+  }
+
+  function resolveAvailableDigestionTools(baseTools, {
+    isLastRound = false,
+    isMidImagePipeline = false,
+    isMidWeatherPipeline = false,
+    hasSucceededWeatherFetch = false,
+    hasExecutedWeatherRender = false,
+    weatherFetchFailed = false,
+    hasExecutedImagePrepare = false,
+    hasExecutedVideo = false,
+    allowSecondaryAfterMedia = false,
+    hasExecutedSearch = false,
+    hasGroundedSearchSources = false,
+    allToolsInRoundFailed = false,
+    autonomousRound = 1,
+    requireFunctionSchema = false
+  } = {}) {
+    if (isLastRound || (!isMidImagePipeline && !isMidWeatherPipeline && hasExecutedVideo && !allowSecondaryAfterMedia) || !Array.isArray(baseTools) || baseTools.length === 0) {
+      return [];
+    }
+    return baseTools.filter(t => {
+      if (requireFunctionSchema && (!t || t.type !== 'function' || !t.function?.name)) return false;
+      const tName = normalizeToolName(t?.function?.name || t?.name || '');
+      if (!tName) return false;
+      if (isMidImagePipeline) return ['inspect_image', 'prepare_image_display'].includes(tName);
+      if (isMidWeatherPipeline) {
+        return hasSucceededWeatherFetch
+          ? ['render_weather_ui'].includes(tName)
+          : ['get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(tName);
+      }
+      if ((hasExecutedWeatherRender || weatherFetchFailed) && ['request_location_permission', 'get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(tName)) {
+        return false;
+      }
+      if (hasExecutedImagePrepare && ['search_images', 'inspect_image', 'prepare_image_display'].includes(tName)) {
+        return false;
+      }
+      if (hasExecutedVideo && ['find_related_videos'].includes(tName)) {
+        return false;
+      }
+      // Izinkan reformulasi kueri search_web pada putaran awal atau saat hasil gagal/kosong;
+      // duplikat argumen persis tetap diblokir oleh executedToolSignatures.
+      if (hasExecutedSearch && autonomousRound >= 3 && hasGroundedSearchSources && !allToolsInRoundFailed && ['search_web', 'web_search', 'search'].includes(tName)) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  function createInterleavedReasoningController({ assistantRow = null, modelName = '' } = {}) {
+    const steps = [];
+    let renderTimer = null;
+    let activeDraft = {
+      round: 0,
+      phase: 'initial',
+      thought: '',
+      reasoningDetails: [],
+      status: 'thinking'
+    };
+
+    const scheduleTimelineRender = (immediate = false, isStreaming = true) => {
+      if (!assistantRow) return;
+      const snapshot = [...steps];
+      if (activeDraft.thought.trim() || (snapshot.length > 0 && activeDraft.status === 'thinking' && isStreaming)) {
+        snapshot.push({ ...activeDraft });
+      }
+      if (snapshot.length === 0) return;
+      if (immediate) {
+        if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+        syncMessageReasoningTimeline(assistantRow, snapshot, { isStreaming, modelName });
+        return;
+      }
+      if (renderTimer) return;
+      renderTimer = setTimeout(() => {
+        renderTimer = null;
+        const liveSnap = [...steps];
+        if (activeDraft.thought.trim() || (liveSnap.length > 0 && activeDraft.status === 'thinking')) {
+          liveSnap.push({ ...activeDraft });
+        }
+        syncMessageReasoningTimeline(assistantRow, liveSnap, { isStreaming: true, modelName });
+      }, 140);
+    };
+
+    return {
+      appendThought(delta) {
+        if (!delta) return;
+        const str = String(delta);
+        if (activeDraft.thought.length < 24000) {
+          activeDraft.thought += str;
+        }
+        scheduleTimelineRender(false, true);
+      },
+      appendReasoningDetails(detailsDelta) {
+        mergeReasoningDetailsDeltas(activeDraft.reasoningDetails, detailsDelta);
+      },
+      resetDraft() {
+        activeDraft.thought = '';
+        activeDraft.reasoningDetails = [];
+        activeDraft.status = 'thinking';
+      },
+      getPendingTurnReasoning() {
+        const cleanDetails = activeDraft.reasoningDetails.filter(Boolean);
+        return {
+          reasoningContent: activeDraft.thought.trim(),
+          reasoningDetails: cleanDetails.length > 0 ? cleanDetails : null
+        };
+      },
+      commitToolRound({ round, toolTaskItems }) {
+        const stepObj = {
+          round: Number.isFinite(round) ? round : steps.length,
+          phase: steps.length === 0 ? 'initial' : 'interleaved',
+          thought: activeDraft.thought.trim(),
+          toolCalls: (Array.isArray(toolTaskItems) ? toolTaskItems : []).map(it => ({
+            name: it.toolName || it.call?.function?.name || 'tool',
+            argsPreview: String(it.previewArg || '').slice(0, 120)
+          })),
+          toolResults: [],
+          allToolsFailed: false,
+          status: 'running_tools'
+        };
+        steps.push(stepObj);
+        activeDraft = {
+          round: stepObj.round + 1,
+          phase: 'interleaved',
+          thought: '',
+          reasoningDetails: [],
+          status: 'thinking'
+        };
+        scheduleTimelineRender(true, true);
+        return stepObj;
+      },
+      resolveToolRoundResults(toolExecResults) {
+        const latest = steps[steps.length - 1];
+        if (!latest) return;
+        const resultsArr = Array.isArray(toolExecResults) ? toolExecResults : [];
+        latest.toolResults = resultsArr.map(r => ({
+          name: r?.toolName || r?.call?.function?.name || 'tool',
+          ok: !isToolExecResultFailure(r),
+          summary: summarizeToolOutcomeForTimeline(r?.toolExecRes)
+        }));
+        latest.allToolsFailed = resultsArr.length > 0 && resultsArr.every(isToolExecResultFailure);
+        latest.status = 'completed';
+        scheduleTimelineRender(true, true);
+      },
+      beginNextReasoningRound(round, opts = {}) {
+        const isLast = Boolean(opts && opts.isLastRound);
+        activeDraft = {
+          round: Number.isFinite(round) ? round : steps.length,
+          phase: isLast ? 'final' : 'interleaved',
+          isLastRound: isLast,
+          thought: '',
+          reasoningDetails: [],
+          status: 'thinking'
+        };
+        scheduleTimelineRender(true, true);
+      },
+      finalize() {
+        if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+        if (activeDraft.thought.trim()) {
+          steps.push({
+            round: activeDraft.round,
+            phase: steps.length > 0 ? 'final' : 'initial',
+            thought: activeDraft.thought.trim(),
+            toolCalls: [],
+            toolResults: [],
+            allToolsFailed: false,
+            status: 'completed'
+          });
+          activeDraft.thought = '';
+          activeDraft.reasoningDetails = [];
+        }
+        activeDraft.status = 'completed';
+        scheduleTimelineRender(true, false);
+      },
+      dispose() {
+        if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+      },
+      getSerializableSteps() {
+        const out = steps.map(s => ({
+          round: s.round,
+          phase: s.phase,
+          thought: String(s.thought || '').slice(0, 6000),
+          toolCalls: Array.isArray(s.toolCalls) ? s.toolCalls : [],
+          toolResults: Array.isArray(s.toolResults) ? s.toolResults : [],
+          allToolsFailed: Boolean(s.allToolsFailed),
+          status: s.status || 'completed'
+        }));
+        if (activeDraft.thought.trim()) {
+          out.push({
+            round: activeDraft.round,
+            phase: out.length > 0 ? 'final' : 'initial',
+            thought: activeDraft.thought.trim().slice(0, 6000),
+            toolCalls: [],
+            toolResults: [],
+            allToolsFailed: false,
+            status: 'completed'
+          });
+        }
+        return out;
+      },
+      getCombinedReasoning() {
+        const all = this.getSerializableSteps()
+          .map((s, idx, arr) => {
+            const t = (s.thought || '').trim();
+            if (!t) return '';
+            if (arr.length === 1) return t;
+            return `[Langkah ${idx + 1}] ${t}`;
+          })
+          .filter(Boolean);
+        return all.join('\n\n');
+      }
+    };
+  }
+
   /**
    * Membangun instruksi sintesis dan menyisipkan hasil eksekusi tool (role: 'tool' / inline fallback)
    * ke dalam conversationChain secara konsisten untuk mesin Ollama maupun OpenRouter.
@@ -39663,6 +40386,8 @@ ${commToolDoc}
     toolExecResults,
     toolSummaryList,
     cleanAssistant,
+    assistantReasoningContent = '',
+    assistantReasoningDetails = null,
     roundToolResponsesText,
     webSources,
     autonomousRound,
@@ -39705,11 +40430,33 @@ ${commToolDoc}
       Array.isArray(toolExecResults) &&
       toolExecResults.some(r => normalizeToolName(r?.toolName || '') === 'fetch_weather_data' && !r?.toolExecRes?.success)
     );
+    const activeUserPrompt = extractLatestUserPromptText(conversationChain);
+    const hasSecondaryTask = hasSecondaryTaskAfterPrimaryTool(activeUserPrompt);
+    const hasLocationCoordsContext = Boolean(
+      hasExecutedCoords ||
+      hasExecutedLocationConsent ||
+      detectedAutonomousCalls.some(c => {
+        if (normalizeToolName(c?.function?.name || '') !== 'fetch_weather_data') return false;
+        try {
+          const parsed = typeof c.function.arguments === 'string' ? JSON.parse(c.function.arguments) : (c.function.arguments || {});
+          return Boolean(parsed && parsed.lat !== undefined && parsed.lon !== undefined);
+        } catch (_) {
+          return false;
+        }
+      })
+    );
+    const canSelfCorrectWeatherFail = Boolean(activeUserPrompt && weatherFetchFailed && !weatherConsentDenied && (autonomousRound < maxAutonomousRounds - 1));
     const isParallelRound = detectedAutonomousCalls.length > 1;
     const hasGroundedSearchSources = Boolean(webSources && webSources.length > 0);
     const isMidImagePipeline = (hasExecutedImageSearch || hasExecutedImageInspect) && !hasExecutedImagePrepare;
     const isMidWeatherPipeline = !weatherConsentDenied && !weatherFetchFailed && (hasExecutedLocationConsent || hasExecutedCoords || hasSucceededWeatherFetch) && !hasExecutedWeatherRender;
-    const isLastRound = circuitBreakerTripped || hasExecutedImagePrepare || hasExecutedWeatherRender || weatherConsentDenied || weatherFetchFailed || (!isMidImagePipeline && !isMidWeatherPipeline && hasExecutedVideo) || (autonomousRound >= maxAutonomousRounds - 1);
+    const isLastRound = circuitBreakerTripped
+      || (hasExecutedImagePrepare && !hasSecondaryTask)
+      || (hasExecutedWeatherRender && !hasSecondaryTask)
+      || weatherConsentDenied
+      || (weatherFetchFailed && !canSelfCorrectWeatherFail)
+      || (!isMidImagePipeline && !isMidWeatherPipeline && hasExecutedVideo && !hasSecondaryTask)
+      || (autonomousRound >= maxAutonomousRounds - 1);
 
     const currentDateObj = new Date();
     const currentFormattedDate = currentDateObj.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -39722,11 +40469,15 @@ ${commToolDoc}
     if (circuitBreakerTripped) {
       evidenceDirective = 'MANDAT JAWABAN DEDUKTIF: Penelusuran selesai. Berikan penjelasan komprehensif, langsung, dan objektif atas pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian atau menyalin catatan sistem internal ini.';
     } else if (hasExecutedWeatherRender) {
-      evidenceDirective = 'MANDAT PENYAJIAN CUACA & VISUALISASI INTERAKTIF: JANGAN HANYA menampilkan kartu visualisasi cuaca! Susun penjelasan cuaca yang LENGKAP, DETAIL, hangat, dan terstruktur dalam Bahasa Indonesia berdasarkan seluruh telemetri real-time di atas: (1) Cantumkan token [[ZOZ_WEATHER_DISPLAY:wth_...]] persis pada baris tersendiri, (2) Jelaskan kondisi atmosfer & wilayah/kota yang terdeteksi (waktu & zona waktu), (3) Jabarkan suhu aktual vs suhu terasa, rentang suhu min/maks hari ini, kelembapan udara (%), tutupan awan (%), kecepatan & arah angin, peluang/curah hujan, indeks UV serta matahari terbit/terbenam, (4) Uraikan tren prakiraan 5 jam ke depan (serta prakiraan besok/lusa dari data harian jika pengguna menanyakan besok), dan (5) Berikan saran aktivitas/perlengkapan praktis.';
+      evidenceDirective = 'MANDAT PENYAJIAN CUACA & VISUALISASI INTERAKTIF: JANGAN HANYA menampilkan kartu visualisasi cuaca! Susun penjelasan cuaca yang LENGKAP, DETAIL, hangat, dan terstruktur dalam Bahasa Indonesia berdasarkan seluruh telemetri real-time di atas: (1) Cantumkan token [[ZOZ_WEATHER_DISPLAY:wth_...]] persis pada baris tersendiri, (2) Jelaskan kondisi atmosfer & wilayah/kota yang terdeteksi (waktu & zona waktu), (3) Jabarkan suhu aktual vs suhu terasa, rentang suhu min/maks hari ini, kelembapan udara (%), tutupan awan (%), kecepatan & arah angin, peluang/curah hujan, indeks UV serta matahari terbit/terbenam, (4) Uraikan tren prakiraan 5 jam ke depan (serta prakiraan besok/lusa dari data harian jika pengguna menanyakan besok), dan (5) Berikan saran aktivitas/perlengkapan praktis.'
+        + (!isLastRound ? `\n[LANJUTAN MULTI-LANGKAH TERDETEKSI]: Pengguna juga memiliki permintaan lanjutan selain cek cuaca (misalnya rekomendasi hotel/ballroom/venue indoor bila hujan). Evaluasi data cuaca di atas pada blok berpikir Anda lalu panggil search_web atau tool berikutnya SEKARANG sebelum jawaban final.${inlineChainHint}` : '');
     } else if (weatherConsentDenied && (hasExecutedLocationConsent || hasExecutedCoords || hasExecutedWeatherFetch)) {
       evidenceDirective = 'IZIN LOKASI DITOLAK / BELUM TERSEDIA: Hormati keputusan privasi pengguna dengan sopan. Jelaskan singkat bahwa akses lokasi tidak diaktifkan sehingga koordinat perangkat tidak diambil, lalu tawarkan untuk mengecek cuaca bila pengguna mengetikkan nama kotanya secara manual.';
     } else if (weatherFetchFailed) {
-      evidenceDirective = 'KENDALA LAYANAN API CUACA EKSTERNAL: Izin & koordinat pengguna SUDAH berhasil diverifikasi, namun server prakiraan cuaca eksternal sedang gagal dijangkau dari lingkungan ini. Jelaskan dengan jujur dan singkat lokasi yang berhasil dideteksi (jangan pernah menyatakan akses lokasi ditolak atau meminta ulang nama kota yang sudah diketahui), serta sampaikan kendala jaringan ke penyedia cuaca secara akurat.';
+      evidenceDirective = (hasLocationCoordsContext
+        ? 'KENDALA LAYANAN API CUACA EKSTERNAL: Izin & koordinat pengguna SUDAH berhasil diverifikasi, namun server prakiraan cuaca eksternal sedang gagal dijangkau dari lingkungan ini. Jelaskan dengan jujur dan singkat lokasi yang berhasil dideteksi (jangan pernah menyatakan akses lokasi ditolak atau meminta ulang nama kota yang sudah diketahui), serta sampaikan kendala jaringan ke penyedia cuaca secara akurat.'
+        : 'KENDALA LAYANAN API CUACA EKSTERNAL: Pengambilan telemetri cuaca untuk wilayah yang diminta gagal dijangkau atau tidak ditemukan oleh layanan geocoding cuaca eksternal.')
+        + (canSelfCorrectWeatherFail ? ` Segera lakukan koreksi mandiri (self-correction) menggunakan search_web dengan kueri prakiraan cuaca spesifik dan/atau tindak lanjut permintaan pengguna (jangan ulangi fetch_weather_data yang gagal).${inlineChainHint}` : '');
     } else if (isMidWeatherPipeline) {
       if (hasSucceededWeatherFetch) {
         evidenceDirective = `ALUR CUACA AKTIF (TAHAP 4 — VISUALISASI): Data cuaca lengkap telah diperoleh. Panggil render_weather_ui({"condition": "<kondisi>", "temp": <angka_suhu>, "city": "<kota>"}) sekarang untuk menampilkan kartu visualisasi cuaca interaktif di chat.${inlineChainHint}`;
@@ -39769,6 +40520,13 @@ ${commToolDoc}
       evidenceDirective = 'Susun PENJELASAN KOMPREHENSIF, mendalam, dan langsung menjawab pertanyaan pengguna berdasarkan isi artikel & fakta terverifikasi di atas (uraikan definisi, mekanisme, poin analisis utama, dan detail faktual). Jika cuplikan bukti masih singkat sementara masih ada putaran tool, panggil browse_web_page pada URL paling relevan. DILARANG KERAS hanya mencetak daftar link/URL sumber tanpa penjelasan mendalam!';
     }
 
+    const anyToolFailedInRound = Boolean(Array.isArray(toolExecResults) && toolExecResults.some(isToolExecResultFailure));
+    const interleavedSelfCorrectionHint = (!isLastRound && !circuitBreakerTripped && !isMidImagePipeline && !isMidWeatherPipeline)
+      ? (anyToolFailedInRound
+          ? '\n[PENALARAN INTERLEAVED / KOREKSI MANDIRI]: Sebagian atau seluruh tool di atas gagal/kurang lengkap. Evaluasi penyebabnya pada blok berpikir Anda, lalu ubah parameter/kueri atau pilih tool alternatif sebelum menyimpulkan.'
+          : '\n[PENALARAN INTERLEAVED]: Evaluasi kecukupan data di atas pada blok berpikir Anda. Jika hasil tool mengindikasikan kondisi khusus yang memerlukan penyaringan lanjutan atau pemanggilan tool tahap berikutnya, lanjutkan pemanggilan tool; jika seluruh aspek sudah terjawab lengkap, susun jawaban akhir.')
+      : '';
+
     let roundInstruction = '';
     if (isMidImagePipeline) {
       roundInstruction = `[ALUR VERIFIKASI VISUAL AKTIF]:
@@ -39777,12 +40535,12 @@ ${hasExecutedImageSearch ? '1. Pilih 3–6 image_id yang paling cocok secara sub
       roundInstruction = `[ALUR CUACA & LOKASI AKTIF]:\n${evidenceDirective}`;
     } else if (hasExecutedSearch && !hasGroundedSearchSources && !hasBrowsedWeb && !hasExecutedImagePrepare && !hasExecutedWeatherRender && !hasExecutedVideo && !hasExecutedCommunication && !hasExecutedWaRead && !hasExecutedDocuments && !hasExecutedChatHistory) {
       roundInstruction = `[INSTRUKSI JAWABAN LANGSUNG]:
-Berikan jawaban akhir yang akurat, objektif, terstruktur, dan langsung menjawab inti persoalan sesuai bahasa pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Jangan menyebutkan catatan tool internal, jangan mengeluh bahwa sumber tidak relevan, dan jangan mengarang URL tautan.`;
-    } else if (isLastRound || hasExecutedImagePrepare || hasExecutedWeatherRender || weatherConsentDenied || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedCommunication || hasExecutedWaRead || hasExecutedDocuments || hasExecutedChatHistory || hasExecutedVideo || hasBrowsedWeb) {
-      roundInstruction = `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:\n${evidenceDirective}`;
+Berikan jawaban akhir yang akurat, objektif, terstruktur, dan langsung menjawab inti persoalan sesuai bahasa pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Jangan menyebutkan catatan tool internal, jangan mengeluh bahwa sumber tidak relevan, dan jangan mengarang URL tautan.${interleavedSelfCorrectionHint}`;
+    } else if (isLastRound || hasExecutedImagePrepare || hasExecutedWeatherRender || weatherConsentDenied || weatherFetchFailed || hasExecutedWeatherFetch || hasExecutedSearch || hasExecutedPython || hasExecutedMemory || hasExecutedCommunication || hasExecutedWaRead || hasExecutedDocuments || hasExecutedChatHistory || hasExecutedVideo || hasBrowsedWeb) {
+      roundInstruction = `[SPESIFIKASI SINTESIS BUKTI — UTC ${currentIsoDate} (${currentFormattedDate})]:\n${evidenceDirective}${interleavedSelfCorrectionHint}`;
     } else {
       roundInstruction = `[HASIL EKSEKUSI TOOL]:
-Jika bukti di atas telah mencukupi, susun jawaban akhir yang menjelaskan hasilnya secara menyeluruh. Jika diperlukan pembacaan halaman lengkap (browse_web_page), panggil fungsi terkait.`;
+Jika bukti di atas telah mencukupi, susun jawaban akhir yang menjelaskan hasilnya secara menyeluruh. Jika diperlukan pembacaan halaman lengkap (browse_web_page), panggil fungsi terkait.${interleavedSelfCorrectionHint}`;
     }
 
     let claimConstraint = '';
@@ -39796,6 +40554,9 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir yang menjelaskan hasilny
 1. Seluruh judul sesi, tanggal/waktu diskusi, keputusan, contoh kode, dan rincian percakapan lampau WAJIB bersumber akurat dari cuplikan riwayat di atas (tanggal referensi hari ini: ${currentFormattedDate}). Dilarang mengarang detail yang tidak muncul di hasil pencarian.
 2. Cantumkan konteks sesi lama relevan (judul atau waktunya) dan hubungkan langsung dengan pertanyaan pengguna saat ini.
 3. Jangan memanggil ulang fungsi (${toolSummaryList.map(s => s.split('(')[0]).join(', ')}) dengan parameter identik.`;
+    } else if (weatherFetchFailed && !isLastRound) {
+      claimConstraint = `ARAHAN KOREKSI MANDIRI CUACA:
+Panggil search_web dengan kueri prakiraan cuaca spesifik (dan/atau tindak lanjut permintaan pengguna) sebagai jalur alternatif, serta jangan mengulang pemanggilan fetch_weather_data yang gagal.`;
     } else if (hasGroundedSearchSources && !circuitBreakerTripped) {
       claimConstraint = `BATASAN DOMAIN KLAIM & STANDAR PENJELASAN:
 1. Gunakan entitas, konsep, metrik, dan tanggal rilis yang selaras dengan bukti dokumen/video di atas (tanggal referensi hari ini: ${currentFormattedDate}).
@@ -39822,16 +40583,24 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
           }
         };
       });
-      conversationChain.push({
+      const assistantToolMsg = {
         role: 'assistant',
         content: cleanAssistant || null,
         tool_calls: bijectiveToolCalls
-      });
+      };
+      if (assistantReasoningContent && String(assistantReasoningContent).trim()) {
+        assistantToolMsg.reasoning_content = String(assistantReasoningContent).trim();
+      }
+      if (Array.isArray(assistantReasoningDetails) && assistantReasoningDetails.length > 0) {
+        assistantToolMsg.reasoning_details = assistantReasoningDetails;
+      }
+      conversationChain.push(assistantToolMsg);
 
       toolTaskItems.forEach((item, idx) => {
         const matchedRes = toolExecResults.find(r => r.call === item.call);
         const callId = item.call.id;
         const isLastToolReply = idx === toolTaskItems.length - 1;
+        const itemFailed = matchedRes ? isToolExecResultFailure(matchedRes) : false;
         let resultObj = null;
 
         if (matchedRes && matchedRes.toolExecRes) {
@@ -39844,7 +40613,7 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
 
           if (res.sources && res.sources.length > 0) {
             resultObj = {
-              status: 'success',
+              status: itemFailed ? 'error' : 'success',
               count: res.sources.length,
               evidence: res.sources.slice(0, 8).map(s => {
                 const fullContent = String(s.content || '').replace(/\s+/g, ' ').trim();
@@ -39873,19 +40642,25 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
             }
           } else if (res.text) {
             resultObj = {
-              status: 'complete',
+              status: itemFailed ? 'error' : 'complete',
               text: formatToolText(res.text, (hasExecutedCommunication || hasExecutedWaRead || hasExecutedDocuments) ? 14000 : 6500)
             };
             if (res.display_id) resultObj.display_id = res.display_id;
             if (res.placement_token) resultObj.placement_token = res.placement_token;
           } else {
             resultObj = {
-              status: 'complete',
+              status: itemFailed ? 'error' : 'complete',
               data: res
             };
           }
         } else {
           resultObj = { status: 'complete', message: 'Executed.' };
+        }
+
+        if (itemFailed && !isLastRound && !circuitBreakerTripped && resultObj && typeof resultObj === 'object') {
+          resultObj.error_recovery_hint = (normalizeToolName(item.call?.function?.name || '') === 'fetch_weather_data')
+            ? 'API cuaca gagal menjangkau/menemukan wilayah tersebut. Lakukan koreksi mandiri dengan memanggil search_web menggunakan kueri prakiraan cuaca spesifik (jangan ulangi fetch_weather_data).'
+            : 'Tool tidak menemukan data memadai atau gagal. Evaluasi penyebab pada penalaran Anda lalu sesuaikan kueri/parameter atau gunakan tool alternatif.';
         }
 
         // Sematkan arahan sintesis di dalam pesan tool terakhir agar giliran percakapan tetap mematuhi skema valid (assistant(tool_calls) -> tool -> assistant)
@@ -39901,11 +40676,16 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
         });
       });
     } else {
-      if (cleanAssistant && !isModelInternalMonologue(cleanAssistant)) {
-        conversationChain.push({ role: 'assistant', content: cleanAssistant });
-      } else {
-        conversationChain.push({ role: 'assistant', content: `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]` });
+      const inlineAssistantTurn = {
+        role: 'assistant',
+        content: (cleanAssistant && !isModelInternalMonologue(cleanAssistant))
+          ? cleanAssistant
+          : `[Mengeksekusi penelusuran otonom: ${toolSummaryList.join(', ')}]`
+      };
+      if (assistantReasoningContent && String(assistantReasoningContent).trim()) {
+        inlineAssistantTurn.reasoning_content = String(assistantReasoningContent).trim();
       }
+      conversationChain.push(inlineAssistantTurn);
 
       const effectiveToolPayload = (circuitBreakerTripped && (!webSources || webSources.length === 0))
         ? '[STATUS PENELUSURAN]: Selesai. Lanjutkan dengan sintesis deduktif penuh berdasarkan pengetahuan analitis Anda.'
@@ -39935,6 +40715,8 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
       hasExecutedWeatherFetch,
       hasSucceededWeatherFetch,
       hasExecutedWeatherRender,
+      weatherFetchFailed,
+      hasSecondaryTask,
       hasGroundedSearchSources,
       isMidImagePipeline,
       isMidWeatherPipeline,
@@ -40257,7 +41039,7 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
 
       if (engine === 'ollama') {
         const item = { role: m.role, content: contentText };
-        if (m.role === 'assistant' && (m.reasoning_content || m.reasoning)) {
+        if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0 && (m.reasoning_content || m.reasoning)) {
           item.reasoning_content = m.reasoning_content || m.reasoning;
         }
         if (imgs.length > 0 && shouldSendImages) {
@@ -40325,7 +41107,7 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
           if (m.role === 'assistant') {
             const pName = sanitizeParticipantName(m.model || m.engine);
             if (pName) item.name = pName;
-            if (m.reasoning_content || m.reasoning) {
+            if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0 && (m.reasoning_content || m.reasoning)) {
               item.reasoning_content = m.reasoning_content || m.reasoning;
             }
           }
@@ -40512,6 +41294,7 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
     let isUsingLaptopOllamaTunnel = false;
     let jozzMemoryRecall = null;
     let activeStreamRenderer = null;
+    let cotController = createInterleavedReasoningController({ assistantRow: isStudioIsolated ? null : assistantRow, modelName });
     const collectedChatHistoryRefs = [];
 
     try {
@@ -40882,11 +41665,18 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (!requestBody.options.num_predict) {
         requestBody.options.num_predict = (isPureMathSession || isQuestionOrAnalytical || wantsFile || isWebRequest) ? 16384 : 8192;
       }
-      if ((decisionCalibration.isDiscreteChoice || decisionCalibration.isAnalyticalQuery) && !wantsFile && !isDocRequest) {
-        requestBody.think = true;
-      }
       // Pasang tools ke Ollama HANYA jika model memiliki kapabilitas tools, relevan secara matematis (I(Q; Tools) > 0), dan BUKAN sesi matematika murni
       const canOllamaUseTools = doesModelSupportTools(modelName) && !isPureMathSession && hasExplicitToolTrigger;
+      const shouldEnableOllamaThink = Boolean(
+        !wantsFile && !isDocRequest && (
+          decisionCalibration.isDiscreteChoice ||
+          decisionCalibration.isAnalyticalQuery ||
+          (canOllamaUseTools && doesModelSupportToolInterleavedThink(modelName, 'ollama'))
+        )
+      );
+      if (shouldEnableOllamaThink) {
+        requestBody.think = true;
+      }
       let selectedOllamaTools = canOllamaUseTools ? getSelectableAutonomousTools(canRunAutonomous, z21ToolCtx) : [];
       if (hasAttachedWebDocs && selectedOllamaTools.length > 0) {
         selectedOllamaTools = selectedOllamaTools.filter(t => t?.function?.name !== 'browse_web_page');
@@ -40960,6 +41750,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             if (assistantRow && assistantRow.parentNode) {
               assistantRow.remove();
             }
+            if (cotController) cotController.dispose();
             return await runOpenRouterStreaming(session, promptText, image, fallbackCloudModel, {
               displayModel: modelName,
               engineLabel: 'Ollama Cloud',
@@ -40980,6 +41771,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         // Semua pemanggilan dari domain publik / remote: jalankan 100% via Cloud Serverless Gateway tanpa laptop
         chatUrl = getUniversalApiUrl('/api/ollama/chat');
         isUsingLaptopOllamaTunnel = false;
+      }
+      if (chatUrl.includes('/api/ollama/chat') || !isLoopbackEp) {
+        requestBody.streamReasoning = true;
       }
 
       let response = await fetch(chatUrl, {
@@ -41042,7 +41836,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       let doneReason = null;
       let receivedOllamaDone = false;
       const accumulatedToolCalls = [];
-      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, { ...runOptions, userPrompt: promptText, getSources: () => webSources });
+      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, {
+        ...runOptions,
+        userPrompt: promptText,
+        getSources: () => webSources,
+        suppressThinkingPlaceholder: !isStudioIsolated,
+        onReasoningDelta: (d) => cotController?.appendThought(d)
+      });
 
       let deadAirTimer = null;
       let deadAirTimedOut = false;
@@ -41134,9 +41934,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               };
             }
             const chunk = parsed.message?.content || parsed.response || '';
-            const reasoningChunk = parsed.message?.reasoning || parsed.message?.thinking || parsed.reasoning || parsed.thinking || '';
+            const reasoningChunk = parsed.message?.reasoning || parsed.message?.reasoning_content || parsed.message?.thinking || parsed.reasoning || parsed.thinking || '';
             if (reasoningChunk) {
               streamRenderer.appendReasoning(reasoningChunk);
+            }
+            if (Array.isArray(parsed.message?.reasoning_details)) {
+              cotController?.appendReasoningDetails(parsed.message.reasoning_details);
             }
             if (chunk) {
               if (!firstTokenTime) firstTokenTime = performance.now();
@@ -41177,9 +41980,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             };
           }
           const chunk = parsed.message?.content || parsed.response || '';
-          const reasoningChunk = parsed.message?.reasoning || parsed.message?.thinking || parsed.reasoning || parsed.thinking || '';
+          const reasoningChunk = parsed.message?.reasoning || parsed.message?.reasoning_content || parsed.message?.thinking || parsed.reasoning || parsed.thinking || '';
           if (reasoningChunk) {
             streamRenderer.appendReasoning(reasoningChunk);
+          }
+          if (Array.isArray(parsed.message?.reasoning_details)) {
+            cotController?.appendReasoningDetails(parsed.message.reasoning_details);
           }
           if (chunk) {
             if (!firstTokenTime) firstTokenTime = performance.now();
@@ -41300,9 +42106,21 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         toolTaskItems.forEach(item => toolSummaryList.push(item.summary));
 
-        // Tampilkan status visual proses penelusuran latar belakang secara bersih tanpa metadata teknis
-        const primaryLoadingTool = toolTaskItems.find(t => ['fetch_communication_context', 'search_documents', 'search_chat_history', 'request_location_permission', 'get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(normalizeToolName(t.toolName))) || toolTaskItems[0];
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + createAutonomousToolHudHtml(primaryLoadingTool?.toolName || 'search_web', primaryLoadingTool?.previewArg || '', 'loading', toolTaskItems);
+        const {
+          reasoningContent: pendingOllamaTurnReasoning,
+          reasoningDetails: pendingOllamaTurnReasoningDetails
+        } = cotController.getPendingTurnReasoning();
+        if (!isStudioIsolated) {
+          cotController.commitToolRound({ round: autonomousRound - 1, toolTaskItems });
+        }
+
+        // Saat CoT timeline aktif, hindari duplikasi HUD status tebal di dalam .msg-text-content
+        if (isStudioIsolated) {
+          const primaryLoadingTool = toolTaskItems.find(t => ['fetch_communication_context', 'search_documents', 'search_chat_history', 'request_location_permission', 'get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(normalizeToolName(t.toolName))) || toolTaskItems[0];
+          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + createAutonomousToolHudHtml(primaryLoadingTool?.toolName || 'search_web', primaryLoadingTool?.previewArg || '', 'loading', toolTaskItems);
+        } else {
+          bubbleText.innerHTML = preambleHtml ? preambleHtml : '';
+        }
         smartScrollChatToBottom(true);
 
         // Eksekusi seluruh tool secara paralel (Promise.all) dengan isolasi kegagalan per-tool
@@ -41377,19 +42195,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           throw abortErr;
         }
 
-        // Tampilkan status sintesis bersih di latar belakang
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyintesis jawaban akhir...</span></div>`;
+        if (!isStudioIsolated) {
+          cotController.resolveToolRoundResults(toolExecResults);
+          bubbleText.innerHTML = preambleHtml ? preambleHtml : '';
+        } else {
+          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyintesis jawaban akhir...</span></div>`;
+        }
         smartScrollChatToBottom(true);
-
-        const allToolsInRoundFailed = toolExecResults.length > 0 && toolExecResults.every(r => {
-          if (!r || !r.toolExecRes) return true;
-          if (r.toolExecRes.success === false) return true;
-          if (r.toolExecRes.success === true) return false;
-          const t = String(r.toolExecRes.text || '').trim();
-          if (t.startsWith('Error:') || t.startsWith('Error eksekusi:') || t.startsWith('Error Keamanan:') || t.includes('Gagal membaca URL')) return true;
-          if (t.includes('tidak ditemukan video') || t.includes('Tidak ditemukan hasil spesifik')) return true;
-          return false;
-        });
+        const allToolsInRoundFailed = toolExecResults.length > 0 && toolExecResults.every(isToolExecResultFailure);
 
         if (allToolsInRoundFailed) {
           consecutiveFailedRounds++;
@@ -41418,10 +42231,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           hasBrowsedWeb,
           hasExecutedSearch,
           hasExecutedVideo,
+          hasExecutedImagePrepare,
           isMidImagePipeline,
           isMidWeatherPipeline,
           hasExecutedWeatherFetch,
           hasSucceededWeatherFetch,
+          hasExecutedWeatherRender,
+          weatherFetchFailed,
+          hasSecondaryTask,
           isLastRound
         } = buildAutonomousToolDigestionStep({
           detectedAutonomousCalls,
@@ -41430,6 +42247,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           toolExecResults,
           toolSummaryList,
           cleanAssistant,
+          assistantReasoningContent: pendingOllamaTurnReasoning || (autonomousRound <= 1 ? streamRenderer?.accumulatedReasoning : '') || '',
+          assistantReasoningDetails: pendingOllamaTurnReasoningDetails,
           roundToolResponsesText,
           webSources,
           autonomousRound,
@@ -41446,8 +42265,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           model: modelName,
           messages: conversationChain,
           stream: true,
+          streamReasoning: true,
           endpoint: ep
         };
+        if (requestBody.think) {
+          digestionBody.think = true;
+        }
         if (requestBody.options) {
           digestionBody.options = { ...requestBody.options };
         }
@@ -41460,21 +42283,24 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             top_p: optSampling.topP
           };
         }
-        if (!isLastRound && (isMidImagePipeline || isMidWeatherPipeline || !hasExecutedVideo) && selectedOllamaTools && selectedOllamaTools.length > 0) {
-          const availableTools = selectedOllamaTools.filter(t => {
-            const tName = normalizeToolName(t?.function?.name || t?.name || '');
-            if (isMidImagePipeline) return ['inspect_image', 'prepare_image_display'].includes(tName);
-            if (isMidWeatherPipeline) {
-              return hasSucceededWeatherFetch
-                ? ['render_weather_ui'].includes(tName)
-                : ['get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(tName);
-            }
-            if (hasExecutedSearch && ['search_web', 'web_search', 'search'].includes(tName)) return false;
-            return true;
-          });
-          if (availableTools.length > 0) {
-            digestionBody.tools = availableTools;
-          }
+        const availableTools = resolveAvailableDigestionTools(selectedOllamaTools, {
+          isLastRound,
+          isMidImagePipeline,
+          isMidWeatherPipeline,
+          hasSucceededWeatherFetch,
+          hasExecutedWeatherRender,
+          weatherFetchFailed,
+          hasExecutedImagePrepare,
+          hasExecutedVideo,
+          allowSecondaryAfterMedia: Boolean(hasSecondaryTask),
+          hasExecutedSearch,
+          hasGroundedSearchSources: Boolean(webSources && webSources.length > 0),
+          allToolsInRoundFailed,
+          autonomousRound,
+          requireFunctionSchema: false
+        });
+        if (availableTools.length > 0) {
+          digestionBody.tools = availableTools;
         }
         // Jika tools tidak dikirim pada ronde sintesis akhir, normalisasi pesan tool -> user agar model tidak memicu error skema 400/500
         if (!digestionBody.tools && hasUnconvertedToolMessages(digestionBody.messages)) {
@@ -41493,6 +42319,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         currentRoundNativeCalls = [];
         doneReason = '';
         receivedOllamaDone = false;
+        if (!isStudioIsolated) {
+          cotController.beginNextReasoningRound(autonomousRound, { isLastRound });
+        }
 
         try {
           let digestionRes = await fetch(chatUrl, {
@@ -41502,11 +42331,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             signal: STATE.abortController?.signal
           });
 
-          if (!digestionRes.ok && (digestionBody.tools || hasUnconvertedToolMessages(digestionBody.messages)) && (digestionRes.status === 400 || digestionRes.status === 422 || digestionRes.status === 500)) {
-            console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Model returned HTTP ${digestionRes.status} with tools. Retrying without tools and normalizing tool messages...`);
+          if (!digestionRes.ok && (digestionBody.tools || digestionBody.think || hasUnconvertedToolMessages(digestionBody.messages)) && (digestionRes.status === 400 || digestionRes.status === 422 || digestionRes.status === 500)) {
+            console.warn(`[Ollama Autonomous Digestion Round ${autonomousRound}] Model returned HTTP ${digestionRes.status} with tools/think. Retrying cleanly...`);
             delete digestionBody.tools;
+            delete digestionBody.think;
             if (Array.isArray(digestionBody.messages)) {
-              const convertedRetry = convertToolMessagesToUserRole(digestionBody.messages);
+              const convertedRetry = convertToolMessagesToUserRole(digestionBody.messages, { stripReasoning: true });
               digestionBody.messages = convertedRetry;
               conversationChain.splice(0, conversationChain.length, ...convertedRetry);
             }
@@ -41541,14 +42371,31 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           bubbleText.innerHTML = (preambleHtml ? preambleHtml : '');
           bubbleText.appendChild(digestionContentBox);
 
-          const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false));
+          const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false), '', {
+            ...runOptions,
+            userPrompt: promptText,
+            getSources: () => webSources,
+            suppressThinkingPlaceholder: !isStudioIsolated,
+            onReasoningDelta: (d) => cotController?.appendThought(d)
+          });
           activeStreamRenderer = digestionRenderer;
           currentRoundNativeCalls = [];
           currentRoundText = '';
 
+          let digestionDeadAirTimer = null;
+          const resetDigestionDeadAir = () => {
+            if (digestionDeadAirTimer) clearTimeout(digestionDeadAirTimer);
+            digestionDeadAirTimer = setTimeout(() => {
+              console.warn(`[Ollama Digestion Dead-Air] Putaran ${autonomousRound} terhenti tanpa token selama 120 detik.`);
+              try { digestionReader.cancel('DEAD_AIR_TIMEOUT'); } catch (_) {}
+            }, 120000);
+          };
+
           try {
           while (true) {
+            resetDigestionDeadAir();
             const { done, value } = await digestionReader.read();
+            resetDigestionDeadAir();
             if (done) {
               digestionBuffer += decoder.decode();
               break;
@@ -41576,9 +42423,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                   };
                 }
                 const chunk = dParsed.message?.content || dParsed.response || '';
-                const dReasoning = dParsed.message?.reasoning || dParsed.message?.thinking || dParsed.reasoning || dParsed.thinking || '';
+                const dReasoning = dParsed.message?.reasoning || dParsed.message?.reasoning_content || dParsed.message?.thinking || dParsed.reasoning || dParsed.thinking || '';
                 if (dReasoning) {
                   digestionRenderer.appendReasoning(dReasoning);
+                }
+                if (Array.isArray(dParsed.message?.reasoning_details)) {
+                  cotController?.appendReasoningDetails(dParsed.message.reasoning_details);
                 }
                 if (chunk) {
                   tokenCount++;
@@ -41599,6 +42449,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           } catch (readErr) {
             try { await digestionReader.cancel(); } catch (_) {}
             throw readErr;
+          } finally {
+            if (digestionDeadAirTimer) { clearTimeout(digestionDeadAirTimer); digestionDeadAirTimer = null; }
           }
 
           if (digestionBuffer && digestionBuffer.trim()) {
@@ -41619,9 +42471,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 };
               }
               const chunk = dParsed.message?.content || dParsed.response || '';
-              const dReasoning = dParsed.message?.reasoning || dParsed.message?.thinking || dParsed.reasoning || dParsed.thinking || '';
+              const dReasoning = dParsed.message?.reasoning || dParsed.message?.reasoning_content || dParsed.message?.thinking || dParsed.reasoning || dParsed.thinking || '';
               if (dReasoning) {
                 digestionRenderer.appendReasoning(dReasoning);
+              }
+              if (Array.isArray(dParsed.message?.reasoning_details)) {
+                cotController?.appendReasoningDetails(dParsed.message.reasoning_details);
               }
               if (chunk) {
                 tokenCount++;
@@ -42030,6 +42885,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (webSources && webSources.length > 0) { ACTIVE_CHAT_SOURCES = webSources; assistantRow._webSources = webSources; }
       const finalRenderedContent = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText, false, webSources).trim();
       bubbleText.innerHTML = finalRenderedContent.trim();
+      cotController?.finalize();
+      const ollamaCotSteps = cotController ? cotController.getSerializableSteps() : [];
+      const ollamaCombinedReasoning = (cotController && cotController.getCombinedReasoning()) || streamRenderer?.accumulatedReasoning || '';
+      if (!isStudioIsolated && ollamaCotSteps.length > 0) {
+        syncMessageReasoningTimeline(assistantRow, ollamaCotSteps, { isStreaming: false, modelName });
+      }
       if (groundedImageDisplays.length > 0) {
         renderGroundedImageDisplaysForRow(assistantRow, groundedImageDisplays);
       }
@@ -42072,8 +42933,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         session.messages.push({
           role: 'assistant',
           content: fullText,
-          reasoning: streamRenderer.accumulatedReasoning || undefined,
-          reasoning_content: streamRenderer.accumulatedReasoning || undefined,
+          reasoning: ollamaCombinedReasoning || undefined,
+          reasoning_content: ollamaCombinedReasoning || undefined,
+          reasoningSteps: ollamaCotSteps.length > 0 ? ollamaCotSteps : undefined,
           model: modelName,
           engine: 'ollama',
           planMode: normalizePlanMode(runOptions.planMode || getActivePlanMode(session)),
@@ -42215,9 +43077,18 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           if (isStudioIsolated) {
             persistStudioIsolatedTurn(session, promptText, stoppedText, stoppedPartial.files, runOptions);
           } else {
+            cotController?.finalize();
+            const abortedCotSteps = cotController ? cotController.getSerializableSteps() : [];
+            const abortedCombinedReasoning = (cotController && cotController.getCombinedReasoning()) || streamRenderer?.accumulatedReasoning || '';
+            if (abortedCotSteps.length > 0) {
+              syncMessageReasoningTimeline(assistantRow, abortedCotSteps, { isStreaming: false, modelName });
+            }
             session.messages.push({
               role: 'assistant',
               content: stoppedText,
+              reasoning: abortedCombinedReasoning || undefined,
+              reasoning_content: abortedCombinedReasoning || undefined,
+              reasoningSteps: abortedCotSteps.length > 0 ? abortedCotSteps : undefined,
               model: modelName,
               engine: 'ollama',
               planMode: normalizePlanMode(runOptions.planMode || getActivePlanMode(session)),
@@ -42290,6 +43161,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           try { assistantRow.remove(); } catch (_) {}
           const fallbackModel = mapOllamaModelToOpenRouter(modelName);
           console.warn(`[Auto-Router Failover] Model ${modelName} tidak tersedia di server Ollama (${err?.message}). Mengalihkan ke Cloud (${fallbackModel})...`);
+          cotController?.dispose();
           showToast(`🔀 Auto-Router: Model ${modelName} dialihkan ke Cloud (${fallbackModel})...`, 'info');
           return await runOpenRouterStreaming(session, promptText, image, fallbackModel, { ...runOptions, isAutoRouter: true });
         }
@@ -42325,11 +43197,21 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             renderChatHistoryRefsBadge(assistantRow, collectedChatHistoryRefs);
           }
           if (isStudioIsolated) {
+            cotController?.dispose();
             persistStudioIsolatedTurn(session, promptText, cleanRescued, rescuePartial.files, runOptions);
           } else if (STATE.sessions.some(s => s.id === session.id)) {
+            cotController?.finalize();
+            const partialOllamaCotSteps = cotController ? cotController.getSerializableSteps() : [];
+            const partialOllamaCombinedReasoning = (cotController && cotController.getCombinedReasoning()) || streamRenderer?.accumulatedReasoning || '';
+            if (partialOllamaCotSteps.length > 0) {
+              syncMessageReasoningTimeline(assistantRow, partialOllamaCotSteps, { isStreaming: false, modelName });
+            }
             session.messages.push({
               role: 'assistant',
               content: cleanRescued,
+              reasoning: partialOllamaCombinedReasoning || undefined,
+              reasoning_content: partialOllamaCombinedReasoning || undefined,
+              reasoningSteps: partialOllamaCotSteps.length > 0 ? partialOllamaCotSteps : undefined,
               model: modelName,
               engine: 'ollama',
               planMode: normalizePlanMode(runOptions.planMode || getActivePlanMode(session)),
@@ -42365,6 +43247,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           return true;
         }
 
+        cotController?.dispose();
         const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
         const errorHtml = formatModelErrorMessage('ollama', modelName, err, actualHasImage, STATE.webSearchEnabled);
 
@@ -42580,6 +43463,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
     let isUsingLaptopOllamaTunnel = false;
     let jozzMemoryRecall = null;
     let activeStreamRenderer = null;
+    let cotController = createInterleavedReasoningController({ assistantRow: isStudioIsolated ? null : assistantRow, modelName: displayModel });
     const collectedChatHistoryRefs = [];
 
     try {
@@ -42946,11 +43830,19 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const selectedAutonomousTools = hasAttachedWebDocs
         ? rawAutonomousTools.filter(t => t?.function?.name !== 'browse_web_page')
         : rawAutonomousTools;
-      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, { ...runOptions, userPrompt: promptText, getSources: () => webSources });
+      streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, {
+        ...runOptions,
+        userPrompt: promptText,
+        getSources: () => webSources,
+        suppressThinkingPlaceholder: !isStudioIsolated,
+        onReasoningDelta: (d) => cotController?.appendThought(d)
+      });
 
       for (let i = 0; i < candidateModels.length; i++) {
         if (STATE.abortController?.signal?.aborted) break;
         accumulatedToolCalls.length = 0;
+        streamRenderer.accumulatedReasoning = '';
+        cotController?.resetDraft();
         const currentModel = candidateModels[i];
         const currentIsFree = Boolean(
           currentModel.includes(':free') ||
@@ -43022,6 +43914,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         // Pasang tools jika model mendukung tools, relevan secara matematis (I(Q; Tools) > 0), BUKAN sesi matematika murni, dan BUKAN model Nemotron
         const canUseTools = doesModelSupportTools(currentModel) && !isPureMathSession && !isNemotronCur && hasExplicitToolTrigger;
+        if (!isNemotronCur && !isStrictReasoning && !basePayload.reasoning && canUseTools && doesModelSupportReasoning(currentModel, 'openrouter') && !currentIsFree) {
+          basePayload.reasoning = { effort: 'medium' };
+        }
         if (canUseTools) {
           const validFunctionTools = (selectedAutonomousTools || []).filter(t => t && t.type === 'function' && t.function && t.function.name);
           if (validFunctionTools.length > 0) {
@@ -43040,6 +43935,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         for (const routeType of routesToTry) {
           if (STATE.abortController?.signal?.aborted) break;
+          cotController?.resetDraft();
 
           let targetUrl = '';
           let targetHeaders = {};
@@ -43070,6 +43966,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             }
             targetBody = {
               ...basePayload,
+              streamReasoning: true,
               sessionId: (session?.id && !STATE.isIncognito && !isIncognitoSession(session)) ? session.id : null,
               userId: STATE.userId || null,
               apiKey: STATE.settings.openRouterKey || undefined
@@ -43153,6 +44050,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               if (targetBody.max_completion_tokens) {
                 delete targetBody.max_completion_tokens;
                 delete basePayload.max_completion_tokens;
+                shouldRetry = true;
+              }
+              if ((targetBody.reasoning || targetBody.include_reasoning) && /reasoning|effort|unsupported|unknown/i.test(errText)) {
+                delete targetBody.reasoning;
+                delete targetBody.include_reasoning;
+                delete basePayload.reasoning;
+                delete basePayload.include_reasoning;
                 shouldRetry = true;
               }
               if (targetBody.temperature && isStrictReasoning) {
@@ -43337,6 +44241,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                     || parsed.choices?.[0]?.delta?.thought
                     || parsed.choices?.[0]?.delta?.thinking
                     || '';
+                  if (Array.isArray(parsed.choices?.[0]?.delta?.reasoning_details)) {
+                    cotController?.appendReasoningDetails(parsed.choices[0].delta.reasoning_details);
+                  }
                   if (reasoningDelta) {
                     if (!firstTokenTime) firstTokenTime = performance.now();
                     clearTimeout(ttftTimer);
@@ -43421,6 +44328,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                         || parsed.choices?.[0]?.delta?.thought
                         || parsed.choices?.[0]?.delta?.thinking
                         || '';
+                      if (Array.isArray(parsed.choices?.[0]?.delta?.reasoning_details)) {
+                        cotController?.appendReasoningDetails(parsed.choices[0].delta.reasoning_details);
+                      }
                       if (reasoningDelta) {
                         if (!firstTokenTime) firstTokenTime = performance.now();
                         clearTimeout(ttftTimer);
@@ -43639,9 +44549,21 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         toolTaskItems.forEach(item => toolSummaryList.push(item.summary));
 
-        // Tampilkan status visual proses penelusuran latar belakang secara bersih tanpa metadata teknis
-        const primaryLoadingTool = toolTaskItems.find(t => ['fetch_communication_context', 'search_documents', 'search_chat_history', 'request_location_permission', 'get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(normalizeToolName(t.toolName))) || toolTaskItems[0];
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + createAutonomousToolHudHtml(primaryLoadingTool?.toolName || 'search_web', primaryLoadingTool?.previewArg || '', 'loading', toolTaskItems);
+        const {
+          reasoningContent: pendingOpenRouterTurnReasoning,
+          reasoningDetails: pendingOpenRouterTurnReasoningDetails
+        } = cotController.getPendingTurnReasoning();
+        if (!isStudioIsolated) {
+          cotController.commitToolRound({ round: autonomousRound - 1, toolTaskItems });
+        }
+
+        // Saat CoT timeline aktif, hindari duplikasi HUD status tebal di dalam .msg-text-content
+        if (isStudioIsolated) {
+          const primaryLoadingTool = toolTaskItems.find(t => ['fetch_communication_context', 'search_documents', 'search_chat_history', 'request_location_permission', 'get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(normalizeToolName(t.toolName))) || toolTaskItems[0];
+          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + createAutonomousToolHudHtml(primaryLoadingTool?.toolName || 'search_web', primaryLoadingTool?.previewArg || '', 'loading', toolTaskItems);
+        } else {
+          bubbleText.innerHTML = preambleHtml ? preambleHtml : '';
+        }
         smartScrollChatToBottom(true);
 
         // Eksekusi seluruh tool secara paralel (Promise.all) dengan isolasi kegagalan per-tool
@@ -43716,19 +44638,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           throw abortErr;
         }
 
-        // Tampilkan status sintesis bersih di latar belakang
-        bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyintesis jawaban akhir...</span></div>`;
+        if (!isStudioIsolated) {
+          cotController.resolveToolRoundResults(toolExecResults);
+          bubbleText.innerHTML = preambleHtml ? preambleHtml : '';
+        } else {
+          bubbleText.innerHTML = (preambleHtml ? preambleHtml : '') + `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-bolt"></i> <span>Menyintesis jawaban akhir...</span></div>`;
+        }
         smartScrollChatToBottom(true);
-
-        const allToolsInRoundFailed = toolExecResults.length > 0 && toolExecResults.every(r => {
-          if (!r || !r.toolExecRes) return true;
-          if (r.toolExecRes.success === false) return true;
-          if (r.toolExecRes.success === true) return false;
-          const t = String(r.toolExecRes.text || '').trim();
-          if (t.startsWith('Error:') || t.startsWith('Error eksekusi:') || t.startsWith('Error Keamanan:') || t.includes('Gagal membaca URL')) return true;
-          if (t.includes('tidak ditemukan video') || t.includes('Tidak ditemukan hasil spesifik')) return true;
-          return false;
-        });
+        const allToolsInRoundFailed = toolExecResults.length > 0 && toolExecResults.every(isToolExecResultFailure);
 
         if (allToolsInRoundFailed) {
           consecutiveFailedRounds++;
@@ -43768,10 +44685,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           hasBrowsedWeb,
           hasExecutedSearch,
           hasExecutedVideo,
+          hasExecutedImagePrepare,
           isMidImagePipeline,
           isMidWeatherPipeline,
           hasExecutedWeatherFetch,
           hasSucceededWeatherFetch,
+          hasExecutedWeatherRender,
+          weatherFetchFailed,
+          hasSecondaryTask,
           isLastRound
         } = buildAutonomousToolDigestionStep({
           detectedAutonomousCalls,
@@ -43780,6 +44701,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           toolExecResults,
           toolSummaryList,
           cleanAssistant,
+          assistantReasoningContent: pendingOpenRouterTurnReasoning || (autonomousRound <= 1 ? streamRenderer?.accumulatedReasoning : '') || '',
+          assistantReasoningDetails: pendingOpenRouterTurnReasoningDetails,
           roundToolResponsesText,
           webSources,
           autonomousRound,
@@ -43802,18 +44725,28 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             allow_fallbacks: isAutoRouterActive
           }
         };
-        if (!isLastRound && (isMidImagePipeline || isMidWeatherPipeline || !hasExecutedVideo) && (!isDigestionFree || validNativeCalls.length > 0) && canDigestionUseTools && selectedAutonomousTools && selectedAutonomousTools.length > 0) {
-          const validFunctionTools = selectedAutonomousTools.filter(t => {
-            if (!t || t.type !== 'function' || !t.function?.name) return false;
-            const tName = normalizeToolName(t.function.name);
-            if (isMidImagePipeline) return ['inspect_image', 'prepare_image_display'].includes(tName);
-            if (isMidWeatherPipeline) {
-              return hasSucceededWeatherFetch
-                ? ['render_weather_ui'].includes(tName)
-                : ['get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(tName);
-            }
-            if (hasExecutedSearch && ['search_web', 'web_search', 'search'].includes(tName)) return false;
-            return true;
+        if (activeBasePayload?.reasoning) {
+          digestionRequestBody.reasoning = activeBasePayload.reasoning;
+        }
+        if (activeBasePayload?.include_reasoning) {
+          digestionRequestBody.include_reasoning = activeBasePayload.include_reasoning;
+        }
+        if ((!isDigestionFree || validNativeCalls.length > 0) && canDigestionUseTools) {
+          const validFunctionTools = resolveAvailableDigestionTools(selectedAutonomousTools, {
+            isLastRound,
+            isMidImagePipeline,
+            isMidWeatherPipeline,
+            hasSucceededWeatherFetch,
+            hasExecutedWeatherRender,
+            weatherFetchFailed,
+            hasExecutedImagePrepare,
+            hasExecutedVideo,
+            allowSecondaryAfterMedia: Boolean(hasSecondaryTask),
+            hasExecutedSearch,
+            hasGroundedSearchSources: Boolean(webSources && webSources.length > 0),
+            allToolsInRoundFailed,
+            autonomousRound,
+            requireFunctionSchema: true
           });
           if (validFunctionTools.length > 0) {
             digestionRequestBody.tools = validFunctionTools;
@@ -43841,10 +44774,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
 
         const isDirectRoute = activeRouteType === 'direct' || (!activeEndpoint || activeEndpoint.includes('openrouter.ai'));
         if (isDirectRoute) {
+          delete digestionRequestBody.streamReasoning;
           delete digestionRequestBody.sessionId;
           delete digestionRequestBody.userId;
           delete digestionRequestBody.apiKey;
         } else {
+          digestionRequestBody.streamReasoning = true;
           if (session?.id) digestionRequestBody.sessionId = session.id + '_digest_' + autonomousRound;
           if (STATE.userId) digestionRequestBody.userId = STATE.userId;
           digestionRequestBody.apiKey = STATE.settings.openRouterKey || undefined;
@@ -43863,6 +44798,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         finishReason = '';
         isStreamInterrupted = false;
         let digestionSseDone = false;
+        if (!isStudioIsolated) {
+          cotController.beginNextReasoningRound(autonomousRound, { isLastRound });
+        }
 
         try {
           let digestionRes = await fetch(digestionUrl, {
@@ -43872,13 +44810,15 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             signal: STATE.abortController?.signal
           });
 
-          // Fallback resiliensi: jika model menolak tools di putaran lanjutan (HTTP 400/404/422/500)
-          if (!digestionRes.ok && (digestionRequestBody.tools || hasUnconvertedToolMessages(digestionRequestBody.messages)) && (digestionRes.status === 400 || digestionRes.status === 404 || digestionRes.status === 422 || digestionRes.status === 500)) {
-            console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Model returned HTTP ${digestionRes.status} with tools. Retrying without tools and normalizing tool messages...`);
+          // Fallback resiliensi: jika model menolak tools/reasoning di putaran lanjutan (HTTP 400/404/422/500)
+          if (!digestionRes.ok && (digestionRequestBody.tools || digestionRequestBody.reasoning || hasUnconvertedToolMessages(digestionRequestBody.messages)) && (digestionRes.status === 400 || digestionRes.status === 404 || digestionRes.status === 422 || digestionRes.status === 500)) {
+            console.warn(`[OpenRouter Autonomous Digestion Round ${autonomousRound}] Model returned HTTP ${digestionRes.status} with tools/reasoning. Retrying cleanly...`);
             delete digestionRequestBody.tools;
             delete digestionRequestBody.tool_choice;
+            delete digestionRequestBody.reasoning;
+            delete digestionRequestBody.include_reasoning;
             if (Array.isArray(digestionRequestBody.messages)) {
-              const convertedOrRetry = convertToolMessagesToUserRole(digestionRequestBody.messages);
+              const convertedOrRetry = convertToolMessagesToUserRole(digestionRequestBody.messages, { stripReasoning: true });
               digestionRequestBody.messages = convertedOrRetry;
               conversationChain.splice(0, conversationChain.length, ...convertedOrRetry);
             }
@@ -43916,12 +44856,29 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           bubbleText.innerHTML = (preambleHtml ? preambleHtml : '');
           bubbleText.appendChild(digestionContentBox);
 
-          const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false));
+          const digestionRenderer = new StreamBufferRenderer(digestionContentBox, () => smartScrollChatToBottom(false), '', {
+            ...runOptions,
+            userPrompt: promptText,
+            getSources: () => webSources,
+            suppressThinkingPlaceholder: !isStudioIsolated,
+            onReasoningDelta: (d) => cotController?.appendThought(d)
+          });
           activeStreamRenderer = digestionRenderer;
+
+          let digestionDeadAirTimer = null;
+          const resetDigestionDeadAir = () => {
+            if (digestionDeadAirTimer) clearTimeout(digestionDeadAirTimer);
+            digestionDeadAirTimer = setTimeout(() => {
+              console.warn(`[OpenRouter Digestion Dead-Air] Putaran ${autonomousRound} terhenti tanpa token selama 180 detik.`);
+              try { digestionReader.cancel('DEAD_AIR_TIMEOUT'); } catch (_) {}
+            }, 180000);
+          };
 
           try {
           while (!digestionSseDone) {
+            resetDigestionDeadAir();
             const { done, value } = await digestionReader.read();
+            resetDigestionDeadAir();
             if (done) {
               digestionBuffer += digestionDecoder.decode();
               break;
@@ -43950,6 +44907,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                   || dParsed.choices?.[0]?.delta?.thought
                   || dParsed.choices?.[0]?.delta?.thinking
                   || '';
+                if (Array.isArray(dParsed.choices?.[0]?.delta?.reasoning_details)) {
+                  cotController?.appendReasoningDetails(dParsed.choices[0].delta.reasoning_details);
+                }
                 if (dReasoning) {
                   tokenCount++;
                   digestionRenderer.appendReasoning(dReasoning);
@@ -43997,6 +44957,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           } catch (digReadErr) {
             try { await digestionReader.cancel(); } catch (_) {}
             throw digReadErr;
+          } finally {
+            if (digestionDeadAirTimer) { clearTimeout(digestionDeadAirTimer); digestionDeadAirTimer = null; }
           }
 
           if (digestionBuffer && digestionBuffer.trim() && digestionBuffer.trim().startsWith('data:')) {
@@ -44015,6 +44977,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                   || dParsed.choices?.[0]?.delta?.thought
                   || dParsed.choices?.[0]?.delta?.thinking
                   || '';
+                if (Array.isArray(dParsed.choices?.[0]?.delta?.reasoning_details)) {
+                  cotController?.appendReasoningDetails(dParsed.choices[0].delta.reasoning_details);
+                }
                 if (dReasoning) {
                   tokenCount++;
                   digestionRenderer.appendReasoning(dReasoning);
@@ -44485,6 +45450,12 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
       const finalRenderedContent = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderedMarkdown + imagesHtml;
       bubbleText.innerHTML = finalRenderedContent.trim();
+      cotController?.finalize();
+      const openRouterCotSteps = cotController ? cotController.getSerializableSteps() : [];
+      const openRouterCombinedReasoning = (cotController && cotController.getCombinedReasoning()) || streamRenderer?.accumulatedReasoning || '';
+      if (!isStudioIsolated && openRouterCotSteps.length > 0) {
+        syncMessageReasoningTimeline(assistantRow, openRouterCotSteps, { isStreaming: false, modelName: actualModelUsed || displayModel });
+      }
       if (groundedImageDisplays.length > 0) {
         renderGroundedImageDisplaysForRow(assistantRow, groundedImageDisplays);
       }
@@ -44590,8 +45561,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         session.messages.push({
           role: 'assistant',
           content: fullText,
-          reasoning: streamRenderer.accumulatedReasoning || undefined,
-          reasoning_content: streamRenderer.accumulatedReasoning || undefined,
+          reasoning: openRouterCombinedReasoning || undefined,
+          reasoning_content: openRouterCombinedReasoning || undefined,
+          reasoningSteps: openRouterCotSteps.length > 0 ? openRouterCotSteps : undefined,
           model: actualModelUsed || displayModel,
           engine: engineMode,
           planMode: normalizePlanMode(runOptions.planMode || getActivePlanMode(session)),
@@ -44732,9 +45704,18 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           if (isStudioIsolated) {
             persistStudioIsolatedTurn(session, promptText, stoppedPartial.files.length > 0 ? partialRaw : stoppedText, stoppedPartial.files, runOptions);
           } else {
+            cotController?.finalize();
+            const abortedOrCotSteps = cotController ? cotController.getSerializableSteps() : [];
+            const abortedOrCombinedReasoning = (cotController && cotController.getCombinedReasoning()) || streamRenderer?.accumulatedReasoning || '';
+            if (abortedOrCotSteps.length > 0) {
+              syncMessageReasoningTimeline(assistantRow, abortedOrCotSteps, { isStreaming: false, modelName: actualModelUsed || displayModel });
+            }
             session.messages.push({
               role: 'assistant',
               content: stoppedText,
+              reasoning: abortedOrCombinedReasoning || undefined,
+              reasoning_content: abortedOrCombinedReasoning || undefined,
+              reasoningSteps: abortedOrCotSteps.length > 0 ? abortedOrCotSteps : undefined,
               model: displayModel,
               engine: engineMode,
               planMode: normalizePlanMode(runOptions.planMode || getActivePlanMode(session)),
@@ -44767,6 +45748,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
         // Auto-Router fallback: HANYA jika belum ada 1 pun token yang dihasilkan (jangan pernah menghapus output AI!)
         if (runOptions && runOptions.autoFallback && tokenCount === 0 && (!streamRenderer || !streamRenderer.text)) {
+          cotController?.dispose();
           try { assistantRow.remove(); } catch (_) {}
           return false;
         }
@@ -44802,11 +45784,21 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             renderChatHistoryRefsBadge(assistantRow, collectedChatHistoryRefs);
           }
           if (isStudioIsolated) {
+            cotController?.dispose();
             persistStudioIsolatedTurn(session, promptText, rescuePartial.files.length > 0 ? partialRaw : cleanRescued, rescuePartial.files, runOptions);
           } else if (STATE.sessions.some(s => s.id === session.id)) {
+            cotController?.finalize();
+            const partialOrCotSteps = cotController ? cotController.getSerializableSteps() : [];
+            const partialOrCombinedReasoning = (cotController && cotController.getCombinedReasoning()) || streamRenderer?.accumulatedReasoning || '';
+            if (partialOrCotSteps.length > 0) {
+              syncMessageReasoningTimeline(assistantRow, partialOrCotSteps, { isStreaming: false, modelName: actualModelUsed || displayModel });
+            }
             session.messages.push({
               role: 'assistant',
               content: cleanRescued,
+              reasoning: partialOrCombinedReasoning || undefined,
+              reasoning_content: partialOrCombinedReasoning || undefined,
+              reasoningSteps: partialOrCotSteps.length > 0 ? partialOrCotSteps : undefined,
               model: actualModelUsed || displayModel,
               engine: engineMode,
               planMode: normalizePlanMode(runOptions.planMode || getActivePlanMode(session)),
@@ -44842,6 +45834,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           return true;
         }
 
+        cotController?.dispose();
         const actualHasImage = Array.isArray(image) ? image.length > 0 : Boolean(image);
         const errorHtml = formatModelErrorMessage(engineMode, displayModel, err, actualHasImage, STATE.webSearchEnabled);
 
@@ -66607,6 +67600,15 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     handleIncomingFiles,
     appendMessageElement,
     syncLastAssistantRegenButton,
+    doesModelSupportReasoning,
+    doesModelSupportToolInterleavedThink,
+    isToolExecResultFailure,
+    normalizeSavedReasoningSteps,
+    buildInterleavedReasoningTimelineHtml,
+    syncMessageReasoningTimeline,
+    createInterleavedReasoningController,
+    resolveAvailableDigestionTools,
+    mergeReasoningDetailsDeltas,
     AiChatThemeManager,
     WhatsAppController
   };

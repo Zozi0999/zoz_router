@@ -2137,8 +2137,9 @@ function normalizeMessagesForOpenRouter(messages, { normalizeTools = false, incl
       if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
         const textContent = m.content || '[Mengeksekusi alat penelusuran otonom]';
         const baseM = { role: 'assistant', content: textContent };
-        if (includeReasoningPrior) {
-          baseM.reasoning_content = m.reasoning || m.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${String(textContent).slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+        const priorReasoning = m.reasoning_content || m.reasoning || m.thinking;
+        if (includeReasoningPrior || priorReasoning) {
+          baseM.reasoning_content = priorReasoning || `Evaluasi analitis dan penalaran konseptual: ${String(textContent).slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
         }
         return baseM;
       }
@@ -2149,9 +2150,16 @@ function normalizeMessagesForOpenRouter(messages, { normalizeTools = false, incl
     delete cleanMsg.images;
     delete cleanMsg.image;
 
-    if (includeReasoningPrior && cleanMsg.role === 'assistant') {
+    if (cleanMsg.role === 'assistant') {
       const rawTxt = typeof cleanMsg.content === 'string' ? cleanMsg.content : '';
-      cleanMsg.reasoning_content = cleanMsg.reasoning || cleanMsg.reasoning_content || `Evaluasi analitis dan penalaran konseptual: ${rawTxt.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+      const existingReasoning = cleanMsg.reasoning_content || cleanMsg.reasoning || cleanMsg.thinking;
+      if (existingReasoning) {
+        cleanMsg.reasoning_content = existingReasoning;
+      } else if (includeReasoningPrior) {
+        cleanMsg.reasoning_content = `Evaluasi analitis dan penalaran konseptual: ${rawTxt.slice(0, 150).replace(/[\r\n]+/g, ' ')}`;
+      }
+      delete cleanMsg.reasoning;
+      delete cleanMsg.thinking;
     }
 
     if (imgs.length > 0 && cleanMsg.role === 'user' && !Array.isArray(cleanMsg.content)) {
@@ -14850,6 +14858,9 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       const isAutoRouterExplicit = Boolean(req.headers['x-auto-router'] === 'true' || body.isAutoRouter);
       const shouldUseCloudBridge = Boolean((isAutoRouterExplicit || (isCloudModelRequested && !rawOllamaKey && rawOrKey)) && ((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (Boolean(rawOrKey) && !isCustomRemoteEndpoint)));
 
+      const wantsStreamReasoning = Boolean(body.streamReasoning);
+      delete body.streamReasoning;
+
       // Defense-in-depth: Kalibrasi Deduksi Proposisional & Bayesian di Sisi Server (Ollama & Cloud Bridge)
       applyServerSideDecisionCalibration(body, 'ollama', reqUserId);
 
@@ -14923,8 +14934,13 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
           max_tokens: initialMaxTokens,
           provider: { allow_fallbacks: Boolean(req.headers['x-auto-router'] === 'true' || body.isAutoRouter) }
         };
-        if (targetCloudModel.includes('beam') || targetCloudModel.includes('reflection')) {
+        if (body.reasoning) {
+          orPayload.reasoning = body.reasoning;
+        } else if (targetCloudModel.includes('beam') || targetCloudModel.includes('reflection')) {
           orPayload.reasoning = { effort: 'medium' };
+        }
+        if (body.include_reasoning !== undefined && body.include_reasoning !== false) {
+          orPayload.include_reasoning = body.include_reasoning;
         }
         if (body.options?.temperature !== undefined) orPayload.temperature = body.options.temperature;
         if (body.options?.top_p !== undefined) orPayload.top_p = body.options.top_p;
@@ -15126,10 +15142,14 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 try {
                   const parsed = JSON.parse(rawResp);
                   const txt = parsed.choices?.[0]?.message?.content || '';
-                  const reasoning = parsed.choices?.[0]?.message?.reasoning || parsed.choices?.[0]?.message?.reasoning_content || '';
+                  const reasoning = parsed.choices?.[0]?.message?.reasoning || parsed.choices?.[0]?.message?.reasoning_content || parsed.choices?.[0]?.message?.thinking || '';
+                  const reasoningDetails = parsed.choices?.[0]?.message?.reasoning_details;
                   const msgPayload = { role: 'assistant', content: txt };
                   if (reasoning) {
                     msgPayload.reasoning = reasoning;
+                  }
+                  if (reasoningDetails) {
+                    msgPayload.reasoning_details = reasoningDetails;
                   }
                   if (parsed.choices?.[0]?.message?.tool_calls) {
                     msgPayload.tool_calls = parsed.choices[0].message.tool_calls;
@@ -15196,13 +15216,15 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                 if (ch?.finish_reason) lastFinishReason = ch.finish_reason;
                 const delta = ch?.delta?.content || '';
                 const deltaToolCalls = ch?.delta?.tool_calls;
-                const deltaReasoning = ch?.delta?.reasoning || ch?.delta?.reasoning_content || '';
+                const deltaReasoning = ch?.delta?.reasoning || ch?.delta?.reasoning_content || ch?.delta?.thinking || '';
+                const deltaReasoningDetails = ch?.delta?.reasoning_details;
                 if (delta) accumulatedContent += delta;
                 if (deltaReasoning) accumulatedReasoning += deltaReasoning;
-                if (delta || deltaToolCalls || deltaReasoning) {
+                if (delta || deltaToolCalls || deltaReasoning || deltaReasoningDetails) {
                   const msgPayload = { role: 'assistant', content: delta };
                   if (deltaToolCalls) msgPayload.tool_calls = deltaToolCalls;
                   if (deltaReasoning) msgPayload.reasoning = deltaReasoning;
+                  if (deltaReasoningDetails) msgPayload.reasoning_details = deltaReasoningDetails;
                   writeBridgeNdjson({
                     model: body.model || 'qwen2.5:1.5b',
                     created_at: new Date().toISOString(),
@@ -15648,7 +15670,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
           // Upstream returned 200 OK -> Send headers matching Ollama NDJSON / JSON mode!
           const contentType = isStream ? 'application/x-ndjson; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
-          const reasoningFilter = textSafety.createProviderStreamFilter('ollama', isStream ? 'stream' : 'json', { userPrompt });
+          const reasoningFilter = textSafety.createProviderStreamFilter('ollama', isStream ? 'stream' : 'json', {
+            userPrompt,
+            preserveReasoningFields: wantsStreamReasoning
+          });
           if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
             try {
               res.writeHead(200, {
@@ -16301,6 +16326,8 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       }
       // Defense-in-depth: Gerbang Nol-Informasi Shannon di sisi OpenRouter
       applyContextIntegrityGuard(body.messages, userPrompt);
+      const wantsStreamReasoning = Boolean(body.streamReasoning);
+      delete body.streamReasoning;
       delete body.sessionId;
       delete body.userId; // Cegah error Pydantic / upstream validation di OpenRouter
 
@@ -16544,7 +16571,10 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
         // OpenRouter returned 200 OK -> Send headers matching client stream mode!
         const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
-        const reasoningFilter = textSafety.createProviderStreamFilter('openrouter', isStream ? 'stream' : 'json', { userPrompt });
+        const reasoningFilter = textSafety.createProviderStreamFilter('openrouter', isStream ? 'stream' : 'json', {
+          userPrompt,
+          preserveReasoningFields: wantsStreamReasoning
+        });
         if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
           try {
             res.writeHead(200, {
