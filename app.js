@@ -84,7 +84,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://extraction-katrina-pumps-fellowship.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://precious-selecting-boulder-divx.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -18947,7 +18947,19 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   // tuntas 100% atau terpotong di tengah jalan.
   function isWebsiteComplete(content, fullText = '', options = {}) {
     if (!content || typeof content !== 'string') return false;
-    const trimmed = content.trim();
+    const rawTrimmed = content.trim();
+    if (rawTrimmed.length < 150) return false;
+
+    // Ekstrak fragmen HTML utama secara murni (buang header/footer protokol ZOZ_FILE atau prosa pembungkus)
+    const strippedProtocol = rawTrimmed
+      .replace(/^<<<ZOZ_(?:FILE|EDIT|MODIFY)[^\r\n]*$/gim, '')
+      .replace(/^<<<END_ZOZ_(?:FILE|EDIT|MODIFY)[^\r\n]*$/gim, '')
+      .trim();
+    const docStartMatch = /(?:<!DOCTYPE\s+html\b|<html\b)/i.exec(strippedProtocol);
+    const htmlCloseMatchIdx = strippedProtocol.toLowerCase().lastIndexOf('</html>');
+    const trimmed = (docStartMatch && htmlCloseMatchIdx > docStartMatch.index)
+      ? strippedProtocol.slice(docStartMatch.index, htmlCloseMatchIdx + 7).trim()
+      : strippedProtocol;
     if (trimmed.length < 150) return false;
 
     // 1. Tag dokumen HTML5 utama
@@ -18981,37 +18993,47 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return false;
     }
 
-    // 5. Cek tag yang terputus di tengah jalan (misal '<button on\n</body>' atau '<div class="')
+    // 5. Cek tag HTML yang benar-benar terputus di tengah jalan (mengabaikan '<' literal seperti "Harga < $16,000" atau atribut bertanda kutip)
     const cleanDom = trimmed
       .replace(/<!--[\s\S]*?-->/g, '')
-      .replace(/<<<[\s\S]*?>>>/g, '')
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '');
 
-    let inAngle = false;
+    let inTag = false;
+    let quoteChar = null;
     for (let i = 0; i < cleanDom.length; i++) {
       const ch = cleanDom[i];
-      if (ch === '<') {
-        if (inAngle) return false;
-        inAngle = true;
-      } else if (ch === '>') {
-        inAngle = false;
+      if (inTag) {
+        if (quoteChar) {
+          if (ch === quoteChar) quoteChar = null;
+        } else if (ch === '"' || ch === "'") {
+          quoteChar = ch;
+        } else if (ch === '>') {
+          inTag = false;
+        } else if (ch === '<' && /[a-zA-Z/!]/.test(cleanDom[i + 1] || '')) {
+          return false;
+        }
+      } else if (ch === '<' && /[a-zA-Z/!]/.test(cleanDom[i + 1] || '')) {
+        inTag = true;
       }
     }
-    if (inAngle) return false;
+    if (inTag) return false;
 
-    // 6. Pasangan marker blok berkas (<<<ZOZ_FILE ... >>>)
-    const combined = (fullText ? fullText + '\n' : '') + trimmed;
-    if (combined.includes('<<<ZOZ_FILE')) {
+    // 6. Pasangan marker blok berkas (<<<ZOZ_FILE ... >>>): jika hanya 1 blok dan </html> sudah lengkap tuntas, anggap tuntas;
+    // hanya gagalkan bila ada >1 blok yang masih terbuka. Hindari menggandakan bila fullText sudah memuat rawTrimmed.
+    const combined = fullText
+      ? (fullText.includes(rawTrimmed.slice(0, 120)) ? fullText : `${fullText}\n${rawTrimmed}`)
+      : rawTrimmed;
+    if (combined.includes('<<<ZOZ_FILE') || combined.includes('<<<ZOZ_EDIT') || combined.includes('<<<ZOZ_MODIFY')) {
       const fileStarts = (combined.match(/<<<ZOZ_(?:FILE|EDIT|MODIFY)/g) || []).length;
-      const fileEnds = (combined.match(/<<<END_ZOZ_(?:FILE|EDIT|MODIFY)/g) || []).length;
-      if (fileStarts > fileEnds) {
+      const fileEnds = (combined.match(/<<<END_ZOZ_(?:FILE|EDIT|MODIFY)[^\n>]*(?:>|$)/g) || []).length;
+      if (fileStarts > fileEnds && fileStarts > 1) {
         return false;
       }
     }
 
-    // 7. Pasangan markdown fence jika dipakai
-    if (combined.includes('```html') || combined.includes('```htm')) {
+    // 7. Pasangan markdown fence hanya jika dokumen belum ditutup </html> secara lengkap
+    if (!hasClosingHtml && (combined.includes('```html') || combined.includes('```htm'))) {
       const backtickCount = (combined.match(/```/g) || []).length;
       if (backtickCount % 2 !== 0) {
         return false;
@@ -19042,6 +19064,32 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   }
   if (typeof window !== 'undefined') window.isWebsiteComplete = isWebsiteComplete;
 
+  // Membuang blok file/HTML/script/style yang SUDAH TUNTAS sebelum memeriksa keseimbangan backtick, $$, dan \[...\]
+  // agar JS template literal seperti `$${price}` atau regex `\[` tidak memicu deteksi terpotong palsu.
+  function stripCompletedCodeAndFileBlocksForTruncationCheck(rawText) {
+    let outsideTagCode = String(rawText || '')
+      .replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY)[^\r\n]*\r?\n[\s\S]*?<<<END_ZOZ_(?:FILE|EDIT|MODIFY)[^\n>]*(?:>|$)/gi, '');
+
+    const htmlStart = /(?:<!DOCTYPE\s+html\b|<html\b)/i.exec(outsideTagCode);
+    const htmlEndIdx = outsideTagCode.toLowerCase().lastIndexOf('</html>');
+    if (htmlStart && htmlEndIdx > htmlStart.index) {
+      const htmlSlice = outsideTagCode.slice(htmlStart.index, htmlEndIdx + 7);
+      if (isWebsiteComplete(htmlSlice)) {
+        outsideTagCode = outsideTagCode.slice(0, htmlStart.index) + '\n' + outsideTagCode.slice(htmlEndIdx + 7);
+      }
+    }
+
+    outsideTagCode = outsideTagCode
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '');
+
+    const proseOutsideAllCode = outsideTagCode
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`[^`\r\n]+`/g, '');
+
+    return { outsideTagCode, proseOutsideAllCode };
+  }
+
   function isOutputTruncated(text, finishReason = null) {
     const normFinish = String(finishReason || '').trim().toLowerCase();
     if (
@@ -19064,18 +19112,19 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     if (/[\uFFFD\uD800-\uDBFF]$/.test(trimmed)) return true;
     if (/<[a-zA-Z/!][^>\n]{0,40}$/.test(trimmed)) return true;
 
-    // 2. Check for unclosed markdown code blocks (odd count of ```)
-    const backtickCount = (trimmed.match(/```/g) || []).length;
+    const { outsideTagCode, proseOutsideAllCode } = stripCompletedCodeAndFileBlocksForTruncationCheck(trimmed);
+
+    // 2. Check for unclosed markdown code blocks di luar berkas/tag script-style yang sudah tuntas
+    const backtickCount = (outsideTagCode.match(/```/g) || []).length;
     if (backtickCount % 2 !== 0) return true;
 
-    // 2b. Check for unclosed display math ($$) dan \[ ... \] di luar blok kode berpagar tertutup
-    const trimmedOutsideClosedCode = trimmed.replace(/```[\s\S]*?```/g, '');
-    const displayMathCount = (trimmedOutsideClosedCode.match(/\$\$/g) || []).length;
+    // 2b. Check for unclosed display math ($$) dan \[ ... \] hanya di prosa non-kode
+    const displayMathCount = (proseOutsideAllCode.match(/\$\$/g) || []).length;
     if (displayMathCount % 2 !== 0) return true;
 
     // 2c. Check for unclosed LaTeX brackets \[ ... \]
-    const openBracketMath = (trimmedOutsideClosedCode.match(/\\\[/g) || []).length;
-    const closeBracketMath = (trimmedOutsideClosedCode.match(/\\\]/g) || []).length;
+    const openBracketMath = (proseOutsideAllCode.match(/\\\[/g) || []).length;
+    const closeBracketMath = (proseOutsideAllCode.match(/\\\]/g) || []).length;
     if (openBracketMath > closeBracketMath) return true;
 
     // 3. Check for HTML document completion
@@ -19089,16 +19138,16 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
     // 5. Check for unclosed HTML / script / style blocks
     const htmlStarts = (trimmed.match(/<html\b/gi) || []).length;
-    const htmlEnds = (trimmed.match(/<\/html>/gi) || []).length;
+    const htmlEnds = (trimmed.match(/<\/html\s*>/gi) || []).length;
     if (htmlStarts > htmlEnds) return true;
-    if ((trimmed.includes('<!DOCTYPE html') || /<html\b/i.test(trimmed)) && !/<\/html>/i.test(trimmed)) return true;
+    if ((trimmed.includes('<!DOCTYPE html') || /<html\b/i.test(trimmed)) && !/<\/html\s*>/i.test(trimmed)) return true;
 
     const scriptStarts = (trimmed.match(/<script\b/gi) || []).length;
-    const scriptEnds = (trimmed.match(/<\/script>/gi) || []).length;
+    const scriptEnds = (trimmed.match(/<\/script\s*>/gi) || []).length;
     if (scriptStarts > scriptEnds) return true;
 
     const styleStarts = (trimmed.match(/<style\b/gi) || []).length;
-    const styleEnds = (trimmed.match(/<\/style>/gi) || []).length;
+    const styleEnds = (trimmed.match(/<\/style\s*>/gi) || []).length;
     if (styleStarts > styleEnds) return true;
 
     // Bare list marker at end of text (even on short outputs) is always incomplete
@@ -19268,6 +19317,18 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     };
 
     try {
+      // Pre-check: bila berkas website sudah 100% tuntas sebelum loop, jangan boroskan putaran agen tambahan
+      if (isWebContinue) {
+        const preCheck = extractGeneratedFiles(currentAccumulated, true, contRunOptions);
+        const prePrimary = preCheck.files.find(f => /\.(?:html?|jsx|tsx)$/i.test(f?.name || '')) || preCheck.files[0];
+        if (prePrimary && !preCheck.hasIncompleteFile) {
+          const preIsReact = /\.(?:jsx|tsx)$/i.test(prePrimary.name || '');
+          const preHtml = prePrimary.rawContent || prePrimary.content || '';
+          if (preIsReact || isWebsiteComplete(preHtml, currentAccumulated)) {
+            isActuallyComplete = true;
+          }
+        }
+      }
       while (agentRound < MAX_AGENT_ROUNDS && !isActuallyComplete && !STATE.abortController?.signal?.aborted) {
         agentRound++;
         updateAgentHud(`Putaran ${agentRound}/${MAX_AGENT_ROUNDS}: Menyambung respons...`);
@@ -19548,8 +19609,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       renderChatHistory(els.searchHistoryInput?.value || '');
 
       const container = options.container || row?.querySelector('.message-actions-bar') || row?.querySelector('.msg-actions') || row?.querySelector('.message-content-box');
-      if (!options.isAutoContinue && container && (isStillIncomplete || isOutputTruncated(currentAccumulated, lastContFinishReason || 'stop'))) {
+      const shouldReattachManualBtn = isWebContinue
+        ? isStillIncomplete
+        : Boolean(isStillIncomplete || isOutputTruncated(currentAccumulated, lastContFinishReason || 'stop'));
+      if (!options.isAutoContinue && container && shouldReattachManualBtn) {
         attachContinuationButton(container, session, row, modelName, engine, currentAccumulated, { isWebsite: isWebContinue });
+      } else if (!shouldReattachManualBtn && row) {
+        row.querySelectorAll('.continue-response-btn').forEach(el => el.remove());
       }
 
       const msgSuccess = `✅ Berkas selesai sempurna dalam ${agentRound} putaran agen (${modelName})!`;
@@ -19633,6 +19699,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       initialText,
       finishReason,
       isFileIncomplete,
+      hasCompleteWebFile,
       groundedImageDisplays,
       groundedWeatherDisplays,
       isWebTask,
@@ -19647,7 +19714,38 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     let effectiveFinishReason = finishReason;
     let continued = false;
 
-    const needsContinuation = !isAborted && !isAutoContinuation && (stillFileIncomplete || isOutputTruncated(finalText, effectiveFinishReason));
+    const HARD_TRUNCATION_REASONS = new Set(['length', 'max_tokens', 'incomplete', 'interrupted', 'timeout', 'error']);
+    const CLEAN_EOS_REASONS = new Set(['stop', 'end_turn', 'eos', 'complete', 'stop_sequence']);
+
+    const checkWebArtifactComplete = (rawTxt) => {
+      if ((!isWebTask && !hasCompleteWebFile) || stillFileIncomplete) return false;
+      if (hasCompleteWebFile && rawTxt === initialText) return true;
+      try {
+        const ex = extractGeneratedFiles(rawTxt, true, {
+          planMode: session?.planMode,
+          isWebCreation: true
+        });
+        return !ex.hasIncompleteFile && ex.files.some(f => !f.isIncomplete && /\.(?:html?|jsx|tsx)$/i.test(f?.name || ''));
+      } catch (_) {
+        return false;
+      }
+    };
+
+    const isEffectiveOutputTruncated = (rawTxt, finishRsn, fileIncomplete) => {
+      if (fileIncomplete) return true;
+      const normFinish = String(finishRsn || '').trim().toLowerCase();
+      if (HARD_TRUNCATION_REASONS.has(normFinish)) return true;
+      if ((isWebTask || hasCompleteWebFile) && checkWebArtifactComplete(rawTxt)) {
+        // Website HTML/React sudah tuntas 100%; jangan panggil sambungan hanya karena isi HTML/JS (mis. template literal `$$`)
+        if (!normFinish || CLEAN_EOS_REASONS.has(normFinish)) return false;
+        const { proseOutsideAllCode } = stripCompletedCodeAndFileBlocksForTruncationCheck(rawTxt);
+        const cleanProse = proseOutsideAllCode.trim();
+        return cleanProse ? isOutputTruncated(cleanProse, finishRsn) : false;
+      }
+      return isOutputTruncated(rawTxt, finishRsn);
+    };
+
+    const needsContinuation = !isAborted && !isAutoContinuation && isEffectiveOutputTruncated(finalText, effectiveFinishReason, stillFileIncomplete);
     if (needsContinuation) {
       console.log(`[${engineLabel} Auto-Recovery] Respons terputus/terpotong di tengah jalan. Menyambung otomatis...`);
       try {
@@ -19678,7 +19776,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           const fallbackRaw = assistantRow.dataset.rawIncompleteText || assistantRow.dataset.fullContent;
           finalText = fallbackRaw;
           cleanFinalText = assistantRow.dataset.fullContent || fallbackRaw;
-          stillFileIncomplete = Boolean(assistantRow.dataset.rawIncompleteText) || Boolean(extractGeneratedFiles(fallbackRaw, Boolean(isWebTask)).hasIncompleteFile);
+          stillFileIncomplete = Boolean(assistantRow.dataset.rawIncompleteText) || Boolean(extractGeneratedFiles(fallbackRaw, Boolean(isWebTask), { planMode: session?.planMode, isWebCreation: Boolean(isWebTask) }).hasIncompleteFile);
           effectiveFinishReason = null;
         }
       } catch (autoContErr) {
@@ -19686,7 +19784,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       }
     }
 
-    const stillTruncated = stillFileIncomplete || isOutputTruncated(finalText, effectiveFinishReason);
+    const stillTruncated = isEffectiveOutputTruncated(finalText, effectiveFinishReason, stillFileIncomplete);
     if (stillTruncated) {
       attachContinuationButton(
         assistantRow.querySelector('.message-content-box') || assistantRow,
@@ -19697,6 +19795,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         finalText,
         { isWebsite: isWebTask }
       );
+    } else if (assistantRow && typeof assistantRow.querySelectorAll === 'function') {
+      assistantRow.querySelectorAll('.continue-response-btn').forEach(el => el.remove());
     }
     return { text: finalText, cleanText: cleanFinalText, stillTruncated, continued };
   }
@@ -24831,7 +24931,13 @@ KEMAMPUAN DOKUMEN OTONOM (PDF & WORD .DOCX):
       return `### INSTRUKSI SISTEM: ${studioTitle} — REVISI APLIKASI WEB LIVE
 Pengguna ingin memodifikasi, mengoptimalkan, atau memperbaiki website aktif "${targetName}".
 
-ATURAN MUTLAK OUTPUT:
+TAHAP 1 — PERSIAPAN ALAT & DATA NYATA (TOOL-FIRST ARCHITECT):
+- Jika perubahan membutuhkan data aktual dunia nyata (harga pasar/komoditas/saham/cuaca/fakta terbaru), perhitungan kuantitatif, atau foto terverifikasi, panggil tool yang relevan terlebih dahulu (\`search_web\`, \`execute_python_code\`, \`search_images\`, dll.) sebelum menulis kode agar angka dan isi website akurat serta bukan dummy asal-asalan.
+
+TAHAP 2 — PENALARAN ARSITEKTUR MENDALAM (BERPIKIR PANJANG SEBELUM MENULIS KODE):
+- Sebelum mengeluarkan kode, rancang dengan teliti di dalam blok berpikir Anda: analisis bug/kekurangan saat ini, dampak revisi pada state JavaScript, tata letak responsif (360px–desktop), kontras warna, aksesibilitas, serta konsistensi desain agar seluruh fitur lama tetap bekerja tanpa regresi.
+
+TAHAP 3 — ATURAN MUTLAK OUTPUT:
 1. Terapkan seluruh perubahan dan optimasi yang diminta pengguna sambil mempertahankan fitur yang sudah berjalan baik.
 2. Kembalikan SELURUH kode HTML5/CSS3/JS yang telah diperbarui lengkap dari <!DOCTYPE html> hingga </html> di dalam SATU blok protokol (JANGAN dibungkus backtick \`\`\`):
 <<<ZOZ_FILE name="${targetName}" mime="text/html" lang="html">
@@ -24840,17 +24946,28 @@ ATURAN MUTLAK OUTPUT:
 </html>
 <<<END_ZOZ_FILE>>>
 (Atau gunakan blok <<<ZOZ_EDIT name="${targetName}"> dengan <<<SEARCH ... === ... >>> jika hanya mengubah bagian kecil secara presisi.)
-3. Pastikan website 100% responsif (layar HP 360px maupun desktop), ringan di perangkat kelas menengah (hindari blur berlapis berat atau animasi mahal), bebas error konsol, dan tanpa dependensi eksternal yang rusak.
+3. Pastikan website 100% responsif (layar HP 360px maupun desktop), ringan di perangkat kelas menengah (hindari blur berlapis berat atau animasi mahal), bebas error konsol, bebas komentar placeholder ("// sisa kode..."), dan tanpa dependensi eksternal yang rusak.
 4. Pastikan tag <title>...</title> singkat, deskriptif, dan jelas (contoh: "Nama Studio — Subjudul Fitur").
 5. Di LUAR blok <<<ZOZ_FILE>>>, ANDA WAJIB menulis penjelasan autentik Anda sendiri yang utuh dan alami dalam Bahasa Indonesia (jelaskan apa yang diubah/diperbaiki, fitur utama yang kini aktif, desain UI/visual, dan cara pengguna mengujinya — BUKAN teks pendek kosong; jangan berhenti tepat setelah <<<END_ZOZ_FILE>>>). DILARANG menulis ulang HTML/CSS/JS mentah di luar blok protokol, dan DILARANG menyertakan watermark atau atribusi "Dibuat oleh AI".`;
     }
     return `### INSTRUKSI SISTEM: ${studioTitle} — WEB APPLICATION ARCHITECT
 Pengguna berada di mode website & pratinjau live interaktif (**${activePlan === 'z21' ? 'Z21' : 'ZOZ FORGE'}**).
 - Jika pengguna hanya menyapa atau bertanya konsep biasa TANPA meminta pembuatan/contoh halaman, form, komponen UI, atau website (misal: "halo", "apa itu CSS?"), jawab secara percakapan teks biasa tanpa blok file HTML.
-- Jika pengguna meminta dibuatkan website, landing page, contoh halaman/form HTML, aplikasi web, game, kalkulator, atau UI interaktif, WAJIB ikuti ATURAN MUTLAK OUTPUT berikut:
+- Jika pengguna meminta dibuatkan website, landing page, contoh halaman/form HTML, aplikasi web, game, kalkulator, atau UI interaktif, WAJIB ikuti 3 TAHAP ARSITEK WEB berikut:
 
-ATURAN MUTLAK OUTPUT:
-1. Rancang SATU berkas aplikasi web tunggal (HTML5 + CSS3 + JavaScript ES6+) yang LENGKAP, fungsional, responsif mobile-first (sempurna di layar HP 360px maupun desktop), ringan di perangkat menengah, dan visualnya tajam berkelas profesional.
+TAHAP 1 — PERSIAPAN ALAT & RISET DATA (TOOL-FIRST ARCHITECT):
+- Evaluasi kebutuhan nyata aplikasi terlebih dahulu. Jika website berkaitan dengan data dunia nyata atau informasi terkini (misal grafik harga nikel/emas/saham/kripto, data pasar, berita, statistik, lokasi, jadwal, atau katalog spesifik), **siapkan dan panggil tool yang tersedia terlebih dahulu** (\`search_web\` untuk mengambil angka/fakta aktual terkini, \`execute_python_code\` untuk pemodelan/kalkulasi metrik, \`search_images\` untuk referensi visual nyata, atau orkestrasi sub-agen di Mode Z21 bila cakupan riset luas).
+- Tanamkan data awal hasil riset (beserta label waktu/sumbernya) ke dalam state/grafik website agar aplikasi terasa hidup dan otentik — bukan sekadar angka acak hampa. Jika website murni kreatif/kalkulator/game/UI yang tidak memerlukan data internet, langsung masuk ke Tahap 2.
+
+TAHAP 2 — PENALARAN ARSITEKTUR MENDALAM (THINK LONGER BEFORE CODING):
+- Luangkan waktu di dalam blok berpikir (\`<think>\` / reasoning) untuk merancang arsitektur secara menyeluruh sebelum menulis baris HTML pertama:
+  1. **Arsitektur Informasi & Alur Pengguna**: petakan komponen utama, kontrol interaktif (filter, switcher, simulator, tooltip hover, modal/drawer, localStorage), dan skenario pengguna nyata.
+  2. **Sistem Desain Visual Profesional**: rancang \`<style>\` dengan token warna CSS (\`:root\`), tipografi berhierarki tegas, kontras mudah dibaca, grid responsif mobile-first (sempurna di HP 360px maupun layar desktop lebar), dan animasi ringan yang ramah perangkat menengah.
+  3. **Logika JavaScript & Ketangguhan Mandiri**: pastikan seluruh grafik (SVG/Canvas custom atau CDN ber-fallback mandiri), state, kalkulasi, serta penanganan error berjalan mulus tanpa tombol mati, tanpa gambar/aset eksternal rusak, dan tanpa dependensi gagal.
+  4. **Audit Kelengkapan Kode Mandiri**: pastikan semua tag \`<style>\`, \`<script>\`, \`</body>\`, dan \`</html>\` tertutup seimbang, tanpa komentar placeholder ("// lanjutkan di sini").
+
+TAHAP 3 — ATURAN MUTLAK OUTPUT:
+1. Rancang SATU berkas aplikasi web tunggal (HTML5 + CSS3 + JavaScript ES6+) yang LENGKAP, fungsional, responsif, ringan, dan berkelas produksi.
 2. Bungkus SELURUH kode sumber website dari <!DOCTYPE html> hingga </html> di dalam SATU blok protokol persis seperti format berikut (TANPA backtick \`\`\` di luar maupun di dalamnya):
 <<<ZOZ_FILE name="index.html" mime="text/html" lang="html">
 <!DOCTYPE html>
@@ -24866,7 +24983,7 @@ ATURAN MUTLAK OUTPUT:
 </html>
 <<<END_ZOZ_FILE>>>
 3. Pastikan tag <title> singkat, jelas, dan mencerminkan aplikasi yang dibangun. Semua logika JS, CSS, SVG ikon, Canvas, atau WebAudio harus berjalan mandiri tanpa aset eksternal mati.
-4. Di LUAR blok <<<ZOZ_FILE>>>, ANDA WAJIB menuliskan penjelasan autentik buatan Anda sendiri secara utuh (arsitektur halaman, fitur interaktif utama, desain antarmuka, dan cara menggunakan aplikasi) — jangan pernah berhenti tepat di <<<END_ZOZ_FILE>>> tanpa penjelasan!
+4. Di LUAR blok <<<ZOZ_FILE>>>, ANDA WAJIB menuliskan penjelasan autentik buatan Anda sendiri secara utuh (arsitektur halaman, sumber data/fitur interaktif utama, desain antarmuka, dan cara menggunakan aplikasi) — jangan pernah berhenti tepat di <<<END_ZOZ_FILE>>> tanpa penjelasan!
 5. DILARANG menulis ulang kode HTML/CSS/JS mentah di luar blok <<<ZOZ_FILE>>>, dan DILARANG menambahkan watermark atau atribusi "Dibuat oleh AI".`;
   }
 
@@ -26542,7 +26659,6 @@ ATURAN MUTLAK OUTPUT:
 
     const docTitle = getGeminiDocTitle(file);
     const rawContent = file.rawContent || file.content || '';
-    const isFileIncomplete = Boolean(file.isIncomplete || !isWebsiteComplete(rawContent, file.rawBlock || ''));
     const isReactApp = Boolean(
       /\.(?:jsx|tsx)$/i.test(file.name || '') ||
       file.lang === 'jsx' ||
@@ -26550,6 +26666,7 @@ ATURAN MUTLAK OUTPUT:
       file.lang === 'react' ||
       isRawJsxOrReactCode(rawContent, file)
     );
+    const isFileIncomplete = Boolean(file.isIncomplete || (!isReactApp && !isWebsiteComplete(rawContent, file.rawBlock || '')));
     const stackLabel = isReactApp ? 'REACT' : 'HTML5';
     const sizeLabel = file.size || formatFileSize(rawContent.length);
 
@@ -30361,7 +30478,7 @@ ${msg.content.slice(0, 3000)}
         if (!STATE.localWorkspace.pendingChanges) STATE.localWorkspace.pendingChanges = {};
 
         // Selesaikan semua subtask AI sebelumnya yang tertinggal in_progress HANYA jika berkas benar-benar tuntas!
-        const allFilesActuallyComplete = generatedFiles.every(f => !f.isIncomplete && (/\.(?:html?|jsx|tsx)$/i.test(f.name || '') ? isWebsiteComplete(f.rawContent || f.content || '') : true));
+        const allFilesActuallyComplete = generatedFiles.every(f => !f.isIncomplete && (/\.(?:html?)$/i.test(f.name || '') ? isWebsiteComplete(f.rawContent || f.content || '') : true));
         if (allFilesActuallyComplete) {
           (STATE.taskTracker.tasks || []).forEach(t => {
             if (t.status === 'in_progress') {
@@ -34954,6 +35071,7 @@ ${blocks}
     const isZ21CommanderEligible = Boolean(opts.planMode === 'z21' && (opts.isZ21SwarmOrDevTurn || isZ21DocBuildEligible || !opts.isPureSimpleWebOnly || isZ21SwarmOrDevPrompt(text)));
     return Boolean(
       opts.canRunAutonomous ||
+      (opts.isWebRequest && !opts.isStudioIsolated) ||
       isZ21DocBuildEligible ||
       isZ21CommanderEligible ||
       opts.isCommAnalysisTurn ||
@@ -39717,6 +39835,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (Z21_COMMANDER_SWARM_TOOL_NAMES.includes(name)) return allowZ21Swarm;
       if (Z21_DOCUMENT_BUILDER_TOOL_NAMES.includes(name)) {
         if (!allowZ21DocBuilder) return false;
+        if (context && context.isWebRequest && !context.isZ21DocBuildTurn) return false;
         if (context && context.isSubagent) {
           return context.allowedToolsSet instanceof Set && context.allowedToolsSet.has(name);
         }
@@ -46471,7 +46590,9 @@ ${commToolDoc}
     maxAutonomousRounds,
     circuitBreakerTripped,
     conversationChain,
-    allowInlineToolFallback = false
+    allowInlineToolFallback = false,
+    isWebRequest = false,
+    isWebRevision = false
   }) {
     const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(normalizeToolName(c.function.name)));
     const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web'].includes(normalizeToolName(c.function.name)));
@@ -46531,15 +46652,14 @@ ${commToolDoc}
     const canSelfCorrectWeatherFail = Boolean(activeUserPrompt && weatherFetchFailed && !weatherConsentDenied && (autonomousRound < maxAutonomousRounds - 1));
     const isParallelRound = detectedAutonomousCalls.length > 1;
     const hasGroundedSearchSources = Boolean(webSources && webSources.length > 0);
-    const isMidImagePipeline = (hasExecutedImageSearch || hasExecutedImageInspect) && !hasExecutedImagePrepare;
+    const isMidImagePipeline = !isWebRequest && (hasExecutedImageSearch || hasExecutedImageInspect) && !hasExecutedImagePrepare;
     const isMidWeatherPipeline = !weatherConsentDenied && !weatherFetchFailed && (hasExecutedLocationConsent || hasExecutedCoords || hasSucceededWeatherFetch) && !hasExecutedWeatherRender;
     const isLastRound = circuitBreakerTripped
-      || (hasExecutedImagePrepare && !hasSecondaryTask)
-      || (hasExecutedWeatherRender && !hasSecondaryTask)
+      || (!isWebRequest && hasExecutedImagePrepare && !hasSecondaryTask)
+      || (!isWebRequest && hasExecutedWeatherRender && !hasSecondaryTask)
       || (hasExecutedDocBuilder && !hasSecondaryTask)
-      || weatherConsentDenied
-      || (weatherFetchFailed && !canSelfCorrectWeatherFail)
-      || (!isMidImagePipeline && !isMidWeatherPipeline && hasExecutedVideo && !hasSecondaryTask)
+      || (!isWebRequest && (weatherConsentDenied || (weatherFetchFailed && !canSelfCorrectWeatherFail)))
+      || (!isWebRequest && !isMidImagePipeline && !isMidWeatherPipeline && hasExecutedVideo && !hasSecondaryTask)
       || (autonomousRound >= maxAutonomousRounds - 1);
 
     const currentDateObj = new Date();
@@ -46588,6 +46708,13 @@ ${commToolDoc}
       evidenceDirective = `GELOMBANG SUB-AGEN Z21 TELAH DILUNCURKAN: Panggil \`wait_and_collect({"wave_id": "*"})\` sekarang (atau luncurkan gelombang tambahan jika diperlukan) untuk menunggu seluruh sub-agen selesai dan menarik output ringkasannya sebelum menyusun jawaban akhir.${inlineChainHint}`;
     } else if (hasExecutedSwarmCreate && !hasExecutedSwarmDispatch && !isLastRound) {
       evidenceDirective = `SUB-AGEN Z21 SUDAH TERDAFTAR: Panggil \`dispatch_tasks\` untuk mengirim daftar sub-tugas secara paralel ke sub-agen yang sudah Anda definisikan.${inlineChainHint}`;
+    } else if (isWebRequest) {
+      const actionVerbWeb = isWebRevision ? 'perbarui & optimalkan' : 'bangun';
+      evidenceDirective = isLastRound
+        ? `DATA & ALAT ARSITEK WEB SIAP — ${isWebRevision ? 'REVISI' : 'BANGUN'} WEBSITE LENGKAP SEKARANG:
+Gunakan seluruh angka, fakta terkini, referensi visual, dan hasil kalkulasi dari tool di atas secara akurat sebagai data baseline/dataset nyata di dalam aplikasi web.
+Rancang arsitektur UI/UX, tata letak responsif, visualisasi/grafik interaktif, dan logika JavaScript di dalam blok berpikir Anda terlebih dahulu, lalu ${actionVerbWeb} SATU berkas website utuh lengkap dari <!DOCTYPE html> hingga </html> di dalam blok \`<<<ZOZ_FILE name="index.html" mime="text/html" lang="html"> ... </html> <<<END_ZOZ_FILE>>>\`, diikuti penjelasan lengkap berbahasa Indonesia di luar blok tersebut. DILARANG hanya mencetak daftar link pencarian tanpa membuat website!`
+        : `HASIL TOOL ARSITEK WEB DITERIMA: Evaluasi kelengkapan data di atas pada blok berpikir Anda. Jika masih membutuhkan sumber tambahan, kalkulasi Python, atau referensi lain, panggil tool berikutnya sekarang.${inlineChainHint} Jika data sudah memadai, langsung rancang arsitektur secara mendalam dan ${actionVerbWeb} website lengkap di dalam \`<<<ZOZ_FILE name="index.html" mime="text/html" lang="html"> ... </html> <<<END_ZOZ_FILE>>>\` beserta penjelasan utuh di luar blok.`;
     } else if (hasExecutedSwarmCollect) {
       evidenceDirective = isLastRound
         ? 'AGREGASI Z21 COMMANDER SWARM SELESAI: Susun jawaban akhir komprehensif dengan mensintesis dan memverifikasi silang seluruh temuan sub-agen di atas.'
@@ -46667,6 +46794,10 @@ Jika bukti di atas telah mencukupi, susun jawaban akhir yang menjelaskan hasilny
     } else if (weatherFetchFailed && !isLastRound) {
       claimConstraint = `ARAHAN KOREKSI MANDIRI CUACA:
 Panggil search_web dengan kueri prakiraan cuaca spesifik (dan/atau tindak lanjut permintaan pengguna) sebagai jalur alternatif, serta jangan mengulang pemanggilan fetch_weather_data yang gagal.`;
+    } else if (isWebRequest && !circuitBreakerTripped) {
+      claimConstraint = `BATASAN ARSITEK WEB & AKURASI DATA:
+1. Gunakan angka, harga, metrik, kutipan tanggal (${currentFormattedDate}), serta temuan hasil tool di atas secara akurat di dalam dataset awal HTML/JS dan penjelasan website Anda.
+2. Kembalikan berkas website utuh yang valid dari <!DOCTYPE html> hingga </html> di dalam <<<ZOZ_FILE ...>>> ... <<<END_ZOZ_FILE>>> tanpa tag rusak atau komentar placeholder, disertai penjelasan lengkap di luar blok protokol.`;
     } else if (hasGroundedSearchSources && !circuitBreakerTripped) {
       claimConstraint = `BATASAN DOMAIN KLAIM & STANDAR PENJELASAN:
 1. Gunakan entitas, konsep, metrik, dan tanggal rilis yang selaras dengan bukti dokumen/video di atas (tanggal referensi hari ini: ${currentFormattedDate}).
@@ -47578,6 +47709,15 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
       cotController.setLiveStatus(`Menyiapkan skrip Python & kontainer dokumen .${fmt.toUpperCase()} Z21...`, 'fa-solid fa-file-export', 'is-docs', { showInLiveRail: true });
       return;
     }
+    if (webCtx?.isWebRequest) {
+      const webStatusText = webCtx.isWebRevisionIntent
+        ? 'Menganalisis kode website aktif & menyiapkan revisi arsitektur...'
+        : (webCtx.planMode === 'z21'
+          ? 'Menyiapkan alat arsitek Z21 & merancang arsitektur website...'
+          : 'Menyiapkan alat & merancang arsitektur website...');
+      cotController.setLiveStatus(webStatusText, 'fa-solid fa-compass-drafting', 'is-web', { showInLiveRail: true });
+      return;
+    }
     if (webCtx?.planMode === 'z21' && hasExplicitToolTrigger) {
       cotController.setLiveStatus('Menganalisis permintaan & menyiapkan alat Z21...', 'fa-solid fa-bolt', 'is-thought', { showInLiveRail: false });
     }
@@ -47732,7 +47872,9 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
     hasSucceededWeatherFetch = false,
     hasExecutedWeatherRender = false,
     weatherTurnCtx = null,
-    groundedWeatherDisplays = []
+    groundedWeatherDisplays = [],
+    isWebRequest = false,
+    isWebRevision = false
   } = {}) {
     if (!isLastRound && isMidWeatherPipeline) {
       const city = weatherTurnCtx?.matchedLocation?.city || weatherTurnCtx?.manualCity || '';
@@ -47740,6 +47882,14 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
     }
     if (isLastRound && (hasSucceededWeatherFetch || hasExecutedWeatherRender || (Array.isArray(groundedWeatherDisplays) && groundedWeatherDisplays.length > 0) || weatherTurnCtx?.weatherData?.success)) {
       return 'Menyusun laporan cuaca real-time...';
+    }
+    if (isWebRequest) {
+      if (isLastRound) {
+        return isWebRevision
+          ? 'Merancang arsitektur pembaruan UI/UX & membangun ulang kode website...'
+          : 'Merancang arsitektur UI/UX & membangun kode website lengkap...';
+      }
+      return 'Mengolah hasil alat & memperdalam rancangan arsitektur website...';
     }
     return '';
   }
@@ -48059,10 +48209,16 @@ $$
         !hasNegativePreview &&
         (isZ21DocumentBuildPrompt(promptText) || isDocRequest)
       );
+      if (z21ToolCtx) {
+        z21ToolCtx.isWebRequest = isWebRequest;
+        z21ToolCtx.isZ21DocBuildTurn = isZ21DocBuildTurn;
+      }
 
       // Direktif tool pencarian/rekomendasi video & utilitas otonom disuntikkan hanya bila relevan secara matematis (I(Q; Tools) > 0)
       const hasExplicitToolTrigger = computeAutonomousToolTrigger(promptText, {
         planMode: webCtx?.planMode,
+        isWebRequest,
+        isStudioIsolated,
         isZ21DocBuildTurn,
         isZ21SwarmOrDevTurn,
         isPureMathSession,
@@ -48150,7 +48306,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // Aktif HANYA jika kueri BUKAN konsep aljabar murni / Nemotron (IG = 0), BUKAN evaluasi pilihan ganda / gambar soal lokal,
       // BELUM memiliki dokumen web yang diekstrak (H(Web) = 0),
       // serta pengguna menyalakan toggle Web Search secara eksplisit ATAU kueri memiliki ketidakpastian temporal-aktual tinggi (U(Q) >= 0.72).
-      const autoEpistemicPreSearch = !isWeatherTurn && !((isZ21DocBuildTurn || isZ21SwarmOrDevTurn) && !STATE.webSearchEnabled) && !hasAttachedWebDocs && !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn || isChatHistoryTurn) && !STATE.webSearchEnabled) && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      const autoEpistemicPreSearch = !isWeatherTurn && !((isWebRequest || isZ21DocBuildTurn || isZ21SwarmOrDevTurn) && !STATE.webSearchEnabled) && !hasAttachedWebDocs && !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn || isChatHistoryTurn) && !STATE.webSearchEnabled) && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
@@ -48227,9 +48383,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (isDenseModelOllama) {
         requestBody.options.num_predict = Math.min(requestBody.options.num_predict || 8192, 8192);
       }
-      if (!requestBody.options.num_ctx) requestBody.options.num_ctx = 16384;
-      if (wantsFile || isWebRequest) {
-        if (!requestBody.options.num_predict) requestBody.options.num_predict = 16384;
+      if (!requestBody.options.num_ctx) requestBody.options.num_ctx = (isWebRequest && !isDenseModelOllama) ? 32768 : 16384;
+      if ((wantsFile || isWebRequest) && !isDenseModelOllama) {
+        if (!requestBody.options.num_predict || requestBody.options.num_predict < 24576) {
+          requestBody.options.num_predict = isWebRequest ? 24576 : 16384;
+        }
       }
       if (!requestBody.options.num_predict) {
         requestBody.options.num_predict = (isPureMathSession || isQuestionOrAnalytical || wantsFile || isWebRequest) ? 16384 : 8192;
@@ -48543,7 +48701,10 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             throw new Error(errStr);
           }
           if (parsed.done_reason) doneReason = parsed.done_reason;
-          if (parsed.done && !doneReason) doneReason = 'stop';
+          if (parsed.done) {
+            receivedOllamaDone = true;
+            if (!doneReason) doneReason = 'stop';
+          }
           if (parsed.done && (parsed.eval_count !== undefined || parsed.prompt_eval_count !== undefined)) {
             ollamaUsage = {
               completion_tokens: parsed.eval_count,
@@ -48858,7 +49019,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           maxAutonomousRounds,
           circuitBreakerTripped,
           conversationChain,
-          allowInlineToolFallback: validNativeCalls.length === 0
+          allowInlineToolFallback: validNativeCalls.length === 0,
+          isWebRequest,
+          isWebRevision: Boolean(webCtx?.isWebRevisionIntent)
         });
         }
         const {
@@ -48895,14 +49058,23 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         if (requestBody.options) {
           digestionBody.options = { ...requestBody.options };
         }
-        // Penajaman Distribusi Boltzmann (T -> 0.05) untuk menekan entropi halusinasi saat menyintesis bukti web
+        // Penajaman Distribusi Boltzmann (T -> 0.05) untuk menekan entropi halusinasi saat menyintesis bukti web,
+        // namun pertahankan temperatur arsitektural seimbang (0.38) saat membangun/merevisi website.
         if (!STATE.settings.useCustomParameters && (hasExecutedSearch || hasBrowsedWeb || (webSources && webSources.length > 0))) {
-          const optSampling = getGroundedSamplingParams(promptText);
-          digestionBody.options = {
-            ...(digestionBody.options || {}),
-            temperature: optSampling.temperature,
-            top_p: optSampling.topP
-          };
+          if (isWebRequest) {
+            digestionBody.options = {
+              ...(digestionBody.options || {}),
+              temperature: 0.38,
+              top_p: 0.92
+            };
+          } else {
+            const optSampling = getGroundedSamplingParams(promptText);
+            digestionBody.options = {
+              ...(digestionBody.options || {}),
+              temperature: optSampling.temperature,
+              top_p: optSampling.topP
+            };
+          }
         }
         const availableTools = resolveAvailableDigestionTools(selectedOllamaTools, {
           isLastRound,
@@ -48948,7 +49120,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             hasSucceededWeatherFetch,
             hasExecutedWeatherRender,
             weatherTurnCtx: weatherTurnCtxOr,
-            groundedWeatherDisplays
+            groundedWeatherDisplays,
+            isWebRequest,
+            isWebRevision: Boolean(webCtx?.isWebRevisionIntent)
           });
           cotController.beginNextReasoningRound(autonomousRound, { isLastRound, liveStatusText: ollamaNextLiveStatus });
         }
@@ -49150,7 +49324,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // ===== GERBANG KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) >= 0.75 =====
-      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isWeatherTurn && !isZ21DocBuildTurn && !isZ21SwarmOrDevTurn && !z21ToolCtx?.z21SwarmManager?.hasWaves() && groundedWeatherDisplays.length === 0 && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn || isChatHistoryTurn) && !STATE.webSearchEnabled) && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
+      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isWeatherTurn && !isWebRequest && !isZ21DocBuildTurn && !isZ21SwarmOrDevTurn && !z21ToolCtx?.z21SwarmManager?.hasWaves() && groundedWeatherDisplays.length === 0 && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn || isChatHistoryTurn) && !STATE.webSearchEnabled) && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
         try {
           bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Menjalankan penelusuran indeks matematis (U=${temporalRecencyProfile.epistemicSearchTrigger})...</span></div>`;
           smartScrollChatToBottom(true);
@@ -49207,7 +49381,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah / link-only / kartu cuaca tanpa penjelasan rinci → minta model menyusun jawaban bersih =====
-      if (autonomousRound > 0 && !isPureMathSession && !STATE.abortController?.signal?.aborted) {
+      if (autonomousRound > 0 && !isPureMathSession && !(isWebRequest && /<<<ZOZ_FILE|<\/html>/i.test(fullText || '')) && !STATE.abortController?.signal?.aborted) {
         const rescuePlan = resolveRescueEvidenceContext({
           fullText,
           groundedWeatherDisplays,
@@ -49383,7 +49557,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB (Lewati jika sesi matematika murni / Nemotron)
-      if (webSources && webSources.length > 0 && fullText && !isPureMathSession) {
+      if (webSources && webSources.length > 0 && fullText && !isPureMathSession && !hasExtractedWebFile) {
         fullText = verifyAndSanitizeWebDigestion(fullText, webSources, allAccumulatedToolResponsesText);
       }
 
@@ -49495,7 +49669,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // ===== GERBANG VISUAL GROUNDING OTONOM (OLLAMA - FINAL TURN) =====
       // Analisis pertanyaan pengguna -> terjemahkan kata kunci ke Bahasa Inggris -> ambil 3 foto paling relevan via API Unsplash (per_page: 3).
       const visualSpecOllama = resolveVisualSearchSpec(promptText, fullText);
-      if (!isEmptyResponseFallback && groundedImageDisplays.length === 0 && groundedWeatherDisplays.length === 0 && visualSpecOllama && !wantsFile && !isDocRequest && !isStudioIsolated && !isCommAnalysisTurn && !isLocalTimeTurn && !isDocKnowledgeTurn && !isChatHistoryTurn && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
+      if (!isEmptyResponseFallback && groundedImageDisplays.length === 0 && groundedWeatherDisplays.length === 0 && visualSpecOllama && !isWebRequest && !hasExtractedWebFile && !wantsFile && !isDocRequest && !isStudioIsolated && !isCommAnalysisTurn && !isLocalTimeTurn && !isDocKnowledgeTurn && !isChatHistoryTurn && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
           const existingGeneratedHtml = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
           bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari 3 foto relevan untuk "${escapeHtml(visualSpecOllama.englishQuery)}"...</span></div>`;
@@ -49726,6 +49900,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         initialText: rawFullTextBeforeStripping,
         finishReason: isOllamaStreamIncomplete ? 'incomplete' : doneReason,
         isFileIncomplete: isFileStillIncomplete,
+        hasCompleteWebFile: Boolean(hasExtractedWebFile && !isFileStillIncomplete),
         groundedImageDisplays,
         groundedWeatherDisplays,
         isWebTask,
@@ -50425,10 +50600,16 @@ $$
         !hasNegativePreview &&
         (isZ21DocumentBuildPrompt(promptText) || isDocRequest)
       );
+      if (z21ToolCtx) {
+        z21ToolCtx.isWebRequest = isWebRequest;
+        z21ToolCtx.isZ21DocBuildTurn = isZ21DocBuildTurn;
+      }
 
       // Direktif tool pencarian/rekomendasi video & utilitas otonom disuntikkan hanya bila relevan secara matematis (I(Q; Tools) > 0)
       const hasExplicitToolTrigger = computeAutonomousToolTrigger(promptText, {
         planMode: webCtx?.planMode,
+        isWebRequest,
+        isStudioIsolated,
         isZ21DocBuildTurn,
         isZ21SwarmOrDevTurn,
         isPureMathSession,
@@ -50528,7 +50709,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // Aktif HANYA jika kueri BUKAN konsep aljabar murni / Nemotron (IG = 0), BUKAN evaluasi pilihan ganda / gambar soal lokal,
       // BELUM memiliki dokumen web yang diekstrak (H(Web) = 0),
       // serta pengguna menyalakan toggle Web Search secara eksplisit ATAU kueri memiliki ketidakpastian temporal-aktual tinggi (U(Q) >= 0.72).
-      const autoEpistemicPreSearch = !isWeatherTurn && !((isZ21DocBuildTurn || isZ21SwarmOrDevTurn) && !STATE.webSearchEnabled) && !hasAttachedWebDocs && !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn || isChatHistoryTurn) && !STATE.webSearchEnabled) && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
+      const autoEpistemicPreSearch = !isWeatherTurn && !((isWebRequest || isZ21DocBuildTurn || isZ21SwarmOrDevTurn) && !STATE.webSearchEnabled) && !hasAttachedWebDocs && !isPureMathSession && !isQuizRevision && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn || isChatHistoryTurn) && !STATE.webSearchEnabled) && (!hasAttachedImages || STATE.webSearchEnabled) && (STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (autoEpistemicPreSearch) {
         try {
           const searchRes = await getWebSearchContext(promptText, session, bubbleText, true);
@@ -50644,8 +50825,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           currentModel.includes('671b') ||
           currentModel.includes('675b')
         ));
-        const numPredictReqOr = (runOptions.maxTokens && Number.isFinite(runOptions.maxTokens)) ? runOptions.maxTokens : 16384;
-        const initialMaxTokensOr = isDenseModelOpenRouter ? Math.min(numPredictReqOr, 8192) : Math.min(numPredictReqOr, 16384);
+        const defaultOrTokens = (isWebRequest && !isDenseModelOpenRouter) ? 24576 : 16384;
+        const numPredictReqOr = (runOptions.maxTokens && Number.isFinite(runOptions.maxTokens)) ? runOptions.maxTokens : defaultOrTokens;
+        const initialMaxTokensOr = isDenseModelOpenRouter ? Math.min(numPredictReqOr, 8192) : Math.min(numPredictReqOr, 24576);
 
         const basePayload = {
           model: currentModel,
@@ -50689,7 +50871,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         // Pasang tools jika model mendukung tools, relevan secara matematis (I(Q; Tools) > 0), BUKAN sesi matematika murni, dan BUKAN model Nemotron
         const canUseTools = doesModelSupportTools(currentModel) && !isPureMathSession && !isNemotronCur && hasExplicitToolTrigger;
         if (!isNemotronCur && !isStrictReasoning && !basePayload.reasoning && !isPureMathSession && doesModelSupportReasoning(currentModel, 'openrouter')) {
-          basePayload.reasoning = { effort: 'medium' };
+          basePayload.reasoning = { effort: isWebRequest ? 'high' : 'medium' };
           basePayload.include_reasoning = true;
         }
         if (canUseTools) {
@@ -51513,7 +51695,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           maxAutonomousRounds,
           circuitBreakerTripped,
           conversationChain,
-          allowInlineToolFallback: Boolean((isDigestionFree && validNativeCalls.length === 0) || !canDigestionUseTools)
+          allowInlineToolFallback: Boolean((isDigestionFree && validNativeCalls.length === 0) || !canDigestionUseTools),
+          isWebRequest,
+          isWebRevision: Boolean(webCtx?.isWebRevisionIntent)
         });
         }
         const {
@@ -51590,9 +51774,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             digestionRequestBody.top_p = parseFloat(STATE.settings.topP);
           }
         } else if (hasExecutedSearch || hasBrowsedWeb || (webSources && webSources.length > 0)) {
-          const optSampling = getGroundedSamplingParams(promptText);
-          if (!isDigestionReasoning) digestionRequestBody.temperature = optSampling.temperature;
-          if (!isDigestionLiquid && !isDigestionReasoning) digestionRequestBody.top_p = optSampling.topP;
+          if (isWebRequest) {
+            if (!isDigestionReasoning) digestionRequestBody.temperature = 0.38;
+            if (!isDigestionLiquid && !isDigestionReasoning) digestionRequestBody.top_p = 0.92;
+          } else {
+            const optSampling = getGroundedSamplingParams(promptText);
+            if (!isDigestionReasoning) digestionRequestBody.temperature = optSampling.temperature;
+            if (!isDigestionLiquid && !isDigestionReasoning) digestionRequestBody.top_p = optSampling.topP;
+          }
         }
 
         const isDirectRoute = activeRouteType === 'direct' || (!activeEndpoint || activeEndpoint.includes('openrouter.ai'));
@@ -51628,7 +51817,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
             hasSucceededWeatherFetch,
             hasExecutedWeatherRender,
             weatherTurnCtx: weatherTurnCtxOr,
-            groundedWeatherDisplays
+            groundedWeatherDisplays,
+            isWebRequest,
+            isWebRevision: Boolean(webCtx?.isWebRevisionIntent)
           });
           cotController.beginNextReasoningRound(autonomousRound, { isLastRound, liveStatusText: orNextLiveStatus });
         }
@@ -51881,7 +52072,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // ===== GERBANG KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) >= 0.75 (OPENROUTER) =====
-      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isWeatherTurn && !isZ21DocBuildTurn && !isZ21SwarmOrDevTurn && !z21ToolCtx?.z21SwarmManager?.hasWaves() && groundedWeatherDisplays.length === 0 && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn || isChatHistoryTurn) && !STATE.webSearchEnabled) && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
+      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isWeatherTurn && !isWebRequest && !isZ21DocBuildTurn && !isZ21SwarmOrDevTurn && !z21ToolCtx?.z21SwarmManager?.hasWaves() && groundedWeatherDisplays.length === 0 && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn || isChatHistoryTurn) && !STATE.webSearchEnabled) && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
         try {
           bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Menjalankan penelusuran indeks matematis (U=${temporalRecencyProfile.epistemicSearchTrigger})...</span></div>`;
           smartScrollChatToBottom(true);
@@ -51945,7 +52136,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // ===== RESCUE ROUND: jawaban digesti kosong / monolog / fallback mentah / link-only / kartu cuaca tanpa penjelasan rinci → minta model menyusun jawaban bersih =====
-      if (autonomousRound > 0 && !isPureMathSession && !STATE.abortController?.signal?.aborted) {
+      if (autonomousRound > 0 && !isPureMathSession && !(isWebRequest && /<<<ZOZ_FILE|<\/html>/i.test(fullText || '')) && !STATE.abortController?.signal?.aborted) {
         const rescuePlan = resolveRescueEvidenceContext({
           fullText,
           groundedWeatherDisplays,
@@ -52129,7 +52320,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // ANTI-HALUSINASI PADA RESPON PENELUSURAN WEB (Lewati jika sesi matematika murni / Nemotron)
-      if (webSources && webSources.length > 0 && fullText && !isPureMathSession) {
+      if (webSources && webSources.length > 0 && fullText && !isPureMathSession && !hasExtractedWebFile) {
         fullText = verifyAndSanitizeWebDigestion(fullText, webSources, allAccumulatedToolResponsesText);
       }
 
@@ -52242,7 +52433,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // ===== GERBANG VISUAL GROUNDING OTONOM (OPENROUTER - FINAL TURN) =====
       // Analisis pertanyaan pengguna -> terjemahkan kata kunci ke Bahasa Inggris -> ambil 3 foto paling relevan via API Unsplash (per_page: 3).
       const visualSpecOpenRouter = resolveVisualSearchSpec(promptText, fullText);
-      if (!isEmptyResponseFallback && groundedImageDisplays.length === 0 && groundedWeatherDisplays.length === 0 && visualSpecOpenRouter && !wantsFile && !isDocRequest && !isStudioIsolated && !isCommAnalysisTurn && !isLocalTimeTurn && !isDocKnowledgeTurn && !isChatHistoryTurn && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
+      if (!isEmptyResponseFallback && groundedImageDisplays.length === 0 && groundedWeatherDisplays.length === 0 && visualSpecOpenRouter && !isWebRequest && !hasExtractedWebFile && !wantsFile && !isDocRequest && !isStudioIsolated && !isCommAnalysisTurn && !isLocalTimeTurn && !isDocKnowledgeTurn && !isChatHistoryTurn && (!rawImgs || rawImgs.length === 0) && !STATE.abortController?.signal?.aborted) {
         try {
           const existingGeneratedHtml = (fullText.trim() ? '' : (preambleHtml ? preambleHtml : '')) + renderMarkdown(fullText).trim();
           bubbleText.innerHTML = existingGeneratedHtml + `<div class="autonomous-search-status" style="border-color: rgba(56, 189, 248, 0.45); background: rgba(12, 74, 110, 0.28); color: #7dd3fc; margin-top: 10px;"><span class="typing-cursor"></span> <i class="fa-solid fa-images fa-spin"></i> <span>Mencari 3 foto relevan untuk "${escapeHtml(visualSpecOpenRouter.englishQuery)}"...</span></div>`;
@@ -52551,6 +52742,7 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         initialText: rawFullTextBeforeStripping,
         finishReason: isStreamInterrupted ? 'incomplete' : finishReason,
         isFileIncomplete: isFileStillIncomplete,
+        hasCompleteWebFile: Boolean(hasExtractedWebFile && !isFileStillIncomplete),
         groundedImageDisplays,
         groundedWeatherDisplays,
         isWebTask,
@@ -68248,7 +68440,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://extraction-katrina-pumps-fellowship.trycloudflare.com',
+    activeTunnelUrl: 'https://precious-selecting-boulder-divx.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
