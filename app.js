@@ -84,7 +84,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://environments-municipal-experiment-combat.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://fred-providence-julie-distribution.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -22203,10 +22203,17 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     let activeRow = null;
     let activeBtn = null;
     let activeAudio = null;
+    let sharedAudioEl = null;
+    let isPrimingAudio = false;
     let activeObjectUrl = null;
     let activeAbortController = null;
     let activeSpeechUtterance = null;
+    let speechCancelTimer = null;
+    let speechKeepAliveTimer = null;
     let activeState = 'idle'; // 'idle' | 'loading' | 'playing'
+    let preferredTtsEndpoint = null;
+
+    const SILENT_WAV_DATA_URI = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
 
     function getCurrentVoice() {
       const v = STATE?.settings?.ttsVoice || 'id-ID-GadisNeural';
@@ -22216,6 +22223,63 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     function getCurrentRate() {
       const r = String(STATE?.settings?.ttsRate || '+0%').trim();
       return /^[+-](?:[0-4]?\d|50)%$/.test(r) ? r : '+0%';
+    }
+
+    function getTtsEndpointCandidates() {
+      const host = (typeof location !== 'undefined' && location.hostname) ? String(location.hostname).toLowerCase() : '';
+      const isLocalOrigin = host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.includes('trycloudflare.com');
+      if (isLocalOrigin || IS_VERCEL) {
+        return ['/api/tts'];
+      }
+      const list = [];
+      const pushUnique = (u) => {
+        if (u && !list.includes(u)) list.push(u);
+      };
+      if (preferredTtsEndpoint) pushUnique(preferredTtsEndpoint);
+      // 1. Same-origin Cloudflare Pages _worker.js Edge TTS (0ms hop saat aktif)
+      pushUnique('/api/tts');
+      // 2. Cloud Vercel Serverless 24/7 Gateway (berjalan bebas-laptop via pure-JS Edge TTS)
+      if (typeof VERCEL_BACKEND_GATEWAY === 'string' && VERCEL_BACKEND_GATEWAY) {
+        pushUnique(`${VERCEL_BACKEND_GATEWAY.replace(/\/+$/, '')}/api/tts`);
+      }
+      // 3. Fallback sekunder ke tunnel laptop bila tersedia
+      if (typeof getActiveTunnelUrl === 'function') {
+        const tb = getActiveTunnelUrl();
+        if (tb) pushUnique(`${String(tb).replace(/\/+$/, '')}/api/tts`);
+      }
+      return list;
+    }
+
+    function primeAudioForUserGesture() {
+      if (typeof Audio === 'undefined') return;
+      try {
+        if (!sharedAudioEl) {
+          sharedAudioEl = new Audio();
+          sharedAudioEl.preload = 'auto';
+          try { sharedAudioEl.playsInline = true; } catch (_) {}
+        }
+        isPrimingAudio = true;
+        sharedAudioEl.muted = true;
+        sharedAudioEl.src = SILENT_WAV_DATA_URI;
+        const p = sharedAudioEl.play();
+        if (p && typeof p.then === 'function') {
+          p.then(() => {
+            if (isPrimingAudio && sharedAudioEl) {
+              try { sharedAudioEl.pause(); } catch (_) {}
+              isPrimingAudio = false;
+            }
+            if (sharedAudioEl) sharedAudioEl.muted = false;
+          }).catch(() => {
+            if (sharedAudioEl) sharedAudioEl.muted = false;
+            isPrimingAudio = false;
+          });
+        } else {
+          sharedAudioEl.muted = false;
+          isPrimingAudio = false;
+        }
+      } catch (_) {
+        isPrimingAudio = false;
+      }
     }
 
     function syncQuickVoicePill(row, state, voiceId) {
@@ -22255,14 +22319,32 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       if (row) syncQuickVoicePill(row, state, voiceId);
     }
 
+    function clearSpeechTimers() {
+      if (speechCancelTimer) {
+        clearTimeout(speechCancelTimer);
+        speechCancelTimer = null;
+      }
+      if (speechKeepAliveTimer) {
+        clearInterval(speechKeepAliveTimer);
+        speechKeepAliveTimer = null;
+      }
+    }
+
     function revokeAudioResources() {
+      isPrimingAudio = false;
+      clearSpeechTimers();
+      if (sharedAudioEl) {
+        sharedAudioEl.muted = false;
+      }
       if (activeAudio) {
         try {
           activeAudio.onended = null;
           activeAudio.onerror = null;
           activeAudio.pause();
-          activeAudio.removeAttribute?.('src');
-          activeAudio.load?.();
+          if (activeAudio !== sharedAudioEl) {
+            activeAudio.removeAttribute?.('src');
+            activeAudio.load?.();
+          }
         } catch (_) {}
         activeAudio = null;
       }
@@ -22308,36 +22390,65 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     }
 
     async function fetchTtsChunkBlob(chunkText, voice, rate, signal) {
-      const ttsUrl = (typeof getUniversalApiUrl === 'function') ? getUniversalApiUrl('/api/tts') : '/api/tts';
-      const resp = await fetch(ttsUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: chunkText, voice, rate }),
-        signal
-      });
-      if (!resp.ok) {
-        let errMsg = `HTTP ${resp.status}`;
+      const candidates = getTtsEndpointCandidates();
+      let lastErr = null;
+      for (const ttsUrl of candidates) {
+        if (signal && signal.aborted) {
+          throw Object.assign(new Error('TTS_ABORTED'), { name: 'AbortError' });
+        }
         try {
-          const j = await resp.json();
-          if (j?.error) errMsg = j.error;
-        } catch (_) {}
-        throw new Error(errMsg);
+          const resp = await fetch(ttsUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: chunkText, voice, rate }),
+            signal
+          });
+          if (!resp.ok) {
+            let errMsg = `HTTP ${resp.status}`;
+            try {
+              const j = await resp.json();
+              if (j?.error) errMsg = j.error;
+            } catch (_) {}
+            if (resp.status === 400) {
+              throw Object.assign(new Error(errMsg), { noRetry: true });
+            }
+            lastErr = new Error(`${ttsUrl}: ${errMsg}`);
+            continue;
+          }
+          const respCt = String(resp.headers?.get?.('content-type') || '').toLowerCase();
+          if (respCt && !respCt.includes('audio/') && !respCt.includes('application/octet-stream')) {
+            lastErr = new Error(`${ttsUrl}: invalid content-type (${respCt})`);
+            continue;
+          }
+          const blob = await resp.blob();
+          if (!blob || blob.size < 128) {
+            lastErr = new Error(`${ttsUrl}: audio stream kosong/terpotong (${blob?.size || 0}B)`);
+            continue;
+          }
+          preferredTtsEndpoint = ttsUrl;
+          return blob;
+        } catch (err) {
+          if (err?.name === 'AbortError' || signal?.aborted || err?.noRetry) {
+            throw err;
+          }
+          lastErr = err;
+        }
       }
-      const blob = await resp.blob();
-      if (!blob || blob.size === 0) {
-        throw new Error('Audio stream kosong');
-      }
-      return blob;
+      throw lastErr || new Error('Semua rute TTS tidak tersedia.');
     }
 
     function playAudioBlob(blob, token) {
       return new Promise((resolve, reject) => {
         if (token !== activeToken) return resolve(false);
         revokeAudioResources();
+        if (token !== activeToken) return resolve(false);
         const url = URL.createObjectURL(blob);
         activeObjectUrl = url;
-        const audio = new Audio(url);
+        const audio = sharedAudioEl || (typeof Audio !== 'undefined' ? new Audio() : null);
+        if (!audio) return reject(new Error('Audio API tidak tersedia'));
         activeAudio = audio;
+        audio.muted = false;
+        audio.volume = 1.0;
         audio.preload = 'auto';
         audio.onended = () => {
           if (activeObjectUrl === url) {
@@ -22353,6 +22464,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           }
           reject(new Error('Gagal memutar audio MPEG di browser'));
         };
+        audio.src = url;
         const playPromise = audio.play();
         if (playPromise && typeof playPromise.catch === 'function') {
           playPromise.catch(reject);
@@ -22365,35 +22477,74 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         if (typeof window === 'undefined' || !window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') {
           return reject(new Error('Browser tidak mendukung Web Speech API'));
         }
+        clearSpeechTimers();
         try { window.speechSynthesis.cancel(); } catch (_) {}
-        const utter = new SpeechSynthesisUtterance(cleanText);
         const meta = ZOZ_TTS_VOICE_META[voiceId] || ZOZ_TTS_VOICE_META['id-ID-GadisNeural'];
-        utter.lang = meta.lang || 'id-ID';
         const pctMatch = String(rateStr || '+0%').match(/^([+-]?\d+)%$/);
         const rateNum = pctMatch ? Math.max(0.7, Math.min(1.5, 1 + (parseInt(pctMatch[1], 10) / 100))) : 1.0;
-        utter.rate = rateNum;
-        try {
-          const voices = window.speechSynthesis.getVoices() || [];
-          const preferred = voices.find(v => (v.lang || '').toLowerCase().startsWith(utter.lang.toLowerCase().slice(0, 2)));
-          if (preferred) utter.voice = preferred;
-        } catch (_) {}
-        activeSpeechUtterance = utter;
-        utter.onstart = () => {
-          if (token === activeToken) {
-            activeState = 'playing';
-            setButtonState(activeBtn, 'playing', activeRow, voiceId);
+        const speechChunks = splitTextIntoTtsChunks(cleanText, 260);
+        if (speechChunks.length === 0) return resolve(true);
+
+        const resolveVoice = () => {
+          try {
+            const voices = window.speechSynthesis.getVoices() || [];
+            const langPrefix = String(meta.lang || 'id-ID').toLowerCase().slice(0, 2);
+            return voices.find(v => (v.lang || '').toLowerCase().startsWith(meta.lang.toLowerCase())) ||
+                   voices.find(v => (v.lang || '').toLowerCase().startsWith(langPrefix)) || null;
+          } catch (_) {
+            return null;
           }
         };
-        utter.onend = () => {
-          activeSpeechUtterance = null;
-          resolve(true);
+
+        let idx = 0;
+        const speakNextChunk = () => {
+          if (token !== activeToken) {
+            clearSpeechTimers();
+            return resolve(false);
+          }
+          if (idx >= speechChunks.length) {
+            clearSpeechTimers();
+            activeSpeechUtterance = null;
+            return resolve(true);
+          }
+          const utter = new SpeechSynthesisUtterance(speechChunks[idx++]);
+          utter.lang = meta.lang || 'id-ID';
+          utter.rate = rateNum;
+          const preferred = resolveVoice();
+          if (preferred) utter.voice = preferred;
+          activeSpeechUtterance = utter;
+          utter.onstart = () => {
+            if (token === activeToken && activeState !== 'playing') {
+              activeState = 'playing';
+              setButtonState(activeBtn, 'playing', activeRow, voiceId);
+            }
+          };
+          utter.onend = () => {
+            speakNextChunk();
+          };
+          utter.onerror = (ev) => {
+            clearSpeechTimers();
+            activeSpeechUtterance = null;
+            if (ev && (ev.error === 'canceled' || ev.error === 'interrupted')) return resolve(false);
+            reject(new Error(ev?.error || 'SpeechSynthesis error'));
+          };
+          window.speechSynthesis.speak(utter);
         };
-        utter.onerror = (ev) => {
-          activeSpeechUtterance = null;
-          if (ev && (ev.error === 'canceled' || ev.error === 'interrupted')) return resolve(false);
-          reject(new Error(ev?.error || 'SpeechSynthesis error'));
-        };
-        window.speechSynthesis.speak(utter);
+
+        speechKeepAliveTimer = setInterval(() => {
+          if (token !== activeToken) return clearSpeechTimers();
+          try {
+            if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+              window.speechSynthesis.pause();
+              window.speechSynthesis.resume();
+            }
+          } catch (_) {}
+        }, 10000);
+
+        speechCancelTimer = setTimeout(() => {
+          speechCancelTimer = null;
+          speakNextChunk();
+        }, 45);
       });
     }
 
@@ -22407,6 +22558,8 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       }
 
       stop();
+      // Buka kunci autoplay audio browser secara sinkron di dalam event klik pengguna sebelum fetch async
+      primeAudioForUserGesture();
       const token = ++activeToken;
       activeRow = row;
       activeBtn = btn;
@@ -22518,7 +22671,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       toggleQuickVoiceForRow,
       testVoice,
       stop,
-      getState: () => ({ state: activeState, row: activeRow, voice: getCurrentVoice(), rate: getCurrentRate() })
+      getState: () => ({ state: activeState, row: activeRow, voice: getCurrentVoice(), rate: getCurrentRate(), preferredEndpoint: preferredTtsEndpoint })
     };
   })();
 
@@ -22857,6 +23010,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     await DeviceStorage.deleteSession(sessionId);
 
     if (STATE.currentSessionId === sessionId) {
+      if (typeof ZozReadAloudController !== 'undefined') ZozReadAloudController.stop();
       STATE.currentSessionId = null;
       STATE.pendingPlanMode = 'zoz';
       if (STATE.isIncognito) {
@@ -68953,7 +69107,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://environments-municipal-experiment-combat.trycloudflare.com',
+    activeTunnelUrl: 'https://fred-providence-julie-distribution.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,

@@ -939,6 +939,557 @@ function envKeyAllowed(request, env) {
   return false;
 }
 
+// ===== PURE-JS MICROSOFT EDGE NEURAL TTS ENGINE (Cloudflare Workers Web Standards) =====
+const EDGE_TTS_TRUSTED_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
+const EDGE_TTS_CHROMIUM_VER = '143.0.3650.75';
+const EDGE_TTS_CHROMIUM_MAJOR = '143';
+const EDGE_TTS_SEC_MS_GEC_VERSION = `2-${EDGE_TTS_CHROMIUM_VER}`;
+const EDGE_TTS_HOST = 'speech.platform.bing.com';
+const EDGE_TTS_PATH_BASE = '/consumer/speech/synthesize/readaloud/edge/v1';
+const EDGE_TTS_ORIGIN = 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold';
+const EDGE_TTS_USER_AGENT =
+  `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ` +
+  `(KHTML, like Gecko) Chrome/${EDGE_TTS_CHROMIUM_MAJOR}.0.0.0 Safari/537.36 ` +
+  `Edg/${EDGE_TTS_CHROMIUM_MAJOR}.0.0.0`;
+
+const EDGE_TTS_DEFAULT_VOICE = 'id-ID-GadisNeural';
+const EDGE_TTS_VOICES_LIST = [
+  { id: 'id-ID-GadisNeural', label: 'Gadis (Indonesia — Perempuan Natural)', shortLabel: 'Gadis', lang: 'id-ID', gender: 'Female' },
+  { id: 'id-ID-ArdiNeural', label: 'Ardi (Indonesia — Laki-laki Natural)', shortLabel: 'Ardi', lang: 'id-ID', gender: 'Male' },
+  { id: 'en-US-AriaNeural', label: 'Aria (English — Female Natural)', shortLabel: 'Aria', lang: 'en-US', gender: 'Female' },
+  { id: 'en-US-GuyNeural', label: 'Guy (English — Male Natural)', shortLabel: 'Guy', lang: 'en-US', gender: 'Male' }
+];
+const EDGE_TTS_VOICE_SET = new Set(EDGE_TTS_VOICES_LIST.map((v) => v.id));
+
+const _EDGE_SHA256_INITIAL = [
+  0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
+  0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19
+];
+const _EDGE_SHA256_STATE = [
+  0xFD9FBEA2, 0x91243CE7, 0xBE499094, 0xCD2E1E0A,
+  0x6C006F49, 0x04BD35AB, 0xFEB0A7E4, 0x03EFFBD2
+];
+const _EDGE_SHA256_SCHEDULE = [
+  0xEB24BF9E, 0x1558691F, 0xA0C09EE2, 0x0CFA32BA,
+  0xA622EE8C, 0xD1DD9491, 0xC0DD25A0, 0xF9E70AB6,
+  0xF0C31573, 0x7058CE4E, 0x7188E606, 0x00E5AB33,
+  0xD258B060, 0x72766564
+];
+const _EDGE_SHA256_ROUND_CONSTANTS = [
+  0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5, 0x3956C25B, 0x59F111F1, 0x923F82A4, 0xAB1C5ED5,
+  0xD807AA98, 0x12835B01, 0x243185BE, 0x550C7DC3, 0x72BE5D74, 0x80DEB1FE, 0x9BDC06A7, 0xC19BF174,
+  0xE49B69C1, 0xEFBE4786, 0x0FC19DC6, 0x240CA1CC, 0x2DE92C6F, 0x4A7484AA, 0x5CB0A9DC, 0x76F988DA,
+  0x983E5152, 0xA831C66D, 0xB00327C8, 0xBF597FC7, 0xC6E00BF3, 0xD5A79147, 0x06CA6351, 0x14292967,
+  0x27B70A85, 0x2E1B2138, 0x4D2C6DFC, 0x53380D13, 0x650A7354, 0x766A0ABB, 0x81C2C92E, 0x92722C85,
+  0xA2BFE8A1, 0xA81A664B, 0xC24B8B70, 0xC76C51A3, 0xD192E819, 0xD6990624, 0xF40E3585, 0x106AA070,
+  0x19A4C116, 0x1E376C08, 0x2748774C, 0x34B0BCB5, 0x391C0CB3, 0x4ED8AA4A, 0x5B9CCA4F, 0x682E6FF3,
+  0x748F82EE, 0x78A5636F, 0x84C87814, 0x8CC70208, 0x90BEFFFA, 0xA4506CEB, 0xBEF9A3F7, 0xC67178F2
+];
+const _EDGE_SHA256_ADJUSTMENT = 0xC9DC06A7;
+const _EDGE_SHA256_BLOCK_CONSTANTS = [
+  ..._EDGE_SHA256_ROUND_CONSTANTS.slice(0, 14),
+  _EDGE_SHA256_ADJUSTMENT,
+  ..._EDGE_SHA256_ROUND_CONSTANTS.slice(15)
+];
+const _EDGE_SHA256_SIGMA0_ADJUSTMENT = 0x059C0B80;
+const _EDGE_SHA256_SIGMA1_ADJUSTMENT = 0x000B92C0;
+const _EDGE_CS64_COEFFICIENTS = [
+  [0xE82E91B1, 0xB32700D0], [0x44DE24C6, 0x88DFF51D], [0x3BEB65BC, 0x29514038],
+  [0xC89C5933, 0xB328CBDF], [0x8D1EC211, 0xD405B4D5], [0x314EF5D5, 0x26E55F3C],
+  [0xE92491B1, 0x607801C6], [0xF0A5B9D5, 0x82B2C1FB], [0x06064CF3, 0xFA51A3DA],
+  [0xDA79FA60, 0x207CC464], [0xBED20560, 0x3C3C74F3], [0x89F9C9F8, 0xD2D14B61],
+  [0x35FA38C6, 0xBB04A2C1], [0xCB49E3C6, 0xC5626167]
+];
+const _EDGE_CS64_FACTOR = 0x82893933;
+const _EDGE_CS64_ADJUSTMENT0 = 0xF2F90B1A;
+const _EDGE_CS64_ADJUSTMENT1 = 0x0B1A0000;
+
+let _edgeClockSkewSeconds = 0;
+
+function _edgeRotr32(v, n) {
+  return ((v >>> n) | (v << (32 - n))) >>> 0;
+}
+function _edgeRol16(v) {
+  return (((v & 0xFFFF) << 16) | ((v >>> 16) & 0xFFFF)) >>> 0;
+}
+function _edgeSigma0(v) {
+  return (_edgeRotr32(v, 7) ^ _edgeRotr32(v, 18) ^ (v >>> 3)) >>> 0;
+}
+function _edgeSigma1(v) {
+  return (_edgeRotr32(v, 17) ^ _edgeRotr32(v, 19) ^ (v >>> 10)) >>> 0;
+}
+function _edgeExpandSha256(words, firstWord = 16) {
+  for (let i = firstWord; i < 64; i++) {
+    words[i] = (_edgeSigma1(words[i - 2]) + words[i - 7] + _edgeSigma0(words[i - 15]) + words[i - 16]) >>> 0;
+  }
+}
+function _edgeSha256Rounds(state, words, firstRound = 0) {
+  let [a, b, c, d, e, f, g, h] = state;
+  const K = firstRound === 14 ? _EDGE_SHA256_BLOCK_CONSTANTS : _EDGE_SHA256_ROUND_CONSTANTS;
+  for (let i = firstRound; i < 64; i++) {
+    const s1 = (_edgeRotr32(e, 6) ^ _edgeRotr32(e, 11) ^ _edgeRotr32(e, 25)) >>> 0;
+    const ch = (g ^ (e & (f ^ g))) >>> 0;
+    const t1 = (h + s1 + ch + K[i] + words[i]) >>> 0;
+    const s0 = (_edgeRotr32(a, 2) ^ _edgeRotr32(a, 13) ^ _edgeRotr32(a, 22)) >>> 0;
+    const maj = ((a & b) | (c & (a | b))) >>> 0;
+    const t2 = (s0 + maj) >>> 0;
+    h = g; g = f; f = e; e = (d + t1) >>> 0;
+    d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+  }
+  return [a, b, c, d, e, f, g, h];
+}
+function _edgeSha256Digest(bytes) {
+  const words = new Array(64).fill(0);
+  words[14] = ((bytes[0] << 16) | (bytes[1] << 8) | bytes[2]) >>> 0;
+  words[15] = ((bytes[3] << 24) | (bytes[4] << 16) | (bytes[5] << 8) | bytes[6]) >>> 0;
+  for (let i = 16; i < 30; i++) {
+    let v = _EDGE_SHA256_SCHEDULE[i - 16];
+    if (i - 2 >= 14) {
+      const s1 = _edgeSigma1(words[i - 2]);
+      v = (v + (i === 16 ? ((s1 ^ _EDGE_SHA256_SIGMA1_ADJUSTMENT) >>> 0) : s1)) >>> 0;
+    }
+    if (i - 7 >= 14) v = (v + words[i - 7]) >>> 0;
+    if (i - 15 >= 14) {
+      const s0 = _edgeSigma0(words[i - 15]);
+      v = (v + (i === 29 ? ((s0 ^ _EDGE_SHA256_SIGMA0_ADJUSTMENT) >>> 0) : s0)) >>> 0;
+    }
+    words[i] = v >>> 0;
+  }
+  words[30] = (_edgeSigma1(words[28]) + words[23] + _edgeSigma0(words[15]) + words[14] + ((_EDGE_SHA256_ADJUSTMENT - _EDGE_SHA256_ROUND_CONSTANTS[14]) >>> 0)) >>> 0;
+  _edgeExpandSha256(words, 31);
+  const wInit = _edgeSha256Rounds(_EDGE_SHA256_STATE, words, 14);
+  let state = _EDGE_SHA256_INITIAL.map((x, idx) => (x + wInit[idx]) >>> 0);
+
+  const length = 57 + bytes.length;
+  const padZeroCount = (((55 - length) % 64) + 64) % 64;
+  const tailLen = bytes.length - 7;
+  const padded = new Uint8Array(tailLen + 1 + padZeroCount + 8);
+  padded.set(bytes.subarray(7), 0);
+  padded[tailLen] = 0x80;
+  const bitLen = BigInt(length) * 8n;
+  new DataView(padded.buffer).setBigUint64(padded.length - 8, bitLen, false);
+
+  const dv = new DataView(padded.buffer);
+  const blkWords = new Array(64);
+  for (let off = 0; off < padded.length; off += 64) {
+    for (let j = 0; j < 16; j++) blkWords[j] = dv.getUint32(off + j * 4, false);
+    _edgeExpandSha256(blkWords, 16);
+    const w = _edgeSha256Rounds(state, blkWords, 0);
+    state = state.map((x, idx) => (x + w[idx]) >>> 0);
+  }
+  const out = new Uint8Array(32);
+  const outDv = new DataView(out.buffer);
+  for (let i = 0; i < 8; i++) outDv.setUint32(i * 4, state[i] >>> 0, false);
+  return out;
+}
+function _edgeCs64Digest(bytes, digest) {
+  const digDv = new DataView(digest.buffer);
+  const keyA = (digDv.getUint32(0, true) | 1) >>> 0;
+  const keyB = (digDv.getUint32(4, true) | 1) >>> 0;
+  const factors = [Math.imul(keyA, _EDGE_CS64_FACTOR) >>> 0, Math.imul(keyB, _EDGE_CS64_FACTOR) >>> 0];
+  const terms = [];
+  const offsets = [];
+  for (let i = 0; i < _EDGE_CS64_COEFFICIENTS.length; i++) {
+    terms.push(Math.imul(_EDGE_CS64_COEFFICIENTS[i][0], factors[i % 2]) >>> 0);
+    offsets.push(_EDGE_CS64_COEFFICIENTS[i][1] >>> 0);
+  }
+  const prefLen = 1 + bytes.length;
+  const padLen = (4 - (prefLen % 4)) % 4;
+  const padded = new Uint8Array(prefLen + padLen);
+  padded.set(bytes, 1);
+  const pDv = new DataView(padded.buffer);
+  const leWords = [];
+  for (let i = 0; i < padded.length; i += 4) leWords.push(pDv.getUint32(i, true));
+  if (leWords.length % 2 === 1) leWords.push(0);
+  for (let i = 0; i < leWords.length; i++) {
+    const w = leWords[i];
+    let term = Math.imul(w, i % 2 === 0 ? keyA : keyB) >>> 0;
+    let off = Math.imul(_edgeRol16(w), i % 2 === 0 ? 0xEF0569FB : 0xC31713DB) >>> 0;
+    if (i === 0) {
+      term = (term + (Math.imul(_EDGE_CS64_ADJUSTMENT0, factors[0]) >>> 0)) >>> 0;
+      off = (off + _EDGE_CS64_ADJUSTMENT1) >>> 0;
+    }
+    terms.push(term >>> 0);
+    offsets.push(off >>> 0);
+  }
+  let swapAcc = 0, swapLast = 0, state = 0, acc = 0;
+  for (let i = 0; i < terms.length; i += 2) {
+    const x = terms[i], y = terms[i + 1];
+    let t = _edgeRol16((offsets[i] + x) >>> 0);
+    let q = Math.imul(t, 0x76F50F34) >>> 0;
+    swapAcc = (swapAcc + ((Math.imul(_edgeRol16(q), 0xC3EFEA97) + q) >>> 0)) >>> 0;
+    t = _edgeRol16((offsets[i + 1] + y) >>> 0);
+    q = Math.imul(t, 0x1881CE3C) >>> 0;
+    swapLast = (Math.imul(_edgeRol16(q), 0x35BD1EC9) + q) >>> 0;
+    swapAcc = (swapAcc + swapLast) >>> 0;
+
+    state = (Math.imul(state, keyA) + x) >>> 0;
+    state = Math.imul(_edgeRol16(state), 0xCF98B111) >>> 0;
+    state = Math.imul(_edgeRol16(state), 0x87085B9F) >>> 0;
+    state = Math.imul(_edgeRol16(state), 0x12CEB96D) >>> 0;
+    state = Math.imul(_edgeRol16(state), 0x257E1D83) >>> 0;
+    acc = (acc + state) >>> 0;
+
+    t = (Math.imul(state, keyB) + y) >>> 0;
+    t = Math.imul(_edgeRol16(t), 0xA27416F5) >>> 0;
+    t = Math.imul(_edgeRol16(t), 0xD38396FF) >>> 0;
+    state = Math.imul(_edgeRol16(Math.imul(_edgeRol16(t), 0x7C932B89) >>> 0), 0xBFA49F69) >>> 0;
+    acc = (acc + state) >>> 0;
+  }
+  const out = new Uint8Array(8);
+  const oDv = new DataView(out.buffer);
+  oDv.setUint32(0, (swapLast ^ state) >>> 0, true);
+  oDv.setUint32(4, (swapAcc ^ acc) >>> 0, true);
+  return out;
+}
+function _edgeBytesToUpperHex(bytes) {
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    hex += bytes[i].toString(16).padStart(2, '0').toUpperCase();
+  }
+  return hex;
+}
+function generateEdgeSecMsGecV2(unixTimestamp = null) {
+  const baseSec = unixTimestamp == null ? (Date.now() / 1000 + _edgeClockSkewSeconds) : Number(unixTimestamp);
+  const winSecs = Math.floor(baseSec) + 11644473600;
+  const floored = winSecs - (winSecs % 300);
+  const ticksStr = (BigInt(floored) * 10000000n).toString();
+  const strBytes = new TextEncoder().encode(`${ticksStr}${EDGE_TTS_TRUSTED_TOKEN}`);
+  const digest = _edgeSha256Digest(strBytes);
+  const cs64 = _edgeCs64Digest(strBytes, digest);
+  return `${_edgeBytesToUpperHex(cs64)}-${_edgeBytesToUpperHex(digest)}`;
+}
+function _edgeRandomHex(byteLen = 16) {
+  const arr = new Uint8Array(byteLen);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+function _edgeFormatDate() {
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const d = new Date();
+  const p = (n) => (n < 10 ? '0' + n : String(n));
+  return `${days[d.getUTCDay()]} ${months[d.getUTCMonth()]} ${p(d.getUTCDate())} ${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} GMT+0000 (Coordinated Universal Time)`;
+}
+function cleanEdgeTtsText(rawText) {
+  if (!rawText || typeof rawText !== 'string') return '';
+  let text = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  text = text.replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY|TASKS)[\s\S]*?(?:<<<END_ZOZ_(?:FILE|EDIT|MODIFY|TASKS)[^\n>]*>?|$)/gi, ' ');
+  text = text.replace(/<(?:think|thinking|reasoning|thought|tool_call|function_call)>[\s\S]*?<\/(?:think|thinking|reasoning|thought|tool_call|function_call)>/gi, ' ');
+  text = text.replace(/\[\[ZOZ_(?:IMAGE|WEATHER)_DISPLAY:[^\]]+\]\]/gi, ' ');
+  text = text.replace(/\[System Note:[^\]]*\]/gi, ' ');
+  text = text.replace(/```[\s\S]*?```/g, ' ').replace(/~~~[\s\S]*?~~~/g, ' ');
+  text = text.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ');
+  text = text.replace(/\[([^\]]+)\]\((?:https?:\/\/|\/|#)[^)]*\)/g, '$1');
+  text = text.replace(/https?:\/\/[^\s)\]>'"]+/gi, ' ').replace(/\[\s*\d+(?:\s*[,–-]\s*\d+)*\s*\]/g, '');
+  const cleanLatex = (_, expr) => {
+    let e = String(expr || '');
+    e = e.replace(/\\text\{([^}]*)\}/g, ' $1 ').replace(/\\mathrm\{([^}]*)\}/g, ' $1 ');
+    e = e.replace(/\\frac\{([^}]*)\}\{([^}]*)\}/g, ' $1 per $2 ').replace(/\\sqrt\{([^}]*)\}/g, ' akar $1 ');
+    e = e.replace(/\\times/g, ' kali ').replace(/\\cdot/g, ' kali ');
+    e = e.replace(/\\approx/g, ' sekitar ').replace(/\\le/g, ' kurang dari sama dengan ').replace(/\\ge/g, ' lebih dari sama dengan ');
+    e = e.replace(/\\[a-zA-Z]+/g, ' ').replace(/[{}^_]/g, ' ');
+    return ` ${e} `;
+  };
+  text = text.replace(/\$\$([\s\S]*?)\$\$/g, cleanLatex).replace(/\$([^$\n]{1,180})\$/g, cleanLatex);
+  text = text.replace(/`([^`\n]+)`/g, '$1');
+  text = text.replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{0,}:?\s*\|?\s*$/gm, ' ').replace(/^\s*[-*_]{3,}\s*$/gm, ' ').replace(/\|/g, ', ');
+  text = text.replace(/^\s{0,3}#{1,6}\s+/gm, '').replace(/^\s*>\s?/gm, '').replace(/^\s*[-*•◦▪]\s+/gm, '');
+  text = text.replace(/(\*\*|__)([\s\S]*?)\1/g, '$2').replace(/~~([\s\S]*?)~~/g, '$1');
+  text = text.replace(/(^|[^\w])[*_]([^*\n_]+)[*_](?=$|[^\w])/g, '$1$2').replace(/[*_~#`]+/g, '').replace(/<[^>]+>/g, ' ');
+  try { text = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F\u200D]/gu, ' '); } catch (_) {}
+  const lines = text.split('\n').map((ln) => ln.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  let cleaned = lines.map((ln) => (/[.!?,;:]$/.test(ln) ? ln : `${ln}.`)).join(' ');
+  cleaned = cleaned.replace(/\s+([.,!?;:])/g, '$1').replace(/([.,!?;:])\1+/g, '$1').replace(/\s{2,}/g, ' ').trim();
+  if (cleaned.length > 6000) {
+    const sl = cleaned.slice(0, 6000);
+    const sp = sl.lastIndexOf(' ');
+    cleaned = (sp > 100 ? sl.slice(0, sp) : sl).trim();
+  }
+  return cleaned;
+}
+function _escapeEdgeXml(str) {
+  let safe = '';
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if ((code >= 0 && code <= 8) || (code >= 11 && code <= 12) || (code >= 14 && code <= 31)) {
+      safe += ' ';
+    } else {
+      safe += str[i];
+    }
+  }
+  return safe
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+function _splitEdgeSsmlChunks(escapedText, maxBytes = 3600) {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const bytes = encoder.encode(escapedText);
+  const chunks = [];
+  let offset = 0;
+  while (offset < bytes.length) {
+    if (bytes.length - offset <= maxBytes) {
+      const tail = decoder.decode(bytes.subarray(offset)).trim();
+      if (tail) chunks.push(tail);
+      break;
+    }
+    let splitLen = maxBytes;
+    const end = offset + maxBytes;
+    let nl = -1, sp = -1;
+    for (let i = end; i > offset + 64; i--) {
+      if (bytes[i] === 0x0A && nl === -1) { nl = i; break; }
+      if (bytes[i] === 0x20 && sp === -1) sp = i;
+    }
+    if (nl > offset + 64) splitLen = nl - offset;
+    else if (sp > offset + 64) splitLen = sp - offset;
+    else {
+      while (splitLen > 1 && (bytes[offset + splitLen] & 0xC0) === 0x80) splitLen--;
+    }
+    // Hindari memotong entitas XML seperti &amp;
+    for (let k = offset + splitLen - 1; k >= offset && k >= offset + splitLen - 10; k--) {
+      if (bytes[k] === 0x3B) break;
+      if (bytes[k] === 0x26) {
+        if (k > offset) splitLen = k - offset;
+        break;
+      }
+    }
+    const piece = decoder.decode(bytes.subarray(offset, offset + splitLen)).trim();
+    if (piece) chunks.push(piece);
+    offset += Math.max(splitLen, 1);
+  }
+  return chunks;
+}
+function _parseEdgeFrameHeaders(headerText) {
+  const out = {};
+  for (const line of String(headerText || '').split('\r\n')) {
+    const idx = line.indexOf(':');
+    if (idx > 0) out[line.slice(0, idx).trim().toLowerCase()] = line.slice(idx + 1).trim();
+  }
+  return out;
+}
+async function openEdgeTtsChunkSocket(escapedChunk, voice, rate, attempt = 1) {
+  const connId = _edgeRandomHex(16);
+  const muid = _edgeRandomHex(16).toUpperCase();
+  const secMsGec = generateEdgeSecMsGecV2();
+  const targetUrl =
+    `https://${EDGE_TTS_HOST}${EDGE_TTS_PATH_BASE}?TrustedClientToken=${EDGE_TTS_TRUSTED_TOKEN}` +
+    `&ConnectionId=${connId}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=${EDGE_TTS_SEC_MS_GEC_VERSION}`;
+
+  const wsResp = await fetch(targetUrl, {
+    headers: {
+      Upgrade: 'websocket',
+      Origin: EDGE_TTS_ORIGIN,
+      'User-Agent': EDGE_TTS_USER_AGENT,
+      Pragma: 'no-cache',
+      'Cache-Control': 'no-cache',
+      'Accept-Language': 'en-US,en;q=0.9',
+      Cookie: `muid=${muid};`
+    }
+  });
+
+  if (wsResp.status === 403 && attempt < 2) {
+    const srvDate = wsResp.headers && wsResp.headers.get ? wsResp.headers.get('date') : null;
+    const parsedMs = srvDate ? Date.parse(srvDate) : NaN;
+    if (Number.isFinite(parsedMs)) {
+      _edgeClockSkewSeconds += (parsedMs / 1000) - (Date.now() / 1000 + _edgeClockSkewSeconds);
+      return openEdgeTtsChunkSocket(escapedChunk, voice, rate, attempt + 1);
+    }
+  }
+
+  if (wsResp.status !== 101 || !wsResp.webSocket) {
+    throw new Error(`Cloudflare Edge TTS WS status ${wsResp.status}`);
+  }
+
+  const ws = wsResp.webSocket;
+  ws.accept();
+
+  const ts = _edgeFormatDate();
+  ws.send(
+    `X-Timestamp:${ts}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n` +
+    `{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"true","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}\r\n`
+  );
+  const reqId = _edgeRandomHex(16);
+  const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='${voice}'><prosody pitch='+0Hz' rate='${rate}' volume='+0%'>${escapedChunk}</prosody></voice></speak>`;
+  ws.send(`X-RequestId:${reqId}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:${_edgeFormatDate()}Z\r\nPath:ssml\r\n\r\n${ssml}`);
+  return ws;
+}
+function streamEdgeWsToCallbacks(ws, { onAudio, onDone, onError, timeoutMs = 15000 }) {
+  const decoder = new TextDecoder();
+  let settled = false;
+  let emittedBytes = 0;
+  const finishOk = () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    try { ws.close(1000, 'done'); } catch (_) {}
+    onDone(emittedBytes);
+  };
+  const finishErr = (err) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    try { ws.close(1011, 'error'); } catch (_) {}
+    onError(err);
+  };
+  const timer = setTimeout(() => {
+    if (emittedBytes > 0) finishOk();
+    else finishErr(new Error('Edge TTS WebSocket timeout'));
+  }, timeoutMs);
+
+  ws.addEventListener('message', (ev) => {
+    if (settled) return;
+    if (typeof ev.data === 'string') {
+      const sep = ev.data.indexOf('\r\n\r\n');
+      const hdrs = _parseEdgeFrameHeaders(sep >= 0 ? ev.data.slice(0, sep) : ev.data);
+      if (hdrs.path === 'turn.end') {
+        finishOk();
+      }
+      return;
+    }
+    const bytes = ev.data instanceof ArrayBuffer
+      ? new Uint8Array(ev.data)
+      : (ArrayBuffer.isView(ev.data) ? new Uint8Array(ev.data.buffer, ev.data.byteOffset, ev.data.byteLength) : null);
+    if (!bytes || bytes.length < 2) return;
+    const headerLen = (bytes[0] << 8) | bytes[1];
+    if (2 + headerLen > bytes.length) return;
+    const hdrs = _parseEdgeFrameHeaders(decoder.decode(bytes.subarray(2, 2 + headerLen)));
+    if (hdrs.path === 'audio') {
+      const ct = String(hdrs['content-type'] || '');
+      const audioPayload = bytes.subarray(2 + headerLen);
+      if (audioPayload.length > 0 && (!ct || ct.includes('audio/mpeg'))) {
+        emittedBytes += audioPayload.length;
+        onAudio(audioPayload);
+      }
+    }
+  });
+  ws.addEventListener('close', () => {
+    if (!settled) {
+      if (emittedBytes > 0) finishOk();
+      else finishErr(new Error('Edge TTS WebSocket closed before audio'));
+    }
+  });
+  ws.addEventListener('error', () => {
+    finishErr(new Error('Edge TTS WebSocket error'));
+  });
+  return () => {
+    settled = true;
+    clearTimeout(timer);
+    try { ws.close(1000, 'cancelled'); } catch (_) {}
+  };
+}
+async function createEdgeTtsWorkerResponse(cleanedText, voice, rate) {
+  const escaped = _escapeEdgeXml(cleanedText);
+  const chunks = _splitEdgeSsmlChunks(escaped, 3600);
+  if (chunks.length === 0) throw new Error('EMPTY_CLEAN_TEXT');
+
+  // Probe chunk #1 sampai audio byte pertama diterima agar kegagalan IP Cloudflare bisa langsung fallback ke Vercel sebelum HTTP 200 terkirim
+  const firstWs = await openEdgeTtsChunkSocket(chunks[0], voice, rate);
+  const preBuffered = [];
+  let cancelActiveWs = null;
+  let cancelled = false;
+  let firstChunkResolve, firstChunkReject;
+  const firstChunkReady = new Promise((res, rej) => { firstChunkResolve = res; firstChunkReject = rej; });
+  let firstChunkSignaled = false;
+  let controllerRef = null;
+  let firstChunkDone = false;
+  let firstChunkEndResolve = null;
+  const firstChunkFinished = new Promise((res) => { firstChunkEndResolve = res; });
+
+  cancelActiveWs = streamEdgeWsToCallbacks(firstWs, {
+    timeoutMs: 14000,
+    onAudio: (bytes) => {
+      if (cancelled) return;
+      if (controllerRef) {
+        try { controllerRef.enqueue(bytes); } catch (_) {}
+      } else {
+        preBuffered.push(bytes);
+      }
+      if (!firstChunkSignaled) {
+        firstChunkSignaled = true;
+        firstChunkResolve(true);
+      }
+    },
+    onDone: (emitted) => {
+      firstChunkDone = true;
+      if (!firstChunkSignaled) {
+        firstChunkSignaled = true;
+        if (emitted > 0) firstChunkResolve(true);
+        else firstChunkReject(new Error('Edge TTS returned empty first chunk'));
+      }
+      if (firstChunkEndResolve) firstChunkEndResolve();
+    },
+    onError: (err) => {
+      firstChunkDone = true;
+      if (!firstChunkSignaled) {
+        firstChunkSignaled = true;
+        firstChunkReject(err);
+      } else if (controllerRef) {
+        try { controllerRef.error(err); } catch (_) {}
+      }
+      if (firstChunkEndResolve) firstChunkEndResolve();
+    }
+  });
+
+  await firstChunkReady;
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      controllerRef = controller;
+      for (const b of preBuffered) {
+        if (cancelled) return;
+        controller.enqueue(b);
+      }
+      preBuffered.length = 0;
+      if (!firstChunkDone) await firstChunkFinished;
+
+      try {
+        for (let i = 1; i < chunks.length && !cancelled; i++) {
+          await new Promise((resChunk, rejChunk) => {
+            openEdgeTtsChunkSocket(chunks[i], voice, rate).then((ws) => {
+              if (cancelled) {
+                try { ws.close(1000, 'cancelled'); } catch (_) {}
+                return resChunk();
+              }
+              cancelActiveWs = streamEdgeWsToCallbacks(ws, {
+                timeoutMs: 14000,
+                onAudio: (bytes) => { if (!cancelled) controller.enqueue(bytes); },
+                onDone: () => resChunk(),
+                onError: (err) => rejChunk(err)
+              });
+            }).catch(rejChunk);
+          });
+        }
+        if (!cancelled) controller.close();
+      } catch (chunkErr) {
+        if (!cancelled) {
+          try { controller.error(chunkErr); } catch (_) {}
+        }
+      }
+    },
+    cancel() {
+      cancelled = true;
+      if (typeof cancelActiveWs === 'function') cancelActiveWs();
+    }
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      'Content-Type': 'audio/mpeg',
+      'Cache-Control': 'no-store',
+      'X-Accel-Buffering': 'no',
+      'X-Content-Type-Options': 'nosniff',
+      'X-TTS-Engine': 'edge-tts-cf-worker',
+      'X-TTS-Voice': voice,
+      'Access-Control-Allow-Origin': '*'
+    }
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -960,7 +1511,7 @@ export default {
     // yang diteruskan ke TUNNEL_GATEWAY_URL (server laptop).
     // Pemanggilan AI & API Key (OpenRouter, Ollama Cloud, Search Web, Models, Sessions)
     // BERJALAN 100% MANDIRI DI CLOUDFLARE EDGE TANPA PERNAH BERGANTUNG PADA LAPTOP!
-    const TUNNEL_GATEWAY_URL = String((env && env.TUNNEL_GATEWAY_URL) || 'https://environments-municipal-experiment-combat.trycloudflare.com').replace(/\/+$/, '');
+    const TUNNEL_GATEWAY_URL = String((env && env.TUNNEL_GATEWAY_URL) || 'https://fred-providence-julie-distribution.trycloudflare.com').replace(/\/+$/, '');
     let reqBodyBytes = null;
 
     const isLaptopOnlyRoute = url.pathname.startsWith('/api/terminal') ||
@@ -1043,6 +1594,99 @@ export default {
           'Access-Control-Allow-Origin': '*'
         }
       });
+    }
+
+    // Neural Read Aloud TTS Endpoints di Cloudflare Edge (24/7 bebas-laptop, fallback otomatis ke Vercel & Tunnel)
+    if ((url.pathname === '/api/tts/voices' || url.pathname === '/tts/voices') && request.method === 'GET') {
+      return new Response(JSON.stringify({
+        success: true,
+        engine: 'edge-tts-cf-worker',
+        defaultVoice: EDGE_TTS_DEFAULT_VOICE,
+        voices: EDGE_TTS_VOICES_LIST
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+
+    if ((url.pathname === '/api/tts' || url.pathname === '/tts') && request.method === 'POST') {
+      const ttsErrHeaders = {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*'
+      };
+      let ttsBody = null;
+      try {
+        ttsBody = await request.json();
+      } catch (_) {
+        return new Response(JSON.stringify({ success: false, error: 'Body JSON TTS tidak valid.' }), { status: 400, headers: ttsErrHeaders });
+      }
+      const rawText = typeof ttsBody?.text === 'string' ? ttsBody.text : String(ttsBody?.text || '');
+      const safeVoice = EDGE_TTS_VOICE_SET.has(String(ttsBody?.voice || '').trim())
+        ? String(ttsBody.voice).trim()
+        : EDGE_TTS_DEFAULT_VOICE;
+      const rawRate = String(ttsBody?.rate || '+0%').trim();
+      const safeRate = /^[+-](?:[0-4]?\d|50)%$/.test(rawRate)
+        ? ((parseInt(rawRate.slice(0, -1), 10) >= 0 ? '+' : '') + Math.max(-25, Math.min(50, parseInt(rawRate.slice(0, -1), 10))) + '%')
+        : '+0%';
+
+      const cleanedText = cleanEdgeTtsText(rawText);
+      if (!cleanedText) {
+        return new Response(JSON.stringify({ success: false, error: 'Teks kosong setelah dibersihkan dari simbol Markdown/kode.' }), { status: 400, headers: ttsErrHeaders });
+      }
+
+      // 1. Native Cloudflare Worker outbound WebSocket Edge-TTS
+      let lastErrMsg = '';
+      try {
+        return await createEdgeTtsWorkerResponse(cleanedText, safeVoice, safeRate);
+      } catch (cfErr) {
+        lastErrMsg = cfErr && cfErr.message ? cfErr.message : String(cfErr);
+      }
+
+      // 2. Fallback transparan ke Vercel Serverless Gateway & Tunnel Laptop jika IP Edge diblokir
+      const VERCEL_TTS_GATEWAY = String((env && env.VERCEL_BACKEND_GATEWAY) || 'https://zoz-router.vercel.app').replace(/\/+$/, '');
+      const fallbackUpstreams = [
+        { url: `${VERCEL_TTS_GATEWAY}/api/tts`, engine: 'edge-tts-vercel-proxy', timeoutMs: 32000 },
+        { url: `${TUNNEL_GATEWAY_URL}/api/tts`, engine: 'edge-tts-tunnel-proxy', timeoutMs: 12000 }
+      ];
+      for (const up of fallbackUpstreams) {
+        try {
+          const upRes = await fetch(up.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: cleanedText, voice: safeVoice, rate: safeRate }),
+            signal: AbortSignal.timeout(up.timeoutMs)
+          });
+          const upCt = String(upRes.headers.get('content-type') || '').toLowerCase();
+          if (upRes.ok && (upCt.includes('audio/') || upCt.includes('application/octet-stream'))) {
+            return new Response(upRes.body, {
+              status: 200,
+              headers: {
+                'Content-Type': 'audio/mpeg',
+                'Cache-Control': 'no-store',
+                'X-Accel-Buffering': 'no',
+                'X-Content-Type-Options': 'nosniff',
+                'X-TTS-Engine': upRes.headers.get('x-tts-engine') || up.engine,
+                'X-TTS-Voice': upRes.headers.get('x-tts-voice') || safeVoice,
+                'Access-Control-Allow-Origin': '*'
+              }
+            });
+          }
+          lastErrMsg = `${up.engine}: HTTP ${upRes.status}`;
+        } catch (proxyErr) {
+          lastErrMsg = `${up.engine}: ${proxyErr && proxyErr.message ? proxyErr.message : String(proxyErr)}`;
+        }
+      }
+
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Layanan Edge TTS sementara tidak dapat dijangkau.',
+        detail: lastErrMsg
+      }), { status: 503, headers: ttsErrHeaders });
     }
 
     // Jozz Memory Cloud Edge Endpoints (/api/memories/*)
