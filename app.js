@@ -84,7 +84,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://pvc-fragrances-excited-organizing.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://faster-rob-insights-terrorism.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -11983,17 +11983,19 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   }
 
   const Z21_TEX_GLYPH_MAP = {
-    '\\alpha': 'α', '\\beta': 'β', '\\gamma': 'γ', '\\delta': 'δ', '\\Delta': 'Δ',
-    '\\epsilon': 'ε', '\\varepsilon': 'ε', '\\zeta': 'ζ', '\\eta': 'η', '\\theta': 'θ',
-    '\\kappa': 'κ', '\\lambda': 'λ', '\\mu': 'μ', '\\nu': 'ν', '\\xi': 'ξ',
-    '\\pi': 'π', '\\rho': 'ρ', '\\sigma': 'σ', '\\Sigma': 'Σ', '\\tau': 'τ',
+    '\\alpha': 'α', '\\beta': 'β', '\\gamma': 'γ', '\\Gamma': 'Γ', '\\delta': 'δ', '\\Delta': 'Δ',
+    '\\epsilon': 'ε', '\\varepsilon': 'ε', '\\zeta': 'ζ', '\\eta': 'η', '\\theta': 'θ', '\\Theta': 'Θ',
+    '\\kappa': 'κ', '\\lambda': 'λ', '\\Lambda': 'Λ', '\\mu': 'μ', '\\nu': 'ν', '\\xi': 'ξ', '\\Xi': 'Ξ',
+    '\\pi': 'π', '\\Pi': 'Π', '\\rho': 'ρ', '\\sigma': 'σ', '\\Sigma': 'Σ', '\\tau': 'τ', '\\Upsilon': 'Υ',
     '\\phi': 'φ', '\\Phi': 'Φ', '\\psi': 'ψ', '\\Psi': 'Ψ', '\\omega': 'ω', '\\Omega': 'Ω',
     '\\times': '×', '\\div': '÷', '\\cdot': '·', '\\pm': '±', '\\mp': '∓',
-    '\\approx': '≈', '\\neq': '≠', '\\ne': '≠', '\\equiv': '≡', '\\propto': '∝',
-    '\\leq': '≤', '\\le': '≤', '\\geq': '≥', '\\ge': '≥', '\\infty': '∞',
-    '\\partial': '∂', '\\nabla': '∇', '\\in': '∈', '\\notin': '∉',
-    '\\forall': '∀', '\\exists': '∃', '\\rightarrow': '→', '\\to': '→',
-    '\\leftarrow': '←', '\\Rightarrow': '⇒', '\\implies': '⇒', '\\leftrightarrow': '↔', '\\Leftrightarrow': '⇔', '\\iff': '⇔', '\\circ': '°',
+    '\\approx': '≈', '\\simeq': '≃', '\\cong': '≅', '\\sim': '~', '\\neq': '≠', '\\ne': '≠', '\\equiv': '≡', '\\propto': '∝',
+    '\\leq': '≤', '\\le': '≤', '\\geq': '≥', '\\ge': '≥', '\\ll': '≪', '\\gg': '≫', '\\mid': '|', '\\parallel': '∥', '\\perp': '⊥', '\\infty': '∞',
+    '\\partial': '∂', '\\nabla': '∇', '\\in': '∈', '\\notin': '∉', '\\subset': '⊂', '\\subseteq': '⊆', '\\cup': '∪', '\\cap': '∩',
+    '\\forall': '∀', '\\exists': '∃', '\\rightarrow': '→', '\\to': '→', '\\longrightarrow': '→',
+    '\\leftarrow': '←', '\\Rightarrow': '⇒', '\\implies': '⇒', '\\Leftarrow': '⇐',
+    '\\leftrightarrow': '↔', '\\longleftrightarrow': '↔', '\\Leftrightarrow': '⇔', '\\iff': '⇔',
+    '\\uparrow': '↑', '\\downarrow': '↓', '\\updownarrow': '↕', '\\circ': '°', '\\degree': '°',
     '\\cdots': '⋯', '\\ldots': '…', '\\%': '%', '\\&': '&', '\\#': '#', '\\_': '_', '\\{': '{', '\\}': '}', '\\|': '‖'
   };
   const Z21_TEX_SPACE_CMDS = { '\\,': 0.16, '\\:': 0.22, '\\;': 0.28, '\\ ': 0.25, '\\\\': 0.9, '\\quad': 0.85, '\\qquad': 1.7, '\\!': -0.1 };
@@ -12163,9 +12165,14 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             next();
           }
           if (curRow.length > 0) rows.push(curRow);
-          const delimMap = { pmatrix: ['(', ')'], bmatrix: ['[', ']'], Bmatrix: ['{', '}'], vmatrix: ['|', '|'], Vmatrix: ['‖', '‖'], cases: ['{', ''] };
-          const [ld, rd] = delimMap[env] || ['(', ')'];
-          return { type: 'delim', left: ld, right: rd, body: { type: 'matrix', rows }, explicit: true };
+          const envLower = env.toLowerCase();
+          if (/^(?:aligned|align\*?|gather\*?|split|eqnarray\*?)$/.test(envLower)) {
+            return { type: 'matrix', rows, align: 'aligned' };
+          }
+          const delimMap = { pmatrix: ['(', ')'], bmatrix: ['[', ']'], Bmatrix: ['{', '}'], vmatrix: ['|', '|'], Vmatrix: ['‖', '‖'], cases: ['{', ''], matrix: ['', ''] };
+          const [ld, rd] = delimMap[env] || ['', ''];
+          if (!ld && !rd) return { type: 'matrix', rows, align: 'center' };
+          return { type: 'delim', left: ld, right: rd, body: { type: 'matrix', rows, align: envLower === 'cases' ? 'left' : 'center' }, explicit: true };
         }
         if (t.name === '\\sqrt') {
           let index = null;
@@ -12305,7 +12312,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         return { type: 'frac', noBar: Boolean(node.noBar), numB, denB, width: innerW + (fontSize * 0.18), barWidth: innerW, barThick, gap, axis, ascent, descent, fontSize };
       }
       if (node.type === 'matrix') {
-        const subSz = Math.max(7.2, fontSize * 0.88);
+        const subSz = node.align === 'aligned' ? Math.max(7.6, fontSize * 0.96) : Math.max(7.2, fontSize * 0.88);
         const mRows = (node.rows || []).map(r => r.map(c => this.measureBox(ctx, c, subSz)));
         const numCols = Math.max(1, ...mRows.map(r => r.length));
         const colWidths = new Array(numCols).fill(0);
@@ -12319,13 +12326,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           });
           return { ascent: maxA, descent: maxD };
         });
-        const colGap = fontSize * 0.55;
-        const rowGap = fontSize * 0.28;
-        const padX = fontSize * 0.22;
+        const colGap = node.align === 'aligned' ? (fontSize * 0.16) : (fontSize * 0.55);
+        const rowGap = node.align === 'aligned' ? (fontSize * 0.34) : (fontSize * 0.28);
+        const padX = node.align === 'aligned' ? (fontSize * 0.08) : (fontSize * 0.22);
         const totalW = colWidths.reduce((a, b) => a + b, 0) + Math.max(0, numCols - 1) * colGap + padX * 2;
         const totalH = rowHeights.reduce((a, rh) => a + rh.ascent + rh.descent, 0) + Math.max(0, mRows.length - 1) * rowGap;
         const halfH = totalH / 2;
-        return { type: 'matrix', mRows, colWidths, rowHeights, colGap, rowGap, padX, width: totalW, ascent: halfH + axis, descent: Math.max(0.2, halfH - axis), axis, fontSize };
+        return { type: 'matrix', align: node.align || 'center', mRows, colWidths, rowHeights, colGap, rowGap, padX, width: totalW, ascent: halfH + axis, descent: Math.max(0.2, halfH - axis), axis, fontSize };
       }
       if (node.type === 'sqrt') {
         const bodyB = this.measureBox(ctx, node.body, fontSize);
@@ -12431,7 +12438,15 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           let curX = x + box.padX;
           box.colWidths.forEach((cw, ci) => {
             const cb = r[ci];
-            if (cb) this.drawBox(ctx, cb, curX + ((cw - cb.width) / 2), rowBaseY, color);
+            if (cb) {
+              let cx = curX + ((cw - cb.width) / 2);
+              if (box.align === 'aligned') {
+                cx = (ci === 0 && box.colWidths.length > 1) ? (curX + cw - cb.width) : curX;
+              } else if (box.align === 'left') {
+                cx = curX;
+              }
+              this.drawBox(ctx, cb, cx, rowBaseY, color);
+            }
             curX += cw + box.colGap;
           });
           curTop += rh.ascent + rh.descent + box.rowGap;
@@ -12747,7 +12762,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   };
 
   function renderMathTextToDocxRuns(str, baseRPrXml = '') {
-    const tokens = String(str || '').split(/(\^\{[^{}]+\}|_\{[^{}]+\}|[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+|[₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ]+)/g);
+    const preNorm = normalizeZ21VarSubscriptsClient(String(str || ''));
+    const tokens = preNorm.split(/(\^\{[^{}]+\}|_\{[^{}]+\}|[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+|[₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ]+)/g);
     return tokens.filter(Boolean).map((tok) => {
       let vertAlign = '';
       let val = tok;
@@ -12927,7 +12943,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       .replace(/\[\[ZOZ_(?:WEATHER|IMAGE)_DISPLAY:[^\]]+\]\]/gi, '')
       .trim();
 
-    const rawLines = (markdownText || '').split('\n');
+    const rawLines = coalesceZ21MathBlocksClient(markdownText || '');
       const firstMdH1 = rawLines.find(l => l.trim().startsWith('# '));
       const resolvedDocTitle = firstMdH1
         ? firstMdH1.trim().substring(2).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim()
@@ -13565,7 +13581,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         const wrapped = [];
         let maxL = 1;
         for (let ci = 0; ci < colCnt; ci++) {
-          const cellStr = sanitizeJsPdfWinAnsiText(stripZ21InlineMd(cells[ci] ?? ''));
+          const rawCell = stripZ21InlineMd(cells[ci] ?? '')
+            .replace(/_\{([^{}]+)\}/g, '$1')
+            .replace(/\^\{([^{}]+)\}/g, '^($1)');
+          const cellStr = sanitizeJsPdfWinAnsiText(rawCell);
           const sp = doc.splitTextToSize(cellStr, Math.max(12, colW - 5));
           wrapped.push(sp);
           if (sp.length > maxL) maxL = sp.length;
@@ -13669,7 +13688,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         cursorY += dh + 4.5;
       }
       if (sec.content) {
-        for (const para of cleanZ21ClientResidue(sec.content).split(/\r?\n/)) {
+        for (const para of coalesceZ21MathBlocksClient(cleanZ21ClientResidue(sec.content))) {
           const pTrim = para.trim();
           if (!pTrim) continue;
           const plainCheck = normalizeZ21ScientificTextClient(pTrim, { preserveFrac: true }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
@@ -13711,6 +13730,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       }
       if (sec.table && Array.isArray(sec.table.rows)) {
         drawRichPdfTable(sec.table);
+      }
+      if (Array.isArray(sec.tables)) {
+        for (const extraT of sec.tables) {
+          if (extraT && extraT !== sec.table && Array.isArray(extraT.rows)) drawRichPdfTable(extraT);
+        }
       }
     }
 
@@ -14153,8 +14177,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     .z21-frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 3px; line-height: 1.1; }
     .z21-frac-num { border-bottom: 1.4px solid currentColor; padding: 0 4px 2px 4px; font-size: 0.88em; }
     .z21-frac-den { padding: 2px 4px 0 4px; font-size: 0.88em; }
-    .z21-eq-expr sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
-    .z21-eq-expr sub { font-size: 0.72em; vertical-align: sub; line-height: 0; }
+    sup, sub { font-size: 0.75em; line-height: 0; position: relative; vertical-align: baseline; }
+    sup { top: -0.45em; }
+    sub { bottom: -0.22em; }
+    .z21-eq-expr sup { font-size: 0.72em; vertical-align: super; line-height: 0; position: static; }
+    .z21-eq-expr sub { font-size: 0.72em; vertical-align: sub; line-height: 0; position: static; }
     blockquote { margin: 14px 0; padding: 10px 14px; background: #f8fafc; border-left: 4px solid #3b82f6; color: #475569; border-radius: 4px; font-size: 13px; }
     table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 13.5px; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
     th, td { border: 1px solid #cbd5e1; padding: 10px 14px; text-align: left; }
@@ -14249,8 +14276,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     .z21-frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 3px; line-height: 1.1; }
     .z21-frac-num { border-bottom: 1.4px solid currentColor; padding: 0 4px 2px 4px; font-size: 0.88em; }
     .z21-frac-den { padding: 2px 4px 0 4px; font-size: 0.88em; }
-    .z21-eq-expr sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
-    .z21-eq-expr sub { font-size: 0.72em; vertical-align: sub; line-height: 0; }
+    sup, sub { font-size: 0.75em; line-height: 0; position: relative; vertical-align: baseline; }
+    sup { top: -0.45em; }
+    sub { bottom: -0.22em; }
+    .z21-eq-expr sup { font-size: 0.72em; vertical-align: super; line-height: 0; position: static; }
+    .z21-eq-expr sub { font-size: 0.72em; vertical-align: sub; line-height: 0; position: static; }
     blockquote { margin: 14px 0; padding: 10px 14px; background: #f8fafc; border-left: 4px solid #38bdf8; color: #475569; border-radius: 4px; font-size: 13px; }
     table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 13.5px; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
     th, td { border: 1px solid #cbd5e1; padding: 10px 14px; text-align: left; }
@@ -35583,8 +35613,8 @@ ATURAN MUTLAK EKSEKUSI AGEN:
    - \`format\`: \`"${targetFmt}"\`.
    - \`title\` & \`subtitle\`: Judul utama dan subjudul/tanggal laporan.
    - \`sections\`: Daftar bab \`[{"heading": "...", "content": "...", "bullets": [...]}]\` yang merangkum seluruh data secara lengkap.
-   - **FORMAT RUMUS MATEMATIKA AUTENTIK**: Tulis setiap ekspresi matematika dengan sintaks LaTeX yang valid & baku (mis. \`\\\\frac{a}{b}\`, \`\\\\ln\\\\left(\\\\frac{RH}{100}\\\\right)\`, \`\\\\sqrt{x}\`, \`\\\\gamma(T, RH)\`, \`T_{dp}\`, \`c_{1}\`, \`V^{0.16}\`, \`100\\\\%\`) agar dirender sebagai persamaan matematika 2D asli di PDF, Word, dan pratinjau.
-   - \`tables\` / \`sheets\`: Daftar tabel data terformat \`[{"title": "...", "headers": [...], "rows": [[...]]}]\` (untuk Excel \`.xlsx\`, sertakan \`sheets\` lengkap dengan \`formulas\` seperti \`"=SUM(B2:B10)"\` bila ada data numerik).
+   - **FORMAT RUMUS MATEMATIKA AUTENTIK**: Tulis setiap persamaan berdiri sendiri dalam LaTeX baku (mis. \`\\\\frac{a}{b}\`, \`\\\\ln\\\\left(\\\\frac{RH}{100}\\\\right)\`, \`\\\\sqrt{x}\`, \`\\\\begin{aligned} ... \\\\end{aligned}\`, \`T_{dp}\`, \`c_{1}\`, \`V^{0.16}\`, \`100\\\\%\`). **PISAHKAN** kalimat pengantar naratif (mis. *"Substitusi T = 24 °C menghasilkan:"*, *"Dengan T_{F} = ...:"*) pada paragraf tersendiri — JANGAN campurkan kalimat naratif ke dalam blok rumus \`$...$\`!
+   - \`tables\` / \`sheets\`: Daftar tabel data terformat \`[{"title": "...", "headers": [...], "rows": [[...]]}]\` (untuk bab yang berisi tabel seperti *"Tabel Ringkasan..."*, WAJIB isi properti \`table: {"headers": [...], "rows": [[...]]}\` langsung di objek bab tersebut agar tabel tidak hilang; untuk Excel \`.xlsx\`, sertakan \`sheets\` lengkap dengan \`formulas\` seperti \`"=SUM(B2:B10)"\`).
    - Apabila pengguna merujuk pada laporan/data di pesan sebelumnya (misal: "buatkan file pdf nya"), ambil seluruh fakta, angka, dan rincian dari riwayat percakapan terakhir lalu masukkan ke dalam \`z21_document_builder\`.
 3. PENYAJIAN BERSIH KE PENGGUNA (KARTU UNDUHAN / FILE ARTIFACT CARD):
    - Di dalam gelembung chat, tuliskan HANYA pengantar & ringkasan eksekutif singkat bahwa berkas telah selesai dirender dan siap diunduh pada Kartu Unduhan di bawah.
@@ -35654,6 +35684,27 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x'
   };
 
+  function maskZ21NonMathTokensClient(rawText) {
+    const slots = [];
+    const masked = String(rawText ?? '').replace(/https?:\/\/[^\s)]+|(?<![A-Za-z0-9_])[A-Za-z0-9][A-Za-z0-9_-]{2,}\.(?:pdf|docx?|xlsx?|csv|png|jpe?g|json|py|js|html?|css)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[a-z]{2,}_[a-z]{2,}(?:_[a-z0-9]+)+(?![A-Za-z0-9_])/gi, (m) => {
+      slots.push(m);
+      return `\x00ZNMT${slots.length - 1}\x00`;
+    });
+    return { masked, unmask: (s) => slots.length ? String(s || '').replace(/\x00ZNMT(\d+)\x00/g, (_, idx) => slots[Number(idx)] || '') : s };
+  }
+
+  function normalizeZ21VarSubscriptsClient(str) {
+    const { masked, unmask } = maskZ21NonMathTokensClient(str);
+    let s = masked
+      .replace(/\bTd_?p\b/g, 'T_{dp}')
+      .replace(/\bT_dp\b/g, 'T_{dp}')
+      .replace(/\bTd\b(?=\s*=)/g, 'T_{d}')
+      .replace(/_(dp|max|min|atm|sat|tot|eff|avg|rel|abs|in|out|init|fin|rms|crit|opt)\b/g, '_{$1}')
+      .replace(/(?<![A-Za-z_])([A-Za-z\u0370-\u03FF])_([0-9]{1,6})/g, '$1_{$2}')
+      .replace(/(?<![A-Za-z_])([A-Za-z\u0370-\u03FF])_([A-Za-z↓↑][A-Za-z0-9↓↑]{0,7})(?![A-Za-z0-9_])/g, '$1_{$2}');
+    return unmask(s);
+  }
+
   function restoreCorruptedJsonLatexEscapesClient(rawText) {
     let s = cleanZ21ClientResidue(rawText);
     if (!s) return '';
@@ -35672,12 +35723,83 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/\bR\s+H\s*(?==)/g, 'RH ')
       .replace(/(\d+(?:[.,]\d+)?)\s+%/g, '$1%')
       .replace(/\(\s*([^\s()]+)\s+%\s*\)/g, '($1%)')
-      .replace(/([A-Za-z0-9)])\s+\^(\{[^{}]+\}|[0-9])/g, '$1^$2')
-      .replace(/\bTd_?p\b/g, 'T_{dp}')
-      .replace(/\bT_dp\b/g, 'T_{dp}')
-      .replace(/\bTd\b(?=\s*=)/g, 'T_{d}')
-      .replace(/_(dp|max|min|atm|sat|tot|eff|avg|rel|abs|in|out|init|fin|rms|crit|opt)\b/g, '_{$1}');
-    return s;
+      .replace(/([A-Za-z0-9)])\s+\^(\{[^{}]+\}|[0-9])/g, '$1^$2');
+    return normalizeZ21VarSubscriptsClient(s);
+  }
+
+  function hasZ21NarrativeProseClient(text, minProseWords = 4) {
+    const s = String(text || '')
+      .replace(/\\(?:text|mathrm|operatorname|mathbf|mathit)\{[^{}]*\}/g, ' ')
+      .replace(/\\[a-zA-Z]+/g, ' ')
+      .trim();
+    if (/\.\s+[A-ZÀ-Ö]/.test(s)) return true;
+    const words = s.match(/\b[a-z\u00e0-\u00ff]{3,}\b/g) || [];
+    const mathStopWords = new Set([
+      'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'arcsin', 'arccos', 'arctan',
+      'sinh', 'cosh', 'tanh', 'exp', 'log', 'lim', 'min', 'max', 'mod', 'det',
+      'gcd', 'sup', 'inf', 'rms', 'avg', 'eff', 'sat', 'atm', 'net', 'tot',
+      'rel', 'abs', 'init', 'fin', 'crit', 'opt', 'hpa', 'mol', 'dan', 'atau',
+      'serta', 'dimana', 'and', 'with', 'where', 'udara', 'hujan', 'dew'
+    ]);
+    return words.filter(w => !mathStopWords.has(w)).length >= minProseWords;
+  }
+
+  function wrapZ21FractionOperandClient(part) {
+    const p = String(part || '').trim();
+    if (!p) return p;
+    if (/^[A-Za-z0-9α-ωΑ-Ω₀-₉⁰-⁹¹²³._^{}]+$/.test(p)) return p;
+    if (p.startsWith('(') && p.endsWith(')')) {
+      let d = 0;
+      let balancedOuter = true;
+      for (let i = 0; i < p.length - 1; i++) {
+        if (p[i] === '(') d++;
+        else if (p[i] === ')') {
+          d--;
+          if (d === 0) { balancedOuter = false; break; }
+        }
+      }
+      if (balancedOuter && d === 1) return p;
+    }
+    return `(${p})`;
+  }
+
+  function coalesceZ21MathBlocksClient(rawText) {
+    const lines = String(rawText ?? '').split(/\r?\n/);
+    const out = [];
+    let inEnv = false;
+    let envName = '';
+    let envLines = [];
+    let inDisplay = false;
+    let displayLines = [];
+    for (const rawLine of lines) {
+      const trimmed = rawLine.trim();
+      if (!inEnv && !inDisplay) {
+        const mBegin = trimmed.match(/\\begin\{(aligned|align\*?|gather\*?|split|eqnarray\*?|cases|equation\*?)\}/i);
+        if (mBegin && !trimmed.includes(`\\end{${mBegin[1]}}`)) {
+          inEnv = true; envName = mBegin[1]; envLines = [trimmed]; continue;
+        }
+        if (trimmed.startsWith('$$') && (trimmed.length === 2 || !trimmed.slice(2).includes('$$'))) {
+          inDisplay = true; displayLines = [trimmed]; continue;
+        }
+        if (trimmed.startsWith('\\[') && !trimmed.includes('\\]')) {
+          inDisplay = true; displayLines = [trimmed]; continue;
+        }
+        out.push(rawLine);
+      } else if (inEnv) {
+        envLines.push(trimmed);
+        if (trimmed.includes(`\\end{${envName}}`) || trimmed.includes('\\end{')) {
+          out.push(envLines.join(' ')); inEnv = false; envName = ''; envLines = [];
+        }
+      } else if (inDisplay) {
+        displayLines.push(trimmed);
+        if (trimmed.endsWith('$$') || trimmed.includes('$$') || trimmed.includes('\\]')) {
+          out.push(displayLines.join(' ')); inDisplay = false; displayLines = [];
+        }
+      }
+    }
+    if (envLines.length > 0) out.push(envLines.join(' '));
+    if (displayLines.length > 0) out.push(displayLines.join(' '));
+    return out;
   }
 
   function isZ21VariableLegendLineClient(line) {
@@ -35689,7 +35811,7 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     if (!m) return { isLegend: false };
     const lhs = m[1].trim();
     const rhs = m[2].trim();
-    if (/\\(?:frac|dfrac|tfrac|sqrt|sum|int|prod|ln|log|sin|cos|tan)\b/.test(rhs)) return { isLegend: false };
+    if (/\\(?:frac|dfrac|tfrac|sqrt|sum|int|prod|ln|log|sin|cos|tan|arctan|arcsin|arccos)(?![a-zA-Z])/.test(rhs)) return { isLegend: false };
     if (/^[+-]?\d+(?:[.,]\d+)?(?:\s*(?:°[CFK]|%|hPa|km\/h|m\/s))?(?:\s*,\s*[A-Za-z\u0370-\u03FF][A-Za-z0-9_{}₀-₉]{0,8}\s*=\s*[+-]?\d+(?:[.,]\d+)?(?:\s*(?:°[CFK]|%|hPa|km\/h|m\/s))?)+$/i.test(rhs)) {
       return { isLegend: true, symbol: lhs, description: rhs };
     }
@@ -35752,7 +35874,8 @@ ATURAN MUTLAK EKSEKUSI AGEN:
             const rawRight = out.slice(slashIdx + 1, j - 1).trim();
             const innerEndsRight = /\\right\s*$/.test(rawRight);
             const rightPart = innerEndsRight ? rawRight.replace(/\\right\s*$/, '').trim() : rawRight;
-            if (leftPart && rightPart && !leftPart.includes('=') && !rightPart.includes('=')) {
+            const isProsePair = /^[a-z]{3,}$/i.test(leftPart) && /^[a-z]{3,}$/i.test(rightPart) && !/(?:^|[=+\-*/×·]\s*|ln\s*$|exp\s*$)/.test(res.trim());
+            if (leftPart && rightPart && !leftPart.includes('=') && !rightPart.includes('=') && !isProsePair) {
               const before = res;
               const hasOuterLeft = /\\left\s*$/.test(before);
               const afterFn = fnPrefixRe.test(before);
@@ -35797,12 +35920,19 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/^\\\[\s*([\s\S]*?)\s*\\\]$/g, '$1')
       .replace(/^\\\(\s*([\s\S]*?)\s*\\\)$/g, '$1')
       .replace(/^\$\s*([^$\n]+)\s*\$$/g, '$1')
+      .replace(/(?<!\\)\$/g, '')
       .replace(/[`]/g, '')
       .trim();
 
+    const cmdAhead = '(?:left|right|frac|dfrac|tfrac|cfrac|sqrt|ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max|alpha|beta|gamma|Gamma|delta|Delta|epsilon|varepsilon|zeta|eta|theta|Theta|kappa|lambda|Lambda|mu|nu|xi|Xi|pi|Pi|rho|sigma|Sigma|tau|Upsilon|phi|Phi|psi|Psi|omega|Omega|times|div|cdot|pm|mp|approx|neq|ne|equiv|propto|leq|le|geq|ge|ll|gg|mid|infty|sum|int|prod|partial|nabla|in|notin|forall|exists|rightarrow|Rightarrow|implies|iff|leftrightarrow|Leftrightarrow|leftarrow|Leftarrow|uparrow|downarrow|updownarrow|to|mathbb|mathrm|mathbf|mathit|operatorname|text|hat|bar|tilde|vec|binom|boxed|quad|qquad|circ|begin|end|%)';
+    const hasEnv = /\\begin\s*\{(?:aligned|align\*?|gather\*?|split|eqnarray\*?|cases|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix)\}/i.test(s);
+    if (!hasEnv) {
+      s = s.replace(new RegExp(`\\\\{2,}(?=${cmdAhead})`, 'g'), '\\');
+    } else {
+      s = s.replace(new RegExp(`\\\\{3,}(?=${cmdAhead})`, 'g'), '\\');
+    }
     s = s
-      .replace(/\\{2,}(?=(?:left|right|frac|dfrac|tfrac|cfrac|sqrt|ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max|alpha|beta|gamma|delta|Delta|epsilon|varepsilon|zeta|eta|theta|kappa|lambda|mu|nu|xi|pi|rho|sigma|Sigma|tau|phi|Phi|psi|Psi|omega|Omega|times|div|cdot|pm|approx|neq|ne|equiv|propto|leq|le|geq|ge|infty|sum|int|prod|partial|nabla|in|forall|exists|rightarrow|Rightarrow|implies|iff|leftrightarrow|Leftrightarrow|to|mathbb|mathrm|mathbf|mathit|operatorname|text|hat|bar|tilde|vec|binom|boxed|quad|qquad|circ|%))/g, '\\')
-      .replace(/\\(?:dfrac|tfrac|cfrac)\b/g, '\\frac')
+      .replace(/\\(?:dfrac|tfrac|cfrac)(?![a-zA-Z])/g, '\\frac')
       .replace(/\\le(?![a-zA-Z])/g, '\\leq')
       .replace(/\\ge(?![a-zA-Z])/g, '\\geq')
       .replace(/\\ne(?![a-zA-Z])/g, '\\neq')
@@ -35815,19 +35945,20 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/[₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ]+/g, (m) => `_{${m.split('').map(c => Z21_INV_SUB_MAP_CLIENT[c] || c).join('')}}`);
 
     const symToTex = {
-      'α': '\\alpha', 'β': '\\beta', 'γ': '\\gamma', 'δ': '\\delta', 'Δ': '\\Delta',
-      'ε': '\\epsilon', 'ζ': '\\zeta', 'η': '\\eta', 'θ': '\\theta', 'κ': '\\kappa',
-      'λ': '\\lambda', 'μ': '\\mu', 'ν': '\\nu', 'ξ': '\\xi', 'π': '\\pi',
-      'ρ': '\\rho', 'σ': '\\sigma', 'Σ': '\\Sigma', 'τ': '\\tau', 'φ': '\\phi',
-      'Φ': '\\Phi', 'ψ': '\\psi', 'Ψ': '\\Psi', 'ω': '\\omega', 'Ω': '\\Omega',
-      '×': '\\times', '÷': '\\div', '·': '\\cdot', '±': '\\pm', '≈': '\\approx',
-      '≠': '\\neq', '≡': '\\equiv', '∝': '\\propto', '≤': '\\leq', '≥': '\\geq',
+      'α': '\\alpha', 'β': '\\beta', 'γ': '\\gamma', 'Γ': '\\Gamma', 'δ': '\\delta', 'Δ': '\\Delta',
+      'ε': '\\epsilon', 'ζ': '\\zeta', 'η': '\\eta', 'θ': '\\theta', 'Θ': '\\Theta', 'κ': '\\kappa',
+      'λ': '\\lambda', 'Λ': '\\Lambda', 'μ': '\\mu', 'ν': '\\nu', 'ξ': '\\xi', 'Ξ': '\\Xi',
+      'π': '\\pi', 'Π': '\\Pi', 'ρ': '\\rho', 'σ': '\\sigma', 'Σ': '\\Sigma', 'τ': '\\tau',
+      'Υ': '\\Upsilon', 'φ': '\\phi', 'Φ': '\\Phi', 'ψ': '\\psi', 'Ψ': '\\Psi', 'ω': '\\omega', 'Ω': '\\Omega',
+      '×': '\\times', '÷': '\\div', '·': '\\cdot', '±': '\\pm', '∓': '\\mp', '≈': '\\approx',
+      '≠': '\\neq', '≡': '\\equiv', '∝': '\\propto', '≤': '\\leq', '≥': '\\geq', '≪': '\\ll', '≫': '\\gg',
       '∞': '\\infty', '∑': '\\sum', '∫': '\\int', '∏': '\\prod', '∂': '\\partial', '∇': '\\nabla',
-      '∈': '\\in', '∀': '\\forall', '∃': '\\exists', '→': '\\rightarrow', '⇒': '\\Rightarrow',
-      '↔': '\\leftrightarrow', '⇔': '\\Leftrightarrow', '⊕': '\\oplus', '⊗': '\\otimes', '‖': '\\|',
-      'ℝ': '\\mathbb{R}', 'ℕ': '\\mathbb{N}', 'ℤ': '\\mathbb{Z}'
+      '∈': '\\in', '∉': '\\notin', '∀': '\\forall', '∃': '\\exists',
+      '→': '\\rightarrow', '←': '\\leftarrow', '⇒': '\\Rightarrow', '⇐': '\\Leftarrow',
+      '↔': '\\leftrightarrow', '⇔': '\\Leftrightarrow', '↑': '\\uparrow', '↓': '\\downarrow', '↕': '\\updownarrow',
+      '⊕': '\\oplus', '⊗': '\\otimes', '‖': '\\|', 'ℝ': '\\mathbb{R}', 'ℕ': '\\mathbb{N}', 'ℤ': '\\mathbb{Z}'
     };
-    s = s.replace(/[αβγδΔεζηθκλμνξπρσΣτφΦψΨωΩ×÷·±≈≠≡∝≤≥∞∑∫∏∂∇∈∀∃→⇒↔⇔⊕⊗‖ℝℕℤ]/g, (ch, idx, full) => {
+    s = s.replace(/[αβγΓδΔεζηθΘκλΛμνξΞπΠρσΣτΥφΦψΨωΩ×÷·±∓≈≠≡∝≤≥≪≫∞∑∫∏∂∇∈∉∀∃→←⇒⇐↔⇔↑↓↕⊕⊗‖ℝℕℤ]/g, (ch, idx, full) => {
       const cmd = symToTex[ch];
       if (!cmd) return ch;
       const nextCh = full[idx + 1] || '';
@@ -35845,17 +35976,17 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/(\/\s*|\(\s*)es\b/g, '$1e_{s}')
       .replace(/\bes(?=\s*=|\s*\))/g, 'e_{s}')
       .replace(/_([0-9]+)/g, '_{$1}')
-      .replace(/_([a-zA-Z])(?![a-zA-Z0-9}])/g, '_{$1}')
       .replace(/\^([0-9]+)(?![0-9}])/g, '^{$1}');
+    s = normalizeZ21VarSubscriptsClient(s);
 
     const textSlots = [];
-    s = s.replace(/\\(?:text|mathrm|mathbf|operatorname)\{[^{}]*\}/g, (blk) => {
+    s = s.replace(/\\(?:text|mathrm|mathbf|operatorname|begin|end)\{[^{}]*\}/g, (blk) => {
       textSlots.push(blk);
       return `\x00ZTEXT${textSlots.length - 1}\x00`;
     });
     s = s
       .replace(/(?<!\\)\b(ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max)\b(?=\s*(?:\\left|[(\[{]))/g, '\\$1')
-      .replace(/(?<!\\)\b(cos|sin|tan|exp|ln|log)\s+([θ\w])/g, '\\$1 $2')
+      .replace(/(?<!\\)\b(cos|sin|tan|exp|ln|log|arctan|arcsin|arccos)\s+([θ\w])/g, '\\$1 $2')
       .replace(/(\bP\s*\(\s*)([A-Z][a-z]{2,})(\s*\))/g, '$1\\mathrm{$2}$3')
       .replace(/(?:\\sqrt|(?<!\\)\bsqrt)\s*\(([^()]+)\)/gi, '\\sqrt{$1}')
       .replace(/√\s*\(([^()]+)\)/g, '\\sqrt{$1}')
@@ -35872,7 +36003,7 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     const leftCount = (s.match(/\\left(?![a-zA-Z])/g) || []).length;
     const rightCount = (s.match(/\\right(?![a-zA-Z])/g) || []).length;
     if (leftCount !== rightCount) {
-      s = s.replace(/\\left\s*([([{|])/g, '$1').replace(/\\right\s*([)\]}|])/g, '$1').replace(/\\(?:left|right)\b\s*\.?/g, '');
+      s = s.replace(/\\left\s*([([{|])/g, '$1').replace(/\\right\s*([)\]}|])/g, '$1').replace(/\\(?:left|right)(?![a-zA-Z])\s*\.?/g, '');
     }
     return s.replace(/\s+/g, ' ').trim();
   }
@@ -35937,90 +36068,130 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     if (!s) return '';
 
     const preserveFrac = Boolean(options && options.preserveFrac);
+    const hasAlignEnv = /\\begin\s*\{(?:aligned|align\*?|gather\*?|split|eqnarray\*?|cases|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix)\}/i.test(s);
 
     s = s
       .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, (_, eq) => eq.trim())
       .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (_, eq) => eq.trim())
       .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, (_, eq) => eq.trim())
-      .replace(/(^|[^\w\\])\$([^$\n]{1,220})\$(?!\d)/g, '$1$2');
+      .replace(/(^|[^\w\\])\$([^$\n]{1,360})\$(?!\d)/g, '$1$2');
 
+    if (!(preserveFrac && hasAlignEnv)) {
+      s = s
+        .replace(/\\+left\s*\\?([([{|])/g, '$1')
+        .replace(/\\+right\s*\\?([)\]}|])/g, '$1')
+        .replace(/\\+(?:left|right)(?![a-zA-Z])\s*\.?/g, '');
+    }
     s = s
-      .replace(/\\+left\s*\\?([([{|])/g, '$1')
-      .replace(/\\+right\s*\\?([)\]}|])/g, '$1')
-      .replace(/\\+(?:left|right)\b\s*\.?/g, '')
       .replace(/\\([%&#_])/g, '$1')
-      .replace(/\\(?:quad|qquad)\b|\\(?:limits|nolimits|displaystyle|textstyle)(?![a-zA-Z])|\\[,;:]/g, ' ')
+      .replace(/\\(?:quad|qquad)(?![a-zA-Z])|\\(?:limits|nolimits|displaystyle|textstyle)(?![a-zA-Z])|\\[,;:]/g, ' ')
       .replace(/\\!/g, '');
 
     if (!preserveFrac) {
-      s = replaceZ21Latex2ArgClient(s, /\\(?:dfrac|tfrac|cfrac|frac)(?![a-zA-Z])/g, (num, den) => `(${num} / ${den})`);
+      if (hasAlignEnv) {
+        s = s
+          .replace(/\\begin\s*\{(?:aligned|align\*?|gather\*?|split|eqnarray\*?|cases|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix|equation\*?)\}/gi, '')
+          .replace(/\\end\s*\{(?:aligned|align\*?|gather\*?|split|eqnarray\*?|cases|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix|equation\*?)\}/gi, '')
+          .replace(/\s*\\\\\s*/g, '; ')
+          .replace(/\s*&\s*/g, ' ');
+      }
+      s = replaceZ21Latex2ArgClient(s, /\\(?:dfrac|tfrac|cfrac|frac)(?![a-zA-Z])/g, (num, den) => `(${wrapZ21FractionOperandClient(num)} / ${wrapZ21FractionOperandClient(den)})`);
     } else {
       s = s
-      .replace(/\\{2,}(?=(?:left|right|frac|dfrac|tfrac|cfrac|sqrt|ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max|alpha|beta|gamma|delta|Delta|epsilon|varepsilon|zeta|eta|theta|kappa|lambda|mu|nu|xi|pi|rho|sigma|Sigma|tau|phi|Phi|psi|Psi|omega|Omega|times|div|cdot|pm|approx|neq|ne|equiv|propto|leq|le|geq|ge|infty|sum|int|prod|partial|nabla|in|forall|exists|rightarrow|Rightarrow|implies|iff|leftrightarrow|Leftrightarrow|to|mathbb|mathrm|mathbf|mathit|operatorname|text|hat|bar|tilde|vec|binom|boxed|quad|qquad|circ|%))/g, '\\')
-      .replace(/\\(?:dfrac|tfrac|cfrac)\b/g, '\\frac');
+      .replace(/\\{3,}(?=(?:left|right|frac|dfrac|tfrac|cfrac|sqrt|ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max|alpha|beta|gamma|Gamma|delta|Delta|epsilon|varepsilon|zeta|eta|theta|Theta|kappa|lambda|Lambda|mu|nu|xi|Xi|pi|Pi|rho|sigma|Sigma|tau|Upsilon|phi|Phi|psi|Psi|omega|Omega|times|div|cdot|pm|mp|approx|neq|ne|equiv|propto|leq|le|geq|ge|ll|gg|mid|infty|sum|int|prod|partial|nabla|in|notin|forall|exists|rightarrow|Rightarrow|implies|iff|leftrightarrow|Leftrightarrow|leftarrow|Leftarrow|uparrow|downarrow|updownarrow|to|mathbb|mathrm|mathbf|mathit|operatorname|text|hat|bar|tilde|vec|binom|boxed|quad|qquad|circ|begin|end|%))/g, '\\')
+      .replace(/\\(?:dfrac|tfrac|cfrac)(?![a-zA-Z])/g, '\\frac');
     }
 
-    s = replaceZ21Latex1ArgClient(s, /\\sqrt(?![a-zA-Z])/g, (inner) => `√(${inner})`);
-    s = replaceZ21Latex1ArgClient(s, /\\mathbb(?![a-zA-Z])/g, (inner) => ({ R: 'ℝ', N: 'ℕ', Z: 'ℤ' }[inner.trim()] || inner));
-    s = replaceZ21Latex1ArgClient(s, /\\(?:vec|hat|bar|tilde|text|mathrm|mathbf|mathit|operatorname|boxed)(?![a-zA-Z])/g, (inner) => inner);
+    if (!preserveFrac || !hasAlignEnv) {
+      s = replaceZ21Latex1ArgClient(s, /\\sqrt(?![a-zA-Z])/g, (inner) => `√(${inner})`);
+    }
+    s = replaceZ21Latex1ArgClient(s, /\\mathbb(?![a-zA-Z])/g, (inner) => ({ R: 'ℝ', N: 'ℕ', Z: 'ℤ', Q: 'ℚ', C: 'ℂ' }[inner.trim()] || inner));
+    if (!preserveFrac) {
+      s = replaceZ21Latex1ArgClient(s, /\\(?:vec|hat|bar|tilde|text|mathrm|mathbf|mathit|operatorname|boxed)(?![a-zA-Z])/g, (inner) => inner);
+    }
     s = s
       .replace(/\^\{\s*\\circ\s*\}\s*([CFcf])\b/g, '°$1')
       .replace(/\^\\circ\s*([CFcf])\b/g, '°$1')
       .replace(/\^\{\s*\\circ\s*\}/g, '°')
-      .replace(/\^\\circ\b/g, '°')
-      .replace(/\\circ\b/g, '°')
-      .replace(/\\theta\b/g, 'θ')
-      .replace(/\\alpha\b/g, 'α')
-      .replace(/\\beta\b/g, 'β')
-      .replace(/\\gamma\b/g, 'γ')
-      .replace(/\\delta\b/g, 'δ')
-      .replace(/\\Delta\b/g, 'Δ')
-      .replace(/\\pi\b/g, 'π')
-      .replace(/\\sigma\b/g, 'σ')
-      .replace(/\\Sigma\b/g, 'Σ')
-      .replace(/\\lambda\b/g, 'λ')
-      .replace(/\\mu\b/g, 'μ')
-      .replace(/\\omega\b/g, 'ω')
-      .replace(/\\Omega\b/g, 'Ω')
-      .replace(/\\tau\b/g, 'τ')
-      .replace(/\\rho\b/g, 'ρ')
-      .replace(/\\phi\b/g, 'φ')
-      .replace(/\\Phi\b/g, 'Φ')
-      .replace(/\\psi\b/g, 'ψ')
-      .replace(/\\Psi\b/g, 'Ψ')
-      .replace(/\\eta\b/g, 'η')
-      .replace(/\\zeta\b/g, 'ζ')
-      .replace(/\\xi\b/g, 'ξ')
-      .replace(/\\nu\b/g, 'ν')
-      .replace(/\\kappa\b/g, 'κ')
-      .replace(/\\varepsilon\b/g, 'ε')
-      .replace(/\\epsilon\b/g, 'ε')
-      .replace(/\\times\b/g, '×')
-      .replace(/\\div\b/g, '÷')
-      .replace(/\\cdot\b/g, '·')
-      .replace(/\\cdots\b/g, '⋯')
-      .replace(/\\ldots\b/g, '…')
-      .replace(/\\approx\b/g, '≈')
-      .replace(/\\neq?\b/g, '≠')
-      .replace(/\\equiv\b/g, '≡')
-      .replace(/\\propto\b/g, '∝')
-      .replace(/\\leq?\b/g, '≤')
-      .replace(/\\geq?\b/g, '≥')
-      .replace(/\\pm\b/g, '±')
-      .replace(/\\infty\b/g, '∞')
-      .replace(/\\sum\b/g, '∑')
-      .replace(/\\int\b/g, '∫')
-      .replace(/\\prod\b/g, '∏')
-      .replace(/\\partial\b/g, '∂')
-      .replace(/\\nabla\b/g, '∇')
-      .replace(/\\in\b/g, '∈')
-      .replace(/\\forall\b/g, '∀')
-      .replace(/\\exists\b/g, '∃')
-      .replace(/\\(?:rightarrow|to)\b/g, '→')
-      .replace(/\\(?:Rightarrow|implies)\b/g, '⇒')
-      .replace(/\\leftrightarrow\b/g, '↔')
-      .replace(/\\(?:Leftrightarrow|iff)\b/g, '⇔')
-      .replace(/\\(cos|sin|tan|log|ln|exp|lim)\b/g, '$1');
+      .replace(/\^\\circ(?![a-zA-Z])/g, '°')
+      .replace(/\\(?:circ|degree)(?![a-zA-Z])/g, '°')
+      .replace(/\\theta(?![a-zA-Z])/g, 'θ')
+      .replace(/\\Theta(?![a-zA-Z])/g, 'Θ')
+      .replace(/\\alpha(?![a-zA-Z])/g, 'α')
+      .replace(/\\beta(?![a-zA-Z])/g, 'β')
+      .replace(/\\gamma(?![a-zA-Z])/g, 'γ')
+      .replace(/\\Gamma(?![a-zA-Z])/g, 'Γ')
+      .replace(/\\delta(?![a-zA-Z])/g, 'δ')
+      .replace(/\\Delta(?![a-zA-Z])/g, 'Δ')
+      .replace(/\\pi(?![a-zA-Z])/g, 'π')
+      .replace(/\\Pi(?![a-zA-Z])/g, 'Π')
+      .replace(/\\sigma(?![a-zA-Z])/g, 'σ')
+      .replace(/\\Sigma(?![a-zA-Z])/g, 'Σ')
+      .replace(/\\lambda(?![a-zA-Z])/g, 'λ')
+      .replace(/\\Lambda(?![a-zA-Z])/g, 'Λ')
+      .replace(/\\mu(?![a-zA-Z])/g, 'μ')
+      .replace(/\\omega(?![a-zA-Z])/g, 'ω')
+      .replace(/\\Omega(?![a-zA-Z])/g, 'Ω')
+      .replace(/\\tau(?![a-zA-Z])/g, 'τ')
+      .replace(/\\rho(?![a-zA-Z])/g, 'ρ')
+      .replace(/\\phi(?![a-zA-Z])/g, 'φ')
+      .replace(/\\Phi(?![a-zA-Z])/g, 'Φ')
+      .replace(/\\psi(?![a-zA-Z])/g, 'ψ')
+      .replace(/\\Psi(?![a-zA-Z])/g, 'Ψ')
+      .replace(/\\eta(?![a-zA-Z])/g, 'η')
+      .replace(/\\zeta(?![a-zA-Z])/g, 'ζ')
+      .replace(/\\xi(?![a-zA-Z])/g, 'ξ')
+      .replace(/\\Xi(?![a-zA-Z])/g, 'Ξ')
+      .replace(/\\nu(?![a-zA-Z])/g, 'ν')
+      .replace(/\\kappa(?![a-zA-Z])/g, 'κ')
+      .replace(/\\varepsilon(?![a-zA-Z])/g, 'ε')
+      .replace(/\\epsilon(?![a-zA-Z])/g, 'ε')
+      .replace(/\\Upsilon(?![a-zA-Z])/g, 'Υ')
+      .replace(/\\times(?![a-zA-Z])/g, '×')
+      .replace(/\\div(?![a-zA-Z])/g, '÷')
+      .replace(/\\cdot(?![a-zA-Z])/g, '·')
+      .replace(/\\cdots(?![a-zA-Z])/g, '⋯')
+      .replace(/\\ldots(?![a-zA-Z])/g, '…')
+      .replace(/\\approx(?![a-zA-Z])/g, '≈')
+      .replace(/\\simeq(?![a-zA-Z])/g, '≃')
+      .replace(/\\cong(?![a-zA-Z])/g, '≅')
+      .replace(/\\sim(?![a-zA-Z])/g, '~')
+      .replace(/\\neq?(?![a-zA-Z])/g, '≠')
+      .replace(/\\equiv(?![a-zA-Z])/g, '≡')
+      .replace(/\\propto(?![a-zA-Z])/g, '∝')
+      .replace(/\\ll(?![a-zA-Z])/g, '≪')
+      .replace(/\\gg(?![a-zA-Z])/g, '≫')
+      .replace(/\\leq?(?![a-zA-Z])/g, '≤')
+      .replace(/\\geq?(?![a-zA-Z])/g, '≥')
+      .replace(/\\pm(?![a-zA-Z])/g, '±')
+      .replace(/\\mp(?![a-zA-Z])/g, '∓')
+      .replace(/\\infty(?![a-zA-Z])/g, '∞')
+      .replace(/\\sum(?![a-zA-Z])/g, '∑')
+      .replace(/\\int(?![a-zA-Z])/g, '∫')
+      .replace(/\\prod(?![a-zA-Z])/g, '∏')
+      .replace(/\\partial(?![a-zA-Z])/g, '∂')
+      .replace(/\\nabla(?![a-zA-Z])/g, '∇')
+      .replace(/\\notin(?![a-zA-Z])/g, '∉')
+      .replace(/\\in(?![a-zA-Z])/g, '∈')
+      .replace(/\\subseteq(?![a-zA-Z])/g, '⊆')
+      .replace(/\\subset(?![a-zA-Z])/g, '⊂')
+      .replace(/\\cup(?![a-zA-Z])/g, '∪')
+      .replace(/\\cap(?![a-zA-Z])/g, '∩')
+      .replace(/\\perp(?![a-zA-Z])/g, '⊥')
+      .replace(/\\parallel(?![a-zA-Z])/g, '∥')
+      .replace(/\\mid(?![a-zA-Z])/g, '|')
+      .replace(/\\forall(?![a-zA-Z])/g, '∀')
+      .replace(/\\exists(?![a-zA-Z])/g, '∃')
+      .replace(/\\(?:long)?(?:rightarrow|to)(?![a-zA-Z])/g, '→')
+      .replace(/\\leftarrow(?![a-zA-Z])/g, '←')
+      .replace(/\\(?:Rightarrow|implies)(?![a-zA-Z])/g, '⇒')
+      .replace(/\\Leftarrow(?![a-zA-Z])/g, '⇐')
+      .replace(/\\(?:long)?leftrightarrow(?![a-zA-Z])/g, '↔')
+      .replace(/\\(?:Leftrightarrow|iff)(?![a-zA-Z])/g, '⇔')
+      .replace(/\\downarrow(?![a-zA-Z])/g, '↓')
+      .replace(/\\uparrow(?![a-zA-Z])/g, '↑')
+      .replace(/\\updownarrow(?![a-zA-Z])/g, '↕')
+      .replace(/\\(cos|sin|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|log|ln|exp|lim|min|max)(?![a-zA-Z])/g, '$1');
 
     s = s
       .replace(/(\b(?:Suhu|Temperatur|Temp|Temperature|Feels\s*Like|Terasa|Dew\s*Point|Titik\s*Embun)\s*[:=]?\s*-?\d+(?:[.,]\d+)?)\s*°?\s*([CF])(?![A-Za-z0-9_])/gi, (_, pre, u) => `${pre}°${u.toUpperCase()}`)
@@ -36028,18 +36199,15 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/(\b(?:suhu|temperatur|temp|temperature|celsius|fahrenheit|dew\s*point|wind\s*chill|heat\s*index)[^\n]{0,30}?)\(\s*([CF])\s*\)/gi, (_, pre, u) => `${pre}(°${u.toUpperCase()})`)
       .replace(/\(\s*°\s*([CF])\s*\)/gi, (_, u) => `(°${u.toUpperCase()})`);
 
+    s = normalizeZ21VarSubscriptsClient(s);
     s = s
       .replace(/\^\{([0-9+-]+)\}/g, (_, d) => d.split('').map(c => Z21_SUP_MAP_CLIENT[c] || c).join(''))
       .replace(/\^\{\s*([^{}]+?)\s*\}/g, '^{$1}')
       .replace(/\^([0-9])(?![0-9])/g, (_, d) => Z21_SUP_MAP_CLIENT[d] || d)
       .replace(/_([0-9]+)/g, (_, d) => d.split('').map(c => Z21_SUB_MAP_CLIENT[c] || c).join(''))
-      .replace(/_\{\s*([0-9a-zA-Z+-]+)\s*\}/g, (_, d) => {
+      .replace(/_\{\s*([0-9a-zA-Z+-↓↑]+)\s*\}/g, (_, d) => {
         const mapped = d.split('').map(c => Z21_SUB_MAP_CLIENT[c] || Z21_SUB_MAP_CLIENT[c.toLowerCase()] || '').join('');
         return (d.length === 1 || (d.length <= 2 && /^[0-9+-]+$/.test(d))) && mapped.length === d.length ? mapped : `_{${d}}`;
-      })
-      .replace(/_([a-zA-Z])(?![a-zA-Z0-9])/g, (_, d) => {
-        const m = Z21_SUB_MAP_CLIENT[d] || Z21_SUB_MAP_CLIENT[d.toLowerCase()];
-        return m ? m : `_{${d}}`;
       });
 
     s = s
@@ -36058,14 +36226,27 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     if (isZ21VariableLegendLineClient(t).isLegend) return false;
     const cand = t.replace(/^(?:\(\d+\)|\d+\.)\s+/, '').trim();
     if (cand !== t && isZ21VariableLegendLineClient(cand).isLegend) return false;
-    if (/^(?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}:/i.test(cand)) return true;
-    if (/\\(?:frac|dfrac|tfrac|cfrac|sqrt|sum|int|prod|lim)(?![a-zA-Z])/.test(cand) && cand.length <= 260) {
-      const hasProseRun = /\b[a-z]{3,}\s+[a-z]{3,}\s+[a-z]{3,}\s+[a-z]{3,}\s+[a-z]{3,}\b/.test(cand);
-      if (!hasProseRun || /[=≤≥≈≠→⇒]/.test(cand)) return true;
+    if (/^\\begin\s*\{(?:aligned|align\*?|gather\*?|split|eqnarray\*?|cases|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|equation\*?)\}/i.test(cand) || /\\begin\s*\{(?:aligned|align\*?|gather\*?|split|eqnarray\*?|cases)\}[\s\S]{3,1100}\\end\s*\{/i.test(cand)) {
+      return cand.length <= 1200;
     }
-    if (/^[A-Za-z0-9\u0370-\u03FF][A-Za-z0-9\u0370-\u03FF_₀-₉⁰-⁹¹²³ₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓₛₚ,{}\s()+\-*/^]{0,28}\s*=\s*.+/.test(cand) &&
-        /(?:\s[+\-×÷*/=]\s|[+×÷^≤≥≈≠]|[⁰-⁹¹²³₀-₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓθΔπγ]|\b(?:cos|sin|tan|log|ln|exp|sqrt|limit)\s*\(|\^\{|_\{|\d+\s*%)/i.test(cand)) {
-      return cand.length <= 260;
+    if (/^(?:dengan|untuk|dimana|di\s+mana|substitusi|misal|misalkan|karena|sehingga|maka|jika|apabila|bila|namun|tetapi|sedangkan|yaitu|yakni|oleh\s+karena|nilai|hasil|perubahan|setiap)\s+[A-Za-z0-9\\]/i.test(cand)) {
+      return false;
+    }
+    if (/:$/.test(cand) && /[=<>≈≠≤≥]/.test(cand)) return false;
+    const lblMatch = cand.match(/^((?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}):\s*(.+)$/i);
+    if (lblMatch) {
+      const lblText = lblMatch[1].trim();
+      const rhsText = lblMatch[2].trim();
+      if (/^(?:Formula|Rumus|Persamaan)\s+(?:ini|tersebut|di\s+atas)\b/i.test(lblText) || hasZ21NarrativeProseClient(rhsText, 4)) return false;
+      return Boolean(/[=≤≥≈≠→⇒×÷^]|\\(?:frac|dfrac|tfrac|cfrac|sqrt|sum|int|prod|lim|begin)(?![a-zA-Z])/.test(rhsText));
+    }
+    if (hasZ21NarrativeProseClient(cand, 4)) return false;
+    if (/\\(?:frac|dfrac|tfrac|cfrac|sqrt|sum|int|prod|lim)(?![a-zA-Z])/.test(cand) && cand.length <= 420) {
+      return true;
+    }
+    if (/^(?:\\(?:alpha|beta|gamma|Gamma|delta|Delta|epsilon|theta|lambda|mu|pi|rho|sigma|Sigma|phi|psi|omega|Omega|mathbb|mathrm|text)(?:_[A-Za-z0-9{}]+|\^\{?[^{}\s]+\}?)*|[A-Za-z0-9\u0370-\u03FF])[A-Za-z0-9\u0370-\u03FF\\_{}₀-₉⁰-⁹¹²³ₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓₛₚ,|()+\-*/^\s]{0,36}\s*=\s*.+/.test(cand) &&
+        /(?:\s[+\-×÷*/=]\s|[+×÷^≤≥≈≠]|\\(?:frac|dfrac|tfrac|sqrt|sum|int|prod|ln|log|sin|cos|tan|exp|arctan|cdot|times|alpha|beta|gamma|rho|sigma)|[⁰-⁹¹²³₀-₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓθΔπγαρΓσΣμ]|(?<![A-Za-z])(?:cos|sin|tan|arctan|log|ln|exp|sqrt|limit)\s*\(|\^\{|_\{|\d+\s*%)/i.test(cand)) {
+      return cand.length <= 420;
     }
     return false;
   }
@@ -36087,7 +36268,7 @@ ATURAN MUTLAK EKSEKUSI AGEN:
   }
 
   function formatZ21PreviewHtmlContent(cleanedDocBody) {
-    const rawLines = String(cleanedDocBody || '').split(/\r?\n/);
+    const rawLines = coalesceZ21MathBlocksClient(cleanedDocBody || '');
     const transformed = [];
     const previewMathTokens = [];
     const hasKatex = typeof window !== 'undefined' && window.katex && typeof window.katex.renderToString === 'function';
@@ -36105,9 +36286,9 @@ ATURAN MUTLAK EKSEKUSI AGEN:
         transformed.push('');
         continue;
       }
-      // Jangan ubah baris tabel Markdown
+      // Jangan ubah struktur kolom tabel Markdown, namun rapikan subskrip/superskrip & simbol ilmiah
       if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
-        transformed.push(normalizeZ21ScientificTextClient(rawLine));
+        transformed.push(renderZ21MathSupSubHtml(normalizeZ21ScientificTextClient(rawLine)));
         continue;
       }
       // Promosikan heading bab bernomor ("1. Pendahuluan & Konteks Data") menjadi ## Heading2
@@ -36213,15 +36394,24 @@ ATURAN MUTLAK EKSEKUSI AGEN:
           title: argSpec.title ? stripZ21InlineMd(argSpec.title) : normFilename.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' '),
           subtitle: argSpec.subtitle ? stripZ21InlineMd(argSpec.subtitle) : '',
           sections: Array.isArray(argSpec.sections)
-            ? argSpec.sections.map(s => (s && typeof s === 'object') ? ({
-                heading: s.heading ? stripZ21InlineMd(s.heading) : 'Bagian',
-                content: s.content ? String(s.content).split(/\r?\n/).map(ln => normalizeZ21ScientificTextClient(ln, { preserveFrac: isZ21FormulaLineClient(ln) }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1')).join('\n') : '',
-                bullets: Array.isArray(s.bullets) ? s.bullets.map(b => {
-                  const rb = stripZ21InlineMd(b);
-                  return isZ21FormulaLineClient(rb) ? normalizeZ21ScientificTextClient(rb, { preserveFrac: true }) : rb;
-                }).filter(Boolean) : [],
-                ...(s.table && typeof s.table === 'object' ? { table: s.table } : {})
-              }) : s).filter(Boolean)
+            ? argSpec.sections.map(s => {
+                if (!s || typeof s !== 'object') return s;
+                const coalesced = s.content ? coalesceZ21MathBlocksClient(s.content) : [];
+                const tblList = [];
+                if (s.table && typeof s.table === 'object') tblList.push(s.table);
+                else if ((s.headers || s.columns) && (s.rows || s.data)) tblList.push({ title: s.heading || '', headers: s.headers || s.columns, rows: s.rows || s.data });
+                if (Array.isArray(s.tables)) s.tables.forEach(t => { if (t && typeof t === 'object') tblList.push(t); });
+                return {
+                  heading: s.heading ? stripZ21InlineMd(s.heading) : 'Bagian',
+                  content: coalesced.map(ln => normalizeZ21ScientificTextClient(ln, { preserveFrac: isZ21FormulaLineClient(ln) }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1')).join('\n'),
+                  bullets: Array.isArray(s.bullets) ? s.bullets.map(b => {
+                    const rb = stripZ21InlineMd(b);
+                    return isZ21FormulaLineClient(rb) ? normalizeZ21ScientificTextClient(rb, { preserveFrac: true }) : rb;
+                  }).filter(Boolean) : [],
+                  ...(tblList[0] ? { table: tblList[0] } : {}),
+                  ...(tblList.length > 0 ? { tables: tblList } : {})
+                };
+              }).filter(Boolean)
             : [],
           tables: Array.isArray(argSpec.tables) ? argSpec.tables : [],
           sheets: Array.isArray(argSpec.sheets) ? argSpec.sheets : undefined,
@@ -36298,23 +36488,26 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     const extFromName = (detectedName.match(/\.(pdf|docx|xlsx|csv)$/i)?.[1] || '').toLowerCase();
     const format = detectRequestedZ21DocFormat(promptText, extFromName || 'pdf') || 'pdf';
 
-    const lines = raw.split(/\r?\n/);
+    const lines = coalesceZ21MathBlocksClient(raw);
     let title = '';
     let subtitle = '';
     const sections = [];
     const tables = [];
-    let currentSection = { heading: 'Ringkasan Utama', contentLines: [], bullets: [] };
+    let currentSection = { heading: 'Ringkasan Utama', contentLines: [], bullets: [], table: undefined, tables: [] };
 
     const flushCurrentSection = () => {
       const contentStr = currentSection.contentLines.join('\n').trim();
-      if (contentStr || currentSection.bullets.length > 0) {
+      const hasTbls = Boolean(currentSection.table || (Array.isArray(currentSection.tables) && currentSection.tables.length > 0));
+      if (contentStr || currentSection.bullets.length > 0 || hasTbls) {
         sections.push({
           heading: currentSection.heading || 'Bagian',
           content: contentStr,
-          bullets: [...currentSection.bullets]
+          bullets: [...currentSection.bullets],
+          ...(currentSection.table ? { table: currentSection.table } : {}),
+          ...(Array.isArray(currentSection.tables) && currentSection.tables.length > 0 ? { tables: [...currentSection.tables] } : {})
         });
       }
-      currentSection = { heading: '', contentLines: [], bullets: [] };
+      currentSection = { heading: '', contentLines: [], bullets: [], table: undefined, tables: [] };
     };
 
     let idx = 0;
@@ -36356,7 +36549,7 @@ ATURAN MUTLAK EKSEKUSI AGEN:
         idx++;
         continue;
       }
-      // Deteksi tabel Markdown: | Kolom 1 | Kolom 2 |
+      // Deteksi tabel Markdown: tempelkan langsung ke bab aktif agar urutannya tidak melompat ke akhir PDF
       if (line.startsWith('|') && line.endsWith('|') && (idx + 1 < lines.length) && /^\|[\s:-]+\|/.test(lines[idx + 1].trim())) {
         const headers = line.slice(1, -1).split('|').map(stripZ21InlineMd);
         idx += 2;
@@ -36367,11 +36560,17 @@ ATURAN MUTLAK EKSEKUSI AGEN:
           idx++;
         }
         if (headers.length > 0 && rows.length > 0) {
-          tables.push({
+          const tblObj = {
             title: currentSection.heading || `Tabel ${tables.length + 1}`,
             headers,
             rows
-          });
+          };
+          if (currentSection.heading && currentSection.heading !== 'Ringkasan Utama') {
+            if (!currentSection.table) currentSection.table = tblObj;
+            currentSection.tables.push(tblObj);
+          } else {
+            tables.push(tblObj);
+          }
         }
         continue;
       }
@@ -39150,7 +39349,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             },
             sections: {
               type: 'array',
-              description: 'Opsional (untuk PDF/Word): Daftar bab [{ heading, content, bullets, table }]. Tulis persamaan matematika dalam format LaTeX baku (\\frac, \\ln, \\sqrt, T_{dp}, c_{1}, V^{0.16}, \\%).',
+              description: 'Opsional (untuk PDF/Word): Daftar bab [{ heading, content, bullets, table }]. Pisahkan teks naratif dari persamaan LaTeX (\\frac, \\ln, \\sqrt, \\begin{aligned}...\\end{aligned}, T_{dp}, c_{1}, V^{0.16}); untuk bab bertajuk tabel wajib sertakan table: { headers, rows }.',
               items: { type: 'object' }
             },
             tables: {
@@ -41512,7 +41711,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     for (const sec of (Array.isArray(spec.sections) ? spec.sections : [])) {
       if (sec.heading && sec.heading !== spec.title) out.push(`## ${stripZ21InlineMd(sec.heading)}`);
       if (sec.content) {
-        const preservedLines = String(sec.content).split(/\r?\n/).map(ln =>
+        const preservedLines = coalesceZ21MathBlocksClient(sec.content).map(ln =>
           normalizeZ21ScientificTextClient(ln, { preserveFrac: isZ21FormulaLineClient(ln) })
         ).join('\n');
         out.push(preservedLines);
@@ -41523,8 +41722,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           return `- ${isZ21FormulaLineClient(rb) ? normalizeZ21ScientificTextClient(rb, { preserveFrac: true }) : rb}`;
         }).join('\n'));
       }
-      if (sec.table && (Array.isArray(sec.table.headers) || Array.isArray(sec.table.rows))) {
-        const mdTbl = renderMdTbl(sec.table);
+      const secTbls = Array.isArray(sec.tables) && sec.tables.length > 0
+        ? sec.tables
+        : ((sec.table && (Array.isArray(sec.table.headers) || Array.isArray(sec.table.rows))) ? [sec.table] : []);
+      for (const st of secTbls) {
+        const mdTbl = renderMdTbl(st);
         if (mdTbl) out.push(mdTbl);
       }
     }
@@ -67727,7 +67929,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://pvc-fragrances-excited-organizing.trycloudflare.com',
+    activeTunnelUrl: 'https://faster-rob-insights-terrorism.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -74074,6 +74276,7 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     normalizeZ21ScientificTextClient,
     toZ21LatexMathClient,
     isZ21VariableLegendLineClient,
+    isZ21FormulaLineClient,
     parseZ21LatexAst,
     ZozCanvasMathRenderer,
     compileZ21SpecToRichPdfBlob,
