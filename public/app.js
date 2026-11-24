@@ -22228,7 +22228,8 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     function getTtsEndpointCandidates() {
       const host = (typeof location !== 'undefined' && location.hostname) ? String(location.hostname).toLowerCase() : '';
       const isLocalOrigin = host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.includes('trycloudflare.com');
-      if (isLocalOrigin || IS_VERCEL) {
+      const isVercelHost = typeof IS_VERCEL !== 'undefined' && Boolean(IS_VERCEL);
+      if (isLocalOrigin || isVercelHost) {
         return ['/api/tts'];
       }
       const list = [];
@@ -22421,8 +22422,10 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
             continue;
           }
           const blob = await resp.blob();
-          if (!blob || blob.size < 128) {
-            lastErr = new Error(`${ttsUrl}: audio stream kosong/terpotong (${blob?.size || 0}B)`);
+          const blobType = String(blob?.type || '').toLowerCase();
+          const isHtmlOrJsonBlob = blobType.includes('text/html') || blobType.includes('application/json');
+          if (!blob || blob.size === 0 || isHtmlOrJsonBlob) {
+            lastErr = new Error(`${ttsUrl}: audio stream kosong/bukan audio (${blob?.size || 0}B, ${blobType || respCt})`);
             continue;
           }
           preferredTtsEndpoint = ttsUrl;

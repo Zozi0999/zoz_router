@@ -196,6 +196,10 @@ module.exports = async function handler(req, res) {
     pathname.startsWith('/api/terminal/') ||
     pathname.startsWith('/api/z21/') ||
     pathname === '/api/tools/z21-document-builder' ||
+    pathname === '/api/tts' ||
+    pathname === '/tts' ||
+    pathname === '/api/tts/voices' ||
+    pathname === '/tts/voices' ||
     pathname === '/api/workspace' ||
     pathname.startsWith('/api/workspace/');
 
@@ -238,6 +242,8 @@ module.exports = async function handler(req, res) {
     pathname === '/api/ollama/chat' ||
     pathname === '/api/openrouter/chat' ||
     pathname === '/api/chat' ||
+    pathname === '/api/tts' ||
+    pathname === '/tts' ||
     pathname.includes('/stream');
   if (isStreamingPath) {
     res.setHeader('X-Accel-Buffering', 'no');
@@ -272,6 +278,11 @@ module.exports = async function handler(req, res) {
     console.error(`[Vercel Gateway Timeout] ${rawUrl} melampaui batas watchdog ${WATCHDOG_MS}ms (maxDuration terkonfigurasi: ${configuredMaxDuration}s)`);
     if (res.headersSent && isStreamingPath) {
       const resCtype = String(res.getHeader('content-type') || '').toLowerCase();
+      if (resCtype.includes('audio/')) {
+        try { res.end(); } catch (_) {}
+        try { if (typeof res.emit === 'function') res.emit('close'); } catch (_) {}
+        return;
+      }
       const isSseFrame = !resCtype.includes('application/x-ndjson') && (
         resCtype.includes('text/event-stream') ||
         (pathname.includes('openrouter') && !pathname.includes('ollama'))

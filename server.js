@@ -19,6 +19,7 @@ const { StringDecoder } = require('string_decoder');
 const { spawn, execSync, execFile } = require('child_process');
 const textSafety = require('./text-safety');
 const { createImageGroundingService } = require('./image-grounding');
+const edgeTtsNative = require('./edge-tts-native');
 
 // Loader .env minimal diposisikan paling awal sebelum modul lain (whatsapp-gateway, WORKSPACE_ROOT, tunnel sync) membaca process.env
 try {
@@ -14886,20 +14887,14 @@ async function requestHandler(req, res) {
     }
   }
 
-  // ==================== NEURAL READ ALOUD STREAMING TTS (PYTHON edge-tts -> audio/mpeg) ====================
-  const TTS_VOICES_LIST = [
-    { id: 'id-ID-GadisNeural', label: 'Gadis (Indonesia — Perempuan Natural)', shortLabel: 'Gadis', lang: 'id-ID', gender: 'Female' },
-    { id: 'id-ID-ArdiNeural', label: 'Ardi (Indonesia — Laki-laki Natural)', shortLabel: 'Ardi', lang: 'id-ID', gender: 'Male' },
-    { id: 'en-US-AriaNeural', label: 'Aria (English — Female Natural)', shortLabel: 'Aria', lang: 'en-US', gender: 'Female' },
-    { id: 'en-US-GuyNeural', label: 'Guy (English — Male Natural)', shortLabel: 'Guy', lang: 'en-US', gender: 'Male' }
-  ];
-  const TTS_ALLOWED_VOICE_IDS = new Set(TTS_VOICES_LIST.map(v => v.id));
+  // ==================== NEURAL READ ALOUD STREAMING TTS (Native Edge WS + Python edge-tts) ====================
+  const TTS_VOICES_LIST = edgeTtsNative.TTS_VOICES_LIST;
 
   if ((pathname === '/tts/voices' || pathname === '/api/tts/voices') && method === 'GET') {
     return sendJSON(res, 200, {
       success: true,
-      engine: 'edge-tts',
-      defaultVoice: 'id-ID-GadisNeural',
+      engine: IS_VERCEL_ENV ? 'edge-tts-native' : 'edge-tts-hybrid',
+      defaultVoice: edgeTtsNative.DEFAULT_VOICE,
       voices: TTS_VOICES_LIST
     });
   }
@@ -14908,28 +14903,91 @@ async function requestHandler(req, res) {
     const body = await safeParseBody(req);
     if (!body) return;
     const rawText = typeof body.text === 'string' ? body.text : String(body.text || '');
-    const safeVoice = TTS_ALLOWED_VOICE_IDS.has(String(body.voice || '').trim())
-      ? String(body.voice).trim()
-      : 'id-ID-GadisNeural';
-    const rawRate = String(body.rate || '+0%').trim();
-    const safeRate = /^[+-](?:[0-4]?\d|50)%$/.test(rawRate) ? rawRate : '+0%';
+    const safeVoice = edgeTtsNative.normalizeVoice(body.voice);
+    const safeRate = edgeTtsNative.normalizeRate(body.rate);
 
-    // Pra-pembersihan cepat di Node untuk validasi teks tidak kosong (pembersihan penuh juga dijalankan di tts_engine.py)
-    const quickClean = rawText
-      .replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY|TASKS)[\s\S]*?(?:<<<END_ZOZ_(?:FILE|EDIT|MODIFY|TASKS)[^\n>]*>?|$)/gi, ' ')
-      .replace(/```[\s\S]*?```/g, ' ')
-      .replace(/\[\[ZOZ_(?:IMAGE|WEATHER)_DISPLAY:[^\]]+\]\]/gi, ' ')
-      .replace(/https?:\/\/\S+/gi, ' ')
-      .replace(/[*_~`#>|]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (!quickClean) {
+    const cleanedForSpeech = edgeTtsNative.cleanTextForSpeech(rawText);
+    if (!cleanedForSpeech) {
       return sendJSON(res, 400, { success: false, error: 'Teks kosong setelah dibersihkan dari simbol Markdown/kode.' });
     }
 
+    const streamViaNativeEdgeTts = async () => {
+      const abortCtrl = new AbortController();
+      let headersDispatched = false;
+      const onClientAbort = () => {
+        if (!res.writableEnded) {
+          try { abortCtrl.abort('CLIENT_ABORT'); } catch (_) {}
+        }
+      };
+      res.on('close', onClientAbort);
+      req.on('aborted', onClientAbort);
+      try {
+        const result = await edgeTtsNative.streamEdgeTts({
+          text: cleanedForSpeech,
+          voice: safeVoice,
+          rate: safeRate,
+          skipClean: true,
+          signal: abortCtrl.signal,
+          timeoutMs: 42000,
+          onChunk: (chunk) => {
+            if (!chunk || chunk.length === 0 || res.destroyed || res.writableEnded) return;
+            if (!headersDispatched) {
+              headersDispatched = true;
+              res.writeHead(200, {
+                'Content-Type': 'audio/mpeg',
+                'Transfer-Encoding': 'chunked',
+                'Cache-Control': 'no-store',
+                'X-Accel-Buffering': 'no',
+                'X-Content-Type-Options': 'nosniff',
+                'X-TTS-Engine': 'edge-tts-native',
+                'X-TTS-Voice': safeVoice
+              });
+            }
+            try {
+              res.write(chunk);
+            } catch (_) {
+              try { abortCtrl.abort('WRITE_FAILED'); } catch (__) {}
+            }
+          }
+        });
+        if (!headersDispatched) {
+          return sendJSON(res, 502, { success: false, error: 'Stream Edge TTS native selesai tanpa data audio.' });
+        }
+        if (!res.writableEnded) {
+          try { res.end(); } catch (_) {}
+        }
+        return result;
+      } catch (err) {
+        if (err && (err.name === 'AbortError' || abortCtrl.signal.aborted)) {
+          if (!res.writableEnded) try { res.end(); } catch (_) {}
+          return;
+        }
+        if (err && err.code === 'EMPTY_CLEAN_TEXT' && !res.headersSent) {
+          return sendJSON(res, 400, { success: false, error: err.message });
+        }
+        if (!headersDispatched && !res.headersSent) {
+          return sendJSON(res, 502, {
+            success: false,
+            error: 'Gagal menghasilkan audio TTS streaming.',
+            detail: err && err.message ? err.message : String(err)
+          });
+        }
+        if (!res.writableEnded) {
+          try { res.end(); } catch (_) {}
+        }
+      } finally {
+        if (typeof res.off === 'function') res.off('close', onClientAbort);
+        else res.removeListener('close', onClientAbort);
+        if (typeof req.off === 'function') req.off('aborted', onClientAbort);
+        else req.removeListener('aborted', onClientAbort);
+      }
+    };
+
     const ttsScriptPath = path.join(__dirname, 'tts_engine.py');
-    if (!fs.existsSync(ttsScriptPath)) {
-      return sendJSON(res, 503, { success: false, error: 'Modul tts_engine.py tidak ditemukan di server.' });
+    // Di Vercel / Serverless Lambda (tanpa Python edge-tts) atau jika modul Python absen,
+    // gunakan engine WebSocket Node.js zero-dependency langsung agar berjalan 24/7 tanpa laptop.
+    if (IS_VERCEL_ENV || !fs.existsSync(ttsScriptPath)) {
+      return await streamViaNativeEdgeTts();
     }
 
     const pythonCandidates = [];
@@ -14942,11 +15000,19 @@ async function requestHandler(req, res) {
       let activeProc = null;
       let streamTimeout = null;
 
+      const detachAbortListeners = () => {
+        if (typeof res.off === 'function') res.off('close', onClientAbort);
+        else res.removeListener('close', onClientAbort);
+        if (typeof req.off === 'function') req.off('aborted', onClientAbort);
+        else req.removeListener('aborted', onClientAbort);
+      };
+
       const finish = () => {
         if (streamTimeout) {
           clearTimeout(streamTimeout);
           streamTimeout = null;
         }
+        detachAbortListeners();
         if (!settled) {
           settled = true;
           resolve();
@@ -14968,15 +15034,21 @@ async function requestHandler(req, res) {
       res.on('close', onClientAbort);
       req.on('aborted', onClientAbort);
 
+      const fallbackToNative = () => {
+        if (streamTimeout) {
+          clearTimeout(streamTimeout);
+          streamTimeout = null;
+        }
+        detachAbortListeners();
+        if (settled) return;
+        settled = true;
+        streamViaNativeEdgeTts().then(resolve, () => resolve());
+      };
+
       const tryNextPython = () => {
         if (settled || res.writableEnded || res.destroyed) return finish();
         if (candIdx >= pythonCandidates.length) {
-          if (!res.headersSent) {
-            sendJSON(res, 503, { success: false, error: 'Runtime Python edge-tts tidak tersedia di server ini.' });
-          } else if (!res.writableEnded) {
-            try { res.end(); } catch (_) {}
-          }
-          return finish();
+          return fallbackToNative();
         }
 
         const pyExec = pythonCandidates[candIdx++];
@@ -15017,6 +15089,7 @@ async function requestHandler(req, res) {
               'Content-Type': 'audio/mpeg',
               'Transfer-Encoding': 'chunked',
               'Cache-Control': 'no-store',
+              'X-Accel-Buffering': 'no',
               'X-Content-Type-Options': 'nosniff',
               'X-TTS-Engine': 'edge-tts',
               'X-TTS-Voice': safeVoice
@@ -15057,12 +15130,8 @@ async function requestHandler(req, res) {
           if (stderrBuf.includes('ModuleNotFoundError') && candIdx < pythonCandidates.length) {
             return tryNextPython();
           }
-          sendJSON(res, 503, {
-            success: false,
-            error: 'Gagal menghasilkan audio TTS streaming.',
-            detail: stderrBuf.trim().slice(0, 300) || `exit_code=${code}`
-          });
-          finish();
+          // Fallback otomatis ke Pure-JS Edge TTS native jika Python/edge-tts gagal sebelum header terkirim
+          return fallbackToNative();
         });
 
         try {
