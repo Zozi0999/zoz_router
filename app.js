@@ -84,7 +84,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://navy-perfect-exam-thehun.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://pvc-fragrances-excited-organizing.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -5957,6 +5957,14 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
               const sf = sMsg.files.find(x => x && ((df.fileId && x.fileId === df.fileId) || x.name === df.name)) || sMsg.files[fIdx];
               if (sf) {
                 if (!df.fileId && sf.fileId) df.fileId = sf.fileId;
+                if (sf.isZ21Artifact && !df.isZ21Artifact) df.isZ21Artifact = true;
+                if (sf.engine && !df.engine) df.engine = sf.engine;
+                if (sf.z21Spec && !df.z21Spec) df.z21Spec = sf.z21Spec;
+                if (sf.pythonScript && !df.pythonScript) df.pythonScript = sf.pythonScript;
+                if (sf.base64 && !df.base64) {
+                  df.base64 = sf.base64;
+                  df.isBinaryArtifact = true;
+                }
                 const dBody = df.rawContent || df.content || '';
                 const sBody = sf.rawContent || sf.content || '';
                 if (!dBody && sBody) {
@@ -7350,6 +7358,15 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
                         const df = dMsg.files.find(x => x && ((mf.fileId && x.fileId === mf.fileId) || x.name === mf.name)) || dMsg.files[fIdx];
                         if (!df) return;
                         if (!mf.fileId && df.fileId) mf.fileId = df.fileId;
+                        if (df.isZ21Artifact && !mf.isZ21Artifact) { mf.isZ21Artifact = true; repairedImagesInPlace = true; }
+                        if (df.engine && !mf.engine) mf.engine = df.engine;
+                        if (df.z21Spec && !mf.z21Spec) mf.z21Spec = df.z21Spec;
+                        if (df.pythonScript && !mf.pythonScript) mf.pythonScript = df.pythonScript;
+                        if (df.base64 && !mf.base64) {
+                          mf.base64 = df.base64;
+                          mf.isBinaryArtifact = true;
+                          repairedImagesInPlace = true;
+                        }
                         const mBody = mf.rawContent || mf.content || '';
                         const dBody = df.rawContent || df.content || '';
                         if (!mBody && dBody) {
@@ -11915,6 +11932,16 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       if (ch === '\\') {
         const next = s[i + 1] || '';
         if (!next) { i++; continue; }
+        if (next === '\\') {
+          tokens.push({ type: 'cmd', name: '\\\\' });
+          i += 2;
+          continue;
+        }
+        if (next === ' ') {
+          tokens.push({ type: 'cmd', name: '\\ ' });
+          i += 2;
+          continue;
+        }
         if (/[%&#_${},;:!|]/.test(next)) {
           tokens.push({ type: 'cmd', name: '\\' + next });
           i += 2;
@@ -11966,10 +11993,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     '\\leq': '≤', '\\le': '≤', '\\geq': '≥', '\\ge': '≥', '\\infty': '∞',
     '\\partial': '∂', '\\nabla': '∇', '\\in': '∈', '\\notin': '∉',
     '\\forall': '∀', '\\exists': '∃', '\\rightarrow': '→', '\\to': '→',
-    '\\leftarrow': '←', '\\Rightarrow': '⇒', '\\circ': '°',
-    '\\%': '%', '\\&': '&', '\\#': '#', '\\_': '_', '\\{': '{', '\\}': '}', '\\|': '‖'
+    '\\leftarrow': '←', '\\Rightarrow': '⇒', '\\implies': '⇒', '\\leftrightarrow': '↔', '\\Leftrightarrow': '⇔', '\\iff': '⇔', '\\circ': '°',
+    '\\cdots': '⋯', '\\ldots': '…', '\\%': '%', '\\&': '&', '\\#': '#', '\\_': '_', '\\{': '{', '\\}': '}', '\\|': '‖'
   };
-  const Z21_TEX_SPACE_CMDS = { '\\,': 0.16, '\\:': 0.22, '\\;': 0.28, '\\ ': 0.25, '\\quad': 0.85, '\\qquad': 1.7, '\\!': -0.1 };
+  const Z21_TEX_SPACE_CMDS = { '\\,': 0.16, '\\:': 0.22, '\\;': 0.28, '\\ ': 0.25, '\\\\': 0.9, '\\quad': 0.85, '\\qquad': 1.7, '\\!': -0.1 };
   const Z21_TEX_FN_CMDS = new Set(['\\ln', '\\log', '\\sin', '\\cos', '\\tan', '\\csc', '\\sec', '\\cot', '\\arcsin', '\\arccos', '\\arctan', '\\sinh', '\\cosh', '\\tanh', '\\exp', '\\lim', '\\min', '\\max', '\\sup', '\\inf', '\\det', '\\gcd']);
   const Z21_TEX_BIGOPS = { '\\sum': '∑', '\\prod': '∏', '\\int': '∫', '\\oint': '∮' };
 
@@ -12014,6 +12041,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         if (stopFn && stopFn(cur)) break;
         const base = parseAtom();
         if (!base) break;
+        while (peek() && peek().type === 'cmd' && (peek().name === '\\limits' || peek().name === '\\nolimits')) {
+          next();
+        }
         let sup = null;
         let sub = null;
         while (peek() && peek().type === 'ctrl' && (peek().value === '^' || peek().value === '_')) {
@@ -12084,10 +12114,58 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         return { type: 'text', value: t.value, style: 'op' };
       }
       if (t.type === 'cmd') {
+        if (t.name === '\\limits' || t.name === '\\nolimits' || t.name === '\\displaystyle' || t.name === '\\textstyle') {
+          return parseAtom();
+        }
         if (t.name === '\\frac' || t.name === '\\dfrac' || t.name === '\\tfrac' || t.name === '\\cfrac') {
           const num = parseAtomOrGroup();
           const den = parseAtomOrGroup();
           return { type: 'frac', num, den };
+        }
+        if (t.name === '\\binom') {
+          const top = parseAtomOrGroup();
+          const bot = parseAtomOrGroup();
+          return { type: 'delim', left: '(', right: ')', body: { type: 'frac', num: top, den: bot, noBar: true }, explicit: true };
+        }
+        if (t.name === '\\begin') {
+          const env = readTextGroup().trim();
+          const rows = [];
+          let curRow = [];
+          while (pos < tokens.length) {
+            const pk = peek();
+            if (pk && pk.type === 'cmd' && pk.name === '\\end') {
+              next();
+              readTextGroup();
+              break;
+            }
+            const cellNode = parseSequence((tok) =>
+              (tok && tok.type === 'cmd' && (tok.name === '\\end' || tok.name === '\\\\')) ||
+              (tok && tok.type === 'sym' && tok.value === '&')
+            );
+            curRow.push(cellNode);
+            const sep = peek();
+            if (!sep) break;
+            if (sep.type === 'sym' && sep.value === '&') {
+              next();
+              continue;
+            }
+            if (sep.type === 'cmd' && sep.name === '\\\\') {
+              next();
+              rows.push(curRow);
+              curRow = [];
+              continue;
+            }
+            if (sep.type === 'cmd' && sep.name === '\\end') {
+              next();
+              readTextGroup();
+              break;
+            }
+            next();
+          }
+          if (curRow.length > 0) rows.push(curRow);
+          const delimMap = { pmatrix: ['(', ')'], bmatrix: ['[', ']'], Bmatrix: ['{', '}'], vmatrix: ['|', '|'], Vmatrix: ['‖', '‖'], cases: ['{', ''] };
+          const [ld, rd] = delimMap[env] || ['(', ')'];
+          return { type: 'delim', left: ld, right: rd, body: { type: 'matrix', rows }, explicit: true };
         }
         if (t.name === '\\sqrt') {
           let index = null;
@@ -12129,6 +12207,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         }
         if (t.name === '\\vec' || t.name === '\\hat' || t.name === '\\bar' || t.name === '\\overline' || t.name === '\\tilde') {
           return { type: 'accent', kind: t.name.slice(1), body: parseAtomOrGroup() };
+        }
+        if (t.name === '\\boxed') {
+          return parseAtomOrGroup();
         }
         if (Z21_TEX_BIGOPS[t.name]) {
           return { type: 'bigop', sym: Z21_TEX_BIGOPS[t.name], sup: null, sub: null };
@@ -12216,12 +12297,35 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         const subSz = Math.max(6.8, fontSize * 0.86);
         const numB = this.measureBox(ctx, node.num, subSz);
         const denB = this.measureBox(ctx, node.den, subSz);
-        const innerW = Math.max(numB.width, denB.width) + (fontSize * 0.42);
-        const barThick = Math.max(0.85, fontSize * 0.068);
+        const innerW = Math.max(numB.width, denB.width) + (fontSize * (node.noBar ? 0.24 : 0.42));
+        const barThick = node.noBar ? 0 : Math.max(0.85, fontSize * 0.068);
         const gap = Math.max(2.0, fontSize * 0.19);
         const ascent = axis + (barThick / 2) + gap + numB.descent + numB.ascent;
         const descent = denB.ascent + denB.descent + gap + (barThick / 2) - axis;
-        return { type: 'frac', numB, denB, width: innerW + (fontSize * 0.18), barWidth: innerW, barThick, gap, axis, ascent, descent, fontSize };
+        return { type: 'frac', noBar: Boolean(node.noBar), numB, denB, width: innerW + (fontSize * 0.18), barWidth: innerW, barThick, gap, axis, ascent, descent, fontSize };
+      }
+      if (node.type === 'matrix') {
+        const subSz = Math.max(7.2, fontSize * 0.88);
+        const mRows = (node.rows || []).map(r => r.map(c => this.measureBox(ctx, c, subSz)));
+        const numCols = Math.max(1, ...mRows.map(r => r.length));
+        const colWidths = new Array(numCols).fill(0);
+        const rowHeights = mRows.map(r => {
+          let maxA = subSz * 0.65;
+          let maxD = subSz * 0.20;
+          r.forEach((cb, ci) => {
+            if (cb.width > colWidths[ci]) colWidths[ci] = cb.width;
+            if (cb.ascent > maxA) maxA = cb.ascent;
+            if (cb.descent > maxD) maxD = cb.descent;
+          });
+          return { ascent: maxA, descent: maxD };
+        });
+        const colGap = fontSize * 0.55;
+        const rowGap = fontSize * 0.28;
+        const padX = fontSize * 0.22;
+        const totalW = colWidths.reduce((a, b) => a + b, 0) + Math.max(0, numCols - 1) * colGap + padX * 2;
+        const totalH = rowHeights.reduce((a, rh) => a + rh.ascent + rh.descent, 0) + Math.max(0, mRows.length - 1) * rowGap;
+        const halfH = totalH / 2;
+        return { type: 'matrix', mRows, colWidths, rowHeights, colGap, rowGap, padX, width: totalW, ascent: halfH + axis, descent: Math.max(0.2, halfH - axis), axis, fontSize };
       }
       if (node.type === 'sqrt') {
         const bodyB = this.measureBox(ctx, node.body, fontSize);
@@ -12256,8 +12360,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         const scSz = Math.max(6.2, fontSize * 0.68);
         const supB = node.sup ? this.measureBox(ctx, node.sup, scSz) : null;
         const subB = node.sub ? this.measureBox(ctx, node.sub, scSz) : null;
-        const supRaise = fontSize * 0.42;
-        const subDrop = fontSize * 0.24;
+        const supRaise = Math.max(fontSize * 0.42, baseB.ascent - (fontSize * 0.34));
+        const subDrop = Math.max(fontSize * 0.24, baseB.descent - (fontSize * 0.10));
         const extraW = Math.max(supB ? supB.width : 0, subB ? subB.width : 0) + (fontSize * 0.06);
         const ascent = Math.max(baseB.ascent, supB ? (supRaise + supB.ascent) : 0);
         const descent = Math.max(baseB.descent, subB ? (subDrop + subB.descent) : 0);
@@ -12265,7 +12369,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       }
       if (node.type === 'accent') {
         const bodyB = this.measureBox(ctx, node.body, fontSize);
-        return { type: 'accent', kind: node.kind, bodyB, width: bodyB.width, ascent: bodyB.ascent + (fontSize * 0.24), descent: bodyB.descent, fontSize };
+        return { type: 'accent', kind: node.kind, bodyB, width: bodyB.width, ascent: bodyB.ascent + (fontSize * 0.32), descent: bodyB.descent, fontSize };
       }
       if (node.type === 'bigop') {
         const symSz = fontSize * 1.48;
@@ -12312,9 +12416,26 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         const numBaseline = barY - (box.barThick / 2) - box.gap - box.numB.descent;
         const denBaseline = barY + (box.barThick / 2) + box.gap + box.denB.ascent;
         this.drawBox(ctx, box.numB, cx - (box.numB.width / 2), numBaseline, color);
-        ctx.fillStyle = color;
-        ctx.fillRect(x + (box.width - box.barWidth) / 2, barY - (box.barThick / 2), box.barWidth, box.barThick);
+        if (!box.noBar && box.barThick > 0) {
+          ctx.fillStyle = color;
+          ctx.fillRect(x + (box.width - box.barWidth) / 2, barY - (box.barThick / 2), box.barWidth, box.barThick);
+        }
         this.drawBox(ctx, box.denB, cx - (box.denB.width / 2), denBaseline, color);
+        return;
+      }
+      if (box.type === 'matrix') {
+        let curTop = baseY - box.ascent;
+        box.mRows.forEach((r, ri) => {
+          const rh = box.rowHeights[ri];
+          const rowBaseY = curTop + rh.ascent;
+          let curX = x + box.padX;
+          box.colWidths.forEach((cw, ci) => {
+            const cb = r[ci];
+            if (cb) this.drawBox(ctx, cb, curX + ((cw - cb.width) / 2), rowBaseY, color);
+            curX += cw + box.colGap;
+          });
+          curTop += rh.ascent + rh.descent + box.rowGap;
+        });
         return;
       }
       if (box.type === 'sqrt') {
@@ -12359,8 +12480,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           ctx.strokeStyle = color;
           ctx.lineWidth = Math.max(1.05, box.fontSize * 0.075);
           ctx.lineCap = 'round';
+          const dw = isRight ? box.rW : box.lW;
           const padX = 1.5;
-          const span = box.lW - 3.0;
+          const span = Math.max(1.5, dw - 3.0);
           ctx.beginPath();
           if (ch === '(' || ch === ')') {
             const xEdge = isRight ? dx + padX : dx + padX + span;
@@ -12374,8 +12496,22 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             ctx.lineTo(xBar, topY + 1);
             ctx.lineTo(xBar, botY - 1);
             ctx.lineTo(xArm, botY - 1);
+          } else if (ch === '{' || ch === '}') {
+            const xTip = isRight ? dx + padX + span : dx + padX;
+            const xSpine = dx + (dw / 2);
+            const xEnd = isRight ? dx + padX : dx + padX + span;
+            ctx.moveTo(xEnd, topY + 1);
+            ctx.quadraticCurveTo(xSpine, topY + 1, xSpine, (topY + midY) / 2);
+            ctx.quadraticCurveTo(xSpine, midY - 1, xTip, midY);
+            ctx.quadraticCurveTo(xSpine, midY + 1, xSpine, (midY + botY) / 2);
+            ctx.quadraticCurveTo(xSpine, botY - 1, xEnd, botY - 1);
+          } else if (ch === '‖') {
+            const x1 = dx + (dw * 0.32);
+            const x2 = dx + (dw * 0.68);
+            ctx.moveTo(x1, topY + 1); ctx.lineTo(x1, botY - 1);
+            ctx.moveTo(x2, topY + 1); ctx.lineTo(x2, botY - 1);
           } else {
-            const xv = dx + (box.lW / 2);
+            const xv = dx + (dw / 2);
             ctx.moveTo(xv, topY + 1);
             ctx.lineTo(xv, botY - 1);
           }
@@ -12412,6 +12548,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           ctx.moveTo(ax1 - 2.2, ay - 1.6);
           ctx.lineTo(ax1, ay);
           ctx.lineTo(ax1 - 2.2, ay + 1.6);
+        } else if (box.kind === 'tilde') {
+          const wSpan = ax1 - ax0;
+          ctx.moveTo(ax0, ay);
+          ctx.bezierCurveTo(ax0 + wSpan * 0.25, ay - 2.4, ax0 + wSpan * 0.5, ay + 2.4, ax1, ay - 0.3);
         } else {
           ctx.moveTo(ax0, ay);
           ctx.lineTo(ax1, ay);
@@ -12607,7 +12747,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   };
 
   function renderMathTextToDocxRuns(str, baseRPrXml = '') {
-    const tokens = String(str || '').split(/(\^\{[^{}]+\}|_\{[^{}]+\}|[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+|[₀₁₂₃₄₅₆₇₈₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ]+)/g);
+    const tokens = String(str || '').split(/(\^\{[^{}]+\}|_\{[^{}]+\}|[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+|[₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ]+)/g);
     return tokens.filter(Boolean).map((tok) => {
       let vertAlign = '';
       let val = tok;
@@ -12620,7 +12760,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       } else if (/^[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+$/.test(tok)) {
         vertAlign = 'superscript';
         val = tok.split('').map(c => Z21_INV_SUP_MAP_CLIENT[c] || c).join('');
-      } else if (/^[₀₁₂₃₄₅₆₇₈₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ]+$/.test(tok)) {
+      } else if (/^[₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ]+$/.test(tok)) {
         vertAlign = 'subscript';
         val = tok.split('').map(c => Z21_INV_SUB_MAP_CLIENT[c] || c).join('');
       }
@@ -12788,10 +12928,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       .trim();
 
     const rawLines = (markdownText || '').split('\n');
-    const firstMdH1 = rawLines.find(l => l.trim().startsWith('# '));
-    const resolvedDocTitle = firstMdH1
-      ? firstMdH1.trim().substring(2).replace(/[*_`]/g, '').trim()
-      : cleanTitle;
+      const firstMdH1 = rawLines.find(l => l.trim().startsWith('# '));
+      const resolvedDocTitle = firstMdH1
+        ? firstMdH1.trim().substring(2).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim()
+        : cleanTitle;
     let paragraphsXml = '';
     let inCode = false;
     let skippedTopTitle = false;
@@ -12834,10 +12974,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         return `
           <w:p>
             <w:pPr>
-              <w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/>
               <w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr>
-              <w:ind w:left="240" w:right="240"/>
+              <w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/>
               <w:spacing w:before="100" w:after="100"/>
+              <w:ind w:left="240" w:right="240"/>
             </w:pPr>
             ${labelXml}
             <w:r>
@@ -12873,10 +13013,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       return `
         <w:p>
           <w:pPr>
-            <w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/>
             <w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr>
-            <w:ind w:left="240" w:right="240"/>
+            <w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/>
             <w:spacing w:before="100" w:after="100"/>
+            <w:ind w:left="240" w:right="240"/>
           </w:pPr>
           ${labelXml}${runs}
         </w:p>
@@ -12884,18 +13024,20 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     };
 
     const buildDocxTableXml = (headers, rows) => {
-      const colCnt = Math.max(1, headers.length || (rows[0] ? rows[0].length : 1));
+      const maxRowLen = Math.max(0, ...rows.map(r => (Array.isArray(r) ? r.length : 1)));
+      const colCnt = Math.max(1, headers.length, maxRowLen);
       const trs = [];
+      const stripCellEmphasis = (v) => String(v ?? '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim();
       if (headers.length > 0) {
-        trs.push('<w:tr>' + headers.slice(0, colCnt).map(h =>
-          `<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="1E293B"/></w:tcPr><w:p>${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(String(h || '').replace(/[*_`]/g, '').trim()), '<w:b/><w:color w:val="FFFFFF"/>')}</w:p></w:tc>`
+        trs.push('<w:tr>' + Array.from({ length: colCnt }, (_, ci) => headers[ci] ?? '').map(h =>
+          `<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="1E293B"/></w:tcPr><w:p>${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(stripCellEmphasis(h)), '<w:b/><w:color w:val="FFFFFF"/>')}</w:p></w:tc>`
         ).join('') + '</w:tr>');
       }
       for (const r of rows) {
         const arr = Array.isArray(r) ? r : [r];
         let cells = '';
         for (let ci = 0; ci < colCnt; ci++) {
-          const val = normalizeZ21ScientificTextClient(String(arr[ci] ?? '').replace(/[*_`]/g, '').trim());
+          const val = normalizeZ21ScientificTextClient(stripCellEmphasis(arr[ci] ?? ''));
           cells += `<w:tc><w:p>${renderMathTextToDocxRuns(val)}</w:p></w:tc>`;
         }
         trs.push(`<w:tr>${cells}</w:tr>`);
@@ -12967,8 +13109,8 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             ${parseMarkdownInlineToDocxRuns(text)}
           </w:p>
         `;
-      } else if (cleanedLine.startsWith('### ')) {
-        const text = cleanedLine.substring(4).trim();
+      } else if (cleanedLine.startsWith('### ') || cleanedLine.startsWith('#### ')) {
+        const text = cleanedLine.replace(/^#{3,4}\s+/, '').trim();
         paragraphsXml += `
           <w:p>
             <w:pPr><w:pStyle w:val="Heading3"/></w:pPr>
@@ -12989,20 +13131,26 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
               <w:pPr>
                 <w:ind w:left="480" w:hanging="240"/>
               </w:pPr>
-              <w:r><w:rPr><w:rFonts w:ascii="Symbol" w:hAnsi="Symbol"/><w:color w:val="38BDF8"/></w:rPr><w:t>• </w:t></w:r>
+              <w:r><w:rPr><w:color w:val="38BDF8"/></w:rPr><w:t>• </w:t></w:r>
               ${parseMarkdownInlineToDocxRuns(normLegendItem)}
             </w:p>
           `;
         }
       } else if (/^\d+\.\s+/.test(cleanedLine)) {
         const numSecM = cleanedLine.match(/^(\d+)\.\s+([A-ZÀ-ÖØ-Þ][^\n]{3,92})$/);
-        if (numSecM && !/[.:;]$/.test(numSecM[2]) && !/^\d/.test(numSecM[2])) {
+        const normNumFrac = normalizeZ21ScientificTextClient(cleanedLine, { preserveFrac: true }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+        const isFormulaNum = isZ21FormulaLineClient(normNumFrac) && !isZ21VariableLegendLineClient(normNumFrac).isLegend;
+        if (numSecM && !/[.:;]$/.test(numSecM[2]) && !/^\d/.test(numSecM[2]) && !/[=<>\\^_{}]/.test(numSecM[2]) && !isFormulaNum) {
           paragraphsXml += `
             <w:p>
               <w:pPr><w:pStyle w:val="Heading2"/></w:pPr>
               ${parseMarkdownInlineToDocxRuns(normalizeZ21ScientificTextClient(cleanedLine))}
             </w:p>
           `;
+        } else if (isFormulaNum) {
+          const { label, expr } = parseZ21FormulaPartsClient(normNumFrac);
+          const { expr: rawExpr } = parseZ21FormulaPartsClient(cleanedLine.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1'), true);
+          paragraphsXml += buildDocxEqParagraphXml(rawExpr || expr, label, expr);
         } else {
           const prefix = cleanedLine.match(/^\d+\./)[0];
           const itemText = normalizeZ21ScientificTextClient(cleanedLine.replace(/^\d+\.\s+/, ''));
@@ -13284,12 +13432,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     };
 
     const hasHighUnicode = (s) => /[^\x00-\xFF]/.test(String(s || ''));
-    const drawSafeVectorTextOrPng = (rawText, xMm, yMm, opts = {}) => {
+    const drawSafeVectorTextOrPng = (rawText, xMm, opts = {}) => {
       const str = normalizeZ21ScientificTextClient(rawText);
       const fontPt = opts.fontSize || 10;
       const fontStyle = opts.bold ? 'bold' : (opts.italic ? 'italic' : 'normal');
       const colorHex = opts.colorHex || '#334155';
       const boldPrefix = opts.boldPrefix ? normalizeZ21ScientificTextClient(opts.boldPrefix) : '';
+      const yOff = Number.isFinite(opts.offsetY) ? opts.offsetY : 0;
 
       if ((hasHighUnicode(str) || hasHighUnicode(boldPrefix)) && ZozCanvasMathRenderer.renderUnicodeLineToPngDataUrl) {
         const maxAvailMm = Math.max(20, (margin + contentWidth) - xMm);
@@ -13305,32 +13454,51 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         if (im && im.dataUrl) {
           const drawW = Math.min(im.widthMm, maxAvailMm);
           const drawH = drawW < im.widthMm ? im.heightMm * (drawW / im.widthMm) : im.heightMm;
-          ensurePageSpace(drawH + 1.5);
-          doc.addImage(im.dataUrl, 'PNG', xMm, yMm - (fontPt * 0.28), drawW, drawH);
+          ensurePageSpace(drawH + yOff + 2.0);
+          const drawY = cursorY + yOff;
+          if (opts.bulletCircle) {
+            doc.setFillColor(56, 189, 248);
+            doc.circle(margin + 2.2, cursorY + 1.9, 0.85, 'F');
+          }
+          doc.addImage(im.dataUrl, 'PNG', xMm, drawY - (fontPt * 0.28), drawW, drawH);
           return drawH + 1.2;
         }
       }
-
-      if (opts.rgb) doc.setTextColor(opts.rgb[0], opts.rgb[1], opts.rgb[2]);
-      else doc.setTextColor(51, 65, 85);
 
       if (boldPrefix) {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(fontPt);
         const cleanPre = sanitizeJsPdfWinAnsiText(boldPrefix);
         const preW = typeof doc.getTextWidth === 'function' ? doc.getTextWidth(cleanPre) : (cleanPre.length * fontPt * 0.21);
-        doc.text(cleanPre, xMm, yMm);
         doc.setFont('helvetica', fontStyle);
         const cleanRest = sanitizeJsPdfWinAnsiText(str);
         const remW = Math.max(20, (margin + contentWidth) - (xMm + preW));
         const split = doc.splitTextToSize(cleanRest, remW);
-        if (split.length > 0) doc.text(split[0], xMm + preW, yMm);
-        for (let si = 1; si < split.length; si++) {
-          yMm += fontPt * 0.46;
-          ensurePageSpace(5);
-          doc.text(split[si], xMm, yMm);
+        const lineStep = fontPt * 0.46;
+        ensurePageSpace(Math.max(7, yOff + lineStep + 1));
+        if (opts.bulletCircle) {
+          doc.setFillColor(56, 189, 248);
+          doc.circle(margin + 2.2, cursorY + 1.9, 0.85, 'F');
         }
-        return Math.max(1, split.length) * (fontPt * 0.46) + 1.5;
+        if (opts.rgb) doc.setTextColor(opts.rgb[0], opts.rgb[1], opts.rgb[2]);
+        else doc.setTextColor(51, 65, 85);
+        doc.setFont('helvetica', 'bold');
+        doc.text(cleanPre, xMm, cursorY + yOff);
+        doc.setFont('helvetica', fontStyle);
+        if (split.length > 0) doc.text(split[0], xMm + preW, cursorY + yOff);
+        let consumed = lineStep;
+        for (let si = 1; si < split.length; si++) {
+          const prevY = cursorY;
+          ensurePageSpace(yOff + consumed + lineStep);
+          if (cursorY < prevY) {
+            consumed = 0;
+          }
+          if (opts.rgb) doc.setTextColor(opts.rgb[0], opts.rgb[1], opts.rgb[2]);
+          else doc.setTextColor(51, 65, 85);
+          doc.text(split[si], xMm, cursorY + yOff + consumed);
+          consumed += lineStep;
+        }
+        return consumed + 1.5;
       }
 
       doc.setFont('helvetica', fontStyle);
@@ -13338,8 +13506,29 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const safeStr = sanitizeJsPdfWinAnsiText(str);
       const maxW = opts.maxWidthMm || (margin + contentWidth - xMm);
       const split = doc.splitTextToSize(safeStr, maxW);
-      doc.text(split, xMm, yMm);
-      return Math.max(1, split.length) * (fontPt * 0.47) + 1.8;
+      const lineStep = fontPt * 0.47;
+      ensurePageSpace(Math.max(7, yOff + lineStep + 1));
+      if (opts.bulletCircle) {
+        doc.setFillColor(56, 189, 248);
+        doc.circle(margin + 2.2, cursorY + 1.9, 0.85, 'F');
+      }
+      if (opts.rgb) doc.setTextColor(opts.rgb[0], opts.rgb[1], opts.rgb[2]);
+      else doc.setTextColor(51, 65, 85);
+      let consumed = 0;
+      for (let si = 0; si < split.length; si++) {
+        if (si > 0) {
+          const prevY = cursorY;
+          ensurePageSpace(yOff + consumed + lineStep);
+          if (cursorY < prevY) {
+            consumed = 0;
+            if (opts.rgb) doc.setTextColor(opts.rgb[0], opts.rgb[1], opts.rgb[2]);
+            else doc.setTextColor(51, 65, 85);
+          }
+        }
+        doc.text(split[si], xMm, cursorY + yOff + consumed);
+        consumed += lineStep;
+      }
+      return Math.max(lineStep, consumed) + 1.8;
     };
 
     const docTitle = stripZ21InlineMd(spec.title || spec.filename || 'Dokumen Z21');
@@ -13349,7 +13538,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(16.5);
     const cleanTitle = sanitizeJsPdfWinAnsiText(docTitle);
-    const titleSplit = doc.splitTextToSize(cleanTitle, contentWidth - 10).slice(0, 2);
+    const titleSplit = doc.splitTextToSize(cleanTitle, contentWidth - 10);
     const hdrH = 11 + (titleSplit.length * 7.2);
     doc.setFillColor(15, 23, 42);
     doc.rect(margin, cursorY, contentWidth, hdrH, 'F');
@@ -13360,14 +13549,15 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     cursorY += hdrH + 5.5;
 
     if (docSub) {
-      const dh = drawSafeVectorTextOrPng(docSub, margin, cursorY, { fontSize: 10, italic: true, colorHex: '#475569', rgb: [71, 85, 105] });
+      const dh = drawSafeVectorTextOrPng(docSub, margin, { fontSize: 10, italic: true, colorHex: '#475569', rgb: [71, 85, 105] });
       cursorY += dh + 2.5;
     }
 
     const drawRichPdfTable = (tbl) => {
       const headers = Array.isArray(tbl.headers) ? tbl.headers : [];
       const rows = Array.isArray(tbl.rows) ? tbl.rows : [];
-      const colCnt = Math.max(1, headers.length || (rows[0] && Array.isArray(rows[0]) ? rows[0].length : 1));
+      const maxRowLen = Math.max(0, ...rows.map(r => (Array.isArray(r) ? r.length : 1)));
+      const colCnt = Math.max(1, headers.length, maxRowLen);
       const colW = contentWidth / colCnt;
       const drawRow = (cells, isHdr, rIdx) => {
         doc.setFont('helvetica', isHdr ? 'bold' : 'normal');
@@ -13381,7 +13571,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           if (sp.length > maxL) maxL = sp.length;
         }
         const rH = Math.max(7.2, (maxL * 4.3) + 3.0);
+        const prevY = cursorY;
         ensurePageSpace(rH + 2);
+        if (!isHdr && cursorY < prevY && headers.length > 0) {
+          drawRow(headers, true, 0);
+        }
         if (isHdr) doc.setFillColor(30, 41, 59);
         else if (rIdx % 2 === 1) doc.setFillColor(248, 250, 252);
         else doc.setFillColor(255, 255, 255);
@@ -13404,9 +13598,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     };
 
     const drawEquationBox = (rawEqLine) => {
-      const cleanLine = normalizeZ21ScientificTextClient(rawEqLine, { preserveFrac: true }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim();
+      const cleanRawEq = String(rawEqLine || '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim();
+      const cleanLine = normalizeZ21ScientificTextClient(cleanRawEq, { preserveFrac: true }).trim();
       const { label, expr } = parseZ21FormulaPartsClient(cleanLine, true);
-      const { expr: rawExpr } = parseZ21FormulaPartsClient(rawEqLine, true);
+      const { expr: rawExpr } = parseZ21FormulaPartsClient(cleanRawEq, true);
       const eqInput = toZ21LatexMathClient(rawExpr || expr);
       const eqImg = ZozCanvasMathRenderer.renderZ21LatexToPngDataUrl(eqInput, {
         fontSizePt: 11.5,
@@ -13467,7 +13662,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
         renderedHeadings.add(sh);
         ensurePageSpace(14);
         cursorY += 2.2;
-        const dh = drawSafeVectorTextOrPng(sh, margin, cursorY + 3.2, { fontSize: 12.2, bold: true, colorHex: '#1e3a8a', rgb: [30, 58, 138] });
+        const dh = drawSafeVectorTextOrPng(sh, margin, { offsetY: 3.2, fontSize: 12.2, bold: true, colorHex: '#1e3a8a', rgb: [30, 58, 138] });
         doc.setDrawColor(226, 232, 240);
         doc.setLineWidth(0.35);
         doc.line(margin, cursorY + dh + 1.8, margin + contentWidth, cursorY + dh + 1.8);
@@ -13483,12 +13678,11 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             continue;
           }
           const kvMatch = normalizeZ21ScientificTextClient(pTrim).replace(/\*\*([^*]+)\*\*/g, '$1').match(/^((?:Lokasi|Tanggal|Parameter\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\s*:)\s*(.+)$/i);
-          ensurePageSpace(8);
           if (kvMatch) {
-            const dh = drawSafeVectorTextOrPng(kvMatch[2], margin, cursorY + 3.0, { boldPrefix: kvMatch[1] + ' ', fontSize: 10, colorHex: '#334155', rgb: [51, 65, 85] });
+            const dh = drawSafeVectorTextOrPng(kvMatch[2], margin, { offsetY: 3.0, boldPrefix: kvMatch[1] + ' ', fontSize: 10, colorHex: '#334155', rgb: [51, 65, 85] });
             cursorY += dh + 1.2;
           } else {
-            const dh = drawSafeVectorTextOrPng(pTrim.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1'), margin, cursorY + 3.0, { fontSize: 10, colorHex: '#334155', rgb: [51, 65, 85] });
+            const dh = drawSafeVectorTextOrPng(pTrim.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1'), margin, { offsetY: 3.0, fontSize: 10, colorHex: '#334155', rgb: [51, 65, 85] });
             cursorY += dh + 1.2;
           }
         }
@@ -13502,17 +13696,14 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
             drawEquationBox(rawB);
             continue;
           }
-          ensurePageSpace(7);
-          doc.setFillColor(56, 189, 248);
-          doc.circle(margin + 2.2, cursorY + 1.9, 0.85, 'F');
           const legend = isZ21VariableLegendLineClient(plainB);
           let dh = 5.5;
           if (legend.isLegend) {
             const symNorm = normalizeZ21ScientificTextClient(legend.symbol);
             const descNorm = normalizeZ21ScientificTextClient(legend.description);
-            dh = drawSafeVectorTextOrPng(descNorm, margin + 5.5, cursorY + 3.0, { boldPrefix: `${symNorm} = `, fontSize: 9.8, colorHex: '#334155', rgb: [51, 65, 85] });
+            dh = drawSafeVectorTextOrPng(descNorm, margin + 5.5, { offsetY: 3.0, bulletCircle: true, boldPrefix: `${symNorm} = `, fontSize: 9.8, colorHex: '#334155', rgb: [51, 65, 85] });
           } else {
-            dh = drawSafeVectorTextOrPng(plainB, margin + 5.5, cursorY + 3.0, { fontSize: 9.8, colorHex: '#334155', rgb: [51, 65, 85] });
+            dh = drawSafeVectorTextOrPng(plainB, margin + 5.5, { offsetY: 3.0, bulletCircle: true, fontSize: 9.8, colorHex: '#334155', rgb: [51, 65, 85] });
           }
           cursorY += dh + 1.0;
         }
@@ -13527,7 +13718,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const tt = stripZ21InlineMd(tbl.title || '');
       if (tt && !renderedHeadings.has(tt)) {
         ensurePageSpace(12);
-        const dh = drawSafeVectorTextOrPng(tt, margin, cursorY + 3.0, { fontSize: 11.2, bold: true, colorHex: '#1e3a8a', rgb: [30, 58, 138] });
+        const dh = drawSafeVectorTextOrPng(tt, margin, { offsetY: 3.0, fontSize: 11.2, bold: true, colorHex: '#1e3a8a', rgb: [30, 58, 138] });
         cursorY += dh + 2.5;
       }
       drawRichPdfTable(tbl);
@@ -14088,6 +14279,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link id="z21KatexCssLink" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
   <style>
     body {
       background: #0b0f19;
@@ -14128,6 +14320,20 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     h1, h2, h3 { color: #0f172a; font-weight: 700; }
     h1 { font-size: 22px; border-bottom: 2px solid #10b981; padding-bottom: 8px; }
     h2 { font-size: 16px; color: #065f46; margin-top: 22px; }
+    .z21-equation-box {
+      margin: 12px 0; padding: 10px 14px;
+      background: linear-gradient(135deg, #f0f9ff 0%, #f8fafc 100%);
+      border: 1px solid #bae6fd; border-left: 4px solid #0284c7; border-radius: 6px;
+    }
+    .z21-eq-label { font-size: 11.5px; font-weight: 700; color: #0369a1; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
+    .z21-eq-expr { font-family: 'Cambria Math', 'Segoe UI Symbol', 'Times New Roman', serif; font-size: 15.5px; font-weight: 600; color: #0f172a; overflow-x: auto; }
+    html:not(.katex-css-ok) .katex .katex-html { display: none !important; }
+    html:not(.katex-css-ok) .katex .katex-mathml math { font-family: 'Cambria Math', 'Latin Modern Math', 'STIX Two Math', serif; font-size: 1.08em; }
+    html.katex-css-ok .katex .katex-html { display: inline-block; }
+    html.katex-css-ok .katex .katex-mathml { position: absolute !important; clip: rect(1px, 1px, 1px, 1px) !important; padding: 0 !important; border: 0 !important; height: 1px !important; width: 1px !important; overflow: hidden !important; }
+    .z21-frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 3px; line-height: 1.1; }
+    .z21-frac-num { border-bottom: 1.4px solid currentColor; padding: 0 4px 2px 4px; font-size: 0.88em; }
+    .z21-frac-den { padding: 2px 4px 0 4px; font-size: 0.88em; }
     blockquote { margin: 12px 0; padding: 8px 12px; background: #f0fdf4; border-left: 4px solid #10b981; color: #334155; font-size: 12.5px; }
     table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px; border-radius: 6px; overflow: hidden; }
     th, td { border: 1px solid #cbd5e1; padding: 9px 12px; text-align: left; }
@@ -14145,6 +14351,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     <div class="xlsx-header-badge"><span>📊 ${escapeHtml(fileName || 'Spreadsheet.xlsx')}</span><span class="doc-sheet-fmt">Spreadsheet & Tabel Data</span></div>
     ${parsedBody}
   </div>
+  <script>(function(){var l=document.getElementById('z21KatexCssLink');function mark(){try{for(var i=0;i<document.styleSheets.length;i++){var s=document.styleSheets[i];if(s&&s.href&&s.href.indexOf('katex')!==-1){document.documentElement.classList.add('katex-css-ok');return;}}}catch(_){}}if(l){l.addEventListener('load',function(){document.documentElement.classList.add('katex-css-ok');});}mark();})();</script>
 </body>
 </html>`;
   }
@@ -27152,9 +27359,27 @@ ATURAN MUTLAK OUTPUT:
         const m = targetMessageFound;
         const f = targetFileFound;
         if (activeUid && !f.fileId) f.fileId = activeUid;
+        const prevBody = f.rawContent || f.content || '';
+        const bodyChanged = prevBody !== trimmedCode;
         f.rawContent = trimmedCode;
         f.content = trimmedCode;
         f.size = formatFileSize(trimmedCode.length);
+        if (bodyChanged) {
+          delete f.base64;
+          delete f.engine;
+          delete f.z21Spec;
+          delete f._z21JsonHealed;
+          delete f.svgContent;
+          f.isBinaryArtifact = false;
+          if (activeAIFile && activeAIFile !== f) {
+            delete activeAIFile.base64;
+            delete activeAIFile.engine;
+            delete activeAIFile.z21Spec;
+            delete activeAIFile._z21JsonHealed;
+            delete activeAIFile.svgContent;
+            activeAIFile.isBinaryArtifact = false;
+          }
+        }
         if (activeAIFile._studioChatHistory) f._studioChatHistory = activeAIFile._studioChatHistory;
         if (activeAIFile._editChatHistory) f._editChatHistory = activeAIFile._editChatHistory;
         if (activeAIFile.projectFiles) f.projectFiles = activeAIFile.projectFiles;
@@ -27422,6 +27647,11 @@ ATURAN MUTLAK OUTPUT:
       els.aiFileStudioFrame.dataset.bridgeReady = '0';
       els.aiFileStudioFrame.dataset.lastRawContent = rawContent;
       els.aiFileStudioFrame.srcdoc = safeHtml;
+    } else if (/^(?:txt|log|json|py|js|ts|css|yaml|yml|xml|sql|sh|csv)$/i.test(ext) || rawContent.trim().length > 0) {
+      els.aiFileStudioFrame.removeAttribute('src');
+      els.aiFileStudioFrame.dataset.bridgeReady = '0';
+      const safeText = escapeHtml(String(rawContent || ''));
+      els.aiFileStudioFrame.srcdoc = `<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"><style>body{margin:0;padding:24px;background:#0b0f19;color:#e2e8f0;font-family:'JetBrains Mono','Consolas',monospace;font-size:13px;line-height:1.6;}pre{margin:0;white-space:pre-wrap;word-break:break-word;background:#111827;border:1px solid #1e293b;border-radius:8px;padding:18px 20px;}</style></head><body><pre>${safeText}</pre></body></html>`;
     } else {
       els.aiFileStudioFrame.removeAttribute('src');
       els.aiFileStudioFrame.dataset.bridgeReady = '0';
@@ -27834,12 +28064,14 @@ ATURAN MUTLAK OUTPUT:
           return nl && isZ21FormulaLineClient(nl) && !isZ21VariableLegendLineClient(nl).isLegend;
         });
         const hasEmbeddedMathImage = /\/Subtype\s*\/Image\b/.test(decodedProbe);
+        const hasV832Subject = /\(zoz-z21-pdf-v832\)/.test(decodedProbe);
         const hasTrustedPdfEngine = file.engine === 'python-container-sandbox' || file.engine === 'zoz-rich-math-pdf';
+        const hasDecodedDefect = /Dirender oleh|zoz-client-sandbox|zoz-client-native|\(\s*#{1,3}\s+|\|\s*---|z21_document_builder|"sections"\s*:|\\\\left|\\\\right/.test(decodedProbe.slice(0, 24000));
         const hasLegacyClientPdfDefect = !file.base64 ||
           !hasTrustedPdfEngine ||
           (hasFormulaInDoc && !hasEmbeddedMathImage) ||
-          /Dirender oleh|zoz-client-sandbox|zoz-client-native|\(\s*#{1,3}\s+|\|\s*---|z21_document_builder|"sections"\s*:|\\\\left|\\\\right/.test(decodedProbe.slice(0, 24000)) ||
-          Boolean(extractEmbeddedZ21DocBuilderSpec(rawText));
+          hasDecodedDefect ||
+          (!(hasEmbeddedMathImage || hasV832Subject) && Boolean(extractEmbeddedZ21DocBuilderSpec(rawText)));
         if (hasLegacyClientPdfDefect && (file.z21Spec || rawText)) {
           const embeddedHeal = extractEmbeddedZ21DocBuilderSpec(rawText);
           const rebuiltSpec = (embeddedHeal && embeddedHeal.spec)
@@ -27852,9 +28084,13 @@ ATURAN MUTLAK OUTPUT:
           if (file.pythonScript && !rebuiltSpec.python_code) rebuiltSpec.python_code = file.pythonScript;
           try {
             if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
+              const reqHeaders = { 'Content-Type': 'application/json' };
+              if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.getTunnelHeaders === 'function') {
+                Object.assign(reqHeaders, TerminalManager.getTunnelHeaders() || {});
+              }
               const res = await fetch(getUniversalApiUrl('/api/z21/document-builder'), {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: reqHeaders,
                 body: JSON.stringify(rebuiltSpec),
                 signal: (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') ? AbortSignal.timeout(12000) : undefined
               }).catch(() => null);
@@ -35423,10 +35659,10 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     if (!s) return '';
     s = s
       .replace(/\uFFFD/g, '')
-      .replace(/\r(?=ight\b)/g, '\\r')
-      .replace(/\f(?=rac\b|orall\b)/g, '\\f')
-      .replace(/\t(?=(?:heta|imes|ext|an|au|o|op|frac)\b)/g, '\\t')
-      .replace(/[\b](?=(?:eta|ar|inom|egin|ig)\b)/g, '\\b')
+      .replace(/\r(?=(?:ight(?:arrow)?|ho|angle)\b)/g, '\\r')
+      .replace(/\f(?=(?:rac|orall|lat|rown)\b)/g, '\\f')
+      .replace(/\t(?=(?:heta|imes|ext(?:bf|it|rm|sf|tt)?|an|au|o|op|frac|riangle|herefore)\b)/g, '\\t')
+      .replace(/[\b](?=(?:eta|ar|inom|egin|ig|igskip|ullet|oxed)\b)/g, '\\b')
       .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
     s = s
@@ -35449,16 +35685,19 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     if (!t || /^(?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}:/i.test(t)) {
       return { isLegend: false };
     }
-    const m = t.match(/^([A-Za-z\u0370-\u03FF][A-Za-z0-9\u0370-\u03FF_{}₀-₉ₛₚ()\s\\]{0,18})\s*=\s*(.+)$/);
+    const m = t.match(/^([A-Za-z\u0370-\u03FF][A-Za-z0-9\u0370-\u03FF_{}₀-₉ₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓₛₚ()\s\\]{0,18})\s*=\s*(.+)$/);
     if (!m) return { isLegend: false };
     const lhs = m[1].trim();
     const rhs = m[2].trim();
-    if (/\\(?:frac|sqrt|sum|int|prod|ln|log|sin|cos|tan)\b/.test(rhs)) return { isLegend: false };
+    if (/\\(?:frac|dfrac|tfrac|sqrt|sum|int|prod|ln|log|sin|cos|tan)\b/.test(rhs)) return { isLegend: false };
     if (/^[+-]?\d+(?:[.,]\d+)?(?:\s*(?:°[CFK]|%|hPa|km\/h|m\/s))?(?:\s*,\s*[A-Za-z\u0370-\u03FF][A-Za-z0-9_{}₀-₉]{0,8}\s*=\s*[+-]?\d+(?:[.,]\d+)?(?:\s*(?:°[CFK]|%|hPa|km\/h|m\/s))?)+$/i.test(rhs)) {
       return { isLegend: true, symbol: lhs, description: rhs };
     }
     if (/[=+\-×÷*/^]|²|³/.test(rhs)) {
-      const withoutUnits = rhs.replace(/\b(?:km\/h|m\/s|m\/s2|W\/m2|kg\/m3|g\/kg|°C|°F|in\s+%)\b/gi, '');
+      const withoutUnits = rhs
+        .replace(/\b(?:km\/h|m\/s|m\/s2|W\/m2|kg\/m3|g\/kg|°C|°F|in\s+%)\b/gi, '')
+        .replace(/([A-Za-z\u00C0-\u024F])-([A-Za-z\u00C0-\u024F])/g, '$1 $2')
+        .replace(/([A-Za-z\u00C0-\u024F])-([A-Za-z\u00C0-\u024F])/g, '$1 $2');
       if (/[=+\-×÷*^]/.test(withoutUnits) || /\s\/\s/.test(withoutUnits)) return { isLegend: false };
     }
     const hasProseWords = /[A-Za-zÀ-ÖØ-öø-ÿ]{3,}\s+[A-Za-zÀ-ÖØ-öø-ÿ]{2,}/.test(rhs);
@@ -35471,7 +35710,7 @@ ATURAN MUTLAK EKSEKUSI AGEN:
 
   function promoteBalancedDivisionToFracClient(expr) {
     let out = String(expr || '');
-    const fnPrefixRe = /(?:\\?(?:ln|log|sin|cos|tan|exp|csc|sec|cot|sqrt)|\\left)\s*$/i;
+    const fnPrefixRe = /(?:\\?(?:ln|log|sin|cos|tan|exp|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh))(?:\s*\\left)?\s*$/i;
     for (let pass = 0; pass < 3; pass++) {
       let changed = false;
       let res = '';
@@ -35495,9 +35734,10 @@ ATURAN MUTLAK EKSEKUSI AGEN:
               else if (depth === 1 && ch === '/' && j > i + 1 && j + 1 < out.length) {
                 const spacedSlash = /\s/.test(out[j - 1]) && /\s/.test(out[j + 1]);
                 const closeP = out.indexOf(')', j);
-                const innerSeg = out.slice(i + 1, j) + '/' + out.slice(j + 1, closeP > j ? closeP : out.length);
+                const innerSeg = (out.slice(i + 1, j) + '/' + out.slice(j + 1, closeP > j ? closeP : out.length)).replace(/\\right\s*$/i, '').trim();
                 const unspacedMathPair = /[A-Za-z0-9}_)]/.test(out[j - 1]) && /[A-Za-z0-9\\({]/.test(out[j + 1]) &&
-                  !/\b(?:km\/h|m\/s|kg\/m|mm\/|C\/F|N\/A|I\/O|A\/B)\b/i.test(innerSeg) &&
+                  !/\b(?:km\/h|m\/s|kg\/m|mm\/)/i.test(innerSeg) &&
+                  !/\b(?:C\/F|N\/A|I\/O|A\/B)\b/.test(innerSeg) &&
                   !/^\d{1,2}\/\d{1,2}(?:\/\d{2,4})?$/.test(innerSeg);
                 if (spacedSlash || unspacedMathPair) {
                   if (slashIdx === -1) slashIdx = j;
@@ -35509,15 +35749,26 @@ ATURAN MUTLAK EKSEKUSI AGEN:
           }
           if (depth === 0 && slashIdx !== -1 && !multipleTopSlashes && !hasTopLevelComma) {
             const leftPart = out.slice(i + 1, slashIdx).trim();
-            const rightPart = out.slice(slashIdx + 1, j - 1).trim();
+            const rawRight = out.slice(slashIdx + 1, j - 1).trim();
+            const innerEndsRight = /\\right\s*$/.test(rawRight);
+            const rightPart = innerEndsRight ? rawRight.replace(/\\right\s*$/, '').trim() : rawRight;
             if (leftPart && rightPart && !leftPart.includes('=') && !rightPart.includes('=')) {
-              const afterFn = fnPrefixRe.test(res);
-              if (afterFn && /\\left\s*$/i.test(res)) {
-                res += `\\frac{${leftPart}}{${rightPart}}`;
-              } else if (afterFn) {
+              const before = res;
+              const hasOuterLeft = /\\left\s*$/.test(before);
+              const afterFn = fnPrefixRe.test(before);
+              const hasExpAfter = /^\s*\^/.test(out.slice(j));
+              if (hasOuterLeft && innerEndsRight) {
+                if (afterFn || hasExpAfter) {
+                  res += `(\\frac{${leftPart}}{${rightPart}}\\right)`;
+                } else {
+                  res = before.replace(/\\left\s*$/, '') + `\\frac{${leftPart}}{${rightPart}}`;
+                }
+              } else if (!hasOuterLeft && (afterFn || hasExpAfter)) {
                 res += `\\left(\\frac{${leftPart}}{${rightPart}}\\right)`;
-              } else {
+              } else if (!hasOuterLeft && !innerEndsRight) {
                 res += `\\frac{${leftPart}}{${rightPart}}`;
+              } else {
+                res += out.slice(i, j);
               }
               i = j;
               changed = true;
@@ -35550,8 +35801,15 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .trim();
 
     s = s
-      .replace(/\\{2,}(?=(?:left|right|frac|dfrac|tfrac|cfrac|sqrt|ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max|alpha|beta|gamma|delta|Delta|epsilon|varepsilon|zeta|eta|theta|kappa|lambda|mu|nu|xi|pi|rho|sigma|Sigma|tau|phi|Phi|psi|Psi|omega|Omega|times|div|cdot|pm|approx|neq|equiv|propto|leq|geq|infty|sum|int|partial|nabla|in|forall|exists|rightarrow|Rightarrow|to|mathbb|mathrm|mathbf|mathit|operatorname|text|quad|qquad|circ|%))/g, '\\')
-      .replace(/\\(?:dfrac|tfrac|cfrac)\b/g, '\\frac');
+      .replace(/\\{2,}(?=(?:left|right|frac|dfrac|tfrac|cfrac|sqrt|ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max|alpha|beta|gamma|delta|Delta|epsilon|varepsilon|zeta|eta|theta|kappa|lambda|mu|nu|xi|pi|rho|sigma|Sigma|tau|phi|Phi|psi|Psi|omega|Omega|times|div|cdot|pm|approx|neq|ne|equiv|propto|leq|le|geq|ge|infty|sum|int|prod|partial|nabla|in|forall|exists|rightarrow|Rightarrow|implies|iff|leftrightarrow|Leftrightarrow|to|mathbb|mathrm|mathbf|mathit|operatorname|text|hat|bar|tilde|vec|binom|boxed|quad|qquad|circ|%))/g, '\\')
+      .replace(/\\(?:dfrac|tfrac|cfrac)\b/g, '\\frac')
+      .replace(/\\le(?![a-zA-Z])/g, '\\leq')
+      .replace(/\\ge(?![a-zA-Z])/g, '\\geq')
+      .replace(/\\ne(?![a-zA-Z])/g, '\\neq')
+      .replace(/\\implies(?![a-zA-Z])/g, '\\Rightarrow')
+      .replace(/\\iff(?![a-zA-Z])/g, '\\Leftrightarrow')
+      .replace(/\\(?:limits|nolimits|displaystyle|textstyle)(?![a-zA-Z])/g, '')
+      .replace(/\\boxed\s*\{([^{}]*)\}/g, '$1');
     s = s
       .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+/g, (m) => `^{${m.split('').map(c => Z21_INV_SUP_MAP_CLIENT[c] || c).join('')}}`)
       .replace(/[₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ]+/g, (m) => `_{${m.split('').map(c => Z21_INV_SUB_MAP_CLIENT[c] || c).join('')}}`);
@@ -35564,11 +35822,12 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       'Φ': '\\Phi', 'ψ': '\\psi', 'Ψ': '\\Psi', 'ω': '\\omega', 'Ω': '\\Omega',
       '×': '\\times', '÷': '\\div', '·': '\\cdot', '±': '\\pm', '≈': '\\approx',
       '≠': '\\neq', '≡': '\\equiv', '∝': '\\propto', '≤': '\\leq', '≥': '\\geq',
-      '∞': '\\infty', '∑': '\\sum', '∫': '\\int', '∂': '\\partial', '∇': '\\nabla',
+      '∞': '\\infty', '∑': '\\sum', '∫': '\\int', '∏': '\\prod', '∂': '\\partial', '∇': '\\nabla',
       '∈': '\\in', '∀': '\\forall', '∃': '\\exists', '→': '\\rightarrow', '⇒': '\\Rightarrow',
+      '↔': '\\leftrightarrow', '⇔': '\\Leftrightarrow', '⊕': '\\oplus', '⊗': '\\otimes', '‖': '\\|',
       'ℝ': '\\mathbb{R}', 'ℕ': '\\mathbb{N}', 'ℤ': '\\mathbb{Z}'
     };
-    s = s.replace(/[αβγδΔεζηθκλμνξπρσΣτφΦψΨωΩ×÷·±≈≠≡∝≤≥∞∑∫∂∇∈∀∃→⇒ℝℕℤ]/g, (ch, idx, full) => {
+    s = s.replace(/[αβγδΔεζηθκλμνξπρσΣτφΦψΨωΩ×÷·±≈≠≡∝≤≥∞∑∫∏∂∇∈∀∃→⇒↔⇔⊕⊗‖ℝℕℤ]/g, (ch, idx, full) => {
       const cmd = symToTex[ch];
       if (!cmd) return ch;
       const nextCh = full[idx + 1] || '';
@@ -35587,16 +35846,28 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/\bes(?=\s*=|\s*\))/g, 'e_{s}')
       .replace(/_([0-9]+)/g, '_{$1}')
       .replace(/_([a-zA-Z])(?![a-zA-Z0-9}])/g, '_{$1}')
-      .replace(/\^([0-9]+)(?![0-9}])/g, '^{$1}')
+      .replace(/\^([0-9]+)(?![0-9}])/g, '^{$1}');
+
+    const textSlots = [];
+    s = s.replace(/\\(?:text|mathrm|mathbf|operatorname)\{[^{}]*\}/g, (blk) => {
+      textSlots.push(blk);
+      return `\x00ZTEXT${textSlots.length - 1}\x00`;
+    });
+    s = s
       .replace(/(?<!\\)\b(ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max)\b(?=\s*(?:\\left|[(\[{]))/g, '\\$1')
-      .replace(/\b(cos|sin|tan|exp|ln|log)\s+([θ\w])/gi, '\\$1 $2')
+      .replace(/(?<!\\)\b(cos|sin|tan|exp|ln|log)\s+([θ\w])/g, '\\$1 $2')
       .replace(/(\bP\s*\(\s*)([A-Z][a-z]{2,})(\s*\))/g, '$1\\mathrm{$2}$3')
+      .replace(/(?:\\sqrt|(?<!\\)\bsqrt)\s*\(([^()]+)\)/gi, '\\sqrt{$1}')
       .replace(/√\s*\(([^()]+)\)/g, '\\sqrt{$1}')
+      .replace(/√\s*([A-Za-z0-9α-ωθ])/g, '\\sqrt{$1}')
       .replace(/([A-Za-z0-9}])\s*\*\s*([A-Za-z0-9\\(])/g, '$1 \\times $2')
       .replace(/([A-Za-z0-9)\]}θγπ])\s+\b(dan|atau|serta|dimana|and|or|where|with)\b\s+(?=[A-Za-zθγπ\\(])/gi, '$1\\;\\mathrm{$2}\\;');
+    if (textSlots.length > 0) {
+      s = s.replace(/\x00ZTEXT(\d+)\x00/g, (_, idx) => textSlots[Number(idx)] || '');
+    }
 
     s = promoteBalancedDivisionToFracClient(s);
-    s = s.replace(/(\b\w\w?\s*=\s*)([A-Za-z0-9\\_{}]+)\s*\/\s*([A-Za-z0-9\\_{}]+)(?=$|\s*[×+\-=])/g, '$1\\frac{$2}{$3}');
+    s = s.replace(/(\b\w\w?\s*=\s*)(?!\b(?:km\/h|m\/s|kg\/m|g\/kg|mg\/|mm\/|N\/A|I\/O)\b)([A-Za-z0-9\\_{}]+)\s*\/\s*([A-Za-z0-9\\_{}]+)(?=$|\s*[×+\-=])/g, '$1\\frac{$2}{$3}');
 
     const leftCount = (s.match(/\\left(?![a-zA-Z])/g) || []).length;
     const rightCount = (s.match(/\\right(?![a-zA-Z])/g) || []).length;
@@ -35604,6 +35875,61 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       s = s.replace(/\\left\s*([([{|])/g, '$1').replace(/\\right\s*([)\]}|])/g, '$1').replace(/\\(?:left|right)\b\s*\.?/g, '');
     }
     return s.replace(/\s+/g, ' ').trim();
+  }
+
+  function extractBalancedZ21BracesClient(str, startIdx) {
+    let i = startIdx;
+    while (i < str.length && /\s/.test(str[i])) i++;
+    if (i >= str.length || str[i] !== '{') return null;
+    let depth = 0;
+    const contentStart = i + 1;
+    while (i < str.length) {
+      if (str[i] === '\\' && i + 1 < str.length) { i += 2; continue; }
+      if (str[i] === '{') depth++;
+      else if (str[i] === '}') {
+        depth--;
+        if (depth === 0) return { content: str.slice(contentStart, i), endIdx: i + 1 };
+      }
+      i++;
+    }
+    return null;
+  }
+
+  function replaceZ21Latex1ArgClient(str, cmdRegex, fn) {
+    let out = String(str || '');
+    for (let pass = 0; pass < 4; pass++) {
+      let changed = false; let res = ''; let idx = 0;
+      while (idx < out.length) {
+        cmdRegex.lastIndex = idx;
+        const m = cmdRegex.exec(out);
+        if (!m) { res += out.slice(idx); break; }
+        res += out.slice(idx, m.index);
+        const arg1 = extractBalancedZ21BracesClient(out, m.index + m[0].length);
+        if (arg1) { res += fn(arg1.content, m[0]); idx = arg1.endIdx; changed = true; }
+        else { res += m[0]; idx = m.index + m[0].length; }
+      }
+      out = res; if (!changed) break;
+    }
+    return out;
+  }
+
+  function replaceZ21Latex2ArgClient(str, cmdRegex, fn) {
+    let out = String(str || '');
+    for (let pass = 0; pass < 4; pass++) {
+      let changed = false; let res = ''; let idx = 0;
+      while (idx < out.length) {
+        cmdRegex.lastIndex = idx;
+        const m = cmdRegex.exec(out);
+        if (!m) { res += out.slice(idx); break; }
+        res += out.slice(idx, m.index);
+        const arg1 = extractBalancedZ21BracesClient(out, m.index + m[0].length);
+        const arg2 = arg1 ? extractBalancedZ21BracesClient(out, arg1.endIdx) : null;
+        if (arg1 && arg2) { res += fn(arg1.content, arg2.content, m[0]); idx = arg2.endIdx; changed = true; }
+        else { res += m[0]; idx = m.index + m[0].length; }
+      }
+      out = res; if (!changed) break;
+    }
+    return out;
   }
 
   function normalizeZ21ScientificTextClient(rawText, options = {}) {
@@ -35623,26 +35949,25 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/\\+right\s*\\?([)\]}|])/g, '$1')
       .replace(/\\+(?:left|right)\b\s*\.?/g, '')
       .replace(/\\([%&#_])/g, '$1')
-      .replace(/\\(?:,|;|:|quad|qquad)\b/g, ' ')
+      .replace(/\\(?:quad|qquad)\b|\\(?:limits|nolimits|displaystyle|textstyle)(?![a-zA-Z])|\\[,;:]/g, ' ')
       .replace(/\\!/g, '');
 
     if (!preserveFrac) {
-      s = s.replace(/\\(?:dfrac|tfrac|cfrac|frac)\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '($1 / $2)');
+      s = replaceZ21Latex2ArgClient(s, /\\(?:dfrac|tfrac|cfrac|frac)(?![a-zA-Z])/g, (num, den) => `(${num} / ${den})`);
     } else {
       s = s
-      .replace(/\\{2,}(?=(?:left|right|frac|dfrac|tfrac|cfrac|sqrt|ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max|alpha|beta|gamma|delta|Delta|epsilon|varepsilon|zeta|eta|theta|kappa|lambda|mu|nu|xi|pi|rho|sigma|Sigma|tau|phi|Phi|psi|Psi|omega|Omega|times|div|cdot|pm|approx|neq|equiv|propto|leq|geq|infty|sum|int|partial|nabla|in|forall|exists|rightarrow|Rightarrow|to|mathbb|mathrm|mathbf|mathit|operatorname|text|quad|qquad|circ|%))/g, '\\')
+      .replace(/\\{2,}(?=(?:left|right|frac|dfrac|tfrac|cfrac|sqrt|ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max|alpha|beta|gamma|delta|Delta|epsilon|varepsilon|zeta|eta|theta|kappa|lambda|mu|nu|xi|pi|rho|sigma|Sigma|tau|phi|Phi|psi|Psi|omega|Omega|times|div|cdot|pm|approx|neq|ne|equiv|propto|leq|le|geq|ge|infty|sum|int|prod|partial|nabla|in|forall|exists|rightarrow|Rightarrow|implies|iff|leftrightarrow|Leftrightarrow|to|mathbb|mathrm|mathbf|mathit|operatorname|text|hat|bar|tilde|vec|binom|boxed|quad|qquad|circ|%))/g, '\\')
       .replace(/\\(?:dfrac|tfrac|cfrac)\b/g, '\\frac');
     }
 
+    s = replaceZ21Latex1ArgClient(s, /\\sqrt(?![a-zA-Z])/g, (inner) => `√(${inner})`);
+    s = replaceZ21Latex1ArgClient(s, /\\mathbb(?![a-zA-Z])/g, (inner) => ({ R: 'ℝ', N: 'ℕ', Z: 'ℤ' }[inner.trim()] || inner));
+    s = replaceZ21Latex1ArgClient(s, /\\(?:vec|hat|bar|tilde|text|mathrm|mathbf|mathit|operatorname|boxed)(?![a-zA-Z])/g, (inner) => inner);
     s = s
-      .replace(/\\sqrt\s*\{([^{}]+)\}/g, '√($1)')
-      .replace(/\\mathbb\s*\{R\}/g, 'ℝ')
-      .replace(/\\mathbb\s*\{N\}/g, 'ℕ')
-      .replace(/\\mathbb\s*\{Z\}/g, 'ℤ')
-      .replace(/\\vec\s*\{([^{}]+)\}/g, '$1')
-      .replace(/\\hat\s*\{([^{}]+)\}/g, '$1')
-      .replace(/\\(?:text|mathrm|mathbf|mathit|operatorname)\s*\{([^{}]*)\}/g, '$1')
+      .replace(/\^\{\s*\\circ\s*\}\s*([CFcf])\b/g, '°$1')
       .replace(/\^\\circ\s*([CFcf])\b/g, '°$1')
+      .replace(/\^\{\s*\\circ\s*\}/g, '°')
+      .replace(/\^\\circ\b/g, '°')
       .replace(/\\circ\b/g, '°')
       .replace(/\\theta\b/g, 'θ')
       .replace(/\\alpha\b/g, 'α')
@@ -35673,29 +35998,35 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/\\times\b/g, '×')
       .replace(/\\div\b/g, '÷')
       .replace(/\\cdot\b/g, '·')
+      .replace(/\\cdots\b/g, '⋯')
+      .replace(/\\ldots\b/g, '…')
       .replace(/\\approx\b/g, '≈')
-      .replace(/\\neq\b/g, '≠')
+      .replace(/\\neq?\b/g, '≠')
       .replace(/\\equiv\b/g, '≡')
       .replace(/\\propto\b/g, '∝')
-      .replace(/\\leq\b/g, '≤')
-      .replace(/\\geq\b/g, '≥')
+      .replace(/\\leq?\b/g, '≤')
+      .replace(/\\geq?\b/g, '≥')
       .replace(/\\pm\b/g, '±')
       .replace(/\\infty\b/g, '∞')
       .replace(/\\sum\b/g, '∑')
       .replace(/\\int\b/g, '∫')
+      .replace(/\\prod\b/g, '∏')
       .replace(/\\partial\b/g, '∂')
       .replace(/\\nabla\b/g, '∇')
       .replace(/\\in\b/g, '∈')
       .replace(/\\forall\b/g, '∀')
       .replace(/\\exists\b/g, '∃')
       .replace(/\\(?:rightarrow|to)\b/g, '→')
-      .replace(/\\Rightarrow\b/g, '⇒')
+      .replace(/\\(?:Rightarrow|implies)\b/g, '⇒')
+      .replace(/\\leftrightarrow\b/g, '↔')
+      .replace(/\\(?:Leftrightarrow|iff)\b/g, '⇔')
       .replace(/\\(cos|sin|tan|log|ln|exp|lim)\b/g, '$1');
 
     s = s
-      .replace(/(\b(?:Suhu|Temperatur|Temp|Temperature|Feels\s*Like|Terasa|Dew\s*Point|Titik\s*Embun|T|c)\s*[:=]?\s*-?\d+(?:[.,]\d+)?)\s*°?\s*([CF])(?![A-Za-z0-9_])/gi, (_, pre, u) => `${pre}°${u.toUpperCase()}`)
+      .replace(/(\b(?:Suhu|Temperatur|Temp|Temperature|Feels\s*Like|Terasa|Dew\s*Point|Titik\s*Embun)\s*[:=]?\s*-?\d+(?:[.,]\d+)?)\s*°?\s*([CF])(?![A-Za-z0-9_])/gi, (_, pre, u) => `${pre}°${u.toUpperCase()}`)
       .replace(/((?:suhu|temperatur|temp|temperature|terasa|udara|dingin|panas|celsius|fahrenheit|in|dalam)[^\n]{0,24}?\b-?\d+(?:[.,]\d+)?)\s+([CF])(?=[,.;:)\s]|$)/gi, (_, pre, u) => `${pre}°${u.toUpperCase()}`)
-      .replace(/\(\s*°?\s*([CF])\s*\)/g, (_, u) => `(°${u.toUpperCase()})`);
+      .replace(/(\b(?:suhu|temperatur|temp|temperature|celsius|fahrenheit|dew\s*point|wind\s*chill|heat\s*index)[^\n]{0,30}?)\(\s*([CF])\s*\)/gi, (_, pre, u) => `${pre}(°${u.toUpperCase()})`)
+      .replace(/\(\s*°\s*([CF])\s*\)/gi, (_, u) => `(°${u.toUpperCase()})`);
 
     s = s
       .replace(/\^\{([0-9+-]+)\}/g, (_, d) => d.split('').map(c => Z21_SUP_MAP_CLIENT[c] || c).join(''))
@@ -35716,19 +36047,25 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/([+\-=/(]\s*)c([1-9])(?=[TR\s+\-*/=]|$)/g, (_, p, d) => `${p}c${Z21_SUB_MAP_CLIENT[d] || d}`)
       .replace(/(\/\s*|\(\s*)es\b/g, '$1eₛ')
       .replace(/\bes(?=\s*=|\s*\))/g, 'eₛ')
-      .replace(/([A-Za-z0-9₀-₉⁰-⁹ₛ)])\s*\*\s*([A-Za-z0-9₀-₉⁰-⁹ₛ(])/g, '$1 × $2');
+      .replace(/([A-Za-z0-9₀-₉⁰-⁹¹²³ₛ)])\s*\*\s*([A-Za-z0-9₀-₉⁰-⁹¹²³ₛ(])/g, '$1 × $2');
 
-    return s;
+    return s.replace(/  +/g, ' ').trim();
   }
 
   function isZ21FormulaLineClient(line) {
     const t = String(line || '').trim();
     if (!t) return false;
     if (isZ21VariableLegendLineClient(t).isLegend) return false;
-    if (/^(?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}:/i.test(t)) return true;
-    if (/\\(?:frac|dfrac|sqrt|sum|int|prod|lim)\b/.test(t) && t.length <= 260) return true;
-    if (/^[A-Za-z\u0370-\u03FF][A-Za-z0-9\u0370-\u03FF_₀-₉⁰-⁹ₛₚ,{}\s()]{0,28}\s*=\s*.+/.test(t) && /(?:\s[+\-×÷*/=]\s|[²³⁴₀-₉ₛₚθΔπγ]|\b(?:cos|sin|tan|log|ln|exp|limit)\s*\(|\^\{|_\{|\d+\s*%)/i.test(t)) {
-      return t.length <= 260;
+    const cand = t.replace(/^(?:\(\d+\)|\d+\.)\s+/, '').trim();
+    if (cand !== t && isZ21VariableLegendLineClient(cand).isLegend) return false;
+    if (/^(?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}:/i.test(cand)) return true;
+    if (/\\(?:frac|dfrac|tfrac|cfrac|sqrt|sum|int|prod|lim)(?![a-zA-Z])/.test(cand) && cand.length <= 260) {
+      const hasProseRun = /\b[a-z]{3,}\s+[a-z]{3,}\s+[a-z]{3,}\s+[a-z]{3,}\s+[a-z]{3,}\b/.test(cand);
+      if (!hasProseRun || /[=≤≥≈≠→⇒]/.test(cand)) return true;
+    }
+    if (/^[A-Za-z0-9\u0370-\u03FF][A-Za-z0-9\u0370-\u03FF_₀-₉⁰-⁹¹²³ₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓₛₚ,{}\s()+\-*/^]{0,28}\s*=\s*.+/.test(cand) &&
+        /(?:\s[+\-×÷*/=]\s|[+×÷^≤≥≈≠]|[⁰-⁹¹²³₀-₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓθΔπγ]|\b(?:cos|sin|tan|log|ln|exp|sqrt|limit)\s*\(|\^\{|_\{|\d+\s*%)/i.test(cand)) {
+      return cand.length <= 260;
     }
     return false;
   }
@@ -35741,12 +36078,12 @@ ATURAN MUTLAK EKSEKUSI AGEN:
   }
 
   function renderZ21MathSupSubHtml(escapedHtmlStr) {
-    return String(escapedHtmlStr || '')
-      .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '<span class="z21-frac"><span class="z21-frac-num">$1</span><span class="z21-frac-den">$2</span></span>')
+    let out = replaceZ21Latex2ArgClient(String(escapedHtmlStr || ''), /\\(?:frac|dfrac|tfrac|cfrac)(?![a-zA-Z])/g, (n, d) => `<span class="z21-frac"><span class="z21-frac-num">${n}</span><span class="z21-frac-den">${d}</span></span>`);
+    return out
       .replace(/\^\{([^{}]+)\}/g, '<sup>$1</sup>')
       .replace(/_\{([^{}]+)\}/g, '<sub>$1</sub>')
-      .replace(/([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+)/g, (m) => `<sup>${m.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]/g, c => '0123456789+-'['⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻'.indexOf(c)])}</sup>`)
-      .replace(/([₀₁₂₃₄₅₆₇₈₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ]+)/g, (m) => `<sub>${m.replace(/[₀₁₂₃₄₅₆₇₈₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ]/g, c => '0123456789spaehijlmnortuvx'['₀₁₂₃₄₅₆₇₈₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ'.indexOf(c)])}</sub>`);
+      .replace(/([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+)/g, (m) => `<sup>${m.split('').map(c => Z21_INV_SUP_MAP_CLIENT[c] || c).join('')}</sup>`)
+      .replace(/([₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ]+)/g, (m) => `<sub>${m.split('').map(c => Z21_INV_SUB_MAP_CLIENT[c] || c).join('')}</sub>`);
   }
 
   function formatZ21PreviewHtmlContent(cleanedDocBody) {
@@ -35775,7 +36112,8 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       }
       // Promosikan heading bab bernomor ("1. Pendahuluan & Konteks Data") menjadi ## Heading2
       const numSecMatch = trimmed.match(/^(\d+)\.\s+([A-ZÀ-ÖØ-Þ][^\n]{3,92})$/);
-      if (numSecMatch && !/[.:;]$/.test(numSecMatch[2]) && !/^\d/.test(numSecMatch[2])) {
+      const numCheckFrac = normalizeZ21ScientificTextClient(trimmed, { preserveFrac: true });
+      if (numSecMatch && !/[.:;]$/.test(numSecMatch[2]) && !/^\d/.test(numSecMatch[2]) && !/[=<>\\^_{}]/.test(numSecMatch[2]) && !isZ21FormulaLineClient(numCheckFrac)) {
         transformed.push('');
         transformed.push(`## ${numSecMatch[1]}. ${normalizeZ21ScientificTextClient(numSecMatch[2])}`);
         transformed.push('');
@@ -35881,7 +36219,8 @@ ATURAN MUTLAK EKSEKUSI AGEN:
                 bullets: Array.isArray(s.bullets) ? s.bullets.map(b => {
                   const rb = stripZ21InlineMd(b);
                   return isZ21FormulaLineClient(rb) ? normalizeZ21ScientificTextClient(rb, { preserveFrac: true }) : rb;
-                }).filter(Boolean) : []
+                }).filter(Boolean) : [],
+                ...(s.table && typeof s.table === 'object' ? { table: s.table } : {})
               }) : s).filter(Boolean)
             : [],
           tables: Array.isArray(argSpec.tables) ? argSpec.tables : [],
@@ -36010,7 +36349,8 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       }
       // Promosikan heading bab bernomor ("1. Pendahuluan & Konteks Data", "2. Termodinamika...") menjadi Section Heading terpisah
       const numberedHeadingMatch = line.match(/^(\d+)\.\s+([A-ZÀ-ÖØ-Þ][^\n]{3,92})$/);
-      if (numberedHeadingMatch && !/[.:;]$/.test(numberedHeadingMatch[2]) && !/^\d/.test(numberedHeadingMatch[2])) {
+      const numSpecFrac = normalizeZ21ScientificTextClient(line, { preserveFrac: true });
+      if (numberedHeadingMatch && !/[.:;]$/.test(numberedHeadingMatch[2]) && !/^\d/.test(numberedHeadingMatch[2]) && !/[=<>\\^_{}]/.test(numberedHeadingMatch[2]) && !isZ21FormulaLineClient(numSpecFrac)) {
         flushCurrentSection();
         currentSection.heading = `${numberedHeadingMatch[1]}. ${stripZ21InlineMd(numberedHeadingMatch[2])}`;
         idx++;
@@ -40651,7 +40991,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   }
 
   function escapeClientXml(v) {
-    return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return String(v ?? '')
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
   }
 
   function clientColA1(colIdx) {
@@ -40666,23 +41012,28 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   }
 
   function compileStructuredDataToXlsxBase64(rawSpec = {}) {
+    const secTables = (Array.isArray(rawSpec.sections) ? rawSpec.sections : [])
+      .filter(s => s && s.table && (Array.isArray(s.table.headers) || Array.isArray(s.table.rows)))
+      .map((s, i) => ({ name: s.table.title || s.heading || `Sheet${i + 1}`, headers: s.table.headers || [], rows: s.table.rows || [], formulas: s.table.formulas || [] }));
     const sheets = (Array.isArray(rawSpec.sheets) && rawSpec.sheets.length > 0)
       ? rawSpec.sheets
       : (Array.isArray(rawSpec.tables) && rawSpec.tables.length > 0)
         ? rawSpec.tables.map((t, i) => ({ name: t.title || `Sheet${i + 1}`, headers: t.headers || [], rows: t.rows || [], formulas: t.formulas || [] }))
-        : [{ name: 'Data', headers: ['Kolom', 'Nilai'], rows: [[rawSpec.title || 'Dokumen Z21', String(rawSpec.content || 'Data Spreadsheet').slice(0, 400)]], formulas: [] }];
+        : (secTables.length > 0 ? secTables : [{ name: 'Data', headers: ['Kolom', 'Nilai'], rows: [[rawSpec.title || 'Dokumen Z21', String(rawSpec.content || 'Data Spreadsheet').slice(0, 400)]], formulas: [] }]);
 
     const entries = [];
     const wbSheets = [];
     const wbRels = [];
     const ctParts = [];
+    const usedSheetNames = new Set();
     const makeCell = (r, c, val, isHdr) => {
       const ref = `${clientColA1(c)}${r}`;
       const sAttr = isHdr ? ' s="1"' : '';
       const str = val === null || val === undefined ? '' : String(val);
       if (str.startsWith('=')) return `<c r="${ref}"${sAttr}><f>${escapeClientXml(str.slice(1))}</f></c>`;
       if (typeof val === 'number' && Number.isFinite(val)) return `<c r="${ref}"${sAttr} t="n"><v>${val}</v></c>`;
-      if (/^-?\d+(?:\.\d+)?$/.test(str.trim()) && str.trim().length <= 15 && !isHdr) return `<c r="${ref}"${sAttr} t="n"><v>${str.trim()}</v></c>`;
+      const trimmed = str.trim();
+      if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(trimmed) && trimmed.length <= 15 && !isHdr) return `<c r="${ref}"${sAttr} t="n"><v>${trimmed}</v></c>`;
       return `<c r="${ref}"${sAttr} t="inlineStr"><is><t>${escapeClientXml(str)}</t></is></c>`;
     };
     sheets.forEach((sh, i) => {
@@ -40703,12 +41054,21 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           const cells = [];
           if (fItem.label) cells.push(makeCell(rNum, 0, fItem.label, true));
           const fStr = String(fItem.formula || fItem.value || 'SUM(A1:A1)');
-          cells.push(makeCell(rNum, Number.isInteger(fItem.col) ? fItem.col : (cells.length ? 1 : 0), fStr.startsWith('=') ? fStr : '=' + fStr, false));
+          const targetCol = Number.isInteger(fItem.col) && (!fItem.label || fItem.col > 0) ? fItem.col : (cells.length ? 1 : 0);
+          cells.push(makeCell(rNum, targetCol, fStr.startsWith('=') ? fStr : '=' + fStr, false));
           rowsXml.push(`<row r="${rNum}">${cells.join('')}</row>`);
           rNum++;
         }
       }
-      const sName = escapeClientXml(String(sh.name || `Sheet${num}`).slice(0, 30) || `Sheet${num}`);
+      const baseName = String(sh.name || `Sheet${num}`).replace(/[:\\/?*\[\]\x00-\x1F]/g, '').replace(/^'+|'+$/g, '').trim().slice(0, 31) || `Sheet${num}`;
+      let candName = baseName;
+      let suffix = 2;
+      while (usedSheetNames.has(candName.toLowerCase())) {
+        const sfx = `_${suffix++}`;
+        candName = baseName.slice(0, Math.max(1, 31 - sfx.length)) + sfx;
+      }
+      usedSheetNames.add(candName.toLowerCase());
+      const sName = escapeClientXml(candName);
       entries.push({
         name: `xl/worksheets/sheet${num}.xml`,
         data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rowsXml.join('')}</sheetData></worksheet>`
@@ -40769,15 +41129,44 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (cp === 0x03B3) { out += 'gamma'; continue; }
       if (cp === 0x03B4) { out += 'delta'; continue; }
       if (cp === 0x0394) { out += 'Delta'; continue; }
+      if (cp === 0x03B5) { out += 'epsilon'; continue; }
+      if (cp === 0x03B6) { out += 'zeta'; continue; }
+      if (cp === 0x03B7) { out += 'eta'; continue; }
+      if (cp === 0x03BA) { out += 'kappa'; continue; }
       if (cp === 0x03BB) { out += 'lambda'; continue; }
       if (cp === 0x03BC) { out += 'mu'; continue; }
+      if (cp === 0x03BD) { out += 'nu'; continue; }
+      if (cp === 0x03BE) { out += 'xi'; continue; }
       if (cp === 0x03C0) { out += 'pi'; continue; }
       if (cp === 0x03C1) { out += 'rho'; continue; }
       if (cp === 0x03C3) { out += 'sigma'; continue; }
       if (cp === 0x03A3) { out += 'Sigma'; continue; }
+      if (cp === 0x03C4) { out += 'tau'; continue; }
+      if (cp === 0x03C6) { out += 'phi'; continue; }
+      if (cp === 0x03A6) { out += 'Phi'; continue; }
+      if (cp === 0x03C8) { out += 'psi'; continue; }
+      if (cp === 0x03A8) { out += 'Psi'; continue; }
       if (cp === 0x03C9) { out += 'omega'; continue; }
       if (cp === 0x03A9) { out += 'Omega'; continue; }
       if (cp === 0x211D) { out += 'R'; continue; }
+      if (cp === 0x2115) { out += 'N'; continue; }
+      if (cp === 0x2124) { out += 'Z'; continue; }
+      if (cp === 0x221A) { out += 'sqrt'; continue; }
+      if (cp === 0x2211) { out += 'Sum'; continue; }
+      if (cp === 0x222B) { out += 'Int'; continue; }
+      if (cp === 0x220F) { out += 'Prod'; continue; }
+      if (cp === 0x2202) { out += 'd'; continue; }
+      if (cp === 0x2207) { out += 'nabla'; continue; }
+      if (cp === 0x221E) { out += 'inf'; continue; }
+      if (cp === 0x2208) { out += 'in'; continue; }
+      if (cp === 0x2200) { out += 'forall'; continue; }
+      if (cp === 0x2203) { out += 'exists'; continue; }
+      if (cp === 0x2192) { out += '->'; continue; }
+      if (cp === 0x21D2) { out += '=>'; continue; }
+      if (cp === 0x2194) { out += '<->'; continue; }
+      if (cp === 0x21D4) { out += '<=>'; continue; }
+      if (cp === 0x2261) { out += '=='; continue; }
+      if (cp === 0x221D) { out += '~'; continue; }
       if (cp === 0x2248) { out += '~='; continue; }
       if (cp === 0x2260) { out += '!='; continue; }
       if (cp === 0x2264) { out += '<='; continue; }
@@ -40797,8 +41186,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   }
 
   function wrapClientPdfText(str, maxChars = 84) {
-    const words = String(str || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
-    if (words.length === 0) return [''];
+    const tokens = String(str || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+    if (tokens.length === 0) return [''];
+    const words = [];
+    for (const tok of tokens) {
+      if (tok.length <= maxChars) words.push(tok);
+      else for (let k = 0; k < tok.length; k += maxChars) words.push(tok.slice(k, k + maxChars));
+    }
     const lines = [];
     let cur = '';
     for (const w of words) {
@@ -40837,7 +41231,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     };
 
     // Header band navy + aksen cyan
-    const titleLines = wrapClientPdfText(docTitle, 54).slice(0, 2);
+    const titleLines = wrapClientPdfText(docTitle, 54);
     const hdrH = 28 + (titleLines.length * 18);
     const hdrBot = 802 - hdrH;
     drawOps.push(`0.06 0.09 0.16 rg 40 ${hdrBot} 515 ${hdrH} re f`);
@@ -40860,7 +41254,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const drawClientPdfTable = (tbl) => {
       const headers = Array.isArray(tbl.headers) ? tbl.headers : [];
       const rows = Array.isArray(tbl.rows) ? tbl.rows : [];
-      const colCnt = Math.max(1, headers.length || (rows[0] && Array.isArray(rows[0]) ? rows[0].length : 1));
+      const maxRowLen = Math.max(0, ...rows.map(r => (Array.isArray(r) ? r.length : 1)));
+      const colCnt = Math.max(1, headers.length, maxRowLen);
       const tblX = 40;
       const tblW = 515;
       const colW = tblW / colCnt;
@@ -40909,7 +41304,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         renderedSectionHeadings.add(sh);
         pushPageBreakIfNeeded(24);
         y -= 4;
-        drawOps.push(`0.06 0.16 0.38 rg BT /F2 12 Tf 40 ${y} Td (${pdfWinAnsiSafe(sh).slice(0, 82)}) Tj ET`);
+        drawOps.push(`0.06 0.16 0.38 rg BT /F2 12 Tf 40 ${y} Td (${pdfWinAnsiSafe(sh.slice(0, 78))}) Tj ET`);
         drawOps.push(`0.88 0.91 0.94 rg 40 ${y - 4} 515 1 re f`);
         y -= 18;
       }
@@ -40966,7 +41361,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const tt = stripZ21InlineMd(tbl.title || '');
       if (tt && !renderedSectionHeadings.has(tt)) {
         pushPageBreakIfNeeded(22);
-        drawOps.push(`0.06 0.16 0.38 rg BT /F2 11.5 Tf 40 ${y} Td (${pdfWinAnsiSafe(tt).slice(0, 82)}) Tj ET`);
+        drawOps.push(`0.06 0.16 0.38 rg BT /F2 11.5 Tf 40 ${y} Td (${pdfWinAnsiSafe(tt.slice(0, 78))}) Tj ET`);
         y -= 16;
       }
       drawClientPdfTable(tbl);
@@ -41023,15 +41418,17 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const pushDocxTable = (tbl) => {
       const headers = Array.isArray(tbl.headers) ? tbl.headers : [];
       const rows = Array.isArray(tbl.rows) ? tbl.rows : [];
+      const maxRowLen = Math.max(0, ...rows.map(r => (Array.isArray(r) ? r.length : 1)));
+      const colCnt = Math.max(headers.length, maxRowLen);
       const rowsXml = [];
       if (headers.length > 0) {
-        rowsXml.push('<w:tr>' + headers.map(h =>
-          `<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="1E293B"/></w:tcPr><w:p><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:t>${escapeClientXml(stripZ21InlineMd(h))}</w:t></w:r></w:p></w:tc>`
+        rowsXml.push('<w:tr>' + Array.from({ length: colCnt }, (_, ci) => headers[ci] ?? '').map(h =>
+          `<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="1E293B"/></w:tcPr><w:p>${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(stripZ21InlineMd(h)), '<w:b/><w:color w:val="FFFFFF"/>')}</w:p></w:tc>`
         ).join('') + '</w:tr>');
       }
       for (const r of rows) {
         const arr = Array.isArray(r) ? r : [r];
-        rowsXml.push('<w:tr>' + arr.map(c =>
+        rowsXml.push('<w:tr>' + Array.from({ length: colCnt }, (_, ci) => arr[ci] ?? '').map(c =>
           `<w:tc><w:p>${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(stripZ21InlineMd(c)))}</w:p></w:tc>`
         ).join('') + '</w:tr>');
       }
@@ -41057,7 +41454,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             const { label, expr } = parseZ21FormulaPartsClient(normLnFrac);
             const labelXml = label ? `<w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t xml:space="preserve">${escapeClientXml(label)}: </w:t></w:r>` : '';
             const exprRuns = renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(expr), '<w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/>');
-            paras.push(`<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:ind w:left="240" w:right="240"/><w:spacing w:before="100" w:after="100"/></w:pPr>${labelXml}${exprRuns}</w:p>`);
+            paras.push(`<w:p><w:pPr><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:spacing w:before="100" w:after="100"/><w:ind w:left="240" w:right="240"/></w:pPr>${labelXml}${exprRuns}</w:p>`);
             continue;
           }
           const kvMatch = normLn.match(/^((?:Lokasi|Tanggal|Parameter\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\s*:)\s*(.+)$/i);
@@ -41073,7 +41470,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         if (isZ21FormulaLineClient(rbFrac) && !isZ21VariableLegendLineClient(rbFrac).isLegend) {
           const { label, expr } = parseZ21FormulaPartsClient(rbFrac);
           const labelXml = label ? `<w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t xml:space="preserve">${escapeClientXml(label)}: </w:t></w:r>` : '';
-          paras.push(`<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:ind w:left="240" w:right="240"/><w:spacing w:before="100" w:after="100"/></w:pPr>${labelXml}${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(expr), '<w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/>')}</w:p>`);
+          paras.push(`<w:p><w:pPr><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:spacing w:before="100" w:after="100"/><w:ind w:left="240" w:right="240"/></w:pPr>${labelXml}${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(expr), '<w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/>')}</w:p>`);
         } else {
           paras.push(`<w:p><w:r><w:t xml:space="preserve">• </w:t></w:r>${renderMathTextToDocxRuns(stripZ21InlineMd(b))}</w:p>`);
         }
@@ -41100,6 +41497,16 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   }
 
   function buildZ21DocumentPreviewMarkdown(spec, filename, ext, librariesUsed, engine) {
+    const escMdCell = (v) => String(v ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+    const renderMdTbl = (tblObj) => {
+      const rows = Array.isArray(tblObj?.rows) ? tblObj.rows : [];
+      const hdr = (Array.isArray(tblObj?.headers) && tblObj.headers.length > 0)
+        ? tblObj.headers.map(escMdCell)
+        : (rows[0] ? (Array.isArray(rows[0]) ? rows[0] : [rows[0]]).map((_, idx) => `Kolom ${idx + 1}`) : []);
+      if (hdr.length === 0) return '';
+      return '| ' + hdr.join(' | ') + ' |\n| ' + hdr.map(() => '---').join(' | ') + ' |\n' +
+        rows.map(r => '| ' + (Array.isArray(r) ? r : [r]).map(escMdCell).join(' | ') + ' |').join('\n');
+    };
     const out = [`# ${stripZ21InlineMd(spec.title || filename)}`];
     if (spec.subtitle) out.push(`*${stripZ21InlineMd(spec.subtitle)}*`);
     for (const sec of (Array.isArray(spec.sections) ? spec.sections : [])) {
@@ -41116,16 +41523,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           return `- ${isZ21FormulaLineClient(rb) ? normalizeZ21ScientificTextClient(rb, { preserveFrac: true }) : rb}`;
         }).join('\n'));
       }
+      if (sec.table && (Array.isArray(sec.table.headers) || Array.isArray(sec.table.rows))) {
+        const mdTbl = renderMdTbl(sec.table);
+        if (mdTbl) out.push(mdTbl);
+      }
     }
     for (const sh of (Array.isArray(spec.sheets) ? spec.sheets : (Array.isArray(spec.tables) ? spec.tables : []))) {
       const sHeading = sh.name || sh.title || '';
       if (sHeading && !(Array.isArray(spec.sections) && spec.sections.some(s => s.heading === sHeading))) {
         out.push(`## ${stripZ21InlineMd(sHeading)}`);
       }
-      if (Array.isArray(sh.headers) && sh.headers.length > 0) {
-        out.push('| ' + sh.headers.join(' | ') + ' |\n| ' + sh.headers.map(() => '---').join(' | ') + ' |\n' +
-          (sh.rows || []).map(r => '| ' + (Array.isArray(r) ? r : [r]).map(c => String(c ?? '')).join(' | ') + ' |').join('\n'));
-      }
+      const mdTbl = renderMdTbl(sh);
+      if (mdTbl) out.push(mdTbl);
       if (Array.isArray(sh.formulas) && sh.formulas.length > 0) {
         out.push('**Rumus Formula:** ' + sh.formulas.map(f => `\`${f.label ? f.label + ': ' : ''}${f.formula || f.value || ''}\``).join(', '));
       }
@@ -41314,28 +41723,24 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       let args = {};
       if (typeof rawArgs === 'string') {
         const trimmed = rawArgs.trim();
-        try {
-          const parsedArgs = JSON.parse(trimmed);
-          if (parsedArgs && typeof parsedArgs === 'object' && !Array.isArray(parsedArgs)) {
+        const parsedArgs = parseToolJsonSafe(trimmed);
+        if (parsedArgs !== null && parsedArgs !== undefined) {
+          if (typeof parsedArgs === 'object' && !Array.isArray(parsedArgs)) {
             args = parsedArgs;
           } else if (typeof parsedArgs === 'string') {
-            // Cegah JSON.parse mengembalikan primitive string mentah (mis. "\"SOP-01\"" atau double-encoded JSON)
             const innerTrimmed = parsedArgs.trim();
             let nestedObj = null;
             if (innerTrimmed.startsWith('{')) {
-              try {
-                const candidate = JSON.parse(innerTrimmed);
-                if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
-                  nestedObj = candidate;
-                }
-              } catch (_) {}
+              const candidate = parseToolJsonSafe(innerTrimmed);
+              if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+                nestedObj = candidate;
+              }
             }
             args = nestedObj || coerceRawToolStringToArgs(toolName, innerTrimmed);
           } else {
-            args = coerceRawToolStringToArgs(toolName, parsedArgs != null ? String(parsedArgs) : trimmed);
+            args = coerceRawToolStringToArgs(toolName, String(parsedArgs));
           }
-        } catch (_) {
-          // If string is raw text (not JSON), use it directly
+        } else {
           args = coerceRawToolStringToArgs(toolName, trimmed);
         }
       } else if (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)) {
@@ -41344,9 +41749,15 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
       // Unpack nested parameters if model wrapped them in arguments/parameters/input
       if (args && typeof args === 'object') {
-        if (args.arguments && typeof args.arguments === 'object') args = args.arguments;
-        else if (args.parameters && typeof args.parameters === 'object') args = args.parameters;
-        else if (args.input && typeof args.input === 'object') args = args.input;
+        for (const key of ['arguments', 'parameters', 'input']) {
+          if (typeof args[key] === 'string' && args[key].trim().startsWith('{')) {
+            const un = parseToolJsonSafe(args[key]);
+            if (un && typeof un === 'object' && !Array.isArray(un)) { args = un; break; }
+          } else if (args[key] && typeof args[key] === 'object' && !Array.isArray(args[key])) {
+            args = args[key];
+            break;
+          }
+        }
       }
 
       // Bangun cacheKey kanonikal: satukan alias tool & parameter esensial
@@ -43603,8 +44014,17 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (typeof rawJsonStr !== 'string') return rawJsonStr;
     const trimmed = rawJsonStr.trim();
     if (!trimmed) return null;
+    const hasCorruptedLatexCtrl = (val) => {
+      if (typeof val === 'string') {
+        return /(?:\r(?:ight(?:arrow)?|ho|angle|ule)|\f(?:rac|orall|lat|rown)|\t(?:heta|imes|ext(?:bf|it|rm|sf|tt)?|frac|ilde|au|op|riangle|herefore)|[\b](?:eta|ar|inom|egin|ig|igskip|ullet|oxed)|\n(?:eq|abla|otin|ewline))\b/.test(val);
+      }
+      if (Array.isArray(val)) return val.some(hasCorruptedLatexCtrl);
+      if (val && typeof val === 'object') return Object.values(val).some(hasCorruptedLatexCtrl);
+      return false;
+    };
     try {
-      return JSON.parse(trimmed);
+      const quickParsed = JSON.parse(trimmed);
+      if (!hasCorruptedLatexCtrl(quickParsed)) return quickParsed;
     } catch (_) {}
     // Perbaiki backslash LaTeX tunggal di dalam literal string JSON (\left, \right, \theta, \frac, \beta, dll.)
     try {
@@ -43625,7 +44045,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         if (ch === '\\') {
           const next = trimmed[i + 1] || '';
           const rest = trimmed.slice(i + 1);
-          const latexCmdMatch = rest.match(/^(left|right|theta|alpha|beta|gamma|delta|Delta|pi|sigma|Sigma|lambda|mu|omega|Omega|times|cdot|frac|sqrt|mathbb|neq|nabla|leq|geq|approx|pm|infty|sum|int|partial|in|cos|sin|tan|ln|log|exp|vec|hat|circ|text|mathrm|mathbf|mathit|operatorname|bar|binom|forall|exists|to|rightarrow|Rightarrow|div|equiv|propto|tau|rho|phi|Phi|psi|Psi|eta|zeta|xi|nu|kappa|varepsilon|epsilon)\b/);
+          const latexCmdMatch = rest.match(/^(left|right|theta|alpha|beta|gamma|delta|Delta|pi|sigma|Sigma|lambda|mu|omega|Omega|times|cdot|frac|dfrac|tfrac|cfrac|sqrt|mathbb|neq|ne|nabla|leq|le|geq|ge|approx|pm|mp|infty|sum|int|prod|partial|in|notin|cos|sin|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|ln|log|exp|lim|vec|hat|bar|tilde|circ|text|textbf|textit|textrm|mathrm|mathbf|mathit|operatorname|binom|boxed|forall|exists|to|rightarrow|Rightarrow|implies|iff|leftrightarrow|Leftrightarrow|div|equiv|propto|tau|rho|phi|Phi|psi|Psi|eta|zeta|xi|nu|kappa|varepsilon|epsilon|big|Big|bigl|bigr|lfloor|rfloor|lceil|rceil|rule|newline|quad|qquad|limits|displaystyle|dots|cdots|ldots)\b/);
           if (latexCmdMatch) {
             fixed += '\\\\';
             continue;
@@ -67307,7 +67727,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://navy-perfect-exam-thehun.trycloudflare.com',
+    activeTunnelUrl: 'https://pvc-fragrances-excited-organizing.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
