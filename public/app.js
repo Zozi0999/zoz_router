@@ -84,7 +84,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://customized-gadgets-webcams-rover.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://racial-fairfield-harvard-lonely.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -35933,7 +35933,7 @@ ${blocks}
     if (!text || typeof text !== 'string') return false;
     const t = text.trim();
     if (!t) return false;
-    return /\b(?:create_subagent|spawn_agent|dispatch_tasks|wait_and_collect|aggregate|sub[\s-]?agen(?:s|t)?|swarm|multi[\s-]?agen(?:t|s)?|gelombang\s+agen|koordinator|orkestrasi|parallel\s+execution|bash|terminal|powershell|cmd|shell|command\s*line|jalankan\s+(?:perintah|skrip|tes|test|npm|node|pytest|git)|npm\s+(?:test|run|install)|pytest|unittest|unit\s+test|git\s+(?:status|diff|log|branch)|file_editor|read_file|write_file|patch_file|edit_file|baca\s+(?:file|berkas|baris|kode)|edit\s+(?:file|berkas|kode)|patch\s+(?:file|berkas|kode)|audit\s+(?:kode|proyek|folder|bug)|struktur\s+folder)\b/i.test(t);
+    return /\b(?:create_subagent|spawn_agent|dispatch_tasks|wait_and_collect|aggregate|sub[\s-]?agen(?:s|t)?|swarm|multi[\s-]?agen(?:t|s)?|gelombang\s+agen|koordinator|orkestrasi|parallel\s+execution|bash|terminal|run_terminal|sandbox|sandbox_sessions|powershell|cmd|shell|command\s*line|jalankan\s+(?:perintah|skrip|kode|tes|test|npm|node|python|pytest|git|di\s+terminal)|npm\s+(?:test|run|install)|pytest|unittest|unit\s+test|git\s+(?:status|diff|log|branch)|file_editor|read_file|write_file|patch_file|edit_file|baca\s+(?:file|berkas|baris|kode)|tulis\s+(?:file|berkas|kode|skrip)|simpan\s+ke\s+(?:file|berkas)|buat(?:kan)?\s+(?:file|berkas|skrip)\s+[a-z0-9_.-]+\.[a-z0-9]+|edit\s+(?:file|berkas|kode)|patch\s+(?:file|berkas|kode)|audit\s+(?:kode|proyek|folder|bug)|struktur\s+folder)\b/i.test(t);
   }
 
   function computeAutonomousToolTrigger(promptText, opts = {}) {
@@ -40410,6 +40410,87 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     {
       type: 'function',
       function: {
+        name: 'run_terminal',
+        description: 'KHUSUS LOCALHOST MODE Z21 (SANDBOX SESI): Menjalankan perintah shell/terminal di direktori terisolasi khusus sesi obrolan (./sandbox_sessions/<chat_id>) dan mengembalikan stdout, stderr, serta exit_code. Timeout otomatis 15–30 detik (maks 30000ms) dan output dipotong maksimal 5.000 karakter.',
+        parameters: {
+          type: 'object',
+          properties: {
+            command: {
+              type: 'string',
+              description: 'Perintah terminal yang dijalankan di dalam folder sandbox sesi (contoh: "python main.py", "node app.js", "ls -la").'
+            },
+            cwd: {
+              type: 'string',
+              description: 'Opsional: Sub-folder relatif di dalam sandbox sesi (default ".").'
+            },
+            timeout_ms: {
+              type: 'integer',
+              minimum: 1000,
+              maximum: 30000,
+              default: 20000,
+              description: 'Batas waktu eksekusi dalam milidetik (default 20000ms / 20 detik, maks 30000ms / 30 detik).'
+            }
+          },
+          required: ['command']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'read_file',
+        description: 'KHUSUS LOCALHOST MODE Z21 (SANDBOX SESI): Membaca isi berkas secara langsung di dalam ./sandbox_sessions/<chat_id> tanpa memakai cat di bash (anti masalah tanda kutip). Output dibatasi maksimal 5.000 karakter.',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Path berkas relatif di dalam folder sandbox sesi (contoh: "main.py", "output/result.txt").'
+            },
+            start_line: {
+              type: 'integer',
+              minimum: 1,
+              description: 'Opsional: Nomor baris awal (berbasis 1).'
+            },
+            end_line: {
+              type: 'integer',
+              minimum: 1,
+              description: 'Opsional: Nomor baris akhir (berbasis 1).'
+            }
+          },
+          required: ['path']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'write_file',
+        description: 'KHUSUS LOCALHOST MODE Z21 (SANDBOX SESI): Menulis atau menimpa berkas secara aman di dalam ./sandbox_sessions/<chat_id> tanpa memakai echo atau heredoc di bash (anti masalah tanda kutip).',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Path berkas relatif di dalam folder sandbox sesi (contoh: "main.py", "data/input.json").'
+            },
+            content: {
+              type: 'string',
+              description: 'Isi lengkap berkas yang akan ditulis.'
+            },
+            append: {
+              type: 'boolean',
+              default: false,
+              description: 'Opsional: Jika true, tambahkan konten ke akhir berkas.'
+            }
+          },
+          required: ['path', 'content']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
         name: 'file_editor',
         description: 'KHUSUS MODE Z21 DI LOCALHOST (DIBLOKIR DI DOMAIN .COM): Membaca daftar berkas atau potongan baris tertentu dari file kode/teks (read_file), menulis berkas baru/utuh (write_file), atau menambal/memperbaiki bagian kode secara presisi tanpa menulis ulang seluruh file (patch_file). Mendukung pemanggilan langsung alias read_file, write_file, patch_file, list_files.',
         parameters: {
@@ -40554,8 +40635,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     'create_subagent', 'spawn_agent', 'create_agent', 'define_subagent', 'buat_subagen',
     'dispatch_tasks', 'dispatch_parallel_tasks', 'run_subagents', 'kirim_tugas', 'parallel_dispatch',
     'wait_and_collect', 'aggregate', 'collect_results', 'wait_wave', 'gather_subagents', 'tunggu_dan_kumpulkan',
-    'bash', 'terminal', 'run_terminal', 'shell', 'exec_command', 'run_shell', 'execute_command',
-    'file_editor', 'read_file', 'write_file', 'patch_file', 'edit_file', 'list_files',
+    'bash', 'terminal', 'shell', 'exec_command', 'run_shell', 'execute_command',
+    'run_terminal', 'sandbox_terminal', 'exec_sandbox', 'jalankan_terminal',
+    'read_file', 'baca_file', 'sandbox_read_file',
+    'write_file', 'tulis_file', 'sandbox_write_file',
+    'file_editor', 'patch_file', 'edit_file', 'list_files',
     'z21_document_builder', 'generate_document_file', 'create_document_file', 'build_document_artifact', 'python_document_builder', 'export_document_file', 'create_pdf_file', 'create_docx_file', 'create_excel_file', 'create_xlsx_file'
   ];
 
@@ -40583,8 +40667,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     'create_subagent', 'spawn_agent', 'create_agent', 'define_subagent', 'buat_subagen',
     'dispatch_tasks', 'dispatch_parallel_tasks', 'run_subagents', 'kirim_tugas', 'parallel_dispatch',
     'wait_and_collect', 'aggregate', 'collect_results', 'wait_wave', 'gather_subagents', 'tunggu_dan_kumpulkan',
-    'bash', 'terminal', 'run_terminal', 'shell', 'exec_command', 'run_shell', 'execute_command',
-    'file_editor', 'read_file', 'write_file', 'patch_file', 'edit_file', 'list_files',
+    'bash', 'terminal', 'shell', 'exec_command', 'run_shell', 'execute_command',
+    'run_terminal', 'sandbox_terminal', 'exec_sandbox', 'jalankan_terminal',
+    'read_file', 'baca_file', 'sandbox_read_file',
+    'write_file', 'tulis_file', 'sandbox_write_file',
+    'file_editor', 'patch_file', 'edit_file', 'list_files',
     'z21_document_builder', 'generate_document_file', 'create_document_file', 'build_document_artifact', 'python_document_builder', 'export_document_file', 'create_pdf_file', 'create_docx_file', 'create_excel_file', 'create_xlsx_file'
   ];
 
@@ -40631,8 +40718,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (['create_subagent', 'spawn_agent', 'create_agent', 'define_subagent', 'buat_subagen'].includes(n)) return 'create_subagent';
     if (['dispatch_tasks', 'dispatch_parallel_tasks', 'run_subagents', 'kirim_tugas', 'parallel_dispatch'].includes(n)) return 'dispatch_tasks';
     if (['wait_and_collect', 'aggregate', 'collect_results', 'wait_wave', 'gather_subagents', 'tunggu_dan_kumpulkan'].includes(n)) return 'wait_and_collect';
-    if (['bash', 'terminal', 'run_terminal', 'shell', 'exec_command', 'run_shell', 'execute_command'].includes(n)) return 'bash';
-    if (['file_editor', 'read_file', 'write_file', 'patch_file', 'edit_file', 'list_files'].includes(n)) return 'file_editor';
+    if (['run_terminal', 'sandbox_terminal', 'exec_sandbox', 'jalankan_terminal'].includes(n)) return 'run_terminal';
+    if (['read_file', 'baca_file', 'sandbox_read_file'].includes(n)) return 'read_file';
+    if (['write_file', 'tulis_file', 'sandbox_write_file'].includes(n)) return 'write_file';
+    if (['bash', 'terminal', 'shell', 'exec_command', 'run_shell', 'execute_command'].includes(n)) return 'bash';
+    if (['file_editor', 'patch_file', 'edit_file', 'list_files'].includes(n)) return 'file_editor';
     if (['z21_document_builder', 'generate_document_file', 'create_document_file', 'build_document_artifact', 'python_document_builder', 'export_document_file', 'create_pdf_file', 'create_docx_file', 'create_excel_file', 'create_xlsx_file'].includes(n)) return 'z21_document_builder';
     return n;
   }
@@ -40651,10 +40741,10 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   }
 
   const Z21_COMMANDER_SWARM_TOOL_NAMES = ['create_subagent', 'dispatch_tasks', 'wait_and_collect'];
-  const Z21_LOCAL_DEV_TOOL_NAMES = ['bash', 'file_editor'];
+  const Z21_LOCAL_DEV_TOOL_NAMES = ['bash', 'file_editor', 'run_terminal', 'read_file', 'write_file'];
   const Z21_DOCUMENT_BUILDER_TOOL_NAMES = ['z21_document_builder'];
   const NON_DEDUP_STATEFUL_TOOL_NAMES = new Set([
-    'create_subagent', 'dispatch_tasks', 'wait_and_collect', 'bash', 'file_editor', 'z21_document_builder'
+    'create_subagent', 'dispatch_tasks', 'wait_and_collect', 'bash', 'file_editor', 'run_terminal', 'read_file', 'write_file', 'z21_document_builder'
   ]);
 
   // Tool utility & web otonom:
@@ -43129,11 +43219,14 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           if (tName === 'execute_python_code') {
             return { code: s };
           }
-          if (tName === 'bash') {
+          if (tName === 'bash' || tName === 'run_terminal') {
             return { command: s };
           }
+          if (tName === 'read_file' || tName === 'write_file') {
+            return { path: s };
+          }
           if (tName === 'file_editor') {
-            const inferredAct = ['read_file', 'write_file', 'patch_file', 'list_files'].includes(normRawInvoke)
+            const inferredAct = ['patch_file', 'list_files'].includes(normRawInvoke)
               ? normRawInvoke
               : (normRawInvoke === 'edit_file' ? 'patch_file' : 'read_file');
             return { action: inferredAct, path: s };
@@ -43248,7 +43341,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       } else if (toolName === 'search_chat_history') {
         canonicalTool = 'search_chat_history';
         canonicalArg = ''; // Riwayat obrolan harus selalu segar lintas sesi terbaru
-      } else if (['create_subagent', 'dispatch_tasks', 'wait_and_collect', 'bash', 'file_editor'].includes(toolName)) {
+      } else if (['create_subagent', 'dispatch_tasks', 'wait_and_collect', 'bash', 'file_editor', 'run_terminal', 'read_file', 'write_file'].includes(toolName)) {
         canonicalTool = toolName;
         canonicalArg = ''; // Tool orkestrasi swarm Z21 & developer localhost tidak pernah di-cache antar pemanggilan
       } else if (['request_location_permission', 'get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(toolName)) {
@@ -45178,6 +45271,184 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         };
       }
 
+      if (toolName === 'run_terminal') {
+        if (!canUseZ21LocalDevTools(toolContext?.planMode, session)) {
+          return {
+            text: '[TERBLOKIR DI DOMAIN PUBLIK (.COM) / NON-Z21]: Tool `run_terminal` hanya dapat digunakan di Mode Z21 pada localhost.',
+            blocked: true,
+            sources: [],
+            success: false
+          };
+        }
+        const cmdText = String(args.command || args.cmd || args.script || '').trim();
+        if (!cmdText) {
+          return { text: 'Error run_terminal: Parameter `command` wajib diisi.', sources: [], success: false };
+        }
+        const activeSessionId = String(session?.id || toolContext?.session?.id || STATE.currentSessionId || 'default_z21').trim();
+        const reqCwd = String(args.cwd || toolContext?.sandboxCwd || '').trim();
+        const timeoutMs = Math.max(1000, Math.min(30000, parseInt(args.timeout_ms || args.timeoutMs, 10) || 20000));
+        const resp = await fetch(getUniversalApiUrl('/api/z21/sandbox/terminal'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Zoz-Mode': 'z21' },
+          body: JSON.stringify({
+            session_id: activeSessionId,
+            planMode: 'z21',
+            command: cmdText,
+            cwd: reqCwd || undefined,
+            timeout_ms: timeoutMs,
+            max_output_chars: 5000
+          }),
+          signal: makeToolSignal(timeoutMs + 4000)
+        });
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok || !data) {
+          return {
+            text: `Error run_terminal (${resp.status}): ${data?.error || 'Gagal menghubungi endpoint sandbox Z21 localhost.'}`,
+            data,
+            blocked: Boolean(data?.blocked || resp.status === 403),
+            sources: [],
+            success: false
+          };
+        }
+        if (data.cwd && toolContext && typeof toolContext === 'object') {
+          toolContext.sandboxCwd = data.cwd;
+        }
+        const outParts = [];
+        if (data.stdout) outParts.push(`stdout:\n${data.stdout}`);
+        if (data.stderr) outParts.push(`stderr:\n${data.stderr}`);
+        const joinedRaw = outParts.join('\n\n') || '(selesai tanpa output teks)';
+        const cappedText = joinedRaw.length > 5000
+          ? joinedRaw.slice(0, 4920) + '\n...[Output dipotong otomatis pada batas 5.000 karakter]'
+          : joinedRaw;
+        return {
+          text: `[SANDBOX Z21 ./sandbox_sessions/${data.session_id || activeSessionId} | exit_code: ${data.exit_code ?? (data.success ? 0 : 1)} | cwd: ${data.cwd || '.'}]\n${cappedText}`.slice(0, 5000),
+          data,
+          sources: [],
+          success: Boolean(data.success && data.exit_code === 0)
+        };
+      }
+
+      if (toolName === 'read_file') {
+        if (!canUseZ21LocalDevTools(toolContext?.planMode, session)) {
+          return {
+            text: '[TERBLOKIR DI DOMAIN PUBLIK (.COM) / NON-Z21]: Tool `read_file` hanya dapat digunakan di Mode Z21 pada localhost.',
+            blocked: true,
+            sources: [],
+            success: false
+          };
+        }
+        const filePath = String(args.path || args.file || args.filePath || args.name || '').trim();
+        if (!filePath) {
+          return { text: 'Error read_file: Parameter `path` wajib diisi.', sources: [], success: false };
+        }
+        const activeSessionId = String(session?.id || toolContext?.session?.id || STATE.currentSessionId || 'default_z21').trim();
+        const resp = await fetch(getUniversalApiUrl('/api/z21/sandbox/read-file'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Zoz-Mode': 'z21' },
+          body: JSON.stringify({
+            session_id: activeSessionId,
+            planMode: 'z21',
+            path: filePath,
+            start_line: args.start_line || args.startLine,
+            end_line: args.end_line || args.endLine,
+            max_chars: 5000
+          }),
+          signal: makeToolSignal(10000)
+        });
+        const data = await resp.json().catch(() => null);
+        // Guard kompatibilitas mock pengujian lawas (v823): jalankan fallback workspace hanya jika respons 404 non-sandbox
+        if (resp.status === 404 && (!data || !data.sandbox)) {
+          const qp = new URLSearchParams({ path: filePath });
+          if (args.start_line || args.startLine) qp.set('start_line', String(args.start_line || args.startLine));
+          if (args.end_line || args.endLine) qp.set('end_line', String(args.end_line || args.endLine));
+          const legHeaders = { 'Content-Type': 'application/json' };
+          if (typeof TerminalManager !== 'undefined' && typeof TerminalManager.getTunnelHeaders === 'function') {
+            Object.assign(legHeaders, TerminalManager.getTunnelHeaders() || {});
+          }
+          const legResp = await fetch(getUniversalApiUrl(`/api/workspace/read?${qp.toString()}`), {
+            method: 'GET',
+            headers: legHeaders,
+            signal: makeToolSignal(10000)
+          });
+          const legData = await legResp.json().catch(() => null);
+          if (legResp.ok && legData && legData.success) {
+            const bodyLegacy = String(legData.numbered_content || legData.content || '');
+            return {
+              text: `[READ_FILE: ${legData.path} | baris ${legData.start_line || 1}-${legData.end_line || legData.total_lines || '?'} dari ${legData.total_lines || '?'}]\n${bodyLegacy.slice(0, 4800)}`.slice(0, 5000),
+              data: legData,
+              sources: [],
+              success: true
+            };
+          }
+        }
+        if (!resp.ok || !data || !data.success) {
+          return {
+            text: `Error read_file (${filePath}): ${data?.error || `HTTP ${resp.status}`}`,
+            data,
+            blocked: Boolean(data?.blocked || resp.status === 403),
+            sources: [],
+            success: false
+          };
+        }
+        const rawReadText = String(data.content || '');
+        const clampedRead = rawReadText.length > 5000
+          ? rawReadText.slice(0, 4920) + '\n...[Output dipotong otomatis pada batas 5.000 karakter]'
+          : rawReadText;
+        return {
+          text: `[SANDBOX READ_FILE: ${data.path} | baris ${data.start_line || 1}-${data.end_line || data.total_lines || '?'} dari ${data.total_lines || '?'} | ${data.size} B]\n${clampedRead}`.slice(0, 5000),
+          data,
+          sources: [],
+          success: true
+        };
+      }
+
+      if (toolName === 'write_file') {
+        if (!canUseZ21LocalDevTools(toolContext?.planMode, session)) {
+          return {
+            text: '[TERBLOKIR DI DOMAIN PUBLIK (.COM) / NON-Z21]: Tool `write_file` hanya dapat digunakan di Mode Z21 pada localhost.',
+            blocked: true,
+            sources: [],
+            success: false
+          };
+        }
+        const filePath = String(args.path || args.file || args.filePath || args.name || '').trim();
+        if (!filePath) {
+          return { text: 'Error write_file: Parameter `path` wajib diisi.', sources: [], success: false };
+        }
+        if (args.content === undefined && args.text === undefined) {
+          return { text: `Error write_file (${filePath}): Parameter \`content\` wajib disediakan.`, sources: [], success: false };
+        }
+        const activeSessionId = String(session?.id || toolContext?.session?.id || STATE.currentSessionId || 'default_z21').trim();
+        const resp = await fetch(getUniversalApiUrl('/api/z21/sandbox/write-file'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Zoz-Mode': 'z21' },
+          body: JSON.stringify({
+            session_id: activeSessionId,
+            planMode: 'z21',
+            path: filePath,
+            content: String(args.content !== undefined ? args.content : args.text),
+            append: Boolean(args.append)
+          }),
+          signal: makeToolSignal(12000)
+        });
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok || !data || !data.success) {
+          return {
+            text: `Error write_file (${filePath}): ${data?.error || `HTTP ${resp.status}`}`,
+            data,
+            blocked: Boolean(data?.blocked || resp.status === 403),
+            sources: [],
+            success: false
+          };
+        }
+        return {
+          text: `[SANDBOX WRITE_FILE SUKSES]: ./sandbox_sessions/${data.session_id || activeSessionId}/${data.path} (${data.size} B, ${data.total_lines || '?'} baris).`,
+          data,
+          sources: [],
+          success: true
+        };
+      }
+
       if (toolName === 'bash') {
         if (!canUseZ21LocalDevTools(toolContext?.planMode, session)) {
           return {
@@ -45619,7 +45890,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       } else if (p.lat !== undefined && p.lon !== undefined) {
         name = 'fetch_weather_data';
       } else if (typeof p.command === 'string' && !p.query) {
-        name = 'bash';
+        name = (p.cwd === undefined && p.shell === undefined) ? 'run_terminal' : 'bash';
+      } else if (typeof p.path === 'string' && typeof p.content === 'string' && p.target === undefined && p.edits === undefined) {
+        name = 'write_file';
+      } else if (typeof p.path === 'string' && p.target === undefined && p.edits === undefined && p.content === undefined && p.action === undefined) {
+        name = 'read_file';
       } else if (typeof p.path === 'string' && (typeof p.target === 'string' || Array.isArray(p.edits) || typeof p.content === 'string' || p.start_line !== undefined)) {
         name = 'file_editor';
       } else if (typeof p.role === 'string' && typeof p.prompt === 'string' && !Array.isArray(p.tasks)) {
@@ -46316,7 +46591,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
 
     const allowZ21LocalComm = canUseZ21LocalCommunicationTool(options?.planMode, options?.session);
     const allowZ21Swarm = hasTool('create_subagent') || hasTool('dispatch_tasks') || hasTool('wait_and_collect') || hasTool('z21_document_builder');
-    const allowZ21LocalDev = hasTool('bash') || hasTool('file_editor');
+    const allowZ21LocalDev = hasTool('bash') || hasTool('file_editor') || hasTool('run_terminal') || hasTool('read_file') || hasTool('write_file');
+    const hasSandboxTools = hasTool('run_terminal') || hasTool('read_file') || hasTool('write_file');
 
     const lines = [];
     if (hasTool('search_web')) lines.push(`  - \`search_web({"query": "<kata kunci>", "max_results": 8})\`: Pencarian dokumen web real-time di internet terbuka (wajib dipakai untuk berita terbaru, rilis/versi model AI, harga, fakta mutakhir, atau informasi eksternal apa pun).`);
@@ -46336,11 +46612,12 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         : `  - Alur Cuaca Real-Time: Panggil \`request_location_permission({"reason": "..."})\` -> \`get_current_coordinates({})\` -> \`fetch_weather_data({"lat": <lat>, "lon": <lon>})\` -> \`render_weather_ui(...)\` (atau langsung \`fetch_weather_data({"city": "<kota>"})\` jika kota disebut eksplisit).`);
     }
 
-    const z21SwarmDoc = allowZ21Swarm
-      ? `\n\n[Z21 COMMANDER & ARTIFACT TOOLS]:` +
+    const z21SwarmDoc = (allowZ21Swarm || allowZ21LocalDev)
+      ? `\n\n[Z21 COMMANDER & SANDBOX TOOLS]:` +
         (hasTool('create_subagent') ? `\n  - \`create_subagent\`, \`dispatch_tasks\`, \`wait_and_collect\`: Orkestrasi sub-agen terisolasi paralel untuk tugas kompleks.` : '') +
         (hasTool('z21_document_builder') ? `\n  - \`z21_document_builder({"filename": "<Laporan.pdf|Proposal.docx|Keuangan.xlsx>", "format": "pdf|docx|xlsx|csv", ...})\`: Membangun artefak dokumen PDF/DOCX/XLSX di sandbox Z21.` : '') +
-        (allowZ21LocalDev ? `\n  - \`bash\` & \`file_editor\`: Eksekusi shell lokal dan pembacaan/penyuntingan berkas presisi.` : '')
+        (hasSandboxTools ? `\n  - \`run_terminal({"command": "..."})\`, \`read_file({"path": "..."})\`, \`write_file({"path": "...", "content": "..."})\`: Sandbox terisolasi khusus sesi obrolan (\`./sandbox_sessions/<chat_id>\`) dengan timeout 15–30 detik & batas output 5.000 karakter. Gunakan \`read_file\`/\`write_file\` untuk membaca & menulis berkas alih-alih memakai \`cat\`/\`echo\` di shell agar bebas masalah tanda kutip.` : '') +
+        ((hasTool('bash') || hasTool('file_editor')) ? `\n  - \`bash\` & \`file_editor\`: Eksekusi shell workspace proyek dan pembacaan/penambalan berkas presisi.` : '')
       : '';
 
     return `\n[ATURAN ANTI-HALUSINASI & PRIORITAS PENCARIAN WEB]:
@@ -46962,6 +47239,18 @@ ${lines.join('\n')}${lines.length > 1 ? `\n\n[ORCHESTRATION]: Anda dapat memangg
       iconClass = 'fa-solid fa-layer-group';
       toneClass = 'is-code';
       label = isRunning ? `Menunggu & mengumpulkan hasil gelombang sub-agen...` : `Menggabungkan ringkasan hasil gelombang sub-agen.`;
+    } else if (norm === 'run_terminal') {
+      iconClass = 'fa-solid fa-terminal';
+      toneClass = 'is-code';
+      label = argClean ? `Menjalankan di terminal sandbox sesi: ${argClean}${suffix}` : `Menjalankan perintah di sandbox sesi Z21${suffix}`;
+    } else if (norm === 'read_file') {
+      iconClass = 'fa-regular fa-file-lines';
+      toneClass = 'is-code';
+      label = argClean ? `Membaca berkas sandbox "${argClean}"${suffix}` : `Membaca berkas dalam sandbox sesi${suffix}`;
+    } else if (norm === 'write_file') {
+      iconClass = 'fa-regular fa-pen-to-square';
+      toneClass = 'is-code';
+      label = argClean ? `Menulis berkas sandbox "${argClean}"${suffix}` : `Menulis berkas dalam sandbox sesi${suffix}`;
     } else if (norm === 'bash') {
       iconClass = 'fa-solid fa-terminal';
       toneClass = 'is-code';
@@ -47559,8 +47848,8 @@ ${lines.join('\n')}${lines.length > 1 ? `\n\n[ORCHESTRATION]: Anda dapat memangg
     const hasExecutedSwarmCreate = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'create_subagent');
     const hasExecutedSwarmDispatch = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'dispatch_tasks');
     const hasExecutedSwarmCollect = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'wait_and_collect');
-    const hasExecutedBashTool = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'bash');
-    const hasExecutedFileEditor = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'file_editor');
+    const hasExecutedBashTool = detectedAutonomousCalls.some(c => c && c.function && ['bash', 'run_terminal'].includes(normalizeToolName(c.function.name)));
+    const hasExecutedFileEditor = detectedAutonomousCalls.some(c => c && c.function && ['file_editor', 'read_file', 'write_file'].includes(normalizeToolName(c.function.name)));
     const hasExecutedDocBuilder = detectedAutonomousCalls.some(c => c && c.function && normalizeToolName(c.function.name) === 'z21_document_builder');
     const weatherConsentDenied = Boolean(
       Array.isArray(toolExecResults) &&
@@ -47663,8 +47952,8 @@ Rancang arsitektur UI/UX, tata letak responsif, visualisasi/grafik interaktif, d
         : `AGREGASI Z21 COMMANDER SWARM SELESAI: Evaluasi kelengkapan hasil sub-agen di atas. Anda dapat meluncurkan gelombang verifikasi lanjutan, menjalankan \`bash\` / \`file_editor\` (bila di localhost), atau langsung menyusun sintesis jawaban akhir terpadu.${inlineChainHint}`;
     } else if ((hasExecutedBashTool || hasExecutedFileEditor) && !hasExecutedSearch) {
       evidenceDirective = isLastRound
-        ? 'HASIL EKSEKUSI DEVELOPER TOOLS Z21 LOCALHOST: Laporkan hasil perintah terminal atau modifikasi berkas di atas secara jujur dan presisi berdasarkan stdout, exitCode, dan isi berkas aktual.'
-        : `DEVELOPER TOOLS Z21 LOCALHOST AKTIF: Evaluasi output terminal / perubahan berkas di atas. Jika Anda baru saja memodifikasi kode dengan \`file_editor\`, disarankan memverifikasinya dengan \`bash\` (misal unit test / syntax check) sebelum menyusun laporan akhir.${inlineChainHint}`;
+        ? 'HASIL EKSEKUSI SANDBOX / DEVELOPER TOOLS Z21 LOCALHOST: Laporkan hasil perintah terminal atau operasi berkas di atas secara jujur dan presisi berdasarkan stdout, stderr, exit_code, dan isi berkas aktual.'
+        : `SANDBOX / DEVELOPER TOOLS Z21 LOCALHOST AKTIF: Evaluasi stdout, stderr, exit_code, atau isi berkas di atas. Jika Anda baru saja menulis/mengubah berkas dengan \`write_file\` / \`file_editor\`, disarankan memverifikasi eksekusinya dengan \`run_terminal\` (atau \`read_file\`) sebelum menjawab ke pengguna.${inlineChainHint}`;
     } else if (isParallelRound) {
       evidenceDirective = isLastRound
         ? 'SINTESIS PARALLEL TOOL CALLING: Gabungkan dan silangkan seluruh bukti dari beberapa sumber paralel di atas (dokumen SOP/regulasi, riwayat komunikasi, memori, atau hasil perhitungan) menjadi satu jawaban terpadu yang akurat, terstruktur, dan langsung dapat ditindaklanjuti.'
@@ -47824,10 +48113,19 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
               resultObj.formatted_context = formatToolText(res.text, 4500);
             }
           } else if (res.text) {
+            const maxSandboxOrToolChars = ['run_terminal', 'read_file', 'write_file'].includes(normItemTool)
+              ? 5000
+              : ((hasExecutedCommunication || hasExecutedWaRead || hasExecutedDocuments) ? 14000 : 6500);
             resultObj = {
               status: itemFailed ? 'error' : 'complete',
-              text: formatToolText(res.text, (hasExecutedCommunication || hasExecutedWaRead || hasExecutedDocuments) ? 14000 : 6500)
+              text: formatToolText(res.text, maxSandboxOrToolChars)
             };
+            if (normItemTool === 'run_terminal' && res.data && typeof res.data === 'object') {
+              resultObj.exit_code = res.data.exit_code;
+              resultObj.cwd = res.data.cwd;
+              resultObj.timed_out = Boolean(res.data.timed_out);
+              resultObj.truncated = Boolean(res.data.truncated);
+            }
             if (res.display_id) resultObj.display_id = res.display_id;
             if (res.placement_token) resultObj.placement_token = res.placement_token;
           } else {
@@ -69483,7 +69781,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://customized-gadgets-webcams-rover.trycloudflare.com',
+    activeTunnelUrl: 'https://racial-fairfield-harvard-lonely.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,

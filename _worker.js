@@ -1511,7 +1511,7 @@ export default {
     // yang diteruskan ke TUNNEL_GATEWAY_URL (server laptop).
     // Pemanggilan AI & API Key (OpenRouter, Ollama Cloud, Search Web, Models, Sessions)
     // BERJALAN 100% MANDIRI DI CLOUDFLARE EDGE TANPA PERNAH BERGANTUNG PADA LAPTOP!
-    const TUNNEL_GATEWAY_URL = String((env && env.TUNNEL_GATEWAY_URL) || 'https://customized-gadgets-webcams-rover.trycloudflare.com').replace(/\/+$/, '');
+    const TUNNEL_GATEWAY_URL = String((env && env.TUNNEL_GATEWAY_URL) || 'https://racial-fairfield-harvard-lonely.trycloudflare.com').replace(/\/+$/, '');
     let reqBodyBytes = null;
 
     const isLaptopOnlyRoute = url.pathname.startsWith('/api/terminal') ||
