@@ -44,6 +44,20 @@ function computeTokenOverlapScore(queryTokens, docText) {
 
 const CROSS_SESSION_RECALL_QUERY_REGEX = /\b(?:percakapan\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|sesi\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir|lain)|pertanyaan\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|bahas(?:an)?\s+(?:kita\s+)?(?:sebelumnya|tadi|terakhir)|lanjutkan\s+(?:pembahasan|percakapan|yang)\s+(?:tadi|sebelumnya)|ingat\s*(?:percakapan|pertanyaan|pembahasan|soal|siapa|teman|tokoh|lagi)?|coba\s+ingat|ingat[- ]ingat|pikun|lupa|tokoh\s+siapa|siapa\s+tokoh|siapa\s+yang\s+(?:saya|pernah)|pernah\s+(?:saya|kita)\s+(?:bahas|cerita|bicarakan)|kemarin\s+(?:kan|kita)|sesi\s+lalu|riwayat\s+sebelumnya)\b/i;
 
+function isPoisonedHallucinationText(txt) {
+  return /(?:gemini\s*4\s*(?:neon|argon|carbon|hydrogen)|gpt-?6\b|claude\s*5\b|llama\s*5\b|the\s+great\s+reasoning\s+war)/i.test(String(txt || ''));
+}
+
+function isExternalNewsOrModelClaimMemory(mem) {
+  if (!mem) return false;
+  const cat = String(mem.category || '').toLowerCase();
+  if (cat === 'error_lesson') return false;
+  const content = String(mem.content || '');
+  if (isPoisonedHallucinationText(content)) return true;
+  if (cat === 'episodic_context' || /^\[Episodik Sesi\b/i.test(content)) return true;
+  return /(?:berdasarkan\s+data\s+terbaru|baru\s+saja\s+merilis|perilisan\s+besar|model\s+ai\s+(?:yang\s+)?baru\s+rilis|rilis\s+.*\b202[5-9])/i.test(content);
+}
+
 /**
  * Perform Scoped Hybrid Recall combining:
  * 1. Vector Cosine Similarity (Float32Array)
@@ -167,16 +181,20 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
 
   // 4C. Cross-Session Episodic Recall Signal (Explicit Meta-Recall or High Token Overlap)
   const isExplicitCrossSessionRecall = CROSS_SESSION_RECALL_QUERY_REGEX.test(q);
-  const recentEpisodic = allRecent.filter(m => m && (m.category === 'episodic_context' || String(m.content || '').startsWith('[Episodik Sesi')));
-  recentEpisodic.forEach((epMem, idx) => {
-    const sim = computeTokenOverlapScore(queryTokens, epMem.content || '');
-    if (isExplicitCrossSessionRecall && idx < 12) {
-      const recencyWeight = 2.4 * Math.exp(-0.05 * idx);
-      addRank({ ...epMem, category: 'episodic_context' }, idx + 1, recencyWeight, 'episodic_recent');
-    } else if (sim >= 0.32) {
-      addRank({ ...epMem, category: 'episodic_context' }, idx + 1, 1.6 * sim, 'episodic_match');
-    }
-  });
+  const suppressExternalEpisodic = Boolean(options && options.suppressExternalEpisodic) && !isExplicitCrossSessionRecall;
+  if (!suppressExternalEpisodic) {
+    const recentEpisodic = allRecent.filter(m => m && (m.category === 'episodic_context' || String(m.content || '').startsWith('[Episodik Sesi')));
+    recentEpisodic.forEach((epMem, idx) => {
+      if (isPoisonedHallucinationText(epMem.content)) return;
+      const sim = computeTokenOverlapScore(queryTokens, epMem.content || '');
+      if (isExplicitCrossSessionRecall && idx < 12) {
+        const recencyWeight = 2.4 * Math.exp(-0.05 * idx);
+        addRank({ ...epMem, category: 'episodic_context' }, idx + 1, recencyWeight, 'episodic_recent');
+      } else if (sim >= 0.32) {
+        addRank({ ...epMem, category: 'episodic_context' }, idx + 1, 1.6 * sim, 'episodic_match');
+      }
+    });
+  }
 
   // 4D. Bayesian Core Fact Invariant Prior (P(m_core) > 0)
   // Fakta terverifikasi pengguna, identitas, preferensi, dan relasi adalah invariant priors
@@ -188,9 +206,14 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
     addRank({ ...coreMem }, idx + 1, priorWeight + sim * 1.5, 'core_fact');
   });
 
-  // Sort by combined RRF score descending
+  // Sort by combined RRF score descending (drop poisoned claims, and suppress external episodic on live web queries)
   const sorted = Array.from(rrfMap.values())
-    .filter(entry => entry.score >= config.MIN_RELEVANCE_SCORE)
+    .filter(entry => {
+      if (!entry || !entry.item || entry.score < config.MIN_RELEVANCE_SCORE) return false;
+      if (isPoisonedHallucinationText(entry.item.content)) return false;
+      if (suppressExternalEpisodic && isExternalNewsOrModelClaimMemory(entry.item)) return false;
+      return true;
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, maxResults);
 
@@ -240,7 +263,7 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
         const epId = mEpId ? `Episode: ${mEpId}` : 'Manual';
         return `[MEM-${m.id.slice(-6)} | ${epId} | Kategori: ${m.category || 'fact'}]: ${m.content}`;
       });
-      blocks.push(`### JOZZ MEMORY CONTEXT (CLICKABLE RECEIPTS ACTIVE):\n[INFORMASI MEMORI & RIWAYAT LINTAS-SESI TERVERIFIKASI]:\n${lines.join('\n')}\n(Gunakan fakta dan riwayat percakapan lintas-sesi di atas secara langsung dan akurat).`);
+      blocks.push(`### KONTEKS MEMORI PRIBADI PENGGUNA (Jozz Memory — HANYA Profil, Preferensi, & Proyek):\n${lines.join('\n')}\n[BATASAN EPISTEMIK WAJIB]: Catatan di atas HANYA untuk konteks pribadi/preferensi/proyek pengguna dan BUKAN sumber berita, rilis model AI, harga, atau fakta dunia nyata terkini. DILARANG memakai memori atau riwayat obrolan lama sebagai pengganti tool \`search_web\`.`);
     }
 
     systemPromptInjection = blocks.join('\n\n');

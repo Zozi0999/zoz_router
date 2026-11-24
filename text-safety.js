@@ -2331,9 +2331,17 @@
       halfLifeDays = Math.min(halfLifeDays, 10);
     }
 
-    const generalRecency = /\b(?:terbaru|terkini|mutakhir|bulan\s+ini|tahun\s+ini|latest|newest|most\s+recent|this\s+month|current\s+release|rilis\s+.*\bbaru|new\s+release)\b/i.test(q);
+    const generalRecency = /\b(?:terbaru|trbaru|terabru|terkini|mutakhir|bulan\s+ini|tahun\s+ini|saat\s+ini|akhir\s+202\d|tahun\s+202\d|latest|newest|most\s+recent|this\s+month|current\s+release|rilis\s+.*(?:baru|abru)|(?:baru|abru)\s+rilis|new\s+release)\b/i.test(q);
     if (generalRecency) {
       probs.push(0.90);
+      halfLifeDays = Math.min(halfLifeDays, 18);
+    }
+
+    const aiModelFreshnessSignal = !isCodeOrCreative &&
+      /\b(?:gemini|gpt|openai|claude|anthropic|llama|deepseek|qwen|mistral|grok|perplexity|copilot|model\s+ai|ai\s+model|llm)\b/i.test(q) &&
+      /\b(?:terbaru|trbaru|terabru|terkini|baru|abru|rilis|peluncuran|update|sekarang|saat\s+ini|selain|lain(?:nya)?|kompetitor|pesaing|perbandingan|bandingkan|peta|persaingan|berita|kabar|apa\s+saja|bagaimana\s+dengan|gimana\s+(?:dengan|kalau)|versi|latest|newest|new|other|alternative|competitor|vs\.?|versus)\b/i.test(q);
+    if (aiModelFreshnessSignal) {
+      probs.push(0.86);
       halfLifeDays = Math.min(halfLifeDays, 18);
     }
 
@@ -2354,7 +2362,7 @@
     }
 
     let targetHistoricalYear = null;
-    if (historicalYears.length > 0 && !hasCurrentYear && !immediateRecency && !generalRecency) {
+    if (historicalYears.length > 0 && !hasCurrentYear && !immediateRecency && !generalRecency && !aiModelFreshnessSignal) {
       targetHistoricalYear = historicalYears[0];
     }
 
@@ -2367,8 +2375,14 @@
       recencyAlpha = 1.0 - complement;
     }
 
-    // Check contextual continuity (e.g. follow-up turn about recent news)
-    if (recencyAlpha < 0.5 && !targetHistoricalYear && /\b(?:terbaru|terkini|latest|2026|oktober|october)\b/i.test(combined)) {
+    // Check contextual continuity (e.g. comparative/follow-up turns after news/release queries)
+    const ctxStr = String(contextText || '');
+    const ctxHasRecentNews = /\b(?:terbaru|trbaru|terabru|terkini|mutakhir|latest|newest|rilis|abru\s+rilis|peluncuran|berita|news|update|pembaruan|2025|2026|2027|januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|january|february|march|may|june|july|august|october|november|december|model\s+ai|gemini|openai|claude|llama|deepseek)\b/i.test(ctxStr);
+    const isComparativeFollowUp = /\b(?:bagaimana\s+dengan|gimana\s+(?:dengan|kalau)|kalau\s+|selain\b|lainnya\b|model\s+lain|kompetitor|pesaing|dibanding|versus|\bvs\b|what\s+about|how\s+about|other\s+models?|alternatif)\b/i.test(q);
+    if (!targetHistoricalYear && !isCodeOrCreative && ctxHasRecentNews && isComparativeFollowUp) {
+      recencyAlpha = Math.max(recencyAlpha, 0.84);
+      halfLifeDays = Math.min(halfLifeDays, 18);
+    } else if (recencyAlpha < 0.5 && !targetHistoricalYear && !isCodeOrCreative && ctxHasRecentNews) {
       recencyAlpha = Math.max(recencyAlpha, 0.55);
       halfLifeDays = Math.min(halfLifeDays, 30);
     }

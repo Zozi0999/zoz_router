@@ -22229,6 +22229,7 @@ svg.lucide,
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 8px;
   pointer-events: none;
   user-select: none;
   opacity: 1;
@@ -22251,7 +22252,10 @@ svg.lucide,
 
 .app-container.sidebar-collapsed .zoz-persona-vertical-dock .zoz-persona-vertical-capsule,
 .sidebar.collapsed ~ .zoz-persona-vertical-dock .zoz-persona-vertical-capsule,
-.zoz-persona-vertical-dock.is-sidebar-hidden .zoz-persona-vertical-capsule {
+.zoz-persona-vertical-dock.is-sidebar-hidden .zoz-persona-vertical-capsule,
+.app-container.sidebar-collapsed .zoz-persona-vertical-dock .zoz-auto-aloud-vertical-capsule,
+.sidebar.collapsed ~ .zoz-persona-vertical-dock .zoz-auto-aloud-vertical-capsule,
+.zoz-persona-vertical-dock.is-sidebar-hidden .zoz-auto-aloud-vertical-capsule {
   pointer-events: none !important;
 }
 
@@ -22298,6 +22302,125 @@ body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
   border-color: rgba(148, 163, 184, 0.24);
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.78) 0%, rgba(9, 13, 22, 0.86) 100%);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.48);
+}
+
+/* 1b. Sidebar-Adjacent Vertical Auto Read Aloud ON/OFF Capsule (Stacked Above Persona) */
+.zoz-auto-aloud-vertical-capsule {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 34px;
+  padding: 4px 3px;
+  border-radius: 9999px;
+  background: linear-gradient(180deg, rgba(11, 16, 29, 0.92) 0%, rgba(7, 10, 18, 0.96) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.54);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.zoz-auto-aloud-vertical-capsule.is-off-mode {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.78) 0%, rgba(9, 13, 22, 0.86) 100%);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.48);
+}
+
+.zoz-auto-aloud-vertical-capsule.is-on-mode {
+  border-color: rgba(16, 185, 129, 0.56);
+  background: linear-gradient(180deg, rgba(6, 30, 34, 0.94) 0%, rgba(7, 16, 24, 0.96) 100%);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.65), 0 0 20px rgba(16, 185, 129, 0.26);
+}
+
+.zoz-auto-aloud-vertical-capsule:hover {
+  border-color: rgba(0, 242, 254, 0.58);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.72), 0 0 22px rgba(0, 242, 254, 0.22);
+}
+
+.zoz-auto-aloud-vert-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 26px;
+  padding: 2px 0 8px;
+  border-radius: 9999px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.zoz-auto-aloud-vert-btn.is-on-mode {
+  color: #a7f3d0;
+}
+
+.zoz-auto-aloud-vert-power {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  background: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  font-size: 0.68rem;
+  transition: all 0.18s ease;
+}
+
+.zoz-auto-aloud-vert-btn.is-on-mode .zoz-auto-aloud-vert-power {
+  border-color: rgba(16, 185, 129, 0.62);
+  background: rgba(16, 185, 129, 0.22);
+  color: #34d399;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.34);
+}
+
+.zoz-auto-aloud-vert-btn.is-speaking .zoz-auto-aloud-vert-power {
+  border-color: rgba(0, 242, 254, 0.85);
+  background: rgba(0, 242, 254, 0.22);
+  color: #67e8f9;
+  animation: zozAutoAloudPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes zozAutoAloudPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(0, 242, 254, 0.35); transform: scale(1); }
+  50% { box-shadow: 0 0 16px rgba(16, 185, 129, 0.72); transform: scale(1.06); }
+}
+
+.zoz-auto-aloud-vert-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: #475569;
+  flex-shrink: 0;
+  transition: all 0.18s ease;
+}
+
+.zoz-auto-aloud-vert-btn.is-on-mode .zoz-auto-aloud-vert-dot {
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.85);
+}
+
+.zoz-auto-aloud-vert-label {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  max-height: 76px;
+  max-inline-size: 76px;
+  max-width: 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
 }
 
 .zoz-persona-vert-power-btn {
@@ -22498,6 +22621,48 @@ body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
   background: rgba(226, 232, 240, 0.88);
   border-color: rgba(100, 116, 139, 0.35);
   color: #475569;
+}
+
+body.light-theme .zoz-auto-aloud-vertical-capsule,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .zoz-auto-aloud-vertical-capsule,
+#mainContent.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .zoz-auto-aloud-vertical-capsule,
+#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .zoz-auto-aloud-vertical-capsule,
+#appContainer.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .zoz-auto-aloud-vertical-capsule,
+#appContainer.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .zoz-auto-aloud-vertical-capsule,
+#appContainer.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .zoz-auto-aloud-vertical-capsule {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(241, 245, 249, 0.97) 100%);
+  border-color: rgba(100, 116, 139, 0.35);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
+}
+
+body.light-theme .zoz-auto-aloud-vertical-capsule.is-on-mode,
+#mainContent.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .zoz-auto-aloud-vertical-capsule.is-on-mode,
+#mainContent.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .zoz-auto-aloud-vertical-capsule.is-on-mode,
+#mainContent.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .zoz-auto-aloud-vertical-capsule.is-on-mode,
+#appContainer.ai-nature-themed[data-ai-chat-theme="apple-orchard"] .zoz-auto-aloud-vertical-capsule.is-on-mode,
+#appContainer.ai-nature-themed[data-ai-chat-theme="mango-citrus"] .zoz-auto-aloud-vertical-capsule.is-on-mode,
+#appContainer.ai-nature-themed[data-ai-chat-theme="strawberry-sakura"] .zoz-auto-aloud-vertical-capsule.is-on-mode {
+  background: linear-gradient(180deg, rgba(236, 253, 245, 0.97) 0%, rgba(209, 250, 229, 0.96) 100%);
+  border-color: rgba(16, 185, 129, 0.55);
+}
+
+body.light-theme .zoz-auto-aloud-vert-btn,
+#mainContent.ai-nature-themed[data-ai-chat-theme] .zoz-auto-aloud-vert-btn,
+#appContainer.ai-nature-themed[data-ai-chat-theme] .zoz-auto-aloud-vert-btn {
+  color: #475569;
+}
+
+body.light-theme .zoz-auto-aloud-vert-btn.is-on-mode,
+#mainContent.ai-nature-themed[data-ai-chat-theme] .zoz-auto-aloud-vert-btn.is-on-mode,
+#appContainer.ai-nature-themed[data-ai-chat-theme] .zoz-auto-aloud-vert-btn.is-on-mode {
+  color: #065f46;
+}
+
+body.light-theme .zoz-auto-aloud-vert-btn.is-on-mode .zoz-auto-aloud-vert-power,
+#mainContent.ai-nature-themed[data-ai-chat-theme] .zoz-auto-aloud-vert-btn.is-on-mode .zoz-auto-aloud-vert-power,
+#appContainer.ai-nature-themed[data-ai-chat-theme] .zoz-auto-aloud-vert-btn.is-on-mode .zoz-auto-aloud-vert-power {
+  color: #059669;
+  background: rgba(16, 185, 129, 0.16);
 }
 
 @media (max-width: 768px) {
@@ -23529,6 +23694,7 @@ body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
     top: 50% !important;
     transform: translateY(-50%) !important;
     z-index: 1005 !important;
+    gap: 6px !important;
   }
   #sidebar:not(.open) ~ .zoz-persona-vertical-dock,
   body:not(.mobile-sidebar-open) .zoz-persona-vertical-dock,
@@ -23540,8 +23706,31 @@ body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
   }
   #sidebar:not(.open) ~ .zoz-persona-vertical-dock .zoz-persona-vertical-capsule,
   body:not(.mobile-sidebar-open) .zoz-persona-vertical-dock .zoz-persona-vertical-capsule,
-  .zoz-persona-vertical-dock.is-sidebar-hidden .zoz-persona-vertical-capsule {
+  .zoz-persona-vertical-dock.is-sidebar-hidden .zoz-persona-vertical-capsule,
+  #sidebar:not(.open) ~ .zoz-persona-vertical-dock .zoz-auto-aloud-vertical-capsule,
+  body:not(.mobile-sidebar-open) .zoz-persona-vertical-dock .zoz-auto-aloud-vertical-capsule,
+  .zoz-persona-vertical-dock.is-sidebar-hidden .zoz-auto-aloud-vertical-capsule {
     pointer-events: none !important;
+  }
+  .zoz-auto-aloud-vertical-capsule {
+    width: 30px;
+    padding: 3px 2px;
+  }
+  .zoz-auto-aloud-vert-btn {
+    width: 22px;
+    gap: 4px;
+    padding: 2px 0 6px;
+    font-size: 0.62rem;
+  }
+  .zoz-auto-aloud-vert-power {
+    width: 22px;
+    height: 22px;
+    font-size: 0.64rem;
+  }
+  .zoz-auto-aloud-vert-label {
+    font-size: 0.62rem;
+    max-height: 62px;
+    max-inline-size: 62px;
   }
   .zoz-persona-vertical-capsule {
     width: 30px;
@@ -23583,6 +23772,20 @@ body[data-chat-mode="whatsapp"] .zoz-persona-vertical-dock {
 @media (max-width: 640px) {
   .zoz-persona-vertical-dock {
     left: min(calc(min(288px, 82vw) + 8px), calc(100vw - 36px)) !important;
+  }
+}
+
+@media (max-height: 500px) {
+  .zoz-persona-vertical-dock {
+    gap: 4px !important;
+  }
+  .zoz-auto-aloud-vert-label {
+    max-height: 52px;
+    max-inline-size: 52px;
+  }
+  .composer-btn.zoz-persona-composer-btn .zoz-persona-btn-label {
+    max-height: 64px;
+    max-inline-size: 64px;
   }
 }
 

@@ -4292,7 +4292,16 @@ function applyServerSideDecisionCalibration(body, provider = 'ollama', authentic
     try {
       const memRetriever = require('./src/memory/pipeline/retriever');
       const memQuery = (calib && calib.parentQuestionText) ? `${rawUserText}\n${calib.parentQuestionText}` : rawUserText;
-      const recalled = memRetriever.recallMemories(authenticatedUserId || 'default', memQuery, body.scope || 'global');
+      const prevTurnContext = body.messages
+        .slice(Math.max(0, lastUserIdx - 3), lastUserIdx)
+        .map(m => (m && typeof m.content === 'string') ? m.content.slice(0, 300) : '')
+        .join(' ');
+      const srvRecency = (typeof textSafety.computeTemporalRecencyProfile === 'function')
+        ? textSafety.computeTemporalRecencyProfile(rawUserText, prevTurnContext)
+        : { epistemicSearchTrigger: 0 };
+      const recalled = memRetriever.recallMemories(authenticatedUserId || 'default', memQuery, body.scope || 'global', {
+        suppressExternalEpisodic: srvRecency.epistemicSearchTrigger >= 0.72
+      });
       if (recalled && recalled.systemPromptInjection) {
         const sysMsg = body.messages.find(m => m && m.role === 'system');
         if (sysMsg && typeof sysMsg.content === 'string') {
