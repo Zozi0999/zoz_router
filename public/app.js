@@ -84,7 +84,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://precious-selecting-boulder-divx.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://environments-municipal-experiment-combat.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -865,6 +865,8 @@
       openRouterModel: 'openrouter/free',
       imageModel: 'flux',
       musicModel: 'google/lyria-3-clip-preview',
+      ttsVoice: 'id-ID-GadisNeural',
+      ttsRate: '+0%',
       useCustomParameters: false, // Default false: gunakan parameter bawaan resmi penyedia OpenRouter/Ollama
       temperature: 0.7,
       topP: 0.9,
@@ -1424,6 +1426,9 @@
     btnRefreshOpenRouterBalance: $('#btnRefreshOpenRouterBalance'),
     btnAddOpenRouterCredits: $('#btnAddOpenRouterCredits'),
     settingAutoPolicy: $('#settingAutoPolicy'),
+    settingTtsVoice: $('#settingTtsVoice'),
+    settingTtsRate: $('#settingTtsRate'),
+    btnTestTtsVoice: $('#btnTestTtsVoice'),
     saveSettingsBtn: $('#saveSettingsBtn'),
 
 
@@ -7036,6 +7041,13 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
       if (!STATE.settings.imageModel) {
         STATE.settings.imageModel = 'flux';
+      }
+      const allowedTtsVoices = ['id-ID-GadisNeural', 'id-ID-ArdiNeural', 'en-US-AriaNeural', 'en-US-GuyNeural'];
+      if (!allowedTtsVoices.includes(STATE.settings.ttsVoice)) {
+        STATE.settings.ttsVoice = 'id-ID-GadisNeural';
+      }
+      if (!/^[+-](?:[0-4]?\d|50)%$/.test(String(STATE.settings.ttsRate || ''))) {
+        STATE.settings.ttsRate = '+0%';
       }
 
       // Senyap total: nonaktifkan semua audio web & efek suara
@@ -22051,7 +22063,467 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     return normalized;
   }
 
+  // ==================== NEURAL READ ALOUD ENGINE (BACAKAN OUTPUT AI • EDGE-TTS STREAMING) ====================
+  const ZOZ_TTS_VOICE_META = {
+    'id-ID-GadisNeural': { id: 'id-ID-GadisNeural', shortLabel: 'Gadis', lang: 'id-ID' },
+    'id-ID-ArdiNeural': { id: 'id-ID-ArdiNeural', shortLabel: 'Ardi', lang: 'id-ID' },
+    'en-US-AriaNeural': { id: 'en-US-AriaNeural', shortLabel: 'Aria', lang: 'en-US' },
+    'en-US-GuyNeural': { id: 'en-US-GuyNeural', shortLabel: 'Guy', lang: 'en-US' }
+  };
+
+  function cleanTextForReadAloud(rawText) {
+    if (!rawText || typeof rawText !== 'string') return '';
+    let text = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    // 1. Hapus blok protokol berkas ZOZ, tag thinking/tool internal, dan token komponen visual
+    text = text
+      .replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY|TASKS)[\s\S]*?(?:<<<END_ZOZ_(?:FILE|EDIT|MODIFY|TASKS)[^\n>]*>?|$)/gi, ' ')
+      .replace(/<(?:think|thinking|reasoning|thought|tool_call|function_call)>[\s\S]*?<\/(?:think|thinking|reasoning|thought|tool_call|function_call)>/gi, ' ')
+      .replace(/\[\[ZOZ_(?:IMAGE|WEATHER)_DISPLAY:[^\]]+\]\]/gi, ' ')
+      .replace(/\[System Note:[^\]]*\]/gi, ' ');
+
+    // 2. Hapus blok kode berpagar ```...``` / ~~~...~~~ agar simbol kode tidak dibacakan mentah
+    text = text
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/~~~[\s\S]*?~~~/g, ' ');
+
+    // 3. Hapus gambar Markdown, pertahankan label link [teks](url) -> teks, buang URL mentah & sitasi [1]
+    text = text
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+      .replace(/\[([^\]]+)\]\((?:https?:\/\/|\/|#)[^)]*\)/g, '$1')
+      .replace(/https?:\/\/[^\s)\]>'"]+/gi, ' ')
+      .replace(/\[\s*\d+(?:\s*[,–-]\s*\d+)*\s*\]/g, '');
+
+    // 4. Bersihkan rumus LaTeX $$...$$ dan $...$ agar nyaman didengarkan
+    const cleanLatex = (_, expr = '') => {
+      let s = String(expr || '');
+      s = s
+        .replace(/\\text\{([^}]*)\}/g, ' $1 ')
+        .replace(/\\mathrm\{([^}]*)\}/g, ' $1 ')
+        .replace(/\\frac\{([^}]*)\}\{([^}]*)\}/g, ' $1 per $2 ')
+        .replace(/\\sqrt\{([^}]*)\}/g, ' akar $1 ')
+        .replace(/\\times|\\cdot/g, ' kali ')
+        .replace(/\\approx/g, ' sekitar ')
+        .replace(/\\[a-zA-Z]+/g, ' ')
+        .replace(/[{}^_]/g, ' ');
+      return ` ${s} `;
+    };
+    text = text
+      .replace(/\$\$([\s\S]*?)\$\$/g, cleanLatex)
+      .replace(/\$([^$\n]{1,180})\$/g, cleanLatex);
+
+    // 5. Inline code `...` -> pertahankan isi teks tanpa backtick
+    text = text.replace(/`([^`\n]+)`/g, '$1');
+
+    // 6. Hapus garis tabel Markdown & pipa tabel, heading #, blockquote >, bullet - / * / •, bold/italic ** * __ _ ~~
+    text = text
+      .replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{0,}:?\s*\|?\s*$/gm, ' ')
+      .replace(/^\s*[-*_]{3,}\s*$/gm, ' ')
+      .replace(/\|/g, ', ')
+      .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+      .replace(/^\s*>\s?/gm, '')
+      .replace(/^\s*[-*•◦▪]\s+/gm, '')
+      .replace(/(\*\*|__)(.*?)\1/g, '$2')
+      .replace(/~~(.*?)~~/g, '$1')
+      .replace(/[*_~#`]+/g, '')
+      .replace(/<[^>]+>/g, ' ');
+
+    // 7. Hapus emoji piktografik
+    try {
+      text = text.replace(/[\p{Extended_Pictographic}\uFE0F\u200D]+/gu, ' ');
+    } catch (_) {}
+
+    // 8. Rapikan baris & tanda baca agar intonasi jeda terdengar alami
+    const cleanLines = text
+      .split('\n')
+      .map(ln => ln.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .map(ln => (/[.!?,;:]$/.test(ln) ? ln : `${ln}.`));
+
+    return cleanLines
+      .join(' ')
+      .replace(/\s+([.,!?;:])/g, '$1')
+      .replace(/([.,!?;:])\1+/g, '$1')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+  function splitTextIntoTtsChunks(cleanText, firstChunkMax = 260, nextChunkMax = 650) {
+    const text = String(cleanText || '').trim();
+    if (!text) return [];
+    const sentences = text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean);
+    const chunks = [];
+    let current = '';
+
+    const pushSafe = (piece, limit) => {
+      if (piece.length <= limit) {
+        chunks.push(piece);
+        return;
+      }
+      const words = piece.split(/\s+/);
+      let buf = '';
+      for (const w of words) {
+        if (buf && (buf.length + 1 + w.length) > limit) {
+          chunks.push(buf);
+          buf = w;
+        } else {
+          buf = buf ? `${buf} ${w}` : w;
+        }
+      }
+      if (buf) chunks.push(buf);
+    };
+
+    for (const sentence of sentences) {
+      const limit = chunks.length === 0 ? firstChunkMax : nextChunkMax;
+      if (!current) {
+        if (sentence.length > limit) {
+          pushSafe(sentence, limit);
+        } else {
+          current = sentence;
+        }
+      } else if ((current.length + 1 + sentence.length) <= limit) {
+        current = `${current} ${sentence}`;
+      } else {
+        chunks.push(current);
+        const nextLimit = nextChunkMax;
+        if (sentence.length > nextLimit) {
+          pushSafe(sentence, nextLimit);
+          current = '';
+        } else {
+          current = sentence;
+        }
+      }
+    }
+    if (current) chunks.push(current);
+    return chunks.slice(0, 40);
+  }
+
+  const ZozReadAloudController = (() => {
+    let activeToken = 0;
+    let activeRow = null;
+    let activeBtn = null;
+    let activeAudio = null;
+    let activeObjectUrl = null;
+    let activeAbortController = null;
+    let activeSpeechUtterance = null;
+    let activeState = 'idle'; // 'idle' | 'loading' | 'playing'
+
+    function getCurrentVoice() {
+      const v = STATE?.settings?.ttsVoice || 'id-ID-GadisNeural';
+      return ZOZ_TTS_VOICE_META[v] ? v : 'id-ID-GadisNeural';
+    }
+
+    function getCurrentRate() {
+      const r = String(STATE?.settings?.ttsRate || '+0%').trim();
+      return /^[+-](?:[0-4]?\d|50)%$/.test(r) ? r : '+0%';
+    }
+
+    function syncQuickVoicePill(row, state, voiceId) {
+      if (!row || typeof row.querySelector !== 'function') return;
+      const quickBtn = row.querySelector('.tts-voice-quick-btn');
+      if (!quickBtn) return;
+      const meta = ZOZ_TTS_VOICE_META[voiceId] || ZOZ_TTS_VOICE_META['id-ID-GadisNeural'];
+      quickBtn.innerHTML = `<i class="fa-solid fa-microphone-lines"></i> <span>${meta.shortLabel}</span>`;
+      quickBtn.title = `Suara aktif: ${meta.shortLabel} — klik untuk ganti Gadis / Ardi`;
+      const isVisible = state === 'loading' || state === 'playing';
+      quickBtn.hidden = !isVisible;
+      quickBtn.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+    }
+
+    function setButtonState(btn, state, row = null, voiceId = getCurrentVoice()) {
+      if (btn) {
+        btn.dataset.ttsState = state;
+        if (state === 'loading') {
+          btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> <span>Memuat...</span>';
+          btn.title = 'Memproses suara — klik untuk batal';
+          btn.setAttribute('aria-label', 'Memuat suara Read Aloud, klik untuk membatalkan');
+        } else if (state === 'playing') {
+          btn.innerHTML = '<i class="fa-solid fa-stop"></i> <span>Berhenti</span><span class="tts-wave-bars" aria-hidden="true"><span></span><span></span><span></span></span>';
+          btn.title = 'Hentikan pembacaan suara';
+          btn.setAttribute('aria-label', 'Hentikan pembacaan suara');
+        } else {
+          if (btn.dataset?.ttsIdleHtml) {
+            btn.innerHTML = btn.dataset.ttsIdleHtml;
+            btn.title = btn.dataset.ttsIdleTitle || 'Dengarkan contoh suara terpilih';
+          } else {
+            btn.innerHTML = '<i class="fa-solid fa-volume-high"></i> <span>Bacakan</span>';
+            btn.title = 'Bacakan jawaban AI (Read Aloud)';
+            btn.setAttribute('aria-label', 'Bacakan jawaban AI');
+          }
+        }
+      }
+      if (row) syncQuickVoicePill(row, state, voiceId);
+    }
+
+    function revokeAudioResources() {
+      if (activeAudio) {
+        try {
+          activeAudio.onended = null;
+          activeAudio.onerror = null;
+          activeAudio.pause();
+          activeAudio.removeAttribute?.('src');
+          activeAudio.load?.();
+        } catch (_) {}
+        activeAudio = null;
+      }
+      if (activeObjectUrl) {
+        try { URL.revokeObjectURL(activeObjectUrl); } catch (_) {}
+        activeObjectUrl = null;
+      }
+      if (activeSpeechUtterance && typeof window !== 'undefined' && window.speechSynthesis) {
+        try { window.speechSynthesis.cancel(); } catch (_) {}
+        activeSpeechUtterance = null;
+      }
+    }
+
+    function stop() {
+      activeToken++;
+      if (activeAbortController) {
+        try { activeAbortController.abort('TTS_STOPPED'); } catch (_) {}
+        activeAbortController = null;
+      }
+      revokeAudioResources();
+      if (activeBtn || activeRow) {
+        setButtonState(activeBtn, 'idle', activeRow);
+      }
+      activeRow = null;
+      activeBtn = null;
+      activeState = 'idle';
+    }
+
+    function extractReadableTextFromRow(row) {
+      if (!row) return '';
+      let rawText = row.dataset?.fullContent || '';
+      const textEl = row.querySelector?.('.msg-text-content');
+      if (!rawText && textEl) {
+        try {
+          const clone = textEl.cloneNode(true);
+          clone.querySelectorAll?.('pre, .code-header, .mermaid-header, .mermaid-toolbar, .zoz-cot-timeline, .zoz-cot-live-rail, .zoz-z21-swarm-card, .ai-file-card, .gemini-canvas-card, .message-actions-bar, script, style, svg').forEach(n => n.remove());
+          rawText = clone.innerText || clone.textContent || '';
+        } catch (_) {
+          rawText = textEl.innerText || textEl.textContent || '';
+        }
+      }
+      return cleanTextForReadAloud(rawText);
+    }
+
+    async function fetchTtsChunkBlob(chunkText, voice, rate, signal) {
+      const ttsUrl = (typeof getUniversalApiUrl === 'function') ? getUniversalApiUrl('/api/tts') : '/api/tts';
+      const resp = await fetch(ttsUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: chunkText, voice, rate }),
+        signal
+      });
+      if (!resp.ok) {
+        let errMsg = `HTTP ${resp.status}`;
+        try {
+          const j = await resp.json();
+          if (j?.error) errMsg = j.error;
+        } catch (_) {}
+        throw new Error(errMsg);
+      }
+      const blob = await resp.blob();
+      if (!blob || blob.size === 0) {
+        throw new Error('Audio stream kosong');
+      }
+      return blob;
+    }
+
+    function playAudioBlob(blob, token) {
+      return new Promise((resolve, reject) => {
+        if (token !== activeToken) return resolve(false);
+        revokeAudioResources();
+        const url = URL.createObjectURL(blob);
+        activeObjectUrl = url;
+        const audio = new Audio(url);
+        activeAudio = audio;
+        audio.preload = 'auto';
+        audio.onended = () => {
+          if (activeObjectUrl === url) {
+            try { URL.revokeObjectURL(url); } catch (_) {}
+            activeObjectUrl = null;
+          }
+          resolve(true);
+        };
+        audio.onerror = () => {
+          if (activeObjectUrl === url) {
+            try { URL.revokeObjectURL(url); } catch (_) {}
+            activeObjectUrl = null;
+          }
+          reject(new Error('Gagal memutar audio MPEG di browser'));
+        };
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch(reject);
+        }
+      });
+    }
+
+    function playBrowserSpeechFallback(cleanText, voiceId, rateStr, token) {
+      return new Promise((resolve, reject) => {
+        if (typeof window === 'undefined' || !window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') {
+          return reject(new Error('Browser tidak mendukung Web Speech API'));
+        }
+        try { window.speechSynthesis.cancel(); } catch (_) {}
+        const utter = new SpeechSynthesisUtterance(cleanText);
+        const meta = ZOZ_TTS_VOICE_META[voiceId] || ZOZ_TTS_VOICE_META['id-ID-GadisNeural'];
+        utter.lang = meta.lang || 'id-ID';
+        const pctMatch = String(rateStr || '+0%').match(/^([+-]?\d+)%$/);
+        const rateNum = pctMatch ? Math.max(0.7, Math.min(1.5, 1 + (parseInt(pctMatch[1], 10) / 100))) : 1.0;
+        utter.rate = rateNum;
+        try {
+          const voices = window.speechSynthesis.getVoices() || [];
+          const preferred = voices.find(v => (v.lang || '').toLowerCase().startsWith(utter.lang.toLowerCase().slice(0, 2)));
+          if (preferred) utter.voice = preferred;
+        } catch (_) {}
+        activeSpeechUtterance = utter;
+        utter.onstart = () => {
+          if (token === activeToken) {
+            activeState = 'playing';
+            setButtonState(activeBtn, 'playing', activeRow, voiceId);
+          }
+        };
+        utter.onend = () => {
+          activeSpeechUtterance = null;
+          resolve(true);
+        };
+        utter.onerror = (ev) => {
+          activeSpeechUtterance = null;
+          if (ev && (ev.error === 'canceled' || ev.error === 'interrupted')) return resolve(false);
+          reject(new Error(ev?.error || 'SpeechSynthesis error'));
+        };
+        window.speechSynthesis.speak(utter);
+      });
+    }
+
+    async function speakText(rawText, { row = null, btn = null, voice = getCurrentVoice(), rate = getCurrentRate() } = {}) {
+      const cleanText = cleanTextForReadAloud(rawText);
+      if (!cleanText) {
+        if (typeof showToast === 'function') {
+          showToast('Tidak ada teks naratif untuk dibacakan pada pesan ini.', 'info');
+        }
+        return false;
+      }
+
+      stop();
+      const token = ++activeToken;
+      activeRow = row;
+      activeBtn = btn;
+      activeState = 'loading';
+      activeAbortController = new AbortController();
+      const signal = activeAbortController.signal;
+      setButtonState(btn, 'loading', row, voice);
+
+      const chunks = splitTextIntoTtsChunks(cleanText);
+      if (chunks.length === 0) {
+        stop();
+        return false;
+      }
+
+      try {
+        let nextBlobPromise = fetchTtsChunkBlob(chunks[0], voice, rate, signal);
+        for (let i = 0; i < chunks.length; i++) {
+          if (token !== activeToken) return false;
+          const currentBlob = await nextBlobPromise;
+          if (token !== activeToken) return false;
+
+          // Prefetch potongan kalimat berikutnya secara paralel saat potongan saat ini mulai diputar
+          if (i + 1 < chunks.length) {
+            nextBlobPromise = fetchTtsChunkBlob(chunks[i + 1], voice, rate, signal).catch(err => ({ __ttsErr: err }));
+          }
+
+          activeState = 'playing';
+          setButtonState(btn, 'playing', row, voice);
+          await playAudioBlob(currentBlob, token);
+          if (token !== activeToken) return false;
+
+          if (i + 1 < chunks.length) {
+            const peek = await nextBlobPromise;
+            if (peek && peek.__ttsErr) throw peek.__ttsErr;
+            nextBlobPromise = Promise.resolve(peek);
+          }
+        }
+        if (token === activeToken) stop();
+        return true;
+      } catch (err) {
+        if (token !== activeToken || signal.aborted || err?.name === 'AbortError') {
+          return false;
+        }
+        console.warn('[Read Aloud Edge-TTS Notice]:', err?.message || err);
+        // Fallback halus ke Web Speech API browser jika server edge-tts offline / tidak tersedia
+        try {
+          if (typeof window !== 'undefined' && window.speechSynthesis) {
+            await playBrowserSpeechFallback(cleanText, voice, rate, token);
+            if (token === activeToken) stop();
+            return true;
+          }
+        } catch (fbErr) {
+          console.warn('[Read Aloud Fallback Notice]:', fbErr?.message || fbErr);
+        }
+        if (token === activeToken) {
+          stop();
+          if (typeof showToast === 'function') {
+            showToast('Gagal memproses suara Read Aloud. Pastikan server & koneksi internet aktif.', 'error');
+          }
+        }
+        return false;
+      }
+    }
+
+    async function toggleRow(row, btn) {
+      if (!row || !btn) return;
+      if (activeRow === row && activeState !== 'idle') {
+        stop();
+        return;
+      }
+      const readable = extractReadableTextFromRow(row);
+      await speakText(readable, { row, btn });
+    }
+
+    async function toggleQuickVoiceForRow(row, readAloudBtn) {
+      const cur = getCurrentVoice();
+      const nextVoice = cur === 'id-ID-GadisNeural' ? 'id-ID-ArdiNeural' : 'id-ID-GadisNeural';
+      STATE.settings.ttsVoice = nextVoice;
+      if (els.settingTtsVoice) els.settingTtsVoice.value = nextVoice;
+      savePersistedState();
+      if (activeRow === row && activeState !== 'idle') {
+        const readable = extractReadableTextFromRow(row);
+        await speakText(readable, { row, btn: readAloudBtn, voice: nextVoice });
+      } else {
+        syncQuickVoicePill(row, 'idle', nextVoice);
+      }
+    }
+
+    async function testVoice(voice, rate, testBtn) {
+      if (activeBtn === testBtn && activeState !== 'idle') {
+        stop();
+        if (testBtn) testBtn.innerHTML = '<i class="fa-solid fa-play"></i> Tes Suara';
+        return;
+      }
+      const meta = ZOZ_TTS_VOICE_META[voice] || ZOZ_TTS_VOICE_META['id-ID-GadisNeural'];
+      const sample = meta.lang === 'en-US'
+        ? `Hello! This is ${meta.shortLabel}, your natural neural voice in Zoz Router.`
+        : `Halo! Ini adalah suara ${meta.shortLabel} dari fitur Read Aloud Zoz Router. Suara ini dialirkan secara langsung dan natural dalam Bahasa Indonesia.`;
+      if (testBtn && !testBtn.dataset.ttsIdleHtml) {
+        testBtn.dataset.ttsIdleHtml = '<i class="fa-solid fa-play"></i> Tes Suara';
+        testBtn.dataset.ttsIdleTitle = 'Dengarkan contoh suara terpilih';
+      }
+      await speakText(sample, { row: null, btn: testBtn, voice, rate });
+    }
+
+    return {
+      speakText,
+      toggleRow,
+      toggleQuickVoiceForRow,
+      testVoice,
+      stop,
+      getState: () => ({ state: activeState, row: activeRow, voice: getCurrentVoice(), rate: getCurrentRate() })
+    };
+  })();
+
   function createNewSession(initialTitle = 'Obrolan Baru', targetMode = STATE.mode, sessionOptions = {}) {
+    if (typeof ZozReadAloudController !== 'undefined') ZozReadAloudController.stop();
     if (activeChatPollTimer) {
       clearInterval(activeChatPollTimer);
       activeChatPollTimer = null;
@@ -22179,6 +22651,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     }
     const targetSession = STATE.sessions.find(s => s.id === sessionId);
     if (!targetSession) return;
+    if (typeof ZozReadAloudController !== 'undefined') ZozReadAloudController.stop();
     // Musnahkan sesi Incognito sementara seketika saat pengguna berpindah ke riwayat percakapan lain
     purgeEphemeralIncognitoSessions(sessionId);
     const switchToken = ++sessionSwitchToken;
@@ -23761,6 +24234,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         <div class="message-actions-bar">
           ${role === 'user' ? `<button class="msg-action-btn edit-msg-btn" title="${hasText ? 'Edit & Kirim Ulang Prompt' : 'Masukkan Prompt untuk Foto/File'}"><i class="fa-solid fa-pen-to-square"></i> ${hasText ? 'Edit' : 'Masukkan Prompt'}</button>` : ''}
           <button class="msg-action-btn copy-msg-btn" title="Salin Pesan"><i class="fa-solid fa-copy"></i> Salin</button>
+          ${role === 'assistant' ? `<button class="msg-action-btn read-aloud-btn" type="button" data-tts-state="idle" title="Bacakan jawaban AI (Read Aloud)" aria-label="Bacakan jawaban AI"><i class="fa-solid fa-volume-high"></i> <span>Bacakan</span></button><button class="msg-action-btn tts-voice-quick-btn" type="button" hidden aria-hidden="true" title="Ganti cepat suara Gadis / Ardi"><i class="fa-solid fa-microphone-lines"></i> <span>Gadis</span></button>` : ''}
           ${role === 'assistant' ? `<button class="msg-action-btn regen-msg-btn" title="Minta Ulang Output AI" aria-label="Minta Ulang Output AI" hidden aria-hidden="true" tabindex="-1"><i class="fa-solid fa-rotate-right"></i> Ulangi</button>` : ''}
         </div>
       </div>
@@ -24077,6 +24551,20 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     });
 
     if (role === 'assistant') {
+      const readAloudBtn = row.querySelector('.read-aloud-btn');
+      const quickVoiceBtn = row.querySelector('.tts-voice-quick-btn');
+      readAloudBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof ZozReadAloudController !== 'undefined') {
+          ZozReadAloudController.toggleRow(row, readAloudBtn);
+        }
+      });
+      quickVoiceBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof ZozReadAloudController !== 'undefined') {
+          ZozReadAloudController.toggleQuickVoiceForRow(row, readAloudBtn);
+        }
+      });
       row.querySelector('.regen-msg-btn')?.addEventListener('click', (e) => {
         const btn = e.currentTarget;
         if (!row.classList.contains('is-last-assistant') || btn?.hidden) return;
@@ -58241,6 +58729,8 @@ Aturan:
       els.chatHistorySearchGlobalToggle.checked = STATE.settings.enableChatHistorySearch !== false;
     }
     if (els.settingAutoPolicy) els.settingAutoPolicy.value = STATE.settings.autoPolicy || 'local_first';
+    if (els.settingTtsVoice) els.settingTtsVoice.value = STATE.settings.ttsVoice || 'id-ID-GadisNeural';
+    if (els.settingTtsRate) els.settingTtsRate.value = STATE.settings.ttsRate || '+0%';
     
     // Sinkronisasi status tab Direktori Lokal
     if (els.settingLocalWorkspaceToggle) els.settingLocalWorkspaceToggle.checked = Boolean(STATE.localWorkspace.enabled);
@@ -60783,6 +61273,27 @@ Aturan:
       AudioEngine.click();
     });
 
+    els.btnTestTtsVoice?.addEventListener('click', () => {
+      const selectedVoice = els.settingTtsVoice?.value || STATE.settings.ttsVoice || 'id-ID-GadisNeural';
+      const selectedRate = els.settingTtsRate?.value || STATE.settings.ttsRate || '+0%';
+      STATE.settings.ttsVoice = selectedVoice;
+      STATE.settings.ttsRate = selectedRate;
+      savePersistedState();
+      if (typeof ZozReadAloudController !== 'undefined') {
+        ZozReadAloudController.testVoice(selectedVoice, selectedRate, els.btnTestTtsVoice);
+      }
+    });
+
+    els.settingTtsVoice?.addEventListener('change', () => {
+      STATE.settings.ttsVoice = els.settingTtsVoice.value || 'id-ID-GadisNeural';
+      savePersistedState();
+    });
+
+    els.settingTtsRate?.addEventListener('change', () => {
+      STATE.settings.ttsRate = els.settingTtsRate.value || '+0%';
+      savePersistedState();
+    });
+
     els.saveSettingsBtn?.addEventListener('click', () => {
       const epVal = els.settingOllamaEndpoint ? els.settingOllamaEndpoint.value.trim() : '';
       if (epVal) STATE.settings.ollamaEndpoint = epVal;
@@ -60814,6 +61325,8 @@ Aturan:
       STATE.settings.customSystemPrompt = '';
       STATE.settings.activePreset = 'default';
       if (els.settingAutoPolicy) STATE.settings.autoPolicy = els.settingAutoPolicy.value;
+      if (els.settingTtsVoice) STATE.settings.ttsVoice = els.settingTtsVoice.value || 'id-ID-GadisNeural';
+      if (els.settingTtsRate) STATE.settings.ttsRate = els.settingTtsRate.value || '+0%';
       
       // Simpan preferensi Direktori Lokal
       if (els.settingLocalWorkspaceToggle) {
@@ -68440,7 +68953,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://precious-selecting-boulder-divx.trycloudflare.com',
+    activeTunnelUrl: 'https://environments-municipal-experiment-combat.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,

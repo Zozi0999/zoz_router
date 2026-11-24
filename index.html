@@ -40,7 +40,7 @@
         }
       });
       try {
-        var currentVer = 'v20261124_tmwukb2se';
+        var currentVer = 'v20261124_tmwuojinc';
         var savedVer = localStorage.getItem('__zoz_ver__');
         if (savedVer !== currentVer) {
           if (savedVer) {
@@ -53,7 +53,7 @@
           }
         }
       } catch (_) {}
-      window.__ZOZ_VERSION__ = 'v20261124_tmwukb2se';
+      window.__ZOZ_VERSION__ = 'v20261124_tmwuojinc';
     })();
   </script>
   <title>ZOZ ROUTER</title>
@@ -115,8 +115,8 @@
   <script>(function(){var l=document.getElementById('mainKatexCssLink');function mark(){try{for(var i=0;i<document.styleSheets.length;i++){var s=document.styleSheets[i];if(s&&s.href&&s.href.indexOf('katex')!==-1){document.documentElement.classList.add('katex-css-ok');return;}}}catch(_){}}if(l){l.addEventListener('load',function(){document.documentElement.classList.add('katex-css-ok');});}window.addEventListener('DOMContentLoaded',mark);mark();})();</script>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261124_v832">
-  <link rel="stylesheet" href="style.css?v=20261124_v832">
+  <link rel="preload" as="style" href="style.css?v=20261124_v836">
+  <link rel="stylesheet" href="style.css?v=20261124_v836">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -1418,6 +1418,42 @@
             </div>
           </div>
 
+
+          <!-- Read Aloud / Neural TTS Voice Settings Card -->
+          <div class="provider-status-card tts-settings-card" id="settingTtsCard">
+            <div class="provider-status-header">
+              <div class="provider-status-indicator-box">
+                <span class="pulse-dot active" id="settingTtsStatusDot"></span>
+                <span class="status-title"><i class="fa-solid fa-volume-high" style="color:var(--neon-cyan);"></i> Suara Bacakan AI (Read Aloud &bull; Edge TTS)</span>
+              </div>
+              <div class="status-actions">
+                <button type="button" class="btn btn-xs btn-primary-neon" id="btnTestTtsVoice" title="Dengarkan contoh suara terpilih">
+                  <i class="fa-solid fa-play"></i> Tes Suara
+                </button>
+              </div>
+            </div>
+            <div class="tts-settings-grid">
+              <div class="form-group" style="margin-bottom:0;">
+                <label for="settingTtsVoice"><i class="fa-solid fa-microphone-lines"></i> Pilihan Suara Natural</label>
+                <select id="settingTtsVoice" class="custom-select">
+                  <option value="id-ID-GadisNeural">Gadis (Indonesia — Perempuan Natural)</option>
+                  <option value="id-ID-ArdiNeural">Ardi (Indonesia — Laki-laki Natural)</option>
+                  <option value="en-US-AriaNeural">Aria (English — Female Natural)</option>
+                  <option value="en-US-GuyNeural">Guy (English — Male Natural)</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label for="settingTtsRate"><i class="fa-solid fa-gauge-high"></i> Kecepatan Bicara</label>
+                <select id="settingTtsRate" class="custom-select">
+                  <option value="-15%">0.85x (Santai)</option>
+                  <option value="+0%" selected>1.0x (Normal)</option>
+                  <option value="+15%">1.15x (Cepat)</option>
+                  <option value="+30%">1.3x (Sangat Cepat)</option>
+                </select>
+              </div>
+            </div>
+            <small class="form-hint" style="margin-top:6px;">Streaming audio langsung (<code>audio/mpeg</code>) tanpa menyimpan berkas permanen di server; simbol Markdown &amp; blok kode dibersihkan otomatis sebelum dibacakan.</small>
+          </div>
 
           <div class="form-group" style="display: none;">
             <label for="settingAutoPolicy"><i class="fa-solid fa-shield-virus"></i> Auto-Router Policy</label>
@@ -4047,6 +4083,6 @@
   <!-- Reasoning suppression & Bayesian calibration engine (must load before app.js) -->
   <script src="text-safety.js?v=20261124_v832" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=v20261124_tmwukb2se" defer></script>
+  <script src="app.js?v=v20261124_tmwuojinc" defer></script>
 </body>
 </html>
