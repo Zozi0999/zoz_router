@@ -84,7 +84,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://fred-providence-julie-distribution.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://customized-gadgets-webcams-rover.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -867,6 +867,7 @@
       musicModel: 'google/lyria-3-clip-preview',
       ttsVoice: 'id-ID-GadisNeural',
       ttsRate: '+0%',
+      autoReadAloud: false,
       useCustomParameters: false, // Default false: gunakan parameter bawaan resmi penyedia OpenRouter/Ollama
       temperature: 0.7,
       topP: 0.9,
@@ -1326,6 +1327,11 @@
     aiChatThemeActiveBadge: $('#aiChatThemeActiveBadge'),
     aiChatThemeActiveDesc: $('#aiChatThemeActiveDesc'),
     zozPersonaVerticalDock: $('#zozPersonaVerticalDock'),
+    zozAutoAloudVerticalCapsule: $('#zozAutoAloudVerticalCapsule'),
+    btnAutoReadAloudVerticalToggle: $('#btnAutoReadAloudVerticalToggle'),
+    zozAutoAloudVertIcon: $('#zozAutoAloudVertIcon'),
+    zozAutoAloudVertDot: $('#zozAutoAloudVertDot'),
+    zozAutoAloudVertLabel: $('#zozAutoAloudVertLabel'),
     btnPersonaVerticalPowerToggle: $('#btnPersonaVerticalPowerToggle'),
     btnComposerPersonaMenu: $('#btnComposerPersonaMenu'),
     zozPersonaComposerIcon: $('#zozPersonaComposerIcon'),
@@ -1739,7 +1745,9 @@
       userMessage = '',
       assistantResponse = '',
       decisionCalibration = null,
-      scope = STATE.activeProjectScope || 'global'
+      scope = STATE.activeProjectScope || 'global',
+      hasVerifiedWebSources = false,
+      epistemicSearchTrigger = 0
     } = {}) {
       const rawUser = String(userMessage || '')
         .replace(/\n*\[PROYEKSI (?:RUANG KEADAAN REVISI|OPERATOR ANAPHORA)[\s\S]*$/i, '')
@@ -1843,13 +1851,17 @@
         this.save(preferenceMemory);
       }
 
-      // 3. Cross-Session Episodic Q&A Distillation
+      // 3. Cross-Session Episodic Q&A Distillation (hanya bila bukan klaim berita/rilis tanpa sumber web terverifikasi)
       const effectiveQuestion = (decisionCalibration && decisionCalibration.parentQuestionText)
         ? decisionCalibration.parentQuestionText
         : rawUser;
       const cleanQ = effectiveQuestion.replace(/\s+/g, ' ').trim();
       const isTrivialGreeting = /^(?:halo|hai|pagi|siang|sore|malam|ok|oke|makasih|thanks|ping|tes)[\s!.?]*$/i.test(cleanQ);
-      if (cleanQ.length >= 15 && !isTrivialGreeting && rawAsst.length >= 2) {
+      const isUngroundedExternalClaim = !hasVerifiedWebSources && (
+        epistemicSearchTrigger >= 0.72 ||
+        /(?:gemini\s*4\s*(?:neon|argon|carbon|hydrogen)|gpt-?6\b|claude\s*5\b|llama\s*5\b|the\s+great\s+reasoning\s+war)/i.test(rawAsst)
+      );
+      if (cleanQ.length >= 15 && !isTrivialGreeting && rawAsst.length >= 2 && !isUngroundedExternalClaim) {
         const epId = `ep_${this.hashText(cleanQ)}`;
         const cleanA = rawAsst.replace(/\s+/g, ' ').trim().slice(0, 260);
         const sTitle = (sessionTitle && sessionTitle !== 'Percakapan Baru') ? sessionTitle : 'Percakapan Sebelumnya';
@@ -1991,7 +2003,20 @@
       return merged;
     },
 
-    recallLocal(queryText, scope = 'global', userId = STATE.userId || 'default', limit = 16, currentSessionId = null) {
+    isPoisonedHallucinationText(txt) {
+      return /(?:gemini\s*4\s*(?:neon|argon|carbon|hydrogen)|gpt-?6\b|claude\s*5\b|llama\s*5\b|the\s+great\s+reasoning\s+war)/i.test(String(txt || ''));
+    },
+
+    isExternalNewsOrModelClaimMemory(m) {
+      if (!m) return false;
+      if (m.category === 'error_lesson') return false;
+      const content = String(m.content || '');
+      if (this.isPoisonedHallucinationText(content)) return true;
+      if (m.category === 'episodic_context' || /^\[Episodik Sesi\b/i.test(content)) return true;
+      return /(?:berdasarkan\s+data\s+terbaru|baru\s+saja\s+merilis|perilisan\s+besar|model\s+ai\s+(?:yang\s+)?baru\s+rilis)/i.test(content);
+    },
+
+    recallLocal(queryText, scope = 'global', userId = STATE.userId || 'default', limit = 16, currentSessionId = null, options = {}) {
       if (!queryText) return null;
       const recallSession = (typeof STATE !== 'undefined' && Array.isArray(STATE.sessions) && currentSessionId)
         ? STATE.sessions.find(s => s && s.id === currentSessionId)
@@ -2003,6 +2028,7 @@
       const memories = this.getAll(userId);
       const queryTokens = this.extractSubstantiveTokens(queryText);
       const isExplicitCrossSessionRecall = this.CROSS_SESSION_RECALL_REGEX.test(queryText);
+      const suppressExternalEpisodic = Boolean(options && options.suppressExternalEpisodic) && !isExplicitCrossSessionRecall;
 
       const scored = [];
       const seenIds = new Set();
@@ -2010,6 +2036,8 @@
       // 1. Evaluasi item di LocalMemoryVault (error_lesson, preference, fact, episodic_context)
       for (const m of memories) {
         if (!m || !m.content) continue;
+        if (this.isPoisonedHallucinationText(m.content)) continue;
+        if (suppressExternalEpisodic && this.isExternalNewsOrModelClaimMemory(m)) continue;
         const probe = m.questionText || m.content || '';
         const { score: simScore, hitCount } = this.computeTokenOverlap(queryTokens, probe);
         const titleOverlap = m.sessionTitle ? this.computeTokenOverlap(queryTokens, m.sessionTitle) : { score: 0, hitCount: 0 };
@@ -2044,8 +2072,8 @@
         }
       }
 
-      // 2. Pemindaian Lintas-Sesi Langsung dari STATE.sessions (agar percakapan sesi berbeda selalu diingat meski belum masuk vault)
-      if (typeof STATE !== 'undefined' && Array.isArray(STATE.sessions)) {
+      // 2. Pemindaian Lintas-Sesi Langsung dari STATE.sessions (dilewati untuk memori berita eksternal pada kueri real-time/web)
+      if (!suppressExternalEpisodic && typeof STATE !== 'undefined' && Array.isArray(STATE.sessions)) {
         const otherSessions = STATE.sessions
           .filter(s => s && !(typeof isIncognitoSession === 'function' ? isIncognitoSession(s) : s.isIncognito) && s.id !== currentSessionId && Array.isArray(s.messages) && s.messages.length >= 2)
           .slice(0, 30);
@@ -2121,7 +2149,7 @@
 
       if (standardMemories.length > 0) {
         const lines = standardMemories.map((m, idx) => `[MEM-${idx + 1} | ID: ${m.id} | Cat: ${m.category}]: ${m.content}`);
-        blocks.push(`### MEMORI & RIWAYAT LINTAS-SESI TERVERIFIKASI (Jozz Memory Vault):\n${lines.join('\n')}\n*Instruksi: Gunakan fakta dan riwayat percakapan lintas-sesi di atas secara relevan dan akurat.*`);
+        blocks.push(`### KONTEKS MEMORI PRIBADI PENGGUNA (Jozz Memory Vault — HANYA Profil, Preferensi, & Proyek):\n${lines.join('\n')}\n[BATASAN EPISTEMIK WAJIB]: Catatan di atas HANYA untuk konteks pribadi/preferensi/proyek pengguna dan BUKAN sumber berita, rilis model AI, harga, atau fakta dunia nyata terkini. DILARANG memakai memori atau riwayat obrolan lama sebagai pengganti tool \`search_web\`.`);
       }
 
       // 3. Peta Riwayat Sesi Sebelumnya jika ada query eksplisit / meta recall
@@ -7049,6 +7077,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       if (!/^[+-](?:[0-4]?\d|50)%$/.test(String(STATE.settings.ttsRate || ''))) {
         STATE.settings.ttsRate = '+0%';
       }
+      STATE.settings.autoReadAloud = Boolean(STATE.settings.autoReadAloud);
 
       // Senyap total: nonaktifkan semua audio web & efek suara
       STATE.soundEnabled = false;
@@ -7904,6 +7933,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           } else {
             AudioEngine.receive();
             notifyAiCompletion('🤖 ' + (modelName || data.model), finalReportText);
+            if (typeof ZozReadAloudController !== 'undefined' && typeof ZozReadAloudController.autoSpeakRow === 'function') {
+              ZozReadAloudController.autoSpeakRow(assistantRow, finalReportText, {
+                isStudioIsolated: Boolean(bgOpts && bgOpts.isStudioIsolated),
+                isAborted: false
+              });
+            }
             showToast('✨ AI selesai menjawab di latar belakang.');
           }
         } else if (data.status === 'error') {
@@ -22205,6 +22240,9 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
     let activeAudio = null;
     let sharedAudioEl = null;
     let isPrimingAudio = false;
+    let audioGestureUnlocked = false;
+    let autoToggleInitialized = false;
+    const autoSpokenRows = typeof WeakSet !== 'undefined' ? new WeakSet() : null;
     let activeObjectUrl = null;
     let activeAbortController = null;
     let activeSpeechUtterance = null;
@@ -22265,6 +22303,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         const p = sharedAudioEl.play();
         if (p && typeof p.then === 'function') {
           p.then(() => {
+            audioGestureUnlocked = true;
             if (isPrimingAudio && sharedAudioEl) {
               try { sharedAudioEl.pause(); } catch (_) {}
               isPrimingAudio = false;
@@ -22275,6 +22314,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
             isPrimingAudio = false;
           });
         } else {
+          audioGestureUnlocked = true;
           sharedAudioEl.muted = false;
           isPrimingAudio = false;
         }
@@ -22318,6 +22358,7 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         }
       }
       if (row) syncQuickVoicePill(row, state, voiceId);
+      syncAutoToggleUI();
     }
 
     function clearSpeechTimers() {
@@ -22366,12 +22407,16 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
         activeAbortController = null;
       }
       revokeAudioResources();
-      if (activeBtn || activeRow) {
-        setButtonState(activeBtn, 'idle', activeRow);
-      }
+      const prevBtn = activeBtn;
+      const prevRow = activeRow;
       activeRow = null;
       activeBtn = null;
       activeState = 'idle';
+      if (prevBtn || prevRow) {
+        setButtonState(prevBtn, 'idle', prevRow);
+      } else {
+        syncAutoToggleUI();
+      }
     }
 
     function extractReadableTextFromRow(row) {
@@ -22551,18 +22596,117 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
       });
     }
 
-    async function speakText(rawText, { row = null, btn = null, voice = getCurrentVoice(), rate = getCurrentRate() } = {}) {
+    function isAutoEnabled() {
+      return Boolean(typeof STATE !== 'undefined' && STATE?.settings?.autoReadAloud);
+    }
+
+    function syncAutoToggleUI(isDockVisibleOverride) {
+      const enabled = isAutoEnabled();
+      const isSpeaking = activeState === 'playing' || activeState === 'loading';
+      const capsuleEl = (typeof els !== 'undefined' && els?.zozAutoAloudVerticalCapsule) ||
+        (typeof document !== 'undefined' ? document.getElementById('zozAutoAloudVerticalCapsule') : null);
+      const btnEl = (typeof els !== 'undefined' && els?.btnAutoReadAloudVerticalToggle) ||
+        (typeof document !== 'undefined' ? document.getElementById('btnAutoReadAloudVerticalToggle') : null);
+      const iconEl = (typeof els !== 'undefined' && els?.zozAutoAloudVertIcon) ||
+        (typeof document !== 'undefined' ? document.getElementById('zozAutoAloudVertIcon') : null);
+      const labelEl = (typeof els !== 'undefined' && els?.zozAutoAloudVertLabel) ||
+        (typeof document !== 'undefined' ? document.getElementById('zozAutoAloudVertLabel') : null);
+
+      const isAiMode = typeof STATE === 'undefined' || STATE?.chatMode !== 'whatsapp';
+      const sidebarOpen = typeof isDockVisibleOverride === 'boolean'
+        ? isDockVisibleOverride
+        : (isAiMode && (typeof isSidebarCurrentlyOpen === 'function' ? isSidebarCurrentlyOpen() : true));
+
+      if (capsuleEl) {
+        capsuleEl.classList.toggle('is-on-mode', enabled);
+        capsuleEl.classList.toggle('is-off-mode', !enabled);
+        capsuleEl.classList.toggle('is-speaking', enabled && isSpeaking);
+      }
+      if (btnEl) {
+        const ariaLabel = enabled
+          ? 'Matikan Auto Bacakan (Read Aloud Otomatis)'
+          : 'Aktifkan Auto Bacakan (Read Aloud Otomatis)';
+        btnEl.setAttribute('aria-pressed', String(enabled));
+        btnEl.setAttribute('aria-label', ariaLabel);
+        btnEl.title = enabled
+          ? 'Auto Bacakan: AKTIF — Jawaban AI otomatis dibacakan. Klik untuk mematikan.'
+          : 'Auto Bacakan: Nonaktif — Klik untuk membacakan jawaban AI secara otomatis.';
+        btnEl.tabIndex = sidebarOpen ? 0 : -1;
+        btnEl.classList.toggle('is-on-mode', enabled);
+        btnEl.classList.toggle('is-off-mode', !enabled);
+        btnEl.classList.toggle('is-speaking', enabled && isSpeaking);
+      }
+      if (iconEl) {
+        iconEl.className = enabled ? 'fa-solid fa-volume-high' : 'fa-solid fa-volume-xmark';
+      }
+      if (labelEl) {
+        labelEl.textContent = enabled ? 'Auto: On' : 'Auto: Off';
+      }
+    }
+
+    function setAutoEnabled(enabled, { silent = false } = {}) {
+      const next = Boolean(enabled);
+      if (typeof STATE !== 'undefined' && STATE?.settings) {
+        STATE.settings.autoReadAloud = next;
+      }
+      if (typeof savePersistedState === 'function') {
+        try { savePersistedState(); } catch (_) {}
+      }
+      if (next) {
+        primeAudioForUserGesture();
+      } else if (activeState !== 'idle') {
+        stop();
+      }
+      syncAutoToggleUI();
+      if (!silent && typeof showToast === 'function') {
+        showToast(
+          next
+            ? 'Auto Bacakan aktif — jawaban AI akan otomatis dibacakan.'
+            : 'Auto Bacakan dimatikan.',
+          'info'
+        );
+      }
+      return next;
+    }
+
+    function toggleAutoEnabled() {
+      return setAutoEnabled(!isAutoEnabled());
+    }
+
+    function initAutoToggle() {
+      syncAutoToggleUI();
+      if (autoToggleInitialized) return;
+      const btnEl = (typeof els !== 'undefined' && els?.btnAutoReadAloudVerticalToggle) ||
+        (typeof document !== 'undefined' ? document.getElementById('btnAutoReadAloudVerticalToggle') : null);
+      if (!btnEl || typeof btnEl.addEventListener !== 'function') return;
+      autoToggleInitialized = true;
+      btnEl.addEventListener('click', (e) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        if (typeof AudioEngine !== 'undefined' && typeof AudioEngine.click === 'function') AudioEngine.click();
+        toggleAutoEnabled();
+      });
+    }
+
+    function primeForAutoSpeak() {
+      if (!isAutoEnabled()) return;
+      if (activeState !== 'idle') stop();
+      primeAudioForUserGesture();
+    }
+
+    async function speakText(rawText, { row = null, btn = null, voice = getCurrentVoice(), rate = getCurrentRate(), fromAuto = false, silentEmpty = false } = {}) {
       const cleanText = cleanTextForReadAloud(rawText);
       if (!cleanText) {
-        if (typeof showToast === 'function') {
+        if (!silentEmpty && typeof showToast === 'function') {
           showToast('Tidak ada teks naratif untuk dibacakan pada pesan ini.', 'info');
         }
         return false;
       }
 
       stop();
-      // Buka kunci autoplay audio browser secara sinkron di dalam event klik pengguna sebelum fetch async
-      primeAudioForUserGesture();
+      // Jangan timpa sharedAudioEl saat auto-speak async jika gestur audio sudah terbuka sebelumnya
+      if (!fromAuto || !audioGestureUnlocked) {
+        primeAudioForUserGesture();
+      }
       const token = ++activeToken;
       activeRow = row;
       activeBtn = btn;
@@ -22618,13 +22762,47 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
           console.warn('[Read Aloud Fallback Notice]:', fbErr?.message || fbErr);
         }
         if (token === activeToken) {
+          const isAutoBlocked = Boolean(fromAuto && err && (err.name === 'NotAllowedError' || /notallowed|gesture|autoplay/i.test(String(err.message || ''))));
           stop();
           if (typeof showToast === 'function') {
-            showToast('Gagal memproses suara Read Aloud. Pastikan server & koneksi internet aktif.', 'error');
+            if (isAutoBlocked) {
+              showToast('Auto Bacakan: klik ikon speaker Bacakan pada pesan untuk membuka izin suara browser.', 'info');
+            } else {
+              showToast('Gagal memproses suara Read Aloud. Pastikan server & koneksi internet aktif.', 'error');
+            }
           }
         }
         return false;
       }
+    }
+
+    async function autoSpeakRow(row, fallbackText = '', opts = {}) {
+      if (!isAutoEnabled()) return false;
+      if (typeof STATE !== 'undefined') {
+        if (STATE?.chatMode === 'whatsapp') return false;
+        if (STATE?.userStoppedGeneration) return false;
+      }
+      if (opts?.isStudioIsolated || opts?.isAutoContinuation || opts?.isAborted) return false;
+      if (!row || (typeof row.isConnected === 'boolean' && !row.isConnected)) return false;
+
+      if (autoSpokenRows && autoSpokenRows.has(row)) return false;
+      if (row.dataset && row.dataset.zozAutoSpoken === '1') return false;
+      if (autoSpokenRows) autoSpokenRows.add(row);
+      if (row.dataset) row.dataset.zozAutoSpoken = '1';
+
+      // Sinkronkan dataset.fullContent bila teks akhir hasil auto-continuation lebih lengkap
+      const fallbackStr = typeof fallbackText === 'string' ? fallbackText : '';
+      if (row.dataset && fallbackStr.trim().length > String(row.dataset.fullContent || '').trim().length) {
+        row.dataset.fullContent = fallbackStr;
+      }
+
+      const rowReadable = extractReadableTextFromRow(row);
+      const fallbackReadable = fallbackStr ? cleanTextForReadAloud(fallbackStr) : '';
+      const readable = (fallbackReadable.length > rowReadable.length) ? fallbackReadable : (rowReadable || fallbackReadable);
+      if (!readable) return false;
+
+      const btn = typeof row.querySelector === 'function' ? row.querySelector('.read-aloud-btn') : null;
+      return await speakText(readable, { row, btn, fromAuto: true, silentEmpty: true });
     }
 
     async function toggleRow(row, btn) {
@@ -22670,11 +22848,25 @@ Pastikan sintaks 100% valid dan bebas dari error runtime.`;
 
     return {
       speakText,
+      autoSpeakRow,
       toggleRow,
       toggleQuickVoiceForRow,
       testVoice,
       stop,
-      getState: () => ({ state: activeState, row: activeRow, voice: getCurrentVoice(), rate: getCurrentRate(), preferredEndpoint: preferredTtsEndpoint })
+      isAutoEnabled,
+      setAutoEnabled,
+      toggleAutoEnabled,
+      syncAutoToggleUI,
+      initAutoToggle,
+      primeForAutoSpeak,
+      getState: () => ({
+        state: activeState,
+        row: activeRow,
+        voice: getCurrentVoice(),
+        rate: getCurrentRate(),
+        autoEnabled: isAutoEnabled(),
+        preferredEndpoint: preferredTtsEndpoint
+      })
     };
   })();
 
@@ -31620,6 +31812,30 @@ ${msg.content.slice(0, 3000)}
     const words = cleanPrompt.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
     const contentTokens = words.filter(w => !ANAPHORA_FILLER_WORDS.has(w) && w.length >= 2);
 
+    // 0. Pertanyaan komparatif / lanjutan berita/model AI terkini (mis. "bagaimana dengan model lain selain gemini?")
+    const isComparativeOrFollowUpNews =
+      /\b(?:bagaimana\s+dengan|gimana\s+(?:dengan|kalau)|selain\b|lainnya\b|model\s+lain|kompetitor|pesaing|alternatif|what\s+about|other\s+models?)\b/i.test(cleanPrompt) &&
+      !/\b(?:terbaru|terkini|latest|newest|202\d|rilis|berita|news)\b/i.test(cleanPrompt);
+    if (isComparativeOrFollowUpNews && session && Array.isArray(session.messages) && session.messages.length > 0) {
+      const priorText = session.messages
+        .slice(-6)
+        .filter(m => m && m.role === 'user' && typeof m.content === 'string')
+        .map(m => stripDocumentContextForQuery(m.content || ''))
+        .join(' ');
+      if (/\b(?:berita|terbaru|trbaru|rilis|abru|ai|model|llm|gemini|gpt|claude|llama)\b/i.test(priorText) ||
+          /\b(?:gemini|gpt|openai|claude|anthropic|llama|deepseek|mistral|qwen|grok|model\s+ai|llm)\b/i.test(cleanPrompt)) {
+        const curYr = new Date().getUTCFullYear();
+        const cleanedTokens = cleanPrompt
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+          .split(/\s+/)
+          .filter(w => w.length >= 2 && !IR_QUERY_STOPWORDS.has(w) && !ANAPHORA_FILLER_WORDS.has(w) && w !== 'bagaimana' && w !== 'dengan');
+        const hasAiDomainTok = /\b(?:ai|llm|gemini|gpt|openai|claude|llama|deepseek|mistral|qwen|grok)\b/i.test(cleanedTokens.join(' '));
+        const baseClause = cleanedTokens.join(' ');
+        return `${hasAiDomainTok ? '' : 'AI '}${baseClause} terbaru rilis ${curYr}`.replace(/\s+/g, ' ').trim();
+      }
+    }
+
     // 1. Cek Kata Ganti Orang Ketiga atau Deiktis
     const hasPronoun = words.some(w => ANAPHORA_PRONOUNS_3RD.has(w));
 
@@ -35686,12 +35902,23 @@ ${blocks}
     if (hasChannel && (hasActionVerb || hasExplicitId)) return true;
     if (hasNewChatInquiry && !isWebsiteCreationPrompt(trimmed)) return true;
     if (/\b(?:TICKET|TKT|INC|BUG|ISSUE|JIRA|CASE|REQ|SR)[-_#]?\d+\b/i.test(trimmed) && hasActionVerb) return true;
-    if (isStrictLocalhostMode() && hasActionVerb && !isWebsiteCreationPrompt(trimmed) && typeof WhatsAppController !== 'undefined' && Array.isArray(WhatsAppController.contacts) && WhatsAppController.contacts.length > 0) {
+    // Jika jelas merupakan pertanyaan berita/model AI eksternal tanpa penyebutan kanal komunikasi, jangan pernah dibajak oleh kecocokan nama kontak
+    const looksLikeExternalWorldOrAiQuery = /\b(?:berita|kabar|rilis|peluncuran|model\s+ai|ai\s+model|llm|gemini|openai|gpt|claude|anthropic|llama|deepseek|mistral|qwen|grok)\b/i.test(trimmed);
+    if (looksLikeExternalWorldOrAiQuery && !hasChannel && !hasNewChatInquiry && !hasExplicitId) {
+      return false;
+    }
+    const hasStrictCommVerb = /\b(?:analis(?:a|is)|menganalis(?:a|is)|rangkum(?:an|kan)?|merangkum|ringkas(?:an|kan)?|meringkas|rekap|(?:menge|nge|di)?cek|periksa|memeriksa|(?:mem|di)?baca(?:kan)?|membacakan|balas(?:an)?|draft|kirim|chat|pesan|whatsapp|wasap|wa|email|surel|tiket|kontak|tindak\s*lanjut(?:i|nya)?|follow[\s-]*up|notif)\b/i.test(trimmed);
+    if (isStrictLocalhostMode() && hasStrictCommVerb && !isWebsiteCreationPrompt(trimmed) && typeof WhatsAppController !== 'undefined' && Array.isArray(WhatsAppController.contacts) && WhatsAppController.contacts.length > 0) {
       const normPrompt = normalizeClientCommPhrase(trimmed);
-      if (normPrompt.length >= 3) {
+      if (normPrompt.length >= 4) {
         for (const c of WhatsAppController.contacts) {
           const cn = normalizeClientCommPhrase(c && (c.name || c.notify));
-          if (cn && cn.length >= 3 && normPrompt.includes(cn)) return true;
+          if (!cn) continue;
+          const minLen = hasChannel ? 3 : 4;
+          if (cn.length >= minLen || /\b(?:chat|pesan|wa|whatsapp|kontak|dari|dengan|sama)\s+/i.test(normPrompt)) {
+            const escapedCn = cn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            if (new RegExp(`(?:^|\\s)${escapedCn}(?:\\s|$)`, 'i').test(normPrompt)) return true;
+          }
         }
       }
     }
@@ -38369,7 +38596,17 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     );
     const isWebRequest = Boolean(isWebCreationIntent || isWebRevisionIntent);
     const isExplicitCodeOnlyChatReq = Boolean(flags.isExplicitCleanCodeCmd || (flags.hasNegativePreview && !isConversationalNonWeb));
-    const isConversationalAfterWeb = Boolean(!isWebRequest && latestSessionWebFile && !flags.isStudioIsolated && !flags.isDocRequest && !isExplicitCodeOnlyChatReq && !isNonWebLocalOnly && !isWeatherOrNonWebToolQuery);
+    let isHighEpistemicQuery = false;
+    try {
+      if (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function') {
+        const recentCtx = (session && Array.isArray(session.messages))
+          ? session.messages.slice(-4).map(m => typeof m?.content === 'string' ? m.content.slice(0, 220) : '').join(' ')
+          : '';
+        const prof = ZozTextSafety.computeTemporalRecencyProfile(trimmedPrompt, recentCtx);
+        isHighEpistemicQuery = Boolean(prof && prof.epistemicSearchTrigger >= 0.72);
+      }
+    } catch (_) {}
+    const isConversationalAfterWeb = Boolean(!isWebRequest && latestSessionWebFile && !flags.isStudioIsolated && !flags.isDocRequest && !isExplicitCodeOnlyChatReq && !isNonWebLocalOnly && !isWeatherOrNonWebToolQuery && !isHighEpistemicQuery);
     if (runOptions) {
       if (activePlan === 'z21') {
         runOptions.planMode = 'z21';
@@ -38634,6 +38871,12 @@ ATURAN MUTLAK:
     if (!options.skipDocCheck && !options.docFormat && creationIntent === 'document' && activePlanBeforeSend !== 'z21') {
       openDocModeModal(rawText);
       return;
+    }
+
+    if (!options._isAutoContinuation && !options.isStudioIsolated && typeof ZozReadAloudController !== 'undefined') {
+      if (typeof ZozReadAloudController.isAutoEnabled === 'function' && ZozReadAloudController.isAutoEnabled()) {
+        ZozReadAloudController.primeForAutoSpeak();
+      }
     }
 
     // Tutup celah await (hydrasi sesi lazy-disk) sebelum input dibersihkan,
@@ -40467,7 +40710,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     return LOCAL_UTILITY_TOOL_NAMES.includes(norm) || LOCAL_UTILITY_TOOL_NAMES.includes(toolName);
   }
 
-  // Susun daftar tool yang dikirimkan ke model
+  // Susun daftar tool yang dikirimkan ke model (Intent-Scoped Tool Pruning v839: hindari kebanjiran tool & cegah pencarian memori/chat menyaingi search_web)
   function getSelectableAutonomousTools(webToolsAllowed = true, context = null) {
     const allowZ21LocalComm = canUseZ21LocalCommunicationTool(context?.planMode, context?.session);
     const allowZ21Swarm = canUseZ21CommanderSwarmTools(context?.planMode, context?.session, context);
@@ -40475,15 +40718,24 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const allowZ21DocBuilder = canUseZ21DocumentBuilderTool(context?.planMode, context?.session);
     const allowDocRag = isStrictLocalhostMode() || hasClientRagDocuments(context?.session);
     const allowChatHistory = canUseChatHistorySearch(context?.session);
+    const isIncognito = isIncognitoMemoryBlocked(context?.session);
+    const scoped = Boolean(context && !context.isSubagent && context.hasIntentScoping);
+    const isHighEpistemic = Boolean(scoped && context.isHighEpistemicWebTurn);
+
     return AUTONOMOUS_WEB_TOOLS.filter((t) => {
       const name = t && t.function ? t.function.name : '';
-      if (Z21_COMMANDER_SWARM_TOOL_NAMES.includes(name)) return allowZ21Swarm;
+      if (Z21_COMMANDER_SWARM_TOOL_NAMES.includes(name)) {
+        if (!allowZ21Swarm) return false;
+        if (scoped) return Boolean(context.isZ21SwarmOrDevTurn || context.isZ21DocBuildTurn || context.isWebRequest);
+        return true;
+      }
       if (Z21_DOCUMENT_BUILDER_TOOL_NAMES.includes(name)) {
         if (!allowZ21DocBuilder) return false;
         if (context && context.isWebRequest && !context.isZ21DocBuildTurn) return false;
         if (context && context.isSubagent) {
           return context.allowedToolsSet instanceof Set && context.allowedToolsSet.has(name);
         }
+        if (scoped) return Boolean(context.isZ21DocBuildTurn);
         return true;
       }
       if (Z21_LOCAL_DEV_TOOL_NAMES.includes(name)) {
@@ -40491,17 +40743,62 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         if (context && context.isSubagent) {
           return context.allowedToolsSet instanceof Set && context.allowedToolsSet.has(name);
         }
+        if (scoped) return Boolean(context.isZ21SwarmOrDevTurn || context.isZ21DocBuildTurn || context.isWebRequest);
         return true;
       }
       if (context && context.isSubagent) {
         if (name === 'request_location_permission') return false;
         if (!(context.allowedToolsSet instanceof Set) || !context.allowedToolsSet.has(name)) return false;
       }
-      if (name === 'fetch_communication_context') return allowZ21LocalComm;
-      if (name === 'search_documents') return allowDocRag;
-      if (name === 'search_chat_history') return allowChatHistory;
-      if (name === 'save_memory' || name === 'search_memory') return !isIncognitoMemoryBlocked(context?.session);
-      if (name === 'summarize_whatsapp_chat' && allowZ21LocalComm) return false;
+      if (name === 'search_web' || name === 'browse_web_page') {
+        return webToolsAllowed !== false;
+      }
+      if (name === 'fetch_communication_context') {
+        if (!allowZ21LocalComm) return false;
+        if (scoped) return Boolean(context.isCommAnalysisTurn || context.isWhatsAppMentioned);
+        return true;
+      }
+      if (name === 'summarize_whatsapp_chat') {
+        if (allowZ21LocalComm) return false;
+        if (scoped) return Boolean(context.isCommAnalysisTurn || context.isWhatsAppMentioned);
+        return true;
+      }
+      if (name === 'search_documents') {
+        if (!allowDocRag) return false;
+        if (scoped) return Boolean(context.isDocKnowledgeTurn || hasClientRagDocuments(context?.session));
+        return true;
+      }
+      if (name === 'search_chat_history') {
+        if (!allowChatHistory) return false;
+        if (scoped) return Boolean(context.isChatHistoryTurn);
+        return true;
+      }
+      if (name === 'search_memory') {
+        if (isIncognito) return false;
+        if (scoped) return Boolean(context.isExplicitMemoryTurn || context.isChatHistoryTurn || !isHighEpistemic);
+        return true;
+      }
+      if (name === 'save_memory') {
+        if (isIncognito) return false;
+        if (scoped) return Boolean(context.isExplicitMemoryTurn || !isHighEpistemic);
+        return true;
+      }
+      if (['request_location_permission', 'get_current_coordinates', 'fetch_weather_data', 'render_weather_ui'].includes(name)) {
+        if (scoped) return Boolean(context.isWeatherTurn);
+        return true;
+      }
+      if (['search_images', 'inspect_image', 'prepare_image_display'].includes(name)) {
+        if (scoped) return Boolean(context.isVisualRequest);
+        return true;
+      }
+      if (name === 'find_related_videos') {
+        if (scoped) return Boolean(context.isVideoTopicPrompt);
+        return true;
+      }
+      if (name === 'execute_python_code') {
+        if (scoped) return Boolean(context.isCodeOrCalcTurn || context.isZ21SwarmOrDevTurn || context.isZ21DocBuildTurn || context.isDocKnowledgeTurn || context.isWebRequest);
+        return true;
+      }
       return LOCAL_UTILITY_TOOL_NAMES.includes(name);
     });
   }
@@ -46011,50 +46308,50 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
   }
 
   function getAutonomousSystemDirective(options = {}) {
-    const allowZ21LocalComm = canUseZ21LocalCommunicationTool(options?.planMode, options?.session);
-    const allowZ21Swarm = canUseZ21CommanderSwarmTools(options?.planMode, options?.session, options);
-    const allowZ21LocalDev = canUseZ21LocalDevTools(options?.planMode, options?.session);
-    const allowChatHistory = canUseChatHistorySearch(options?.session);
-    const commToolDoc = allowZ21LocalComm
-      ? `  7. \`fetch_communication_context({"source": "auto|all|whatsapp|email|team_chat|ticket|session|memory", "query": "<kata kunci>", "target_id": "<opsional: nomor HP/JID/nama kontak/ID tiket>", "limit": 6, "max_messages": 25, "days": 0, "since_minutes": 0, "sort_by": "auto|recent|relevance", "unread_only": false})\`: KHUSUS MODE Z21 LOCALHOST — Mengambil riwayat chat WhatsApp terbaru (termasuk pesan baru masuk real-time, kontak, grup, lampiran, timestamp HH:mm:ss & status unread), email lokal, pesan chat tim/notulen, catatan tiket, riwayat sesi AI, dan memori lokal untuk dirangkum atau ditindaklanjuti secara langsung di chat tanpa membuka pop-up UI terpisah. Gunakan sort_by="recent" atau since_minutes (mis. 60) untuk melihat chat terbaru.`
-      : `  7. \`summarize_whatsapp_chat({"target_number_or_name": "", "focus_topic": "<fokus opsional>"})\`: Mengecek, membaca, & merangkum chat WhatsApp terbaru atau dari kontak/grup spesifik secara pasif (read-only) untuk langsung disajikan di percakapan AI tanpa membuka pop-up UI terpisah. Kosongkan target_number_or_name bila pengguna ingin melihat semua chat terbaru.`;
-    const chatHistoryDoc = allowChatHistory
-      ? `\n  10. \`search_chat_history({"query": "<kata kunci topik lama>", "mode": "auto|search|recent", "limit": 5, "max_snippets": 3, "days": 0, "after": "YYYY-MM-DD", "before": "YYYY-MM-DD", "sort_by": "auto|relevance|recent"})\` (alias \`conversation_search\`, \`recent_chats\`): Mencari detail spesifik, keputusan, kode, atau cuplikan percakapan pengguna-AI terdahulu di luar sesi aktif saat pengguna menyinggung obrolan lama.`
-      : '';
-    const z21SwarmDoc = allowZ21Swarm
-      ? `\n\n[5. Z21 COMMANDER ORCHESTRATION & SWARM CONTROL TOOLS (KHUSUS AGEN UTAMA MODE Z21)]:
-Anda bertindak sebagai Agen Koordinator (Commander) yang dapat mendelegasikan tugas kompleks/skala besar ke puluhan hingga ratusan sub-agen terisolasi (berfungsi baik di localhost maupun domain publik .com):
-  - \`create_subagent({"agent_id": "...", "role": "...", "prompt": "...", "allowed_tools": [...], "model_tier": "auto|fast|reasoning|coder", "max_rounds": 3})\` (alias \`spawn_agent\`): Mendefinisikan instansi sub-agen baru beserta peran, instruksi spesifik, dan whitelist tool yang diizinkan (sub-agen tidak pernah mendapat tool orkestrasi).
-  - \`dispatch_tasks({"wave_name": "...", "tasks": [...], "max_concurrency": 8})\` ATAU mode cepat skala besar \`dispatch_tasks({"wave_name": "...", "agent_id": "...", "items": ["item1", ...], "prompt_template": "Analisis {{item}}", "allowed_tools": [...]})\`: Meluncurkan banyak sub-agen sekaligus secara paralel dalam sebuah gelombang (\`wave_id\`).
-  - \`wait_and_collect({"wave_id": "<wave_id atau *>", "collect_mode": "all|quorum", "quorum_ratio": 0.85, "timeout_ms": 90000})\` (alias \`aggregate\`): Menunggu gelombang sub-agen selesai dan menarik seluruh hasil ringkasan terpadatkan untuk disintesis menjadi jawaban final.
-  - \`z21_document_builder({"filename": "<Laporan.pdf|Proposal.docx|Keuangan.xlsx>", "format": "pdf|docx|xlsx|csv", "python_code": "<skrip Python opsional: reportlab/fpdf/weasyprint/python-docx/openpyxl/pandas/xlsxwriter>", "title": "...", "sections": [...], "tables": [...], "sheets": [...]})\`: Membuat berkas PDF (.pdf), Word (.docx), atau Excel/CSV (.xlsx/.csv dengan rumus formula & grafik) di dalam sandbox kontainer Z21 lalu menampilkannya otomatis sebagai Kartu Unduhan (File Artifact Card) di chat.` + (allowZ21LocalDev
-        ? `\n\n[6. Z21 LOCALHOST-ONLY DEVELOPER TOOLS (AKTIF KARENA BERJALAN DI LOCALHOST)]:
-  - \`bash({"command": "<perintah shell>", "cwd": "<opsional>", "shell": "auto|powershell|cmd|bash|node|python", "timeout_ms": 20000})\` (alias \`terminal\`): Menjalankan perintah OS lokal (menginstal paket, menjalankan skrip pengujian/unit test, memeriksa struktur folder/git).
-  - \`file_editor({"action": "read_file|write_file|patch_file|list_files", "path": "<jalur relatif>", "start_line": 1, "end_line": 150, "target": "...", "replacement": "...", "content": "..."})\` (atau panggil langsung \`read_file\`, \`write_file\`, \`patch_file\`): Membaca rentang baris berkas secara presisi, menulis file, atau menambal kode secara bedah. Dapat juga diberikan di \`allowed_tools\` sub-agen saat berjalan di localhost.`
-        : `\n\n[CATATAN LINGKUNGAN DOMAIN PUBLIK (.COM)]: Aplikasi berjalan di domain publik non-localhost sehingga tool \`bash\` / \`terminal\` dan \`file_editor\` dinonaktifkan demi keamanan. Gunakan tool orkestrasi swarm (\`create_subagent\`, \`dispatch_tasks\`, \`wait_and_collect\`) bersama \`search_web\`, \`browse_web_page\`, \`execute_python_code\`, \`search_memory\`, dan \`search_documents\`.`)
-      : '';
-    return `\n[SKEMA TOOL EKSTERNAL AKTIF]:
-- Panggil fungsi melalui native tool calling API; apabila jalur upstream tidak mendukung native tool API, keluarkan blok \`<tool_call>{"name": "<nama_tool>", "arguments": {<parameter_json>}}</tool_call>\`.
-- Daftar fungsi tersedia:
-  1. \`search_web({"query": "<kata kunci>", "max_results": 8})\`: Pencarian dokumen web real-time terperingkat secara matematis (BM25F × peluruhan temporal).
-  2. \`browse_web_page({"url": "<https://...>"})\`: Ekstraksi isi teks halaman URL publik di internet.
-  3. \`save_memory({"topic": "<topik>", "content": "<fakta>"})\`: Menyimpan fakta, preferensi, atau catatan proyek ke memori jangka panjang lokal.
-  4. \`search_memory({"query": "<kata kunci>", "limit": 5})\`: Mencari catatan dari memori jangka panjang lokal via SQLite Full-Text Search.
-  5. \`execute_python_code({"code": "<script python>"})\`: Menjalankan kode Python dalam sandbox lokal untuk kalkulasi matematika presisi atau manipulasi data.
-  6. \`find_related_videos({"video_url": "<URL video>", "query": "<topik>", "platform": "auto", "limit": 5})\`: Pencarian dan rekomendasi video nyata lintas platform yang dapat diputar langsung di percakapan.
-${commToolDoc}
-  8. \`search_documents({"query": "<kata kunci SOP/laporan/regulasi/kebijakan>", "category": "auto|all|sop|laporan|regulasi|kebijakan|panduan|vector_db|workspace", "doc_id": "<opsional: ID/nama berkas>", "top_k": 5})\` (atau alias \`retrieve_knowledge({"query": "...", "category": "auto", "top_k": 5})\`): Mencari dan mengambil potongan dokumen relevan (SOP, laporan, regulasi, kebijakan, panduan) dari vector database (Hybrid Vector Cosine Similarity + SQLite FTS5 BM25 + Knowledge Graph RRF) atau sistem manajemen dokumen internal secara real-time (RAG dinamis).
-  9. \`search_images({"query": "<kata kunci bahasa Inggris>", "per_page": 3, "sources": ["unsplash"], "orientation": "any", "image_type": "photo", "safe_search": true})\` -> \`inspect_image({"image_id": "<id>"})\` -> \`prepare_image_display({"image_ids": ["<id1>", "<id2>", "<id3>"], "layout": "collage", "placement": "after_intro", "alt_texts": ["<deskripsi>"]})\`: Siklus pencarian dan perenderan 3 foto paling relevan untuk mendukung jawaban visual. ATURAN PEMROSESAN: (1) Analisis pertanyaan pengguna dan tentukan visual apa yang paling cocok mendukung jawaban; (2) Terjemahkan kata kunci tersebut ke Bahasa Inggris agar pencarian Unsplash akurat (contoh: "kopi hangat" menjadi "hot coffee"); (3) Ambil per_page: 3 dari ["unsplash"] untuk objek/kuliner/alam/sejarah umum atau ["wikimedia_commons"] khusus potret tokoh bernama spesifik, lalu sisipkan token \`[[ZOZ_IMAGE_DISPLAY:disp_...]]\` di dekat pembahasan tanpa menampilkan JSON mentah.${chatHistoryDoc}
-  11. **Alur Cuaca Real-Time Berizin Lokasi (Consent-Gated Weather Workflow)**: ${WeatherController.hasPersistedApproval()
-    ? 'Izin lokasi pengguna SUDAH DIBERIKAN sebelumnya (tersimpan aman — JANGAN meminta izin ulang lewat popup!). Saat pengguna menanyakan cuaca di lokasi mereka saat ini/besok, langsung panggil `get_current_coordinates({})` -> `fetch_weather_data({"lat": <lat>, "lon": <lon>})` -> `render_weather_ui({"condition": "<kondisi>", "temp": <angka>, "city": "<kota>"})` (alias `generate_weather_visual`), lalu susun penjelasan cuaca yang LENGKAP & DETAIL (suhu aktual & terasa, kelembapan, angin, peluang hujan, tren 5 jam ke depan/besok, serta saran) di samping token `[[ZOZ_WEATHER_DISPLAY:...]]`. DILARANG KERAS menjawab pengguna dengan "Mohon tunggu sebentar..." atau menjanjikan pengecekan tanpa benar-benar memanggil fungsi tool!'
-    : 'Saat pengguna menanyakan cuaca di lokasi mereka saat ini ("Bagaimana cuaca di tempatku/lokasiku sekarang?"), jalankan alur berantai berurutan demi privasi (izin hanya diminta sekali lalu diingat otomatis): (a) `request_location_permission({"reason": "..."})` (tunggu persetujuan [Izinkan]/[Tolak] pengguna; jangan pernah menebak koordinat!) -> (b) `get_current_coordinates({})` (ambil lat/lon & cocokkan nama wilayah/kota) -> (c) `fetch_weather_data({"lat": <lat>, "lon": <lon>})` (ambil suhu, kelembapan, angin, prakiraan 5 jam ke depan & harian; jika pengguna menyebut kota tertentu secara eksplisit seperti "cuaca di Bandung", boleh langsung panggil `fetch_weather_data({"city": "Bandung"})`) -> (d) `render_weather_ui({"condition": "<kondisi>", "temp": <angka>, "city": "<kota>"})` (alias `generate_weather_visual`) untuk merender kartu visualisasi cuaca interaktif, diikuti penjelasan teks Bahasa Indonesia yang LENGKAP dan DETAIL. DILARANG KERAS menulis teks penundaan ("Mohon tunggu sebentar sementara saya memproses...") sebagai respons ke pengguna — selalu eksekusi pemanggilan tool sampai tuntas!'}
+    const activeToolList = Array.isArray(options?.selectedTools)
+      ? options.selectedTools
+      : getSelectableAutonomousTools(true, options);
+    const activeSet = new Set(activeToolList.map(t => t?.function?.name).filter(Boolean));
+    const hasTool = (nm) => activeSet.has(nm);
 
-[4. ORCHESTRATION & CHAINING (MULTI-STEP TOOL CALLING & INTERLEAVED REASONING)]:
-- **Interleaved Reasoning & Self-Correction (Think -> Act -> Observe -> Re-Think)**: Sebelum memanggil tool DAN di setiap jeda setelah menerima output tool, lakukan evaluasi singkat di dalam blok penalaran internal Anda (\`<think>\` / reasoning):
-  1. Cek apakah output tool sebelumnya sudah menjawab seluruh sub-pertanyaan, masih parsial/kosong, atau mengembalikan error.
-  2. Jika hasil tool memengaruhi strategi (mis. prakiraan cuaca menunjukkan hujan lebat sehingga pencarian akomodasi wajib difokuskan ke hotel dengan fasilitas aula/ballroom indoor), atau jika tool gagal/tidak ditemukan, **koreksi parameter/kueri atau pilih tool alternatif** secara dinamis pada langkah berikutnya sebelum menyusun jawaban akhir.
-- **Parallel Tool Calling**: Anda dapat memanggil beberapa tool sekaligus dalam satu giliran (baik beberapa item pada array \`tool_calls\` maupun beberapa blok \`<tool_call>...</tool_call>\` berurutan dalam satu respons) untuk mengambil beberapa sumber sekaligus secara paralel (contoh: mengambil data transaksi/riwayat dari \`${allowZ21LocalComm ? 'fetch_communication_context' : 'search_memory'}\` + mengambil kebijakan diskon/SOP dari \`search_documents\` / \`retrieve_knowledge\` dalam satu giliran) sebelum menyusun jawaban.
-- **Sequential Chaining**: Anda dapat menggunakan output dari satu putaran tool sebagai input untuk tool berikutnya pada putaran selanjutnya (contoh: \`${allowZ21LocalComm ? 'fetch_communication_context' : 'search_memory'}\` / \`search_documents\` -> \`execute_python_code\` untuk kalkulasi presisi -> menyusun laporan akhir atau berkas dokumen).${z21SwarmDoc}`;
+    const allowZ21LocalComm = canUseZ21LocalCommunicationTool(options?.planMode, options?.session);
+    const allowZ21Swarm = hasTool('create_subagent') || hasTool('dispatch_tasks') || hasTool('wait_and_collect') || hasTool('z21_document_builder');
+    const allowZ21LocalDev = hasTool('bash') || hasTool('file_editor');
+
+    const lines = [];
+    if (hasTool('search_web')) lines.push(`  - \`search_web({"query": "<kata kunci>", "max_results": 8})\`: Pencarian dokumen web real-time di internet terbuka (wajib dipakai untuk berita terbaru, rilis/versi model AI, harga, fakta mutakhir, atau informasi eksternal apa pun).`);
+    if (hasTool('browse_web_page')) lines.push(`  - \`browse_web_page({"url": "<https://...>"})\`: Ekstraksi isi teks halaman URL publik di internet.`);
+    if (hasTool('save_memory')) lines.push(`  - \`save_memory({"topic": "<topik>", "content": "<fakta>"})\`: Menyimpan preferensi atau fakta pribadi pengguna ke memori lokal.`);
+    if (hasTool('search_memory')) lines.push(`  - \`search_memory({"query": "<kata kunci>", "limit": 5})\`: Mencari catatan/preferensi pribadi pengguna di memori lokal (bukan untuk berita atau fakta dunia nyata).`);
+    if (hasTool('execute_python_code')) lines.push(`  - \`execute_python_code({"code": "<script python>"})\`: Menjalankan kode Python dalam sandbox lokal untuk kalkulasi matematika presisi atau manipulasi data.`);
+    if (hasTool('find_related_videos')) lines.push(`  - \`find_related_videos({"video_url": "<URL video>", "query": "<topik>", "platform": "auto", "limit": 5})\`: Pencarian dan rekomendasi video nyata lintas platform yang dapat diputar langsung di percakapan.`);
+    if (hasTool('fetch_communication_context')) lines.push(`  - \`fetch_communication_context({"source": "auto|all|whatsapp|email|team_chat|ticket|session|memory", "query": "<kata kunci>", "target_id": "<opsional>", "limit": 6, "max_messages": 25, "since_minutes": 0, "sort_by": "auto|recent|relevance"})\`: Mengambil riwayat chat WhatsApp/email/tiket lokal untuk dirangkum langsung di chat.`);
+    else if (hasTool('summarize_whatsapp_chat')) lines.push(`  - \`summarize_whatsapp_chat({"target_number_or_name": "", "focus_topic": "<fokus>"})\`: Mengecek dan merangkum chat WhatsApp secara read-only.`);
+    if (hasTool('search_documents')) lines.push(`  - \`search_documents({"query": "<kata kunci SOP/dokumen>", "category": "auto|all|sop|laporan|regulasi|kebijakan|panduan|vector_db|workspace", "doc_id": "<opsional>", "top_k": 5})\`: Mengambil potongan dokumen internal / lampiran RAG.`);
+    if (hasTool('search_images')) lines.push(`  - \`search_images({"query": "<kata kunci bahasa Inggris>", "per_page": 3, "sources": ["unsplash"]})\` -> \`inspect_image({"image_id": "<id>"})\` -> \`prepare_image_display({"image_ids": [...], "layout": "collage"})\`: Cari, verifikasi lisensi, & tampilkan visual via token \`[[ZOZ_IMAGE_DISPLAY:disp_...]]\`.`);
+    if (hasTool('search_chat_history')) lines.push(`  - \`search_chat_history({"query": "<topik lama>", "mode": "auto|search|recent", "limit": 5})\`: Menelusuri percakapan pengguna-AI terdahulu saat pengguna merujuk obrolan lampau.`);
+    if (hasTool('fetch_weather_data')) {
+      lines.push(WeatherController.hasPersistedApproval()
+        ? `  - Alur Cuaca Real-Time: Izin lokasi sudah aktif. Panggil \`get_current_coordinates({})\` -> \`fetch_weather_data({"lat": <lat>, "lon": <lon>})\` -> \`render_weather_ui({"condition": "<kondisi>", "temp": <angka>, "city": "<kota>"})\` lalu jelaskan lengkap di samping \`[[ZOZ_WEATHER_DISPLAY:...]]\`.`
+        : `  - Alur Cuaca Real-Time: Panggil \`request_location_permission({"reason": "..."})\` -> \`get_current_coordinates({})\` -> \`fetch_weather_data({"lat": <lat>, "lon": <lon>})\` -> \`render_weather_ui(...)\` (atau langsung \`fetch_weather_data({"city": "<kota>"})\` jika kota disebut eksplisit).`);
+    }
+
+    const z21SwarmDoc = allowZ21Swarm
+      ? `\n\n[Z21 COMMANDER & ARTIFACT TOOLS]:` +
+        (hasTool('create_subagent') ? `\n  - \`create_subagent\`, \`dispatch_tasks\`, \`wait_and_collect\`: Orkestrasi sub-agen terisolasi paralel untuk tugas kompleks.` : '') +
+        (hasTool('z21_document_builder') ? `\n  - \`z21_document_builder({"filename": "<Laporan.pdf|Proposal.docx|Keuangan.xlsx>", "format": "pdf|docx|xlsx|csv", ...})\`: Membangun artefak dokumen PDF/DOCX/XLSX di sandbox Z21.` : '') +
+        (allowZ21LocalDev ? `\n  - \`bash\` & \`file_editor\`: Eksekusi shell lokal dan pembacaan/penyuntingan berkas presisi.` : '')
+      : '';
+
+    return `\n[ATURAN ANTI-HALUSINASI & PRIORITAS PENCARIAN WEB]:
+1. Untuk pertanyaan berita terkini, rilis/versi model AI (Gemini, GPT/OpenAI, Claude/Anthropic, Llama/Meta, DeepSeek, Mistral, Qwen, Grok, dll.), perbandingan model terbaru, harga, skor, atau fakta dunia nyata: WAJIB panggil \`search_web\` secara langsung sebelum menjawab!
+2. DILARANG KERAS mengarang nama model atau versi fiktif (seperti Gemini 4 Carbon/Neon, GPT-6, Claude 5, Llama 5), tanggal rilis rekaan, atau menjawab dari simulasi internal tanpa bukti hasil \`search_web\`.
+3. Memori pengguna / riwayat obrolan BUKAN sumber berita eksternal: jangan pernah menggantikan \`search_web\` dengan asumsi diri sendiri atau memori lama. Jika ada ketidakpastian atau informasi terbaru setelah batas pengetahuan Anda, panggil \`search_web\` dengan kueri spesifik.
+
+[SKEMA TOOL EKSTERNAL AKTIF]:
+- Panggil fungsi melalui native tool calling API; apabila jalur upstream tidak mendukung native tool API, keluarkan blok \`<tool_call>{"name": "<nama_tool>", "arguments": {<parameter_json>}}</tool_call>\`.
+- Daftar fungsi tersedia pada giliran ini:
+${lines.join('\n')}${lines.length > 1 ? `\n\n[ORCHESTRATION]: Anda dapat memanggil beberapa tool paralel atau berantai seperlunya, lalu verifikasi hasilnya sebelum menyusun jawaban akhir.` : ''}${z21SwarmDoc}`;
   }
   const AUTONOMOUS_SYSTEM_DIRECTIVE = '';
 
@@ -48626,8 +48923,11 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
       // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q), PELURUHAN W(Δt), & KALIBRASI BAYESIAN
       const attachedImageCount = Array.isArray(image) ? image.length : (image ? 1 : 0);
       const hasAttachedImages = attachedImageCount > 0;
+      const recentTurnCtxOllama = (session && Array.isArray(session.messages) && session.messages.length > 0)
+        ? session.messages.slice(-5).filter(m => m && m.role === 'user').map(m => typeof m.content === 'string' ? m.content.slice(0, 200) : '').join(' ')
+        : '';
       const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
-        ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
+        ? ZozTextSafety.computeTemporalRecencyProfile(promptText, recentTurnCtxOllama)
         : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
       const hasLetterPrefOllama = (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.hasLetterPreference === 'function')
         ? LocalMemoryVault.hasLetterPreference()
@@ -48722,8 +49022,9 @@ $$
               }
             }
           }
+          const suppressExternalEpisodic = temporalRecencyProfile.epistemicSearchTrigger >= 0.72;
           const localRecall = (typeof LocalMemoryVault !== 'undefined')
-            ? LocalMemoryVault.recallLocal(effectiveMemoryQuery, STATE.activeProjectScope || 'global', STATE.userId || 'default', 16, session?.id)
+            ? LocalMemoryVault.recallLocal(effectiveMemoryQuery, STATE.activeProjectScope || 'global', STATE.userId || 'default', 16, session?.id, { suppressExternalEpisodic })
             : null;
           const recallRes = await fetch(getUniversalApiUrl('/api/memories/recall'), {
             method: 'POST',
@@ -48732,7 +49033,7 @@ $$
               userId: STATE.userId || 'default',
               query: effectiveMemoryQuery,
               scope: STATE.activeProjectScope || 'global',
-              options: { maxResults: 16 }
+              options: { maxResults: 16, suppressExternalEpisodic }
             })
           }).catch(() => null);
           if (recallRes && recallRes.ok) {
@@ -48854,9 +49155,27 @@ $$
         !hasNegativePreview &&
         (isZ21DocumentBuildPrompt(promptText) || isDocRequest)
       );
+      const isVideoToolIntent = /\b(?:video|youtube|youtu\.be|dailymotion|vimeo|tiktok|tonton|klip|channel)\b/i.test(promptText);
+      const isVisualRequest = /\b(?:foto|gambar|image|images|photo|visual|potret|ilustrasi|tampilkan\s+(?:foto|gambar|visual)|unsplash|wikimedia|search_images|prepare_image_display)\b/i.test(promptText);
+      const isExplicitMemoryTurn = /\b(?:memor[iy]|ingatan|ingat(?:kan)?\s+(?:ini|bahwa|saya)|simpan\s+(?:ke\s+)?memor[iy]|catat\s+(?:ke\s+)?memor[iy]|preferensi\s+saya|siapa\s+saya|search_memory|save_memory)\b/i.test(promptText);
+      const isCodeOrCalcTurn = /\b(?:python|hitung|kalkulasi|komputasi|simulasi|jalankan\s+kode|execute_python_code|script|skrip|rumus|matematika|statistik|csv|json|regex|algorithm|algoritma)\b/i.test(promptText);
+      const isWhatsAppMentioned = Boolean(matchesWhatsAppChannelVariant(promptText));
+      const isHighEpistemicWebTurn = Boolean(STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (z21ToolCtx) {
+        z21ToolCtx.hasIntentScoping = true;
         z21ToolCtx.isWebRequest = isWebRequest;
         z21ToolCtx.isZ21DocBuildTurn = isZ21DocBuildTurn;
+        z21ToolCtx.isZ21SwarmOrDevTurn = isZ21SwarmOrDevTurn;
+        z21ToolCtx.isWeatherTurn = isWeatherTurn;
+        z21ToolCtx.isCommAnalysisTurn = isCommAnalysisTurn;
+        z21ToolCtx.isWhatsAppMentioned = isWhatsAppMentioned;
+        z21ToolCtx.isDocKnowledgeTurn = isDocKnowledgeTurn;
+        z21ToolCtx.isChatHistoryTurn = isChatHistoryTurn;
+        z21ToolCtx.isVideoTopicPrompt = isVideoToolIntent;
+        z21ToolCtx.isVisualRequest = isVisualRequest;
+        z21ToolCtx.isExplicitMemoryTurn = isExplicitMemoryTurn;
+        z21ToolCtx.isCodeOrCalcTurn = isCodeOrCalcTurn;
+        z21ToolCtx.isHighEpistemicWebTurn = isHighEpistemicWebTurn;
       }
 
       // Direktif tool pencarian/rekomendasi video & utilitas otonom disuntikkan hanya bila relevan secara matematis (I(Q; Tools) > 0)
@@ -49969,11 +50288,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // ===== GERBANG KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) >= 0.75 =====
-      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isWeatherTurn && !isWebRequest && !isZ21DocBuildTurn && !isZ21SwarmOrDevTurn && !z21ToolCtx?.z21SwarmManager?.hasWaves() && groundedWeatherDisplays.length === 0 && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn || isChatHistoryTurn) && !STATE.webSearchEnabled) && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
+      const hasUngroundedTemporalClaimOllama = Boolean(
+        (!webSources || webSources.length === 0) &&
+        !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated &&
+        /(?:(?:per|akhir|di\s+akhir)\s+(?:(?:januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\s+)?202[5-9]|baru\s+saja\s+(?:merilis|meluncurkan|mengumumkan)|gemini\s*4\s*(?:neon|argon|carbon|hydrogen)|gpt-?6\b|claude\s*5\b|llama\s*5\b|the\s+great\s+reasoning\s+war)/i.test(fullText || '')
+      );
+      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isWeatherTurn && !isWebRequest && !isZ21DocBuildTurn && (!isZ21SwarmOrDevTurn || hasUngroundedTemporalClaimOllama) && !z21ToolCtx?.z21SwarmManager?.hasWaves() && groundedWeatherDisplays.length === 0 && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn || isChatHistoryTurn) && !STATE.webSearchEnabled) || hasUngroundedTemporalClaimOllama) && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && (temporalRecencyProfile.epistemicSearchTrigger >= 0.75 || hasUngroundedTemporalClaimOllama)) {
         try {
+          const gateSearchQuery = synthesizeAutonomousSearchQuery(session, promptText) || promptText;
           bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Menjalankan penelusuran indeks matematis (U=${temporalRecencyProfile.epistemicSearchTrigger})...</span></div>`;
           smartScrollChatToBottom(true);
-          const autoSearchRes = await executeAutonomousWebTool('search_web', { query: promptText, max_results: 8 }, promptText, session);
+          const autoSearchRes = await executeAutonomousWebTool('search_web', { query: gateSearchQuery, max_results: 8 }, promptText, session);
           if (autoSearchRes && Array.isArray(autoSearchRes.sources) && autoSearchRes.sources.length > 0 && !STATE.abortController?.signal?.aborted) {
             webSources = autoSearchRes.sources;
             allAccumulatedToolResponsesText = autoSearchRes.text || '';
@@ -50512,7 +50837,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 userMessage: promptText,
                 assistantResponse: fullText,
                 decisionCalibration,
-                scope: STATE.activeProjectScope || 'global'
+                scope: STATE.activeProjectScope || 'global',
+                hasVerifiedWebSources: Boolean(webSources && webSources.length > 0),
+                epistemicSearchTrigger: temporalRecencyProfile.epistemicSearchTrigger
               })
             : {};
           fetch(getUniversalApiUrl('/api/memories/extract-background'), {
@@ -50528,7 +50855,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               turnIndex: session.messages.length,
               errorLesson: capturedLocal?.errorLesson || null,
               episodicSummary: capturedLocal?.episodicSummary || null,
-              preferenceMemory: capturedLocal?.preferenceMemory || null
+              preferenceMemory: capturedLocal?.preferenceMemory || null,
+              incognito: Boolean(!(webSources && webSources.length > 0) && temporalRecencyProfile.epistemicSearchTrigger >= 0.72)
             })
           }).catch(() => {});
         }
@@ -50559,6 +50887,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + modelName, fullText);
+      if (typeof ZozReadAloudController !== 'undefined' && typeof ZozReadAloudController.autoSpeakRow === 'function') {
+        ZozReadAloudController.autoSpeakRow(assistantRow, fullText, {
+          isStudioIsolated: Boolean(isStudioIsolated),
+          isAutoContinuation: Boolean(runOptions._isAutoContinuation),
+          isAborted: Boolean(STATE.abortController?.signal?.aborted)
+        });
+      }
       BioEndocrine.secreteDopamine(12, `Ollama inferensi sukses: ${modelName}`);
       BioEndocrine.secreteEndorphin(8, `Penyelesaian penalaran model ${modelName}`);
       if (typeof BioEndocrine.inspectModelText === 'function') {
@@ -51017,8 +51352,11 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       // PROFIL KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q), PELURUHAN W(Δt), & KALIBRASI BAYESIAN
       const attachedImageCount = Array.isArray(image) ? image.length : (image ? 1 : 0);
       const hasAttachedImages = attachedImageCount > 0;
+      const recentTurnCtxOllama = (session && Array.isArray(session.messages) && session.messages.length > 0)
+        ? session.messages.slice(-5).filter(m => m && m.role === 'user').map(m => typeof m.content === 'string' ? m.content.slice(0, 200) : '').join(' ')
+        : '';
       const temporalRecencyProfile = (typeof ZozTextSafety !== 'undefined' && typeof ZozTextSafety.computeTemporalRecencyProfile === 'function')
-        ? ZozTextSafety.computeTemporalRecencyProfile(promptText)
+        ? ZozTextSafety.computeTemporalRecencyProfile(promptText, recentTurnCtxOllama)
         : { alpha: 0.1, recencyAlpha: 0.1, epistemicSearchTrigger: 0.1 };
       const hasLetterPrefOllama = (typeof LocalMemoryVault !== 'undefined' && typeof LocalMemoryVault.hasLetterPreference === 'function')
         ? LocalMemoryVault.hasLetterPreference()
@@ -51113,8 +51451,9 @@ $$
               }
             }
           }
+          const suppressExternalEpisodic = temporalRecencyProfile.epistemicSearchTrigger >= 0.72;
           const localRecall = (typeof LocalMemoryVault !== 'undefined')
-            ? LocalMemoryVault.recallLocal(effectiveMemoryQuery, STATE.activeProjectScope || 'global', STATE.userId || 'default', 16, session?.id)
+            ? LocalMemoryVault.recallLocal(effectiveMemoryQuery, STATE.activeProjectScope || 'global', STATE.userId || 'default', 16, session?.id, { suppressExternalEpisodic })
             : null;
           const recallRes = await fetch(getUniversalApiUrl('/api/memories/recall'), {
             method: 'POST',
@@ -51123,7 +51462,7 @@ $$
               userId: STATE.userId || 'default',
               query: effectiveMemoryQuery,
               scope: STATE.activeProjectScope || 'global',
-              options: { maxResults: 16 }
+              options: { maxResults: 16, suppressExternalEpisodic }
             })
           }).catch(() => null);
           if (recallRes && recallRes.ok) {
@@ -51245,9 +51584,27 @@ $$
         !hasNegativePreview &&
         (isZ21DocumentBuildPrompt(promptText) || isDocRequest)
       );
+      const isVideoToolIntent = /\b(?:video|youtube|youtu\.be|dailymotion|vimeo|tiktok|tonton|klip|channel)\b/i.test(promptText);
+      const isVisualRequest = /\b(?:foto|gambar|image|images|photo|visual|potret|ilustrasi|tampilkan\s+(?:foto|gambar|visual)|unsplash|wikimedia|search_images|prepare_image_display)\b/i.test(promptText);
+      const isExplicitMemoryTurn = /\b(?:memor[iy]|ingatan|ingat(?:kan)?\s+(?:ini|bahwa|saya)|simpan\s+(?:ke\s+)?memor[iy]|catat\s+(?:ke\s+)?memor[iy]|preferensi\s+saya|siapa\s+saya|search_memory|save_memory)\b/i.test(promptText);
+      const isCodeOrCalcTurn = /\b(?:python|hitung|kalkulasi|komputasi|simulasi|jalankan\s+kode|execute_python_code|script|skrip|rumus|matematika|statistik|csv|json|regex|algorithm|algoritma)\b/i.test(promptText);
+      const isWhatsAppMentioned = Boolean(matchesWhatsAppChannelVariant(promptText));
+      const isHighEpistemicWebTurn = Boolean(STATE.webSearchEnabled || temporalRecencyProfile.epistemicSearchTrigger >= 0.72);
       if (z21ToolCtx) {
+        z21ToolCtx.hasIntentScoping = true;
         z21ToolCtx.isWebRequest = isWebRequest;
         z21ToolCtx.isZ21DocBuildTurn = isZ21DocBuildTurn;
+        z21ToolCtx.isZ21SwarmOrDevTurn = isZ21SwarmOrDevTurn;
+        z21ToolCtx.isWeatherTurn = isWeatherTurn;
+        z21ToolCtx.isCommAnalysisTurn = isCommAnalysisTurn;
+        z21ToolCtx.isWhatsAppMentioned = isWhatsAppMentioned;
+        z21ToolCtx.isDocKnowledgeTurn = isDocKnowledgeTurn;
+        z21ToolCtx.isChatHistoryTurn = isChatHistoryTurn;
+        z21ToolCtx.isVideoTopicPrompt = isVideoToolIntent;
+        z21ToolCtx.isVisualRequest = isVisualRequest;
+        z21ToolCtx.isExplicitMemoryTurn = isExplicitMemoryTurn;
+        z21ToolCtx.isCodeOrCalcTurn = isCodeOrCalcTurn;
+        z21ToolCtx.isHighEpistemicWebTurn = isHighEpistemicWebTurn;
       }
 
       // Direktif tool pencarian/rekomendasi video & utilitas otonom disuntikkan hanya bila relevan secara matematis (I(Q; Tools) > 0)
@@ -52717,11 +53074,17 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
 
       // ===== GERBANG KETIDAKPASTIAN EPISTEMIK-TEMPORAL U(Q) >= 0.75 (OPENROUTER) =====
-      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isWeatherTurn && !isWebRequest && !isZ21DocBuildTurn && !isZ21SwarmOrDevTurn && !z21ToolCtx?.z21SwarmManager?.hasWaves() && groundedWeatherDisplays.length === 0 && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && !((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn || isChatHistoryTurn) && !STATE.webSearchEnabled) && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && temporalRecencyProfile.epistemicSearchTrigger >= 0.75) {
+      const hasUngroundedTemporalClaimOr = Boolean(
+        (!webSources || webSources.length === 0) &&
+        !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated &&
+        /(?:(?:per|akhir|di\s+akhir)\s+(?:(?:januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\s+)?202[5-9]|baru\s+saja\s+(?:merilis|meluncurkan|mengumumkan)|gemini\s*4\s*(?:neon|argon|carbon|hydrogen)|gpt-?6\b|claude\s*5\b|llama\s*5\b|the\s+great\s+reasoning\s+war)/i.test(fullText || '')
+      );
+      if (autonomousRound === 0 && (!webSources || webSources.length === 0) && !isWeatherTurn && !isWebRequest && !isZ21DocBuildTurn && (!isZ21SwarmOrDevTurn || hasUngroundedTemporalClaimOr) && !z21ToolCtx?.z21SwarmManager?.hasWaves() && groundedWeatherDisplays.length === 0 && !isPureMathSession && !wantsFile && !isDocRequest && !isStudioIsolated && !hasVideoUrlGrounded && !isVideoTopicPrompt && !decisionCalibration.isDiscreteChoice && !decisionCalibration.isConceptualTaxonomy && !isPureAlgebraConcept && (!((isCommAnalysisTurn || isLocalTimeTurn || isDocKnowledgeTurn || isChatHistoryTurn) && !STATE.webSearchEnabled) || hasUngroundedTemporalClaimOr) && !hasAttachedImages && !/<<<ZOZ_FILE/i.test(fullText || '') && !STATE.abortController?.signal?.aborted && (temporalRecencyProfile.epistemicSearchTrigger >= 0.75 || hasUngroundedTemporalClaimOr)) {
         try {
+          const gateSearchQueryOr = synthesizeAutonomousSearchQuery(session, promptText) || promptText;
           bubbleText.innerHTML = `<div class="autonomous-search-status"><span class="typing-cursor"></span> <i class="fa-solid fa-compass fa-spin"></i> <span>Menjalankan penelusuran indeks matematis (U=${temporalRecencyProfile.epistemicSearchTrigger})...</span></div>`;
           smartScrollChatToBottom(true);
-          const autoSearchRes = await executeAutonomousWebTool('search_web', { query: promptText, max_results: 8 }, promptText, session);
+          const autoSearchRes = await executeAutonomousWebTool('search_web', { query: gateSearchQueryOr, max_results: 8 }, promptText, session);
           if (autoSearchRes && Array.isArray(autoSearchRes.sources) && autoSearchRes.sources.length > 0 && !STATE.abortController?.signal?.aborted) {
             webSources = autoSearchRes.sources;
             allAccumulatedToolResponsesText = autoSearchRes.text || '';
@@ -53357,7 +53720,9 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
                 userMessage: promptText,
                 assistantResponse: fullText,
                 decisionCalibration,
-                scope: STATE.activeProjectScope || 'global'
+                scope: STATE.activeProjectScope || 'global',
+                hasVerifiedWebSources: Boolean(webSources && webSources.length > 0),
+                epistemicSearchTrigger: temporalRecencyProfile.epistemicSearchTrigger
               })
             : {};
           fetch(getUniversalApiUrl('/api/memories/extract-background'), {
@@ -53373,7 +53738,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
               turnIndex: session.messages.length,
               errorLesson: capturedLocal?.errorLesson || null,
               episodicSummary: capturedLocal?.episodicSummary || null,
-              preferenceMemory: capturedLocal?.preferenceMemory || null
+              preferenceMemory: capturedLocal?.preferenceMemory || null,
+              incognito: Boolean(!(webSources && webSources.length > 0) && temporalRecencyProfile.epistemicSearchTrigger >= 0.72)
             })
           }).catch(() => {});
         }
@@ -53402,6 +53768,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       }
       AudioEngine.receive();
       notifyAiCompletion('🤖 ' + (actualModelUsed || displayModel), fullText);
+      if (typeof ZozReadAloudController !== 'undefined' && typeof ZozReadAloudController.autoSpeakRow === 'function') {
+        ZozReadAloudController.autoSpeakRow(assistantRow, fullText, {
+          isStudioIsolated: Boolean(isStudioIsolated),
+          isAutoContinuation: Boolean(runOptions._isAutoContinuation),
+          isAborted: Boolean(STATE.abortController?.signal?.aborted)
+        });
+      }
       BioEndocrine.secreteDopamine(12, `OpenRouter inferensi sukses: ${actualModelUsed || displayModel}`);
       BioEndocrine.secreteEndorphin(8, `Penyelesaian penalaran model ${actualModelUsed || displayModel}`);
       if (typeof BioEndocrine.inspectModelText === 'function') {
@@ -69110,7 +69483,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://fred-providence-julie-distribution.trycloudflare.com',
+    activeTunnelUrl: 'https://customized-gadgets-webcams-rover.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -74779,6 +75152,9 @@ Gunakan format Markdown lengkap dengan struktur berikut:
         vertDock.setAttribute('aria-hidden', isDockVisible ? 'false' : 'true');
         if ('inert' in vertDock) vertDock.inert = !isDockVisible;
       }
+      if (typeof ZozReadAloudController !== 'undefined' && typeof ZozReadAloudController.syncAutoToggleUI === 'function') {
+        ZozReadAloudController.syncAutoToggleUI(isDockVisible);
+      }
       if (vertPowerBtn) {
         const vertPowerAria = isOff ? 'Aktifkan Persona AI (1-Klik)' : 'Matikan Persona AI (1-Klik)';
         vertPowerBtn.setAttribute('aria-pressed', String(!isOff));
@@ -75216,6 +75592,9 @@ Gunakan format Markdown lengkap dengan struktur berikut:
 
     init() {
       this.syncUI();
+      if (typeof ZozReadAloudController !== 'undefined' && typeof ZozReadAloudController.initAutoToggle === 'function') {
+        ZozReadAloudController.initAutoToggle();
+      }
       if (this.initialized) return;
       this.initialized = true;
 

@@ -40,7 +40,7 @@
         }
       });
       try {
-        var currentVer = 'v20261124_tmwuqqux4';
+        var currentVer = 'v20261124_tmwuu9529';
         var savedVer = localStorage.getItem('__zoz_ver__');
         if (savedVer !== currentVer) {
           if (savedVer) {
@@ -53,7 +53,7 @@
           }
         }
       } catch (_) {}
-      window.__ZOZ_VERSION__ = 'v20261124_tmwuqqux4';
+      window.__ZOZ_VERSION__ = 'v20261124_tmwuu9529';
     })();
   </script>
   <title>ZOZ ROUTER</title>
@@ -115,8 +115,8 @@
   <script>(function(){var l=document.getElementById('mainKatexCssLink');function mark(){try{for(var i=0;i<document.styleSheets.length;i++){var s=document.styleSheets[i];if(s&&s.href&&s.href.indexOf('katex')!==-1){document.documentElement.classList.add('katex-css-ok');return;}}}catch(_){}}if(l){l.addEventListener('load',function(){document.documentElement.classList.add('katex-css-ok');});}window.addEventListener('DOMContentLoaded',mark);mark();})();</script>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261124_v837">
-  <link rel="stylesheet" href="style.css?v=20261124_v837">
+  <link rel="preload" as="style" href="style.css?v=20261124_v839">
+  <link rel="stylesheet" href="style.css?v=20261124_v839">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -875,8 +875,17 @@
     <!-- Sidebar Backdrop for Mobile/Offcanvas Click-to-Dismiss -->
     <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
-    <!-- Sidebar-Adjacent Vertical Persona Dock (Visible Only When Sidebar Is Open: 1-Click ON/OFF + Persona Studio Trigger) -->
-    <div class="zoz-persona-vertical-dock" id="zozPersonaVerticalDock" role="region" aria-label="Kontrol Cepat Persona AI">
+    <!-- Sidebar-Adjacent Vertical Quick Dock (Visible Only When Sidebar Is Open: Auto Bacakan ON/OFF + Persona AI) -->
+    <div class="zoz-persona-vertical-dock" id="zozPersonaVerticalDock" role="region" aria-label="Kontrol Cepat Auto Bacakan & Persona AI">
+      <div class="zoz-auto-aloud-vertical-capsule is-off-mode" id="zozAutoAloudVerticalCapsule">
+        <button type="button" class="zoz-auto-aloud-vert-btn is-off-mode" id="btnAutoReadAloudVerticalToggle" aria-pressed="false" aria-label="Aktifkan Auto Bacakan (Read Aloud Otomatis)" title="Auto Bacakan: Nonaktif — Klik untuk membacakan jawaban AI secara otomatis">
+          <span class="zoz-auto-aloud-vert-power" aria-hidden="true">
+            <i class="fa-solid fa-volume-xmark" id="zozAutoAloudVertIcon"></i>
+          </span>
+          <span class="zoz-auto-aloud-vert-dot" id="zozAutoAloudVertDot" aria-hidden="true"></span>
+          <span class="zoz-auto-aloud-vert-label" id="zozAutoAloudVertLabel">Auto: Off</span>
+        </button>
+      </div>
       <div class="zoz-persona-vertical-capsule">
         <button type="button" class="zoz-persona-vert-power-btn" id="btnPersonaVerticalPowerToggle" aria-pressed="true" aria-label="Matikan Persona AI (1-Klik)" title="Persona Aktif — Klik untuk mematikan Persona AI">
           <i class="fa-solid fa-power-off" aria-hidden="true"></i>
@@ -4081,8 +4090,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression & Bayesian calibration engine (must load before app.js) -->
-  <script src="text-safety.js?v=20261124_v832" defer></script>
+  <script src="text-safety.js?v=20261124_v839" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=v20261124_tmwuqqux4" defer></script>
+  <script src="app.js?v=v20261124_tmwuu9529" defer></script>
 </body>
 </html>
