@@ -40,7 +40,7 @@
         }
       });
       try {
-        var currentVer = 'v20261124_tmwu6b4hm';
+        var currentVer = 'v20261124_tmwu7hsej';
         var savedVer = localStorage.getItem('__zoz_ver__');
         if (savedVer !== currentVer) {
           if (savedVer) {
@@ -53,7 +53,7 @@
           }
         }
       } catch (_) {}
-      window.__ZOZ_VERSION__ = 'v20261124_tmwu6b4hm';
+      window.__ZOZ_VERSION__ = 'v20261124_tmwu7hsej';
     })();
   </script>
   <title>ZOZ ROUTER</title>
@@ -111,7 +111,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" integrity="sha384-oaMLBGEzBOJx3UHwac0cVndtX5fxGQIfnAeFZ35RTgqPcYlbprH9o9PUV/F8Le07" crossorigin="anonymous" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"></noscript>
   <!-- KaTeX for mathematical formula & scientific equation rendering -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
+  <link id="mainKatexCssLink" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
+  <script>(function(){var l=document.getElementById('mainKatexCssLink');function mark(){try{for(var i=0;i<document.styleSheets.length;i++){var s=document.styleSheets[i];if(s&&s.href&&s.href.indexOf('katex')!==-1){document.documentElement.classList.add('katex-css-ok');return;}}}catch(_){}}if(l){l.addEventListener('load',function(){document.documentElement.classList.add('katex-css-ok');});}window.addEventListener('DOMContentLoaded',mark);mark();})();</script>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
   <link rel="preload" as="style" href="style.css?v=20261124_v832">
@@ -4046,6 +4047,6 @@
   <!-- Reasoning suppression & Bayesian calibration engine (must load before app.js) -->
   <script src="text-safety.js?v=20261124_v832" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=v20261124_tmwu6b4hm" defer></script>
+  <script src="app.js?v=v20261124_tmwu7hsej" defer></script>
 </body>
 </html>

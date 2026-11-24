@@ -84,7 +84,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://diameter-reflection-alice-tones.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://navy-perfect-exam-thehun.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -13896,7 +13896,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+  <link id="z21KatexCssLink" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
   <style>
     body {
       background: #0b0f19;
@@ -13955,6 +13955,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     .z21-eq-expr { font-family: 'Cambria Math', 'Segoe UI Symbol', 'Times New Roman', serif; font-size: 16.5px; font-weight: 600; color: #0f172a; overflow-x: auto; overflow-y: hidden; }
     .z21-eq-expr .katex-display { margin: 4px 0; text-align: left; }
     .z21-eq-expr .katex { font-size: 1.12em; color: #0f172a; }
+    html:not(.katex-css-ok) .katex .katex-html { display: none !important; }
+    html:not(.katex-css-ok) .katex .katex-mathml math { font-family: 'Cambria Math', 'Latin Modern Math', 'STIX Two Math', serif; font-size: 1.12em; font-weight: 500; }
+    html.katex-css-ok .katex .katex-html { display: inline-block; }
+    html.katex-css-ok .katex .katex-mathml { position: absolute !important; clip: rect(1px, 1px, 1px, 1px) !important; padding: 0 !important; border: 0 !important; height: 1px !important; width: 1px !important; overflow: hidden !important; }
     .z21-frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 3px; line-height: 1.1; }
     .z21-frac-num { border-bottom: 1.4px solid currentColor; padding: 0 4px 2px 4px; font-size: 0.88em; }
     .z21-frac-den { padding: 2px 4px 0 4px; font-size: 0.88em; }
@@ -13977,6 +13981,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     <div class="word-header-badge"><span>📄 ${escapeHtml(fileName || 'Dokumen.docx')}</span><span class="doc-sheet-fmt">Microsoft Word (.docx) • A4</span></div>
     ${parsedBody}
   </div>
+  <script>(function(){var l=document.getElementById('z21KatexCssLink');function mark(){try{for(var i=0;i<document.styleSheets.length;i++){var s=document.styleSheets[i];if(s&&s.href&&s.href.indexOf('katex')!==-1){document.documentElement.classList.add('katex-css-ok');return;}}}catch(_){}}if(l){l.addEventListener('load',function(){document.documentElement.classList.add('katex-css-ok');});}mark();})();</script>
 </body>
 </html>`;
   }
@@ -13987,7 +13992,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+  <link id="z21KatexCssLink" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
   <style>
     body {
       background: #0b0f19;
@@ -14046,6 +14051,10 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     .z21-eq-expr { font-family: 'Cambria Math', 'Segoe UI Symbol', 'Times New Roman', serif; font-size: 16px; font-weight: 600; color: #0f172a; overflow-x: auto; overflow-y: hidden; }
     .z21-eq-expr .katex-display { margin: 4px 0; text-align: left; }
     .z21-eq-expr .katex { font-size: 1.12em; color: #0f172a; }
+    html:not(.katex-css-ok) .katex .katex-html { display: none !important; }
+    html:not(.katex-css-ok) .katex .katex-mathml math { font-family: 'Cambria Math', 'Latin Modern Math', 'STIX Two Math', serif; font-size: 1.12em; font-weight: 500; }
+    html.katex-css-ok .katex .katex-html { display: inline-block; }
+    html.katex-css-ok .katex .katex-mathml { position: absolute !important; clip: rect(1px, 1px, 1px, 1px) !important; padding: 0 !important; border: 0 !important; height: 1px !important; width: 1px !important; overflow: hidden !important; }
     .z21-frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 3px; line-height: 1.1; }
     .z21-frac-num { border-bottom: 1.4px solid currentColor; padding: 0 4px 2px 4px; font-size: 0.88em; }
     .z21-frac-den { padding: 2px 4px 0 4px; font-size: 0.88em; }
@@ -14068,6 +14077,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     <div class="pdf-header-badge"><span>📑 ${escapeHtml(fileName || 'Dokumen.pdf')}</span><span class="doc-sheet-fmt">Dokumen PDF • A4 Siap Cetak</span></div>
     ${parsedBody}
   </div>
+  <script>(function(){var l=document.getElementById('z21KatexCssLink');function mark(){try{for(var i=0;i<document.styleSheets.length;i++){var s=document.styleSheets[i];if(s&&s.href&&s.href.indexOf('katex')!==-1){document.documentElement.classList.add('katex-css-ok');return;}}}catch(_){}}if(l){l.addEventListener('load',function(){document.documentElement.classList.add('katex-css-ok');});}mark();})();</script>
 </body>
 </html>`;
   }
@@ -27803,14 +27813,32 @@ ATURAN MUTLAK OUTPUT:
         let decodedProbe = '';
         if (file.base64) {
           try {
-            const probeBytes = base64ToUint8Array(file.base64).slice(0, 18000);
-            for (let bi = 0; bi < probeBytes.length; bi++) decodedProbe += String.fromCharCode(probeBytes[bi]);
+            const probeBytes = base64ToUint8Array(file.base64);
+            const scanLimit = Math.min(probeBytes.length, 2000000);
+            for (let bi = 0; bi < scanLimit; bi++) decodedProbe += String.fromCharCode(probeBytes[bi]);
           } catch (_) {}
         }
+        const rawLinesCheck = String(rawText || '').split(/\r?\n/);
+        const specEqCheck = Boolean(
+          file.z21Spec?.equationLatexMap && Object.keys(file.z21Spec.equationLatexMap).length > 0
+        ) || (Array.isArray(file.z21Spec?.sections) && file.z21Spec.sections.some(sec => {
+          const linesA = [...String(sec?.content || '').split(/\r?\n/), ...(Array.isArray(sec?.bullets) ? sec.bullets : [])];
+          return linesA.some(ln => {
+            const nl = normalizeZ21ScientificTextClient(ln, { preserveFrac: true }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim();
+            return nl && isZ21FormulaLineClient(nl) && !isZ21VariableLegendLineClient(nl).isLegend;
+          });
+        }));
+        const hasFormulaInDoc = specEqCheck || rawLinesCheck.some(ln => {
+          const clean = ln.replace(/^[-*•]\s+/, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim();
+          const nl = normalizeZ21ScientificTextClient(clean, { preserveFrac: true });
+          return nl && isZ21FormulaLineClient(nl) && !isZ21VariableLegendLineClient(nl).isLegend;
+        });
+        const hasEmbeddedMathImage = /\/Subtype\s*\/Image\b/.test(decodedProbe);
         const hasTrustedPdfEngine = file.engine === 'python-container-sandbox' || file.engine === 'zoz-rich-math-pdf';
         const hasLegacyClientPdfDefect = !file.base64 ||
           !hasTrustedPdfEngine ||
-          /Dirender oleh|zoz-client-sandbox|zoz-client-native|\(\s*#{1,3}\s+|\|\s*---|z21_document_builder|"sections"\s*:|\\\\left|\\\\right/.test(decodedProbe) ||
+          (hasFormulaInDoc && !hasEmbeddedMathImage) ||
+          /Dirender oleh|zoz-client-sandbox|zoz-client-native|\(\s*#{1,3}\s+|\|\s*---|z21_document_builder|"sections"\s*:|\\\\left|\\\\right/.test(decodedProbe.slice(0, 24000)) ||
           Boolean(extractEmbeddedZ21DocBuilderSpec(rawText));
         if (hasLegacyClientPdfDefect && (file.z21Spec || rawText)) {
           const embeddedHeal = extractEmbeddedZ21DocBuilderSpec(rawText);
@@ -35464,9 +35492,17 @@ ATURAN MUTLAK EKSEKUSI AGEN:
               if (ch === '(') depth++;
               else if (ch === ')') depth--;
               else if (depth === 1 && ch === ',') hasTopLevelComma = true;
-              else if (depth === 1 && ch === '/' && j > i + 1 && j + 1 < out.length && /\s/.test(out[j - 1]) && /\s/.test(out[j + 1])) {
-                if (slashIdx === -1) slashIdx = j;
-                else multipleTopSlashes = true;
+              else if (depth === 1 && ch === '/' && j > i + 1 && j + 1 < out.length) {
+                const spacedSlash = /\s/.test(out[j - 1]) && /\s/.test(out[j + 1]);
+                const closeP = out.indexOf(')', j);
+                const innerSeg = out.slice(i + 1, j) + '/' + out.slice(j + 1, closeP > j ? closeP : out.length);
+                const unspacedMathPair = /[A-Za-z0-9}_)]/.test(out[j - 1]) && /[A-Za-z0-9\\({]/.test(out[j + 1]) &&
+                  !/\b(?:km\/h|m\/s|kg\/m|mm\/|C\/F|N\/A|I\/O|A\/B)\b/i.test(innerSeg) &&
+                  !/^\d{1,2}\/\d{1,2}(?:\/\d{2,4})?$/.test(innerSeg);
+                if (spacedSlash || unspacedMathPair) {
+                  if (slashIdx === -1) slashIdx = j;
+                  else multipleTopSlashes = true;
+                }
               }
             }
             j++;
@@ -35556,10 +35592,11 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/\b(cos|sin|tan|exp|ln|log)\s+([θ\w])/gi, '\\$1 $2')
       .replace(/(\bP\s*\(\s*)([A-Z][a-z]{2,})(\s*\))/g, '$1\\mathrm{$2}$3')
       .replace(/√\s*\(([^()]+)\)/g, '\\sqrt{$1}')
-      .replace(/([A-Za-z0-9}])\s*\*\s*([A-Za-z0-9\\(])/g, '$1 \\times $2');
+      .replace(/([A-Za-z0-9}])\s*\*\s*([A-Za-z0-9\\(])/g, '$1 \\times $2')
+      .replace(/([A-Za-z0-9)\]}θγπ])\s+\b(dan|atau|serta|dimana|and|or|where|with)\b\s+(?=[A-Za-zθγπ\\(])/gi, '$1\\;\\mathrm{$2}\\;');
 
     s = promoteBalancedDivisionToFracClient(s);
-    s = s.replace(/(\b\w\w?\s*=\s*)([A-Za-z0-9\\_{}]+)\s+\/\s+([A-Za-z0-9\\_{}]+)(?=$|\s*[×+\-=])/g, '$1\\frac{$2}{$3}');
+    s = s.replace(/(\b\w\w?\s*=\s*)([A-Za-z0-9\\_{}]+)\s*\/\s*([A-Za-z0-9\\_{}]+)(?=$|\s*[×+\-=])/g, '$1\\frac{$2}{$3}');
 
     const leftCount = (s.match(/\\left(?![a-zA-Z])/g) || []).length;
     const rightCount = (s.match(/\\right(?![a-zA-Z])/g) || []).length;
@@ -36000,11 +36037,17 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       }
       const bulletMatch = line.match(/^(?:[-*•])\s+(.+)$/);
       if (bulletMatch) {
-        currentSection.bullets.push(stripZ21InlineMd(bulletMatch[1]));
+        const bItem = isZ21FormulaLineClient(bulletMatch[1])
+          ? normalizeZ21ScientificTextClient(bulletMatch[1], { preserveFrac: true }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim()
+          : stripZ21InlineMd(bulletMatch[1]);
+        currentSection.bullets.push(bItem);
         idx++;
         continue;
       }
-      currentSection.contentLines.push(stripZ21InlineMd(line));
+      const cItem = isZ21FormulaLineClient(line)
+        ? normalizeZ21ScientificTextClient(line, { preserveFrac: true }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim()
+        : stripZ21InlineMd(line);
+      currentSection.contentLines.push(cItem);
       idx++;
     }
     flushCurrentSection();
@@ -67264,7 +67307,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://diameter-reflection-alice-tones.trycloudflare.com',
+    activeTunnelUrl: 'https://navy-perfect-exam-thehun.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
