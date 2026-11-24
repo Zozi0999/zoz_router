@@ -84,7 +84,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://learning-adware-lawyer-lower.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://landscape-consist-visible-news.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -35426,6 +35426,9 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     const lhs = m[1].trim();
     const rhs = m[2].trim();
     if (/\\(?:frac|sqrt|sum|int|prod|ln|log|sin|cos|tan)\b/.test(rhs)) return { isLegend: false };
+    if (/^[+-]?\d+(?:[.,]\d+)?(?:\s*(?:°[CFK]|%|hPa|km\/h|m\/s))?(?:\s*,\s*[A-Za-z\u0370-\u03FF][A-Za-z0-9_{}₀-₉]{0,8}\s*=\s*[+-]?\d+(?:[.,]\d+)?(?:\s*(?:°[CFK]|%|hPa|km\/h|m\/s))?)+$/i.test(rhs)) {
+      return { isLegend: true, symbol: lhs, description: rhs };
+    }
     if (/[=+\-×÷*/^]|²|³/.test(rhs)) {
       const withoutUnits = rhs.replace(/\b(?:km\/h|m\/s|m\/s2|W\/m2|kg\/m3|g\/kg|°C|°F|in\s+%)\b/gi, '');
       if (/[=+\-×÷*^]/.test(withoutUnits) || /\s\/\s/.test(withoutUnits)) return { isLegend: false };
@@ -35510,7 +35513,9 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/[`]/g, '')
       .trim();
 
-    s = s.replace(/\\(?:dfrac|tfrac|cfrac)\b/g, '\\frac');
+    s = s
+      .replace(/\\{2,}(?=(?:left|right|frac|dfrac|tfrac|cfrac|sqrt|ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max|alpha|beta|gamma|delta|Delta|epsilon|varepsilon|zeta|eta|theta|kappa|lambda|mu|nu|xi|pi|rho|sigma|Sigma|tau|phi|Phi|psi|Psi|omega|Omega|times|div|cdot|pm|approx|neq|equiv|propto|leq|geq|infty|sum|int|partial|nabla|in|forall|exists|rightarrow|Rightarrow|to|mathbb|mathrm|mathbf|mathit|operatorname|text|quad|qquad|circ|%))/g, '\\')
+      .replace(/\\(?:dfrac|tfrac|cfrac)\b/g, '\\frac');
     s = s
       .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+/g, (m) => `^{${m.split('').map(c => Z21_INV_SUP_MAP_CLIENT[c] || c).join('')}}`)
       .replace(/[₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ]+/g, (m) => `_{${m.split('').map(c => Z21_INV_SUB_MAP_CLIENT[c] || c).join('')}}`);
@@ -35538,13 +35543,14 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     s = s
       .replace(/°\s*([CF])\b/g, '^{\\circ}\\mathrm{$1}')
       .replace(/°/g, '^{\\circ}')
-      .replace(/(?<!\\)%/g, '\\%')
+      .replace(/\\+%/g, '%')
+      .replace(/%/g, '\\%')
       .replace(/\bc([1-9])\b(?=\s*(?:[+\-*/=\\]|T|R|\(|\^|$))/g, 'c_{$1}')
       .replace(/([+\-=/(]\s*)c([1-9])(?=[TR\s+\-*/=\\]|$)/g, '$1c_{$2}')
       .replace(/(\/\s*|\(\s*)es\b/g, '$1e_{s}')
       .replace(/\bes(?=\s*=|\s*\))/g, 'e_{s}')
-      .replace(/_([a-zA-Z0-9]{2,})\b/g, '_{$1}')
-      .replace(/_([a-zA-Z0-9])(?![a-zA-Z0-9}])/g, '_{$1}')
+      .replace(/_([0-9]+)/g, '_{$1}')
+      .replace(/_([a-zA-Z])(?![a-zA-Z0-9}])/g, '_{$1}')
       .replace(/\^([0-9]+)(?![0-9}])/g, '^{$1}')
       .replace(/(?<!\\)\b(ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max)\b(?=\s*(?:\\left|[(\[{]))/g, '\\$1')
       .replace(/\b(cos|sin|tan|exp|ln|log)\s+([θ\w])/gi, '\\$1 $2')
@@ -35586,7 +35592,9 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     if (!preserveFrac) {
       s = s.replace(/\\(?:dfrac|tfrac|cfrac|frac)\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '($1 / $2)');
     } else {
-      s = s.replace(/\\(?:dfrac|tfrac|cfrac)\b/g, '\\frac');
+      s = s
+      .replace(/\\{2,}(?=(?:left|right|frac|dfrac|tfrac|cfrac|sqrt|ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max|alpha|beta|gamma|delta|Delta|epsilon|varepsilon|zeta|eta|theta|kappa|lambda|mu|nu|xi|pi|rho|sigma|Sigma|tau|phi|Phi|psi|Psi|omega|Omega|times|div|cdot|pm|approx|neq|equiv|propto|leq|geq|infty|sum|int|partial|nabla|in|forall|exists|rightarrow|Rightarrow|to|mathbb|mathrm|mathbf|mathit|operatorname|text|quad|qquad|circ|%))/g, '\\')
+      .replace(/\\(?:dfrac|tfrac|cfrac)\b/g, '\\frac');
     }
 
     s = s
@@ -67256,7 +67264,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://learning-adware-lawyer-lower.trycloudflare.com',
+    activeTunnelUrl: 'https://landscape-consist-visible-news.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
