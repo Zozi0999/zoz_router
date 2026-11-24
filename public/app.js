@@ -84,7 +84,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://document-first-map-destinations.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://learning-adware-lawyer-lower.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -7181,6 +7181,27 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
                 mMsg.image = validDImgs[0];
                 didRestoreAnyImage = true;
               }
+              if (Array.isArray(mMsg.files) && Array.isArray(dMsg.files)) {
+                mMsg.files.forEach((mFile, fi) => {
+                  if (!mFile) return;
+                  const dFile = dMsg.files.find(df => df && ((mFile.fileId && df.fileId === mFile.fileId) || (mFile.name && df.name === mFile.name))) || dMsg.files[fi];
+                  if (!dFile) return;
+                  if (dFile.isZ21Artifact && !mFile.isZ21Artifact) { mFile.isZ21Artifact = true; didRestoreAnyImage = true; }
+                  if (dFile.engine && !mFile.engine) mFile.engine = dFile.engine;
+                  if (dFile.z21Spec && !mFile.z21Spec) mFile.z21Spec = dFile.z21Spec;
+                  if (dFile.pythonScript && !mFile.pythonScript) mFile.pythonScript = dFile.pythonScript;
+                  if (dFile.base64 && !mFile.base64) {
+                    mFile.base64 = dFile.base64;
+                    mFile.isBinaryArtifact = true;
+                    didRestoreAnyImage = true;
+                  }
+                  if ((dFile.rawContent || dFile.content) && !(mFile.rawContent || mFile.content)) {
+                    mFile.content = dFile.content || dFile.rawContent;
+                    mFile.rawContent = dFile.rawContent || dFile.content;
+                    didRestoreAnyImage = true;
+                  }
+                });
+              }
             });
           }
         });
@@ -8040,11 +8061,21 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
               safeFiles = m.files.map(f => {
                 const rawFileBody = f.rawContent || f.content || '';
                 const shouldKeepBody = keepRecentContent || (keepFileWindow && rawFileBody.length <= 120000);
+                let safeZ21Spec = undefined;
+                if (f.z21Spec && typeof f.z21Spec === 'object') {
+                  try {
+                    if (JSON.stringify(f.z21Spec).length <= 24000) safeZ21Spec = f.z21Spec;
+                  } catch (_) {}
+                }
                 return {
                   fileId: f.fileId || undefined,
                   name: f.name, mime: f.mime, lang: f.lang,
                   planMode: f.planMode,
                   websiteMode: f.websiteMode,
+                  isZ21Artifact: f.isZ21Artifact || undefined,
+                  engine: f.engine || undefined,
+                  z21Spec: safeZ21Spec,
+                  pythonScript: (keepRecentContent && typeof f.pythonScript === 'string' && f.pythonScript.length <= 16000) ? f.pythonScript : undefined,
                   content: shouldKeepBody ? rawFileBody : '',
                   rawBlock: keepRecentContent ? f.rawBlock : undefined,
                   _editChatHistory: f._editChatHistory,
@@ -11811,6 +11842,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   }
 
   function blobToBase64(blob) {
+    if (typeof FileReader === 'undefined') {
+      if (blob && typeof blob.arrayBuffer === 'function') {
+        return blob.arrayBuffer().then((buf) => uint8ArrayToBase64(new Uint8Array(buf)));
+      }
+      return Promise.resolve('');
+    }
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -11821,6 +11858,776 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
+  }
+
+  // ==================== ZOZ CANVAS 2D MATHEMATICAL TYPESETTER (300+ DPI PDF & DOCX) ====================
+  function sanitizeJsPdfWinAnsiText(str) {
+    const cleaned = normalizeZ21ScientificTextClient(str).normalize('NFC');
+    let out = '';
+    for (let i = 0; i < cleaned.length; i++) {
+      const cp = cleaned.charCodeAt(i);
+      if (cp >= 0x20 && cp <= 0x7E) { out += cleaned[i]; continue; }
+      if (cp === 0x00B0 || cp === 0x00B1 || cp === 0x00B2 || cp === 0x00B3 || cp === 0x00B7 || cp === 0x00B9) { out += cleaned[i]; continue; }
+      if (cp === 0x00D7) { out += 'x'; continue; }
+      if (cp === 0x00F7) { out += '/'; continue; }
+      if (cp === 0x2022) { out += '-'; continue; }
+      if (cp === 0x2013 || cp === 0x2014) { out += '-'; continue; }
+      if (cp === 0x2018 || cp === 0x2019) { out += "'"; continue; }
+      if (cp === 0x201C || cp === 0x201D) { out += '"'; continue; }
+      if (cp === 0x2026) { out += '...'; continue; }
+      if (cp === 0x2070) { out += '0'; continue; }
+      if (cp >= 0x2074 && cp <= 0x2079) { out += String(cp - 0x2070); continue; }
+      if (cp === 0x207A) { out += '+'; continue; }
+      if (cp === 0x207B) { out += '-'; continue; }
+      if (cp >= 0x2080 && cp <= 0x2089) { out += String(cp - 0x2080); continue; }
+      const subLetters = {
+        0x2090: 'a', 0x2091: 'e', 0x2092: 'o', 0x2093: 'x', 0x2095: 'h',
+        0x2096: 'k', 0x2097: 'l', 0x2098: 'm', 0x2099: 'n', 0x209A: 'p',
+        0x209B: 's', 0x209C: 't', 0x1D62: 'i', 0x1D63: 'r', 0x1D64: 'u', 0x1D65: 'v', 0x2C7C: 'j'
+      };
+      if (subLetters[cp]) { out += subLetters[cp]; continue; }
+      const symAscii = {
+        0x03B1: 'alpha', 0x03B2: 'beta', 0x03B3: 'gamma', 0x03B4: 'delta', 0x0394: 'Delta',
+        0x03B5: 'eps', 0x03B6: 'zeta', 0x03B7: 'eta', 0x03B8: 'theta', 0x03BB: 'lambda',
+        0x03BC: 'mu', 0x03C0: 'pi', 0x03C1: 'rho', 0x03C3: 'sigma', 0x03A3: 'Sigma',
+        0x03C6: 'phi', 0x03C8: 'psi', 0x03C9: 'omega', 0x03A9: 'Omega', 0x211D: 'R',
+        0x2115: 'N', 0x2124: 'Z', 0x2248: '~=', 0x2260: '!=', 0x2264: '<=', 0x2265: '>=',
+        0x221E: 'inf', 0x221A: 'sqrt', 0x2211: 'sum', 0x222B: 'int', 0x2208: ' in ',
+        0x2192: '->', 0x21D2: '=>'
+      };
+      if (symAscii[cp]) { out += symAscii[cp]; continue; }
+      if (cp >= 0xA0 && cp <= 0xFF) { out += cleaned[i]; continue; }
+      out += ' ';
+    }
+    return out;
+  }
+
+  function tokenizeZ21LatexMath(rawLatex) {
+    const s = toZ21LatexMathClient(rawLatex);
+    const tokens = [];
+    let i = 0;
+    while (i < s.length) {
+      const ch = s[i];
+      if (/\s/.test(ch)) {
+        i++;
+        continue;
+      }
+      if (ch === '\\') {
+        const next = s[i + 1] || '';
+        if (!next) { i++; continue; }
+        if (/[%&#_${},;:!|]/.test(next)) {
+          tokens.push({ type: 'cmd', name: '\\' + next });
+          i += 2;
+          continue;
+        }
+        const m = s.slice(i + 1).match(/^[a-zA-Z]+/);
+        if (m) {
+          tokens.push({ type: 'cmd', name: '\\' + m[0] });
+          i += 1 + m[0].length;
+        } else {
+          tokens.push({ type: 'sym', value: next });
+          i += 2;
+        }
+        continue;
+      }
+      if (ch === '{' || ch === '}' || ch === '^' || ch === '_') {
+        tokens.push({ type: 'ctrl', value: ch });
+        i++;
+        continue;
+      }
+      if (/[0-9]/.test(ch)) {
+        let j = i;
+        while (j < s.length && (/[0-9.]/.test(s[j]) && !(s[j] === '.' && !/[0-9]/.test(s[j + 1] || '')))) j++;
+        tokens.push({ type: 'num', value: s.slice(i, j) });
+        i = j;
+        continue;
+      }
+      if (/[a-zA-Z]/.test(ch)) {
+        let j = i;
+        while (j < s.length && /[a-zA-Z]/.test(s[j])) j++;
+        tokens.push({ type: 'ident', value: s.slice(i, j) });
+        i = j;
+        continue;
+      }
+      tokens.push({ type: 'sym', value: ch });
+      i++;
+    }
+    return tokens;
+  }
+
+  const Z21_TEX_GLYPH_MAP = {
+    '\\alpha': 'α', '\\beta': 'β', '\\gamma': 'γ', '\\delta': 'δ', '\\Delta': 'Δ',
+    '\\epsilon': 'ε', '\\varepsilon': 'ε', '\\zeta': 'ζ', '\\eta': 'η', '\\theta': 'θ',
+    '\\kappa': 'κ', '\\lambda': 'λ', '\\mu': 'μ', '\\nu': 'ν', '\\xi': 'ξ',
+    '\\pi': 'π', '\\rho': 'ρ', '\\sigma': 'σ', '\\Sigma': 'Σ', '\\tau': 'τ',
+    '\\phi': 'φ', '\\Phi': 'Φ', '\\psi': 'ψ', '\\Psi': 'Ψ', '\\omega': 'ω', '\\Omega': 'Ω',
+    '\\times': '×', '\\div': '÷', '\\cdot': '·', '\\pm': '±', '\\mp': '∓',
+    '\\approx': '≈', '\\neq': '≠', '\\ne': '≠', '\\equiv': '≡', '\\propto': '∝',
+    '\\leq': '≤', '\\le': '≤', '\\geq': '≥', '\\ge': '≥', '\\infty': '∞',
+    '\\partial': '∂', '\\nabla': '∇', '\\in': '∈', '\\notin': '∉',
+    '\\forall': '∀', '\\exists': '∃', '\\rightarrow': '→', '\\to': '→',
+    '\\leftarrow': '←', '\\Rightarrow': '⇒', '\\circ': '°',
+    '\\%': '%', '\\&': '&', '\\#': '#', '\\_': '_', '\\{': '{', '\\}': '}', '\\|': '‖'
+  };
+  const Z21_TEX_SPACE_CMDS = { '\\,': 0.16, '\\:': 0.22, '\\;': 0.28, '\\ ': 0.25, '\\quad': 0.85, '\\qquad': 1.7, '\\!': -0.1 };
+  const Z21_TEX_FN_CMDS = new Set(['\\ln', '\\log', '\\sin', '\\cos', '\\tan', '\\csc', '\\sec', '\\cot', '\\arcsin', '\\arccos', '\\arctan', '\\sinh', '\\cosh', '\\tanh', '\\exp', '\\lim', '\\min', '\\max', '\\sup', '\\inf', '\\det', '\\gcd']);
+  const Z21_TEX_BIGOPS = { '\\sum': '∑', '\\prod': '∏', '\\int': '∫', '\\oint': '∮' };
+
+  function parseZ21LatexAst(rawLatex) {
+    const tokens = tokenizeZ21LatexMath(rawLatex);
+    let pos = 0;
+    const peek = () => tokens[pos] || null;
+    const next = () => tokens[pos++] || null;
+
+    function readTextGroup() {
+      const t = peek();
+      if (!t) return '';
+      if (t.type === 'ctrl' && t.value === '{') {
+        next();
+        let depth = 1;
+        let out = '';
+        while (pos < tokens.length && depth > 0) {
+          const cur = next();
+          if (cur.type === 'ctrl' && cur.value === '{') { depth++; out += '{'; }
+          else if (cur.type === 'ctrl' && cur.value === '}') { depth--; if (depth > 0) out += '}'; }
+          else if (cur.type === 'cmd') out += (Z21_TEX_GLYPH_MAP[cur.name] || cur.name.slice(1));
+          else out += (cur.value || '');
+        }
+        return out;
+      }
+      const single = next();
+      return single ? (Z21_TEX_GLYPH_MAP[single.name] || single.value || '') : '';
+    }
+
+    function readDelimChar() {
+      const t = next();
+      if (!t) return '';
+      if (t.type === 'sym' || t.type === 'ident') return t.value === '.' ? '' : t.value;
+      if (t.type === 'cmd') return Z21_TEX_GLYPH_MAP[t.name] || (t.name === '\\|' ? '‖' : t.name.replace(/^\\/, ''));
+      return '';
+    }
+
+    function parseSequence(stopFn) {
+      const items = [];
+      while (pos < tokens.length) {
+        const cur = peek();
+        if (stopFn && stopFn(cur)) break;
+        const base = parseAtom();
+        if (!base) break;
+        let sup = null;
+        let sub = null;
+        while (peek() && peek().type === 'ctrl' && (peek().value === '^' || peek().value === '_')) {
+          const op = next().value;
+          const arg = parseAtomOrGroup();
+          if (op === '^') sup = arg;
+          else sub = arg;
+        }
+        if (sup || sub) {
+          if (base.type === 'bigop') {
+            if (sup) base.sup = sup;
+            if (sub) base.sub = sub;
+            items.push(base);
+          } else {
+            items.push({ type: 'supsub', base, sup, sub });
+          }
+        } else {
+          items.push(base);
+        }
+      }
+      return { type: 'row', items };
+    }
+
+    function parseAtomOrGroup() {
+      const t = peek();
+      if (!t) return { type: 'row', items: [] };
+      if (t.type === 'ctrl' && t.value === '{') {
+        next();
+        const inner = parseSequence((tok) => tok && tok.type === 'ctrl' && tok.value === '}');
+        if (peek() && peek().type === 'ctrl' && peek().value === '}') next();
+        return inner;
+      }
+      return parseAtom() || { type: 'row', items: [] };
+    }
+
+    function parseAtom() {
+      const t = peek();
+      if (!t) return null;
+      if (t.type === 'ctrl' && t.value === '{') {
+        next();
+        const inner = parseSequence((tok) => tok && tok.type === 'ctrl' && tok.value === '}');
+        if (peek() && peek().type === 'ctrl' && peek().value === '}') next();
+        return inner;
+      }
+      if (t.type === 'ctrl' && (t.value === '}' || t.value === '^' || t.value === '_')) {
+        return null;
+      }
+      next();
+      if (t.type === 'num') {
+        return { type: 'text', value: t.value, style: 'num' };
+      }
+      if (t.type === 'ident') {
+        return { type: 'text', value: t.value, style: 'var' };
+      }
+      if (t.type === 'sym') {
+        if (t.value === '(' || t.value === '[') {
+          const closeTarget = t.value === '(' ? ')' : ']';
+          const savePos = pos;
+          const body = parseSequence((tok) => tok && tok.type === 'sym' && tok.value === closeTarget);
+          if (peek() && peek().type === 'sym' && peek().value === closeTarget) {
+            next();
+            return { type: 'delim', left: t.value, right: closeTarget, body };
+          }
+          pos = savePos;
+          return { type: 'text', value: t.value, style: 'op' };
+        }
+        if (t.value === ',' || t.value === ';') return { type: 'text', value: t.value + ' ', style: 'punct' };
+        return { type: 'text', value: t.value, style: 'op' };
+      }
+      if (t.type === 'cmd') {
+        if (t.name === '\\frac' || t.name === '\\dfrac' || t.name === '\\tfrac' || t.name === '\\cfrac') {
+          const num = parseAtomOrGroup();
+          const den = parseAtomOrGroup();
+          return { type: 'frac', num, den };
+        }
+        if (t.name === '\\sqrt') {
+          let index = null;
+          if (peek() && peek().type === 'sym' && peek().value === '[') {
+            next();
+            index = parseSequence((tok) => tok && tok.type === 'sym' && tok.value === ']');
+            if (peek() && peek().type === 'sym' && peek().value === ']') next();
+          }
+          const body = parseAtomOrGroup();
+          return { type: 'sqrt', index, body };
+        }
+        if (t.name === '\\left') {
+          const leftDelim = readDelimChar();
+          const body = parseSequence((tok) => tok && tok.type === 'cmd' && tok.name === '\\right');
+          let rightDelim = '';
+          if (peek() && peek().type === 'cmd' && peek().name === '\\right') {
+            next();
+            rightDelim = readDelimChar();
+          }
+          return { type: 'delim', left: leftDelim, right: rightDelim, body, explicit: true };
+        }
+        if (t.name === '\\right') {
+          const rightChar = readDelimChar();
+          return { type: 'text', value: rightChar, style: 'op' };
+        }
+        if (t.name === '\\text' || t.name === '\\mathrm' || t.name === '\\operatorname') {
+          return { type: 'text', value: readTextGroup(), style: 'text' };
+        }
+        if (t.name === '\\mathbf') {
+          return { type: 'text', value: readTextGroup(), style: 'bold' };
+        }
+        if (t.name === '\\mathit') {
+          return { type: 'text', value: readTextGroup(), style: 'var' };
+        }
+        if (t.name === '\\mathbb') {
+          const bbMap = { R: 'ℝ', N: 'ℕ', Z: 'ℤ', Q: 'ℚ', C: 'ℂ' };
+          const ch = readTextGroup().trim();
+          return { type: 'text', value: bbMap[ch] || ch, style: 'bold' };
+        }
+        if (t.name === '\\vec' || t.name === '\\hat' || t.name === '\\bar' || t.name === '\\overline' || t.name === '\\tilde') {
+          return { type: 'accent', kind: t.name.slice(1), body: parseAtomOrGroup() };
+        }
+        if (Z21_TEX_BIGOPS[t.name]) {
+          return { type: 'bigop', sym: Z21_TEX_BIGOPS[t.name], sup: null, sub: null };
+        }
+        if (Z21_TEX_FN_CMDS.has(t.name)) {
+          return { type: 'text', value: t.name.slice(1), style: 'fn' };
+        }
+        if (Object.prototype.hasOwnProperty.call(Z21_TEX_SPACE_CMDS, t.name)) {
+          return { type: 'space', em: Z21_TEX_SPACE_CMDS[t.name] };
+        }
+        if (Z21_TEX_GLYPH_MAP[t.name]) {
+          const glyph = Z21_TEX_GLYPH_MAP[t.name];
+          const isGreek = /[\u03B1-\u03C9]/.test(glyph);
+          return { type: 'text', value: glyph, style: isGreek ? 'var' : 'op' };
+        }
+        return { type: 'text', value: t.name.slice(1), style: 'fn' };
+      }
+      return null;
+    }
+
+    return parseSequence(null);
+  }
+
+  const ZozCanvasMathRenderer = {
+    FONT_FAMILY: '"Cambria Math", "STIXGeneral", "Times New Roman", "Liberation Serif", Georgia, serif',
+    BIN_OPS: new Set(['=', '+', '-', '−', '×', '÷', '·', '±', '∓', '≈', '≠', '≡', '∝', '≤', '≥', '∈', '∉', '→', '←', '⇒', '<', '>']),
+    getFontString(style, pxSize) {
+      const sz = Math.max(5.5, pxSize).toFixed(2);
+      if (style === 'var') return `italic 600 ${sz}px ${this.FONT_FAMILY}`;
+      if (style === 'bold') return `700 ${sz}px ${this.FONT_FAMILY}`;
+      return `600 ${sz}px ${this.FONT_FAMILY}`;
+    },
+    isBinaryOpNode(node, prevNode) {
+      if (!node || node.type !== 'text' || node.style !== 'op') return false;
+      if (!this.BIN_OPS.has(node.value)) return false;
+      if ((node.value === '-' || node.value === '+') && (!prevNode || (prevNode.type === 'text' && prevNode.style === 'op' && (this.BIN_OPS.has(prevNode.value) || prevNode.value === '(' || prevNode.value === '[')))) {
+        return false; // Unary minus/plus
+      }
+      return true;
+    },
+    measureBox(ctx, node, fontSize) {
+      if (!node) return { type: 'empty', width: 0, ascent: 0, descent: 0, fontSize };
+      const axis = fontSize * 0.28;
+      if (node.type === 'space') {
+        return { type: 'space', width: Math.max(0, node.em * fontSize), ascent: 0, descent: 0, fontSize };
+      }
+      if (node.type === 'text') {
+        const displayVal = (node.value === '-' && node.style === 'op') ? '−' : node.value;
+        ctx.font = this.getFontString(node.style, fontSize);
+        const m = ctx.measureText(displayVal);
+        const w = Math.max(m.width || (displayVal.length * fontSize * 0.52), displayVal ? 2 : 0);
+        const asc = m.actualBoundingBoxAscent || (fontSize * 0.78);
+        const desc = m.actualBoundingBoxDescent || (fontSize * 0.22);
+        return { type: 'text', displayVal, style: node.style, width: w, ascent: Math.max(asc, fontSize * 0.55), descent: Math.max(desc, fontSize * 0.14), fontSize };
+      }
+      if (node.type === 'row') {
+        const items = node.items || [];
+        const boxes = [];
+        let cursorX = 0;
+        let maxAsc = fontSize * 0.65;
+        let maxDesc = fontSize * 0.16;
+        for (let idx = 0; idx < items.length; idx++) {
+          const item = items[idx];
+          const prev = idx > 0 ? items[idx - 1] : null;
+          const b = this.measureBox(ctx, item, fontSize);
+          let preGap = 0;
+          let postGap = 0;
+          if (this.isBinaryOpNode(item, prev)) {
+            preGap = idx > 0 ? fontSize * 0.24 : 0;
+            postGap = fontSize * 0.24;
+          } else if (prev && prev.type === 'text' && prev.style === 'fn' && item.type !== 'delim') {
+            preGap = fontSize * 0.16;
+          } else if (prev && prev.type === 'text' && prev.style === 'var' && item.type === 'text' && item.style === 'num') {
+            preGap = fontSize * 0.08;
+          }
+          const x = cursorX + preGap;
+          boxes.push({ box: b, x });
+          cursorX = x + b.width + postGap;
+          if (b.ascent > maxAsc) maxAsc = b.ascent;
+          if (b.descent > maxDesc) maxDesc = b.descent;
+        }
+        return { type: 'row', boxes, width: cursorX, ascent: maxAsc, descent: maxDesc, fontSize, sourceItems: items };
+      }
+      if (node.type === 'frac') {
+        const subSz = Math.max(6.8, fontSize * 0.86);
+        const numB = this.measureBox(ctx, node.num, subSz);
+        const denB = this.measureBox(ctx, node.den, subSz);
+        const innerW = Math.max(numB.width, denB.width) + (fontSize * 0.42);
+        const barThick = Math.max(0.85, fontSize * 0.068);
+        const gap = Math.max(2.0, fontSize * 0.19);
+        const ascent = axis + (barThick / 2) + gap + numB.descent + numB.ascent;
+        const descent = denB.ascent + denB.descent + gap + (barThick / 2) - axis;
+        return { type: 'frac', numB, denB, width: innerW + (fontSize * 0.18), barWidth: innerW, barThick, gap, axis, ascent, descent, fontSize };
+      }
+      if (node.type === 'sqrt') {
+        const bodyB = this.measureBox(ctx, node.body, fontSize);
+        const hookW = fontSize * 0.62;
+        const barGap = fontSize * 0.22;
+        const barThick = Math.max(0.85, fontSize * 0.065);
+        return {
+          type: 'sqrt',
+          bodyB,
+          indexB: node.index ? this.measureBox(ctx, node.index, fontSize * 0.62) : null,
+          hookW,
+          barGap,
+          barThick,
+          width: hookW + bodyB.width + (fontSize * 0.16),
+          ascent: bodyB.ascent + barGap + barThick,
+          descent: Math.max(bodyB.descent, fontSize * 0.22),
+          fontSize
+        };
+      }
+      if (node.type === 'delim') {
+        const bodyB = this.measureBox(ctx, node.body, fontSize);
+        const isTall = Boolean(node.explicit) || (bodyB.ascent + bodyB.descent) > (fontSize * 1.45);
+        const dW = isTall ? fontSize * 0.36 : fontSize * 0.30;
+        const lW = node.left ? dW : 0;
+        const rW = node.right ? dW : 0;
+        const padAsc = isTall ? Math.max(bodyB.ascent, fontSize * 0.85) + 1.5 : bodyB.ascent;
+        const padDesc = isTall ? Math.max(bodyB.descent, fontSize * 0.25) + 1.5 : bodyB.descent;
+        return { type: 'delim', left: node.left, right: node.right, bodyB, lW, rW, isTall, width: lW + bodyB.width + rW, ascent: padAsc, descent: padDesc, fontSize };
+      }
+      if (node.type === 'supsub') {
+        const baseB = this.measureBox(ctx, node.base, fontSize);
+        const scSz = Math.max(6.2, fontSize * 0.68);
+        const supB = node.sup ? this.measureBox(ctx, node.sup, scSz) : null;
+        const subB = node.sub ? this.measureBox(ctx, node.sub, scSz) : null;
+        const supRaise = fontSize * 0.42;
+        const subDrop = fontSize * 0.24;
+        const extraW = Math.max(supB ? supB.width : 0, subB ? subB.width : 0) + (fontSize * 0.06);
+        const ascent = Math.max(baseB.ascent, supB ? (supRaise + supB.ascent) : 0);
+        const descent = Math.max(baseB.descent, subB ? (subDrop + subB.descent) : 0);
+        return { type: 'supsub', baseB, supB, subB, supRaise, subDrop, width: baseB.width + extraW, ascent, descent, fontSize };
+      }
+      if (node.type === 'accent') {
+        const bodyB = this.measureBox(ctx, node.body, fontSize);
+        return { type: 'accent', kind: node.kind, bodyB, width: bodyB.width, ascent: bodyB.ascent + (fontSize * 0.24), descent: bodyB.descent, fontSize };
+      }
+      if (node.type === 'bigop') {
+        const symSz = fontSize * 1.48;
+        ctx.font = `500 ${symSz}px ${this.FONT_FAMILY}`;
+        const m = ctx.measureText(node.sym);
+        const symW = Math.max(m.width || symSz * 0.72, symSz * 0.55);
+        const scSz = Math.max(6.2, fontSize * 0.66);
+        const supB = node.sup ? this.measureBox(ctx, node.sup, scSz) : null;
+        const subB = node.sub ? this.measureBox(ctx, node.sub, scSz) : null;
+        const limW = Math.max(supB ? supB.width : 0, subB ? subB.width : 0);
+        return {
+          type: 'bigop',
+          sym: node.sym,
+          symSz,
+          symW,
+          supB,
+          subB,
+          width: symW + limW + (fontSize * 0.22),
+          ascent: Math.max(symSz * 0.62, supB ? (symSz * 0.38 + supB.ascent) : 0),
+          descent: Math.max(symSz * 0.34, subB ? (symSz * 0.24 + subB.descent) : 0),
+          fontSize
+        };
+      }
+      return { type: 'empty', width: 0, ascent: 0, descent: 0, fontSize };
+    },
+    drawBox(ctx, box, x, baseY, color) {
+      if (!box || box.type === 'empty' || box.type === 'space') return;
+      if (box.type === 'text') {
+        ctx.fillStyle = color;
+        ctx.font = this.getFontString(box.style, box.fontSize);
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(box.displayVal, x, baseY);
+        return;
+      }
+      if (box.type === 'row') {
+        for (const entry of box.boxes) {
+          this.drawBox(ctx, entry.box, x + entry.x, baseY, color);
+        }
+        return;
+      }
+      if (box.type === 'frac') {
+        const cx = x + (box.width / 2);
+        const barY = baseY - box.axis;
+        const numBaseline = barY - (box.barThick / 2) - box.gap - box.numB.descent;
+        const denBaseline = barY + (box.barThick / 2) + box.gap + box.denB.ascent;
+        this.drawBox(ctx, box.numB, cx - (box.numB.width / 2), numBaseline, color);
+        ctx.fillStyle = color;
+        ctx.fillRect(x + (box.width - box.barWidth) / 2, barY - (box.barThick / 2), box.barWidth, box.barThick);
+        this.drawBox(ctx, box.denB, cx - (box.denB.width / 2), denBaseline, color);
+        return;
+      }
+      if (box.type === 'sqrt') {
+        const topY = baseY - box.ascent + (box.barThick / 2);
+        const botY = baseY + box.descent * 0.72;
+        const midY = baseY - box.fontSize * 0.2;
+        const x0 = x;
+        const x1 = x + box.hookW * 0.26;
+        const x2 = x + box.hookW * 0.56;
+        const x3 = x + box.hookW;
+        const xEnd = x + box.width - (box.fontSize * 0.08);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(1.0, box.barThick * 1.15);
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x0 + 1, midY + box.fontSize * 0.18);
+        ctx.lineTo(x1, midY);
+        ctx.lineTo(x2, botY);
+        ctx.lineTo(x3, topY);
+        ctx.lineTo(xEnd, topY);
+        ctx.stroke();
+        if (box.indexB) {
+          this.drawBox(ctx, box.indexB, x0, midY - box.fontSize * 0.08, color);
+        }
+        this.drawBox(ctx, box.bodyB, x3 + (box.fontSize * 0.08), baseY, color);
+        return;
+      }
+      if (box.type === 'delim') {
+        const topY = baseY - box.ascent;
+        const botY = baseY + box.descent;
+        const midY = (topY + botY) / 2;
+        const strokeDelim = (ch, dx, isRight) => {
+          if (!ch) return;
+          if (!box.isTall) {
+            ctx.fillStyle = color;
+            ctx.font = this.getFontString('op', box.fontSize);
+            ctx.textBaseline = 'alphabetic';
+            ctx.fillText(ch, dx + 0.5, baseY);
+            return;
+          }
+          ctx.strokeStyle = color;
+          ctx.lineWidth = Math.max(1.05, box.fontSize * 0.075);
+          ctx.lineCap = 'round';
+          const padX = 1.5;
+          const span = box.lW - 3.0;
+          ctx.beginPath();
+          if (ch === '(' || ch === ')') {
+            const xEdge = isRight ? dx + padX : dx + padX + span;
+            const xCtrl = isRight ? dx + padX + span * 1.15 : dx + padX - span * 0.15;
+            ctx.moveTo(xEdge, topY + 1);
+            ctx.quadraticCurveTo(xCtrl, midY, xEdge, botY - 1);
+          } else if (ch === '[' || ch === ']') {
+            const xArm = isRight ? dx + padX : dx + padX + span;
+            const xBar = isRight ? dx + padX + span * 0.8 : dx + padX + span * 0.2;
+            ctx.moveTo(xArm, topY + 1);
+            ctx.lineTo(xBar, topY + 1);
+            ctx.lineTo(xBar, botY - 1);
+            ctx.lineTo(xArm, botY - 1);
+          } else {
+            const xv = dx + (box.lW / 2);
+            ctx.moveTo(xv, topY + 1);
+            ctx.lineTo(xv, botY - 1);
+          }
+          ctx.stroke();
+        };
+        if (box.left) strokeDelim(box.left, x, false);
+        this.drawBox(ctx, box.bodyB, x + box.lW, baseY, color);
+        if (box.right) strokeDelim(box.right, x + box.lW + box.bodyB.width, true);
+        return;
+      }
+      if (box.type === 'supsub') {
+        this.drawBox(ctx, box.baseB, x, baseY, color);
+        const sx = x + box.baseB.width + (box.fontSize * 0.04);
+        if (box.supB) this.drawBox(ctx, box.supB, sx, baseY - box.supRaise, color);
+        if (box.subB) this.drawBox(ctx, box.subB, sx, baseY + box.subDrop, color);
+        return;
+      }
+      if (box.type === 'accent') {
+        this.drawBox(ctx, box.bodyB, x, baseY, color);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(0.85, box.fontSize * 0.065);
+        const ax0 = x + 1;
+        const ax1 = x + Math.max(box.width - 1, box.fontSize * 0.35);
+        const ay = baseY - box.bodyB.ascent - (box.fontSize * 0.12);
+        ctx.beginPath();
+        if (box.kind === 'hat') {
+          const mid = (ax0 + ax1) / 2;
+          ctx.moveTo(ax0, ay + 1.5);
+          ctx.lineTo(mid, ay - 2);
+          ctx.lineTo(ax1, ay + 1.5);
+        } else if (box.kind === 'vec') {
+          ctx.moveTo(ax0, ay);
+          ctx.lineTo(ax1, ay);
+          ctx.moveTo(ax1 - 2.2, ay - 1.6);
+          ctx.lineTo(ax1, ay);
+          ctx.lineTo(ax1 - 2.2, ay + 1.6);
+        } else {
+          ctx.moveTo(ax0, ay);
+          ctx.lineTo(ax1, ay);
+        }
+        ctx.stroke();
+        return;
+      }
+      if (box.type === 'bigop') {
+        ctx.fillStyle = color;
+        ctx.font = `500 ${box.symSz}px ${this.FONT_FAMILY}`;
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(box.sym, x, baseY + (box.symSz * 0.1));
+        const sx = x + box.symW + (box.fontSize * 0.08);
+        if (box.supB) this.drawBox(ctx, box.supB, sx, baseY - (box.symSz * 0.38), color);
+        if (box.subB) this.drawBox(ctx, box.subB, sx, baseY + (box.symSz * 0.24), color);
+      }
+    },
+    splitRowForMaxWidth(ctx, rootAst, fontSize, maxWidthPt) {
+      const fullBox = this.measureBox(ctx, rootAst, fontSize);
+      if (fullBox.width <= maxWidthPt || !rootAst || rootAst.type !== 'row' || (rootAst.items || []).length < 5) {
+        return [fullBox];
+      }
+      const items = rootAst.items;
+      const lines = [];
+      let curItems = [];
+      let lastSplitPos = -1;
+      for (let i = 0; i < items.length; i++) {
+        curItems.push(items[i]);
+        if (curItems.length >= 3 && items[i].type === 'text' && items[i].style === 'op' && (items[i].value === '+' || items[i].value === '-' || items[i].value === '=' || items[i].value === '→')) {
+          lastSplitPos = curItems.length - 1;
+        }
+        const curBox = this.measureBox(ctx, { type: 'row', items: curItems }, fontSize);
+        const effLimit = lines.length === 0 ? maxWidthPt : (maxWidthPt - 18);
+        if (curBox.width > effLimit && lastSplitPos > 1) {
+          const opNode = curItems[lastSplitPos];
+          if (opNode.value === '+' || opNode.value === '-') {
+            const head = curItems.slice(0, lastSplitPos);
+            const tail = curItems.slice(lastSplitPos);
+            lines.push(this.measureBox(ctx, { type: 'row', items: head }, fontSize));
+            curItems = tail;
+          } else {
+            const head = curItems.slice(0, lastSplitPos + 1);
+            const tail = curItems.slice(lastSplitPos + 1);
+            lines.push(this.measureBox(ctx, { type: 'row', items: head }, fontSize));
+            curItems = tail;
+          }
+          lastSplitPos = -1;
+        }
+      }
+      if (curItems.length > 0) {
+        lines.push(this.measureBox(ctx, { type: 'row', items: curItems }, fontSize));
+      }
+      return lines.length > 0 ? lines : [fullBox];
+    },
+    renderZ21LatexToPngDataUrl(rawLatex, options = {}) {
+      if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+      const canvas = document.createElement('canvas');
+      if (!canvas || typeof canvas.getContext !== 'function') return null;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+
+      const fontSize = Number(options.fontSizePt) || 12;
+      const maxWidthPt = Number(options.maxWidthPt) || 445;
+      const dpr = Number(options.scale) || 4;
+      const color = options.color || '#0f172a';
+      const padX = Number.isFinite(options.padXPt) ? options.padXPt : 2;
+      const padY = Number.isFinite(options.padYPt) ? options.padYPt : 3;
+
+      const ast = parseZ21LatexAst(rawLatex);
+      if (!ast || !Array.isArray(ast.items) || ast.items.length === 0) return null;
+
+      const lineBoxes = this.splitRowForMaxWidth(ctx, ast, fontSize, maxWidthPt);
+      const lineGap = fontSize * 0.42;
+      let totalContentH = 0;
+      let maxW = 0;
+      lineBoxes.forEach((lb, li) => {
+        const ind = li > 0 ? 16 : 0;
+        if (lb.width + ind > maxW) maxW = lb.width + ind;
+        totalContentH += lb.ascent + lb.descent + (li > 0 ? lineGap : 0);
+      });
+      const shrinkScale = maxW > maxWidthPt ? (maxWidthPt / maxW) : 1;
+      const finalPtW = (Math.max(10, maxW * shrinkScale) + padX * 2);
+      const finalPtH = (Math.max(12, totalContentH * shrinkScale) + padY * 2);
+
+      canvas.width = Math.max(4, Math.ceil(finalPtW * dpr));
+      canvas.height = Math.max(4, Math.ceil(finalPtH * dpr));
+      if (typeof ctx.setTransform === 'function') {
+        ctx.setTransform(dpr * shrinkScale, 0, 0, dpr * shrinkScale, 0, 0);
+      } else if (typeof ctx.scale === 'function') {
+        ctx.scale(dpr * shrinkScale, dpr * shrinkScale);
+      }
+      if (options.backgroundColor) {
+        ctx.fillStyle = options.backgroundColor;
+        ctx.fillRect(0, 0, finalPtW / shrinkScale, finalPtH / shrinkScale);
+      }
+
+      let curY = padY / shrinkScale;
+      lineBoxes.forEach((lb, li) => {
+        const ind = li > 0 ? 16 : 0;
+        const baseY = curY + lb.ascent;
+        this.drawBox(ctx, lb, (padX / shrinkScale) + ind, baseY, color);
+        curY += lb.ascent + lb.descent + lineGap;
+      });
+
+      const dataUrl = typeof canvas.toDataURL === 'function' ? canvas.toDataURL('image/png') : '';
+      if (!dataUrl || !dataUrl.startsWith('data:image/png')) return null;
+      const ptToMm = 25.4 / 72;
+      return {
+        dataUrl,
+        widthPt: finalPtW,
+        heightPt: finalPtH,
+        widthMm: finalPtW * ptToMm,
+        heightMm: finalPtH * ptToMm,
+        pixelWidth: canvas.width,
+        pixelHeight: canvas.height,
+        lineCount: lineBoxes.length
+      };
+    },
+    renderUnicodeLineToPngDataUrl(text, options = {}) {
+      if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+      const canvas = document.createElement('canvas');
+      if (!canvas || typeof canvas.getContext !== 'function') return null;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+
+      const fontSize = Number(options.fontSizePt) || 10;
+      const dpr = Number(options.scale) || 4;
+      const boldPrefix = String(options.boldPrefix || '');
+      const bodyStr = String(options.text || text || '');
+      const fontFamily = options.fontFamily || '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
+      const boldFont = `700 ${fontSize}px ${fontFamily}`;
+      const regWeight = options.bold ? '700' : '400';
+      const regFont = `${options.italic ? 'italic ' : ''}${regWeight} ${fontSize}px ${fontFamily}`;
+      const maxWidthPt = Number(options.maxWidthPt) || 0;
+
+      ctx.font = boldFont;
+      const preW = boldPrefix ? (ctx.measureText(boldPrefix).width || boldPrefix.length * fontSize * 0.52) : 0;
+      ctx.font = regFont;
+
+      const lines = [];
+      if (maxWidthPt > 40) {
+        const words = bodyStr.split(/(\s+)/);
+        let cur = '';
+        let firstLine = true;
+        for (const w of words) {
+          const limit = firstLine ? Math.max(40, maxWidthPt - preW - 4) : Math.max(40, maxWidthPt - 4);
+          const test = cur + w;
+          const tw = ctx.measureText(test).width || test.length * fontSize * 0.5;
+          if (cur && tw > limit && w.trim()) {
+            lines.push({ text: cur.trimEnd(), prefix: firstLine ? boldPrefix : '', preW: firstLine ? preW : 0 });
+            firstLine = false;
+            cur = w.replace(/^\s+/, '');
+          } else {
+            cur = test;
+          }
+        }
+        if (cur || lines.length === 0) {
+          lines.push({ text: cur.trimEnd(), prefix: firstLine ? boldPrefix : '', preW: firstLine ? preW : 0 });
+        }
+      } else {
+        lines.push({ text: bodyStr, prefix: boldPrefix, preW });
+      }
+
+      let maxLineW = 0;
+      lines.forEach((ln) => {
+        ctx.font = regFont;
+        const mw = ln.preW + (ctx.measureText(ln.text).width || ln.text.length * fontSize * 0.5);
+        if (mw > maxLineW) maxLineW = mw;
+      });
+      const lineH = fontSize * 1.42;
+      const wPt = Math.max(12, maxLineW + 4);
+      const hPt = Math.max(fontSize * 1.45, lines.length * lineH + 2);
+      canvas.width = Math.max(4, Math.ceil(wPt * dpr));
+      canvas.height = Math.max(4, Math.ceil(hPt * dpr));
+      if (typeof ctx.setTransform === 'function') ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      else if (typeof ctx.scale === 'function') ctx.scale(dpr, dpr);
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = options.color || '#334155';
+      lines.forEach((ln, idx) => {
+        const baseY = (fontSize * 1.05) + (idx * lineH);
+        if (ln.prefix) {
+          ctx.font = boldFont;
+          ctx.fillText(ln.prefix, 1, baseY);
+        }
+        ctx.font = regFont;
+        ctx.fillText(ln.text, 1 + ln.preW, baseY);
+      });
+      const dataUrl = typeof canvas.toDataURL === 'function' ? canvas.toDataURL('image/png') : '';
+      if (!dataUrl || !dataUrl.startsWith('data:image/png')) return null;
+      const ptToMm = 25.4 / 72;
+      return { dataUrl, widthMm: wPt * ptToMm, heightMm: hPt * ptToMm, widthPt: wPt, heightPt: hPt };
+    }
+  };
+
+  function renderMathTextToDocxRuns(str, baseRPrXml = '') {
+    const tokens = String(str || '').split(/(\^\{[^{}]+\}|_\{[^{}]+\}|[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+|[₀₁₂₃₄₅₆₇₈₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ]+)/g);
+    return tokens.filter(Boolean).map((tok) => {
+      let vertAlign = '';
+      let val = tok;
+      if (tok.startsWith('^{') && tok.endsWith('}')) {
+        vertAlign = 'superscript';
+        val = tok.slice(2, -1);
+      } else if (tok.startsWith('_{') && tok.endsWith('}')) {
+        vertAlign = 'subscript';
+        val = tok.slice(2, -1);
+      } else if (/^[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+$/.test(tok)) {
+        vertAlign = 'superscript';
+        val = tok.split('').map(c => Z21_INV_SUP_MAP_CLIENT[c] || c).join('');
+      } else if (/^[₀₁₂₃₄₅₆₇₈₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ]+$/.test(tok)) {
+        vertAlign = 'subscript';
+        val = tok.split('').map(c => Z21_INV_SUB_MAP_CLIENT[c] || c).join('');
+      }
+      const vaTag = vertAlign ? `<w:vertAlign w:val="${vertAlign}"/>` : '';
+      const rPr = (baseRPrXml || vaTag) ? `<w:rPr>${baseRPrXml}${vaTag}</w:rPr>` : '';
+      return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(val)}</w:t></w:r>`;
+    }).join('');
   }
 
   function parseMarkdownInlineToDocxRuns(text) {
@@ -11854,7 +12661,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const boldTag = t.bold ? '<w:b/><w:bCs/>' : '';
       const italicTag = t.italic ? '<w:i/><w:iCs/>' : '';
       const codePr = t.code ? '<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/><w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/><w:color w:val="0F172A"/>' : '';
-      return `<w:r><w:rPr>${boldTag}${italicTag}${codePr}</w:rPr><w:t xml:space="preserve">${escapeXml(t.text)}</w:t></w:r>`;
+      return renderMathTextToDocxRuns(t.text, `${boldTag}${italicTag}${codePr}`);
     }).join('');
   }
 
@@ -11871,6 +12678,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
@@ -11884,10 +12692,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
 </Relationships>`;
 
-    const wordRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-</Relationships>`;
+    const mediaImages = [];
+    let nextImageNum = 1;
+    let nextDocPrId = 1;
 
     const coreXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -11999,20 +12806,97 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       </w:p>
     `;
 
+    const buildDocxEqParagraphXml = (rawEqLine, label = '', fallbackExpr = '') => {
+      const eqLatex = toZ21LatexMathClient(rawEqLine || fallbackExpr);
+      const rendered = ZozCanvasMathRenderer.renderZ21LatexToPngDataUrl(eqLatex, {
+        fontSizePt: 12,
+        maxWidthPt: 425,
+        scale: 4,
+        color: '#0f172a',
+        backgroundColor: '#f0f9ff',
+        padXPt: 8,
+        padYPt: 6
+      });
+      const labelXml = label
+        ? `<w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t xml:space="preserve">${escapeXml(label)}: </w:t></w:r>`
+        : '';
+      if (rendered && rendered.dataUrl && rendered.dataUrl.includes(',')) {
+        const b64 = rendered.dataUrl.split(',')[1];
+        const imgNum = nextImageNum++;
+        const docPrId = nextDocPrId++;
+        const relId = `rId${imgNum + 1}`;
+        const fileName = `media/eq_${imgNum}.png`;
+        mediaImages.push({ relId, fileName, bytes: base64ToUint8Array(b64) });
+        const clampedPtW = Math.min(435, Math.max(40, rendered.widthPt || 120));
+        const clampedPtH = Math.max(14, (clampedPtW / Math.max(1, rendered.widthPt || 120)) * (rendered.heightPt || 24));
+        const cx = Math.round(clampedPtW * 12700);
+        const cy = Math.round(clampedPtH * 12700);
+        return `
+          <w:p>
+            <w:pPr>
+              <w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/>
+              <w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr>
+              <w:ind w:left="240" w:right="240"/>
+              <w:spacing w:before="100" w:after="100"/>
+            </w:pPr>
+            ${labelXml}
+            <w:r>
+              <w:drawing>
+                <wp:inline distT="0" distB="0" distL="0" distR="0">
+                  <wp:extent cx="${cx}" cy="${cy}"/>
+                  <wp:docPr id="${docPrId}" name="Equation ${imgNum}"/>
+                  <a:graphic>
+                    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                      <pic:pic>
+                        <pic:nvPicPr>
+                          <pic:cNvPr id="${docPrId}" name="eq_${imgNum}.png"/>
+                          <pic:cNvPicPr/>
+                        </pic:nvPicPr>
+                        <pic:blipFill>
+                          <a:blip r:embed="${relId}"/>
+                          <a:stretch><a:fillRect/></a:stretch>
+                        </pic:blipFill>
+                        <pic:spPr>
+                          <a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>
+                          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+                        </pic:spPr>
+                      </pic:pic>
+                    </a:graphicData>
+                  </a:graphic>
+                </wp:inline>
+              </w:drawing>
+            </w:r>
+          </w:p>
+        `;
+      }
+      const runs = renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(fallbackExpr || rawEqLine), '<w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/>');
+      return `
+        <w:p>
+          <w:pPr>
+            <w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/>
+            <w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr>
+            <w:ind w:left="240" w:right="240"/>
+            <w:spacing w:before="100" w:after="100"/>
+          </w:pPr>
+          ${labelXml}${runs}
+        </w:p>
+      `;
+    };
+
     const buildDocxTableXml = (headers, rows) => {
       const colCnt = Math.max(1, headers.length || (rows[0] ? rows[0].length : 1));
       const trs = [];
       if (headers.length > 0) {
         trs.push('<w:tr>' + headers.slice(0, colCnt).map(h =>
-          `<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="1E293B"/></w:tcPr><w:p><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:t>${escapeXml(String(h || '').replace(/[*_`]/g, '').trim())}</w:t></w:r></w:p></w:tc>`
+          `<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="1E293B"/></w:tcPr><w:p>${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(String(h || '').replace(/[*_`]/g, '').trim()), '<w:b/><w:color w:val="FFFFFF"/>')}</w:p></w:tc>`
         ).join('') + '</w:tr>');
       }
       for (const r of rows) {
         const arr = Array.isArray(r) ? r : [r];
         let cells = '';
         for (let ci = 0; ci < colCnt; ci++) {
-          const val = String(arr[ci] ?? '').replace(/[*_`]/g, '').trim();
-          cells += `<w:tc><w:p><w:r><w:t xml:space="preserve">${escapeXml(val)}</w:t></w:r></w:p></w:tc>`;
+          const val = normalizeZ21ScientificTextClient(String(arr[ci] ?? '').replace(/[*_`]/g, '').trim());
+          cells += `<w:tc><w:p>${renderMathTextToDocxRuns(val)}</w:p></w:tc>`;
         }
         trs.push(`<w:tr>${cells}</w:tr>`);
       }
@@ -12092,16 +12976,24 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           </w:p>
         `;
       } else if (cleanedLine.startsWith('- ') || cleanedLine.startsWith('* ') || cleanedLine.startsWith('+ ')) {
-        const itemText = cleanedLine.replace(/^[-*+]\s+/, '');
-        paragraphsXml += `
-          <w:p>
-            <w:pPr>
-              <w:ind w:left="480" w:hanging="240"/>
-            </w:pPr>
-            <w:r><w:rPr><w:rFonts w:ascii="Symbol" w:hAnsi="Symbol"/><w:color w:val="38BDF8"/></w:rPr><w:t>• </w:t></w:r>
-            ${parseMarkdownInlineToDocxRuns(itemText)}
-          </w:p>
-        `;
+        const rawItem = cleanedLine.replace(/^[-*+]\s+/, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+        const itemText = normalizeZ21ScientificTextClient(rawItem, { preserveFrac: true });
+        if (isZ21FormulaLineClient(itemText) && !isZ21VariableLegendLineClient(itemText).isLegend) {
+          const { label, expr } = parseZ21FormulaPartsClient(itemText);
+          const { expr: rawExpr } = parseZ21FormulaPartsClient(rawItem, true);
+          paragraphsXml += buildDocxEqParagraphXml(rawExpr || expr, label, expr);
+        } else {
+          const normLegendItem = normalizeZ21ScientificTextClient(rawItem);
+          paragraphsXml += `
+            <w:p>
+              <w:pPr>
+                <w:ind w:left="480" w:hanging="240"/>
+              </w:pPr>
+              <w:r><w:rPr><w:rFonts w:ascii="Symbol" w:hAnsi="Symbol"/><w:color w:val="38BDF8"/></w:rPr><w:t>• </w:t></w:r>
+              ${parseMarkdownInlineToDocxRuns(normLegendItem)}
+            </w:p>
+          `;
+        }
       } else if (/^\d+\.\s+/.test(cleanedLine)) {
         const numSecM = cleanedLine.match(/^(\d+)\.\s+([A-ZÀ-ÖØ-Þ][^\n]{3,92})$/);
         if (numSecM && !/[.:;]$/.test(numSecM[2]) && !/^\d/.test(numSecM[2])) {
@@ -12134,36 +13026,35 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
           </w:p>
         `;
       } else {
-        const normBodyLine = normalizeZ21ScientificTextClient(cleanedLine);
+        const plainRawCheck = cleanedLine.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+        const normBodyLine = normalizeZ21ScientificTextClient(cleanedLine, { preserveFrac: true });
         const plainFormulaCheck = normBodyLine.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
-        if (isZ21FormulaLineClient(plainFormulaCheck)) {
+        if (isZ21FormulaLineClient(plainFormulaCheck) && !isZ21VariableLegendLineClient(plainFormulaCheck).isLegend) {
           const { label, expr } = parseZ21FormulaPartsClient(plainFormulaCheck);
-          const lblRun = label ? `<w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t>${escapeXml(label)}: </w:t></w:r>` : '';
-          paragraphsXml += `
-            <w:p>
-              <w:pPr>
-                <w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/>
-                <w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr>
-                <w:ind w:left="240" w:right="240"/>
-                <w:spacing w:before="100" w:after="100"/>
-              </w:pPr>
-              ${lblRun}
-              <w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/></w:rPr><w:t xml:space="preserve">${escapeXml(expr)}</w:t></w:r>
-            </w:p>
-          `;
+          const { expr: rawExpr } = parseZ21FormulaPartsClient(plainRawCheck, true);
+          paragraphsXml += buildDocxEqParagraphXml(rawExpr || expr, label, expr);
         } else {
           paragraphsXml += `
             <w:p>
               <w:pPr><w:pStyle w:val="Normal"/></w:pPr>
-              ${parseMarkdownInlineToDocxRuns(normBodyLine)}
+              ${parseMarkdownInlineToDocxRuns(normalizeZ21ScientificTextClient(cleanedLine))}
             </w:p>
           `;
         }
       }
     }
 
+    const mediaRelsXml = mediaImages.map(im =>
+      `<Relationship Id="${im.relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${im.fileName}"/>`
+    ).join('');
+    const wordRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  ${mediaRelsXml}
+</Relationships>`;
+
     const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
   <w:body>
     ${paragraphsXml}
     <w:sectPr>
@@ -12181,6 +13072,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     wordFolder.folder('_rels').file('document.xml.rels', wordRelsXml);
     wordFolder.file('styles.xml', stylesXml);
     wordFolder.file('document.xml', documentXml);
+    mediaImages.forEach((im) => {
+      wordFolder.file(im.fileName, im.bytes);
+    });
 
     return await zip.generateAsync({
       type: 'blob',
@@ -12359,230 +13253,309 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
     return blocks;
   }
 
-  async function compileMarkdownToPdfBlob(markdownText, title = 'Dokumen') {
+  async function compileZ21SpecToRichPdfBlob(rawInput, maybeTextBody = '') {
+    let spec = (rawInput && typeof rawInput === 'object')
+      ? { ...rawInput }
+      : { title: String(rawInput || 'Dokumen Z21'), content: String(maybeTextBody || '') };
+
+    if ((!Array.isArray(spec.sections) || spec.sections.length === 0) && (!Array.isArray(spec.tables) || spec.tables.length === 0) && (!Array.isArray(spec.sheets) || spec.sheets.length === 0) && spec.content) {
+      spec = parseMarkdownToZ21DocSpec(spec.content, 'pdf', spec.filename || (spec.title ? `${spec.title}.pdf` : 'Dokumen.pdf'), null);
+    }
+
     await ensureJsPdfLoaded().catch(() => null);
     const jsPDFClass = (window.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : null;
     if (!jsPDFClass) {
-      const fallbackSpec = parseMarkdownToZ21DocSpec(markdownText || '', '', title || 'Dokumen.pdf', null);
-      const b64 = buildStructuredClientPdfBase64(fallbackSpec);
+      const b64 = buildStructuredClientPdfBase64(spec);
       return new Blob([base64ToUint8Array(b64)], { type: 'application/pdf' });
     }
 
-    const blocks = parseMarkdownBlocksForPdf(markdownText);
-    const doc = new jsPDFClass({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4'
-    });
-
+    const doc = new jsPDFClass({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 20;
+    const margin = 16;
     const contentWidth = pageWidth - (margin * 2);
-    let cursorY = margin;
+    let cursorY = 14;
 
-    function ensurePageSpace(neededMm) {
-      if (cursorY + neededMm > pageHeight - margin - 15) {
+    const ensurePageSpace = (neededMm) => {
+      if (cursorY + neededMm > pageHeight - 18) {
         doc.addPage();
-        cursorY = margin;
+        cursorY = 18;
       }
-    }
+    };
 
-    // Tentukan judul utama dokumen (prioritaskan h1 dari markdown)
-    let mainTitle = '';
-    const firstH1Idx = blocks.findIndex(b => b.type === 'h1');
-    if (firstH1Idx !== -1) {
-      mainTitle = blocks[firstH1Idx].text;
-      blocks.splice(firstH1Idx, 1);
-    } else {
-      mainTitle = (title || 'Dokumen')
-        .replace(/\.(?:pdf|docx|md|txt)$/i, '')
-        .replace(/[_-]+/g, ' ')
-        .trim();
-    }
+    const hasHighUnicode = (s) => /[^\x00-\xFF]/.test(String(s || ''));
+    const drawSafeVectorTextOrPng = (rawText, xMm, yMm, opts = {}) => {
+      const str = normalizeZ21ScientificTextClient(rawText);
+      const fontPt = opts.fontSize || 10;
+      const fontStyle = opts.bold ? 'bold' : (opts.italic ? 'italic' : 'normal');
+      const colorHex = opts.colorHex || '#334155';
+      const boldPrefix = opts.boldPrefix ? normalizeZ21ScientificTextClient(opts.boldPrefix) : '';
 
-    // Judul utama bersih tanpa watermark
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(18);
-    doc.setTextColor(15, 23, 42);
-    const titleSplit = doc.splitTextToSize(mainTitle, contentWidth);
-    doc.text(titleSplit, margin, cursorY);
-    cursorY += (titleSplit.length * 7) + 2;
-
-    // Garis aksen cyan
-    doc.setDrawColor(56, 189, 248);
-    doc.setLineWidth(0.8);
-    doc.line(margin, cursorY, margin + contentWidth, cursorY);
-    cursorY += 7;
-
-    for (const block of blocks) {
-      if (block.type === 'table') {
-        const headers = Array.isArray(block.headers) ? block.headers : [];
-        const rows = Array.isArray(block.rows) ? block.rows : [];
-        const colCnt = Math.max(1, headers.length || (rows[0] ? rows[0].length : 1));
-        const colW = contentWidth / colCnt;
-        const drawTableRow = (cells, isHdr, rIdx) => {
-          doc.setFont('helvetica', isHdr ? 'bold' : 'normal');
-          doc.setFontSize(9.5);
-          const wrapped = [];
-          let maxL = 1;
-          for (let ci = 0; ci < colCnt; ci++) {
-            const sp = doc.splitTextToSize(String(cells[ci] ?? ''), Math.max(12, colW - 5));
-            wrapped.push(sp);
-            if (sp.length > maxL) maxL = sp.length;
-          }
-          const rH = Math.max(7.5, (maxL * 4.4) + 3.2);
-          ensurePageSpace(rH + 2);
-          if (isHdr) doc.setFillColor(30, 41, 59);
-          else if (rIdx % 2 === 1) doc.setFillColor(248, 250, 252);
-          else doc.setFillColor(255, 255, 255);
-          doc.setDrawColor(203, 213, 225);
-          doc.setLineWidth(0.25);
-          doc.rect(margin, cursorY, contentWidth, rH, 'FD');
-          for (let ci = 1; ci < colCnt; ci++) {
-            const vx = margin + (ci * colW);
-            doc.line(vx, cursorY, vx, cursorY + rH);
-          }
-          doc.setTextColor(isHdr ? 255 : 30, isHdr ? 255 : 41, isHdr ? 255 : 59);
-          for (let ci = 0; ci < colCnt; ci++) {
-            doc.text(wrapped[ci], margin + (ci * colW) + 2.5, cursorY + 5);
-          }
-          cursorY += rH;
-        };
-        if (headers.length > 0) drawTableRow(headers, true, 0);
-        rows.forEach((r, ri) => drawTableRow(r, false, ri));
-        cursorY += 5;
-        continue;
-      }
-
-      if (block.type === 'h2') {
-        ensurePageSpace(16);
-        cursorY += 3;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(13);
-        doc.setTextColor(30, 58, 138); // #1e3a8a
-        const split = doc.splitTextToSize(block.text, contentWidth);
-        doc.text(split, margin, cursorY);
-        cursorY += (split.length * 5.6) + 2.5;
-        continue;
-      }
-
-      if (block.type === 'h3' || block.type === 'h4') {
-        ensurePageSpace(12);
-        cursorY += 2;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.setTextColor(51, 65, 85);
-        const split = doc.splitTextToSize(block.text, contentWidth);
-        doc.text(split, margin, cursorY);
-        cursorY += (split.length * 5) + 2;
-        continue;
-      }
-
-      if (block.type === 'list_item') {
-        ensurePageSpace(7);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
-        doc.setTextColor(51, 65, 85);
-        doc.setFillColor(56, 189, 248);
-        doc.circle(margin + 2.5, cursorY - 1, 0.9, 'F');
-        const split = doc.splitTextToSize(block.text, contentWidth - 7);
-        doc.text(split, margin + 6, cursorY);
-        cursorY += (split.length * 4.9) + 1.8;
-        continue;
-      }
-
-      if (block.type === 'ordered_item') {
-        ensurePageSpace(7);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
-        doc.setTextColor(37, 99, 235);
-        doc.text(`${block.num}.`, margin + 1, cursorY);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(51, 65, 85);
-        const split = doc.splitTextToSize(block.text, contentWidth - 7);
-        doc.text(split, margin + 7, cursorY);
-        cursorY += (split.length * 4.9) + 1.8;
-        continue;
-      }
-
-      if (block.type === 'quote') {
-        ensurePageSpace(10);
-        doc.setFont('helvetica', 'italic');
-        doc.setFontSize(9.5);
-        doc.setTextColor(71, 85, 105);
-        const split = doc.splitTextToSize(block.text, contentWidth - 8);
-        const boxHeight = (split.length * 4.7) + 3;
-        doc.setFillColor(248, 250, 252);
-        doc.rect(margin, cursorY - 3, contentWidth, boxHeight, 'F');
-        doc.setDrawColor(56, 189, 248);
-        doc.setLineWidth(1);
-        doc.line(margin, cursorY - 3, margin, cursorY - 3 + boxHeight);
-        doc.text(split, margin + 4, cursorY + 0.5);
-        cursorY += boxHeight + 3;
-        continue;
-      }
-
-      if (block.type === 'hr') {
-        ensurePageSpace(6);
-        doc.setDrawColor(226, 232, 240);
-        doc.setLineWidth(0.3);
-        doc.line(margin, cursorY, margin + contentWidth, cursorY);
-        cursorY += 4;
-        continue;
-      }
-
-      if (block.type === 'code') {
-        doc.setFont('courier', 'normal');
-        doc.setFontSize(8.5);
-        doc.setTextColor(30, 41, 59);
-        for (const cLine of block.lines) {
-          ensurePageSpace(5.5);
-          doc.setFillColor(241, 245, 249);
-          doc.rect(margin, cursorY - 3.5, contentWidth, 5.2, 'F');
-          doc.setDrawColor(226, 232, 240);
-          doc.setLineWidth(0.2);
-          doc.rect(margin, cursorY - 3.5, contentWidth, 5.2, 'S');
-          const splitC = doc.splitTextToSize(cLine, contentWidth - 4);
-          doc.text(splitC, margin + 2.5, cursorY);
-          cursorY += (splitC.length * 4.5);
+      if ((hasHighUnicode(str) || hasHighUnicode(boldPrefix)) && ZozCanvasMathRenderer.renderUnicodeLineToPngDataUrl) {
+        const maxAvailMm = Math.max(20, (margin + contentWidth) - xMm);
+        const im = ZozCanvasMathRenderer.renderUnicodeLineToPngDataUrl(str, {
+          text: str,
+          boldPrefix,
+          fontSizePt: fontPt,
+          maxWidthPt: (opts.maxWidthMm || maxAvailMm) * (72 / 25.4),
+          color: colorHex,
+          bold: Boolean(opts.bold),
+          italic: Boolean(opts.italic)
+        });
+        if (im && im.dataUrl) {
+          const drawW = Math.min(im.widthMm, maxAvailMm);
+          const drawH = drawW < im.widthMm ? im.heightMm * (drawW / im.widthMm) : im.heightMm;
+          ensurePageSpace(drawH + 1.5);
+          doc.addImage(im.dataUrl, 'PNG', xMm, yMm - (fontPt * 0.28), drawW, drawH);
+          return drawH + 1.2;
         }
-        cursorY += 3;
-        continue;
       }
 
-      if (block.type === 'p') {
-        ensurePageSpace(8);
-        const cleanPara = block.text.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1').replace(/`([^`]+)`/g, '$1');
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
-        doc.setTextColor(51, 65, 85);
-        const split = doc.splitTextToSize(cleanPara, contentWidth);
-        doc.text(split, margin, cursorY);
-        cursorY += (split.length * 4.9) + 3.5;
-        continue;
+      if (opts.rgb) doc.setTextColor(opts.rgb[0], opts.rgb[1], opts.rgb[2]);
+      else doc.setTextColor(51, 65, 85);
+
+      if (boldPrefix) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(fontPt);
+        const cleanPre = sanitizeJsPdfWinAnsiText(boldPrefix);
+        const preW = typeof doc.getTextWidth === 'function' ? doc.getTextWidth(cleanPre) : (cleanPre.length * fontPt * 0.21);
+        doc.text(cleanPre, xMm, yMm);
+        doc.setFont('helvetica', fontStyle);
+        const cleanRest = sanitizeJsPdfWinAnsiText(str);
+        const remW = Math.max(20, (margin + contentWidth) - (xMm + preW));
+        const split = doc.splitTextToSize(cleanRest, remW);
+        if (split.length > 0) doc.text(split[0], xMm + preW, yMm);
+        for (let si = 1; si < split.length; si++) {
+          yMm += fontPt * 0.46;
+          ensurePageSpace(5);
+          doc.text(split[si], xMm, yMm);
+        }
+        return Math.max(1, split.length) * (fontPt * 0.46) + 1.5;
       }
+
+      doc.setFont('helvetica', fontStyle);
+      doc.setFontSize(fontPt);
+      const safeStr = sanitizeJsPdfWinAnsiText(str);
+      const maxW = opts.maxWidthMm || (margin + contentWidth - xMm);
+      const split = doc.splitTextToSize(safeStr, maxW);
+      doc.text(split, xMm, yMm);
+      return Math.max(1, split.length) * (fontPt * 0.47) + 1.8;
+    };
+
+    const docTitle = stripZ21InlineMd(spec.title || spec.filename || 'Dokumen Z21');
+    const docSub = stripZ21InlineMd(spec.subtitle || '');
+
+    // Header band Navy + aksen cyan
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16.5);
+    const cleanTitle = sanitizeJsPdfWinAnsiText(docTitle);
+    const titleSplit = doc.splitTextToSize(cleanTitle, contentWidth - 10).slice(0, 2);
+    const hdrH = 11 + (titleSplit.length * 7.2);
+    doc.setFillColor(15, 23, 42);
+    doc.rect(margin, cursorY, contentWidth, hdrH, 'F');
+    doc.setFillColor(56, 189, 248);
+    doc.rect(margin, cursorY + hdrH - 1.4, contentWidth, 1.4, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.text(titleSplit, margin + 5, cursorY + 7.8);
+    cursorY += hdrH + 5.5;
+
+    if (docSub) {
+      const dh = drawSafeVectorTextOrPng(docSub, margin, cursorY, { fontSize: 10, italic: true, colorHex: '#475569', rgb: [71, 85, 105] });
+      cursorY += dh + 2.5;
+    }
+
+    const drawRichPdfTable = (tbl) => {
+      const headers = Array.isArray(tbl.headers) ? tbl.headers : [];
+      const rows = Array.isArray(tbl.rows) ? tbl.rows : [];
+      const colCnt = Math.max(1, headers.length || (rows[0] && Array.isArray(rows[0]) ? rows[0].length : 1));
+      const colW = contentWidth / colCnt;
+      const drawRow = (cells, isHdr, rIdx) => {
+        doc.setFont('helvetica', isHdr ? 'bold' : 'normal');
+        doc.setFontSize(9.2);
+        const wrapped = [];
+        let maxL = 1;
+        for (let ci = 0; ci < colCnt; ci++) {
+          const cellStr = sanitizeJsPdfWinAnsiText(stripZ21InlineMd(cells[ci] ?? ''));
+          const sp = doc.splitTextToSize(cellStr, Math.max(12, colW - 5));
+          wrapped.push(sp);
+          if (sp.length > maxL) maxL = sp.length;
+        }
+        const rH = Math.max(7.2, (maxL * 4.3) + 3.0);
+        ensurePageSpace(rH + 2);
+        if (isHdr) doc.setFillColor(30, 41, 59);
+        else if (rIdx % 2 === 1) doc.setFillColor(248, 250, 252);
+        else doc.setFillColor(255, 255, 255);
+        doc.setDrawColor(203, 213, 225);
+        doc.setLineWidth(0.25);
+        doc.rect(margin, cursorY, contentWidth, rH, 'FD');
+        for (let ci = 1; ci < colCnt; ci++) {
+          const vx = margin + (ci * colW);
+          doc.line(vx, cursorY, vx, cursorY + rH);
+        }
+        doc.setTextColor(isHdr ? 255 : 30, isHdr ? 255 : 41, isHdr ? 255 : 59);
+        for (let ci = 0; ci < colCnt; ci++) {
+          doc.text(wrapped[ci], margin + (ci * colW) + 2.5, cursorY + 4.8);
+        }
+        cursorY += rH;
+      };
+      if (headers.length > 0) drawRow(headers, true, 0);
+      rows.forEach((r, ri) => drawRow(Array.isArray(r) ? r : [r], false, ri));
+      cursorY += 4.5;
+    };
+
+    const drawEquationBox = (rawEqLine) => {
+      const cleanLine = normalizeZ21ScientificTextClient(rawEqLine, { preserveFrac: true }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim();
+      const { label, expr } = parseZ21FormulaPartsClient(cleanLine, true);
+      const { expr: rawExpr } = parseZ21FormulaPartsClient(rawEqLine, true);
+      const eqInput = toZ21LatexMathClient(rawExpr || expr);
+      const eqImg = ZozCanvasMathRenderer.renderZ21LatexToPngDataUrl(eqInput, {
+        fontSizePt: 11.5,
+        maxWidthPt: 450,
+        scale: 4,
+        color: '#0f172a'
+      });
+
+      const lblH = label ? 4.8 : 0;
+      let exprH = 6.5;
+      let exprSplit = null;
+      if (eqImg && eqImg.dataUrl) {
+        exprH = Math.max(6.2, eqImg.heightMm);
+      } else {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        exprSplit = doc.splitTextToSize(sanitizeJsPdfWinAnsiText(normalizeZ21ScientificTextClient(expr)), contentWidth - 12);
+        exprH = Math.max(5.5, exprSplit.length * 4.8);
+      }
+      const boxH = 5.4 + lblH + exprH;
+      ensurePageSpace(boxH + 4);
+      doc.setFillColor(240, 249, 255);
+      doc.setDrawColor(186, 230, 253);
+      doc.setLineWidth(0.35);
+      doc.rect(margin, cursorY, contentWidth, boxH, 'FD');
+      doc.setFillColor(2, 132, 199);
+      doc.rect(margin, cursorY, 1.3, boxH, 'F');
+
+      let innerY = cursorY + 4.3;
+      if (label) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(3, 105, 161);
+        doc.text(sanitizeJsPdfWinAnsiText(label.toUpperCase()), margin + 5, innerY);
+        innerY += 4.6;
+      }
+      if (eqImg && eqImg.dataUrl) {
+        const maxDrawMm = contentWidth - 10;
+        const drawW = Math.min(eqImg.widthMm, maxDrawMm);
+        const drawH = drawW < eqImg.widthMm ? eqImg.heightMm * (drawW / eqImg.widthMm) : eqImg.heightMm;
+        doc.addImage(eqImg.dataUrl, 'PNG', margin + 5, innerY - 2.6, drawW, drawH);
+      } else if (exprSplit) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.setTextColor(15, 23, 42);
+        doc.text(exprSplit, margin + 5, innerY + 1.0);
+      }
+      cursorY += boxH + 3.5;
+    };
+
+    const sections = Array.isArray(spec.sections) ? spec.sections : [];
+    const tables = Array.isArray(spec.tables) ? spec.tables : [];
+    const renderedHeadings = new Set();
+
+    for (const sec of sections) {
+      const sh = stripZ21InlineMd(sec.heading || '');
+      if (sh && sh.toLowerCase() !== docTitle.toLowerCase()) {
+        renderedHeadings.add(sh);
+        ensurePageSpace(14);
+        cursorY += 2.2;
+        const dh = drawSafeVectorTextOrPng(sh, margin, cursorY + 3.2, { fontSize: 12.2, bold: true, colorHex: '#1e3a8a', rgb: [30, 58, 138] });
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.35);
+        doc.line(margin, cursorY + dh + 1.8, margin + contentWidth, cursorY + dh + 1.8);
+        cursorY += dh + 4.5;
+      }
+      if (sec.content) {
+        for (const para of cleanZ21ClientResidue(sec.content).split(/\r?\n/)) {
+          const pTrim = para.trim();
+          if (!pTrim) continue;
+          const plainCheck = normalizeZ21ScientificTextClient(pTrim, { preserveFrac: true }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+          if (isZ21FormulaLineClient(plainCheck) && !isZ21VariableLegendLineClient(plainCheck).isLegend) {
+            drawEquationBox(pTrim);
+            continue;
+          }
+          const kvMatch = normalizeZ21ScientificTextClient(pTrim).replace(/\*\*([^*]+)\*\*/g, '$1').match(/^((?:Lokasi|Tanggal|Parameter\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\s*:)\s*(.+)$/i);
+          ensurePageSpace(8);
+          if (kvMatch) {
+            const dh = drawSafeVectorTextOrPng(kvMatch[2], margin, cursorY + 3.0, { boldPrefix: kvMatch[1] + ' ', fontSize: 10, colorHex: '#334155', rgb: [51, 65, 85] });
+            cursorY += dh + 1.2;
+          } else {
+            const dh = drawSafeVectorTextOrPng(pTrim.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1'), margin, cursorY + 3.0, { fontSize: 10, colorHex: '#334155', rgb: [51, 65, 85] });
+            cursorY += dh + 1.2;
+          }
+        }
+      }
+      if (Array.isArray(sec.bullets)) {
+        for (const b of sec.bullets) {
+          const rawB = String(b || '').trim();
+          if (!rawB) continue;
+          const plainB = normalizeZ21ScientificTextClient(rawB, { preserveFrac: true }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+          if (isZ21FormulaLineClient(plainB) && !isZ21VariableLegendLineClient(plainB).isLegend) {
+            drawEquationBox(rawB);
+            continue;
+          }
+          ensurePageSpace(7);
+          doc.setFillColor(56, 189, 248);
+          doc.circle(margin + 2.2, cursorY + 1.9, 0.85, 'F');
+          const legend = isZ21VariableLegendLineClient(plainB);
+          let dh = 5.5;
+          if (legend.isLegend) {
+            const symNorm = normalizeZ21ScientificTextClient(legend.symbol);
+            const descNorm = normalizeZ21ScientificTextClient(legend.description);
+            dh = drawSafeVectorTextOrPng(descNorm, margin + 5.5, cursorY + 3.0, { boldPrefix: `${symNorm} = `, fontSize: 9.8, colorHex: '#334155', rgb: [51, 65, 85] });
+          } else {
+            dh = drawSafeVectorTextOrPng(plainB, margin + 5.5, cursorY + 3.0, { fontSize: 9.8, colorHex: '#334155', rgb: [51, 65, 85] });
+          }
+          cursorY += dh + 1.0;
+        }
+        if (sec.bullets.length > 0) cursorY += 1.5;
+      }
+      if (sec.table && Array.isArray(sec.table.rows)) {
+        drawRichPdfTable(sec.table);
+      }
+    }
+
+    for (const tbl of tables) {
+      const tt = stripZ21InlineMd(tbl.title || '');
+      if (tt && !renderedHeadings.has(tt)) {
+        ensurePageSpace(12);
+        const dh = drawSafeVectorTextOrPng(tt, margin, cursorY + 3.0, { fontSize: 11.2, bold: true, colorHex: '#1e3a8a', rgb: [30, 58, 138] });
+        cursorY += dh + 2.5;
+      }
+      drawRichPdfTable(tbl);
     }
 
     const totalPages = doc.internal.getNumberOfPages();
     for (let p = 1; p <= totalPages; p++) {
       doc.setPage(p);
-      doc.setDrawColor(241, 245, 249);
+      doc.setDrawColor(226, 232, 240);
       doc.setLineWidth(0.3);
-      doc.line(margin, pageHeight - 12, margin + contentWidth, pageHeight - 12);
-
+      doc.line(margin, pageHeight - 13, margin + contentWidth, pageHeight - 13);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
-      doc.text(
-        `Halaman ${p} dari ${totalPages}`,
-        pageWidth / 2,
-        pageHeight - 7,
-        { align: 'center' }
-      );
+      doc.text(`Halaman ${p} dari ${totalPages}`, pageWidth / 2, pageHeight - 7.5, { align: 'center' });
     }
 
     return doc.output('blob');
+  }
+
+  async function compileMarkdownToPdfBlob(markdownText, title = 'Dokumen') {
+    const cleanTitle = (title || 'Dokumen.pdf').replace(/\.(?:docx|doc|md|markdown|txt)$/i, '');
+    const pdfFilename = cleanTitle.toLowerCase().endsWith('.pdf') ? cleanTitle : `${cleanTitle}.pdf`;
+    const embedded = extractEmbeddedZ21DocBuilderSpec(markdownText || '');
+    const parsedSpec = (embedded && embedded.spec)
+      ? { ...embedded.spec, filename: pdfFilename, format: 'pdf' }
+      : parseMarkdownToZ21DocSpec(markdownText || '', 'pdf', pdfFilename, null);
+    return compileZ21SpecToRichPdfBlob(parsedSpec);
   }
 
   // Daftar bahasa pemrograman, markup, dan teks yang 100% PASTI BUKAN diagram Mermaid
@@ -12979,7 +13952,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       border-radius: 6px;
     }
     .z21-eq-label { font-size: 12px; font-weight: 700; color: #0369a1; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
-    .z21-eq-expr { font-family: 'Cambria Math', 'Segoe UI Symbol', 'Times New Roman', serif; font-size: 16.5px; font-weight: 600; color: #0f172a; overflow-x: auto; }
+    .z21-eq-expr { font-family: 'Cambria Math', 'Segoe UI Symbol', 'Times New Roman', serif; font-size: 16.5px; font-weight: 600; color: #0f172a; overflow-x: auto; overflow-y: hidden; }
+    .z21-eq-expr .katex-display { margin: 4px 0; text-align: left; }
+    .z21-eq-expr .katex { font-size: 1.12em; color: #0f172a; }
+    .z21-frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 3px; line-height: 1.1; }
+    .z21-frac-num { border-bottom: 1.4px solid currentColor; padding: 0 4px 2px 4px; font-size: 0.88em; }
+    .z21-frac-den { padding: 2px 4px 0 4px; font-size: 0.88em; }
     .z21-eq-expr sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
     .z21-eq-expr sub { font-size: 0.72em; vertical-align: sub; line-height: 0; }
     blockquote { margin: 14px 0; padding: 10px 14px; background: #f8fafc; border-left: 4px solid #3b82f6; color: #475569; border-radius: 4px; font-size: 13px; }
@@ -13065,7 +14043,12 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       border-radius: 6px;
     }
     .z21-eq-label { font-size: 11.5px; font-weight: 700; color: #0369a1; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
-    .z21-eq-expr { font-family: 'Cambria Math', 'Segoe UI Symbol', 'Times New Roman', serif; font-size: 16px; font-weight: 600; color: #0f172a; overflow-x: auto; }
+    .z21-eq-expr { font-family: 'Cambria Math', 'Segoe UI Symbol', 'Times New Roman', serif; font-size: 16px; font-weight: 600; color: #0f172a; overflow-x: auto; overflow-y: hidden; }
+    .z21-eq-expr .katex-display { margin: 4px 0; text-align: left; }
+    .z21-eq-expr .katex { font-size: 1.12em; color: #0f172a; }
+    .z21-frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 3px; line-height: 1.1; }
+    .z21-frac-num { border-bottom: 1.4px solid currentColor; padding: 0 4px 2px 4px; font-size: 0.88em; }
+    .z21-frac-den { padding: 2px 4px 0 4px; font-size: 0.88em; }
     .z21-eq-expr sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
     .z21-eq-expr sub { font-size: 0.72em; vertical-align: sub; line-height: 0; }
     blockquote { margin: 14px 0; padding: 10px 14px; background: #f8fafc; border-left: 4px solid #38bdf8; color: #475569; border-radius: 4px; font-size: 13px; }
@@ -26811,36 +27794,34 @@ ATURAN MUTLAK OUTPUT:
 
       const isDiagram = isDiagramFile(file);
       const isJsxReact = isRawJsxOrReactCode(rawText, file);
-      const wantsNativeArtifact = Boolean(
-        file.base64 &&
-        (
-          !format ||
-          format === 'native' ||
-          format === fileExt ||
-          (format === 'svg' && !isDiagram && ['pdf', 'docx', 'xlsx', 'csv'].includes(fileExt))
-        )
-      );
-
+      const wantsNativeFmt = !format ||
+        format === 'native' ||
+        format === fileExt ||
+        (format === 'svg' && !isDiagram && ['pdf', 'docx', 'xlsx', 'csv'].includes(fileExt));
       let upgradedArtifactBase64 = '';
-      if (wantsNativeArtifact && fileExt === 'pdf') {
-        // Self-healing upgrade: jika base64 lama dibuat oleh fallback zoz-client-sandbox lama yang masih memuat
-        // markdown mentah ("Dirender oleh", "# ", "| ---") atau belum memakai tabel terstruktur, kompilasi ulang otomatis!
+      if (wantsNativeFmt && fileExt === 'pdf') {
         let decodedProbe = '';
-        try {
-          const probeBytes = base64ToUint8Array(file.base64).slice(0, 18000);
-          for (let bi = 0; bi < probeBytes.length; bi++) decodedProbe += String.fromCharCode(probeBytes[bi]);
-        } catch (_) {}
-        const hasLegacyClientPdfDefect = /Dirender oleh|zoz-client-sandbox|zoz-client-native|\(\s*#{1,3}\s+|\|\s*---|z21_document_builder|"sections"\s*:|\\\\left|\\\\right/.test(decodedProbe) || Boolean(extractEmbeddedZ21DocBuilderSpec(rawText));
-        if (hasLegacyClientPdfDefect && rawText) {
+        if (file.base64) {
+          try {
+            const probeBytes = base64ToUint8Array(file.base64).slice(0, 18000);
+            for (let bi = 0; bi < probeBytes.length; bi++) decodedProbe += String.fromCharCode(probeBytes[bi]);
+          } catch (_) {}
+        }
+        const hasTrustedPdfEngine = file.engine === 'python-container-sandbox' || file.engine === 'zoz-rich-math-pdf';
+        const hasLegacyClientPdfDefect = !file.base64 ||
+          !hasTrustedPdfEngine ||
+          /Dirender oleh|zoz-client-sandbox|zoz-client-native|\(\s*#{1,3}\s+|\|\s*---|z21_document_builder|"sections"\s*:|\\\\left|\\\\right/.test(decodedProbe) ||
+          Boolean(extractEmbeddedZ21DocBuilderSpec(rawText));
+        if (hasLegacyClientPdfDefect && (file.z21Spec || rawText)) {
           const embeddedHeal = extractEmbeddedZ21DocBuilderSpec(rawText);
           const rebuiltSpec = (embeddedHeal && embeddedHeal.spec)
-            ? embeddedHeal.spec
-            : parseMarkdownToZ21DocSpec(rawText, '', file.name || 'Dokumen.pdf', null);
+            ? { ...embeddedHeal.spec }
+            : (file.z21Spec ? { ...file.z21Spec } : parseMarkdownToZ21DocSpec(rawText, '', file.name || 'Dokumen.pdf', null));
           rebuiltSpec.filename = (embeddedHeal && embeddedHeal.spec?.filename && /^(?:formula_pure_math|buatkan|buatin|dokumen_z21)/i.test(file.name || ''))
             ? embeddedHeal.spec.filename
-            : (file.name || rebuiltSpec.filename);
+            : (file.name || rebuiltSpec.filename || 'Dokumen_Z21.pdf');
           rebuiltSpec.format = 'pdf';
-          if (file.pythonScript) rebuiltSpec.python_code = file.pythonScript;
+          if (file.pythonScript && !rebuiltSpec.python_code) rebuiltSpec.python_code = file.pythonScript;
           try {
             if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
               const res = await fetch(getUniversalApiUrl('/api/z21/document-builder'), {
@@ -26850,32 +27831,43 @@ ATURAN MUTLAK OUTPUT:
                 signal: (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') ? AbortSignal.timeout(12000) : undefined
               }).catch(() => null);
               const d = res && res.ok ? await res.json().catch(() => null) : null;
-              if (d && d.success && Array.isArray(d.files) && d.files[0]?.base64) {
+              if (d && d.success && d.engine === 'python-container-sandbox' && Array.isArray(d.files) && d.files[0]?.base64) {
                 upgradedArtifactBase64 = d.files[0].base64;
                 file.base64 = upgradedArtifactBase64;
+                file.engine = d.engine;
+                file.z21Spec = rebuiltSpec;
               }
             }
           } catch (_) {}
           if (!upgradedArtifactBase64) {
-            upgradedArtifactBase64 = buildStructuredClientPdfBase64(rebuiltSpec);
+            const richPdfBlob = await compileZ21SpecToRichPdfBlob(rebuiltSpec);
+            upgradedArtifactBase64 = await blobToBase64(richPdfBlob).catch(() => '') || buildStructuredClientPdfBase64(rebuiltSpec);
             file.base64 = upgradedArtifactBase64;
+            file.engine = 'zoz-rich-math-pdf';
+            file.z21Spec = rebuiltSpec;
+            file.isBinaryArtifact = true;
           }
         }
       }
+
+      const wantsNativeArtifact = Boolean((upgradedArtifactBase64 || file.base64) && wantsNativeFmt);
 
       if (wantsNativeArtifact) {
         const bytes = base64ToUint8Array(upgradedArtifactBase64 || file.base64);
         blob = new Blob([bytes], { type: file.mime || guessMimeFromName(file.name) });
       } else if (format === 'xlsx' || ((fileNameLower.endsWith('.xlsx') || fileNameLower.endsWith('.xls')) && format !== 'pdf' && format !== 'docx' && format !== 'jpeg' && format !== 'jpg')) {
         showToast('📊 Mengompilasi spreadsheet Excel (.xlsx)...', 'info');
-        const b64Xlsx = compileStructuredDataToXlsxBase64({ filename: file.name, title: file.name, content: rawText });
+        const xlsxSpec = (file.z21Spec && (Array.isArray(file.z21Spec.sheets) || Array.isArray(file.z21Spec.tables)))
+          ? { ...file.z21Spec, filename: file.name, format: 'xlsx' }
+          : { ...parseMarkdownToZ21DocSpec(rawText, '', file.name, null), filename: file.name, format: 'xlsx', content: rawText };
+        const b64Xlsx = compileStructuredDataToXlsxBase64(xlsxSpec);
         blob = new Blob([base64ToUint8Array(b64Xlsx)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       } else if (format === 'docx' || (fileNameLower.endsWith('.docx') && format !== 'pdf' && format !== 'jpeg' && format !== 'jpg' && format !== 'svg')) {
         showToast('📄 Mengompilasi dokumen Word (.docx)...', 'info');
         blob = await compileMarkdownToDocxBlob(rawText, file.name);
       } else if (format === 'pdf' || (fileNameLower.endsWith('.pdf') && format !== 'docx' && format !== 'jpeg' && format !== 'jpg' && format !== 'svg')) {
         showToast('📄 Mengompilasi dokumen PDF (.pdf)...', 'info');
-        blob = await compileMarkdownToPdfBlob(rawText, file.name);
+        blob = file.z21Spec ? await compileZ21SpecToRichPdfBlob({ ...file.z21Spec, format: 'pdf', filename: file.name }) : await compileMarkdownToPdfBlob(rawText, file.name);
       } else if (isDiagram) {
         let svgText = file.svgContent || '';
         if (!svgText && (rawText.includes('<svg') || rawText.trim().startsWith('<svg'))) {
@@ -30976,7 +31968,9 @@ ${blocks}
     const isDiagram = isDiagramFile(activeAIFile);
     const ext = (activeAIFile.name || '').split('.').pop().toLowerCase();
     const isDoc = ext === 'docx' || ext === 'pdf' || ext === 'doc' || ext === 'md' || ext === 'markdown' ||
-                  activeAIFile.lang === 'docx' || activeAIFile.lang === 'pdf' || (activeAIFile.lang === 'markdown' && !isDiagram);
+                  ext === 'xlsx' || ext === 'xls' || ext === 'csv' ||
+                  activeAIFile.lang === 'docx' || activeAIFile.lang === 'pdf' || activeAIFile.lang === 'xlsx' || activeAIFile.lang === 'csv' ||
+                  (activeAIFile.lang === 'markdown' && !isDiagram);
     const isHtml = ext === 'html' || ext === 'htm' || ext === 'jsx' || ext === 'tsx' ||
                    activeAIFile.lang === 'html' || activeAIFile.lang === 'htm' || activeAIFile.lang === 'jsx' || activeAIFile.lang === 'tsx' || activeAIFile.lang === 'react' ||
                    isRawJsxOrReactCode(activeAIFile.rawContent || activeAIFile.content || '', activeAIFile);
@@ -34325,6 +35319,7 @@ ATURAN MUTLAK EKSEKUSI AGEN:
    - \`format\`: \`"${targetFmt}"\`.
    - \`title\` & \`subtitle\`: Judul utama dan subjudul/tanggal laporan.
    - \`sections\`: Daftar bab \`[{"heading": "...", "content": "...", "bullets": [...]}]\` yang merangkum seluruh data secara lengkap.
+   - **FORMAT RUMUS MATEMATIKA AUTENTIK**: Tulis setiap ekspresi matematika dengan sintaks LaTeX yang valid & baku (mis. \`\\\\frac{a}{b}\`, \`\\\\ln\\\\left(\\\\frac{RH}{100}\\\\right)\`, \`\\\\sqrt{x}\`, \`\\\\gamma(T, RH)\`, \`T_{dp}\`, \`c_{1}\`, \`V^{0.16}\`, \`100\\\\%\`) agar dirender sebagai persamaan matematika 2D asli di PDF, Word, dan pratinjau.
    - \`tables\` / \`sheets\`: Daftar tabel data terformat \`[{"title": "...", "headers": [...], "rows": [[...]]}]\` (untuk Excel \`.xlsx\`, sertakan \`sheets\` lengkap dengan \`formulas\` seperti \`"=SUM(B2:B10)"\` bila ada data numerik).
    - Apabila pengguna merujuk pada laporan/data di pesan sebelumnya (misal: "buatkan file pdf nya"), ambil seluruh fakta, angka, dan rincian dari riwayat percakapan terakhir lalu masukkan ke dalam \`z21_document_builder\`.
 3. PENYAJIAN BERSIH KE PENGGUNA (KARTU UNDUHAN / FILE ARTIFACT CARD):
@@ -34387,16 +35382,23 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     'a': 'ₐ', 'e': 'ₑ', 'h': 'ₕ', 'i': 'ᵢ', 'j': 'ⱼ', 'k': 'ₖ', 'l': 'ₗ', 'm': 'ₘ', 'n': 'ₙ',
     'o': 'ₒ', 'p': 'ₚ', 'r': 'ᵣ', 's': 'ₛ', 't': 'ₜ', 'u': 'ᵤ', 'v': 'ᵥ', 'x': 'ₓ'
   };
+  const Z21_INV_SUP_MAP_CLIENT = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '⁺': '+', '⁻': '-' };
+  const Z21_INV_SUB_MAP_CLIENT = {
+    '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+    '₊': '+', '₋': '-', '₌': '=', '₍': '(', '₎': ')',
+    'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm', 'ₙ': 'n',
+    'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x'
+  };
 
-  function normalizeZ21ScientificTextClient(rawText) {
+  function restoreCorruptedJsonLatexEscapesClient(rawText) {
     let s = cleanZ21ClientResidue(rawText);
     if (!s) return '';
     s = s
       .replace(/\uFFFD/g, '')
       .replace(/\r(?=ight\b)/g, '\\r')
-      .replace(/\f(?=rac\b)/g, '\\f')
-      .replace(/\t(?=(?:heta|imes|ext|an|au)\b)/g, '\\t')
-      .replace(/[\b](?=(?:eta|ar|inom)\b)/g, '\\b')
+      .replace(/\f(?=rac\b|orall\b)/g, '\\f')
+      .replace(/\t(?=(?:heta|imes|ext|an|au|o|op|frac)\b)/g, '\\t')
+      .replace(/[\b](?=(?:eta|ar|inom|egin|ig)\b)/g, '\\b')
       .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
     s = s
@@ -34406,7 +35408,166 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/\bR\s+H\s*(?==)/g, 'RH ')
       .replace(/(\d+(?:[.,]\d+)?)\s+%/g, '$1%')
       .replace(/\(\s*([^\s()]+)\s+%\s*\)/g, '($1%)')
-      .replace(/([A-Za-z0-9)])\s+\^(\{[^{}]+\}|[0-9])/g, '$1^$2');
+      .replace(/([A-Za-z0-9)])\s+\^(\{[^{}]+\}|[0-9])/g, '$1^$2')
+      .replace(/\bTd_?p\b/g, 'T_{dp}')
+      .replace(/\bT_dp\b/g, 'T_{dp}')
+      .replace(/\bTd\b(?=\s*=)/g, 'T_{d}')
+      .replace(/_(dp|max|min|atm|sat|tot|eff|avg|rel|abs|in|out|init|fin|rms|crit|opt)\b/g, '_{$1}');
+    return s;
+  }
+
+  function isZ21VariableLegendLineClient(line) {
+    const t = String(line || '').trim();
+    if (!t || /^(?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}:/i.test(t)) {
+      return { isLegend: false };
+    }
+    const m = t.match(/^([A-Za-z\u0370-\u03FF][A-Za-z0-9\u0370-\u03FF_{}₀-₉ₛₚ()\s\\]{0,18})\s*=\s*(.+)$/);
+    if (!m) return { isLegend: false };
+    const lhs = m[1].trim();
+    const rhs = m[2].trim();
+    if (/\\(?:frac|sqrt|sum|int|prod|ln|log|sin|cos|tan)\b/.test(rhs)) return { isLegend: false };
+    if (/[=+\-×÷*/^]|²|³/.test(rhs)) {
+      const withoutUnits = rhs.replace(/\b(?:km\/h|m\/s|m\/s2|W\/m2|kg\/m3|g\/kg|°C|°F|in\s+%)\b/gi, '');
+      if (/[=+\-×÷*^]/.test(withoutUnits) || /\s\/\s/.test(withoutUnits)) return { isLegend: false };
+    }
+    const hasProseWords = /[A-Za-zÀ-ÖØ-öø-ÿ]{3,}\s+[A-Za-zÀ-ÖØ-öø-ÿ]{2,}/.test(rhs);
+    const endsWithUnit = /\b(?:in\s+(?:°?[CFK%]|km\/h|m\/s|%|kg|m)|pada\s+suhu|at\s+temperature)\s*\.?$/i.test(rhs);
+    if (hasProseWords || endsWithUnit) {
+      return { isLegend: true, symbol: lhs, description: rhs };
+    }
+    return { isLegend: false };
+  }
+
+  function promoteBalancedDivisionToFracClient(expr) {
+    let out = String(expr || '');
+    const fnPrefixRe = /(?:\\?(?:ln|log|sin|cos|tan|exp|csc|sec|cot|sqrt)|\\left)\s*$/i;
+    for (let pass = 0; pass < 3; pass++) {
+      let changed = false;
+      let res = '';
+      let i = 0;
+      while (i < out.length) {
+        if (out[i] === '(') {
+          let depth = 1;
+          let braceDepth = 0;
+          let j = i + 1;
+          let slashIdx = -1;
+          let multipleTopSlashes = false;
+          let hasTopLevelComma = false;
+          while (j < out.length && depth > 0) {
+            const ch = out[j];
+            if (ch === '{') braceDepth++;
+            else if (ch === '}' && braceDepth > 0) braceDepth--;
+            else if (braceDepth === 0) {
+              if (ch === '(') depth++;
+              else if (ch === ')') depth--;
+              else if (depth === 1 && ch === ',') hasTopLevelComma = true;
+              else if (depth === 1 && ch === '/' && j > i + 1 && j + 1 < out.length && /\s/.test(out[j - 1]) && /\s/.test(out[j + 1])) {
+                if (slashIdx === -1) slashIdx = j;
+                else multipleTopSlashes = true;
+              }
+            }
+            j++;
+          }
+          if (depth === 0 && slashIdx !== -1 && !multipleTopSlashes && !hasTopLevelComma) {
+            const leftPart = out.slice(i + 1, slashIdx).trim();
+            const rightPart = out.slice(slashIdx + 1, j - 1).trim();
+            if (leftPart && rightPart && !leftPart.includes('=') && !rightPart.includes('=')) {
+              const afterFn = fnPrefixRe.test(res);
+              if (afterFn && /\\left\s*$/i.test(res)) {
+                res += `\\frac{${leftPart}}{${rightPart}}`;
+              } else if (afterFn) {
+                res += `\\left(\\frac{${leftPart}}{${rightPart}}\\right)`;
+              } else {
+                res += `\\frac{${leftPart}}{${rightPart}}`;
+              }
+              i = j;
+              changed = true;
+              continue;
+            }
+          }
+        }
+        res += out[i];
+        i++;
+      }
+      out = res;
+      if (!changed) break;
+    }
+    out = out.replace(/\\(ln|log|sin|cos|tan|exp)\s*\\left\(\s*\(\\frac\{((?:[^{}]|\{[^{}]*\})+)\}\{((?:[^{}]|\{[^{}]*\})+)\}\)\s*\\right\)/g, '\\$1\\left(\\frac{$2}{$3}\\right)');
+    out = out.replace(/\\(ln|log|sin|cos|tan|exp)\s*\(\s*\(\\frac\{((?:[^{}]|\{[^{}]*\})+)\}\{((?:[^{}]|\{[^{}]*\})+)\}\)\s*\)/g, '\\$1\\left(\\frac{$2}{$3}\\right)');
+    out = out.replace(/\\(ln|log|sin|cos|tan|exp)\s*\(\s*\\frac\{((?:[^{}]|\{[^{}]*\})+)\}\{((?:[^{}]|\{[^{}]*\})+)\}\s*\)/g, '\\$1\\left(\\frac{$2}{$3}\\right)');
+    out = out.replace(/\\left\\left\(/g, '\\left(').replace(/\\right\\right\)/g, '\\right)');
+    return out;
+  }
+
+  function toZ21LatexMathClient(rawExpr) {
+    let s = restoreCorruptedJsonLatexEscapesClient(rawExpr);
+    if (!s) return '';
+    s = s
+      .replace(/^\$\$\s*([\s\S]*?)\s*\$\$$/g, '$1')
+      .replace(/^\\\[\s*([\s\S]*?)\s*\\\]$/g, '$1')
+      .replace(/^\\\(\s*([\s\S]*?)\s*\\\)$/g, '$1')
+      .replace(/^\$\s*([^$\n]+)\s*\$$/g, '$1')
+      .replace(/[`]/g, '')
+      .trim();
+
+    s = s.replace(/\\(?:dfrac|tfrac|cfrac)\b/g, '\\frac');
+    s = s
+      .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+/g, (m) => `^{${m.split('').map(c => Z21_INV_SUP_MAP_CLIENT[c] || c).join('')}}`)
+      .replace(/[₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ]+/g, (m) => `_{${m.split('').map(c => Z21_INV_SUB_MAP_CLIENT[c] || c).join('')}}`);
+
+    const symToTex = {
+      'α': '\\alpha', 'β': '\\beta', 'γ': '\\gamma', 'δ': '\\delta', 'Δ': '\\Delta',
+      'ε': '\\epsilon', 'ζ': '\\zeta', 'η': '\\eta', 'θ': '\\theta', 'κ': '\\kappa',
+      'λ': '\\lambda', 'μ': '\\mu', 'ν': '\\nu', 'ξ': '\\xi', 'π': '\\pi',
+      'ρ': '\\rho', 'σ': '\\sigma', 'Σ': '\\Sigma', 'τ': '\\tau', 'φ': '\\phi',
+      'Φ': '\\Phi', 'ψ': '\\psi', 'Ψ': '\\Psi', 'ω': '\\omega', 'Ω': '\\Omega',
+      '×': '\\times', '÷': '\\div', '·': '\\cdot', '±': '\\pm', '≈': '\\approx',
+      '≠': '\\neq', '≡': '\\equiv', '∝': '\\propto', '≤': '\\leq', '≥': '\\geq',
+      '∞': '\\infty', '∑': '\\sum', '∫': '\\int', '∂': '\\partial', '∇': '\\nabla',
+      '∈': '\\in', '∀': '\\forall', '∃': '\\exists', '→': '\\rightarrow', '⇒': '\\Rightarrow',
+      'ℝ': '\\mathbb{R}', 'ℕ': '\\mathbb{N}', 'ℤ': '\\mathbb{Z}'
+    };
+    s = s.replace(/[αβγδΔεζηθκλμνξπρσΣτφΦψΨωΩ×÷·±≈≠≡∝≤≥∞∑∫∂∇∈∀∃→⇒ℝℕℤ]/g, (ch, idx, full) => {
+      const cmd = symToTex[ch];
+      if (!cmd) return ch;
+      const nextCh = full[idx + 1] || '';
+      const needSpace = /^\\[a-zA-Z]+$/.test(cmd) && /[a-zA-Z]/.test(nextCh);
+      return needSpace ? `${cmd} ` : cmd;
+    });
+
+    s = s
+      .replace(/°\s*([CF])\b/g, '^{\\circ}\\mathrm{$1}')
+      .replace(/°/g, '^{\\circ}')
+      .replace(/(?<!\\)%/g, '\\%')
+      .replace(/\bc([1-9])\b(?=\s*(?:[+\-*/=\\]|T|R|\(|\^|$))/g, 'c_{$1}')
+      .replace(/([+\-=/(]\s*)c([1-9])(?=[TR\s+\-*/=\\]|$)/g, '$1c_{$2}')
+      .replace(/(\/\s*|\(\s*)es\b/g, '$1e_{s}')
+      .replace(/\bes(?=\s*=|\s*\))/g, 'e_{s}')
+      .replace(/_([a-zA-Z0-9]{2,})\b/g, '_{$1}')
+      .replace(/_([a-zA-Z0-9])(?![a-zA-Z0-9}])/g, '_{$1}')
+      .replace(/\^([0-9]+)(?![0-9}])/g, '^{$1}')
+      .replace(/(?<!\\)\b(ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max)\b(?=\s*(?:\\left|[(\[{]))/g, '\\$1')
+      .replace(/\b(cos|sin|tan|exp|ln|log)\s+([θ\w])/gi, '\\$1 $2')
+      .replace(/(\bP\s*\(\s*)([A-Z][a-z]{2,})(\s*\))/g, '$1\\mathrm{$2}$3')
+      .replace(/√\s*\(([^()]+)\)/g, '\\sqrt{$1}')
+      .replace(/([A-Za-z0-9}])\s*\*\s*([A-Za-z0-9\\(])/g, '$1 \\times $2');
+
+    s = promoteBalancedDivisionToFracClient(s);
+    s = s.replace(/(\b\w\w?\s*=\s*)([A-Za-z0-9\\_{}]+)\s+\/\s+([A-Za-z0-9\\_{}]+)(?=$|\s*[×+\-=])/g, '$1\\frac{$2}{$3}');
+
+    const leftCount = (s.match(/\\left(?![a-zA-Z])/g) || []).length;
+    const rightCount = (s.match(/\\right(?![a-zA-Z])/g) || []).length;
+    if (leftCount !== rightCount) {
+      s = s.replace(/\\left\s*([([{|])/g, '$1').replace(/\\right\s*([)\]}|])/g, '$1').replace(/\\(?:left|right)\b\s*\.?/g, '');
+    }
+    return s.replace(/\s+/g, ' ').trim();
+  }
+
+  function normalizeZ21ScientificTextClient(rawText, options = {}) {
+    let s = restoreCorruptedJsonLatexEscapesClient(rawText);
+    if (!s) return '';
+
+    const preserveFrac = Boolean(options && options.preserveFrac);
 
     s = s
       .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, (_, eq) => eq.trim())
@@ -34417,10 +35578,18 @@ ATURAN MUTLAK EKSEKUSI AGEN:
     s = s
       .replace(/\\+left\s*\\?([([{|])/g, '$1')
       .replace(/\\+right\s*\\?([)\]}|])/g, '$1')
-      .replace(/\\+(?:left|right)\b\s*\.?/g, '');
+      .replace(/\\+(?:left|right)\b\s*\.?/g, '')
+      .replace(/\\([%&#_])/g, '$1')
+      .replace(/\\(?:,|;|:|quad|qquad)\b/g, ' ')
+      .replace(/\\!/g, '');
+
+    if (!preserveFrac) {
+      s = s.replace(/\\(?:dfrac|tfrac|cfrac|frac)\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '($1 / $2)');
+    } else {
+      s = s.replace(/\\(?:dfrac|tfrac|cfrac)\b/g, '\\frac');
+    }
 
     s = s
-      .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '($1 / $2)')
       .replace(/\\sqrt\s*\{([^{}]+)\}/g, '√($1)')
       .replace(/\\mathbb\s*\{R\}/g, 'ℝ')
       .replace(/\\mathbb\s*\{N\}/g, 'ℕ')
@@ -34479,9 +35648,9 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/\\(cos|sin|tan|log|ln|exp|lim)\b/g, '$1');
 
     s = s
-      .replace(/(\b(?:Suhu|Temperatur|Temp|T)\s*[:=]?\s*-?\d+(?:[.,]\d+)?)\s*°?\s*([CF])(?![A-Za-z0-9_])/gi, (_, pre, u) => `${pre}°${u.toUpperCase()}`)
-      .replace(/\b(-?\d+(?:[.,]\d+)?)\s+([CF])(?=[,.;:)\s]|$)/g, '$1°$2')
-      .replace(/\(\s*(°?\s*[CF])\s*\)/g, (_, u) => `(°${u.replace(/[°\s]/g, '').toUpperCase()})`);
+      .replace(/(\b(?:Suhu|Temperatur|Temp|Temperature|Feels\s*Like|Terasa|Dew\s*Point|Titik\s*Embun|T|c)\s*[:=]?\s*-?\d+(?:[.,]\d+)?)\s*°?\s*([CF])(?![A-Za-z0-9_])/gi, (_, pre, u) => `${pre}°${u.toUpperCase()}`)
+      .replace(/((?:suhu|temperatur|temp|temperature|terasa|udara|dingin|panas|celsius|fahrenheit|in|dalam)[^\n]{0,24}?\b-?\d+(?:[.,]\d+)?)\s+([CF])(?=[,.;:)\s]|$)/gi, (_, pre, u) => `${pre}°${u.toUpperCase()}`)
+      .replace(/\(\s*°?\s*([CF])\s*\)/g, (_, u) => `(°${u.toUpperCase()})`);
 
     s = s
       .replace(/\^\{([0-9+-]+)\}/g, (_, d) => d.split('').map(c => Z21_SUP_MAP_CLIENT[c] || c).join(''))
@@ -34490,13 +35659,12 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       .replace(/_([0-9]+)/g, (_, d) => d.split('').map(c => Z21_SUB_MAP_CLIENT[c] || c).join(''))
       .replace(/_\{\s*([0-9a-zA-Z+-]+)\s*\}/g, (_, d) => {
         const mapped = d.split('').map(c => Z21_SUB_MAP_CLIENT[c] || Z21_SUB_MAP_CLIENT[c.toLowerCase()] || '').join('');
-        return mapped.length === d.length ? mapped : `_{${d}}`;
+        return (d.length === 1 || (d.length <= 2 && /^[0-9+-]+$/.test(d))) && mapped.length === d.length ? mapped : `_{${d}}`;
       })
       .replace(/_([a-zA-Z])(?![a-zA-Z0-9])/g, (_, d) => {
         const m = Z21_SUB_MAP_CLIENT[d] || Z21_SUB_MAP_CLIENT[d.toLowerCase()];
         return m ? m : `_{${d}}`;
-      })
-      .replace(/\bTd\b(?=\s*=)/g, 'T_{d}');
+      });
 
     s = s
       .replace(/\bc([1-9])\b(?=\s*(?:[+\-×*/=]|T|R|\(|$|[⁰¹²³⁴⁵⁶⁷⁸⁹]))/g, (_, d) => `c${Z21_SUB_MAP_CLIENT[d] || d}`)
@@ -34511,15 +35679,17 @@ ATURAN MUTLAK EKSEKUSI AGEN:
   function isZ21FormulaLineClient(line) {
     const t = String(line || '').trim();
     if (!t) return false;
+    if (isZ21VariableLegendLineClient(t).isLegend) return false;
     if (/^(?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}:/i.test(t)) return true;
-    if (/^[A-Za-z\u0370-\u03FF][A-Za-z0-9\u0370-\u03FF_₀-₉⁰-⁹ₛ,{}\s()]{0,28}\s*=\s*.+/.test(t) && /(?:\s[+\-×*/]\s|[²³⁴₀-₉ₛθΔπγ]|\b(?:cos|sin|log|ln|exp|limit)\s*\(|\^\{|_\{)/i.test(t)) {
-      return t.length <= 220;
+    if (/\\(?:frac|dfrac|sqrt|sum|int|prod|lim)\b/.test(t) && t.length <= 260) return true;
+    if (/^[A-Za-z\u0370-\u03FF][A-Za-z0-9\u0370-\u03FF_₀-₉⁰-⁹ₛₚ,{}\s()]{0,28}\s*=\s*.+/.test(t) && /(?:\s[+\-×÷*/=]\s|[²³⁴₀-₉ₛₚθΔπγ]|\b(?:cos|sin|tan|log|ln|exp|limit)\s*\(|\^\{|_\{|\d+\s*%)/i.test(t)) {
+      return t.length <= 260;
     }
     return false;
   }
 
-  function parseZ21FormulaPartsClient(line) {
-    const t = normalizeZ21ScientificTextClient(line).trim();
+  function parseZ21FormulaPartsClient(line, preserveFrac = false) {
+    const t = normalizeZ21ScientificTextClient(line, { preserveFrac }).trim();
     const m = t.match(/^((?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}):\s*(.+)$/i);
     if (m) return { label: m[1].trim(), expr: m[2].trim() };
     return { label: '', expr: t };
@@ -34527,15 +35697,25 @@ ATURAN MUTLAK EKSEKUSI AGEN:
 
   function renderZ21MathSupSubHtml(escapedHtmlStr) {
     return String(escapedHtmlStr || '')
+      .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '<span class="z21-frac"><span class="z21-frac-num">$1</span><span class="z21-frac-den">$2</span></span>')
       .replace(/\^\{([^{}]+)\}/g, '<sup>$1</sup>')
       .replace(/_\{([^{}]+)\}/g, '<sub>$1</sub>')
       .replace(/([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+)/g, (m) => `<sup>${m.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]/g, c => '0123456789+-'['⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻'.indexOf(c)])}</sup>`)
-      .replace(/([₀₁₂₃₄₅₆₇₈₉ₛₐₑₕᵢⱼₖₗₘₙₒₚᵣₜᵤᵥₓ]+)/g, (m) => `<sub>${m.replace(/[₀₁₂₃₄₅₆₇₈₉ₛₐₑₕᵢⱼₖₗₘₙₒₚᵣₜᵤᵥₓ]/g, c => '0123456789saehijklmnoprtuvx'['₀₁₂₃₄₅₆₇₈₉ₛₐₑₕᵢⱼₖₗₘₙₒₚᵣₜᵤᵥₓ'.indexOf(c)])}</sub>`);
+      .replace(/([₀₁₂₃₄₅₆₇₈₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ]+)/g, (m) => `<sub>${m.replace(/[₀₁₂₃₄₅₆₇₈₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ]/g, c => '0123456789spaehijlmnortuvx'['₀₁₂₃₄₅₆₇₈₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ'.indexOf(c)])}</sub>`);
   }
 
   function formatZ21PreviewHtmlContent(cleanedDocBody) {
     const rawLines = String(cleanedDocBody || '').split(/\r?\n/);
     const transformed = [];
+    const previewMathTokens = [];
+    const hasKatex = typeof window !== 'undefined' && window.katex && typeof window.katex.renderToString === 'function';
+
+    const pushPreviewMathToken = (latexExpr, displayMode, fallbackStr) => {
+      const token = `@@ZOZ_DOC_MATH_${previewMathTokens.length}@@`;
+      previewMathTokens.push({ token, latex: latexExpr, displayMode: Boolean(displayMode), fallbackStr: fallbackStr || latexExpr });
+      return token;
+    };
+
     for (let i = 0; i < rawLines.length; i++) {
       const rawLine = rawLines[i];
       const trimmed = rawLine.trim();
@@ -34557,17 +35737,29 @@ ATURAN MUTLAK EKSEKUSI AGEN:
         continue;
       }
       const isBulletLine = /^[-*•]\s+/.test(trimmed);
-      const normLine = normalizeZ21ScientificTextClient(trimmed);
+      const rawNoBullet = trimmed.replace(/^[-*•]\s+/, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+      const normLine = normalizeZ21ScientificTextClient(trimmed, { preserveFrac: true });
       const plainForFormula = normLine.replace(/^[-*•]\s+/, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
-      if (!isBulletLine && isZ21FormulaLineClient(plainForFormula)) {
-        const { label, expr } = parseZ21FormulaPartsClient(plainForFormula);
-        const exprHtml = renderZ21MathSupSubHtml(escapeHtml(expr));
+
+      if (isZ21FormulaLineClient(plainForFormula) && !isZ21VariableLegendLineClient(plainForFormula).isLegend) {
+        const { label, expr } = parseZ21FormulaPartsClient(plainForFormula, true);
+        const { expr: rawExprPart } = parseZ21FormulaPartsClient(rawNoBullet, true);
+        const latexStr = toZ21LatexMathClient(rawExprPart || expr);
+        const token = pushPreviewMathToken(latexStr, true, promoteBalancedDivisionToFracClient(expr));
         const labelHtml = label ? `<div class="z21-eq-label">${escapeHtml(label)}</div>` : '';
-        transformed.push(`<div class="z21-equation-box">${labelHtml}<div class="z21-eq-expr">${exprHtml}</div></div>`);
+        transformed.push(`<div class="z21-equation-box">${labelHtml}<div class="z21-eq-expr">${token}</div></div>`);
         continue;
       }
       if (isBulletLine) {
-        const mDef = plainForFormula.match(/^([A-Za-z\u0370-\u03FF][A-Za-z0-9\u0370-\u03FF_{}₀-₉ₛ()\s]{0,14})\s*=\s*(.+)$/);
+        const legend = isZ21VariableLegendLineClient(plainForFormula);
+        if (legend.isLegend) {
+          const lhsLatex = toZ21LatexMathClient(legend.symbol);
+          const lhsTok = pushPreviewMathToken(lhsLatex, false, legend.symbol);
+          const rhsClean = normalizeZ21ScientificTextClient(legend.description);
+          transformed.push(`- ${lhsTok} = ${renderZ21MathSupSubHtml(escapeHtml(rhsClean))}`);
+          continue;
+        }
+        const mDef = plainForFormula.match(/^([A-Za-z\u0370-\u03FF][A-Za-z0-9\u0370-\u03FF_{}₀-₉ₛₚ()\s]{0,16})\s*=\s*(.+)$/);
         if (mDef) {
           transformed.push(`- **${renderZ21MathSupSubHtml(escapeHtml(mDef[1].trim()))}** = ${renderZ21MathSupSubHtml(escapeHtml(mDef[2]))}`);
           continue;
@@ -34583,8 +35775,31 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       }
       transformed.push(renderZ21MathSupSubHtml(normLine));
     }
+
     const mdText = transformed.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-    return (window.marked && window.marked.parse) ? sanitizeHtmlSafe(window.marked.parse(mdText)) : escapeHtml(mdText);
+    let htmlOut = (window.marked && window.marked.parse) ? sanitizeHtmlSafe(window.marked.parse(mdText)) : mdText;
+    for (const item of previewMathTokens) {
+      let replacement = '';
+      if (hasKatex) {
+        try {
+          replacement = window.katex.renderToString(normalizeLatexFormulaForKatex(item.latex), {
+            displayMode: item.displayMode,
+            throwOnError: false,
+            strict: false,
+            trust: false
+          });
+        } catch (_) {
+          replacement = '';
+        }
+      }
+      if (!replacement) {
+        replacement = renderZ21MathSupSubHtml(escapeHtml(item.fallbackStr));
+      }
+      if (htmlOut.includes(item.token)) {
+        htmlOut = htmlOut.split(item.token).join(replacement);
+      }
+    }
+    return htmlOut;
   }
 
   function extractEmbeddedZ21DocBuilderSpec(rawText) {
@@ -34617,8 +35832,11 @@ ATURAN MUTLAK EKSEKUSI AGEN:
           sections: Array.isArray(argSpec.sections)
             ? argSpec.sections.map(s => (s && typeof s === 'object') ? ({
                 heading: s.heading ? stripZ21InlineMd(s.heading) : 'Bagian',
-                content: s.content ? normalizeZ21ScientificTextClient(s.content).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1') : '',
-                bullets: Array.isArray(s.bullets) ? s.bullets.map(stripZ21InlineMd).filter(Boolean) : []
+                content: s.content ? String(s.content).split(/\r?\n/).map(ln => normalizeZ21ScientificTextClient(ln, { preserveFrac: isZ21FormulaLineClient(ln) }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1')).join('\n') : '',
+                bullets: Array.isArray(s.bullets) ? s.bullets.map(b => {
+                  const rb = stripZ21InlineMd(b);
+                  return isZ21FormulaLineClient(rb) ? normalizeZ21ScientificTextClient(rb, { preserveFrac: true }) : rb;
+                }).filter(Boolean) : []
               }) : s).filter(Boolean)
             : [],
           tables: Array.isArray(argSpec.tables) ? argSpec.tables : [],
@@ -37541,7 +38759,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             },
             sections: {
               type: 'array',
-              description: 'Opsional (untuk PDF/Word): Daftar bab [{ heading, content, bullets, table }].',
+              description: 'Opsional (untuk PDF/Word): Daftar bab [{ heading, content, bullets, table }]. Tulis persamaan matematika dalam format LaTeX baku (\\frac, \\ln, \\sqrt, T_{dp}, c_{1}, V^{0.16}, \\%).',
               items: { type: 'object' }
             },
             tables: {
@@ -39483,14 +40701,31 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       if (cp === 0x2018 || cp === 0x2019) { out += "'"; continue; }
       if (cp === 0x201C || cp === 0x201D) { out += '"'; continue; }
       if (cp === 0x2026) { out += '...'; continue; }
+      if (cp === 0x2070) { out += '0'; continue; }
+      if (cp >= 0x2074 && cp <= 0x2079) { out += String(cp - 0x2070); continue; }
+      if (cp === 0x207A) { out += '+'; continue; }
+      if (cp === 0x207B) { out += '-'; continue; }
       if (cp >= 0x2080 && cp <= 0x2089) { out += String(cp - 0x2080); continue; }
-      if (cp === 0x209B) { out += 's'; continue; }
+      const subLetters = {
+        0x2090: 'a', 0x2091: 'e', 0x2092: 'o', 0x2093: 'x', 0x2095: 'h',
+        0x2096: 'k', 0x2097: 'l', 0x2098: 'm', 0x2099: 'n', 0x209A: 'p',
+        0x209B: 's', 0x209C: 't', 0x1D62: 'i', 0x1D63: 'r', 0x1D64: 'u', 0x1D65: 'v', 0x2C7C: 'j'
+      };
+      if (subLetters[cp]) { out += subLetters[cp]; continue; }
       if (cp === 0x03B8) { out += 'theta'; continue; }
       if (cp === 0x03B1) { out += 'alpha'; continue; }
       if (cp === 0x03B2) { out += 'beta'; continue; }
       if (cp === 0x03B3) { out += 'gamma'; continue; }
+      if (cp === 0x03B4) { out += 'delta'; continue; }
       if (cp === 0x0394) { out += 'Delta'; continue; }
+      if (cp === 0x03BB) { out += 'lambda'; continue; }
+      if (cp === 0x03BC) { out += 'mu'; continue; }
       if (cp === 0x03C0) { out += 'pi'; continue; }
+      if (cp === 0x03C1) { out += 'rho'; continue; }
+      if (cp === 0x03C3) { out += 'sigma'; continue; }
+      if (cp === 0x03A3) { out += 'Sigma'; continue; }
+      if (cp === 0x03C9) { out += 'omega'; continue; }
+      if (cp === 0x03A9) { out += 'Omega'; continue; }
       if (cp === 0x211D) { out += 'R'; continue; }
       if (cp === 0x2248) { out += '~='; continue; }
       if (cp === 0x2260) { out += '!='; continue; }
@@ -39746,7 +40981,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       for (const r of rows) {
         const arr = Array.isArray(r) ? r : [r];
         rowsXml.push('<w:tr>' + arr.map(c =>
-          `<w:tc><w:p><w:r><w:t xml:space="preserve">${escapeClientXml(stripZ21InlineMd(c))}</w:t></w:r></w:p></w:tc>`
+          `<w:tc><w:p>${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(stripZ21InlineMd(c)))}</w:p></w:tc>`
         ).join('') + '</w:tr>');
       }
       if (rowsXml.length > 0) {
@@ -39759,28 +40994,38 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const sh = stripZ21InlineMd(sec.heading || '');
       if (sh && sh.toLowerCase() !== title.toLowerCase()) {
         seenH.add(sh);
-        paras.push(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>${escapeClientXml(sh)}</w:t></w:r></w:p>`);
+        paras.push(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(sh))}</w:p>`);
       }
       if (sec.content) {
         for (const ln of cleanZ21ClientResidue(sec.content).split(/\r?\n/)) {
           const tLn = ln.trim();
           if (!tLn) continue;
+          const normLnFrac = normalizeZ21ScientificTextClient(tLn, { preserveFrac: true }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
           const normLn = stripZ21InlineMd(tLn);
-          if (isZ21FormulaLineClient(normLn)) {
-            const { label, expr } = parseZ21FormulaPartsClient(normLn);
-            paras.push(`<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:ind w:left="240" w:right="240"/><w:spacing w:before="100" w:after="100"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t>${escapeClientXml(label)}: </w:t></w:r><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/></w:rPr><w:t xml:space="preserve">${escapeClientXml(expr)}</w:t></w:r></w:p>`);
+          if (isZ21FormulaLineClient(normLnFrac) && !isZ21VariableLegendLineClient(normLnFrac).isLegend) {
+            const { label, expr } = parseZ21FormulaPartsClient(normLnFrac);
+            const labelXml = label ? `<w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t xml:space="preserve">${escapeClientXml(label)}: </w:t></w:r>` : '';
+            const exprRuns = renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(expr), '<w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/>');
+            paras.push(`<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:ind w:left="240" w:right="240"/><w:spacing w:before="100" w:after="100"/></w:pPr>${labelXml}${exprRuns}</w:p>`);
             continue;
           }
           const kvMatch = normLn.match(/^((?:Lokasi|Tanggal|Parameter\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\s*:)\s*(.+)$/i);
           if (kvMatch) {
-            paras.push(`<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${escapeClientXml(kvMatch[1])} </w:t></w:r><w:r><w:t xml:space="preserve">${escapeClientXml(kvMatch[2])}</w:t></w:r></w:p>`);
+            paras.push(`<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${escapeClientXml(kvMatch[1])} </w:t></w:r>${renderMathTextToDocxRuns(kvMatch[2])}</w:p>`);
             continue;
           }
-          paras.push(`<w:p><w:r><w:t xml:space="preserve">${escapeClientXml(normLn)}</w:t></w:r></w:p>`);
+          paras.push(`<w:p>${renderMathTextToDocxRuns(normLn)}</w:p>`);
         }
       }
       for (const b of (Array.isArray(sec.bullets) ? sec.bullets : [])) {
-        paras.push(`<w:p><w:r><w:t xml:space="preserve">• ${escapeClientXml(stripZ21InlineMd(b))}</w:t></w:r></w:p>`);
+        const rbFrac = normalizeZ21ScientificTextClient(b, { preserveFrac: true }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+        if (isZ21FormulaLineClient(rbFrac) && !isZ21VariableLegendLineClient(rbFrac).isLegend) {
+          const { label, expr } = parseZ21FormulaPartsClient(rbFrac);
+          const labelXml = label ? `<w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t xml:space="preserve">${escapeClientXml(label)}: </w:t></w:r>` : '';
+          paras.push(`<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:ind w:left="240" w:right="240"/><w:spacing w:before="100" w:after="100"/></w:pPr>${labelXml}${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(expr), '<w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/>')}</w:p>`);
+        } else {
+          paras.push(`<w:p><w:r><w:t xml:space="preserve">• </w:t></w:r>${renderMathTextToDocxRuns(stripZ21InlineMd(b))}</w:p>`);
+        }
       }
       if (sec.table) pushDocxTable(sec.table);
     }
@@ -39808,8 +41053,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (spec.subtitle) out.push(`*${stripZ21InlineMd(spec.subtitle)}*`);
     for (const sec of (Array.isArray(spec.sections) ? spec.sections : [])) {
       if (sec.heading && sec.heading !== spec.title) out.push(`## ${stripZ21InlineMd(sec.heading)}`);
-      if (sec.content) out.push(normalizeZ21ScientificTextClient(sec.content));
-      if (Array.isArray(sec.bullets) && sec.bullets.length > 0) out.push(sec.bullets.map(b => `- ${stripZ21InlineMd(b)}`).join('\n'));
+      if (sec.content) {
+        const preservedLines = String(sec.content).split(/\r?\n/).map(ln =>
+          normalizeZ21ScientificTextClient(ln, { preserveFrac: isZ21FormulaLineClient(ln) })
+        ).join('\n');
+        out.push(preservedLines);
+      }
+      if (Array.isArray(sec.bullets) && sec.bullets.length > 0) {
+        out.push(sec.bullets.map(b => {
+          const rb = stripZ21InlineMd(b);
+          return `- ${isZ21FormulaLineClient(rb) ? normalizeZ21ScientificTextClient(rb, { preserveFrac: true }) : rb}`;
+        }).join('\n'));
+      }
     }
     for (const sh of (Array.isArray(spec.sheets) ? spec.sheets : (Array.isArray(spec.tables) ? spec.tables : []))) {
       const sHeading = sh.name || sh.title || '';
@@ -39841,6 +41096,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const cleanArgs = { ...args, filename: fname, format: ext };
     const previewText = buildZ21DocumentPreviewMarkdown(cleanArgs, fname, ext, ['zoz-client-native'], 'zoz-client-sandbox');
     let base64 = '';
+    let usedEngine = 'zoz-client-sandbox';
+    let libsUsed = ['zoz-client-native'];
     if (ext === 'xlsx') {
       base64 = compileStructuredDataToXlsxBase64(cleanArgs);
     } else if (ext === 'csv') {
@@ -39851,15 +41108,34 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       for (const r of (Array.isArray(sh.rows) ? sh.rows : [])) csvLines.push((Array.isArray(r) ? r : [r]).map(escCsv).join(','));
       base64 = uint8ArrayToBase64(new TextEncoder().encode('\uFEFF' + csvLines.join('\r\n')));
     } else if (ext === 'docx') {
-      base64 = buildClientDocxBase64(cleanArgs);
+      if (typeof document !== 'undefined') {
+        try {
+          const docxBlob = await compileMarkdownToDocxBlob(previewText, fname);
+          base64 = await blobToBase64(docxBlob);
+          usedEngine = 'zoz-rich-math-docx';
+          libsUsed = ['jszip', 'zoz-canvas-mathtext'];
+        } catch (_) {}
+      }
+      if (!base64) base64 = buildClientDocxBase64(cleanArgs);
     } else {
-      base64 = buildStructuredClientPdfBase64(cleanArgs);
+      if (typeof document !== 'undefined') {
+        try {
+          const richBlob = await compileZ21SpecToRichPdfBlob(cleanArgs);
+          const b64 = await blobToBase64(richBlob);
+          if (b64) {
+            base64 = b64;
+            usedEngine = 'zoz-rich-math-pdf';
+            libsUsed = ['jspdf', 'zoz-canvas-mathtext'];
+          }
+        } catch (_) {}
+      }
+      if (!base64) base64 = buildStructuredClientPdfBase64(cleanArgs);
     }
     const byteSize = base64ToUint8Array(base64).length;
     return {
       success: true,
-      engine: 'zoz-client-sandbox',
-      librariesUsed: ['zoz-client-native'],
+      engine: usedEngine,
+      librariesUsed: libsUsed,
       files: [{
         name: fname,
         mime: guessMimeFromName(fname),
@@ -39869,8 +41145,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         base64,
         previewText,
         pythonScript: String(args.python_code || ''),
-        engine: 'zoz-client-sandbox',
-        librariesUsed: ['zoz-client-native']
+        engine: usedEngine,
+        librariesUsed: libsUsed,
+        z21Spec: cleanArgs
       }]
     };
   }
@@ -39891,6 +41168,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       base64: String(art.base64 || ''),
       downloadUrl: String(art.downloadUrl || ''),
       artifactId: String(art.artifactId || ''),
+      engine: String(art.engine || ''),
+      z21Spec: art.z21Spec || null,
       byteSize,
       lineCount: Math.max(1, preview.split('\n').length),
       size: `${art.size || formatFileSize(byteSize)}`,
@@ -42188,8 +43467,53 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
         if (!buildResult || !Array.isArray(buildResult.files) || buildResult.files.length === 0) {
           buildResult = await compileZ21DocumentArtifactClient(reqPayload);
+        } else if (buildResult.engine !== 'python-container-sandbox' && typeof document !== 'undefined') {
+          const primaryFile = buildResult.files[0];
+          const primaryExt = String(primaryFile?.ext || detectRequestedZ21DocFormat(reqPayload.format || reqPayload.filename || '', 'pdf') || 'pdf').toLowerCase();
+          if (primaryExt === 'pdf') {
+            try {
+              const richBlob = await compileZ21SpecToRichPdfBlob({ ...reqPayload, filename: primaryFile?.name || reqPayload.filename, format: 'pdf' });
+              const richB64 = await blobToBase64(richBlob);
+              if (richB64) {
+                const richBytes = base64ToUint8Array(richB64).length;
+                buildResult.files[0] = {
+                  ...primaryFile,
+                  base64: richB64,
+                  byteSize: richBytes,
+                  size: formatFileSize(richBytes),
+                  engine: 'zoz-rich-math-pdf',
+                  z21Spec: reqPayload
+                };
+                buildResult.engine = 'zoz-rich-math-pdf';
+                buildResult.librariesUsed = ['jspdf', 'zoz-canvas-mathtext'];
+              }
+            } catch (_) {}
+          } else if (primaryExt === 'docx') {
+            try {
+              const richDocxMd = buildZ21DocumentPreviewMarkdown(reqPayload, primaryFile?.name || reqPayload.filename, 'docx', ['jszip'], 'zoz-rich-math-docx');
+              const richDocxBlob = await compileMarkdownToDocxBlob(richDocxMd, primaryFile?.name || reqPayload.filename);
+              const richDocxB64 = await blobToBase64(richDocxBlob);
+              if (richDocxB64) {
+                const richBytes = base64ToUint8Array(richDocxB64).length;
+                buildResult.files[0] = {
+                  ...primaryFile,
+                  base64: richDocxB64,
+                  byteSize: richBytes,
+                  size: formatFileSize(richBytes),
+                  engine: 'zoz-rich-math-docx',
+                  z21Spec: reqPayload
+                };
+                buildResult.engine = 'zoz-rich-math-docx';
+                buildResult.librariesUsed = ['jszip', 'zoz-canvas-mathtext'];
+              }
+            } catch (_) {}
+          }
         }
-        const artifactFiles = (buildResult.files || []).map(createZ21ArtifactFileObject);
+        const artifactFiles = (buildResult.files || []).map((f) => createZ21ArtifactFileObject({
+          ...f,
+          engine: f.engine || buildResult.engine || '',
+          z21Spec: f.z21Spec || reqPayload
+        }));
         if (toolContext && typeof toolContext === 'object') {
           if (!Array.isArray(toolContext.collectedArtifactFiles)) toolContext.collectedArtifactFiles = [];
           artifactFiles.forEach((af) => {
@@ -65932,7 +67256,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://document-first-map-destinations.trycloudflare.com',
+    activeTunnelUrl: 'https://learning-adware-lawyer-lower.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -72277,6 +73601,12 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     getZ21DocumentBuilderDirective,
     stripZ21DocumentCodeBlocksFromChat,
     normalizeZ21ScientificTextClient,
+    toZ21LatexMathClient,
+    isZ21VariableLegendLineClient,
+    parseZ21LatexAst,
+    ZozCanvasMathRenderer,
+    compileZ21SpecToRichPdfBlob,
+    sanitizeJsPdfWinAnsiText,
     formatZ21PreviewHtmlContent,
     generatePdfDocPreviewHtml,
     extractEmbeddedZ21DocBuilderSpec,

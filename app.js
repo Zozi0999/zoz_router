@@ -84,7 +84,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://document-first-map-destinations.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://learning-adware-lawyer-lower.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -12543,28 +12543,62 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const bodyStr = String(options.text || text || '');
       const fontFamily = options.fontFamily || '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
       const boldFont = `700 ${fontSize}px ${fontFamily}`;
-      const regFont = `${options.italic ? 'italic ' : ''}400 ${fontSize}px ${fontFamily}`;
+      const regWeight = options.bold ? '700' : '400';
+      const regFont = `${options.italic ? 'italic ' : ''}${regWeight} ${fontSize}px ${fontFamily}`;
+      const maxWidthPt = Number(options.maxWidthPt) || 0;
 
       ctx.font = boldFont;
       const preW = boldPrefix ? (ctx.measureText(boldPrefix).width || boldPrefix.length * fontSize * 0.52) : 0;
       ctx.font = regFont;
-      const bodyM = ctx.measureText(bodyStr);
-      const bodyW = bodyM.width || bodyStr.length * fontSize * 0.5;
-      const wPt = preW + bodyW + 4;
-      const hPt = fontSize * 1.45;
+
+      const lines = [];
+      if (maxWidthPt > 40) {
+        const words = bodyStr.split(/(\s+)/);
+        let cur = '';
+        let firstLine = true;
+        for (const w of words) {
+          const limit = firstLine ? Math.max(40, maxWidthPt - preW - 4) : Math.max(40, maxWidthPt - 4);
+          const test = cur + w;
+          const tw = ctx.measureText(test).width || test.length * fontSize * 0.5;
+          if (cur && tw > limit && w.trim()) {
+            lines.push({ text: cur.trimEnd(), prefix: firstLine ? boldPrefix : '', preW: firstLine ? preW : 0 });
+            firstLine = false;
+            cur = w.replace(/^\s+/, '');
+          } else {
+            cur = test;
+          }
+        }
+        if (cur || lines.length === 0) {
+          lines.push({ text: cur.trimEnd(), prefix: firstLine ? boldPrefix : '', preW: firstLine ? preW : 0 });
+        }
+      } else {
+        lines.push({ text: bodyStr, prefix: boldPrefix, preW });
+      }
+
+      let maxLineW = 0;
+      lines.forEach((ln) => {
+        ctx.font = regFont;
+        const mw = ln.preW + (ctx.measureText(ln.text).width || ln.text.length * fontSize * 0.5);
+        if (mw > maxLineW) maxLineW = mw;
+      });
+      const lineH = fontSize * 1.42;
+      const wPt = Math.max(12, maxLineW + 4);
+      const hPt = Math.max(fontSize * 1.45, lines.length * lineH + 2);
       canvas.width = Math.max(4, Math.ceil(wPt * dpr));
       canvas.height = Math.max(4, Math.ceil(hPt * dpr));
       if (typeof ctx.setTransform === 'function') ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       else if (typeof ctx.scale === 'function') ctx.scale(dpr, dpr);
       ctx.textBaseline = 'alphabetic';
       ctx.fillStyle = options.color || '#334155';
-      const baseY = fontSize * 1.05;
-      if (boldPrefix) {
-        ctx.font = boldFont;
-        ctx.fillText(boldPrefix, 1, baseY);
-      }
-      ctx.font = regFont;
-      ctx.fillText(bodyStr, 1 + preW, baseY);
+      lines.forEach((ln, idx) => {
+        const baseY = (fontSize * 1.05) + (idx * lineH);
+        if (ln.prefix) {
+          ctx.font = boldFont;
+          ctx.fillText(ln.prefix, 1, baseY);
+        }
+        ctx.font = regFont;
+        ctx.fillText(ln.text, 1 + ln.preW, baseY);
+      });
       const dataUrl = typeof canvas.toDataURL === 'function' ? canvas.toDataURL('image/png') : '';
       if (!dataUrl || !dataUrl.startsWith('data:image/png')) return null;
       const ptToMm = 25.4 / 72;
@@ -12644,6 +12678,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
@@ -12657,10 +12692,9 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
   <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
 </Relationships>`;
 
-    const wordRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-</Relationships>`;
+    const mediaImages = [];
+    let nextImageNum = 1;
+    let nextDocPrId = 1;
 
     const coreXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -12772,20 +12806,97 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       </w:p>
     `;
 
+    const buildDocxEqParagraphXml = (rawEqLine, label = '', fallbackExpr = '') => {
+      const eqLatex = toZ21LatexMathClient(rawEqLine || fallbackExpr);
+      const rendered = ZozCanvasMathRenderer.renderZ21LatexToPngDataUrl(eqLatex, {
+        fontSizePt: 12,
+        maxWidthPt: 425,
+        scale: 4,
+        color: '#0f172a',
+        backgroundColor: '#f0f9ff',
+        padXPt: 8,
+        padYPt: 6
+      });
+      const labelXml = label
+        ? `<w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t xml:space="preserve">${escapeXml(label)}: </w:t></w:r>`
+        : '';
+      if (rendered && rendered.dataUrl && rendered.dataUrl.includes(',')) {
+        const b64 = rendered.dataUrl.split(',')[1];
+        const imgNum = nextImageNum++;
+        const docPrId = nextDocPrId++;
+        const relId = `rId${imgNum + 1}`;
+        const fileName = `media/eq_${imgNum}.png`;
+        mediaImages.push({ relId, fileName, bytes: base64ToUint8Array(b64) });
+        const clampedPtW = Math.min(435, Math.max(40, rendered.widthPt || 120));
+        const clampedPtH = Math.max(14, (clampedPtW / Math.max(1, rendered.widthPt || 120)) * (rendered.heightPt || 24));
+        const cx = Math.round(clampedPtW * 12700);
+        const cy = Math.round(clampedPtH * 12700);
+        return `
+          <w:p>
+            <w:pPr>
+              <w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/>
+              <w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr>
+              <w:ind w:left="240" w:right="240"/>
+              <w:spacing w:before="100" w:after="100"/>
+            </w:pPr>
+            ${labelXml}
+            <w:r>
+              <w:drawing>
+                <wp:inline distT="0" distB="0" distL="0" distR="0">
+                  <wp:extent cx="${cx}" cy="${cy}"/>
+                  <wp:docPr id="${docPrId}" name="Equation ${imgNum}"/>
+                  <a:graphic>
+                    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                      <pic:pic>
+                        <pic:nvPicPr>
+                          <pic:cNvPr id="${docPrId}" name="eq_${imgNum}.png"/>
+                          <pic:cNvPicPr/>
+                        </pic:nvPicPr>
+                        <pic:blipFill>
+                          <a:blip r:embed="${relId}"/>
+                          <a:stretch><a:fillRect/></a:stretch>
+                        </pic:blipFill>
+                        <pic:spPr>
+                          <a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>
+                          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+                        </pic:spPr>
+                      </pic:pic>
+                    </a:graphicData>
+                  </a:graphic>
+                </wp:inline>
+              </w:drawing>
+            </w:r>
+          </w:p>
+        `;
+      }
+      const runs = renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(fallbackExpr || rawEqLine), '<w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/>');
+      return `
+        <w:p>
+          <w:pPr>
+            <w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/>
+            <w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr>
+            <w:ind w:left="240" w:right="240"/>
+            <w:spacing w:before="100" w:after="100"/>
+          </w:pPr>
+          ${labelXml}${runs}
+        </w:p>
+      `;
+    };
+
     const buildDocxTableXml = (headers, rows) => {
       const colCnt = Math.max(1, headers.length || (rows[0] ? rows[0].length : 1));
       const trs = [];
       if (headers.length > 0) {
         trs.push('<w:tr>' + headers.slice(0, colCnt).map(h =>
-          `<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="1E293B"/></w:tcPr><w:p><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:t>${escapeXml(String(h || '').replace(/[*_`]/g, '').trim())}</w:t></w:r></w:p></w:tc>`
+          `<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="1E293B"/></w:tcPr><w:p>${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(String(h || '').replace(/[*_`]/g, '').trim()), '<w:b/><w:color w:val="FFFFFF"/>')}</w:p></w:tc>`
         ).join('') + '</w:tr>');
       }
       for (const r of rows) {
         const arr = Array.isArray(r) ? r : [r];
         let cells = '';
         for (let ci = 0; ci < colCnt; ci++) {
-          const val = String(arr[ci] ?? '').replace(/[*_`]/g, '').trim();
-          cells += `<w:tc><w:p><w:r><w:t xml:space="preserve">${escapeXml(val)}</w:t></w:r></w:p></w:tc>`;
+          const val = normalizeZ21ScientificTextClient(String(arr[ci] ?? '').replace(/[*_`]/g, '').trim());
+          cells += `<w:tc><w:p>${renderMathTextToDocxRuns(val)}</w:p></w:tc>`;
         }
         trs.push(`<w:tr>${cells}</w:tr>`);
       }
@@ -13181,15 +13292,17 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
       const boldPrefix = opts.boldPrefix ? normalizeZ21ScientificTextClient(opts.boldPrefix) : '';
 
       if ((hasHighUnicode(str) || hasHighUnicode(boldPrefix)) && ZozCanvasMathRenderer.renderUnicodeLineToPngDataUrl) {
+        const maxAvailMm = Math.max(20, (margin + contentWidth) - xMm);
         const im = ZozCanvasMathRenderer.renderUnicodeLineToPngDataUrl(str, {
           text: str,
           boldPrefix,
           fontSizePt: fontPt,
+          maxWidthPt: (opts.maxWidthMm || maxAvailMm) * (72 / 25.4),
           color: colorHex,
-          italic: opts.italic
+          bold: Boolean(opts.bold),
+          italic: Boolean(opts.italic)
         });
         if (im && im.dataUrl) {
-          const maxAvailMm = Math.max(20, (margin + contentWidth) - xMm);
           const drawW = Math.min(im.widthMm, maxAvailMm);
           const drawH = drawW < im.widthMm ? im.heightMm * (drawW / im.widthMm) : im.heightMm;
           ensurePageSpace(drawH + 1.5);
@@ -27681,36 +27794,34 @@ ATURAN MUTLAK OUTPUT:
 
       const isDiagram = isDiagramFile(file);
       const isJsxReact = isRawJsxOrReactCode(rawText, file);
-      const wantsNativeArtifact = Boolean(
-        file.base64 &&
-        (
-          !format ||
-          format === 'native' ||
-          format === fileExt ||
-          (format === 'svg' && !isDiagram && ['pdf', 'docx', 'xlsx', 'csv'].includes(fileExt))
-        )
-      );
-
+      const wantsNativeFmt = !format ||
+        format === 'native' ||
+        format === fileExt ||
+        (format === 'svg' && !isDiagram && ['pdf', 'docx', 'xlsx', 'csv'].includes(fileExt));
       let upgradedArtifactBase64 = '';
-      if (wantsNativeArtifact && fileExt === 'pdf') {
-        // Self-healing upgrade: jika base64 lama dibuat oleh fallback zoz-client-sandbox lama yang masih memuat
-        // markdown mentah ("Dirender oleh", "# ", "| ---") atau belum memakai tabel terstruktur, kompilasi ulang otomatis!
+      if (wantsNativeFmt && fileExt === 'pdf') {
         let decodedProbe = '';
-        try {
-          const probeBytes = base64ToUint8Array(file.base64).slice(0, 18000);
-          for (let bi = 0; bi < probeBytes.length; bi++) decodedProbe += String.fromCharCode(probeBytes[bi]);
-        } catch (_) {}
-        const hasLegacyClientPdfDefect = /Dirender oleh|zoz-client-sandbox|zoz-client-native|\(\s*#{1,3}\s+|\|\s*---|z21_document_builder|"sections"\s*:|\\\\left|\\\\right/.test(decodedProbe) || Boolean(extractEmbeddedZ21DocBuilderSpec(rawText));
-        if (hasLegacyClientPdfDefect && rawText) {
+        if (file.base64) {
+          try {
+            const probeBytes = base64ToUint8Array(file.base64).slice(0, 18000);
+            for (let bi = 0; bi < probeBytes.length; bi++) decodedProbe += String.fromCharCode(probeBytes[bi]);
+          } catch (_) {}
+        }
+        const hasTrustedPdfEngine = file.engine === 'python-container-sandbox' || file.engine === 'zoz-rich-math-pdf';
+        const hasLegacyClientPdfDefect = !file.base64 ||
+          !hasTrustedPdfEngine ||
+          /Dirender oleh|zoz-client-sandbox|zoz-client-native|\(\s*#{1,3}\s+|\|\s*---|z21_document_builder|"sections"\s*:|\\\\left|\\\\right/.test(decodedProbe) ||
+          Boolean(extractEmbeddedZ21DocBuilderSpec(rawText));
+        if (hasLegacyClientPdfDefect && (file.z21Spec || rawText)) {
           const embeddedHeal = extractEmbeddedZ21DocBuilderSpec(rawText);
           const rebuiltSpec = (embeddedHeal && embeddedHeal.spec)
-            ? embeddedHeal.spec
-            : parseMarkdownToZ21DocSpec(rawText, '', file.name || 'Dokumen.pdf', null);
+            ? { ...embeddedHeal.spec }
+            : (file.z21Spec ? { ...file.z21Spec } : parseMarkdownToZ21DocSpec(rawText, '', file.name || 'Dokumen.pdf', null));
           rebuiltSpec.filename = (embeddedHeal && embeddedHeal.spec?.filename && /^(?:formula_pure_math|buatkan|buatin|dokumen_z21)/i.test(file.name || ''))
             ? embeddedHeal.spec.filename
-            : (file.name || rebuiltSpec.filename);
+            : (file.name || rebuiltSpec.filename || 'Dokumen_Z21.pdf');
           rebuiltSpec.format = 'pdf';
-          if (file.pythonScript) rebuiltSpec.python_code = file.pythonScript;
+          if (file.pythonScript && !rebuiltSpec.python_code) rebuiltSpec.python_code = file.pythonScript;
           try {
             if (!IS_GITHUB_PAGES || DeviceStorage.isDeviceBackendAvailable) {
               const res = await fetch(getUniversalApiUrl('/api/z21/document-builder'), {
@@ -27720,32 +27831,43 @@ ATURAN MUTLAK OUTPUT:
                 signal: (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') ? AbortSignal.timeout(12000) : undefined
               }).catch(() => null);
               const d = res && res.ok ? await res.json().catch(() => null) : null;
-              if (d && d.success && Array.isArray(d.files) && d.files[0]?.base64) {
+              if (d && d.success && d.engine === 'python-container-sandbox' && Array.isArray(d.files) && d.files[0]?.base64) {
                 upgradedArtifactBase64 = d.files[0].base64;
                 file.base64 = upgradedArtifactBase64;
+                file.engine = d.engine;
+                file.z21Spec = rebuiltSpec;
               }
             }
           } catch (_) {}
           if (!upgradedArtifactBase64) {
-            upgradedArtifactBase64 = buildStructuredClientPdfBase64(rebuiltSpec);
+            const richPdfBlob = await compileZ21SpecToRichPdfBlob(rebuiltSpec);
+            upgradedArtifactBase64 = await blobToBase64(richPdfBlob).catch(() => '') || buildStructuredClientPdfBase64(rebuiltSpec);
             file.base64 = upgradedArtifactBase64;
+            file.engine = 'zoz-rich-math-pdf';
+            file.z21Spec = rebuiltSpec;
+            file.isBinaryArtifact = true;
           }
         }
       }
+
+      const wantsNativeArtifact = Boolean((upgradedArtifactBase64 || file.base64) && wantsNativeFmt);
 
       if (wantsNativeArtifact) {
         const bytes = base64ToUint8Array(upgradedArtifactBase64 || file.base64);
         blob = new Blob([bytes], { type: file.mime || guessMimeFromName(file.name) });
       } else if (format === 'xlsx' || ((fileNameLower.endsWith('.xlsx') || fileNameLower.endsWith('.xls')) && format !== 'pdf' && format !== 'docx' && format !== 'jpeg' && format !== 'jpg')) {
         showToast('📊 Mengompilasi spreadsheet Excel (.xlsx)...', 'info');
-        const b64Xlsx = compileStructuredDataToXlsxBase64({ filename: file.name, title: file.name, content: rawText });
+        const xlsxSpec = (file.z21Spec && (Array.isArray(file.z21Spec.sheets) || Array.isArray(file.z21Spec.tables)))
+          ? { ...file.z21Spec, filename: file.name, format: 'xlsx' }
+          : { ...parseMarkdownToZ21DocSpec(rawText, '', file.name, null), filename: file.name, format: 'xlsx', content: rawText };
+        const b64Xlsx = compileStructuredDataToXlsxBase64(xlsxSpec);
         blob = new Blob([base64ToUint8Array(b64Xlsx)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       } else if (format === 'docx' || (fileNameLower.endsWith('.docx') && format !== 'pdf' && format !== 'jpeg' && format !== 'jpg' && format !== 'svg')) {
         showToast('📄 Mengompilasi dokumen Word (.docx)...', 'info');
         blob = await compileMarkdownToDocxBlob(rawText, file.name);
       } else if (format === 'pdf' || (fileNameLower.endsWith('.pdf') && format !== 'docx' && format !== 'jpeg' && format !== 'jpg' && format !== 'svg')) {
         showToast('📄 Mengompilasi dokumen PDF (.pdf)...', 'info');
-        blob = await compileMarkdownToPdfBlob(rawText, file.name);
+        blob = file.z21Spec ? await compileZ21SpecToRichPdfBlob({ ...file.z21Spec, format: 'pdf', filename: file.name }) : await compileMarkdownToPdfBlob(rawText, file.name);
       } else if (isDiagram) {
         let svgText = file.svgContent || '';
         if (!svgText && (rawText.includes('<svg') || rawText.trim().startsWith('<svg'))) {
@@ -31846,7 +31968,9 @@ ${blocks}
     const isDiagram = isDiagramFile(activeAIFile);
     const ext = (activeAIFile.name || '').split('.').pop().toLowerCase();
     const isDoc = ext === 'docx' || ext === 'pdf' || ext === 'doc' || ext === 'md' || ext === 'markdown' ||
-                  activeAIFile.lang === 'docx' || activeAIFile.lang === 'pdf' || (activeAIFile.lang === 'markdown' && !isDiagram);
+                  ext === 'xlsx' || ext === 'xls' || ext === 'csv' ||
+                  activeAIFile.lang === 'docx' || activeAIFile.lang === 'pdf' || activeAIFile.lang === 'xlsx' || activeAIFile.lang === 'csv' ||
+                  (activeAIFile.lang === 'markdown' && !isDiagram);
     const isHtml = ext === 'html' || ext === 'htm' || ext === 'jsx' || ext === 'tsx' ||
                    activeAIFile.lang === 'html' || activeAIFile.lang === 'htm' || activeAIFile.lang === 'jsx' || activeAIFile.lang === 'tsx' || activeAIFile.lang === 'react' ||
                    isRawJsxOrReactCode(activeAIFile.rawContent || activeAIFile.content || '', activeAIFile);
@@ -35328,6 +35452,7 @@ ATURAN MUTLAK EKSEKUSI AGEN:
           let j = i + 1;
           let slashIdx = -1;
           let multipleTopSlashes = false;
+          let hasTopLevelComma = false;
           while (j < out.length && depth > 0) {
             const ch = out[j];
             if (ch === '{') braceDepth++;
@@ -35335,6 +35460,7 @@ ATURAN MUTLAK EKSEKUSI AGEN:
             else if (braceDepth === 0) {
               if (ch === '(') depth++;
               else if (ch === ')') depth--;
+              else if (depth === 1 && ch === ',') hasTopLevelComma = true;
               else if (depth === 1 && ch === '/' && j > i + 1 && j + 1 < out.length && /\s/.test(out[j - 1]) && /\s/.test(out[j + 1])) {
                 if (slashIdx === -1) slashIdx = j;
                 else multipleTopSlashes = true;
@@ -35342,10 +35468,10 @@ ATURAN MUTLAK EKSEKUSI AGEN:
             }
             j++;
           }
-          if (depth === 0 && slashIdx !== -1 && !multipleTopSlashes) {
+          if (depth === 0 && slashIdx !== -1 && !multipleTopSlashes && !hasTopLevelComma) {
             const leftPart = out.slice(i + 1, slashIdx).trim();
             const rightPart = out.slice(slashIdx + 1, j - 1).trim();
-            if (leftPart && rightPart && !/[=,]/.test(leftPart) && !/[=,]/.test(rightPart)) {
+            if (leftPart && rightPart && !leftPart.includes('=') && !rightPart.includes('=')) {
               const afterFn = fnPrefixRe.test(res);
               if (afterFn && /\\left\s*$/i.test(res)) {
                 res += `\\frac{${leftPart}}{${rightPart}}`;
@@ -35366,8 +35492,9 @@ ATURAN MUTLAK EKSEKUSI AGEN:
       out = res;
       if (!changed) break;
     }
-    out = out.replace(/\\(ln|log|sin|cos|tan|exp)\s*\\left\(\s*\(\\frac\{([^{}]+)\}\{([^{}]+)\}\)\s*\\right\)/g, '\\$1\\left(\\frac{$2}{$3}\\right)');
-    out = out.replace(/\\(ln|log|sin|cos|tan|exp)\s*\(\s*\(\\frac\{([^{}]+)\}\{([^{}]+)\}\)\s*\)/g, '\\$1\\left(\\frac{$2}{$3}\\right)');
+    out = out.replace(/\\(ln|log|sin|cos|tan|exp)\s*\\left\(\s*\(\\frac\{((?:[^{}]|\{[^{}]*\})+)\}\{((?:[^{}]|\{[^{}]*\})+)\}\)\s*\\right\)/g, '\\$1\\left(\\frac{$2}{$3}\\right)');
+    out = out.replace(/\\(ln|log|sin|cos|tan|exp)\s*\(\s*\(\\frac\{((?:[^{}]|\{[^{}]*\})+)\}\{((?:[^{}]|\{[^{}]*\})+)\}\)\s*\)/g, '\\$1\\left(\\frac{$2}{$3}\\right)');
+    out = out.replace(/\\(ln|log|sin|cos|tan|exp)\s*\(\s*\\frac\{((?:[^{}]|\{[^{}]*\})+)\}\{((?:[^{}]|\{[^{}]*\})+)\}\s*\)/g, '\\$1\\left(\\frac{$2}{$3}\\right)');
     out = out.replace(/\\left\\left\(/g, '\\left(').replace(/\\right\\right\)/g, '\\right)');
     return out;
   }
@@ -35705,8 +35832,11 @@ ATURAN MUTLAK EKSEKUSI AGEN:
           sections: Array.isArray(argSpec.sections)
             ? argSpec.sections.map(s => (s && typeof s === 'object') ? ({
                 heading: s.heading ? stripZ21InlineMd(s.heading) : 'Bagian',
-                content: s.content ? normalizeZ21ScientificTextClient(s.content).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1') : '',
-                bullets: Array.isArray(s.bullets) ? s.bullets.map(stripZ21InlineMd).filter(Boolean) : []
+                content: s.content ? String(s.content).split(/\r?\n/).map(ln => normalizeZ21ScientificTextClient(ln, { preserveFrac: isZ21FormulaLineClient(ln) }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1')).join('\n') : '',
+                bullets: Array.isArray(s.bullets) ? s.bullets.map(b => {
+                  const rb = stripZ21InlineMd(b);
+                  return isZ21FormulaLineClient(rb) ? normalizeZ21ScientificTextClient(rb, { preserveFrac: true }) : rb;
+                }).filter(Boolean) : []
               }) : s).filter(Boolean)
             : [],
           tables: Array.isArray(argSpec.tables) ? argSpec.tables : [],
@@ -40851,7 +40981,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       for (const r of rows) {
         const arr = Array.isArray(r) ? r : [r];
         rowsXml.push('<w:tr>' + arr.map(c =>
-          `<w:tc><w:p><w:r><w:t xml:space="preserve">${escapeClientXml(stripZ21InlineMd(c))}</w:t></w:r></w:p></w:tc>`
+          `<w:tc><w:p>${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(stripZ21InlineMd(c)))}</w:p></w:tc>`
         ).join('') + '</w:tr>');
       }
       if (rowsXml.length > 0) {
@@ -40864,28 +40994,38 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       const sh = stripZ21InlineMd(sec.heading || '');
       if (sh && sh.toLowerCase() !== title.toLowerCase()) {
         seenH.add(sh);
-        paras.push(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>${escapeClientXml(sh)}</w:t></w:r></w:p>`);
+        paras.push(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(sh))}</w:p>`);
       }
       if (sec.content) {
         for (const ln of cleanZ21ClientResidue(sec.content).split(/\r?\n/)) {
           const tLn = ln.trim();
           if (!tLn) continue;
+          const normLnFrac = normalizeZ21ScientificTextClient(tLn, { preserveFrac: true }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
           const normLn = stripZ21InlineMd(tLn);
-          if (isZ21FormulaLineClient(normLn)) {
-            const { label, expr } = parseZ21FormulaPartsClient(normLn);
-            paras.push(`<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:ind w:left="240" w:right="240"/><w:spacing w:before="100" w:after="100"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t>${escapeClientXml(label)}: </w:t></w:r><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/></w:rPr><w:t xml:space="preserve">${escapeClientXml(expr)}</w:t></w:r></w:p>`);
+          if (isZ21FormulaLineClient(normLnFrac) && !isZ21VariableLegendLineClient(normLnFrac).isLegend) {
+            const { label, expr } = parseZ21FormulaPartsClient(normLnFrac);
+            const labelXml = label ? `<w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t xml:space="preserve">${escapeClientXml(label)}: </w:t></w:r>` : '';
+            const exprRuns = renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(expr), '<w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/>');
+            paras.push(`<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:ind w:left="240" w:right="240"/><w:spacing w:before="100" w:after="100"/></w:pPr>${labelXml}${exprRuns}</w:p>`);
             continue;
           }
           const kvMatch = normLn.match(/^((?:Lokasi|Tanggal|Parameter\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\s*:)\s*(.+)$/i);
           if (kvMatch) {
-            paras.push(`<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${escapeClientXml(kvMatch[1])} </w:t></w:r><w:r><w:t xml:space="preserve">${escapeClientXml(kvMatch[2])}</w:t></w:r></w:p>`);
+            paras.push(`<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${escapeClientXml(kvMatch[1])} </w:t></w:r>${renderMathTextToDocxRuns(kvMatch[2])}</w:p>`);
             continue;
           }
-          paras.push(`<w:p><w:r><w:t xml:space="preserve">${escapeClientXml(normLn)}</w:t></w:r></w:p>`);
+          paras.push(`<w:p>${renderMathTextToDocxRuns(normLn)}</w:p>`);
         }
       }
       for (const b of (Array.isArray(sec.bullets) ? sec.bullets : [])) {
-        paras.push(`<w:p><w:r><w:t xml:space="preserve">• ${escapeClientXml(stripZ21InlineMd(b))}</w:t></w:r></w:p>`);
+        const rbFrac = normalizeZ21ScientificTextClient(b, { preserveFrac: true }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+        if (isZ21FormulaLineClient(rbFrac) && !isZ21VariableLegendLineClient(rbFrac).isLegend) {
+          const { label, expr } = parseZ21FormulaPartsClient(rbFrac);
+          const labelXml = label ? `<w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t xml:space="preserve">${escapeClientXml(label)}: </w:t></w:r>` : '';
+          paras.push(`<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:ind w:left="240" w:right="240"/><w:spacing w:before="100" w:after="100"/></w:pPr>${labelXml}${renderMathTextToDocxRuns(normalizeZ21ScientificTextClient(expr), '<w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/>')}</w:p>`);
+        } else {
+          paras.push(`<w:p><w:r><w:t xml:space="preserve">• </w:t></w:r>${renderMathTextToDocxRuns(stripZ21InlineMd(b))}</w:p>`);
+        }
       }
       if (sec.table) pushDocxTable(sec.table);
     }
@@ -40913,8 +41053,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     if (spec.subtitle) out.push(`*${stripZ21InlineMd(spec.subtitle)}*`);
     for (const sec of (Array.isArray(spec.sections) ? spec.sections : [])) {
       if (sec.heading && sec.heading !== spec.title) out.push(`## ${stripZ21InlineMd(sec.heading)}`);
-      if (sec.content) out.push(normalizeZ21ScientificTextClient(sec.content));
-      if (Array.isArray(sec.bullets) && sec.bullets.length > 0) out.push(sec.bullets.map(b => `- ${stripZ21InlineMd(b)}`).join('\n'));
+      if (sec.content) {
+        const preservedLines = String(sec.content).split(/\r?\n/).map(ln =>
+          normalizeZ21ScientificTextClient(ln, { preserveFrac: isZ21FormulaLineClient(ln) })
+        ).join('\n');
+        out.push(preservedLines);
+      }
+      if (Array.isArray(sec.bullets) && sec.bullets.length > 0) {
+        out.push(sec.bullets.map(b => {
+          const rb = stripZ21InlineMd(b);
+          return `- ${isZ21FormulaLineClient(rb) ? normalizeZ21ScientificTextClient(rb, { preserveFrac: true }) : rb}`;
+        }).join('\n'));
+      }
     }
     for (const sh of (Array.isArray(spec.sheets) ? spec.sheets : (Array.isArray(spec.tables) ? spec.tables : []))) {
       const sHeading = sh.name || sh.title || '';
@@ -40946,6 +41096,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const cleanArgs = { ...args, filename: fname, format: ext };
     const previewText = buildZ21DocumentPreviewMarkdown(cleanArgs, fname, ext, ['zoz-client-native'], 'zoz-client-sandbox');
     let base64 = '';
+    let usedEngine = 'zoz-client-sandbox';
+    let libsUsed = ['zoz-client-native'];
     if (ext === 'xlsx') {
       base64 = compileStructuredDataToXlsxBase64(cleanArgs);
     } else if (ext === 'csv') {
@@ -40956,15 +41108,34 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       for (const r of (Array.isArray(sh.rows) ? sh.rows : [])) csvLines.push((Array.isArray(r) ? r : [r]).map(escCsv).join(','));
       base64 = uint8ArrayToBase64(new TextEncoder().encode('\uFEFF' + csvLines.join('\r\n')));
     } else if (ext === 'docx') {
-      base64 = buildClientDocxBase64(cleanArgs);
+      if (typeof document !== 'undefined') {
+        try {
+          const docxBlob = await compileMarkdownToDocxBlob(previewText, fname);
+          base64 = await blobToBase64(docxBlob);
+          usedEngine = 'zoz-rich-math-docx';
+          libsUsed = ['jszip', 'zoz-canvas-mathtext'];
+        } catch (_) {}
+      }
+      if (!base64) base64 = buildClientDocxBase64(cleanArgs);
     } else {
-      base64 = buildStructuredClientPdfBase64(cleanArgs);
+      if (typeof document !== 'undefined') {
+        try {
+          const richBlob = await compileZ21SpecToRichPdfBlob(cleanArgs);
+          const b64 = await blobToBase64(richBlob);
+          if (b64) {
+            base64 = b64;
+            usedEngine = 'zoz-rich-math-pdf';
+            libsUsed = ['jspdf', 'zoz-canvas-mathtext'];
+          }
+        } catch (_) {}
+      }
+      if (!base64) base64 = buildStructuredClientPdfBase64(cleanArgs);
     }
     const byteSize = base64ToUint8Array(base64).length;
     return {
       success: true,
-      engine: 'zoz-client-sandbox',
-      librariesUsed: ['zoz-client-native'],
+      engine: usedEngine,
+      librariesUsed: libsUsed,
       files: [{
         name: fname,
         mime: guessMimeFromName(fname),
@@ -40974,8 +41145,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         base64,
         previewText,
         pythonScript: String(args.python_code || ''),
-        engine: 'zoz-client-sandbox',
-        librariesUsed: ['zoz-client-native']
+        engine: usedEngine,
+        librariesUsed: libsUsed,
+        z21Spec: cleanArgs
       }]
     };
   }
@@ -40996,6 +41168,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       base64: String(art.base64 || ''),
       downloadUrl: String(art.downloadUrl || ''),
       artifactId: String(art.artifactId || ''),
+      engine: String(art.engine || ''),
+      z21Spec: art.z21Spec || null,
       byteSize,
       lineCount: Math.max(1, preview.split('\n').length),
       size: `${art.size || formatFileSize(byteSize)}`,
@@ -43293,8 +43467,53 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         }
         if (!buildResult || !Array.isArray(buildResult.files) || buildResult.files.length === 0) {
           buildResult = await compileZ21DocumentArtifactClient(reqPayload);
+        } else if (buildResult.engine !== 'python-container-sandbox' && typeof document !== 'undefined') {
+          const primaryFile = buildResult.files[0];
+          const primaryExt = String(primaryFile?.ext || detectRequestedZ21DocFormat(reqPayload.format || reqPayload.filename || '', 'pdf') || 'pdf').toLowerCase();
+          if (primaryExt === 'pdf') {
+            try {
+              const richBlob = await compileZ21SpecToRichPdfBlob({ ...reqPayload, filename: primaryFile?.name || reqPayload.filename, format: 'pdf' });
+              const richB64 = await blobToBase64(richBlob);
+              if (richB64) {
+                const richBytes = base64ToUint8Array(richB64).length;
+                buildResult.files[0] = {
+                  ...primaryFile,
+                  base64: richB64,
+                  byteSize: richBytes,
+                  size: formatFileSize(richBytes),
+                  engine: 'zoz-rich-math-pdf',
+                  z21Spec: reqPayload
+                };
+                buildResult.engine = 'zoz-rich-math-pdf';
+                buildResult.librariesUsed = ['jspdf', 'zoz-canvas-mathtext'];
+              }
+            } catch (_) {}
+          } else if (primaryExt === 'docx') {
+            try {
+              const richDocxMd = buildZ21DocumentPreviewMarkdown(reqPayload, primaryFile?.name || reqPayload.filename, 'docx', ['jszip'], 'zoz-rich-math-docx');
+              const richDocxBlob = await compileMarkdownToDocxBlob(richDocxMd, primaryFile?.name || reqPayload.filename);
+              const richDocxB64 = await blobToBase64(richDocxBlob);
+              if (richDocxB64) {
+                const richBytes = base64ToUint8Array(richDocxB64).length;
+                buildResult.files[0] = {
+                  ...primaryFile,
+                  base64: richDocxB64,
+                  byteSize: richBytes,
+                  size: formatFileSize(richBytes),
+                  engine: 'zoz-rich-math-docx',
+                  z21Spec: reqPayload
+                };
+                buildResult.engine = 'zoz-rich-math-docx';
+                buildResult.librariesUsed = ['jszip', 'zoz-canvas-mathtext'];
+              }
+            } catch (_) {}
+          }
         }
-        const artifactFiles = (buildResult.files || []).map(createZ21ArtifactFileObject);
+        const artifactFiles = (buildResult.files || []).map((f) => createZ21ArtifactFileObject({
+          ...f,
+          engine: f.engine || buildResult.engine || '',
+          z21Spec: f.z21Spec || reqPayload
+        }));
         if (toolContext && typeof toolContext === 'object') {
           if (!Array.isArray(toolContext.collectedArtifactFiles)) toolContext.collectedArtifactFiles = [];
           artifactFiles.forEach((af) => {
@@ -67037,7 +67256,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://document-first-map-destinations.trycloudflare.com',
+    activeTunnelUrl: 'https://learning-adware-lawyer-lower.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -73382,6 +73601,12 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     getZ21DocumentBuilderDirective,
     stripZ21DocumentCodeBlocksFromChat,
     normalizeZ21ScientificTextClient,
+    toZ21LatexMathClient,
+    isZ21VariableLegendLineClient,
+    parseZ21LatexAst,
+    ZozCanvasMathRenderer,
+    compileZ21SpecToRichPdfBlob,
+    sanitizeJsPdfWinAnsiText,
     formatZ21PreviewHtmlContent,
     generatePdfDocPreviewHtml,
     extractEmbeddedZ21DocBuilderSpec,
