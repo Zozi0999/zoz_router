@@ -84,7 +84,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://landscape-consist-visible-news.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://diameter-reflection-alice-tones.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -67264,7 +67264,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://landscape-consist-visible-news.trycloudflare.com',
+    activeTunnelUrl: 'https://diameter-reflection-alice-tones.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
