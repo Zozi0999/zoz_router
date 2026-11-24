@@ -1315,6 +1315,14 @@ function sendJSON(res, statusCode, data) {
 function parseBody(req) {
   // Dukungan lingkungan serverless (Vercel / Lambda) di mana body sudah di-parse oleh gateway
   if (req.body !== undefined && req.body !== null) {
+    if (Buffer.isBuffer(req.body)) {
+      try {
+        const str = req.body.toString('utf8');
+        return Promise.resolve(str.trim() ? JSON.parse(str) : {});
+      } catch (_) {
+        return Promise.reject(new Error('Body JSON tidak valid.'));
+      }
+    }
     if (typeof req.body === 'object') {
       return Promise.resolve(req.body);
     }
@@ -1324,14 +1332,6 @@ function parseBody(req) {
       } catch (_) {
         // F18: JSON rusak jangan pernah dianggap {} (dulu POST /api/sessions dengan
         // body terpotong sukses palsu & membuat sesi sampah).
-        return Promise.reject(new Error('Body JSON tidak valid.'));
-      }
-    }
-    if (Buffer.isBuffer(req.body)) {
-      try {
-        const str = req.body.toString('utf8');
-        return Promise.resolve(str.trim() ? JSON.parse(str) : {});
-      } catch (_) {
         return Promise.reject(new Error('Body JSON tidak valid.'));
       }
     }
@@ -5518,18 +5518,7 @@ function fetchPageDetails(targetUrl, maxChars = 8000, redirectCount = 0) {
             .replace(/&quot;/g, '"')
             .replace(/&#39;/g, "'");
 
-          let clean = html
-            .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
-            .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
-            .replace(/<nav\b[\s\S]*?<\/nav>/gi, ' ')
-            .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
-            .replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ')
-            .replace(/<aside\b[\s\S]*?<\/aside>/gi, ' ')
-            .replace(/<form\b[\s\S]*?<\/form>/gi, ' ')
-            .replace(/<svg\b[\s\S]*?<\/svg>/gi, ' ')
-            .replace(/<!--[\s\S]*?-->/g, ' ');
-
-          clean = cleanHtmlText(clean);
+          const clean = extractCleanMainHtmlText(html);
           if (textSafety.isGarbledPdfBinaryText(clean)) {
             resolved = false;
             return tryJinaOrFail('Konten hasil ekstraksi terdeteksi biner/rusak.');
@@ -5747,6 +5736,12 @@ function deriveBroadSearchQueries(rawQuery, contextText = '') {
 
 function cleanHtmlText(str) {
   if (!str || typeof str !== 'string') return '';
+  const namedLatin = {
+    aacute: 'á', Aacute: 'Á', agrave: 'à', Agrave: 'À', acirc: 'â', Acirc: 'Â', atilde: 'ã', Atilde: 'Ã',
+    eacute: 'é', Eacute: 'É', ecirc: 'ê', Ecirc: 'Ê', iacute: 'í', Iacute: 'Í', oacute: 'ó', Oacute: 'Ó',
+    ocirc: 'ô', Ocirc: 'Ô', otilde: 'õ', Otilde: 'Õ', uacute: 'ú', Uacute: 'Ú', ccedil: 'ç', Ccedil: 'Ç',
+    ntilde: 'ñ', Ntilde: 'Ñ', ordf: 'ª', ordm: 'º', deg: '°'
+  };
   return str
     .replace(/<[^>]+>/g, ' ')
     .replace(/&amp;/g, '&')
@@ -5754,7 +5749,7 @@ function cleanHtmlText(str) {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
+    .replace(/&#x27;/gi, "'")
     .replace(/&apos;/g, "'")
     .replace(/&#x2F;/gi, '/')
     .replace(/&nbsp;/g, ' ')
@@ -5765,6 +5760,15 @@ function cleanHtmlText(str) {
     .replace(/&rsquo;|&#8217;/g, "’")
     .replace(/&ldquo;|&#8220;/g, "“")
     .replace(/&rdquo;|&#8221;/g, "”")
+    .replace(/&([a-zA-Z]+);/g, (m, name) => namedLatin[name] || m)
+    .replace(/&#(\d+);/g, (m, dec) => {
+      const cp = parseInt(dec, 10);
+      return (cp > 0 && cp <= 0x10FFFF) ? String.fromCodePoint(cp) : ' ';
+    })
+    .replace(/&#x([0-9a-fA-F]+);/gi, (m, hex) => {
+      const cp = parseInt(hex, 16);
+      return (cp > 0 && cp <= 0x10FFFF) ? String.fromCodePoint(cp) : ' ';
+    })
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -6579,6 +6583,8 @@ async function probeLiveQueryFeeds(cleanQuery, profile) {
   };
 
   const intervalParam = profile.recencyAlpha >= 0.85 ? '&qft=interval%3d%228%22' : (profile.recencyAlpha >= 0.60 ? '&qft=interval%3d%229%22' : '');
+  const bingMktParam = isIndo ? '&mkt=id-ID&setlang=id&cc=ID' : '';
+  const bingHeaders = { 'Accept-Language': navHeaders['Accept-Language'] };
   const gnewsWhen = profile.recencyAlpha >= 0.85 ? ' when:14d' : (profile.recencyAlpha >= 0.60 ? ' when:30d' : '');
   const yahooHost = isIndo ? 'id.search.yahoo.com' : 'search.yahoo.com';
 
@@ -6602,7 +6608,7 @@ async function probeLiveQueryFeeds(cleanQuery, profile) {
     ).then(raw => { if (raw) pushBucket(wWiki, parseWikipediaSearchJson(raw, isIndo ? 'id' : 'en')); }).catch(() => {}),
 
     // 4. Bing News RSS (direct canonical publisher URLs + exact RFC-2822 pubDate)
-    fetchTextSafe(`https://www.bing.com/news/search?q=${encodeURIComponent(primaryQ)}${intervalParam}&format=rss`, 4000)
+    fetchTextSafe(`https://www.bing.com/news/search?q=${encodeURIComponent(primaryQ)}${intervalParam}${bingMktParam}&format=rss`, 4000, bingHeaders)
       .then(xml => { if (xml) pushBucket(wNews, parseBingRss(xml)); }).catch(() => {}),
 
     // 5. Google News RSS (broad topical / disjunctive coverage with exact pubDate)
@@ -6628,7 +6634,7 @@ async function probeLiveQueryFeeds(cleanQuery, profile) {
   // If multi-lab query had distinct broadQ, also fetch broadQ from Bing News so single-lab launches are never missed
   if (broadQ !== primaryQ) {
     tasks.push(
-      fetchTextSafe(`https://www.bing.com/news/search?q=${encodeURIComponent(broadQ)}${intervalParam}&format=rss`, 4000)
+      fetchTextSafe(`https://www.bing.com/news/search?q=${encodeURIComponent(broadQ)}${intervalParam}${bingMktParam}&format=rss`, 4000, bingHeaders)
         .then(xml => { if (xml) pushBucket(wNews * 0.9, parseBingRss(xml)); }).catch(() => {})
     );
   }
@@ -6904,6 +6910,61 @@ async function performAutonomousSearch(query, maxResults = 10, contextText = '')
   return searchZozWebIndex(query, maxResults, contextText);
 }
 
+// Ekstrak isi artikel utama HTML secara bersih bebas nav/social/login boilerplate
+function extractCleanMainHtmlText(html) {
+  if (!html || typeof html !== 'string') return '';
+  let scrubbed = html
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, ' ')
+    .replace(/<nav\b[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
+    .replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ')
+    .replace(/<aside\b[\s\S]*?<\/aside>/gi, ' ')
+    .replace(/<form\b[\s\S]*?<\/form>/gi, ' ')
+    .replace(/<svg\b[\s\S]*?<\/svg>/gi, ' ')
+    .replace(/<button\b[\s\S]*?<\/button>/gi, ' ')
+    .replace(/<select\b[\s\S]*?<\/select>/gi, ' ')
+    .replace(/<input\b[^>]*>/gi, ' ')
+    .replace(/<textarea\b[\s\S]*?<\/textarea>/gi, ' ')
+    .replace(/<dialog\b[\s\S]*?<\/dialog>/gi, ' ')
+    .replace(/<menu\b[\s\S]*?<\/menu>/gi, ' ');
+
+  const boilerTagRe = /<(div|section|ul)\b[^>]*(?:class|id)=["'][^"']*\b(?:navbar|nav-bar|main-nav|site-nav|top-menu|sub-menu|breadcrumb|social-share|social-links|share-bar|login-modal|signin|signup|recover-password|cookie-banner|consent|sidebar|related-posts|recommended|newsletter|footer-widget|advertisement|ad-container)\b[^"']*["'][^>]*>[\s\S]*?<\/\1>/gi;
+  scrubbed = scrubbed.replace(boilerTagRe, (m) => {
+    if (m.length > 12000 || /<(?:article|main)\b/i.test(m)) return m;
+    return ' ';
+  });
+
+  let container = scrubbed;
+  const articleMatch = /<article\b[^>]*>([\s\S]*?)<\/article>/i.exec(scrubbed);
+  if (articleMatch && cleanHtmlText(articleMatch[1]).length >= 180) {
+    container = articleMatch[1];
+  } else {
+    const mainMatch = /<main\b[^>]*>([\s\S]*?)<\/main>/i.exec(scrubbed);
+    if (mainMatch && cleanHtmlText(mainMatch[1]).length >= 180) {
+      container = mainMatch[1];
+    }
+  }
+
+  const goodParas = [];
+  const pRe = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+  let pm;
+  while ((pm = pRe.exec(container)) !== null) {
+    const pClean = cleanHtmlText(pm[1]);
+    if (pClean.length < 40) continue;
+    if (/(?:facebook\s+instagram|tiktok|recuperar\s+senha|pol[ií]tica\s+de\s+privacidade|fale\s+conosco|deixe\s+seu\s+coment[aá]rio|all\s+rights\s+reserved|sign\s+in|log\s+in|subscribe\s+now)/i.test(pClean)) continue;
+    goodParas.push(pClean);
+  }
+  const joinedParas = goodParas.join(' ').trim();
+  if (goodParas.length >= 2 && joinedParas.length >= 180) {
+    return joinedParas;
+  }
+  return cleanHtmlText(container);
+}
+
 // Engine pembaca dan penjelajah halaman web mandiri (Deep Page Browser)
 function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
   // M23: guard DNS anti-rebinding (juga diulang untuk tiap hop redirect rekursif).
@@ -7004,18 +7065,7 @@ function browseWebPageContent(targetUrl, maxChars = 5000, redirectCount = 0) {
             }
           }
 
-          let clean = html
-            .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
-            .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
-            .replace(/<nav\b[\s\S]*?<\/nav>/gi, ' ')
-            .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
-            .replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ')
-            .replace(/<aside\b[\s\S]*?<\/aside>/gi, ' ')
-            .replace(/<form\b[\s\S]*?<\/form>/gi, ' ')
-            .replace(/<svg\b[\s\S]*?<\/svg>/gi, ' ')
-            .replace(/<!--[\s\S]*?-->/g, ' ');
-
-          clean = cleanHtmlText(clean);
+          const clean = extractCleanMainHtmlText(html);
 
           if ((clean.length < 50 || textSafety.isGarbledPdfBinaryText(clean)) && redirectCount === 0) {
             return fallbackJinaReader(cleanTarget, maxChars).then((jinaRes) => {
@@ -7124,11 +7174,20 @@ function fallbackJinaReader(targetUrl, maxChars = 5000) {
             const titleMatch = md.match(/^Title:\s*(.+)$/m) || md.match(/^#\s+(.+)$/m);
             const pubMatch = md.match(/^Published Time:\s*(.+)$/mi);
             const title = titleMatch ? cleanHtmlText(titleMatch[1].trim()) : extractDomainSafe(targetUrl);
+            const cleanedMd = md
+              .replace(/^(?:Title|URL Source|Published Time):[^\r\n]*\r?\n?/gmi, '')
+              .replace(/^Markdown Content:\s*\r?\n?/gmi, '')
+              .replace(/\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/g, ' ')
+              .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+              .replace(/(?:\[[^\]]{1,40}\]\(https?:\/\/[^)]+\)\s*){3,}/g, ' ')
+              .replace(/[ \t]+/g, ' ')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim();
             safeResolve({
               url: targetUrl,
               title,
-              text: md.substring(0, maxChars),
-              totalLength: md.length,
+              text: cleanedMd.substring(0, maxChars),
+              totalLength: cleanedMd.length,
               published_at: pubMatch ? pubMatch[1].trim() : '',
               links: []
             });
@@ -7574,22 +7633,30 @@ function validateZ21DocumentPythonSafety(code) {
   const strippedCode = normalizedCode
     .replace(
       /(?:#.*$|"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/gm,
-      (match) => (match.startsWith('#') || match.startsWith('"""') || match.startsWith("'''")) ? ' ' : match
+      (match, offset, src) => {
+        const prevChar = offset > 0 ? src[offset - 1] : '';
+        if ((prevChar === 'f' || prevChar === 'F') && match.includes('{')) return match;
+        if (match.startsWith('#') || match.startsWith('"""') || match.startsWith("'''")) return ' ';
+        return match[0] === '"' ? '""' : "''";
+      }
     )
     .replace(/\\\r?\n/g, ' ');
 
   const blockedModules = [
-    'subprocess', 'socket', 'pty', 'ctypes', 'winreg', 'multiprocessing',
+    'subprocess', 'socket', 'pty', 'ctypes', 'winreg', 'multiprocessing', 'shutil',
     'urllib', 'http', 'requests', 'ftplib', 'smtplib', 'imaplib', 'poplib',
     'webbrowser', 'signal', 'pickle', 'shelve', 'marshal', 'importlib', 'runpy',
     'code', 'codeop', 'pdb', 'bdb', 'venv', 'ensurepip', '_posixsubprocess', '_winapi'
   ];
   const blockedPattern = blockedModules.join('|');
-  if (new RegExp(`^[ \\t]*import\\s+[^\\r\\n;#]*\\b(?:${blockedPattern})\\b`, 'im').test(strippedCode)) {
+  if (new RegExp(`(?:^|[;:\\r\\n])[ \\t]*import\\s+[^\\r\\n;#]*\\b(?:${blockedPattern})\\b`, 'im').test(strippedCode)) {
     return { safe: false, reason: 'Modul sistem/jaringan terlarang pada pernyataan import.' };
   }
   if (new RegExp(`\\bfrom\\s+(?:${blockedPattern})(?:\\.[\\w.]+)?\\s+import\\b`, 'i').test(strippedCode)) {
     return { safe: false, reason: 'Modul sistem/jaringan terlarang pada pernyataan from ... import.' };
+  }
+  if (/\bos\s*\.\s*(?:system|popen|spawn\w*|exec\w*|fork|kill|remove|unlink|rmdir)\b|\b(?:io|builtins)\s*\.\s*open\s*\(|\b_orig_open\b/i.test(strippedCode)) {
+    return { safe: false, reason: 'Akses fungsi sistem/file berbahaya (os.system/io.open/builtins.open) diblokir.' };
   }
   if (/\b(?:__import__|eval|exec|compile|breakpoint|getattr|setattr|delattr|load_module)\b/i.test(strippedCode)) {
     return { safe: false, reason: 'Fungsi eksekusi/refleksi dinamis (__import__, eval, exec, compile, getattr, setattr) diblokir.' };
@@ -7693,6 +7760,7 @@ function buildZozNativeZipBuffer(entries) {
 
 function escapeZozXml(s) {
   return String(s ?? '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -7736,17 +7804,39 @@ function toZ21Subscript(str) {
   return String(str || '').split('').map(ch => Z21_SUB_MAP[ch] || Z21_SUB_MAP[ch.toLowerCase()] || ch).join('');
 }
 
-function normalizeZ21ScientificText(rawText) {
+function maskZ21NonMathTokens(rawText) {
+  const slots = [];
+  const masked = String(rawText ?? '').replace(/https?:\/\/[^\s)]+|(?<![A-Za-z0-9_])[A-Za-z0-9][A-Za-z0-9_-]{2,}\.(?:pdf|docx?|xlsx?|csv|png|jpe?g|json|py|js|html?|css)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])[a-z]{2,}_[a-z]{2,}(?:_[a-z0-9]+)+(?![A-Za-z0-9_])/gi, (m) => {
+    slots.push(m);
+    return `\x00ZNMT${slots.length - 1}\x00`;
+  });
+  return { masked, unmask: (s) => slots.length ? String(s || '').replace(/\x00ZNMT(\d+)\x00/g, (_, idx) => slots[Number(idx)] || '') : s };
+}
+
+function normalizeZ21VarSubscripts(str) {
+  const { masked, unmask } = maskZ21NonMathTokens(str);
+  let s = masked
+    .replace(/\bTd_?p\b/g, 'T_{dp}')
+    .replace(/\bT_dp\b/g, 'T_{dp}')
+    .replace(/\bTd\b(?=\s*=)/g, 'T_{d}')
+    .replace(/_(dp|max|min|atm|sat|tot|eff|avg|rel|abs|in|out|init|fin|rms|crit|opt)\b/g, '_{$1}')
+    .replace(/([})])_([A-Za-z0-9]{1,6})(?![A-Za-z0-9_])/g, '$1_{$2}')
+    .replace(/(?<![A-Za-z_])([A-Za-z\u0370-\u03FF])_([0-9]{1,6})/g, '$1_{$2}')
+    .replace(/(?<![A-Za-z_])([A-Za-z\u0370-\u03FF])_([A-Za-z↓↑][A-Za-z0-9↓↑]{0,7})(?![A-Za-z0-9_])/g, '$1_{$2}');
+  return unmask(s);
+}
+
+function restoreCorruptedJsonLatexEscapes(rawText) {
   let s = cleanZ21ResidueLines(rawText);
   if (!s) return '';
 
-  // Pulihkan urutan LaTeX yang korup oleh JSON.parse (mis. \right -> \r+ight, \frac -> \f+rac, \theta -> \t+heta, \beta -> \b+eta, \neq -> \n+eq)
+  // Pulihkan urutan LaTeX yang korup oleh JSON.parse (mis. \right -> \r+ight, \frac -> \f+rac, \theta -> \t+heta, \beta -> \b+eta)
   s = s
     .replace(/\uFFFD/g, '')
-    .replace(/\r(?=ight\b)/g, '\\r')
-    .replace(/\f(?=rac\b)/g, '\\f')
-    .replace(/\t(?=(?:heta|imes|ext|an|au)\b)/g, '\\t')
-    .replace(/[\b](?=(?:eta|ar|inom)\b)/g, '\\b')
+    .replace(/\r(?=(?:ight(?:arrow)?|ho|angle)\b)/g, '\\r')
+    .replace(/\f(?=(?:rac|orall|lat|rown)\b)/g, '\\f')
+    .replace(/\t(?=(?:heta|imes|ext(?:bf|it|rm|sf|tt)?|an|au|o|op|frac|riangle|herefore)\b)/g, '\\t')
+    .replace(/[\b](?=(?:eta|ar|inom|egin|ig|igskip|ullet|oxed)\b)/g, '\\b')
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
   // Rapikan pemecahan spasi aneh dari ekstraksi teks matematis LLM/PDF ("H I =", "R H =", "N T B", "Real- Time", "94 %")
@@ -7759,100 +7849,589 @@ function normalizeZ21ScientificText(rawText) {
     .replace(/\(\s*([^\s()]+)\s+%\s*\)/g, '($1%)')
     .replace(/([A-Za-z0-9)])\s+\^(\{[^{}]+\}|[0-9])/g, '$1^$2');
 
+  return normalizeZ21VarSubscripts(s);
+}
+
+function hasZ21NarrativeProse(text, minProseWords = 4) {
+  const s = String(text || '')
+    .replace(/\\(?:text|mathrm|operatorname|mathbf|mathit)\{[^{}]*\}/g, ' ')
+    .replace(/\\[a-zA-Z]+/g, ' ')
+    .trim();
+  if (/\.\s+[A-ZÀ-Ö]/.test(s)) return true;
+  const words = s.match(/\b[a-z\u00e0-\u00ff]{3,}\b/g) || [];
+  const mathStopWords = new Set([
+    'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'arcsin', 'arccos', 'arctan',
+    'sinh', 'cosh', 'tanh', 'exp', 'log', 'lim', 'min', 'max', 'mod', 'det',
+    'gcd', 'sup', 'inf', 'rms', 'avg', 'eff', 'sat', 'atm', 'net', 'tot',
+    'rel', 'abs', 'init', 'fin', 'crit', 'opt', 'hpa', 'mol', 'dan', 'atau',
+    'serta', 'dimana', 'and', 'with', 'where', 'udara', 'hujan', 'dew'
+  ]);
+  const proseCount = words.filter(w => !mathStopWords.has(w)).length;
+  return proseCount >= minProseWords;
+}
+
+function isZ21VariableLegendLine(line) {
+  const t = String(line || '').trim();
+  if (!t || /^(?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}:/i.test(t)) {
+    return { isLegend: false };
+  }
+  const m = t.match(/^([A-Za-z\u0370-\u03FF][A-Za-z0-9\u0370-\u03FF_{}₀-₉ₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓₛₚ()\s\\]{0,18})\s*=\s*(.+)$/);
+  if (!m) return { isLegend: false };
+  const lhs = m[1].trim();
+  const rhs = m[2].trim();
+  if (/\\(?:frac|dfrac|tfrac|sqrt|sum|int|prod|ln|log|sin|cos|tan|arctan|arcsin|arccos)(?![a-zA-Z])/.test(rhs)) return { isLegend: false };
+  if (/^[+-]?\d+(?:[.,]\d+)?(?:\s*(?:°[CFK]|%|hPa|km\/h|m\/s))?(?:\s*,\s*[A-Za-z\u0370-\u03FF][A-Za-z0-9_{}₀-₉]{0,8}\s*=\s*[+-]?\d+(?:[.,]\d+)?(?:\s*(?:°[CFK]|%|hPa|km\/h|m\/s))?)+$/i.test(rhs)) {
+    return { isLegend: true, symbol: lhs, description: rhs };
+  }
+  if (/[=+\-×÷*/^]|²|³/.test(rhs)) {
+    // Izinkan tanda minus/garis miring di dalam definisi teks alami seperti "Speed in km/h" atau "°C"
+    const withoutUnits = rhs
+      .replace(/\b(?:km\/h|m\/s|m\/s2|W\/m2|kg\/m3|g\/kg|°C|°F|in\s+%)\b/gi, '')
+      .replace(/([A-Za-z\u00C0-\u024F])-([A-Za-z\u00C0-\u024F])/g, '$1 $2')
+      .replace(/([A-Za-z\u00C0-\u024F])-([A-Za-z\u00C0-\u024F])/g, '$1 $2');
+    if (/[=+\-×÷*^]/.test(withoutUnits) || /\s\/\s/.test(withoutUnits)) return { isLegend: false };
+  }
+  const hasProseWords = /[A-Za-zÀ-ÖØ-öø-ÿ]{3,}\s+[A-Za-zÀ-ÖØ-öø-ÿ]{2,}/.test(rhs);
+  const endsWithUnit = /\b(?:in\s+(?:°?[CFK%]|km\/h|m\/s|%|kg|m)|pada\s+suhu|at\s+temperature)\s*\.?$/i.test(rhs);
+  if (hasProseWords || endsWithUnit) {
+    return { isLegend: true, symbol: lhs, description: rhs };
+  }
+  return { isLegend: false };
+}
+
+function promoteBalancedDivisionToFrac(expr) {
+  let out = String(expr || '');
+  const fnPrefixRe = /(?:\\?(?:ln|log|sin|cos|tan|exp|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh))(?:\s*\\left)?\s*$/i;
+  for (let pass = 0; pass < 3; pass++) {
+    let changed = false;
+    let res = '';
+    let i = 0;
+    while (i < out.length) {
+      if (out[i] === '(') {
+        let depth = 1;
+        let braceDepth = 0;
+        let j = i + 1;
+        let slashIdx = -1;
+        let multipleTopSlashes = false;
+        let hasTopLevelComma = false;
+        while (j < out.length && depth > 0) {
+          const ch = out[j];
+          if (ch === '{') braceDepth++;
+          else if (ch === '}' && braceDepth > 0) braceDepth--;
+          else if (braceDepth === 0) {
+            if (ch === '(') depth++;
+            else if (ch === ')') depth--;
+            else if (depth === 1 && ch === ',') hasTopLevelComma = true;
+            else if (depth === 1 && ch === '/' && j > i + 1 && j + 1 < out.length) {
+              const spacedSlash = /\s/.test(out[j - 1]) && /\s/.test(out[j + 1]);
+              const closeP = out.indexOf(')', j);
+              const innerSeg = (out.slice(i + 1, j) + '/' + out.slice(j + 1, closeP > j ? closeP : out.length)).replace(/\\right\s*$/i, '').trim();
+              const unspacedMathPair = /[A-Za-z0-9}_)]/.test(out[j - 1]) && /[A-Za-z0-9\\({]/.test(out[j + 1]) &&
+                !/\b(?:km\/h|m\/s|kg\/m|mm\/)/i.test(innerSeg) &&
+                !/\b(?:C\/F|N\/A|I\/O|A\/B)\b/.test(innerSeg) &&
+                !/^\d{1,2}\/\d{1,2}(?:\/\d{2,4})?$/.test(innerSeg);
+              if (spacedSlash || unspacedMathPair) {
+                if (slashIdx === -1) slashIdx = j;
+                else multipleTopSlashes = true;
+              }
+            }
+          }
+          j++;
+        }
+        if (depth === 0 && slashIdx !== -1 && !multipleTopSlashes && !hasTopLevelComma) {
+          const leftPart = out.slice(i + 1, slashIdx).trim();
+          const rawRight = out.slice(slashIdx + 1, j - 1).trim();
+          const innerEndsRight = /\\right\s*$/.test(rawRight);
+          const rightPart = innerEndsRight ? rawRight.replace(/\\right\s*$/, '').trim() : rawRight;
+          const isProsePair = /^[a-z]{3,}$/i.test(leftPart) && /^[a-z]{3,}$/i.test(rightPart) && !/(?:^|[=+\-*/×·]\s*|ln\s*$|exp\s*$)/.test(res.trim());
+          if (leftPart && rightPart && !leftPart.includes('=') && !rightPart.includes('=') && !isProsePair) {
+            const before = res;
+            const hasOuterLeft = /\\left\s*$/.test(before);
+            const afterFn = fnPrefixRe.test(before);
+            const hasExpAfter = /^\s*\^/.test(out.slice(j));
+            if (hasOuterLeft && innerEndsRight) {
+              if (afterFn || hasExpAfter) {
+                res += `(\\frac{${leftPart}}{${rightPart}}\\right)`;
+              } else {
+                res = before.replace(/\\left\s*$/, '') + `\\frac{${leftPart}}{${rightPart}}`;
+              }
+            } else if (!hasOuterLeft && (afterFn || hasExpAfter)) {
+              res += `\\left(\\frac{${leftPart}}{${rightPart}}\\right)`;
+            } else if (!hasOuterLeft && !innerEndsRight) {
+              res += `\\frac{${leftPart}}{${rightPart}}`;
+            } else {
+              res += out.slice(i, j);
+            }
+            i = j;
+            changed = true;
+            continue;
+          }
+        }
+      }
+      res += out[i];
+      i++;
+    }
+    out = res;
+    if (!changed) break;
+  }
+  out = out.replace(/\\(ln|log|sin|cos|tan|exp)\s*\\left\(\s*\(\\frac\{((?:[^{}]|\{[^{}]*\})+)\}\{((?:[^{}]|\{[^{}]*\})+)\}\)\s*\\right\)/g, '\\$1\\left(\\frac{$2}{$3}\\right)');
+  out = out.replace(/\\(ln|log|sin|cos|tan|exp)\s*\(\s*\(\\frac\{((?:[^{}]|\{[^{}]*\})+)\}\{((?:[^{}]|\{[^{}]*\})+)\}\)\s*\)/g, '\\$1\\left(\\frac{$2}{$3}\\right)');
+  out = out.replace(/\\(ln|log|sin|cos|tan|exp)\s*\(\s*\\frac\{((?:[^{}]|\{[^{}]*\})+)\}\{((?:[^{}]|\{[^{}]*\})+)\}\s*\)/g, '\\$1\\left(\\frac{$2}{$3}\\right)');
+  out = out.replace(/\\left\\left\(/g, '\\left(').replace(/\\right\\right\)/g, '\\right)');
+  return out;
+}
+
+const Z21_INV_SUP_MAP = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '⁺': '+', '⁻': '-' };
+const Z21_INV_SUB_MAP = {
+  '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+  '₊': '+', '₋': '-', '₌': '=', '₍': '(', '₎': ')',
+  'ₐ': 'a', 'ₑ': 'e', 'ₕ': 'h', 'ᵢ': 'i', 'ⱼ': 'j', 'ₖ': 'k', 'ₗ': 'l', 'ₘ': 'm', 'ₙ': 'n',
+  'ₒ': 'o', 'ₚ': 'p', 'ᵣ': 'r', 'ₛ': 's', 'ₜ': 't', 'ᵤ': 'u', 'ᵥ': 'v', 'ₓ': 'x'
+};
+
+function replaceZ21BalancedSqrt(str) {
+  let out = String(str || '');
+  for (let pass = 0; pass < 3; pass++) {
+    let changed = false;
+    let res = '';
+    let i = 0;
+    while (i < out.length) {
+      const rest = out.slice(i);
+      const m = rest.match(/^(?:√|(?:\\sqrt|(?<![A-Za-z\\])sqrt))\s*\(/i);
+      if (m) {
+        let depth = 1;
+        let j = i + m[0].length;
+        while (j < out.length && depth > 0) {
+          if (out[j] === '(') depth++;
+          else if (out[j] === ')') depth--;
+          j++;
+        }
+        if (depth === 0) {
+          const inner = out.slice(i + m[0].length, j - 1);
+          res += `\\sqrt{${inner}}`;
+          i = j;
+          changed = true;
+          continue;
+        }
+      }
+      res += out[i];
+      i++;
+    }
+    out = res;
+    if (!changed) break;
+  }
+  return out.replace(/√\s*([A-Za-z0-9α-ωθ])/g, '\\sqrt{$1}');
+}
+
+function toZ21LatexMath(rawExpr) {
+  let s = restoreCorruptedJsonLatexEscapes(rawExpr);
+  if (!s) return '';
+
+  // Strip wrapper pembuka/penutup LaTeX luar serta $ nyasar di dalam ekspresi agar Matplotlib tidak keluar dari math mode
+  s = s
+    .replace(/^\$\$\s*([\s\S]*?)\s*\$\$$/g, '$1')
+    .replace(/^\\\[\s*([\s\S]*?)\s*\\\]$/g, '$1')
+    .replace(/^\\\(\s*([\s\S]*?)\s*\\\)$/g, '$1')
+    .replace(/^\$\s*([^$\n]+)\s*\$$/g, '$1')
+    .replace(/(?<!\\)\$/g, '')
+    .replace(/[`]/g, '')
+    .trim();
+
+  // Normalisasi command pecahan & runtuhkan backslash ganda di depan command LaTeX (kecuali pemisah baris \\)
+  const cmdAhead = '(?:left|right|frac|dfrac|tfrac|cfrac|sqrt|ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max|alpha|beta|gamma|Gamma|delta|Delta|epsilon|varepsilon|zeta|eta|theta|Theta|kappa|lambda|Lambda|mu|nu|xi|Xi|pi|Pi|rho|sigma|Sigma|tau|Upsilon|phi|Phi|psi|Psi|omega|Omega|times|div|cdot|pm|mp|approx|neq|ne|equiv|propto|leq|le|geq|ge|ll|gg|mid|infty|sum|int|prod|partial|nabla|in|notin|forall|exists|rightarrow|Rightarrow|implies|iff|leftrightarrow|Leftrightarrow|leftarrow|Leftarrow|uparrow|downarrow|updownarrow|to|mathbb|mathrm|mathbf|mathit|operatorname|text|hat|bar|tilde|vec|binom|boxed|quad|qquad|circ|begin|end|%)';
+  const hasEnv = /\\begin\s*\{(?:aligned|align\*?|gather\*?|split|eqnarray\*?|cases|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix)\}/i.test(s);
+  if (!hasEnv) {
+    s = s.replace(new RegExp(`\\\\{2,}(?=${cmdAhead})`, 'g'), '\\');
+  } else {
+    s = s.replace(new RegExp(`\\\\{3,}(?=${cmdAhead})`, 'g'), '\\');
+  }
+  s = s
+    .replace(/\\(?:dfrac|tfrac|cfrac)(?![a-zA-Z])/g, '\\frac')
+    .replace(/\\le(?![a-zA-Z])/g, '\\leq')
+    .replace(/\\ge(?![a-zA-Z])/g, '\\geq')
+    .replace(/\\ne(?![a-zA-Z])/g, '\\neq')
+    .replace(/\\implies(?![a-zA-Z])/g, '\\Rightarrow')
+    .replace(/\\iff(?![a-zA-Z])/g, '\\Leftrightarrow')
+    .replace(/\\(?:limits|nolimits|displaystyle|textstyle)(?![a-zA-Z])/g, '')
+    .replace(/\\boxed\s*\{([^{}]*)\}/g, '$1');
+
+  // Pulihkan superskrip & subskrip Unicode kembali ke sintaks LaTeX eksplisit
+  s = s
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+/g, (m) => `^{${m.split('').map(c => Z21_INV_SUP_MAP[c] || c).join('')}}`)
+    .replace(/[₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ]+/g, (m) => `_{${m.split('').map(c => Z21_INV_SUB_MAP[c] || c).join('')}}`);
+
+  // Konversi simbol Unicode Yunani & matematika ke command LaTeX standar
+  const symToTex = {
+    'α': '\\alpha', 'β': '\\beta', 'γ': '\\gamma', 'Γ': '\\Gamma', 'δ': '\\delta', 'Δ': '\\Delta',
+    'ε': '\\epsilon', 'ζ': '\\zeta', 'η': '\\eta', 'θ': '\\theta', 'Θ': '\\Theta', 'κ': '\\kappa',
+    'λ': '\\lambda', 'Λ': '\\Lambda', 'μ': '\\mu', 'ν': '\\nu', 'ξ': '\\xi', 'Ξ': '\\Xi',
+    'π': '\\pi', 'Π': '\\Pi', 'ρ': '\\rho', 'σ': '\\sigma', 'Σ': '\\Sigma', 'τ': '\\tau',
+    'Υ': '\\Upsilon', 'φ': '\\phi', 'Φ': '\\Phi', 'ψ': '\\psi', 'Ψ': '\\Psi', 'ω': '\\omega', 'Ω': '\\Omega',
+    '×': '\\times', '÷': '\\div', '·': '\\cdot', '±': '\\pm', '∓': '\\mp', '≈': '\\approx',
+    '≠': '\\neq', '≡': '\\equiv', '∝': '\\propto', '≤': '\\leq', '≥': '\\geq', '≪': '\\ll', '≫': '\\gg',
+    '∞': '\\infty', '∑': '\\sum', '∫': '\\int', '∏': '\\prod', '∂': '\\partial', '∇': '\\nabla',
+    '∈': '\\in', '∉': '\\notin', '∀': '\\forall', '∃': '\\exists',
+    '→': '\\rightarrow', '←': '\\leftarrow', '⇒': '\\Rightarrow', '⇐': '\\Leftarrow',
+    '↔': '\\leftrightarrow', '⇔': '\\Leftrightarrow', '↑': '\\uparrow', '↓': '\\downarrow', '↕': '\\updownarrow',
+    '⊕': '\\oplus', '⊗': '\\otimes', '‖': '\\|', 'ℝ': '\\mathbb{R}', 'ℕ': '\\mathbb{N}', 'ℤ': '\\mathbb{Z}'
+  };
+  s = s.replace(/[αβγΓδΔεζηθΘκλΛμνξΞπΠρσΣτΥφΦψΨωΩ×÷·±∓≈≠≡∝≤≥≪≫∞∑∫∏∂∇∈∉∀∃→←⇒⇐↔⇔↑↓↕⊕⊗‖ℝℕℤ]/g, (ch, idx, full) => {
+    const cmd = symToTex[ch];
+    if (!cmd) return ch;
+    const nextCh = full[idx + 1] || '';
+    const needSpace = /^\\[a-zA-Z]+$/.test(cmd) && /[a-zA-Z]/.test(nextCh);
+    return needSpace ? `${cmd} ` : cmd;
+  });
+
+  // Satuan suhu & persen dalam LaTeX
+  s = s
+    .replace(/°\s*([CF])\b/g, '^{\\circ}\\mathrm{$1}')
+    .replace(/°/g, '^{\\circ}')
+    .replace(/\\+%/g, '%')
+    .replace(/%/g, '\\%');
+
+  // Koefisien c1..c9 & es bila tertulis datar -> subskrip LaTeX
+  s = s
+    .replace(/\bc([1-9])\b(?=\s*(?:[+\-*/=\\]|T|R|\(|\^|$))/g, 'c_{$1}')
+    .replace(/([+\-=/(]\s*)c([1-9])(?=[TR\s+\-*/=\\]|$)/g, '$1c_{$2}')
+    .replace(/(\/\s*|\(\s*)es\b/g, '$1e_{s}')
+    .replace(/\bes(?=\s*=|\s*\))/g, 'e_{s}')
+    .replace(/_([0-9]+)/g, '_{$1}')
+    .replace(/\^([0-9]+)(?![0-9}])/g, '^{$1}');
+  s = normalizeZ21VarSubscripts(s);
+
+  // Fungsi matematis tegak (\ln, \log, \sin, ...) tanpa merusak isi \text{...}/\mathrm{...} atau \begin{...}/\end{...}
+  const textSlots = [];
+  s = s.replace(/\\(?:text|mathrm|mathbf|operatorname|begin|end)\{[^{}]*\}/g, (blk) => {
+    textSlots.push(blk);
+    return `\x00ZTEXT${textSlots.length - 1}\x00`;
+  });
+  s = replaceZ21BalancedSqrt(s);
+  s = s
+    .replace(/(?<!\\)\b(ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max)\b(?=\s*(?:\\left|[(\[{]|\\(?:frac|sum|prod)))/g, '\\$1')
+    .replace(/(?<!\\)\b(cos|sin|tan|exp|ln|log|arctan|arcsin|arccos)\s+([θ\w])/g, '\\$1 $2')
+    .replace(/(\bP\s*\(\s*)([A-Z][a-z]{2,})(\s*\))/g, '$1\\mathrm{$2}$3')
+    .replace(/([A-Za-z0-9}])\s*\*\s*([A-Za-z0-9\\(])/g, '$1 \\times $2')
+    .replace(/([A-Za-z0-9)\]}θγπ])\s+\b(dengan\s+kendala|dengan\s+syarat|untuk\s+setiap|untuk\s+semua|di\s+mana|subject\s+to|such\s+that|for\s+all|dan|atau|serta|dimana|jika|apabila|bila|dengan|untuk|where|with|when|and|or|if)\b\s+(?=[A-Za-z0-9θγπ\\(\[{])/gi, (_, pre, w) => /\s/.test(w) ? `${pre}\\;\\text{${w.replace(/\s+/g, ' ')}}\\;` : `${pre}\\;\\mathrm{${w}}\\;`);
+  if (textSlots.length > 0) {
+    s = s.replace(/\x00ZTEXT(\d+)\x00/g, (_, idx) => textSlots[Number(idx)] || '');
+  }
+
+  // Promosikan rasio kurung seimbang `(A / B)` menjadi `\frac{A}{B}` 2D
+  s = promoteBalancedDivisionToFrac(s);
+  s = s.replace(/(\b\w\w?\s*=\s*)(?!\b(?:km\/h|m\/s|kg\/m|g\/kg|mg\/|mm\/|N\/A|I\/O)\b)([A-Za-z0-9\\_{}]+)\s*\/\s*([A-Za-z0-9\\_{}]+)(?=$|\s*[×+\-=])/g, '$1\\frac{$2}{$3}');
+
+  // Seimbangkan jumlah \left dan \right agar tidak menimbulkan error parser
+  const leftCount = (s.match(/\\left(?![a-zA-Z])/g) || []).length;
+  const rightCount = (s.match(/\\right(?![a-zA-Z])/g) || []).length;
+  if (leftCount !== rightCount) {
+    s = s.replace(/\\left\s*([([{|])/g, '$1').replace(/\\right\s*([)\]}|])/g, '$1').replace(/\\(?:left|right)(?![a-zA-Z])\s*\.?/g, '');
+  }
+
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+function extractBalancedZ21Braces(str, startIdx) {
+  let i = startIdx;
+  while (i < str.length && /\s/.test(str[i])) i++;
+  if (i >= str.length || str[i] !== '{') return null;
+  let depth = 0;
+  const contentStart = i + 1;
+  while (i < str.length) {
+    if (str[i] === '\\' && i + 1 < str.length) {
+      i += 2;
+      continue;
+    }
+    if (str[i] === '{') depth++;
+    else if (str[i] === '}') {
+      depth--;
+      if (depth === 0) return { content: str.slice(contentStart, i), endIdx: i + 1 };
+    }
+    i++;
+  }
+  return null;
+}
+
+function replaceZ21Latex1Arg(str, cmdRegex, fn) {
+  let out = String(str || '');
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
+    let res = '';
+    let idx = 0;
+    while (idx < out.length) {
+      cmdRegex.lastIndex = idx;
+      const m = cmdRegex.exec(out);
+      if (!m) {
+        res += out.slice(idx);
+        break;
+      }
+      res += out.slice(idx, m.index);
+      const arg1 = extractBalancedZ21Braces(out, m.index + m[0].length);
+      if (arg1) {
+        res += fn(arg1.content, m[0]);
+        idx = arg1.endIdx;
+        changed = true;
+      } else {
+        res += m[0];
+        idx = m.index + m[0].length;
+      }
+    }
+    out = res;
+    if (!changed) break;
+  }
+  return out;
+}
+
+function replaceZ21Latex2Arg(str, cmdRegex, fn) {
+  let out = String(str || '');
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
+    let res = '';
+    let idx = 0;
+    while (idx < out.length) {
+      cmdRegex.lastIndex = idx;
+      const m = cmdRegex.exec(out);
+      if (!m) {
+        res += out.slice(idx);
+        break;
+      }
+      res += out.slice(idx, m.index);
+      const arg1 = extractBalancedZ21Braces(out, m.index + m[0].length);
+      const arg2 = arg1 ? extractBalancedZ21Braces(out, arg1.endIdx) : null;
+      if (arg1 && arg2) {
+        res += fn(arg1.content, arg2.content, m[0]);
+        idx = arg2.endIdx;
+        changed = true;
+      } else {
+        res += m[0];
+        idx = m.index + m[0].length;
+      }
+    }
+    out = res;
+    if (!changed) break;
+  }
+  return out;
+}
+
+function wrapZ21FractionOperand(part) {
+  const p = String(part || '').trim();
+  if (!p) return p;
+  if (/^[A-Za-z0-9α-ωΑ-Ω₀-₉⁰-⁹¹²³._^{}]+$/.test(p)) return p;
+  if (p.startsWith('(') && p.endsWith(')')) {
+    let d = 0;
+    let balancedOuter = true;
+    for (let i = 0; i < p.length - 1; i++) {
+      if (p[i] === '(') d++;
+      else if (p[i] === ')') {
+        d--;
+        if (d === 0) { balancedOuter = false; break; }
+      }
+    }
+    if (balancedOuter && d === 1) return p;
+  }
+  return `(${p})`;
+}
+
+function coalesceZ21MathBlocks(rawText) {
+  const lines = String(rawText ?? '').split(/\r?\n/);
+  const out = [];
+  let inEnv = false;
+  let envName = '';
+  let envLines = [];
+  let inDisplay = false;
+  let displayLines = [];
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!inEnv && !inDisplay) {
+      const mBegin = trimmed.match(/\\begin\{(aligned|align\*?|gather\*?|split|eqnarray\*?|cases|equation\*?)\}/i);
+      if (mBegin && !trimmed.includes(`\\end{${mBegin[1]}}`)) {
+        inEnv = true;
+        envName = mBegin[1];
+        envLines = [trimmed];
+        continue;
+      }
+      if (trimmed.startsWith('$$') && (trimmed.length === 2 || !trimmed.slice(2).includes('$$'))) {
+        inDisplay = true;
+        displayLines = [trimmed];
+        continue;
+      }
+      if (trimmed.startsWith('\\[') && !trimmed.includes('\\]')) {
+        inDisplay = true;
+        displayLines = [trimmed];
+        continue;
+      }
+      out.push(rawLine);
+    } else if (inEnv) {
+      envLines.push(trimmed);
+      if (trimmed.includes(`\\end{${envName}}`) || trimmed.includes('\\end{')) {
+        out.push(envLines.join(' '));
+        inEnv = false;
+        envName = '';
+        envLines = [];
+      }
+    } else if (inDisplay) {
+      displayLines.push(trimmed);
+      if (trimmed.endsWith('$$') || trimmed.includes('$$') || trimmed.includes('\\]')) {
+        out.push(displayLines.join(' '));
+        inDisplay = false;
+        displayLines = [];
+      }
+    }
+  }
+  if (envLines.length > 0) out.push(envLines.join(' '));
+  if (displayLines.length > 0) out.push(displayLines.join(' '));
+  return out;
+}
+
+function normalizeZ21ScientificText(rawText, options = {}) {
+  let s = restoreCorruptedJsonLatexEscapes(rawText);
+  if (!s) return '';
+
+  const preserveFrac = Boolean(options && options.preserveFrac);
+  const hasAlignEnv = /\\begin\s*\{(?:aligned|align\*?|gather\*?|split|eqnarray\*?|cases|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix)\}/i.test(s);
+
   // Strip wrapper LaTeX $$, $, \( \), \[ \] sambil menjaga isi rumus
   s = s
     .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, (_, eq) => eq.trim())
     .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (_, eq) => eq.trim())
     .replace(/\\\(\s*([\s\S]*?)\s*\\\)/g, (_, eq) => eq.trim())
-    .replace(/(^|[^\w\\])\$([^$\n]{1,220})\$(?!\d)/g, '$1$2');
+    .replace(/(^|[^\w\\])\$([^$\n]{1,360})\$(?!\d)/g, '$1$2');
 
-  // Strip \left dan \right pembatas kurung LaTeX (baik single maupun double-backslash) agar ekspresi tetap bersih
+  // Strip \left dan \right pembatas kurung LaTeX serta escape teks LaTeX (\%, \&, \#, \,)
+  if (!(preserveFrac && hasAlignEnv)) {
+    s = s
+      .replace(/\\+left\s*\\?([([{|])/g, '$1')
+      .replace(/\\+right\s*\\?([)\]}|])/g, '$1')
+      .replace(/\\+(?:left|right)(?![a-zA-Z])\s*\.?/g, '');
+  }
   s = s
-    .replace(/\\+left\s*\\?([([{|])/g, '$1')
-    .replace(/\\+right\s*\\?([)\]}|])/g, '$1')
-    .replace(/\\+(?:left|right)\b\s*\.?/g, '');
+    .replace(/\\([%&#_])/g, '$1')
+    .replace(/\\(?:quad|qquad)(?![a-zA-Z])|\\(?:limits|nolimits|displaystyle|textstyle)(?![a-zA-Z])|\\[,;:]/g, ' ')
+    .replace(/\\!/g, '');
 
-  // Konversi LaTeX umum ke Unicode matematika yang tajam & bersih
+  // Konversi LaTeX umum (termasuk kurung bersarang) ke Unicode matematika yang tajam & bersih
+  if (!preserveFrac) {
+    if (hasAlignEnv) {
+      s = s
+        .replace(/\\begin\s*\{(?:aligned|align\*?|gather\*?|split|eqnarray\*?|cases|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix|equation\*?)\}/gi, '')
+        .replace(/\\end\s*\{(?:aligned|align\*?|gather\*?|split|eqnarray\*?|cases|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix|equation\*?)\}/gi, '')
+        .replace(/\s*\\\\\s*/g, '; ')
+        .replace(/\s*&\s*/g, ' ');
+    }
+    s = replaceZ21Latex2Arg(s, /\\(?:dfrac|tfrac|cfrac|frac)(?![a-zA-Z])/g, (num, den) => `(${wrapZ21FractionOperand(num)} / ${wrapZ21FractionOperand(den)})`);
+  } else {
+    s = s.replace(/\\(?:dfrac|tfrac|cfrac)(?![a-zA-Z])/g, '\\frac');
+  }
+  if (!preserveFrac || !hasAlignEnv) {
+    s = replaceZ21Latex1Arg(s, /\\sqrt(?![a-zA-Z])/g, (inner) => `√(${inner})`);
+  }
+  s = replaceZ21Latex1Arg(s, /\\mathbb(?![a-zA-Z])/g, (inner) => ({ R: 'ℝ', N: 'ℕ', Z: 'ℤ', Q: 'ℚ', C: 'ℂ' }[inner.trim()] || inner));
+  if (!preserveFrac) {
+    s = replaceZ21Latex1Arg(s, /\\(?:vec|hat|bar|tilde|text|mathrm|mathbf|mathit|operatorname|boxed)(?![a-zA-Z])/g, (inner) => inner);
+  }
   s = s
-    .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '($1 / $2)')
-    .replace(/\\sqrt\s*\{([^{}]+)\}/g, '√($1)')
-    .replace(/\\mathbb\s*\{R\}/g, 'ℝ')
-    .replace(/\\mathbb\s*\{N\}/g, 'ℕ')
-    .replace(/\\mathbb\s*\{Z\}/g, 'ℤ')
-    .replace(/\\vec\s*\{([^{}]+)\}/g, '$1')
-    .replace(/\\hat\s*\{([^{}]+)\}/g, '$1')
-    .replace(/\\(?:text|mathrm|mathbf|mathit|operatorname)\s*\{([^{}]*)\}/g, '$1')
+    .replace(/\^\{\s*\\circ\s*\}\s*([CFcf])\b/g, '°$1')
     .replace(/\^\\circ\s*([CFcf])\b/g, '°$1')
-    .replace(/\\circ\b/g, '°')
-    .replace(/\\theta\b/g, 'θ')
-    .replace(/\\alpha\b/g, 'α')
-    .replace(/\\beta\b/g, 'β')
-    .replace(/\\gamma\b/g, 'γ')
-    .replace(/\\delta\b/g, 'δ')
-    .replace(/\\Delta\b/g, 'Δ')
-    .replace(/\\pi\b/g, 'π')
-    .replace(/\\sigma\b/g, 'σ')
-    .replace(/\\Sigma\b/g, 'Σ')
-    .replace(/\\lambda\b/g, 'λ')
-    .replace(/\\mu\b/g, 'μ')
-    .replace(/\\omega\b/g, 'ω')
-    .replace(/\\Omega\b/g, 'Ω')
-    .replace(/\\tau\b/g, 'τ')
-    .replace(/\\rho\b/g, 'ρ')
-    .replace(/\\phi\b/g, 'φ')
-    .replace(/\\Phi\b/g, 'Φ')
-    .replace(/\\psi\b/g, 'ψ')
-    .replace(/\\Psi\b/g, 'Ψ')
-    .replace(/\\eta\b/g, 'η')
-    .replace(/\\zeta\b/g, 'ζ')
-    .replace(/\\xi\b/g, 'ξ')
-    .replace(/\\nu\b/g, 'ν')
-    .replace(/\\kappa\b/g, 'κ')
-    .replace(/\\varepsilon\b/g, 'ε')
-    .replace(/\\epsilon\b/g, 'ε')
-    .replace(/\\times\b/g, '×')
-    .replace(/\\div\b/g, '÷')
-    .replace(/\\cdot\b/g, '·')
-    .replace(/\\approx\b/g, '≈')
-    .replace(/\\neq\b/g, '≠')
-    .replace(/\\equiv\b/g, '≡')
-    .replace(/\\propto\b/g, '∝')
-    .replace(/\\leq\b/g, '≤')
-    .replace(/\\geq\b/g, '≥')
-    .replace(/\\pm\b/g, '±')
-    .replace(/\\infty\b/g, '∞')
-    .replace(/\\sum\b/g, '∑')
-    .replace(/\\int\b/g, '∫')
-    .replace(/\\partial\b/g, '∂')
-    .replace(/\\nabla\b/g, '∇')
-    .replace(/\\in\b/g, '∈')
-    .replace(/\\forall\b/g, '∀')
-    .replace(/\\exists\b/g, '∃')
-    .replace(/\\(?:rightarrow|to)\b/g, '→')
-    .replace(/\\Rightarrow\b/g, '⇒')
-    .replace(/\\(cos|sin|tan|log|ln|exp|lim)\b/g, '$1');
+    .replace(/\^\{\s*\\circ\s*\}/g, '°')
+    .replace(/\^\\circ(?![a-zA-Z])/g, '°')
+    .replace(/\\(?:circ|degree)(?![a-zA-Z])/g, '°')
+    .replace(/\\theta(?![a-zA-Z])/g, 'θ')
+    .replace(/\\Theta(?![a-zA-Z])/g, 'Θ')
+    .replace(/\\alpha(?![a-zA-Z])/g, 'α')
+    .replace(/\\beta(?![a-zA-Z])/g, 'β')
+    .replace(/\\gamma(?![a-zA-Z])/g, 'γ')
+    .replace(/\\Gamma(?![a-zA-Z])/g, 'Γ')
+    .replace(/\\delta(?![a-zA-Z])/g, 'δ')
+    .replace(/\\Delta(?![a-zA-Z])/g, 'Δ')
+    .replace(/\\pi(?![a-zA-Z])/g, 'π')
+    .replace(/\\Pi(?![a-zA-Z])/g, 'Π')
+    .replace(/\\sigma(?![a-zA-Z])/g, 'σ')
+    .replace(/\\Sigma(?![a-zA-Z])/g, 'Σ')
+    .replace(/\\lambda(?![a-zA-Z])/g, 'λ')
+    .replace(/\\Lambda(?![a-zA-Z])/g, 'Λ')
+    .replace(/\\mu(?![a-zA-Z])/g, 'μ')
+    .replace(/\\omega(?![a-zA-Z])/g, 'ω')
+    .replace(/\\Omega(?![a-zA-Z])/g, 'Ω')
+    .replace(/\\tau(?![a-zA-Z])/g, 'τ')
+    .replace(/\\rho(?![a-zA-Z])/g, 'ρ')
+    .replace(/\\phi(?![a-zA-Z])/g, 'φ')
+    .replace(/\\Phi(?![a-zA-Z])/g, 'Φ')
+    .replace(/\\psi(?![a-zA-Z])/g, 'ψ')
+    .replace(/\\Psi(?![a-zA-Z])/g, 'Ψ')
+    .replace(/\\eta(?![a-zA-Z])/g, 'η')
+    .replace(/\\zeta(?![a-zA-Z])/g, 'ζ')
+    .replace(/\\xi(?![a-zA-Z])/g, 'ξ')
+    .replace(/\\Xi(?![a-zA-Z])/g, 'Ξ')
+    .replace(/\\nu(?![a-zA-Z])/g, 'ν')
+    .replace(/\\kappa(?![a-zA-Z])/g, 'κ')
+    .replace(/\\varepsilon(?![a-zA-Z])/g, 'ε')
+    .replace(/\\epsilon(?![a-zA-Z])/g, 'ε')
+    .replace(/\\Upsilon(?![a-zA-Z])/g, 'Υ')
+    .replace(/\\times(?![a-zA-Z])/g, '×')
+    .replace(/\\div(?![a-zA-Z])/g, '÷')
+    .replace(/\\cdot(?![a-zA-Z])/g, '·')
+    .replace(/\\cdots(?![a-zA-Z])/g, '⋯')
+    .replace(/\\ldots(?![a-zA-Z])/g, '…')
+    .replace(/\\approx(?![a-zA-Z])/g, '≈')
+    .replace(/\\simeq(?![a-zA-Z])/g, '≃')
+    .replace(/\\cong(?![a-zA-Z])/g, '≅')
+    .replace(/\\sim(?![a-zA-Z])/g, '~')
+    .replace(/\\neq?(?![a-zA-Z])/g, '≠')
+    .replace(/\\equiv(?![a-zA-Z])/g, '≡')
+    .replace(/\\propto(?![a-zA-Z])/g, '∝')
+    .replace(/\\ll(?![a-zA-Z])/g, '≪')
+    .replace(/\\gg(?![a-zA-Z])/g, '≫')
+    .replace(/\\leq?(?![a-zA-Z])/g, '≤')
+    .replace(/\\geq?(?![a-zA-Z])/g, '≥')
+    .replace(/\\pm(?![a-zA-Z])/g, '±')
+    .replace(/\\mp(?![a-zA-Z])/g, '∓')
+    .replace(/\\infty(?![a-zA-Z])/g, '∞')
+    .replace(/\\sum(?![a-zA-Z])/g, '∑')
+    .replace(/\\int(?![a-zA-Z])/g, '∫')
+    .replace(/\\prod(?![a-zA-Z])/g, '∏')
+    .replace(/\\partial(?![a-zA-Z])/g, '∂')
+    .replace(/\\nabla(?![a-zA-Z])/g, '∇')
+    .replace(/\\notin(?![a-zA-Z])/g, '∉')
+    .replace(/\\in(?![a-zA-Z])/g, '∈')
+    .replace(/\\subseteq(?![a-zA-Z])/g, '⊆')
+    .replace(/\\subset(?![a-zA-Z])/g, '⊂')
+    .replace(/\\cup(?![a-zA-Z])/g, '∪')
+    .replace(/\\cap(?![a-zA-Z])/g, '∩')
+    .replace(/\\perp(?![a-zA-Z])/g, '⊥')
+    .replace(/\\parallel(?![a-zA-Z])/g, '∥')
+    .replace(/\\mid(?![a-zA-Z])/g, '|')
+    .replace(/\\forall(?![a-zA-Z])/g, '∀')
+    .replace(/\\exists(?![a-zA-Z])/g, '∃')
+    .replace(/\\(?:long)?(?:rightarrow|to)(?![a-zA-Z])/g, '→')
+    .replace(/\\leftarrow(?![a-zA-Z])/g, '←')
+    .replace(/\\(?:Rightarrow|implies)(?![a-zA-Z])/g, '⇒')
+    .replace(/\\Leftarrow(?![a-zA-Z])/g, '⇐')
+    .replace(/\\(?:long)?leftrightarrow(?![a-zA-Z])/g, '↔')
+    .replace(/\\(?:Leftrightarrow|iff)(?![a-zA-Z])/g, '⇔')
+    .replace(/\\downarrow(?![a-zA-Z])/g, '↓')
+    .replace(/\\uparrow(?![a-zA-Z])/g, '↑')
+    .replace(/\\updownarrow(?![a-zA-Z])/g, '↕')
+    .replace(/\\(cos|sin|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|log|ln|exp|lim|min|max)(?![a-zA-Z])/g, '$1');
 
-  // Pulihkan simbol derajat yang hilang pada satuan suhu ("Suhu 24 C", "24C", "suhu (F)", "( F )")
+  // Pulihkan simbol derajat hanya pada konteks suhu eksplisit (cegah salah ubah satuan fisika Coulomb/Farad/Vitamin C)
   s = s
-    .replace(/(\b(?:Suhu|Temperatur|Temp|T)\s*[:=]?\s*-?\d+(?:[.,]\d+)?)\s*°?\s*([CF])(?![A-Za-z0-9_])/gi, (_, pre, u) => `${pre}°${u.toUpperCase()}`)
-    .replace(/\b(-?\d+(?:[.,]\d+)?)\s+([CF])(?=[,.;:)\s]|$)/g, '$1°$2')
-    .replace(/\(\s*(°?\s*[CF])\s*\)/g, (_, u) => `(°${u.replace(/[°\s]/g, '').toUpperCase()})`);
+    .replace(/(\b(?:Suhu|Temperatur|Temp|Temperature|Feels\s*Like|Terasa|Dew\s*Point|Titik\s*Embun)\s*[:=]?\s*-?\d+(?:[.,]\d+)?)\s*°?\s*([CF])(?![A-Za-z0-9_])/gi, (_, pre, u) => `${pre}°${u.toUpperCase()}`)
+    .replace(/((?:suhu|temperatur|temp|temperature|terasa|udara|dingin|panas|celsius|fahrenheit|in|dalam)[^\n]{0,24}?\b-?\d+(?:[.,]\d+)?)\s+([CF])(?=[,.;:)\s]|$)/gi, (_, pre, u) => `${pre}°${u.toUpperCase()}`)
+    .replace(/(\b(?:suhu|temperatur|temp|temperature|celsius|fahrenheit|dew\s*point|wind\s*chill|heat\s*index)[^\n]{0,30}?)\(\s*([CF])\s*\)/gi, (_, pre, u) => `${pre}(°${u.toUpperCase()})`)
+    .replace(/\(\s*°\s*([CF])\s*\)/gi, (_, u) => `(°${u.toUpperCase()})`);
 
-  // Superscript (^2, ^{0.16}, ^n) & subscript eksplisit (c_1, c_2T -> c₂T, e_s, x_{12}, T_{d})
+  // Superscript (^2, ^{0.16}, ^n) & subscript eksplisit (c_1, c_2T -> c₂T, e_s, T_{dp}, z_LCL, \rho_udara)
+  s = normalizeZ21VarSubscripts(s);
   s = s
     .replace(/\^\{([0-9+-]+)\}/g, (_, d) => toZ21Superscript(d))
     .replace(/\^\{\s*([^{}]+?)\s*\}/g, '^{$1}')
     .replace(/\^([0-9])(?![0-9])/g, (_, d) => toZ21Superscript(d))
     .replace(/_([0-9]+)/g, (_, d) => toZ21Subscript(d))
-    .replace(/_\{\s*([0-9a-zA-Z+-]+)\s*\}/g, (full, d) => {
+    .replace(/_\{\s*([0-9a-zA-Z+-↓↑]+)\s*\}/g, (full, d) => {
       const mapped = d.split('').map(c => Z21_SUB_MAP[c] || Z21_SUB_MAP[c.toLowerCase()] || '').join('');
-      return mapped.length === d.length ? mapped : `_{${d}}`;
-    })
-    .replace(/_([a-zA-Z])(?![a-zA-Z0-9])/g, (_, d) => {
-      const m = Z21_SUB_MAP[d] || Z21_SUB_MAP[d.toLowerCase()];
-      return m ? m : `_{${d}}`;
-    })
-    .replace(/\bTd\b(?=\s*=)/g, 'T_{d}');
+      return (d.length === 1 || (d.length <= 2 && /^[0-9+-]+$/.test(d))) && mapped.length === d.length ? mapped : `_{${d}}`;
+    });
 
   // Subscript alami pada koefisien polinomial & variabel meteorologi: c1..c9 dan es (tekanan uap jenuh)
   s = s
@@ -7862,30 +8441,97 @@ function normalizeZ21ScientificText(rawText) {
     .replace(/\bes(?=\s*=|\s*\))/g, 'eₛ');
 
   // Operator perkalian matematika (* -> ×) ketika mengapit dua operan matematis
-  s = s.replace(/([A-Za-z0-9₀-₉⁰-⁹ₛ)])\s*\*\s*([A-Za-z0-9₀-₉⁰-⁹ₛ(])/g, '$1 × $2');
+  s = s.replace(/([A-Za-z0-9₀-₉⁰-⁹¹²³ₛ)])\s*\*\s*([A-Za-z0-9₀-₉⁰-⁹¹²³ₛ(])/g, '$1 × $2');
 
-  return s;
+  return s.replace(/  +/g, ' ').trim();
+}
+
+const Z21_NARRATIVE_COLON_PREFIX_RE = /^(?:Formula|Rumus|Persamaan)\s+(?:ini|tersebut|di\s+atas)\b|^(?:Lokasi|Tanggal|Parameter\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan|Dengan|Untuk|Dimana|Di\s+mana|Substitusi|Misal|Misalkan|Karena|Sehingga|Maka|Jika|Apabila|Bila|Namun|Tetapi|Sedangkan|Yaitu|Yakni|Oleh\s+karena|Contoh|Diketahui|Ditanya|Dijawab|Hasil|Nilai|Perubahan|Evaluasi)\b|(?:adalah|yaitu|yakni|menunjukkan|menghasilkan|memberikan|sebesar|sebagai|berikut|berupa)$/i;
+
+function extractZ21FormulaLabelAndNote(line) {
+  const t = String(line || '').trim();
+  if (!t) return { label: '', expr: '', note: '' };
+  let label = '';
+  let body = t;
+  const mLbl = t.match(/^([A-Za-zÀ-ÖØ-öø-ÿ][A-Za-z0-9\u0370-\u03FFÀ-ÖØ-öø-ÿ'’\-/(),.\s]{1,65}):\s*(.+)$/);
+  if (mLbl) {
+    const pfx = mLbl[1].trim();
+    const rest = mLbl[2].trim();
+    if (
+      rest &&
+      !/[=<>≤≥≈≠+×÷^_\\$∑∫∏√]/.test(pfx) &&
+      !Z21_NARRATIVE_COLON_PREFIX_RE.test(pfx) &&
+      !/^(?:[-+*•]|\d+[.)])\s*$/.test(pfx)
+    ) {
+      label = pfx;
+      body = rest;
+    }
+  }
+  let note = '';
+  const mNote = body.match(/^([\s\S]+?)\s+(\([^()\n]{4,160}\)[.,;]?)$/);
+  if (mNote) {
+    const core = mNote[1].trim();
+    const noteRaw = mNote[2].trim();
+    const inner = noteRaw.replace(/^\(|\)[.,;]?$/g, '').trim();
+    const noteMathStop = new Set(['sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh', 'exp', 'log', 'lim', 'min', 'max', 'mod']);
+    const proseWords = (inner.match(/\b[A-Za-z\u00C0-\u024F]*[a-z\u00e0-\u00ff]{2,}[A-Za-z\u00C0-\u024F]*\b/g) || [])
+      .filter(w => !noteMathStop.has(w.toLowerCase()));
+    const hasMathConstruct = /[=^_\\×÷≤≥≈≠∑∫∏*]|\s[+\-]\s/.test(inner);
+    if (proseWords.length >= 2 && !hasMathConstruct && /[=<>≤≥≈≠^_{}\\]|\\(?:frac|sum|sqrt|min|max|sigma|theta)/.test(core)) {
+      body = core;
+      note = noteRaw;
+    }
+  }
+  if ((label || note) && body && /[=<>≤≥≈≠}\dA-Za-z\u0370-\u03FF)\]]$/.test(body.replace(/\.\s*$/, ''))) {
+    body = body.replace(/(?<!\.)\.\s*$/, '').trim();
+  } else if (/\\(?:frac|dfrac|tfrac|sqrt|sum|prod|int)\s*\{[^}]*\}\s*\.\s*$/.test(body) || /[≤≥≈≠=]\s*-?\d+(?:[.,]\d+)?\.\s*$/.test(body)) {
+    body = body.replace(/(?<!\.)\.\s*$/, '').trim();
+  }
+  return { label, expr: body, note };
 }
 
 function isZ21FormulaLine(line) {
   const t = String(line || '').trim();
   if (!t) return false;
-  if (/^(?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}:/i.test(t)) {
+  if (isZ21VariableLegendLine(t).isLegend) return false;
+  const cand = t.replace(/^(?:\(\d+\)|\d+\.)\s+/, '').trim();
+  if (cand !== t && isZ21VariableLegendLine(cand).isLegend) return false;
+
+  // Blok display LaTeX terstruktur (\begin{aligned} ... \end{aligned}, \begin{cases}, dll.) hingga 1200 karakter
+  if (/^\\begin\s*\{(?:aligned|align\*?|gather\*?|split|eqnarray\*?|cases|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix|equation\*?)\}/i.test(cand) || /\\begin\s*\{(?:aligned|align\*?|gather\*?|split|eqnarray\*?|cases)\}[\s\S]{3,1100}\\end\s*\{/i.test(cand)) {
+    return cand.length <= 1200;
+  }
+
+  // Kalimat naratif dengan klausa penghubung / diakhiri titik dua pengantar ("Substitusi T = 24 °C menghasilkan:", "Dengan T_F = ..., hasil:") BUKAN formula mandiri
+  if (/^(?:dengan|untuk|dimana|di\s+mana|substitusi|misal|misalkan|karena|sehingga|maka|jika|apabila|bila|namun|tetapi|sedangkan|yaitu|yakni|oleh\s+karena|nilai|hasil|perubahan|setiap)\s+[A-Za-z0-9\\]/i.test(cand)) {
+    return false;
+  }
+  if (/:$/.test(cand) && /[=<>≈≠≤≥]/.test(cand)) return false;
+
+  const { label: extLbl, expr: coreExpr } = extractZ21FormulaLabelAndNote(cand);
+  if (extLbl && !hasZ21NarrativeProse(coreExpr, 4)) {
+    if (/[=≤≥≈≠→⇒×÷^]|\\(?:frac|dfrac|tfrac|cfrac|sqrt|sum|int|prod|lim|begin|min|max)(?![a-zA-Z])/.test(coreExpr) &&
+        /(?:\s[+\-×÷*/=≤≥≈≠·]\s|[=+\-×÷^≤≥≈≠·∑∫∏√∇∂]|\\(?:frac|dfrac|tfrac|cfrac|sqrt|sum|int|prod|ln|log|sin|cos|tan|exp|arctan|min|max|alpha|beta|gamma|rho|sigma|theta|partial)|(?<![A-Za-z])(?:max|min|cos|sin|tan|arctan|log|ln|exp|sqrt)\s*\(|\^\{|_\{|[⁰¹²³₀-₉ₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓ])/i.test(coreExpr)) {
+      return coreExpr.length <= 520;
+    }
+    return false;
+  }
+
+  if (hasZ21NarrativeProse(coreExpr, 4)) return false;
+
+  if (/\\(?:frac|dfrac|tfrac|cfrac|sqrt|sum|int|prod|lim)(?![a-zA-Z])/.test(coreExpr) && coreExpr.length <= 420) {
     return true;
   }
-  if (/^[A-Za-z\u0370-\u03FF][A-Za-z0-9\u0370-\u03FF_₀-₉⁰-⁹ₛ,{}\s()]{0,28}\s*=\s*.+/.test(t) && /(?:\s[+\-×*/]\s|[²³⁴₀-₉ₛθΔπγ]|\b(?:cos|sin|log|ln|exp|limit)\s*\(|\^\{|_\{)/i.test(t)) {
-    return t.length <= 220;
+  if (/^(?:\\(?:alpha|beta|gamma|Gamma|delta|Delta|epsilon|theta|lambda|mu|pi|rho|sigma|Sigma|phi|psi|omega|Omega|mathbb|mathrm|text|min|max)(?:_[A-Za-z0-9{}]+|\^\{?[^{}\s]+\}?)*|[A-Za-z0-9\u0370-\u03FF])[A-Za-z0-9\u0370-\u03FF\\_{}₀-₉⁰-⁹¹²³ₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓₛₚ,|·()+\-*/^\s]{0,36}\s*(?:=|≤|≥|\\leq|\\geq)\s*.+/.test(coreExpr) &&
+      /(?:\s[+\-×÷*/=·]\s|[+×÷^≤≥≈≠·∑∫∏√∇∂]|\\(?:frac|dfrac|tfrac|sqrt|sum|int|prod|ln|log|sin|cos|tan|exp|arctan|cdot|times|alpha|beta|gamma|rho|sigma|partial)|[⁰-⁹¹²³₀-₉ₛₚₐₑₕᵢⱼₖₗₘₙₒᵣₜᵤᵥₓθΔπγαρΓσΣμ]|(?<![A-Za-z])(?:cos|sin|tan|arctan|log|ln|exp|sqrt|limit|min|max)\s*\(|\^\{|_\{|\d+\s*%)/i.test(coreExpr)) {
+    return coreExpr.length <= 420;
   }
   return false;
 }
 
 function parseZ21FormulaParts(line) {
   const t = normalizeZ21ScientificText(line).trim();
-  const labelMatch = t.match(/^((?:Formula|Rumus|Persamaan|Representasi\s+Vektor|Model\s+Stokastik|Fungsi\s+Matematis|Derivasi)\b[^:]{0,65}):\s*(.+)$/i);
-  if (labelMatch) {
-    return { label: labelMatch[1].trim(), expr: labelMatch[2].trim() };
-  }
-  return { label: '', expr: t };
+  return extractZ21FormulaLabelAndNote(t);
 }
 
 function isZ21NumberedSectionHeading(line) {
@@ -7895,7 +8541,59 @@ function isZ21NumberedSectionHeading(line) {
   const body = m[2].trim();
   if (/[.:;]$/.test(body)) return false;
   if (/^\d/.test(body)) return false;
+  if (/[=<>\\^_{}]/.test(body) || isZ21FormulaLine(t)) return false;
   return true;
+}
+
+function normalizeSingleZ21TableObj(rawTbl, fallbackTitle = '') {
+  if (!rawTbl || typeof rawTbl !== 'object') return null;
+  let tbl = rawTbl;
+  if (Array.isArray(tbl)) {
+    if (tbl.length === 0) return null;
+    if (Array.isArray(tbl[0])) {
+      tbl = { title: fallbackTitle, headers: tbl[0], rows: tbl.slice(1) };
+    } else if (typeof tbl[0] === 'object') {
+      const keys = Object.keys(tbl[0]);
+      tbl = { title: fallbackTitle, headers: keys, rows: tbl.map(row => keys.map(k => row[k] ?? '')) };
+    } else {
+      return null;
+    }
+  }
+  const headersRaw = Array.isArray(tbl.headers) ? tbl.headers : (Array.isArray(tbl.columns) ? tbl.columns : []);
+  const rowsRaw = Array.isArray(tbl.rows) ? tbl.rows : (Array.isArray(tbl.data) ? tbl.data : []);
+  if (headersRaw.length === 0 && rowsRaw.length === 0) return null;
+  return {
+    ...tbl,
+    title: tbl.title ? stripZ21MarkdownInline(tbl.title) : (fallbackTitle || tbl.title),
+    headers: headersRaw.map(stripZ21MarkdownInline),
+    rows: rowsRaw.map(r => Array.isArray(r) ? r.map(c => normalizeZ21ScientificText(c).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1')) : r)
+  };
+}
+
+function extractZ21MarkdownTablesFromLines(lines, fallbackHeading) {
+  const nonTableLines = [];
+  const extractedTables = [];
+  let i = 0;
+  while (i < lines.length) {
+    const ln = String(lines[i] || '').trim();
+    if (ln.startsWith('|') && ln.endsWith('|') && i + 1 < lines.length && /^\|[\s:-]+\|/.test(String(lines[i + 1] || '').trim())) {
+      const hdr = ln.slice(1, -1).split('|').map(c => stripZ21MarkdownInline(c));
+      i += 2;
+      const rows = [];
+      while (i < lines.length && String(lines[i] || '').trim().startsWith('|')) {
+        const rowCells = String(lines[i] || '').trim().replace(/^\||\|$/g, '').split('|').map(c => normalizeZ21ScientificText(c).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1'));
+        if (rowCells.some(Boolean)) rows.push(rowCells);
+        i++;
+      }
+      if (hdr.length > 0 && rows.length > 0) {
+        extractedTables.push({ title: fallbackHeading, headers: hdr, rows });
+      }
+      continue;
+    }
+    nonTableLines.push(lines[i]);
+    i++;
+  }
+  return { nonTableLines, extractedTables };
 }
 
 function splitZ21ContentSections(rawSections = [], fallbackHeading = 'Ringkasan Utama') {
@@ -7903,28 +8601,52 @@ function splitZ21ContentSections(rawSections = [], fallbackHeading = 'Ringkasan 
   for (const sec of (Array.isArray(rawSections) ? rawSections : [])) {
     if (!sec || typeof sec !== 'object') continue;
     const initialHeading = sec.heading ? normalizeZ21ScientificText(sec.heading) : fallbackHeading;
-    const rawLines = String(sec.content || '').split(/\r?\n/);
+    const initialBullets = Array.isArray(sec.bullets)
+      ? sec.bullets.map(b => {
+          const rb = String(b || '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim();
+          return normalizeZ21ScientificText(rb, { preserveFrac: isZ21FormulaLine(rb) });
+        }).filter(Boolean)
+      : [];
+    const initialTables = [];
+    if (sec.table) {
+      const nt = normalizeSingleZ21TableObj(sec.table, initialHeading);
+      if (nt) initialTables.push(nt);
+    }
+    if (Array.isArray(sec.tables)) {
+      for (const t of sec.tables) {
+        const nt = normalizeSingleZ21TableObj(t, initialHeading);
+        if (nt) initialTables.push(nt);
+      }
+    }
+    const rawCoalesced = coalesceZ21MathBlocks(sec.content || '');
+    const { nonTableLines, extractedTables } = extractZ21MarkdownTablesFromLines(rawCoalesced, initialHeading);
+    if (extractedTables.length > 0) initialTables.push(...extractedTables);
+
     let cur = {
       heading: initialHeading,
       contentLines: [],
-      bullets: Array.isArray(sec.bullets) ? sec.bullets.map(b => normalizeZ21ScientificText(b)).filter(Boolean) : [],
-      table: sec.table || undefined
+      bullets: [],
+      tables: initialTables
     };
     let usedInitial = false;
 
-    for (const rawLn of rawLines) {
-      const cleanLn = normalizeZ21ScientificText(rawLn.trim());
+    for (const rawLn of nonTableLines) {
+      const trimmedRaw = String(rawLn || '').trim();
+      if (!trimmedRaw) continue;
+      const keepFrac = isZ21FormulaLine(trimmedRaw);
+      const cleanLn = normalizeZ21ScientificText(trimmedRaw, { preserveFrac: keepFrac }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim();
       if (!cleanLn) continue;
       if (isZ21NumberedSectionHeading(cleanLn) || /^#{2,4}\s+/.test(cleanLn)) {
-        const nextHeading = cleanLn.replace(/^#{2,4}\s+/, '').trim();
-        if (cur.contentLines.length > 0 || cur.bullets.length > 0 || cur.table || usedInitial) {
+        const nextHeading = cleanLn.replace(/^#{2,4}\s+/, '').replace(/\*\*(.+?)\*\*/g, '$1').trim();
+        if (cur.contentLines.length > 0 || cur.bullets.length > 0 || cur.tables.length > 0 || usedInitial) {
           out.push({
             heading: cur.heading,
             content: cur.contentLines.join('\n'),
             bullets: cur.bullets,
-            ...(cur.table ? { table: cur.table } : {})
+            ...(cur.tables[0] ? { table: cur.tables[0] } : {}),
+            ...(cur.tables.length > 0 ? { tables: cur.tables } : {})
           });
-          cur = { heading: nextHeading, contentLines: [], bullets: [], table: undefined };
+          cur = { heading: nextHeading, contentLines: [], bullets: [], tables: [] };
         } else {
           cur.heading = nextHeading;
         }
@@ -7933,12 +8655,14 @@ function splitZ21ContentSections(rawSections = [], fallbackHeading = 'Ringkasan 
         cur.contentLines.push(cleanLn);
       }
     }
-    if (cur.contentLines.length > 0 || cur.bullets.length > 0 || cur.table || (cur.heading && cur.heading !== fallbackHeading)) {
+    if (initialBullets.length > 0) cur.bullets.push(...initialBullets);
+    if (cur.contentLines.length > 0 || cur.bullets.length > 0 || cur.tables.length > 0 || (cur.heading && cur.heading !== fallbackHeading)) {
       out.push({
         heading: cur.heading,
         content: cur.contentLines.join('\n'),
         bullets: cur.bullets,
-        ...(cur.table ? { table: cur.table } : {})
+        ...(cur.tables[0] ? { table: cur.tables[0] } : {}),
+        ...(cur.tables.length > 0 ? { tables: cur.tables } : {})
       });
     }
   }
@@ -7953,6 +8677,41 @@ function stripZ21MarkdownInline(str) {
     .replace(/(^|\s)\*([^*\n]+)\*(\s|$)/g, '$1$2$3')
     .replace(/`([^`]+)`/g, '$1')
     .trim();
+}
+
+function synthesizeGroundedTableForEmptySummarySection(emptySec, allSections) {
+  const rows = [];
+  for (const s of (Array.isArray(allSections) ? allSections : [])) {
+    if (!s || s === emptySec) continue;
+    const h = String(s.heading || '').trim();
+    const lines = [
+      ...coalesceZ21MathBlocks(s.content || ''),
+      ...(Array.isArray(s.bullets) ? s.bullets : [])
+    ];
+    let primaryEq = '';
+    let numericVal = '';
+    for (const ln of lines) {
+      const t = String(ln || '').trim();
+      if (!t) continue;
+      if (!primaryEq && isZ21FormulaLine(t)) {
+        const plain = normalizeZ21ScientificText(t).replace(/^;\s*|;\s*$/g, '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\s+/g, ' ').trim();
+        primaryEq = plain.length > 72 ? (plain.slice(0, 69) + '...') : plain;
+      }
+      const mEqNum = t.match(/=\s*(-?\d+(?:[.,]\d+)?(?:\s*(?:×|x|\*)\s*10\^?\{?-?\d+\}?)?(?:\s*(?:°[CFK]|hPa|g\/kg|kg\/m³|g\/m³|W\/m²|m\/s|km\/h|mm|m|s|%))?)\s*(?:\(|$)/);
+      if (mEqNum && !/^\s*(?:b|c|T|RH|P₀|CC|v)\s*=\s*/.test(t)) {
+        numericVal = normalizeZ21ScientificText(mEqNum[1].trim());
+      }
+    }
+    if (h && (primaryEq || numericVal)) {
+      rows.push([h, primaryEq || '-', numericVal || 'Terkomputasi']);
+    }
+  }
+  if (rows.length === 0) return null;
+  return {
+    title: emptySec.heading || 'Tabel Ringkasan Hasil',
+    headers: ['Komponen / Bagian', 'Persamaan / Formula', 'Hasil Evaluasi'],
+    rows
+  };
 }
 
 function normalizeZ21DocSpec(rawSpec = {}) {
@@ -7980,43 +8739,101 @@ function normalizeZ21DocSpec(rawSpec = {}) {
   spec.title = stripZ21MarkdownInline(spec.title);
   if (spec.subtitle) spec.subtitle = stripZ21MarkdownInline(spec.subtitle);
 
+  const rawLatexMap = {};
+  const registerRawFormulas = (line) => {
+    const rawLn = String(line || '').trim().replace(/^[-*•]\s+/, '').trim();
+    if (!rawLn) return;
+    const isRawFormula = isZ21FormulaLine(rawLn);
+    const normLn = normalizeZ21ScientificText(rawLn, { preserveFrac: isRawFormula }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim();
+    const normFlat = normalizeZ21ScientificText(rawLn).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').trim();
+    if (!normLn) return;
+    if (!(isZ21FormulaLine(normLn) || isRawFormula)) return;
+    const rawParts = extractZ21FormulaLabelAndNote(rawLn);
+    const normParts = parseZ21FormulaParts(normLn);
+    const flatParts = parseZ21FormulaParts(normFlat);
+    const ltx = toZ21LatexMath(rawParts.expr || normParts.expr);
+    if (ltx) {
+      rawLatexMap[normLn] = ltx;
+      if (normFlat) rawLatexMap[normFlat] = ltx;
+      if (normParts.expr) rawLatexMap[normParts.expr] = ltx;
+      if (flatParts.expr) rawLatexMap[flatParts.expr] = ltx;
+    }
+  };
+
   if (Array.isArray(spec.sections)) {
     const preNormalizedSections = spec.sections.map((s) => {
       if (!s || typeof s !== 'object') return s;
       const cleanSec = { ...s };
+      const coalescedContent = s.content ? coalesceZ21MathBlocks(s.content) : [];
+      coalescedContent.forEach(registerRawFormulas);
+      if (Array.isArray(s.bullets)) s.bullets.forEach(registerRawFormulas);
       if (cleanSec.heading) cleanSec.heading = stripZ21MarkdownInline(cleanSec.heading);
-      if (cleanSec.content) cleanSec.content = normalizeZ21ScientificText(cleanSec.content).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
-      if (Array.isArray(cleanSec.bullets)) {
-        cleanSec.bullets = cleanSec.bullets.map((b) => stripZ21MarkdownInline(b)).filter(Boolean);
+      if (coalescedContent.length > 0) {
+        cleanSec.content = coalescedContent.join('\n');
+      }
+      if (cleanSec.headers && (cleanSec.rows || cleanSec.data) && !cleanSec.table) {
+        cleanSec.table = { title: cleanSec.heading, headers: cleanSec.headers, rows: cleanSec.rows || cleanSec.data };
+      } else if (cleanSec.columns && (cleanSec.rows || cleanSec.data) && !cleanSec.table) {
+        cleanSec.table = { title: cleanSec.heading, headers: cleanSec.columns, rows: cleanSec.rows || cleanSec.data };
       }
       if (cleanSec.table && typeof cleanSec.table === 'object') {
-        cleanSec.table = {
-          ...cleanSec.table,
-          title: cleanSec.table.title ? stripZ21MarkdownInline(cleanSec.table.title) : cleanSec.table.title,
-          headers: Array.isArray(cleanSec.table.headers) ? cleanSec.table.headers.map(stripZ21MarkdownInline) : [],
-          rows: Array.isArray(cleanSec.table.rows) ? cleanSec.table.rows.map(r => Array.isArray(r) ? r.map(c => normalizeZ21ScientificText(c).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1')) : r) : []
-        };
+        cleanSec.table = normalizeSingleZ21TableObj(cleanSec.table, cleanSec.heading) || undefined;
+      }
+      if (Array.isArray(cleanSec.tables)) {
+        cleanSec.tables = cleanSec.tables.map(t => normalizeSingleZ21TableObj(t, cleanSec.heading)).filter(Boolean);
+        if (!cleanSec.table && cleanSec.tables.length > 0) cleanSec.table = cleanSec.tables[0];
       }
       return cleanSec;
-    }).filter(s => s && (s.heading || s.content || (Array.isArray(s.bullets) && s.bullets.length > 0) || s.table));
+    }).filter(s => s && (s.heading || s.content || (Array.isArray(s.bullets) && s.bullets.length > 0) || s.table || (Array.isArray(s.tables) && s.tables.length > 0)));
     spec.sections = splitZ21ContentSections(preNormalizedSections, spec.title || 'Ringkasan Utama');
+    if (Object.keys(rawLatexMap).length > 0) {
+      spec.equationLatexMap = { ...(spec.equationLatexMap && typeof spec.equationLatexMap === 'object' ? spec.equationLatexMap : {}), ...rawLatexMap };
+    }
   }
 
   if (Array.isArray(spec.tables)) {
-    spec.tables = spec.tables.map((t) => {
-      if (!t || typeof t !== 'object') return t;
-      return {
-        ...t,
-        title: t.title ? stripZ21MarkdownInline(t.title) : t.title,
-        headers: Array.isArray(t.headers) ? t.headers.map(stripZ21MarkdownInline) : [],
-        rows: Array.isArray(t.rows) ? t.rows.map(r => Array.isArray(r) ? r.map(c => normalizeZ21ScientificText(c).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1')) : r) : []
-      };
-    });
+    spec.tables = spec.tables.map((t) => normalizeSingleZ21TableObj(t, '')).filter(Boolean);
+  }
+
+  // Tempelkan tabel root yang judulnya cocok ke dalam bab terkait (hindari tabel melompat ke akhir dokumen)
+  if (Array.isArray(spec.sections) && Array.isArray(spec.tables) && spec.tables.length > 0) {
+    const remainingTables = [];
+    for (const tbl of spec.tables) {
+      const tTitleNorm = String(tbl.title || '').trim().toLowerCase();
+      const targetSec = tTitleNorm
+        ? spec.sections.find(sec => !sec.table && (!Array.isArray(sec.tables) || sec.tables.length === 0) && String(sec.heading || '').trim().toLowerCase() === tTitleNorm)
+        : null;
+      if (targetSec) {
+        targetSec.table = tbl;
+        targetSec.tables = [tbl];
+      } else {
+        remainingTables.push(tbl);
+      }
+    }
+    spec.tables = remainingTables;
+  }
+
+  // Jika ada bab bertajuk "Tabel Ringkasan..." yang kosong tanpa isi tabel, sintesis tabel ringkasan dari persamaan/hasil bab sebelumnya
+  if (Array.isArray(spec.sections)) {
+    for (const sec of spec.sections) {
+      const hasTbl = Boolean((sec.table && Array.isArray(sec.table.rows) && sec.table.rows.length > 0) || (Array.isArray(sec.tables) && sec.tables.some(t => t && Array.isArray(t.rows) && t.rows.length > 0)));
+      if (!hasTbl && /\btabel\b/i.test(`${sec.heading || ''} ${sec.content || ''}`)) {
+        const synth = synthesizeGroundedTableForEmptySummarySection(sec, spec.sections);
+        if (synth) {
+          sec.table = synth;
+          sec.tables = [synth];
+        }
+      }
+    }
   }
 
   if ((!Array.isArray(spec.sections) || spec.sections.length === 0) && (!Array.isArray(spec.sheets) || spec.sheets.length === 0) && (!Array.isArray(spec.tables) || spec.tables.length === 0)) {
     if (spec.content && typeof spec.content === 'string') {
-      spec.sections = splitZ21ContentSections([{ heading: spec.title, content: normalizeZ21ScientificText(spec.content) }], spec.title);
+      coalesceZ21MathBlocks(spec.content).forEach(registerRawFormulas);
+      spec.sections = splitZ21ContentSections([{ heading: spec.title, content: spec.content }], spec.title);
+      if (Object.keys(rawLatexMap).length > 0) {
+        spec.equationLatexMap = { ...(spec.equationLatexMap && typeof spec.equationLatexMap === 'object' ? spec.equationLatexMap : {}), ...rawLatexMap };
+      }
     } else if (py) {
       const literalStrings = [];
       const reStr = /["']([^"'\n]{4,140})["']/g;
@@ -8033,6 +8850,29 @@ function normalizeZ21DocSpec(rawSpec = {}) {
     } else {
       spec.sections = [{ heading: spec.title, content: 'Dokumen Z21 berhasil dibuat.' }];
     }
+  }
+  const finalEqMap = (spec.equationLatexMap && typeof spec.equationLatexMap === 'object') ? { ...spec.equationLatexMap } : {};
+  for (const sec of (Array.isArray(spec.sections) ? spec.sections : [])) {
+    const candidates = [
+      ...coalesceZ21MathBlocks(sec.content || ''),
+      ...(Array.isArray(sec.bullets) ? sec.bullets : [])
+    ];
+    for (const c of candidates) {
+      const trimmed = String(c || '').trim();
+      if (!trimmed || finalEqMap[trimmed]) continue;
+      if (isZ21FormulaLine(trimmed)) {
+        const { expr } = parseZ21FormulaParts(trimmed);
+        const rawParts = extractZ21FormulaLabelAndNote(trimmed);
+        const ltx = toZ21LatexMath(rawParts.expr || expr);
+        if (ltx) {
+          finalEqMap[trimmed] = ltx;
+          if (expr && !finalEqMap[expr]) finalEqMap[expr] = ltx;
+        }
+      }
+    }
+  }
+  if (Object.keys(finalEqMap).length > 0) {
+    spec.equationLatexMap = finalEqMap;
   }
   return spec;
 }
@@ -8053,7 +8893,7 @@ function pdfAsciiSafe(s) {
     if (cp === 0x00B2) { out += String.fromCharCode(0xB2); continue; } // ²
     if (cp === 0x00B3) { out += String.fromCharCode(0xB3); continue; } // ³
     if (cp === 0x00B9) { out += String.fromCharCode(0xB9); continue; } // ¹
-    if (cp === 0x00D7) { out += 'x'; continue; } // × fallback safe visible x in Type1 Helvetica if D7 font glyph differs
+    if (cp === 0x00D7) { out += 'x'; continue; } // ×
     if (cp === 0x00B7) { out += String.fromCharCode(0xB7); continue; } // ·
     if (cp === 0x2022) { out += String.fromCharCode(0x95); continue; } // •
     if (cp === 0x2013) { out += String.fromCharCode(0x96); continue; } // –
@@ -8061,16 +8901,62 @@ function pdfAsciiSafe(s) {
     if (cp === 0x2018 || cp === 0x2019) { out += "'"; continue; }
     if (cp === 0x201C || cp === 0x201D) { out += '"'; continue; }
     if (cp === 0x2026) { out += '...'; continue; }
-    // Unicode subscripts & math symbols mapped cleanly for Type1 Helvetica fallback
+    // Unicode superscripts & subscripts mapped safely (prevents U+209A/U+208x WinAnsi Mojibake!)
+    if (cp === 0x2070) { out += '0'; continue; }
+    if (cp >= 0x2074 && cp <= 0x2079) { out += String(cp - 0x2070); continue; }
+    if (cp === 0x207A) { out += '+'; continue; }
+    if (cp === 0x207B) { out += '-'; continue; }
     if (cp >= 0x2080 && cp <= 0x2089) { out += String(cp - 0x2080); continue; } // ₀-₉
-    if (cp === 0x209B) { out += 's'; continue; } // ₛ
+    const subLetters = {
+      0x2090: 'a', 0x2091: 'e', 0x2092: 'o', 0x2093: 'x', 0x2095: 'h',
+      0x2096: 'k', 0x2097: 'l', 0x2098: 'm', 0x2099: 'n', 0x209A: 'p',
+      0x209B: 's', 0x209C: 't', 0x1D62: 'i', 0x1D63: 'r', 0x1D64: 'u', 0x1D65: 'v', 0x2C7C: 'j'
+    };
+    if (subLetters[cp]) { out += subLetters[cp]; continue; }
     if (cp === 0x03B8) { out += 'theta'; continue; } // θ
     if (cp === 0x03B1) { out += 'alpha'; continue; } // α
     if (cp === 0x03B2) { out += 'beta'; continue; } // β
     if (cp === 0x03B3) { out += 'gamma'; continue; } // γ
+    if (cp === 0x03B4) { out += 'delta'; continue; } // δ
     if (cp === 0x0394) { out += 'Delta'; continue; } // Δ
+    if (cp === 0x03B5) { out += 'epsilon'; continue; } // ε
+    if (cp === 0x03B6) { out += 'zeta'; continue; } // ζ
+    if (cp === 0x03B7) { out += 'eta'; continue; } // η
+    if (cp === 0x03BA) { out += 'kappa'; continue; } // κ
+    if (cp === 0x03BB) { out += 'lambda'; continue; } // λ
+    if (cp === 0x03BC) { out += 'mu'; continue; } // μ
+    if (cp === 0x03BD) { out += 'nu'; continue; } // ν
+    if (cp === 0x03BE) { out += 'xi'; continue; } // ξ
     if (cp === 0x03C0) { out += 'pi'; continue; } // π
+    if (cp === 0x03C1) { out += 'rho'; continue; } // ρ
+    if (cp === 0x03C3) { out += 'sigma'; continue; } // σ
+    if (cp === 0x03A3) { out += 'Sigma'; continue; } // Σ
+    if (cp === 0x03C4) { out += 'tau'; continue; } // τ
+    if (cp === 0x03C6) { out += 'phi'; continue; } // φ
+    if (cp === 0x03A6) { out += 'Phi'; continue; } // Φ
+    if (cp === 0x03C8) { out += 'psi'; continue; } // ψ
+    if (cp === 0x03A8) { out += 'Psi'; continue; } // Ψ
+    if (cp === 0x03C9) { out += 'omega'; continue; } // ω
+    if (cp === 0x03A9) { out += 'Omega'; continue; } // Ω
     if (cp === 0x211D) { out += 'R'; continue; } // ℝ
+    if (cp === 0x2115) { out += 'N'; continue; } // ℕ
+    if (cp === 0x2124) { out += 'Z'; continue; } // ℤ
+    if (cp === 0x221A) { out += 'sqrt'; continue; } // √
+    if (cp === 0x2211) { out += 'Sum'; continue; } // ∑
+    if (cp === 0x222B) { out += 'Int'; continue; } // ∫
+    if (cp === 0x220F) { out += 'Prod'; continue; } // ∏
+    if (cp === 0x2202) { out += 'd'; continue; } // ∂
+    if (cp === 0x2207) { out += 'nabla'; continue; } // ∇
+    if (cp === 0x221E) { out += 'inf'; continue; } // ∞
+    if (cp === 0x2208) { out += 'in'; continue; } // ∈
+    if (cp === 0x2200) { out += 'forall'; continue; } // ∀
+    if (cp === 0x2203) { out += 'exists'; continue; } // ∃
+    if (cp === 0x2192) { out += '->'; continue; } // →
+    if (cp === 0x21D2) { out += '=>'; continue; } // ⇒
+    if (cp === 0x2194) { out += '<->'; continue; } // ↔
+    if (cp === 0x21D4) { out += '<=>'; continue; } // ⇔
+    if (cp === 0x2261) { out += '=='; continue; } // ≡
+    if (cp === 0x221D) { out += '~'; continue; } // ∝
     if (cp === 0x2248) { out += '~='; continue; } // ≈
     if (cp === 0x2260) { out += '!='; continue; } // ≠
     if (cp === 0x2264) { out += '<='; continue; } // ≤
@@ -8082,8 +8968,16 @@ function pdfAsciiSafe(s) {
 }
 
 function wrapPdfLine(str, maxChars = 84) {
-  const words = String(str || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
-  if (words.length === 0) return [''];
+  const tokens = String(str || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  if (tokens.length === 0) return [''];
+  const words = [];
+  for (const tok of tokens) {
+    if (tok.length <= maxChars) {
+      words.push(tok);
+    } else {
+      for (let k = 0; k < tok.length; k += maxChars) words.push(tok.slice(k, k + maxChars));
+    }
+  }
   const lines = [];
   let cur = '';
   for (const w of words) {
@@ -8188,7 +9082,7 @@ function buildZozNativePdfBuffer(rawSpec) {
     if (sec.heading && sec.heading !== spec.title) {
       pushPageBreakIfNeeded(24);
       y -= 4;
-      drawOps.push(`0.06 0.16 0.38 rg BT /F2 12 Tf 40 ${y} Td (${pdfAsciiSafe(sec.heading).slice(0, 82)}) Tj ET`);
+      drawOps.push(`0.06 0.16 0.38 rg BT /F2 12 Tf 40 ${y} Td (${pdfAsciiSafe(String(sec.heading).slice(0, 78))}) Tj ET`);
       drawOps.push(`0.88 0.91 0.94 rg 40 ${y - 4} 515 1 re f`);
       y -= 18;
     }
@@ -8197,9 +9091,10 @@ function buildZozNativePdfBuffer(rawSpec) {
         const pTrim = para.trim();
         if (!pTrim) continue;
         if (isZ21FormulaLine(pTrim)) {
-          const { label, expr } = parseZ21FormulaParts(pTrim);
+          const { label, expr, note } = parseZ21FormulaParts(pTrim);
           const exprLines = wrapPdfLine(expr, 74);
-          const boxH = (label ? 22 : 12) + (exprLines.length * 14);
+          const noteLines = note ? wrapPdfLine(note, 78) : [];
+          const boxH = (label ? 22 : 12) + (exprLines.length * 14) + (noteLines.length * 12);
           pushPageBreakIfNeeded(boxH + 8);
           const boxBot = y - boxH;
           drawOps.push(`0.94 0.98 1.00 rg 40 ${boxBot} 515 ${boxH} re f`);
@@ -8211,6 +9106,9 @@ function buildZozNativePdfBuffer(rawSpec) {
           const startExprY = label ? (y - 27) : (y - 16);
           exprLines.forEach((el, ei) => {
             drawOps.push(`0.06 0.09 0.16 rg BT /F2 10.5 Tf 52 ${startExprY - (ei * 14)} Td (${pdfAsciiSafe(el)}) Tj ET`);
+          });
+          noteLines.forEach((nl, ni) => {
+            drawOps.push(`0.28 0.33 0.41 rg BT /F1 8.8 Tf 52 ${startExprY - (exprLines.length * 14) - (ni * 12)} Td (${pdfAsciiSafe(nl)}) Tj ET`);
           });
           y = boxBot - 8;
           continue;
@@ -8225,7 +9123,31 @@ function buildZozNativePdfBuffer(rawSpec) {
     }
     if (Array.isArray(sec.bullets)) {
       for (const b of sec.bullets) {
-        const lines = wrapPdfLine(String(b || ''), 82);
+        const bTrim = String(b || '').trim();
+        if (bTrim && isZ21FormulaLine(bTrim)) {
+          const { label, expr, note } = parseZ21FormulaParts(bTrim);
+          const exprLines = wrapPdfLine(expr, 74);
+          const noteLines = note ? wrapPdfLine(note, 78) : [];
+          const boxH = (label ? 22 : 12) + (exprLines.length * 14) + (noteLines.length * 12);
+          pushPageBreakIfNeeded(boxH + 8);
+          const boxBot = y - boxH;
+          drawOps.push(`0.94 0.98 1.00 rg 40 ${boxBot} 515 ${boxH} re f`);
+          drawOps.push(`0.01 0.52 0.78 rg 40 ${boxBot} 3 ${boxH} re f`);
+          drawOps.push(`0.73 0.90 0.99 RG 0.5 w 40 ${boxBot} 515 ${boxH} re S`);
+          if (label) {
+            drawOps.push(`0.01 0.41 0.63 rg BT /F2 9 Tf 52 ${y - 13} Td (${pdfAsciiSafe(label)}) Tj ET`);
+          }
+          const startExprY = label ? (y - 27) : (y - 16);
+          exprLines.forEach((el, ei) => {
+            drawOps.push(`0.06 0.09 0.16 rg BT /F2 10.5 Tf 52 ${startExprY - (ei * 14)} Td (${pdfAsciiSafe(el)}) Tj ET`);
+          });
+          noteLines.forEach((nl, ni) => {
+            drawOps.push(`0.28 0.33 0.41 rg BT /F1 8.8 Tf 52 ${startExprY - (exprLines.length * 14) - (ni * 12)} Td (${pdfAsciiSafe(nl)}) Tj ET`);
+          });
+          y = boxBot - 8;
+          continue;
+        }
+        const lines = wrapPdfLine(bTrim, 82);
         lines.forEach((line, li) => {
           pushPageBreakIfNeeded(15);
           const prefix = li === 0 ? `${String.fromCharCode(0x95)} ` : '  ';
@@ -8238,12 +9160,17 @@ function buildZozNativePdfBuffer(rawSpec) {
     if (sec.table && Array.isArray(sec.table.rows)) {
       drawNativePdfTable(sec.table);
     }
+    if (Array.isArray(sec.tables)) {
+      for (const extraT of sec.tables) {
+        if (extraT && extraT !== sec.table && Array.isArray(extraT.rows)) drawNativePdfTable(extraT);
+      }
+    }
   }
 
   for (const tbl of (Array.isArray(spec.tables) ? spec.tables : [])) {
     if (tbl.title && !(Array.isArray(spec.sections) && spec.sections.some(s => s.heading === tbl.title))) {
       pushPageBreakIfNeeded(22);
-      drawOps.push(`0.06 0.16 0.38 rg BT /F2 11.5 Tf 40 ${y} Td (${pdfAsciiSafe(tbl.title).slice(0, 82)}) Tj ET`);
+      drawOps.push(`0.06 0.16 0.38 rg BT /F2 11.5 Tf 40 ${y} Td (${pdfAsciiSafe(String(tbl.title).slice(0, 78))}) Tj ET`);
       y -= 16;
     }
     drawNativePdfTable(tbl);
@@ -8309,16 +9236,17 @@ function buildZozNativeDocxBuffer(rawSpec) {
     const rowsXml = [];
     const headers = Array.isArray(tbl.headers) ? tbl.headers : [];
     const rows = Array.isArray(tbl.rows) ? tbl.rows : [];
+    const colCount = Math.max(headers.length, ...rows.map(r => (Array.isArray(r) ? r.length : 1)), 0);
     if (headers.length > 0) {
-      const cells = headers.map(h =>
-        `<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="1E293B"/></w:tcPr><w:p><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:t>${escapeZozXml(h)}</w:t></w:r></w:p></w:tc>`
+      const cells = Array.from({ length: colCount }, (_, ci) => headers[ci] ?? '').map(h =>
+        `<w:tc><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="1E293B"/></w:tcPr><w:p><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:t xml:space="preserve">${escapeZozXml(h)}</w:t></w:r></w:p></w:tc>`
       ).join('');
       rowsXml.push(`<w:tr>${cells}</w:tr>`);
     }
     for (const r of rows) {
       const arr = Array.isArray(r) ? r : [r];
-      const cells = arr.map(c =>
-        `<w:tc><w:p><w:r><w:t>${escapeZozXml(c)}</w:t></w:r></w:p></w:tc>`
+      const cells = Array.from({ length: colCount }, (_, ci) => arr[ci] ?? '').map(c =>
+        `<w:tc><w:p><w:r><w:t xml:space="preserve">${escapeZozXml(c)}</w:t></w:r></w:p></w:tc>`
       ).join('');
       rowsXml.push(`<w:tr>${cells}</w:tr>`);
     }
@@ -8336,9 +9264,10 @@ function buildZozNativeDocxBuffer(rawSpec) {
         const tLine = line.trim();
         if (!tLine) continue;
         if (isZ21FormulaLine(tLine)) {
-          const { label, expr } = parseZ21FormulaParts(tLine);
+          const { label, expr, note } = parseZ21FormulaParts(tLine);
           const lblRun = label ? `<w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t>${escapeZozXml(label)}: </w:t></w:r>` : '';
-          bodyNodes.push(`<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:ind w:left="240" w:right="240"/><w:spacing w:before="100" w:after="100"/></w:pPr>${lblRun}<w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/></w:rPr><w:t xml:space="preserve">${escapeZozXml(expr)}</w:t></w:r></w:p>`);
+          const noteRun = note ? `<w:r><w:br/></w:r><w:r><w:rPr><w:i/><w:sz w:val="18"/><w:color w:val="475569"/></w:rPr><w:t xml:space="preserve">${escapeZozXml(note)}</w:t></w:r>` : '';
+          bodyNodes.push(`<w:p><w:pPr><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:ind w:left="240" w:right="240"/><w:spacing w:before="100" w:after="100"/></w:pPr>${lblRun}<w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/></w:rPr><w:t xml:space="preserve">${escapeZozXml(expr)}</w:t></w:r>${noteRun}</w:p>`);
           continue;
         }
         const kvMatch = tLine.match(/^((?:Lokasi|Tanggal|Parameter\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\s*:)\s*(.+)$/i);
@@ -8351,15 +9280,28 @@ function buildZozNativeDocxBuffer(rawSpec) {
     }
     if (Array.isArray(sec.bullets)) {
       for (const b of sec.bullets) {
-        bodyNodes.push(`<w:p><w:r><w:t xml:space="preserve">• ${escapeZozXml(b)}</w:t></w:r></w:p>`);
+        const bTrim = String(b || '').trim();
+        if (bTrim && isZ21FormulaLine(bTrim)) {
+          const { label, expr, note } = parseZ21FormulaParts(bTrim);
+          const lblRun = label ? `<w:r><w:rPr><w:b/><w:sz w:val="19"/><w:color w:val="0369A1"/></w:rPr><w:t xml:space="preserve">${escapeZozXml(label)}: </w:t></w:r>` : '';
+          const noteRun = note ? `<w:r><w:br/></w:r><w:r><w:rPr><w:i/><w:sz w:val="18"/><w:color w:val="475569"/></w:rPr><w:t xml:space="preserve">${escapeZozXml(note)}</w:t></w:r>` : '';
+          bodyNodes.push(`<w:p><w:pPr><w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="F0F9FF"/><w:ind w:left="240" w:right="240"/><w:spacing w:before="80" w:after="80"/></w:pPr>${lblRun}<w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="0F172A"/></w:rPr><w:t xml:space="preserve">${escapeZozXml(expr)}</w:t></w:r>${noteRun}</w:p>`);
+        } else {
+          bodyNodes.push(`<w:p><w:r><w:t xml:space="preserve">• ${escapeZozXml(b)}</w:t></w:r></w:p>`);
+        }
       }
     }
     if (sec.table) pushTable(sec.table);
+    if (Array.isArray(sec.tables)) {
+      for (const extraT of sec.tables) {
+        if (extraT && extraT !== sec.table) pushTable(extraT);
+      }
+    }
   }
 
   for (const tbl of (Array.isArray(spec.tables) ? spec.tables : [])) {
-    if (tbl.title) {
-      bodyNodes.push(`<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>${escapeZozXml(tbl.title)}</w:t></w:r></w:p>`);
+    if (tbl.title && !(Array.isArray(spec.sections) && spec.sections.some(s => s.heading === tbl.title))) {
+      bodyNodes.push(`<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t xml:space="preserve">${escapeZozXml(tbl.title)}</w:t></w:r></w:p>`);
     }
     pushTable(tbl);
   }
@@ -8405,20 +9347,39 @@ function buildZozNativeDocxBuffer(rawSpec) {
 
 function buildZozNativeXlsxBuffer(rawSpec) {
   const spec = normalizeZ21DocSpec(rawSpec);
+  const secTables = [];
+  for (const [i, s] of (Array.isArray(spec.sections) ? spec.sections : []).entries()) {
+    if (!s) continue;
+    const tList = Array.isArray(s.tables) && s.tables.length > 0 ? s.tables : (s.table ? [s.table] : []);
+    for (const st of tList) {
+      if (st && (Array.isArray(st.headers) || Array.isArray(st.rows))) {
+        secTables.push({ name: st.title || s.heading || `Sheet${i + 1}`, headers: st.headers || [], rows: st.rows || [], formulas: st.formulas || [] });
+      }
+    }
+  }
   const sheets = (Array.isArray(spec.sheets) && spec.sheets.length > 0)
     ? spec.sheets
     : (Array.isArray(spec.tables) && spec.tables.length > 0)
       ? spec.tables.map((t, i) => ({ name: t.title || `Sheet${i + 1}`, headers: t.headers || [], rows: t.rows || [], formulas: t.formulas || [] }))
-      : [{ name: 'Data', headers: ['Kolom', 'Nilai'], rows: [['Judul', spec.title || 'Data Z21']], formulas: [] }];
+      : (secTables.length > 0 ? secTables : [{ name: 'Data', headers: ['Kolom', 'Nilai'], rows: [['Judul', spec.title || 'Data Z21']], formulas: [] }]);
 
   const sheetEntries = [];
   const wbSheetsXml = [];
   const wbRelsXml = [];
   const ctOverrides = [];
+  const usedSheetNames = new Set();
 
   sheets.forEach((sh, sIdx) => {
     const sheetNum = sIdx + 1;
-    const sheetName = escapeZozXml(String(sh.name || `Sheet${sheetNum}`).replace(/[:\\/?*\[\]]/g, '').slice(0, 30) || `Sheet${sheetNum}`);
+    let baseName = String(sh.name || `Sheet${sheetNum}`).replace(/[:\\/?*\[\]\x00-\x1F]/g, '').replace(/^'+|'+$/g, '').trim().slice(0, 31) || `Sheet${sheetNum}`;
+    let candName = baseName;
+    let suffix = 2;
+    while (usedSheetNames.has(candName.toLowerCase())) {
+      const sfx = `_${suffix++}`;
+      candName = baseName.slice(0, Math.max(1, 31 - sfx.length)) + sfx;
+    }
+    usedSheetNames.add(candName.toLowerCase());
+    const sheetName = escapeZozXml(candName);
     const rowsXml = [];
     let rowNum = 1;
 
@@ -8432,8 +9393,9 @@ function buildZozNativeXlsxBuffer(rawSpec) {
       if (typeof val === 'number' && Number.isFinite(val)) {
         return `<c r="${ref}"${styleAttr} t="n"><v>${val}</v></c>`;
       }
-      if (/^-?\d+(?:\.\d+)?$/.test(rawStr.trim()) && rawStr.trim().length <= 15 && !isHeader) {
-        return `<c r="${ref}"${styleAttr} t="n"><v>${rawStr.trim()}</v></c>`;
+      const trimmed = rawStr.trim();
+      if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(trimmed) && trimmed.length <= 15 && !isHeader) {
+        return `<c r="${ref}"${styleAttr} t="n"><v>${trimmed}</v></c>`;
       }
       return `<c r="${ref}"${styleAttr} t="inlineStr"><is><t>${escapeZozXml(rawStr)}</t></is></c>`;
     };
@@ -8450,17 +9412,16 @@ function buildZozNativeXlsxBuffer(rawSpec) {
       rowNum++;
     }
     if (Array.isArray(sh.formulas) && sh.formulas.length > 0) {
-      const fRowCells = [];
       for (const fItem of sh.formulas) {
         if (fItem && typeof fItem === 'object') {
+          const fRowCells = [];
           const fStr = String(fItem.formula || fItem.value || '').startsWith('=') ? String(fItem.formula || fItem.value) : ('=' + String(fItem.formula || fItem.value || 'SUM(A1:A1)'));
           if (fItem.label) fRowCells.push(makeCellXml(rowNum, 0, fItem.label, true));
-          const targetCol = Number.isInteger(fItem.col) ? fItem.col : (fRowCells.length > 0 ? 1 : 0);
+          const targetCol = Number.isInteger(fItem.col) && (!fItem.label || fItem.col > 0) ? fItem.col : (fRowCells.length > 0 ? 1 : 0);
           fRowCells.push(makeCellXml(rowNum, targetCol, fStr, false));
+          rowsXml.push(`<row r="${rowNum}">${fRowCells.join('')}</row>`);
+          rowNum++;
         }
-      }
-      if (fRowCells.length > 0) {
-        rowsXml.push(`<row r="${rowNum}">${fRowCells.join('')}</row>`);
       }
     }
 
@@ -8560,36 +9521,48 @@ function buildZ21PreviewMarkdown(spec, filename, ext, librariesUsed, engine) {
   const parts = [];
   parts.push(`# ${spec.title || filename}`);
   if (spec.subtitle) parts.push(`*${spec.subtitle}*`);
+  const escMdCell = (v) => String(v ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  const renderMdTbl = (tbl) => {
+    const rows = Array.isArray(tbl && tbl.rows) ? tbl.rows : [];
+    const hdr = (Array.isArray(tbl && tbl.headers) && tbl.headers.length > 0)
+      ? tbl.headers.map(escMdCell)
+      : (rows[0] ? (Array.isArray(rows[0]) ? rows[0] : [rows[0]]).map((_, idx) => `Kolom ${idx + 1}`) : []);
+    if (hdr.length === 0) return '';
+    return '| ' + hdr.join(' | ') + ' |\n| ' + hdr.map(() => '---').join(' | ') + ' |\n' +
+      rows.map(r => '| ' + (Array.isArray(r) ? r : [r]).map(escMdCell).join(' | ') + ' |').join('\n');
+  };
 
   for (const sec of (Array.isArray(spec.sections) ? spec.sections : [])) {
     if (sec.heading && sec.heading !== spec.title) parts.push(`## ${normalizeZ21ScientificText(sec.heading)}`);
-    if (sec.content) parts.push(normalizeZ21ScientificText(sec.content));
-    if (Array.isArray(sec.bullets) && sec.bullets.length > 0) {
-      parts.push(sec.bullets.map(b => `- ${normalizeZ21ScientificText(b)}`).join('\n'));
+    if (sec.content) {
+      const contentLines = coalesceZ21MathBlocks(sec.content).map(ln =>
+        normalizeZ21ScientificText(ln, { preserveFrac: isZ21FormulaLine(ln) })
+      );
+      parts.push(contentLines.join('\n'));
     }
-    if (sec.table && Array.isArray(sec.table.headers)) {
-      const hdr = sec.table.headers.map(h => String(h ?? ''));
-      parts.push('| ' + hdr.join(' | ') + ' |\n| ' + hdr.map(() => '---').join(' | ') + ' |\n' +
-        (sec.table.rows || []).map(r => '| ' + (Array.isArray(r) ? r : [r]).map(c => String(c ?? '')).join(' | ') + ' |').join('\n'));
+    if (Array.isArray(sec.bullets) && sec.bullets.length > 0) {
+      parts.push(sec.bullets.map(b => {
+        const rb = String(b || '').trim();
+        return `- ${normalizeZ21ScientificText(rb, { preserveFrac: isZ21FormulaLine(rb) })}`;
+      }).join('\n'));
+    }
+    const secTables = Array.isArray(sec.tables) && sec.tables.length > 0 ? sec.tables : (sec.table ? [sec.table] : []);
+    for (const st of secTables) {
+      const mdTbl = renderMdTbl(st);
+      if (mdTbl) parts.push(mdTbl);
     }
   }
   for (const tbl of (Array.isArray(spec.tables) ? spec.tables : [])) {
     if (tbl.title && !(Array.isArray(spec.sections) && spec.sections.some(s => s.heading === tbl.title))) {
       parts.push(`## ${tbl.title}`);
     }
-    const hdr = Array.isArray(tbl.headers) ? tbl.headers : [];
-    if (hdr.length > 0) {
-      parts.push('| ' + hdr.join(' | ') + ' |\n| ' + hdr.map(() => '---').join(' | ') + ' |\n' +
-        (tbl.rows || []).map(r => '| ' + (Array.isArray(r) ? r : [r]).map(c => String(c ?? '')).join(' | ') + ' |').join('\n'));
-    }
+    const mdTbl = renderMdTbl(tbl);
+    if (mdTbl) parts.push(mdTbl);
   }
   for (const sh of (Array.isArray(spec.sheets) ? spec.sheets : [])) {
     parts.push(`## Sheet: ${sh.name || 'Data'}`);
-    const hdr = Array.isArray(sh.headers) ? sh.headers : [];
-    if (hdr.length > 0) {
-      parts.push('| ' + hdr.join(' | ') + ' |\n| ' + hdr.map(() => '---').join(' | ') + ' |\n' +
-        (sh.rows || []).map(r => '| ' + (Array.isArray(r) ? r : [r]).map(c => String(c ?? '')).join(' | ') + ' |').join('\n'));
-    }
+    const mdTbl = renderMdTbl(sh);
+    if (mdTbl) parts.push(mdTbl);
     if (Array.isArray(sh.formulas) && sh.formulas.length > 0) {
       parts.push('**Rumus Formula:** ' + sh.formulas.map(f => `\`${f.label ? f.label + ': ' : ''}${f.formula || f.value || ''}\``).join(', '));
     }
@@ -8598,25 +9571,33 @@ function buildZ21PreviewMarkdown(spec, filename, ext, librariesUsed, engine) {
 }
 
 const ZOZ_DOC_SANDBOX_PRELUDE_PY = [
-  'import os, sys, json, re, csv, math, zipfile, zlib, struct, io, builtins, types, importlib.util',
+  'import os, sys, json, re, csv, math, zipfile, zlib, struct, io, html as _zoz_html, builtins, types, importlib.util',
   'ZOZ_OUTPUT_DIR = os.path.abspath(os.environ.get("ZOZ_OUTPUT_DIR", os.getcwd()))',
   'os.chdir(ZOZ_OUTPUT_DIR)',
   '_orig_open = builtins.open',
+  'def _zoz_in_output_dir(p):',
+  '    abs_p = os.path.abspath(p)',
+  '    return abs_p == ZOZ_OUTPUT_DIR or abs_p.startswith(ZOZ_OUTPUT_DIR + os.sep)',
   'def _zoz_safe_open(file, mode="r", *args, **kwargs):',
   '    if isinstance(file, (str, os.PathLike)):',
   '        fpath = os.fspath(file)',
   '        bname = os.path.basename(fpath)',
-  '        if not bname.startswith("_zoz_") and any(m in str(mode) for m in ("w", "a", "x", "+")):',
-  '            abs_cand = os.path.abspath(fpath)',
-  '            if not abs_cand.startswith(ZOZ_OUTPUT_DIR):',
-  '                fpath = os.path.join(ZOZ_OUTPUT_DIR, bname or "output.bin")',
+  '        if any(m in str(mode) for m in ("w", "a", "x", "+")):',
+  '            in_out = _zoz_in_output_dir(fpath)',
+  '            if bname.startswith("_zoz_") and in_out:',
+  '                return _orig_open(fpath, mode, *args, **kwargs)',
+  '            if not in_out or bname.startswith("_zoz_"):',
+  '                safe_bname = bname[5:] if bname.startswith("_zoz_") else bname',
+  '                fpath = os.path.join(ZOZ_OUTPUT_DIR, safe_bname or "output.bin")',
   '            parent = os.path.dirname(os.path.abspath(fpath))',
   '            if parent and not os.path.exists(parent):',
   '                os.makedirs(parent, exist_ok=True)',
   '            return _orig_open(fpath, mode, *args, **kwargs)',
   '    return _orig_open(file, mode, *args, **kwargs)',
   'builtins.open = _zoz_safe_open',
+  'io.open = _zoz_safe_open',
   'def _zoz_fallback_pdf_bytes(title, blocks):',
+  '    def _esc_rl(v): return str(v or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")',
   '    if importlib.util.find_spec("reportlab") is not None:',
   '        from reportlab.lib.pagesizes import A4',
   '        from reportlab.lib import colors',
@@ -8627,26 +9608,28 @@ const ZOZ_DOC_SANDBOX_PRELUDE_PY = [
   '        styles = getSampleStyleSheet()',
   '        h_style = ParagraphStyle("ZozH", parent=styles["Heading1"], textColor=colors.HexColor("#0f172a"))',
   '        story = []',
-  '        if title: story.append(Paragraph(str(title), h_style))',
+  '        if title: story.append(Paragraph(_esc_rl(title), h_style))',
   '        for b in blocks:',
   '            if isinstance(b, dict) and b.get("type") == "table":',
   '                tdata = b.get("rows") or []',
   '                if tdata:',
-  '                    t = Table(tdata)',
+  '                    safe_tdata = [[Paragraph(_esc_rl(c), styles["Normal"]) for c in (r if isinstance(r, list) else [r])] for r in tdata]',
+  '                    t = Table(safe_tdata)',
   '                    t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#1e293b")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),0.5,colors.HexColor("#cbd5e1")),("FONTSIZE",(0,0),(-1,-1),9)]))',
   '                    story.append(t)',
   '                    story.append(Spacer(1, 8))',
   '            elif isinstance(b, dict) and b.get("type") == "heading":',
-  '                story.append(Paragraph(str(b.get("text") or ""), styles["Heading2"]))',
+  '                story.append(Paragraph(_esc_rl(b.get("text") or ""), styles["Heading2"]))',
   '            else:',
   '                txt = str(b.get("text") if isinstance(b, dict) else b)',
-  '                if txt.strip(): story.append(Paragraph(txt.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"), styles["Normal"]))',
+  '                if txt.strip(): story.append(Paragraph(_esc_rl(txt), styles["Normal"]))',
   '                story.append(Spacer(1, 5))',
   '        if not story: story.append(Paragraph("ZOZ Document", styles["Normal"]))',
   '        doc.build(story)',
   '        return buf.getvalue()',
   '    lines = [str(b.get("text") if isinstance(b, dict) else b) for b in blocks if b]',
-  '    ops = "BT /F1 11 Tf 40 780 Td (" + str(title or "ZOZ PDF").replace("\\\\","\\\\\\\\").replace("(","\\\\(").replace(")","\\\\)")[:80] + ") Tj ET\\n"',
+  '    safe_title = str(title or "ZOZ PDF").encode("ascii", "replace").decode("ascii").replace("\\\\","\\\\\\\\").replace("(","\\\\(").replace(")","\\\\)")[:80]',
+  '    ops = "BT /F1 11 Tf 40 780 Td (" + safe_title + ") Tj ET\\n"',
   '    y = 755',
   '    for ln in lines[:45]:',
   '        safe_ln = ln.encode("ascii", "replace").decode("ascii").replace("\\\\","\\\\\\\\").replace("(","\\\\(").replace(")","\\\\)")[:85]',
@@ -8712,20 +9695,20 @@ const ZOZ_DOC_SANDBOX_PRELUDE_PY = [
   '        def write_pdf(self, target=None, stylesheets=None):',
   '            clean = re.sub(r"<(style|script)[\\s\\S]*?</\\1>", " ", self.html, flags=re.I)',
   '            tm = re.search(r"<h1[^>]*>([\\s\\S]*?)</h1>|<title[^>]*>([\\s\\S]*?)</title>", clean, flags=re.I)',
-  '            title = re.sub(r"<[^>]+>", "", (tm.group(1) or tm.group(2)) if tm else "WeasyPrint Z21 PDF").strip()',
+  '            title = _zoz_html.unescape(re.sub(r"<[^>]+>", "", (tm.group(1) or tm.group(2)) if tm else "WeasyPrint Z21 PDF")).strip()',
   '            blocks = []',
   '            for tbl_m in re.finditer(r"<table[^>]*>([\\s\\S]*?)</table>", clean, flags=re.I):',
   '                rows = []',
   '                for tr_m in re.finditer(r"<tr[^>]*>([\\s\\S]*?)</tr>", tbl_m.group(1), flags=re.I):',
-  '                    cells = [re.sub(r"<[^>]+>", "", c).strip() for c in re.findall(r"<t[hd][^>]*>([\\s\\S]*?)</t[hd]>", tr_m.group(1), flags=re.I)]',
+  '                    cells = [_zoz_html.unescape(re.sub(r"<[^>]+>", "", c)).strip() for c in re.findall(r"<t[hd][^>]*>([\\s\\S]*?)</t[hd]>", tr_m.group(1), flags=re.I)]',
   '                    if cells: rows.append(cells)',
   '                if rows: blocks.append({"type": "table", "rows": rows})',
   '            no_tbl = re.sub(r"<table[^>]*>[\\s\\S]*?</table>", "\\n", clean, flags=re.I)',
   '            for seg in re.findall(r"<(?:h[2-4]|p|li|div)[^>]*>([\\s\\S]*?)</(?:h[2-4]|p|li|div)>", no_tbl, flags=re.I):',
-  '                txt = re.sub(r"<[^>]+>", "", seg).strip()',
+  '                txt = _zoz_html.unescape(re.sub(r"<[^>]+>", "", seg)).strip()',
   '                if txt: blocks.append({"type": "para", "text": txt})',
   '            if not blocks:',
-  '                txt = re.sub(r"<[^>]+>", " ", no_tbl).strip()',
+  '                txt = _zoz_html.unescape(re.sub(r"<[^>]+>", " ", no_tbl)).strip()',
   '                if txt: blocks.append({"type": "para", "text": txt})',
   '            data = _zoz_fallback_pdf_bytes(title, blocks)',
   '            if target is None: return data',
@@ -8812,13 +9795,23 @@ const ZOZ_DOC_SANDBOX_PRELUDE_PY = [
   '            self._filename = os.path.join(ZOZ_OUTPUT_DIR, os.path.basename(str(filename)))',
   '            self._wb = openpyxl.Workbook()',
   '            self._used_default = False',
+  '            self._sheet_names = set()',
+  '        def _safe_sheet_title(self, name):',
+  '            base = re.sub(r"[:\\\\/?*\\[\\]\\x00-\\x1F]", "", str(name or "Sheet")).strip("\'").strip()[:31] or "Sheet"',
+  '            cand, n = base, 2',
+  '            while cand.lower() in self._sheet_names:',
+  '                sfx = f"_{n}"',
+  '                cand = base[:max(1, 31 - len(sfx))] + sfx',
+  '                n += 1',
+  '            self._sheet_names.add(cand.lower())',
+  '            return cand',
   '        def add_worksheet(self, name=None):',
   '            if not self._used_default:',
   '                self._used_default = True',
   '                ws = self._wb.active',
-  '                if name: ws.title = str(name)[:31]',
+  '                ws.title = self._safe_sheet_title(name or "Sheet1")',
   '            else:',
-  '                ws = self._wb.create_sheet(title=str(name or "Sheet")[:31])',
+  '                ws = self._wb.create_sheet(title=self._safe_sheet_title(name or "Sheet"))',
   '            return _ZozXWWorksheet(ws)',
   '        def add_format(self, props=None): return _ZozXWFormat(props)',
   '        def add_chart(self, opts=None): return _ZozXWChart(opts)',
@@ -8831,16 +9824,30 @@ function synthesizeZ21DocumentPythonScript(rawSpec) {
   const spec = normalizeZ21DocSpec(rawSpec);
   const ext = spec.format;
   if (ext === 'pdf') {
-    return `import os, json, re
+    return `import os, json, re, io
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image as RLImage
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib import rcParams
+    rcParams["mathtext.fontset"] = "stix"
+    from matplotlib.mathtext import math_to_image
+    from matplotlib.font_manager import FontProperties
+    from PIL import Image as PILImage
+    HAS_MATHTEXT = True
+except Exception:
+    HAS_MATHTEXT = False
+
 with open(os.environ["ZOZ_DOC_SPEC_PATH"], "r", encoding="utf-8") as _sf:
     spec = json.load(_sf)
+
+EQ_LATEX_MAP = spec.get("equationLatexMap") or {}
 
 # Daftarkan font TrueType Unicode agar simbol matematika, Yunani, dan subskrip/superskrip tampil sempurna
 FONT_REG = "Helvetica"
@@ -8882,14 +9889,25 @@ for _sym_p in [
             pass
 
 out_name = spec["filename"]
-doc = SimpleDocTemplate(out_name, pagesize=A4, leftMargin=42, rightMargin=42, topMargin=40, bottomMargin=40)
+doc = SimpleDocTemplate(
+    out_name,
+    pagesize=A4,
+    leftMargin=42,
+    rightMargin=42,
+    topMargin=40,
+    bottomMargin=40,
+    title=str(spec.get("title") or out_name),
+    subject="zoz-z21-pdf-v832",
+    creator="Zoz Router Z21 Document Builder"
+)
 styles = getSampleStyleSheet()
 title_style = ParagraphStyle("ZozTitle", parent=styles["Title"], fontName=FONT_BOLD, textColor=colors.HexColor("#0f172a"), fontSize=18, leading=22, spaceAfter=6)
 sub_style = ParagraphStyle("ZozSub", parent=styles["Italic"], fontName=FONT_ITALIC, textColor=colors.HexColor("#475569"), fontSize=10, leading=14, spaceAfter=10)
 h_style = ParagraphStyle("ZozH2", parent=styles["Heading2"], fontName=FONT_BOLD, textColor=colors.HexColor("#1e3a8a"), fontSize=12.5, leading=16, spaceBefore=14, spaceAfter=6)
 p_style = ParagraphStyle("ZozBody", parent=styles["Normal"], fontName=FONT_REG, fontSize=10, leading=14.8, textColor=colors.HexColor("#1e293b"), spaceAfter=5)
-eq_label_style = ParagraphStyle("ZozEqLbl", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=9.2, leading=13, textColor=colors.HexColor("#0369a1"), spaceAfter=2)
+eq_label_style = ParagraphStyle("ZozEqLbl", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=9.2, leading=13, textColor=colors.HexColor("#0369a1"), spaceAfter=3)
 eq_expr_style = ParagraphStyle("ZozEqExpr", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=10.8, leading=15.5, textColor=colors.HexColor("#0f172a"))
+eq_note_style = ParagraphStyle("ZozEqNote", parent=styles["Italic"], fontName=FONT_ITALIC, fontSize=9.0, leading=13, textColor=colors.HexColor("#475569"), spaceBefore=4)
 th_style = ParagraphStyle("ZozTh", parent=styles["Normal"], fontName=FONT_BOLD, fontSize=9.5, leading=12.5, textColor=colors.white)
 td_style = ParagraphStyle("ZozTd", parent=styles["Normal"], fontName=FONT_REG, fontSize=9.2, leading=12.5, textColor=colors.HexColor("#1e293b"))
 
@@ -8898,47 +9916,289 @@ def esc_p(v):
 
 def safe_pdf_chars(v):
     s = esc_p(v).replace("\u2022", "&bull;").replace("\u2013", "-").replace("\u2014", "-")
-    s = re.sub(r"\\^\\{([^{}]+)\\}", r'<super rise="3" size="7.2">\\1</super>', s)
-    s = re.sub(r"_\\{([^{}]+)\\}", r'<sub rise="-2" size="7.2">\\1</sub>', s)
+    s = re.sub(r"([})])_([A-Za-z0-9]{1,6})(?![A-Za-z0-9_])", lambda m: f"{m.group(1)}_{{{m.group(2)}}}", s)
+    s = re.sub(r"(?<![A-Za-z_])([A-Za-z\u0370-\u03ff])_([0-9]{1,6})", lambda m: f"{m.group(1)}_{{{m.group(2)}}}", s)
+    s = re.sub(r"(?<![A-Za-z_])([A-Za-z\u0370-\u03ff])_([A-Za-z\u2191\u2193][A-Za-z0-9\u2191\u2193]{0,7})(?![A-Za-z0-9_])", lambda m: f"{m.group(1)}_{{{m.group(2)}}}", s)
+    s = re.sub(r"\\^\\{([^{}]+)\\}", r'<super rise="2.8" size="7.3">\\1</super>', s)
+    s = re.sub(r"_\\{([^{}]+)\\}", r'<sub rise="1.6" size="7.3">\\1</sub>', s)
     if SYM_FONT:
-        s = re.sub(r"([\u211d\u2115\u2124\u2208\u2202\u2207\u2211\u222b])", lambda m: f'<font name="{SYM_FONT}">{m.group(1)}</font>', s)
+        s = re.sub(r"([\u0393\u039b\u0398\u039e\u03a0\u03a5\u211d\u2115\u2124\u2208\u2209\u2200\u2203\u2202\u2207\u2211\u222b\u220f\u221a\u221d\u2248\u2260\u2261\u2264\u2265\u226a\u226b\u2223\u2225\u221e\u2190-\u2195\u21d0\u21d2\u21d4])", lambda m: f'<font name="{SYM_FONT}">{m.group(1)}</font>', s)
     if FONT_REG == "Helvetica":
-        # Fallback aman bila berjalan di kontainer Linux minimal tanpa TTF
-        _sub_tr = str.maketrans("\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089\u209b", "0123456789s")
-        s = s.translate(_sub_tr).replace("\u03b8", "theta").replace("\u03b3", "gamma").replace("\u211d", "R").replace("\u00d7", "&times;")
+        _sub_tr = str.maketrans("\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089\u209a\u209b\u2090\u2091\u2092\u2093\u2095\u2096\u2097\u2098\u2099\u209c", "0123456789psaeoxhklmnt")
+        s = s.translate(_sub_tr).replace("\u03b8", "theta").replace("\u03b3", "gamma").replace("\u0393", "Gamma").replace("\u03b1", "alpha").replace("\u03c1", "rho").replace("\u211d", "R").replace("\u00d7", "&times;")
     return s
 
-def is_formula_line_py(txt):
-    t = str(txt or "").strip()
-    if not t:
-        return False
-    if re.match(r"^(?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}:", t, re.I):
+def has_prose_run_py(txt, min_words=4):
+    s = re.sub(r"\\\\(?:text|mathrm|operatorname|mathbf|mathit)\\{[^{}]*\\}", " ", str(txt or ""))
+    s = re.sub(r"\\\\[a-zA-Z]+", " ", s).strip()
+    if re.search(r"\\.\\s+[A-Z\\u00c0-\\u00d6]", s):
         return True
-    if len(t) <= 220 and re.match(r"^[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_\\u2080-\\u2089\\u209b,{}\\s()]{0,28}\\s*=\\s*.+", t):
-        if re.search(r"(?:\\s[+\\-\\u00d7*/]\\s|[\\u00b2\\u00b3\\u2074\\u2080-\\u2089\\u209b\\u03b8\\u0394\\u03c0\\u03b3]|\\b(?:cos|sin|log|ln|exp)\\s*\\(|\\^\\{|_\\{)", t, re.I):
-            return True
-    return False
+    _stop = {"sin", "cos", "tan", "csc", "sec", "cot", "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh", "exp", "log", "lim", "min", "max", "mod", "det", "gcd", "sup", "inf", "rms", "avg", "eff", "sat", "atm", "net", "tot", "rel", "abs", "init", "fin", "crit", "opt", "hpa", "mol", "dan", "atau", "serta", "dimana", "and", "with", "where", "udara", "hujan", "dew"}
+    words = [w for w in re.findall(r"\\b[a-z\\u00e0-\\u00ff]{3,}\\b", s) if w not in _stop]
+    return len(words) >= min_words
+
+_NARR_COLON_PFX_PY = r"^(?:Formula|Rumus|Persamaan)\\s+(?:ini|tersebut|di\\s+atas)\\b|^(?:Lokasi|Tanggal|Parameter\\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan|Dengan|Untuk|Dimana|Di\\s+mana|Substitusi|Misal|Misalkan|Karena|Sehingga|Maka|Jika|Apabila|Bila|Namun|Tetapi|Sedangkan|Yaitu|Yakni|Oleh\\s+karena|Contoh|Diketahui|Ditanya|Dijawab|Hasil|Nilai|Perubahan|Evaluasi)\\b|(?:adalah|yaitu|yakni|menunjukkan|menghasilkan|memberikan|sebesar|sebagai|berikut|berupa)$"
 
 def split_formula_line_py(txt):
     t = str(txt or "").strip()
-    m = re.match(r"^((?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}):\\s*(.+)$", t, re.I)
+    if not t:
+        return "", "", ""
+    lbl = ""
+    body = t
+    m = re.match(r"^([A-Za-z\\u00c0-\\u00d6\\u00d8-\\u00f6\\u00f8-\\u00ff][A-Za-z0-9\\u0370-\\u03ff\\u00c0-\\u00ff'\\u2019\\-/(),.\\s]{1,65}):\\s*(.+)$", t)
     if m:
-        return m.group(1).strip(), m.group(2).strip()
-    return "", t
+        pfx, rest = m.group(1).strip(), m.group(2).strip()
+        if rest and not re.search(r"[=<>\\u2264\\u2265\\u2248\\u2260+\\u00d7\\u00f7^_\\\\$\\u2211\\u222b\\u220f\\u221a]", pfx) and not re.search(_NARR_COLON_PFX_PY, pfx, re.I):
+            lbl = pfx
+            body = rest
+    note = ""
+    m_note = re.match(r"^([\\s\\S]+?)\\s+(\\([^()\\n]{4,160}\\)[.,;]?)$", body)
+    if m_note:
+        core, note_raw = m_note.group(1).strip(), m_note.group(2).strip()
+        inner = re.sub(r"^\\(|\\)[.,;]?$", "", note_raw).strip()
+        _note_stop = {"sin", "cos", "tan", "csc", "sec", "cot", "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh", "exp", "log", "lim", "min", "max", "mod"}
+        pwords = [w for w in re.findall(r"\\b[A-Za-z\\u00c0-\\u024f]*[a-z\\u00e0-\\u00ff]{2,}[A-Za-z\\u00c0-\\u024f]*\\b", inner) if w.lower() not in _note_stop]
+        if len(pwords) >= 2 and not re.search(r"[=^_\\\\\\u00d7\\u00f7\\u2264\\u2265\\u2248\\u2260\\u2211\\u222b\\u220f*]|\\s[+\\-]\\s", inner) and re.search(r"[=<>\\u2264\\u2265\\u2248\\u2260^_{}\\\\]|\\\\(?:frac|sum|sqrt|min|max|sigma|theta)", core):
+            body = core
+            note = note_raw
+    if (lbl or note) and body and re.search(r"[=<>\\u2264\\u2265\\u2248\\u2260}\\dA-Za-z\\u0370-\\u03ff)\\]]$", re.sub(r"\\.\\s*$", "", body)):
+        body = re.sub(r"(?<!\\.)\\.\\s*$", "", body).strip()
+    elif re.search(r"\\\\(?:frac|dfrac|tfrac|sqrt|sum|prod|int)\\s*\\{[^}]*\\}\\s*\\.\\s*$", body) or re.search(r"[\\u2264\\u2265\\u2248\\u2260=]\\s*-?\\d+(?:[.,]\\d+)?\\.\\s*$", body):
+        body = re.sub(r"(?<!\\.)\\.\\s*$", "", body).strip()
+    return lbl, body, note
+
+def is_legend_line_py(txt):
+    t = str(txt or "").strip()
+    if not t or re.match(r"^(?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}:", t, re.I):
+        return False
+    m = re.match(r"^([A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_{}\\u2080-\\u2089\\u2090-\\u209c\\u1d62-\\u1d65\\u2c7c()\\s\\\\]{0,18})\\s*=\\s*(.+)$", t)
+    if not m:
+        return False
+    rhs = m.group(2).strip()
+    if re.search(r"\\\\(?:frac|dfrac|tfrac|sqrt|sum|int|prod|ln|log|sin|cos|tan|arctan|arcsin|arccos)(?![a-zA-Z])", rhs):
+        return False
+    if re.match(r"^[+-]?\\d+(?:[.,]\\d+)?(?:\\s*(?:°[CFK]|%|hPa|km/h|m/s))?(?:\\s*,\\s*[A-Za-z\\u0370-\\u03ff][A-Za-z0-9_{}\\u2080-\\u2089]{0,8}\\s*=\\s*[+-]?\\d+(?:[.,]\\d+)?(?:\\s*(?:°[CFK]|%|hPa|km/h|m/s))?)+$", rhs, re.I):
+        return True
+    if re.search(r"[=+\\-\u00d7\\u00f7*^]|\\u00b2|\\u00b3", rhs):
+        no_units = re.sub(r"\\b(?:km/h|m/s|m/s2|W/m2|kg/m3|g/kg|°[CF]|in\\s+%)\\b", "", rhs, flags=re.I)
+        no_units = re.sub(r"([A-Za-z\\u00C0-\\u024F])-([A-Za-z\\u00C0-\\u024F])", r"\\1 \\2", no_units)
+        no_units = re.sub(r"([A-Za-z\\u00C0-\\u024F])-([A-Za-z\\u00C0-\\u024F])", r"\\1 \\2", no_units)
+        if re.search(r"[=+\\-\u00d7\\u00f7*^]", no_units) or re.search(r"\\s/\\s", no_units):
+            return False
+    return bool(re.search(r"[A-Za-z\\u00C0-\\u024F]{3,}\\s+[A-Za-z\\u00C0-\\u024F]{2,}", rhs) or re.search(r"\\b(?:in\\s+(?:°?[CFK%]|km/h|m/s|%)|pada\\s+suhu)\\s*\\.?$", rhs, re.I))
+
+def is_formula_line_py(txt):
+    t = str(txt or "").strip()
+    if not t or is_legend_line_py(t):
+        return False
+    cand = re.sub(r"^(?:\\(\\d+\\)|\\d+\\.)\\s+", "", t).strip()
+    if cand != t and is_legend_line_py(cand):
+        return False
+    if re.match(r"^\\\\begin\\s*\\{(?:aligned|align\\*?|gather\\*?|split|eqnarray\\*?|cases|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix|equation\\*?)\\}", cand, re.I) or re.search(r"\\\\begin\\s*\\{(?:aligned|align\\*?|gather\\*?|split|eqnarray\\*?|cases)\\}[\\s\\S]{3,1100}\\\\end\\s*\\{", cand, re.I):
+        return len(cand) <= 1200
+    if re.match(r"^(?:dengan|untuk|dimana|di\\s+mana|substitusi|misal|misalkan|karena|sehingga|maka|jika|apabila|bila|namun|tetapi|sedangkan|yaitu|yakni|oleh\\s+karena|nilai|hasil|perubahan|setiap)\\s+[A-Za-z0-9\\\\]", cand, re.I):
+        return False
+    if cand.endswith(":") and re.search(r"[=<>\\u2248\\u2260\\u2264\\u2265]", cand):
+        return False
+    ext_lbl, core_expr, _ = split_formula_line_py(cand)
+    if ext_lbl:
+        if has_prose_run_py(core_expr, 4):
+            return False
+        if re.search(r"[=\\u2264\\u2265\\u2248\\u2260\\u2192\\u21d2\\u00d7\\u00f7^]|\\\\(?:frac|dfrac|tfrac|cfrac|sqrt|sum|int|prod|lim|begin|min|max)(?![a-zA-Z])", core_expr) and re.search(r"(?:\\s[+\\-\\u00d7\\u00f7*/=\\u2264\\u2265\\u2248\\u2260\\u00b7]\\s|[=+\\-\\u00d7\\u00f7^\\u2264\\u2265\\u2248\\u2260\\u00b7\\u2211\\u222b\\u220f\\u221a\\u2207\\u2202]|\\\\(?:frac|dfrac|tfrac|cfrac|sqrt|sum|int|prod|ln|log|sin|cos|tan|exp|arctan|min|max|alpha|beta|gamma|rho|sigma|theta|partial)|(?<![A-Za-z])(?:max|min|cos|sin|tan|arctan|log|ln|exp|sqrt)\\s*\\(|\\^\\{|_\\{|[\\u2070\\u00b9\\u00b2\\u00b3\\u2074-\\u2079\\u2080-\\u2089\\u2090-\\u209c\\u1d62-\\u1d65\\u2c7c])", core_expr, re.I):
+            return len(core_expr) <= 520
+        return False
+    if has_prose_run_py(core_expr, 4):
+        return False
+    if len(core_expr) <= 420 and re.search(r"\\\\(?:frac|dfrac|tfrac|cfrac|sqrt|sum|int|prod|lim)(?![a-zA-Z])", core_expr):
+        return True
+    if len(core_expr) <= 420 and re.match(r"^(?:\\\\(?:alpha|beta|gamma|Gamma|delta|Delta|epsilon|theta|lambda|mu|pi|rho|sigma|Sigma|phi|psi|omega|Omega|mathbb|mathrm|text|min|max)(?:_[A-Za-z0-9{}]+|\\^\\{?[^{}\\s]+\\}?)*|[A-Za-z0-9\u0370-\u03ff])[A-Za-z0-9\u0370-\u03ff\\\\_{}\\u2080-\\u2089\\u2070-\\u2079\\u00b2\\u00b3\\u00b9\\u2090-\\u209c\\u1d62-\\u1d65\\u2c7c,|\\u00b7()\\s+\\-*/^]{0,36}\\s*(?:=|\\u2264|\\u2265|\\\\leq|\\\\geq)\\s*.+", core_expr):
+        if re.search(r"(?:\\s[+\\-\\u00d7\\u00f7*/=\\u00b7]\\s|[+\u00d7\u00f7^\u2264\u2265\u2248\u2260\\u00b7\\u2211\\u222b\\u220f\\u221a\\u2207\\u2202]|\\\\(?:frac|dfrac|tfrac|sqrt|sum|int|prod|ln|log|sin|cos|tan|exp|arctan|cdot|times|alpha|beta|gamma|rho|sigma|partial)|[\\u00b2\\u00b3\\u00b9\\u2070-\\u2079\\u2080-\\u2089\\u2090-\\u209c\\u1d62-\\u1d65\\u2c7c\\u03b8\\u0394\\u03c0\\u03b3\\u03b1\\u03c1\\u0393\\u03c3\\u03a3\\u03bc]|(?<![A-Za-z])(?:cos|sin|tan|arctan|log|ln|exp|sqrt|min|max)\\s*\\(|\\^\\{|_\\{|\\d+\\s*%)", core_expr, re.I):
+            return True
+    return False
+
+def unicode_to_mathtext_py(raw_expr):
+    s = str(raw_expr or "").strip()
+    if s in EQ_LATEX_MAP:
+        s = EQ_LATEX_MAP[s]
+    _, s_clean, _ = split_formula_line_py(s)
+    if s_clean:
+        s = s_clean
+    s = re.sub(r"^\\$\\$|\\$\\$$", "", s).strip()
+    s = re.sub(r"^\\$|\\$$", "", s).strip()
+    s = re.sub(r"^\\\\\\[|\\\\\\]$", "", s).strip()
+    s = re.sub(r"(?<!\\\\)\\$", "", s)
+    s = re.sub(r"\\\\{3,}(?=(?:left|right|frac|dfrac|tfrac|cfrac|sqrt|ln|log|sin|cos|tan|arctan|arcsin|arccos|exp|lim|gamma|Gamma|theta|alpha|beta|delta|Delta|epsilon|zeta|eta|kappa|lambda|mu|nu|xi|pi|rho|sigma|Sigma|tau|phi|Phi|psi|Psi|omega|Omega|times|div|cdot|pm|approx|neq|ne|leq|le|geq|ge|ll|gg|mid|infty|sum|int|prod|partial|nabla|mathbb|mathrm|text|hat|bar|tilde|vec|implies|iff|rightarrow|Rightarrow|downarrow|uparrow|%))", lambda _m: "\\\\", s)
+    s = re.sub(r"\\\\(?:dfrac|tfrac|cfrac)(?![a-zA-Z])", lambda _m: "\\\\frac", s)
+    s = re.sub(r"\\\\le(?![a-zA-Z])", lambda _m: "\\\\leq", s)
+    s = re.sub(r"\\\\ge(?![a-zA-Z])", lambda _m: "\\\\geq", s)
+    s = re.sub(r"\\\\ne(?![a-zA-Z])", lambda _m: "\\\\neq", s)
+    s = re.sub(r"\\\\implies(?![a-zA-Z])", lambda _m: "\\\\Rightarrow", s)
+    s = re.sub(r"\\\\iff(?![a-zA-Z])", lambda _m: "\\\\Leftrightarrow", s)
+    s = re.sub(r"\\\\(?:limits|nolimits|displaystyle|textstyle)(?![a-zA-Z])", "", s)
+    s = re.sub(r"\\\\boxed\\s*\\{([^{}]*)\\}", lambda m: m.group(1), s)
+    def _fmt_text_blk(m):
+        clean_t = " ".join(re.sub(r"\\\\+", "", m.group(1)).split())
+        return "\\\\mathrm{" + clean_t.replace(" ", "\\\\ ") + "}"
+    s = re.sub(r"\\\\(?:text|mathrm|operatorname)\\s*\\{([^{}]*)\\}", _fmt_text_blk, s)
+    _sup_tr = str.maketrans("\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u207a\u207b", "0123456789+-")
+    s = re.sub(r"[\u2070\u00b9\u00b2\u00b3\u2074-\u2079\u207a\u207b]+", lambda m: "^{" + m.group(0).translate(_sup_tr) + "}", s)
+    _sub_tr = str.maketrans("\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089\u208a\u208b\u208c\u208d\u208e\u2090\u2091\u2092\u2093\u2095\u2096\u2097\u2098\u2099\u209a\u209b\u209c\u1d62\u1d63\u1d64\u1d65\u2c7c", "0123456789+-=()aeoxhklmnpstiruvj")
+    s = re.sub(r"[\u2080-\u208e\u2090-\u209c\u1d62-\u1d65\u2c7c]+", lambda m: "_{" + m.group(0).translate(_sub_tr) + "}", s)
+    def _conv_bal_sqrt(txt_in):
+        out_s = txt_in
+        for _ in range(3):
+            m_sq = re.search(r"(?:\u221a|\\\\sqrt|(?<!\\\\)\\bsqrt)\\s*\\(", out_s, re.I)
+            if not m_sq:
+                break
+            d_sq, j_sq = 1, m_sq.end()
+            while j_sq < len(out_s) and d_sq > 0:
+                if out_s[j_sq] == "(": d_sq += 1
+                elif out_s[j_sq] == ")": d_sq -= 1
+                j_sq += 1
+            if d_sq == 0:
+                out_s = out_s[:m_sq.start()] + "\\\\sqrt{" + out_s[m_sq.end():j_sq - 1] + "}" + out_s[j_sq:]
+            else:
+                break
+        return re.sub(r"\u221a\\s*([A-Za-z0-9\u03b1-\u03c9\u03b8])", lambda m: f"\\\\sqrt{{{m.group(1)}}}", out_s)
+    s = _conv_bal_sqrt(s)
+    sym_map = {
+        "\u03b1": r"\\alpha ", "\u03b2": r"\\beta ", "\u03b3": r"\\gamma ", "\u0393": r"\\Gamma ", "\u03b4": r"\\delta ", "\u0394": r"\\Delta ",
+        "\u03b5": r"\\epsilon ", "\u03b6": r"\\zeta ", "\u03b7": r"\\eta ", "\u03b8": r"\\theta ", "\u0398": r"\\Theta ", "\u03ba": r"\\kappa ",
+        "\u03bb": r"\\lambda ", "\u039b": r"\\Lambda ", "\u03bc": r"\\mu ", "\u03bd": r"\\nu ", "\u03be": r"\\xi ", "\u039e": r"\\Xi ",
+        "\u03c0": r"\\pi ", "\u03a0": r"\\Pi ", "\u03c1": r"\\rho ", "\u03c3": r"\\sigma ", "\u03a3": r"\\Sigma ", "\u03c4": r"\\tau ",
+        "\u03c6": r"\\phi ", "\u03a6": r"\\Phi ", "\u03c8": r"\\psi ", "\u03a8": r"\\Psi ", "\u03c9": r"\\omega ", "\u03a9": r"\\Omega ",
+        "\u00b0": r"^{\\circ}", "\u00d7": r"\\times ", "\u00f7": r"\\div ", "\u00b7": r"\\cdot ", "\u00b1": r"\\pm ", "\u2213": r"\\mp ",
+        "\u2248": r"\\approx ", "\u2243": r"\\simeq ", "\u2245": r"\\cong ", "\u2260": r"\\neq ", "\u2261": r"\\equiv ", "\u221d": r"\\propto ",
+        "\u2264": r"\\leq ", "\u2265": r"\\geq ", "\u226a": r"\\ll ", "\u226b": r"\\gg ", "\u221e": r"\\infty ",
+        "\u211d": r"\\mathbb{R}", "\u2115": r"\\mathbb{N}", "\u2124": r"\\mathbb{Z}", "\u2223": r"\\mid ", "\u2225": r"\\parallel ", "\u22a5": r"\\perp ",
+        "\u2192": r"\\rightarrow ", "\u2190": r"\\leftarrow ", "\u21d2": r"\\Rightarrow ", "\u21d0": r"\\Leftarrow ",
+        "\u2194": r"\\leftrightarrow ", "\u21d4": r"\\Leftrightarrow ", "\u2193": r"\\downarrow ", "\u2191": r"\\uparrow ",
+        "\u2211": r"\\sum ", "\u222b": r"\\int ", "\u220f": r"\\prod ", "\u2202": r"\\partial ", "\u2207": r"\\nabla ",
+        "\u2208": r"\\in ", "\u2209": r"\\notin ", "\u2200": r"\\forall ", "\u2203": r"\\exists "
+    }
+    for k, v in sym_map.items():
+        s = s.replace(k, v)
+    s = re.sub(r"(?<!\\\\)%", lambda _m: "\\\\%", s)
+    text_slots = []
+    def _save_text(m):
+        text_slots.append(m.group(0))
+        return f"\\x00ZT{len(text_slots)-1}\\x00"
+    s = re.sub(r"\\\\(?:text|mathrm|mathbf|operatorname|begin|end)\\{[^{}]*\\}", _save_text, s)
+    s = re.sub(r"([A-Za-z0-9)\\]}])\\s+\\b(dengan\\s+kendala|dengan\\s+syarat|untuk\\s+setiap|untuk\\s+semua|di\\s+mana|subject\\s+to|such\\s+that|for\\s+all|dan|atau|serta|dimana|jika|apabila|bila|dengan|untuk|where|with|when|and|or|if)\\b\\s+(?=[A-Za-z0-9\\\\(\\[{])", lambda m: m.group(1) + r"\\;\\mathrm{" + " ".join(m.group(2).split()).replace(" ", "\\\\ ") + r"}\\;", s, flags=re.I)
+    s = re.sub(r"(?<!\\\\)\\b(ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max)\\b(?=\\s*(?:\\\\left|[(\\[{]|\\\\(?:frac|sum|prod)|\\s+[A-Za-z0-9\\\\]))", lambda m: "\\\\" + m.group(1), s)
+    if text_slots:
+        s = re.sub(r"\\x00ZT(\\d+)\\x00", lambda m: text_slots[int(m.group(1))], s)
+    return s
+
+def split_mathtext_env_rows_py(ltx):
+    m_env = re.search(r"\\\\begin\\s*\\{(aligned|align\\*?|gather\\*?|split|eqnarray\\*?|cases)\\}([\\s\\S]*?)\\\\end\\s*\\{\\1\\}", ltx, re.I)
+    if m_env:
+        body = m_env.group(2).strip()
+        raw_rows = re.split(r"\\\\\\\\", body)
+        rows = []
+        for idx_r, rr in enumerate(raw_rows):
+            r_clean = rr.strip()
+            if not r_clean:
+                continue
+            r_clean = re.sub(r"^&\\s*", r"\\\\quad " if idx_r > 0 else "", r_clean)
+            r_clean = re.sub(r"\\s*&\\s*", " ", r_clean).strip()
+            if r_clean:
+                rows.append(r_clean)
+        if rows:
+            return rows
+    if re.search(r"\\\\\\\\", ltx) and not re.search(r"\\\\(?:text|mathrm|operatorname)\\{[^{}]*\\\\\\\\", ltx):
+        rows = [re.sub(r"\\s*&\\s*", " ", rr).strip() for rr in re.split(r"\\\\\\\\", ltx) if rr.strip()]
+        if len(rows) > 1:
+            return rows
+    return [ltx]
+
+def split_long_latex_lines_py(ltx, max_len=78):
+    if len(ltx) <= max_len:
+        return [ltx]
+    lines = []
+    cur = []
+    depth = 0
+    lr_depth = 0
+    i = 0
+    while i < len(ltx):
+        if ltx.startswith(r"\\left", i):
+            lr_depth += 1
+        elif ltx.startswith(r"\\right", i) and lr_depth > 0:
+            lr_depth -= 1
+        ch = ltx[i]
+        if ch in "{([":
+            depth += 1
+        elif ch in "})]" and depth > 0:
+            depth -= 1
+        cur.append(ch)
+        if depth == 0 and lr_depth == 0 and len(cur) >= max_len - 18 and ch in "+-" and i > 0 and i + 1 < len(ltx) and ltx[i - 1] == " ":
+            part = "".join(cur[:-1]).strip()
+            if part:
+                lines.append(part)
+                cur = [ch, " "]
+        i += 1
+    rem = "".join(cur).strip()
+    if rem:
+        lines.append(rem)
+    return lines if len(lines) > 1 else [ltx]
+
+def render_mathtext_flowables(raw_expr, max_w_pt=465.0, font_pt=12.0):
+    if not HAS_MATHTEXT:
+        return []
+    ltx = unicode_to_mathtext_py(raw_expr)
+    if not ltx:
+        return []
+    env_rows = split_mathtext_env_rows_py(ltx)
+    all_segs = []
+    for er in env_rows:
+        all_segs.extend(split_long_latex_lines_py(er, max_len=82))
+    def _render_segments(segs):
+        imgs = []
+        for idx_l, seg in enumerate(segs):
+            buf = io.BytesIO()
+            render_tex = seg if (idx_l == 0 or len(env_rows) > 1) else (r"\\quad " + seg)
+            math_to_image("$" + render_tex + "$", buf, dpi=300, format="png", prop=FontProperties(size=font_pt), color="#0f172a")
+            buf.seek(0)
+            pil_im = PILImage.open(buf)
+            px_w, px_h = pil_im.size
+            buf.seek(0)
+            w_pt = px_w * 72.0 / 300.0
+            h_pt = px_h * 72.0 / 300.0
+            if w_pt > max_w_pt and w_pt > 0:
+                scale = max_w_pt / w_pt
+                w_pt = max_w_pt
+                h_pt = h_pt * scale
+            imgs.append(RLImage(buf, width=w_pt, height=h_pt, hAlign="LEFT"))
+        return imgs
+    try:
+        return _render_segments(all_segs)
+    except Exception:
+        try:
+            return _render_segments(env_rows)
+        except Exception:
+            return []
 
 story = [Paragraph(safe_pdf_chars(spec.get("title") or out_name), title_style)]
 if spec.get("subtitle"):
     story.append(Paragraph(safe_pdf_chars(spec["subtitle"]), sub_style))
 story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#38bdf8"), spaceBefore=2, spaceAfter=12))
 
-PAGE_CONTENT_W = 511.0
+PAGE_CONTENT_W = 499.0
 
 def render_equation_box(raw_line):
-    lbl, expr = split_formula_line_py(raw_line)
+    lbl, expr, note = split_formula_line_py(raw_line)
     cell_flowables = []
     if lbl:
         cell_flowables.append(Paragraph(safe_pdf_chars(lbl), eq_label_style))
-    cell_flowables.append(Paragraph(safe_pdf_chars(expr), eq_expr_style))
+    math_src = EQ_LATEX_MAP.get(raw_line) or EQ_LATEX_MAP.get(expr) or expr
+    math_imgs = render_mathtext_flowables(math_src, max_w_pt=PAGE_CONTENT_W - 28.0, font_pt=12.5)
+    if math_imgs:
+        for mi in math_imgs:
+            cell_flowables.append(mi)
+    else:
+        cell_flowables.append(Paragraph(safe_pdf_chars(expr), eq_expr_style))
+    if note:
+        cell_flowables.append(Paragraph(safe_pdf_chars(note), eq_note_style))
     eq_tbl = Table([[cell_flowables]], colWidths=[PAGE_CONTENT_W])
     eq_tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f0f9ff")),
@@ -8960,9 +10220,13 @@ def render_body_para(raw_line, is_bullet=False):
     if is_formula_line_py(t):
         render_equation_box(t)
         return
-    m_def = re.match(r"^([A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_{}\\u2080-\\u2089\\u209b()\\s]{0,14})\\s*=\\s*(.+)$", t)
+    m_def = re.match(r"^([A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_{}\\u2080-\\u2089\\u209a\\u209b()\\s]{0,16})\\s*=\\s*(.+)$", t)
     if m_def and is_bullet:
         story.append(Paragraph(f"&bull; <b>{safe_pdf_chars(m_def.group(1).strip())}</b> = {safe_pdf_chars(m_def.group(2))}", p_style))
+        return
+    m_title_kv = re.match(r"^([A-Za-z\\u00c0-\\u00ff][A-Za-z0-9\\u0370-\\u03ff\\u00c0-\\u00ff'\\u2019\\-/(),.\\s]{1,55}:)\\s+(.+)$", t)
+    if m_title_kv and is_bullet and not re.search(r"[=<>^_\\\\]", m_title_kv.group(1)):
+        story.append(Paragraph(f"&bull; <b>{safe_pdf_chars(m_title_kv.group(1))}</b> {safe_pdf_chars(m_title_kv.group(2))}", p_style))
         return
     m_kv = re.match(r"^((?:Lokasi|Tanggal|Parameter\\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\\s*:)\\s*(.+)$", t, re.I)
     if m_kv:
@@ -8987,17 +10251,21 @@ def render_tbl(tbl):
         if col_count == 2:
             col_widths = [PAGE_CONTENT_W * 0.42, PAGE_CONTENT_W * 0.58]
         t = Table(rows, colWidths=col_widths, repeatRows=1 if headers else 0)
-        t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e293b")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        tbl_styles = [
             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("LEFTPADDING", (0, 0), (-1, -1), 8),
             ("RIGHTPADDING", (0, 0), (-1, -1), 8),
             ("TOPPADDING", (0, 0), (-1, -1), 6),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 6)
-        ]))
+        ]
+        if headers:
+            tbl_styles.insert(0, ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e293b")))
+            tbl_styles.insert(1, ("TEXTCOLOR", (0, 0), (-1, 0), colors.white))
+            tbl_styles.append(("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]))
+        else:
+            tbl_styles.append(("ROWBACKGROUNDS", (0, 0), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]))
+        t.setStyle(TableStyle(tbl_styles))
         story.append(t)
         story.append(Spacer(1, 10))
 
@@ -9013,8 +10281,10 @@ for sec in (spec.get("sections") or []):
                 render_body_para(para)
     for b in (sec.get("bullets") or []):
         render_body_para(b, is_bullet=True)
-    if sec.get("table"):
-        render_tbl(sec["table"])
+    sec_tbls = sec.get("tables") if isinstance(sec.get("tables"), list) and len(sec.get("tables")) > 0 else ([sec["table"]] if sec.get("table") else [])
+    for stbl in sec_tbls:
+        if isinstance(stbl, dict):
+            render_tbl(stbl)
 
 for tbl in (spec.get("tables") or []):
     tt = str(tbl.get("title") or "").strip()
@@ -9023,18 +10293,46 @@ for tbl in (spec.get("tables") or []):
     render_tbl(tbl)
 
 doc.build(story)
+try:
+    from pypdf import PdfReader as _ZozQaReader
+    _qa_r = _ZozQaReader(out_name)
+    _qa_defects = []
+    _qa_imgs = 0
+    for _pi, _pg in enumerate(_qa_r.pages, 1):
+        _qa_imgs += len(_pg.images)
+        _ptxt = _pg.extract_text() or ""
+        if re.search(r"\\\\(?:begin|end|frac|text|rho|Gamma|alpha|beta|theta|downarrow|uparrow|ll|gg|mid|arctan)(?![a-zA-Z])", _ptxt):
+            _qa_defects.append(f"p{_pi}:raw_latex")
+        if re.search(r"(?<![A-Za-z0-9_])[A-Za-z\u0370-\u03ff]_(?:LCL|dp|eff|net|udara|wc|sat)(?![A-Za-z0-9_])", _ptxt):
+            _qa_defects.append(f"p{_pi}:raw_underscore")
+    print("Z21_PDF_QA:" + json.dumps({"pages": len(_qa_r.pages), "images": _qa_imgs, "defects": _qa_defects}))
+except Exception:
+    pass
 print(f"PDF_CREATED:{out_name}")`;
   }
   if (ext === 'docx') {
-    return `import os, json, re
+    return `import os, json, re, io
 from docx import Document
 from docx.shared import Pt, RGBColor, Inches
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib import rcParams
+    rcParams["mathtext.fontset"] = "stix"
+    from matplotlib.mathtext import math_to_image
+    from matplotlib.font_manager import FontProperties
+    from PIL import Image as PILImage
+    HAS_MATHTEXT_DX = True
+except Exception:
+    HAS_MATHTEXT_DX = False
+
 with open(os.environ["ZOZ_DOC_SPEC_PATH"], "r", encoding="utf-8") as _sf:
     spec = json.load(_sf)
 
+EQ_LATEX_MAP_DX = spec.get("equationLatexMap") or {}
 out_name = spec["filename"]
 doc = Document()
 title_p = doc.add_heading(str(spec.get("title") or out_name), level=0)
@@ -9044,19 +10342,99 @@ if spec.get("subtitle"):
     r.italic = True
     r.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
 
-def is_formula_line_dx(txt):
+def has_prose_run_dx(txt, min_words=4):
+    s = re.sub(r"\\\\(?:text|mathrm|operatorname|mathbf|mathit)\\{[^{}]*\\}", " ", str(txt or ""))
+    s = re.sub(r"\\\\[a-zA-Z]+", " ", s).strip()
+    if re.search(r"\\.\\s+[A-Z\\u00c0-\\u00d6]", s):
+        return True
+    _stop = {"sin", "cos", "tan", "csc", "sec", "cot", "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh", "exp", "log", "lim", "min", "max", "mod", "det", "gcd", "sup", "inf", "rms", "avg", "eff", "sat", "atm", "net", "tot", "rel", "abs", "init", "fin", "crit", "opt", "hpa", "mol", "dan", "atau", "serta", "dimana", "and", "with", "where", "udara", "hujan", "dew"}
+    words = [w for w in re.findall(r"\\b[a-z\\u00e0-\\u00ff]{3,}\\b", s) if w not in _stop]
+    return len(words) >= min_words
+
+_NARR_COLON_PFX_DX = r"^(?:Formula|Rumus|Persamaan)\\s+(?:ini|tersebut|di\\s+atas)\\b|^(?:Lokasi|Tanggal|Parameter\\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan|Dengan|Untuk|Dimana|Di\\s+mana|Substitusi|Misal|Misalkan|Karena|Sehingga|Maka|Jika|Apabila|Bila|Namun|Tetapi|Sedangkan|Yaitu|Yakni|Oleh\\s+karena|Contoh|Diketahui|Ditanya|Dijawab|Hasil|Nilai|Perubahan|Evaluasi)\\b|(?:adalah|yaitu|yakni|menunjukkan|menghasilkan|memberikan|sebesar|sebagai|berikut|berupa)$"
+
+def split_formula_line_dx(txt):
     t = str(txt or "").strip()
     if not t:
+        return "", "", ""
+    lbl = ""
+    body = t
+    m = re.match(r"^([A-Za-z\\u00c0-\\u00d6\\u00d8-\\u00f6\\u00f8-\\u00ff][A-Za-z0-9\\u0370-\\u03ff\\u00c0-\\u00ff'\\u2019\\-/(),.\\s]{1,65}):\\s*(.+)$", t)
+    if m:
+        pfx, rest = m.group(1).strip(), m.group(2).strip()
+        if rest and not re.search(r"[=<>\\u2264\\u2265\\u2248\\u2260+\\u00d7\\u00f7^_\\\\$\\u2211\\u222b\\u220f\\u221a]", pfx) and not re.search(_NARR_COLON_PFX_DX, pfx, re.I):
+            lbl = pfx
+            body = rest
+    note = ""
+    m_note = re.match(r"^([\\s\\S]+?)\\s+(\\([^()\\n]{4,160}\\)[.,;]?)$", body)
+    if m_note:
+        core, note_raw = m_note.group(1).strip(), m_note.group(2).strip()
+        inner = re.sub(r"^\\(|\\)[.,;]?$", "", note_raw).strip()
+        _note_stop = {"sin", "cos", "tan", "csc", "sec", "cot", "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh", "exp", "log", "lim", "min", "max", "mod"}
+        pwords = [w for w in re.findall(r"\\b[A-Za-z\\u00c0-\\u024f]*[a-z\\u00e0-\\u00ff]{2,}[A-Za-z\\u00c0-\\u024f]*\\b", inner) if w.lower() not in _note_stop]
+        if len(pwords) >= 2 and not re.search(r"[=^_\\\\\\u00d7\\u00f7\\u2264\\u2265\\u2248\\u2260\\u2211\\u222b\\u220f*]|\\s[+\\-]\\s", inner) and re.search(r"[=<>\\u2264\\u2265\\u2248\\u2260^_{}\\\\]|\\\\(?:frac|sum|sqrt|min|max|sigma|theta)", core):
+            body = core
+            note = note_raw
+    if (lbl or note) and body and re.search(r"[=<>\\u2264\\u2265\\u2248\\u2260}\\dA-Za-z\\u0370-\\u03ff)\\]]$", re.sub(r"\\.\\s*$", "", body)):
+        body = re.sub(r"(?<!\\.)\\.\\s*$", "", body).strip()
+    elif re.search(r"\\\\(?:frac|dfrac|tfrac|sqrt|sum|prod|int)\\s*\\{[^}]*\\}\\s*\\.\\s*$", body) or re.search(r"[\\u2264\\u2265\\u2248\\u2260=]\\s*-?\\d+(?:[.,]\\d+)?\\.\\s*$", body):
+        body = re.sub(r"(?<!\\.)\\.\\s*$", "", body).strip()
+    return lbl, body, note
+
+def is_legend_line_dx(txt):
+    t = str(txt or "").strip()
+    if not t or re.match(r"^(?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}:", t, re.I):
         return False
-    if re.match(r"^(?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}:", t, re.I):
+    m = re.match(r"^([A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_{}\\u2080-\\u2089\\u2090-\\u209c\\u1d62-\\u1d65\\u2c7c()\\s\\\\]{0,18})\\s*=\\s*(.+)$", t)
+    if not m:
+        return False
+    rhs = m.group(2).strip()
+    if re.search(r"\\\\(?:frac|dfrac|tfrac|sqrt|sum|int|prod|ln|log|sin|cos|tan|arctan|arcsin|arccos)(?![a-zA-Z])", rhs):
+        return False
+    if re.match(r"^[+-]?\\d+(?:[.,]\\d+)?(?:\\s*(?:°[CFK]|%|hPa|km/h|m/s))?(?:\\s*,\\s*[A-Za-z\\u0370-\\u03ff][A-Za-z0-9_{}\\u2080-\\u2089]{0,8}\\s*=\\s*[+-]?\\d+(?:[.,]\\d+)?(?:\\s*(?:°[CFK]|%|hPa|km/h|m/s))?)+$", rhs, re.I):
         return True
-    if len(t) <= 220 and re.match(r"^[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_\\u2080-\\u2089\\u209b,{}\\s()]{0,28}\\s*=\\s*.+", t):
-        if re.search(r"(?:\\s[+\\-\\u00d7*/]\\s|[\\u00b2\\u00b3\\u2074\\u2080-\\u2089\\u209b\\u03b8\\u0394\\u03c0\\u03b3]|\\b(?:cos|sin|log|ln|exp)\\s*\\(|\\^\\{|_\\{)", t, re.I):
+    if re.search(r"[=+\\-\u00d7\\u00f7*^]|\\u00b2|\\u00b3", rhs):
+        no_units = re.sub(r"\\b(?:km/h|m/s|m/s2|W/m2|kg/m3|g/kg|°[CF]|in\\s+%)\\b", "", rhs, flags=re.I)
+        no_units = re.sub(r"([A-Za-z\\u00C0-\\u024F])-([A-Za-z\\u00C0-\\u024F])", r"\\1 \\2", no_units)
+        no_units = re.sub(r"([A-Za-z\\u00C0-\\u024F])-([A-Za-z\\u00C0-\\u024F])", r"\\1 \\2", no_units)
+        if re.search(r"[=+\\-\u00d7\\u00f7*^]", no_units) or re.search(r"\\s/\\s", no_units):
+            return False
+    return bool(re.search(r"[A-Za-z\\u00C0-\\u024F]{3,}\\s+[A-Za-z\\u00C0-\\u024F]{2,}", rhs) or re.search(r"\\b(?:in\\s+(?:°?[CFK%]|km/h|m/s|%)|pada\\s+suhu)\\s*\\.?$", rhs, re.I))
+
+def is_formula_line_dx(txt):
+    t = str(txt or "").strip()
+    if not t or is_legend_line_dx(t):
+        return False
+    cand = re.sub(r"^(?:\\(\\d+\\)|\\d+\\.)\\s+", "", t).strip()
+    if cand != t and is_legend_line_dx(cand):
+        return False
+    if re.match(r"^\\\\begin\\s*\\{(?:aligned|align\\*?|gather\\*?|split|eqnarray\\*?|cases|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix|equation\\*?)\\}", cand, re.I) or re.search(r"\\\\begin\\s*\\{(?:aligned|align\\*?|gather\\*?|split|eqnarray\\*?|cases)\\}[\\s\\S]{3,1100}\\\\end\\s*\\{", cand, re.I):
+        return len(cand) <= 1200
+    if re.match(r"^(?:dengan|untuk|dimana|di\\s+mana|substitusi|misal|misalkan|karena|sehingga|maka|jika|apabila|bila|namun|tetapi|sedangkan|yaitu|yakni|oleh\\s+karena|nilai|hasil|perubahan|setiap)\\s+[A-Za-z0-9\\\\]", cand, re.I):
+        return False
+    if cand.endswith(":") and re.search(r"[=<>\\u2248\\u2260\\u2264\\u2265]", cand):
+        return False
+    ext_lbl, core_expr, _ = split_formula_line_dx(cand)
+    if ext_lbl:
+        if has_prose_run_dx(core_expr, 4):
+            return False
+        if re.search(r"[=\\u2264\\u2265\\u2248\\u2260\\u2192\\u21d2\\u00d7\\u00f7^]|\\\\(?:frac|dfrac|tfrac|cfrac|sqrt|sum|int|prod|lim|begin|min|max)(?![a-zA-Z])", core_expr) and re.search(r"(?:\\s[+\\-\\u00d7\\u00f7*/=\\u2264\\u2265\\u2248\\u2260\\u00b7]\\s|[=+\\-\\u00d7\\u00f7^\\u2264\\u2265\\u2248\\u2260\\u00b7\\u2211\\u222b\\u220f\\u221a\\u2207\\u2202]|\\\\(?:frac|dfrac|tfrac|cfrac|sqrt|sum|int|prod|ln|log|sin|cos|tan|exp|arctan|min|max|alpha|beta|gamma|rho|sigma|theta|partial)|(?<![A-Za-z])(?:max|min|cos|sin|tan|arctan|log|ln|exp|sqrt)\\s*\\(|\\^\\{|_\\{|[\\u2070\\u00b9\\u00b2\\u00b3\\u2074-\\u2079\\u2080-\\u2089\\u2090-\\u209c\\u1d62-\\u1d65\\u2c7c])", core_expr, re.I):
+            return len(core_expr) <= 520
+        return False
+    if has_prose_run_dx(core_expr, 4):
+        return False
+    if len(core_expr) <= 420 and re.search(r"\\\\(?:frac|dfrac|tfrac|cfrac|sqrt|sum|int|prod|lim)(?![a-zA-Z])", core_expr):
+        return True
+    if len(core_expr) <= 420 and re.match(r"^(?:\\\\(?:alpha|beta|gamma|Gamma|delta|Delta|epsilon|theta|lambda|mu|pi|rho|sigma|Sigma|phi|psi|omega|Omega|mathbb|mathrm|text|min|max)(?:_[A-Za-z0-9{}]+|\\^\\{?[^{}\\s]+\\}?)*|[A-Za-z0-9\u0370-\u03ff])[A-Za-z0-9\u0370-\u03ff\\\\_{}\\u2080-\\u2089\\u2070-\\u2079\\u00b2\\u00b3\\u00b9\\u2090-\\u209c\\u1d62-\\u1d65\\u2c7c,|\\u00b7()\\s+\\-*/^]{0,36}\\s*(?:=|\\u2264|\\u2265|\\\\leq|\\\\geq)\\s*.+", core_expr):
+        if re.search(r"(?:\\s[+\\-\\u00d7\\u00f7*/=\\u00b7]\\s|[+\u00d7\u00f7^\u2264\u2265\u2248\u2260\\u00b7\\u2211\\u222b\\u220f\\u221a\\u2207\\u2202]|\\\\(?:frac|dfrac|tfrac|sqrt|sum|int|prod|ln|log|sin|cos|tan|exp|arctan|cdot|times|alpha|beta|gamma|rho|sigma|partial)|[\\u00b2\\u00b3\\u00b9\\u2070-\\u2079\\u2080-\\u2089\\u2090-\\u209c\\u1d62-\\u1d65\\u2c7c\\u03b8\\u0394\\u03c0\\u03b3\\u03b1\\u03c1\\u0393\\u03c3\\u03a3\\u03bc]|(?<![A-Za-z])(?:cos|sin|tan|arctan|log|ln|exp|sqrt|min|max)\\s*\\(|\\^\\{|_\\{|\\d+\\s*%)", core_expr, re.I):
             return True
     return False
 
 def append_math_runs(p, text, bold=False, size_pt=None, color_rgb=None):
-    parts = re.split(r"(\\^\\{[^{}]+\\}|_\\{[^{}]+\\})", str(text or ""))
+    txt_norm = re.sub(r"([})])_([A-Za-z0-9]{1,6})(?![A-Za-z0-9_])", lambda m: f"{m.group(1)}_{{{m.group(2)}}}", str(text or ""))
+    txt_norm = re.sub(r"(?<![A-Za-z_])([A-Za-z\u0370-\u03ff])_([0-9]{1,6})", lambda m: f"{m.group(1)}_{{{m.group(2)}}}", txt_norm)
+    txt_norm = re.sub(r"(?<![A-Za-z_])([A-Za-z\u0370-\u03ff])_([A-Za-z\u2191\u2193][A-Za-z0-9\u2191\u2193]{0,7})(?![A-Za-z0-9_])", lambda m: f"{m.group(1)}_{{{m.group(2)}}}", txt_norm)
+    parts = re.split(r"(\\^\\{[^{}]+\\}|_\\{[^{}]+\\})", txt_norm)
     for part in parts:
         if not part:
             continue
@@ -9075,28 +10453,156 @@ def append_math_runs(p, text, bold=False, size_pt=None, color_rgb=None):
         if color_rgb:
             r.font.color.rgb = color_rgb
 
+def render_eq_png_dx(raw_txt, expr):
+    if not HAS_MATHTEXT_DX:
+        return None
+    ltx = EQ_LATEX_MAP_DX.get(raw_txt) or EQ_LATEX_MAP_DX.get(expr) or expr
+    _, ltx_clean, _ = split_formula_line_dx(ltx)
+    if ltx_clean:
+        ltx = ltx_clean
+    ltx = re.sub(r"^\\$\\$|\\$\\$$", "", str(ltx or "")).strip()
+    ltx = re.sub(r"^\\$|\\$$", "", ltx).strip()
+    ltx = re.sub(r"^\\\\\\[|\\\\\\]$", "", ltx).strip()
+    ltx = re.sub(r"(?<!\\\\)\\$", "", ltx)
+    if not ltx:
+        return None
+    ltx = re.sub(r"\\\\{3,}(?=(?:left|right|frac|dfrac|tfrac|cfrac|sqrt|ln|log|sin|cos|tan|arctan|arcsin|arccos|exp|lim|gamma|Gamma|theta|alpha|beta|delta|Delta|epsilon|zeta|eta|kappa|lambda|mu|nu|xi|pi|rho|sigma|Sigma|tau|phi|Phi|psi|Psi|omega|Omega|times|div|cdot|pm|approx|neq|ne|leq|le|geq|ge|ll|gg|mid|infty|sum|int|prod|partial|nabla|mathbb|mathrm|text|hat|bar|tilde|vec|implies|iff|rightarrow|Rightarrow|downarrow|uparrow|%))", lambda _m: "\\\\", ltx)
+    ltx = re.sub(r"\\\\(?:dfrac|tfrac|cfrac)(?![a-zA-Z])", lambda _m: "\\\\frac", ltx)
+    ltx = re.sub(r"\\\\le(?![a-zA-Z])", lambda _m: "\\\\leq", ltx)
+    s_dx_tmp = re.sub(r"\\\\ge(?![a-zA-Z])", lambda _m: "\\\\geq", ltx)
+    ltx = s_dx_tmp
+    ltx = re.sub(r"\\\\ne(?![a-zA-Z])", lambda _m: "\\\\neq", ltx)
+    ltx = re.sub(r"\\\\implies(?![a-zA-Z])", lambda _m: "\\\\Rightarrow", ltx)
+    ltx = re.sub(r"\\\\iff(?![a-zA-Z])", lambda _m: "\\\\Leftrightarrow", ltx)
+    ltx = re.sub(r"\\\\(?:limits|nolimits|displaystyle|textstyle)(?![a-zA-Z])", "", ltx)
+    ltx = re.sub(r"\\\\boxed\\s*\\{([^{}]*)\\}", lambda m: m.group(1), ltx)
+    def _fmt_text_blk_dx(m):
+        clean_t = " ".join(re.sub(r"\\\\+", "", m.group(1)).split())
+        return "\\\\mathrm{" + clean_t.replace(" ", "\\\\ ") + "}"
+    ltx = re.sub(r"\\\\(?:text|mathrm|operatorname)\\s*\\{([^{}]*)\\}", _fmt_text_blk_dx, ltx)
+    _sup_tr = str.maketrans("\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u207a\u207b", "0123456789+-")
+    ltx = re.sub(r"[\u2070\u00b9\u00b2\u00b3\u2074-\u2079\u207a\u207b]+", lambda m: "^{" + m.group(0).translate(_sup_tr) + "}", ltx)
+    _sub_tr = str.maketrans("\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089\u208a\u208b\u208c\u208d\u208e\u2090\u2091\u2092\u2093\u2095\u2096\u2097\u2098\u2099\u209a\u209b\u209c\u1d62\u1d63\u1d64\u1d65\u2c7c", "0123456789+-=()aeoxhklmnpstiruvj")
+    ltx = re.sub(r"[\u2080-\u208e\u2090-\u209c\u1d62-\u1d65\u2c7c]+", lambda m: "_{" + m.group(0).translate(_sub_tr) + "}", ltx)
+    for _ in range(3):
+        m_sq_dx = re.search(r"(?:\u221a|\\\\sqrt|(?<!\\\\)\\bsqrt)\\s*\\(", ltx, re.I)
+        if not m_sq_dx:
+            break
+        d_sq_dx, j_sq_dx = 1, m_sq_dx.end()
+        while j_sq_dx < len(ltx) and d_sq_dx > 0:
+            if ltx[j_sq_dx] == "(": d_sq_dx += 1
+            elif ltx[j_sq_dx] == ")": d_sq_dx -= 1
+            j_sq_dx += 1
+        if d_sq_dx == 0:
+            ltx = ltx[:m_sq_dx.start()] + "\\\\sqrt{" + ltx[m_sq_dx.end():j_sq_dx - 1] + "}" + ltx[j_sq_dx:]
+        else:
+            break
+    ltx = re.sub(r"\u221a\\s*([A-Za-z0-9\u03b1-\u03c9\u03b8])", lambda m: f"\\\\sqrt{{{m.group(1)}}}", ltx)
+    for k, v in {
+        "\u03b1": r"\\alpha ", "\u03b2": r"\\beta ", "\u03b3": r"\\gamma ", "\u0393": r"\\Gamma ", "\u03b4": r"\\delta ", "\u0394": r"\\Delta ",
+        "\u03b5": r"\\epsilon ", "\u03b6": r"\\zeta ", "\u03b7": r"\\eta ", "\u03b8": r"\\theta ", "\u0398": r"\\Theta ", "\u03ba": r"\\kappa ",
+        "\u03bb": r"\\lambda ", "\u039b": r"\\Lambda ", "\u03bc": r"\\mu ", "\u03bd": r"\\nu ", "\u03be": r"\\xi ", "\u039e": r"\\Xi ",
+        "\u03c0": r"\\pi ", "\u03a0": r"\\Pi ", "\u03c1": r"\\rho ", "\u03c3": r"\\sigma ", "\u03a3": r"\\Sigma ", "\u03c4": r"\\tau ",
+        "\u03c6": r"\\phi ", "\u03a6": r"\\Phi ", "\u03c8": r"\\psi ", "\u03a8": r"\\Psi ", "\u03c9": r"\\omega ", "\u03a9": r"\\Omega ",
+        "\u00b0": r"^{\\circ}", "\u00d7": r"\\times ", "\u00f7": r"\\div ", "\u00b7": r"\\cdot ", "\u00b1": r"\\pm ", "\u2213": r"\\mp ",
+        "\u2248": r"\\approx ", "\u2243": r"\\simeq ", "\u2245": r"\\cong ", "\u2260": r"\\neq ", "\u2261": r"\\equiv ", "\u221d": r"\\propto ",
+        "\u2264": r"\\leq ", "\u2265": r"\\geq ", "\u226a": r"\\ll ", "\u226b": r"\\gg ", "\u221e": r"\\infty ",
+        "\u211d": r"\\mathbb{R}", "\u2115": r"\\mathbb{N}", "\u2124": r"\\mathbb{Z}", "\u2223": r"\\mid ", "\u2225": r"\\parallel ", "\u22a5": r"\\perp ",
+        "\u2192": r"\\rightarrow ", "\u2190": r"\\leftarrow ", "\u21d2": r"\\Rightarrow ", "\u21d0": r"\\Leftarrow ",
+        "\u2194": r"\\leftrightarrow ", "\u21d4": r"\\Leftrightarrow ", "\u2193": r"\\downarrow ", "\u2191": r"\\uparrow ",
+        "\u2211": r"\\sum ", "\u222b": r"\\int ", "\u220f": r"\\prod ", "\u2202": r"\\partial ", "\u2207": r"\\nabla ",
+        "\u2208": r"\\in ", "\u2209": r"\\notin ", "\u2200": r"\\forall ", "\u2203": r"\\exists "
+    }.items():
+        ltx = ltx.replace(k, v)
+    ltx = re.sub(r"(?<!\\\\)%", lambda _m: "\\\\%", ltx)
+    text_slots = []
+    def _save_text(m):
+        text_slots.append(m.group(0))
+        return f"\\x00ZT{len(text_slots)-1}\\x00"
+    ltx = re.sub(r"\\\\(?:text|mathrm|mathbf|operatorname|begin|end)\\{[^{}]*\\}", _save_text, ltx)
+    ltx = re.sub(r"([A-Za-z0-9)\\]}])\\s+\\b(dengan\\s+kendala|dengan\\s+syarat|untuk\\s+setiap|untuk\\s+semua|di\\s+mana|subject\\s+to|such\\s+that|for\\s+all|dan|atau|serta|dimana|jika|apabila|bila|dengan|untuk|where|with|when|and|or|if)\\b\\s+(?=[A-Za-z0-9\\\\(\\[{])", lambda m: m.group(1) + r"\\;\\mathrm{" + " ".join(m.group(2).split()).replace(" ", "\\\\ ") + r"}\\;", ltx, flags=re.I)
+    ltx = re.sub(r"(?<!\\\\)\\b(ln|log|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|exp|lim|min|max)\\b(?=\\s*(?:\\\\left|[(\\[{]|\\\\(?:frac|sum|prod)|\\s+[A-Za-z0-9\\\\]))", lambda m: "\\\\" + m.group(1), ltx)
+    if text_slots:
+        ltx = re.sub(r"\\x00ZT(\\d+)\\x00", lambda m: text_slots[int(m.group(1))], ltx)
+    rows = [ltx]
+    m_env = re.search(r"\\\\begin\\s*\\{(aligned|align\\*?|gather\\*?|split|eqnarray\\*?|cases)\\}([\\s\\S]*?)\\\\end\\s*\\{\\1\\}", ltx, re.I)
+    if m_env:
+        body = m_env.group(2).strip()
+        rows = []
+        for idx_r, rr in enumerate(re.split(r"\\\\\\\\", body)):
+            rc = re.sub(r"^&\\s*", r"\\\\quad " if idx_r > 0 else "", rr.strip())
+            rc = re.sub(r"\\s*&\\s*", " ", rc).strip()
+            if rc:
+                rows.append(rc)
+        if not rows:
+            rows = [ltx]
+    try:
+        pil_imgs = []
+        for seg in rows:
+            b = io.BytesIO()
+            math_to_image("$" + seg + "$", b, dpi=300, format="png", prop=FontProperties(size=12.0), color="#0f172a")
+            b.seek(0)
+            pil_imgs.append(PILImage.open(b).convert("RGBA"))
+        if len(pil_imgs) == 1:
+            out_buf = io.BytesIO()
+            pil_imgs[0].save(out_buf, format="PNG")
+            out_buf.seek(0)
+            return out_buf, Inches(min(5.6, pil_imgs[0].width / 300.0))
+        max_px_w = max(im.width for im in pil_imgs)
+        gap_px = 14
+        tot_h = sum(im.height for im in pil_imgs) + gap_px * (len(pil_imgs) - 1)
+        stitched = PILImage.new("RGBA", (max_px_w, tot_h), (240, 249, 255, 0))
+        y_off = 0
+        for im in pil_imgs:
+            stitched.paste(im, (0, y_off), im)
+            y_off += im.height + gap_px
+        out_buf = io.BytesIO()
+        stitched.save(out_buf, format="PNG")
+        out_buf.seek(0)
+        return out_buf, Inches(min(5.6, max_px_w / 300.0))
+    except Exception:
+        return None
+
 def add_formatted_para(txt, as_bullet=False):
     t = str(txt or "").strip()
     if not t:
         return
     if is_formula_line_dx(t):
-        m = re.match(r"^((?:Formula|Rumus|Persamaan|Representasi\\s+Vektor|Model\\s+Stokastik|Fungsi\\s+Matematis|Derivasi)\\b[^:]{0,65}):\\s*(.+)$", t, re.I)
-        lbl, expr = (m.group(1).strip(), m.group(2).strip()) if m else ("", t)
+        lbl, expr, note = split_formula_line_dx(t)
         p = doc.add_paragraph()
+        p_pr = p._p.get_or_add_pPr()
+        p_pr.append(parse_xml(f'<w:pBdr {nsdecls("w")}><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr>'))
+        p_pr.append(parse_xml(f'<w:shd {nsdecls("w")} w:val="clear" w:color="auto" w:fill="F0F9FF"/>'))
         p.paragraph_format.left_indent = Inches(0.22)
         p.paragraph_format.space_before = Pt(6)
         p.paragraph_format.space_after = Pt(6)
-        p_pr = p._p.get_or_add_pPr()
-        p_pr.append(parse_xml(f'<w:shd {nsdecls("w")} w:val="clear" w:color="auto" w:fill="F0F9FF"/>'))
-        p_pr.append(parse_xml(f'<w:pBdr {nsdecls("w")}><w:left w:val="single" w:sz="18" w:space="8" w:color="0284C7"/></w:pBdr>'))
         if lbl:
             r1 = p.add_run(lbl + ": ")
             r1.bold = True
             r1.font.size = Pt(10)
             r1.font.color.rgb = RGBColor(0x03, 0x69, 0xA1)
-        append_math_runs(p, expr, bold=True, size_pt=11, color_rgb=RGBColor(0x0F, 0x17, 0x2A))
+            r1.add_break()
+        eq_res = render_eq_png_dx(t, expr)
+        if eq_res:
+            img_buf, img_w = eq_res
+            p.add_run().add_picture(img_buf, width=img_w)
+        else:
+            append_math_runs(p, expr, bold=True, size_pt=11, color_rgb=RGBColor(0x0F, 0x17, 0x2A))
+        if note:
+            rn = p.add_run()
+            rn.add_break()
+            r_note = p.add_run(note)
+            r_note.italic = True
+            r_note.font.size = Pt(9.2)
+            r_note.font.color.rgb = RGBColor(0x47, 0x55, 0x69)
         return
     p = doc.add_paragraph(style="List Bullet") if as_bullet else doc.add_paragraph()
+    m_title_kv = re.match(r"^([A-Za-z\\u00c0-\\u00ff][A-Za-z0-9\\u0370-\\u03ff\\u00c0-\\u00ff'\\u2019\\-/(),.\\s]{1,55}:)\\s+(.+)$", t)
+    if m_title_kv and as_bullet and not re.search(r"[=<>^_\\\\]", m_title_kv.group(1)):
+        r1 = p.add_run(m_title_kv.group(1) + " ")
+        r1.bold = True
+        append_math_runs(p, m_title_kv.group(2))
+        return
     m_kv = re.match(r"^((?:Lokasi|Tanggal|Parameter\\s+Utama|Analisis|Keterangan|Catatan|Kesimpulan)\\s*:)\\s*(.+)$", t, re.I)
     if m_kv:
         r1 = p.add_run(m_kv.group(1) + " ")
@@ -9108,48 +10614,60 @@ def add_formatted_para(txt, as_bullet=False):
 def add_doc_table(tbl):
     headers = tbl.get("headers") or []
     rows = tbl.get("rows") or []
-    col_cnt = len(headers) if headers else (len(rows[0]) if rows and isinstance(rows[0], list) else 1)
+    max_row_len = max((len(r) if isinstance(r, list) else 1 for r in rows), default=0)
+    col_cnt = max(len(headers), max_row_len)
     if col_cnt <= 0:
         return
     t = doc.add_table(rows=(1 if headers else 0) + len(rows), cols=col_cnt)
     t.style = "Table Grid"
     r_idx = 0
     if headers:
-        for ci, h in enumerate(headers):
+        for ci in range(col_cnt):
+            h = headers[ci] if ci < len(headers) else ""
             cell = t.rows[0].cells[ci]
             cell.text = ""
-            run = cell.paragraphs[0].add_run(str(h or ""))
-            run.bold = True
+            tc_pr = cell._tc.get_or_add_tcPr()
+            tc_pr.append(parse_xml(f'<w:shd {nsdecls("w")} w:val="clear" w:color="auto" w:fill="1E293B"/>'))
+            append_math_runs(cell.paragraphs[0], str(h or ""), bold=True, color_rgb=RGBColor(0xFF, 0xFF, 0xFF))
         r_idx = 1
     for r in rows:
         arr = r if isinstance(r, list) else [r]
-        for ci in range(min(col_cnt, len(arr))):
-            t.rows[r_idx].cells[ci].text = str(arr[ci] if arr[ci] is not None else "")
+        for ci in range(col_cnt):
+            val = arr[ci] if ci < len(arr) and arr[ci] is not None else ""
+            cell = t.rows[r_idx].cells[ci]
+            cell.text = ""
+            append_math_runs(cell.paragraphs[0], str(val))
         r_idx += 1
     doc.add_paragraph()
 
+seen_headings_dx = set()
 for sec in (spec.get("sections") or []):
-    if sec.get("heading") and sec["heading"] != spec.get("title"):
-        doc.add_heading(str(sec["heading"]), level=1)
+    sh = str(sec.get("heading") or "").strip()
+    if sh and sh != spec.get("title"):
+        seen_headings_dx.add(sh)
+        doc.add_heading(sh, level=1)
     if sec.get("content"):
         for para in str(sec["content"]).splitlines():
             if para.strip():
                 add_formatted_para(para)
     for b in (sec.get("bullets") or []):
         add_formatted_para(str(b), as_bullet=True)
-    if sec.get("table"):
-        add_doc_table(sec["table"])
+    sec_tbls_dx = sec.get("tables") if isinstance(sec.get("tables"), list) and len(sec.get("tables")) > 0 else ([sec["table"]] if sec.get("table") else [])
+    for stbl_dx in sec_tbls_dx:
+        if isinstance(stbl_dx, dict):
+            add_doc_table(stbl_dx)
 
 for tbl in (spec.get("tables") or []):
-    if tbl.get("title"):
-        doc.add_heading(str(tbl["title"]), level=2)
+    tt = str(tbl.get("title") or "").strip()
+    if tt and tt not in seen_headings_dx:
+        doc.add_heading(tt, level=2)
     add_doc_table(tbl)
 
 doc.save(out_name)
 print(f"DOCX_CREATED:{out_name}")`;
   }
   if (ext === 'xlsx') {
-    return `import os, json
+    return `import os, json, re
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.chart import BarChart, LineChart, PieChart, Reference
@@ -9159,16 +10677,35 @@ with open(os.environ["ZOZ_DOC_SPEC_PATH"], "r", encoding="utf-8") as _sf:
 
 out_name = spec["filename"]
 wb = openpyxl.Workbook()
-sheets = spec.get("sheets") or [{"name": (t.get("title") or f"Sheet{i+1}"), "headers": t.get("headers") or [], "rows": t.get("rows") or [], "formulas": t.get("formulas") or []} for i, t in enumerate(spec.get("tables") or [])]
+sec_tables = []
+for i, s in enumerate(spec.get("sections") or []):
+    if not isinstance(s, dict):
+        continue
+    tlist = s.get("tables") if isinstance(s.get("tables"), list) and len(s.get("tables")) > 0 else ([s.get("table")] if isinstance(s.get("table"), dict) else [])
+    for st in tlist:
+        if isinstance(st, dict):
+            sec_tables.append({"name": (st.get("title") or s.get("heading") or f"Sheet{i+1}"), "headers": st.get("headers") or [], "rows": st.get("rows") or [], "formulas": st.get("formulas") or []})
+sheets = spec.get("sheets") or [
+    {"name": (t.get("title") or f"Sheet{i+1}"), "headers": t.get("headers") or [], "rows": t.get("rows") or [], "formulas": t.get("formulas") or []}
+    for i, t in enumerate(spec.get("tables") or [])
+] or sec_tables
 if not sheets:
     sheets = [{"name": "Data", "headers": ["Item", "Keterangan"], "rows": [[spec.get("title") or "Dokumen Z21", spec.get("content") or "Selesai"]], "formulas": []}]
 
 hdr_fill = PatternFill("solid", fgColor="1E293B")
 hdr_font = Font(bold=True, color="FFFFFF")
+used_titles = set()
 
 for idx, sh in enumerate(sheets):
     ws = wb.active if idx == 0 else wb.create_sheet()
-    ws.title = str(sh.get("name") or f"Sheet{idx+1}")[:31]
+    raw_title = re.sub(r"[:\\\\/?*\\[\\]\\x00-\\x1F]", "", str(sh.get("name") or f"Sheet{idx+1}")).strip("'").strip()[:31] or f"Sheet{idx+1}"
+    cand_title, sfx_n = raw_title, 2
+    while cand_title.lower() in used_titles:
+        sfx = f"_{sfx_n}"
+        cand_title = raw_title[:max(1, 31 - len(sfx))] + sfx
+        sfx_n += 1
+    used_titles.add(cand_title.lower())
+    ws.title = cand_title
     headers = sh.get("headers") or []
     rows = sh.get("rows") or []
     start_row = 1
@@ -9187,9 +10724,10 @@ for idx, sh in enumerate(sheets):
             if isinstance(v, (int, float)):
                 parsed_arr.append(v)
             elif isinstance(v, str) and not v.startswith("="):
-                try:
-                    parsed_arr.append(float(v) if "." in v else int(v))
-                except Exception:
+                vs = v.strip()
+                if re.match(r"^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$", vs) and len(vs) <= 15:
+                    parsed_arr.append(float(vs) if "." in vs else int(vs))
+                else:
                     parsed_arr.append(v)
             else:
                 parsed_arr.append(v)
@@ -9203,6 +10741,8 @@ for idx, sh in enumerate(sheets):
             if f_item.get("label"):
                 ws.cell(row=next_r, column=1, value=str(f_item["label"])).font = Font(bold=True)
             t_col = int(f_item.get("col", 2 if f_item.get("label") else 1))
+            if f_item.get("label") and t_col <= 1:
+                t_col = 2
             ws.cell(row=next_r, column=max(1, t_col), value=f_str)
     chart_cfg = sh.get("chart")
     if isinstance(chart_cfg, dict) and rows:
@@ -9259,21 +10799,27 @@ function executeZ21DocumentBuilderSandbox(rawPayload = {}, timeoutMs = 15000) {
 
     const finalizeWithOutputFiles = (pyOutcome) => {
       let producedFiles = [];
-      try {
-        producedFiles = fs.readdirSync(containerDir)
-          .filter(fn => !fn.startsWith('_zoz_'))
-          .map(fn => path.join(containerDir, fn))
-          .filter(fp => {
-            try {
-              const st = fs.statSync(fp);
-              return st.isFile() && st.size > 0 && st.size <= 15 * 1024 * 1024;
-            } catch (_) {
-              return false;
+      if (pyOutcome && pyOutcome.success === true) {
+        const collectDocFiles = (dirPath) => {
+          let entries = [];
+          try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); } catch (_) { return; }
+          for (const ent of entries) {
+            if (ent.name.startsWith('_zoz_') || ent.name.startsWith('fontlist') || ent.name.startsWith('.matplotlib') || ent.name === '__pycache__') continue;
+            const fullPath = path.join(dirPath, ent.name);
+            if (ent.isDirectory()) {
+              collectDocFiles(fullPath);
+            } else if (ent.isFile() && /\.(?:pdf|docx|xlsx|csv)$/i.test(ent.name)) {
+              try {
+                const st = fs.statSync(fullPath);
+                if (st.size > 0 && st.size <= 15 * 1024 * 1024) producedFiles.push(fullPath);
+              } catch (_) {}
             }
-          });
-      } catch (_) {}
+          }
+        };
+        collectDocFiles(containerDir);
+      }
 
-      let engine = pyOutcome.success && producedFiles.length > 0 ? 'python-container-sandbox' : 'zoz-native-compiler';
+      let engine = pyOutcome && pyOutcome.success && producedFiles.length > 0 ? 'python-container-sandbox' : 'zoz-native-compiler';
       if (producedFiles.length === 0) {
         const nativeRes = compileZ21DocumentArtifactNode(spec, containerDir);
         producedFiles = [nativeRes.filePath];
@@ -9318,22 +10864,34 @@ function executeZ21DocumentBuilderSandbox(rawPayload = {}, timeoutMs = 15000) {
         };
       });
 
+      if (IS_VERCEL_ENV) {
+        try { fs.rmSync(containerDir, { recursive: true, force: true }); } catch (_) {}
+      }
+
+      const stdoutStr = (pyOutcome && pyOutcome.stdout) || '';
+      let pdfQa;
+      const qaM = stdoutStr.match(/^Z21_PDF_QA:(\{[^\r\n]+\})/m);
+      if (qaM) {
+        try { pdfQa = JSON.parse(qaM[1]); } catch (_) {}
+      }
+
       resolve({
         success: true,
         engine,
         librariesUsed: engine === 'zoz-native-compiler' ? ['zoz-native'] : librariesUsed,
-        stdout: pyOutcome.stdout || '',
-        stderr: pyOutcome.stderr || '',
-        pythonFallbackReason: pyOutcome.fallbackReason || undefined,
+        stdout: stdoutStr,
+        stderr: (pyOutcome && pyOutcome.stderr) || '',
+        pythonFallbackReason: (pyOutcome && pyOutcome.fallbackReason) || undefined,
+        ...(pdfQa ? { pdfQa } : {}),
         executionTimeMs: Date.now() - startTime,
         containerDir,
         files: artifacts
       });
     };
 
-    const forceNative = Boolean(rawPayload.forceNative === true || rawPayload.library === 'zoz-native');
+    const forceNative = Boolean(rawPayload.forceNative === true || rawPayload.library === 'zoz-native' || IS_VERCEL_ENV);
     if (forceNative) {
-      return finalizeWithOutputFiles({ success: false, stdout: '', stderr: '', fallbackReason: 'forceNative' });
+      return finalizeWithOutputFiles({ success: false, stdout: '', stderr: '', fallbackReason: IS_VERCEL_ENV ? 'vercel_serverless' : 'forceNative' });
     }
 
     const safety = validateZ21DocumentPythonSafety(effectivePy);
@@ -9346,16 +10904,24 @@ function executeZ21DocumentBuilderSandbox(rawPayload = {}, timeoutMs = 15000) {
       });
     }
 
+    const futureImports = [];
+    const bodyWithoutFuture = effectivePy.replace(/^[ \t]*(from\s+__future__\s+import\s+[^\r\n]+)/gm, (line) => {
+      futureImports.push(line.trim());
+      return '';
+    });
     const specPath = path.join(containerDir, '_zoz_spec.json');
     const runnerPath = path.join(containerDir, '_zoz_runner.py');
     fs.writeFileSync(specPath, JSON.stringify(spec), 'utf8');
-    fs.writeFileSync(runnerPath, ZOZ_DOC_SANDBOX_PRELUDE_PY + '\n\n# --- USER SCRIPT ---\n' + effectivePy + '\n', 'utf8');
+    const preludeHeader = futureImports.length > 0 ? futureImports.join('\n') + '\n' : '';
+    fs.writeFileSync(runnerPath, preludeHeader + ZOZ_DOC_SANDBOX_PRELUDE_PY + '\n\n# --- USER SCRIPT ---\n' + bodyWithoutFuture + '\n', 'utf8');
 
     const pythonExec = process.env.PYTHON_EXEC || 'python';
     const safeEnv = {
       PYTHONIOENCODING: 'utf-8',
       PYTHONUTF8: '1',
       PYTHONUNBUFFERED: '1',
+      MPLBACKEND: 'Agg',
+      MPLCONFIGDIR: containerDir,
       ZOZ_OUTPUT_DIR: containerDir,
       ZOZ_DOC_SPEC_PATH: specPath,
       PATH: process.env.PATH || process.env.Path || '',
@@ -12179,8 +13745,13 @@ async function requestHandler(req, res) {
                                  pathname === '/api/storage-mode' ||
                                  pathname === '/api/youtube-info' ||
                                  pathname === '/api/video-probe' ||
+                                 pathname === '/tts' ||
+                                 pathname === '/api/tts' ||
+                                 pathname === '/tts/voices' ||
+                                 pathname === '/api/tts/voices' ||
                                  (pathname.startsWith('/api/tools/') &&
                                   pathname !== '/api/tools/execute-code' &&
+                                  pathname !== '/api/tools/z21-document-builder' &&
                                   pathname !== '/api/tools/communication-context' &&
                                   pathname !== '/api/tools/search-documents' &&
                                   pathname !== '/api/tools/retrieve-knowledge' &&
@@ -12280,6 +13851,10 @@ async function requestHandler(req, res) {
       pathname === '/api/extract-web' ||
       pathname === '/api/read-url' ||
       pathname === '/api/scrape-url' ||
+      pathname === '/tts' ||
+      pathname === '/api/tts' ||
+      pathname === '/tts/voices' ||
+      pathname === '/api/tts/voices' ||
       pathname.startsWith('/api/wa/')
     );
     if (!isPublicUtility) {
@@ -13311,12 +14886,205 @@ async function requestHandler(req, res) {
     }
   }
 
+  // ==================== NEURAL READ ALOUD STREAMING TTS (PYTHON edge-tts -> audio/mpeg) ====================
+  const TTS_VOICES_LIST = [
+    { id: 'id-ID-GadisNeural', label: 'Gadis (Indonesia — Perempuan Natural)', shortLabel: 'Gadis', lang: 'id-ID', gender: 'Female' },
+    { id: 'id-ID-ArdiNeural', label: 'Ardi (Indonesia — Laki-laki Natural)', shortLabel: 'Ardi', lang: 'id-ID', gender: 'Male' },
+    { id: 'en-US-AriaNeural', label: 'Aria (English — Female Natural)', shortLabel: 'Aria', lang: 'en-US', gender: 'Female' },
+    { id: 'en-US-GuyNeural', label: 'Guy (English — Male Natural)', shortLabel: 'Guy', lang: 'en-US', gender: 'Male' }
+  ];
+  const TTS_ALLOWED_VOICE_IDS = new Set(TTS_VOICES_LIST.map(v => v.id));
+
+  if ((pathname === '/tts/voices' || pathname === '/api/tts/voices') && method === 'GET') {
+    return sendJSON(res, 200, {
+      success: true,
+      engine: 'edge-tts',
+      defaultVoice: 'id-ID-GadisNeural',
+      voices: TTS_VOICES_LIST
+    });
+  }
+
+  if ((pathname === '/tts' || pathname === '/api/tts') && method === 'POST') {
+    const body = await safeParseBody(req);
+    if (!body) return;
+    const rawText = typeof body.text === 'string' ? body.text : String(body.text || '');
+    const safeVoice = TTS_ALLOWED_VOICE_IDS.has(String(body.voice || '').trim())
+      ? String(body.voice).trim()
+      : 'id-ID-GadisNeural';
+    const rawRate = String(body.rate || '+0%').trim();
+    const safeRate = /^[+-](?:[0-4]?\d|50)%$/.test(rawRate) ? rawRate : '+0%';
+
+    // Pra-pembersihan cepat di Node untuk validasi teks tidak kosong (pembersihan penuh juga dijalankan di tts_engine.py)
+    const quickClean = rawText
+      .replace(/<<<ZOZ_(?:FILE|EDIT|MODIFY|TASKS)[\s\S]*?(?:<<<END_ZOZ_(?:FILE|EDIT|MODIFY|TASKS)[^\n>]*>?|$)/gi, ' ')
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/\[\[ZOZ_(?:IMAGE|WEATHER)_DISPLAY:[^\]]+\]\]/gi, ' ')
+      .replace(/https?:\/\/\S+/gi, ' ')
+      .replace(/[*_~`#>|]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!quickClean) {
+      return sendJSON(res, 400, { success: false, error: 'Teks kosong setelah dibersihkan dari simbol Markdown/kode.' });
+    }
+
+    const ttsScriptPath = path.join(__dirname, 'tts_engine.py');
+    if (!fs.existsSync(ttsScriptPath)) {
+      return sendJSON(res, 503, { success: false, error: 'Modul tts_engine.py tidak ditemukan di server.' });
+    }
+
+    const pythonCandidates = [];
+    if (process.env.PYTHON_EXEC) pythonCandidates.push(process.env.PYTHON_EXEC);
+    pythonCandidates.push('python', 'python3');
+
+    return await new Promise((resolve) => {
+      let candIdx = 0;
+      let settled = false;
+      let activeProc = null;
+      let streamTimeout = null;
+
+      const finish = () => {
+        if (streamTimeout) {
+          clearTimeout(streamTimeout);
+          streamTimeout = null;
+        }
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      };
+
+      const killActiveProc = () => {
+        if (activeProc && !activeProc.killed) {
+          try { activeProc.kill(); } catch (_) {}
+        }
+      };
+
+      const onClientAbort = () => {
+        if (!res.writableEnded) {
+          killActiveProc();
+          finish();
+        }
+      };
+      res.on('close', onClientAbort);
+      req.on('aborted', onClientAbort);
+
+      const tryNextPython = () => {
+        if (settled || res.writableEnded || res.destroyed) return finish();
+        if (candIdx >= pythonCandidates.length) {
+          if (!res.headersSent) {
+            sendJSON(res, 503, { success: false, error: 'Runtime Python edge-tts tidak tersedia di server ini.' });
+          } else if (!res.writableEnded) {
+            try { res.end(); } catch (_) {}
+          }
+          return finish();
+        }
+
+        const pyExec = pythonCandidates[candIdx++];
+        let headersDispatched = false;
+        let stderrBuf = '';
+        let spawnFailed = false;
+
+        try {
+          activeProc = spawn(pyExec, ['-u', ttsScriptPath, '--stream'], {
+            cwd: __dirname,
+            windowsHide: true,
+            env: {
+              ...process.env,
+              PYTHONIOENCODING: 'utf-8',
+              PYTHONUTF8: '1'
+            }
+          });
+        } catch (spawnErr) {
+          return tryNextPython();
+        }
+
+        if (streamTimeout) clearTimeout(streamTimeout);
+        streamTimeout = setTimeout(() => {
+          killActiveProc();
+          if (!res.headersSent) {
+            sendJSON(res, 504, { success: false, error: 'Batas waktu streaming TTS terlampaui.' });
+          } else if (!res.writableEnded) {
+            try { res.end(); } catch (_) {}
+          }
+          finish();
+        }, 45000);
+
+        activeProc.stdout.on('data', (chunk) => {
+          if (!chunk || chunk.length === 0 || settled || res.destroyed) return;
+          if (!headersDispatched) {
+            headersDispatched = true;
+            res.writeHead(200, {
+              'Content-Type': 'audio/mpeg',
+              'Transfer-Encoding': 'chunked',
+              'Cache-Control': 'no-store',
+              'X-Content-Type-Options': 'nosniff',
+              'X-TTS-Engine': 'edge-tts',
+              'X-TTS-Voice': safeVoice
+            });
+          }
+          try {
+            res.write(chunk);
+          } catch (_) {
+            killActiveProc();
+          }
+        });
+
+        activeProc.stderr.on('data', (d) => {
+          if (stderrBuf.length < 1200) stderrBuf += d.toString('utf8');
+        });
+
+        activeProc.on('error', () => {
+          spawnFailed = true;
+          if (!headersDispatched) tryNextPython();
+          else {
+            if (!res.writableEnded) try { res.end(); } catch (_) {}
+            finish();
+          }
+        });
+
+        activeProc.on('close', (code) => {
+          if (spawnFailed || settled) return;
+          if (headersDispatched) {
+            if (!res.writableEnded) {
+              try { res.end(); } catch (_) {}
+            }
+            return finish();
+          }
+          if (code === 2 || stderrBuf.includes('EMPTY_CLEAN_TEXT')) {
+            sendJSON(res, 400, { success: false, error: 'Teks kosong setelah dibersihkan dari Markdown.' });
+            return finish();
+          }
+          if (stderrBuf.includes('ModuleNotFoundError') && candIdx < pythonCandidates.length) {
+            return tryNextPython();
+          }
+          sendJSON(res, 503, {
+            success: false,
+            error: 'Gagal menghasilkan audio TTS streaming.',
+            detail: stderrBuf.trim().slice(0, 300) || `exit_code=${code}`
+          });
+          finish();
+        });
+
+        try {
+          activeProc.stdin.write(JSON.stringify({
+            text: rawText.slice(0, 14000),
+            voice: safeVoice,
+            rate: safeRate
+          }));
+          activeProc.stdin.end();
+        } catch (_) {}
+      };
+
+      tryNextPython();
+    });
+  }
+
   // Mode Z21 Document & Spreadsheet File Artifact Builder Sandbox Endpoint
   if ((pathname === '/api/z21/document-builder' || pathname === '/api/tools/z21-document-builder') && method === 'POST') {
     try {
       const body = await safeParseBody(req);
       if (!body) return;
-      if (!requireRemoteHostPin(req, res, reqUrl, body)) return;
+      if (!IS_VERCEL_ENV && !requireRemoteHostPin(req, res, reqUrl, body)) return;
       const timeoutMs = Math.min(Math.max(parseInt(body.timeoutMs || '15000', 10) || 15000, 2000), 30000);
       const buildRes = await executeZ21DocumentBuilderSandbox(body, timeoutMs);
       return sendJSON(res, buildRes.success ? 200 : 400, buildRes);
@@ -13335,6 +15103,7 @@ async function requestHandler(req, res) {
     res.setHeader('Content-Type', item.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
     res.setHeader('Content-Length', String(item.buffer.length));
+    res.setHeader('Cache-Control', 'no-store');
     res.writeHead(200);
     res.end(item.buffer);
     return;
@@ -17007,7 +18776,15 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         (isOpenRouterKeySupplied ? rawKey : '') || process.env.OPENROUTER_API_KEY || ''
       );
       const isAutoRouterExplicit = Boolean(req.headers['x-auto-router'] === 'true' || body.isAutoRouter);
-      const shouldUseCloudBridge = Boolean((isAutoRouterExplicit || (isCloudModelRequested && !rawOllamaKey && rawOrKey)) && ((isServerlessChat && !rawOllamaKey && !isCustomRemoteEndpoint) || (Boolean(rawOrKey) && !isCustomRemoteEndpoint)));
+      const shouldUseCloudBridge = Boolean(
+        !isCustomRemoteEndpoint &&
+        rawOrKey &&
+        (
+          isAutoRouterExplicit ||
+          isOpenRouterKeySupplied ||
+          (isServerlessChat && !rawOllamaKey)
+        )
+      );
 
       const wantsStreamReasoning = Boolean(body.streamReasoning);
       delete body.streamReasoning;
@@ -17029,7 +18806,7 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
 
         const isNemotronModel = targetCloudModel.toLowerCase().includes('nemotron');
         const isFreeModel = targetCloudModel.includes(':free') || targetCloudModel.endsWith('/free') || targetCloudModel === 'openrouter/free';
-        const isNonToolModel = isFreeModel || isNemotronModel || targetCloudModel.includes('beam') || targetCloudModel.includes('reflection');
+        const isNonToolModel = isNemotronModel || targetCloudModel.includes('beam') || targetCloudModel.includes('reflection');
         const isBeamOrReasoning = Boolean(targetCloudModel && (
           targetCloudModel.includes('beam') ||
           targetCloudModel.includes('reflection') ||
@@ -17207,6 +18984,14 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
                   if ((clientDisconnected && !sessionId) || res.__zozWatchdogTimedOut) {
                     if (isTaskCurrent(sessionId, bridgeTaskToken)) delete dbActiveChatTasks[sessionId];
                     return;
+                  }
+                  // Auto-Retry tanpa tools jika endpoint menolak skema tools (misal varian :free tertentu)
+                  if ((bStatus === 400 || bStatus === 404 || bStatus === 422) && payload.tools && retryCount <= 1 && /tool|function|support\s+tool|no\s+endpoints/i.test(msg)) {
+                    console.log(`[Ollama Cloud Bridge Auto-Recovery] Model ${payload.model} rejected tools (HTTP ${bStatus}). Retrying cleanly without tools...`);
+                    delete payload.tools;
+                    delete payload.tool_choice;
+                    payload.messages = normalizeMessagesForOpenRouter(payload.messages, { normalizeTools: true });
+                    return executeBridgeRequest(payload, retryCount + 1);
                   }
                   // Auto-Recovery Missing Reasoning on Jinja Template (Beam / Reflection)
                   if (bStatus === 400 && /missing its reasoning|allow_missing_thinking/i.test(msg) && retryCount <= 1) {
@@ -18526,12 +20311,12 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       }
 
 
-      // Defense-in-depth: Hapus tool jika model gratis, model Nemotron, atau kueri konsep aljabar murni
+      // Defense-in-depth: Hapus tool jika model Nemotron atau kueri konsep aljabar murni
+      // (model :free kini diizinkan mencoba native tools terlebih dahulu dan auto-retry tanpa tools jika ditolak upstream)
       const reqModel = String(body.model || '');
       const isNemotron = reqModel.toLowerCase().includes('nemotron');
       const isPureAlgebraQuery = typeof textSafety.isPureAlgebraOrConceptualQuery === 'function' && textSafety.isPureAlgebraOrConceptualQuery(userPrompt);
-      const isFree = body.model && (body.model.includes(':free') || body.model.endsWith('/free') || body.model === 'openrouter/free');
-      if ((isFree || isPureAlgebraQuery || isNemotron) && Array.isArray(body.tools)) {
+      if ((isPureAlgebraQuery || isNemotron) && Array.isArray(body.tools)) {
         delete body.tools;
         delete body.tool_choice;
       } else if (Array.isArray(body.tools)) {
@@ -18624,24 +20409,6 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
       }
 
       const isStream = body.stream !== false;
-      const postData = JSON.stringify(body);
-
-      const options = {
-        hostname: 'openrouter.ai',
-        port: 443,
-        path: '/api/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': apiKey,
-          'HTTP-Referer': req.headers.origin || req.headers.referer || process.env.ZOX_APP_URL || 'https://github.com/Zozi0999/zoz_router',
-          'X-Title': 'ZOZ ROUTER Neural AI Gateway',
-          'Content-Length': Buffer.byteLength(postData)
-        },
-        agent: openRouterHttpsAgent,
-        timeout: 300000
-      };
-
       let clientDisconnected = false;
       let proxyReq = null;
       let horocycleHalted = false;
@@ -18665,219 +20432,256 @@ Gunakan Bahasa Indonesia yang jelas dengan format Markdown terstruktur:
         }
       });
 
-      proxyReq = https.request(options, (proxyRes) => {
-        if (isTaskCurrent(sessionId, orTaskToken)) {
-          dbActiveChatTasks[sessionId].proxyReq = proxyReq;
-        }
+      const dispatchOpenRouterUpstream = (payloadObj, retryCount = 0) => {
+        const postData = JSON.stringify(payloadObj);
+        const options = {
+          hostname: 'openrouter.ai',
+          port: 443,
+          path: '/api/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': apiKey,
+            'HTTP-Referer': req.headers.origin || req.headers.referer || process.env.ZOX_APP_URL || 'https://github.com/Zozi0999/zoz_router',
+            'X-Title': 'ZOZ ROUTER Neural AI Gateway',
+            'Content-Length': Buffer.byteLength(postData)
+          },
+          agent: openRouterHttpsAgent,
+          timeout: 300000
+        };
 
-        // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
-        if (sessionId && (!isTaskCurrent(sessionId, orTaskToken) || dbActiveChatTasks[sessionId]?.status === 'aborted')) {
-          clearKeepAlive();
-          try { proxyRes.resume(); } catch (_) {}
-          if (!proxyReq.destroyed) proxyReq.destroy();
-          if (isTaskCurrent(sessionId, orTaskToken)) delete dbActiveChatTasks[sessionId];
-          if (!res.writableEnded && !res.destroyed) {
-            try { if (!res.headersSent) sendJSON(res, 499, { aborted: true }); else res.end(); } catch (_) {}
+        const activeReq = https.request(options, (proxyRes) => {
+          if (proxyReq !== activeReq) {
+            try { proxyRes.resume(); } catch (_) {}
+            return;
           }
-          return;
-        }
-
-        if (clientDisconnected || res.writableEnded || res.destroyed) {
-          clearKeepAlive();
-          if (!sessionId && !proxyReq.destroyed) proxyReq.destroy();
-          if (!sessionId) return;
-        }
-
-        const statusCode = proxyRes.statusCode || 200;
-
-        // If OpenRouter returned non-200 (e.g. 401 Unauthorized, 402 Payment Required, 429 Rate Limit)
-        if (statusCode !== 200) {
-          clearKeepAlive();
           if (isTaskCurrent(sessionId, orTaskToken)) {
-            dbActiveChatTasks[sessionId].status = 'error';
+            dbActiveChatTasks[sessionId].proxyReq = activeReq;
           }
-          let errData = '';
-          proxyRes.on('data', chunk => {
-            if (!clientDisconnected) errData += chunk;
-          });
-          proxyRes.on('end', () => {
-            if (isTaskCurrent(sessionId, orTaskToken)) {
-              delete dbActiveChatTasks[sessionId];
+
+          // Jika tugas telah dibatalkan oleh pengguna sebelum respon pertama tiba
+          if (sessionId && (!isTaskCurrent(sessionId, orTaskToken) || dbActiveChatTasks[sessionId]?.status === 'aborted')) {
+            clearKeepAlive();
+            try { proxyRes.resume(); } catch (_) {}
+            if (!activeReq.destroyed) activeReq.destroy();
+            if (isTaskCurrent(sessionId, orTaskToken)) delete dbActiveChatTasks[sessionId];
+            if (!res.writableEnded && !res.destroyed) {
+              try { if (!res.headersSent) sendJSON(res, 499, { aborted: true }); else res.end(); } catch (_) {}
             }
-            if (clientDisconnected || res.writableEnded || res.destroyed) return;
-            try {
+            return;
+          }
+
+          if (clientDisconnected || res.writableEnded || res.destroyed) {
+            clearKeepAlive();
+            if (!sessionId && !activeReq.destroyed) activeReq.destroy();
+            if (!sessionId) return;
+          }
+
+          const statusCode = proxyRes.statusCode || 200;
+
+          // If OpenRouter returned non-200 (e.g. 401 Unauthorized, 402 Payment Required, 429 Rate Limit, or tool rejection on :free)
+          if (statusCode !== 200) {
+            let errData = '';
+            proxyRes.on('data', chunk => {
+              if (!clientDisconnected) errData += chunk;
+            });
+            proxyRes.on('end', () => {
+              if (proxyReq !== activeReq) return;
               let parsedErr = null;
               try { parsedErr = JSON.parse(errData); } catch (e) {}
               const errMsg = parsedErr?.error?.message || parsedErr?.error || errData || `OpenRouter Error [${statusCode}]`;
-              return sendJSON(res, statusCode, { error: errMsg, details: parsedErr || errData });
-            } catch (e) {}
-          });
-          proxyRes.on('error', (err) => {
-            if (isTaskCurrent(sessionId, orTaskToken)) {
-              delete dbActiveChatTasks[sessionId];
-            }
-            if (clientDisconnected || res.writableEnded || res.destroyed) return;
-            if (!res.headersSent) {
-              sendJSON(res, 502, { error: `OpenRouter error stream interrupted: ${err.message}` });
-            }
-          });
-          return;
-        }
-
-        // OpenRouter returned 200 OK -> Send headers matching client stream mode!
-        const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
-        const reasoningFilter = textSafety.createProviderStreamFilter('openrouter', isStream ? 'stream' : 'json', {
-          userPrompt,
-          preserveReasoningFields: wantsStreamReasoning
-        });
-        if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
-          try {
-            res.writeHead(200, {
-              'Content-Type': contentType,
-              'Cache-Control': 'no-cache',
-              'Connection': 'keep-alive',
-              'Access-Control-Allow-Origin': '*'
-            });
-            if (isStream) {
-              res.write(': stream-connected\n\n');
-            }
-          } catch (writeHeadErr) {
-            console.warn('Notice writing head to client (OpenRouter):', writeHeadErr.message);
-          }
-        }
-
-        // Heartbeat berkala setiap 10 detik agar proxy/Cloudflare Tunnel tidak memutus koneksi idle
-        if (isStream) {
-          keepAliveTimer = setInterval(() => {
-            if (clientDisconnected || res.writableEnded || res.destroyed) {
+              if ((statusCode === 400 || statusCode === 404 || statusCode === 422) && payloadObj.tools && retryCount === 0 && !res.headersSent && !clientDisconnected && /tool|function|support\s+tool|no\s+endpoints/i.test(String(errMsg))) {
+                console.warn(`[OpenRouter Gateway] Model ${payloadObj.model} rejected tools (HTTP ${statusCode}). Retrying cleanly without tools...`);
+                delete payloadObj.tools;
+                delete payloadObj.tool_choice;
+                if (Array.isArray(payloadObj.messages)) {
+                  payloadObj.messages = normalizeMessagesForOpenRouter(payloadObj.messages, { normalizeTools: true });
+                }
+                return dispatchOpenRouterUpstream(payloadObj, retryCount + 1);
+              }
               clearKeepAlive();
+              if (isTaskCurrent(sessionId, orTaskToken)) {
+                dbActiveChatTasks[sessionId].status = 'error';
+                delete dbActiveChatTasks[sessionId];
+              }
+              if (clientDisconnected || res.writableEnded || res.destroyed) return;
+              try {
+                return sendJSON(res, statusCode, { error: errMsg, details: parsedErr || errData });
+              } catch (e) {}
+            });
+            proxyRes.on('error', (err) => {
+              clearKeepAlive();
+              if (isTaskCurrent(sessionId, orTaskToken)) {
+                delete dbActiveChatTasks[sessionId];
+              }
+              if (clientDisconnected || res.writableEnded || res.destroyed) return;
+              if (!res.headersSent) {
+                sendJSON(res, 502, { error: `OpenRouter error stream interrupted: ${err.message}` });
+              }
+            });
+            return;
+          }
+
+          // OpenRouter returned 200 OK -> Send headers matching client stream mode!
+          const contentType = isStream ? 'text/event-stream; charset=utf-8' : (proxyRes.headers['content-type'] || 'application/json; charset=utf-8');
+          const reasoningFilter = textSafety.createProviderStreamFilter('openrouter', isStream ? 'stream' : 'json', {
+            userPrompt,
+            preserveReasoningFields: wantsStreamReasoning
+          });
+          if (!clientDisconnected && !res.headersSent && !res.writableEnded && !res.destroyed) {
+            try {
+              res.writeHead(200, {
+                'Content-Type': contentType,
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Origin': '*'
+              });
+              if (isStream) {
+                res.write(': stream-connected\n\n');
+              }
+            } catch (writeHeadErr) {
+              console.warn('Notice writing head to client (OpenRouter):', writeHeadErr.message);
+            }
+          }
+
+          // Heartbeat berkala setiap 10 detik agar proxy/Cloudflare Tunnel tidak memutus koneksi idle
+          if (isStream) {
+            keepAliveTimer = setInterval(() => {
+              if (clientDisconnected || res.writableEnded || res.destroyed) {
+                clearKeepAlive();
+                return;
+              }
+              try {
+                res.write(': keepalive\n\n');
+              } catch (_) {
+                clearKeepAlive();
+              }
+            }, 10000);
+          }
+
+          proxyRes.on('data', chunk => {
+            if (activeReq && !activeReq.destroyed) {
+              try { activeReq.setTimeout(300000); } catch (_) {}
+            }
+            const safeChunk = reasoningFilter.push(chunk);
+            const gateDiag = reasoningFilter.getGateDiagnostics ? reasoningFilter.getGateDiagnostics() : null;
+
+            // Diagnostic log only: Never kill or truncate active user chat stream based on heuristic manifold
+            if (isStream && gateDiag && gateDiag.horocycleTrapped && !horocycleHalted) {
+              horocycleHalted = true;
+              console.warn(`[OpenRouter Stream Diagnostics] Potential repetition orbit detected for session ${sessionId || 'anon'}. Allowing stream to continue.`);
+            }
+
+            // Background task menerima frame yang sama setelah reasoning dihapus.
+            if (isTaskCurrent(sessionId, orTaskToken) && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'openrouter');
+
+            if (clientDisconnected || res.writableEnded || res.destroyed) {
+              if (!sessionId && activeReq && !activeReq.destroyed) activeReq.destroy();
               return;
             }
             try {
-              res.write(': keepalive\n\n');
-            } catch (_) {
-              clearKeepAlive();
+              if (!safeChunk) return;
+              const flushed = res.write(safeChunk);
+              // Resilient backpressure: pause only if client buffer is congested, deduplicated drain listener
+              if (flushed === false && typeof proxyRes.pause === 'function' && !proxyRes._zozWaitingDrain) {
+                proxyRes._zozWaitingDrain = true;
+                proxyRes.pause();
+                const onDrain = () => {
+                  if (!proxyRes._zozWaitingDrain) return;
+                  proxyRes._zozWaitingDrain = false;
+                  clearTimeout(resumeTimer);
+                  try { if (typeof proxyRes.resume === 'function') proxyRes.resume(); } catch (_) {}
+                };
+                const resumeTimer = setTimeout(() => {
+                  try { res.removeListener('drain', onDrain); } catch (_) {}
+                  onDrain();
+                }, 150);
+                res.once('drain', onDrain);
+              }
+            } catch (e) {}
+          });
+
+          proxyRes.on('end', () => {
+            clearKeepAlive();
+            const safeTail = reasoningFilter.end();
+            if (isTaskCurrent(sessionId, orTaskToken) && safeTail) accumulateChatChunk(sessionId, safeTail, 'openrouter');
+            if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+              try {
+                if (safeTail) res.write(safeTail);
+                res.end();
+              } catch (e) {}
             }
-          }, 10000);
-        }
 
-        proxyRes.on('data', chunk => {
-          if (proxyReq && !proxyReq.destroyed) {
-            try { proxyReq.setTimeout(300000); } catch (_) {}
-          }
-          const safeChunk = reasoningFilter.push(chunk);
-          const gateDiag = reasoningFilter.getGateDiagnostics ? reasoningFilter.getGateDiagnostics() : null;
+            // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
+            finalizeStreamingChatTask(sessionId, orTaskToken, 'openrouter');
+          });
 
-          // Diagnostic log only: Never kill or truncate active user chat stream based on heuristic manifold
-          if (isStream && gateDiag && gateDiag.horocycleTrapped && !horocycleHalted) {
-            horocycleHalted = true;
-            console.warn(`[OpenRouter Stream Diagnostics] Potential repetition orbit detected for session ${sessionId || 'anon'}. Allowing stream to continue.`);
-          }
-
-          // Background task menerima frame yang sama setelah reasoning dihapus.
-          if (isTaskCurrent(sessionId, orTaskToken) && safeChunk) accumulateChatChunk(sessionId, safeChunk, 'openrouter');
-
-          if (clientDisconnected || res.writableEnded || res.destroyed) {
-            if (!sessionId && proxyReq && !proxyReq.destroyed) proxyReq.destroy();
-            return;
-          }
-          try {
-            if (!safeChunk) return;
-            const flushed = res.write(safeChunk);
-            // Resilient backpressure: pause only if client buffer is congested, deduplicated drain listener
-            if (flushed === false && typeof proxyRes.pause === 'function' && !proxyRes._zozWaitingDrain) {
-              proxyRes._zozWaitingDrain = true;
-              proxyRes.pause();
-              const onDrain = () => {
-                if (!proxyRes._zozWaitingDrain) return;
-                proxyRes._zozWaitingDrain = false;
-                clearTimeout(resumeTimer);
-                try { if (typeof proxyRes.resume === 'function') proxyRes.resume(); } catch (_) {}
-              };
-              const resumeTimer = setTimeout(() => {
-                try { res.removeListener('drain', onDrain); } catch (_) {}
-                onDrain();
-              }, 150);
-              res.once('drain', onDrain);
-            }
-          } catch (e) {}
-        });
-
-        proxyRes.on('end', () => {
-          clearKeepAlive();
-          const safeTail = reasoningFilter.end();
-          if (isTaskCurrent(sessionId, orTaskToken) && safeTail) accumulateChatChunk(sessionId, safeTail, 'openrouter');
-          if (!clientDisconnected && !res.writableEnded && !res.destroyed) {
+          proxyRes.on('error', (err) => {
+            clearKeepAlive();
+            markChatTaskInterrupted(sessionId, err.message || 'OpenRouter stream interrupted', orTaskToken);
+            if (clientDisconnected || res.writableEnded || res.destroyed) return;
             try {
-              if (safeTail) res.write(safeTail);
+              if (!res.headersSent) {
+                return sendJSON(res, 502, { error: `OpenRouter Response Stream Error: ${err.message}` });
+              }
+              if (isStream) {
+                res.write(`data: ${JSON.stringify({ error: `OpenRouter Response Stream Error: ${err.message}` })}\n\n`);
+                res.write('data: [DONE]\n\n');
+              }
               res.end();
             } catch (e) {}
-          }
-
-          // Simpan hasil akhir asisten ke disk perangkat jika ada sessionId
-          finalizeStreamingChatTask(sessionId, orTaskToken, 'openrouter');
+          });
         });
 
-        proxyRes.on('error', (err) => {
+        proxyReq = activeReq;
+        if (isTaskCurrent(sessionId, orTaskToken)) {
+          dbActiveChatTasks[sessionId].proxyReq = activeReq;
+        }
+
+        activeReq.on('timeout', () => {
+          if (proxyReq !== activeReq) return;
           clearKeepAlive();
-          markChatTaskInterrupted(sessionId, err.message || 'OpenRouter stream interrupted', orTaskToken);
+          markChatTaskInterrupted(sessionId, 'OpenRouter stream timed out (300s)', orTaskToken);
+          if (!activeReq.destroyed) activeReq.destroy();
           if (clientDisconnected || res.writableEnded || res.destroyed) return;
           try {
             if (!res.headersSent) {
-              return sendJSON(res, 502, { error: `OpenRouter Response Stream Error: ${err.message}` });
+              sendJSON(res, 504, { error: 'OpenRouter stream timed out (300s)' });
+            } else {
+              if (isStream) {
+                res.write(`data: ${JSON.stringify({ error: 'OpenRouter stream timed out (300s)' })}\n\n`);
+                res.write('data: [DONE]\n\n');
+              }
+              res.end();
+            }
+          } catch (_) {}
+        });
+
+        activeReq.on('error', (err) => {
+          if (proxyReq !== activeReq) return;
+          clearKeepAlive();
+          markChatTaskInterrupted(sessionId, err.message || 'OpenRouter connection error', orTaskToken);
+          // If client disconnected or socket was intentionally aborted, suppress error write-after-end
+          if (clientDisconnected || res.writableEnded || res.destroyed) {
+            return;
+          }
+          try {
+            if (!res.headersSent) {
+              return sendJSON(res, 503, { error: `OpenRouter Network Error: ${err.message}` });
             }
             if (isStream) {
-              res.write(`data: ${JSON.stringify({ error: `OpenRouter Response Stream Error: ${err.message}` })}\n\n`);
+              res.write(`data: ${JSON.stringify({ error: `OpenRouter Network Error: ${err.message}` })}\n\n`);
               res.write('data: [DONE]\n\n');
             }
             res.end();
           } catch (e) {}
         });
-      });
 
-      if (isTaskCurrent(sessionId, orTaskToken)) {
-        dbActiveChatTasks[sessionId].proxyReq = proxyReq;
-      }
+        activeReq.write(postData);
+        activeReq.end();
+      };
 
-      proxyReq.on('timeout', () => {
-        clearKeepAlive();
-        markChatTaskInterrupted(sessionId, 'OpenRouter stream timed out (300s)', orTaskToken);
-        if (!proxyReq.destroyed) proxyReq.destroy();
-        if (clientDisconnected || res.writableEnded || res.destroyed) return;
-        try {
-          if (!res.headersSent) {
-            sendJSON(res, 504, { error: 'OpenRouter stream timed out (300s)' });
-          } else {
-            if (isStream) {
-              res.write(`data: ${JSON.stringify({ error: 'OpenRouter stream timed out (300s)' })}\n\n`);
-              res.write('data: [DONE]\n\n');
-            }
-            res.end();
-          }
-        } catch (_) {}
-      });
-
-      proxyReq.on('error', (err) => {
-        clearKeepAlive();
-        markChatTaskInterrupted(sessionId, err.message || 'OpenRouter connection error', orTaskToken);
-        // If client disconnected or socket was intentionally aborted, suppress error write-after-end
-        if (clientDisconnected || res.writableEnded || res.destroyed) {
-          return;
-        }
-        try {
-          if (!res.headersSent) {
-            return sendJSON(res, 503, { error: `OpenRouter Network Error: ${err.message}` });
-          }
-          if (isStream) {
-            res.write(`data: ${JSON.stringify({ error: `OpenRouter Network Error: ${err.message}` })}\n\n`);
-            res.write('data: [DONE]\n\n');
-          }
-          res.end();
-        } catch (e) {}
-      });
-
-      proxyReq.write(postData);
-      proxyReq.end();
+      dispatchOpenRouterUpstream(body, 0);
     } catch (err) {
       // Pembersihan aman jika terjadi throw sinkron (ERR_INVALID_CHAR, payload error, socket write error)
       if (isTaskCurrent(sessionId, orTaskToken)) {
@@ -19791,6 +21595,8 @@ module.exports._pdfHelpers = { extractPdfTextFromBuffer, consumeHttpDocumentStre
 module.exports._z21DocHelpers = {
   normalizeZ21DocSpec,
   normalizeZ21ScientificText,
+  toZ21LatexMath,
+  isZ21VariableLegendLine,
   isZ21FormulaLine,
   parseZ21FormulaParts,
   validateZ21DocumentPythonSafety,

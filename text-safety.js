@@ -2531,6 +2531,8 @@
     const k1 = 1.5;
     const b = 0.75;
     const kappa = 3.2;
+    const queryHasIndoCue = /\b(?:bagaimana|gimana|apa|apakah|siapa|kapan|dimana|mengapa|kenapa|hari\s+ini|sekarang|saat\s+ini|besok|lusa|terbaru|terkini|cuaca|cuca|prakiraan|berita|harga|cara|perbedaan|indonesia|jakarta|bandung|surabaya|suwela|lombok|ntb)\b/i.test(String(query || ''));
+    const queryExplicitForeignCue = /\b(?:brasil|brazil|portugis|portuguese|santos|gr[eê]mio|neymar|brasileir[aã]o|libertadores|spain|spanish|espa[nñ]ol|france|french|deutsch|arab|russia|pelatih\s+cuca|cuca\s+santos)\b/i.test(String(query || ''));
 
     const scored = [];
     for (const d of docs) {
@@ -2637,7 +2639,22 @@
       const blend = (1 - alpha) + alpha * temporalWeight;
       const rrfNorm = Math.min(1.0, Math.max(0, Number(d.item.rrfNorm || 0)));
       const rrfBoost = 1.0 + 0.30 * rrfNorm;
-      const mathScore = Math.min(1.0, lexNorm * blend * Math.pow(temporalWeight, alpha) * rrfBoost);
+      let mathScore = Math.min(1.0, lexNorm * blend * Math.pow(temporalWeight, alpha) * rrfBoost);
+
+      // Penalize off-language (Portuguese/Spanish) candidates when query has Indonesian cues without explicit foreign intent
+      let langMismatchPenalty = false;
+      if (queryHasIndoCue && !queryExplicitForeignCue) {
+        let hostLower = '';
+        try { hostLower = new URL(d.url).hostname.toLowerCase(); } catch (_) {}
+        const hasForeignDomainOrPath = /\.(?:com\.br|br|pt|es)$/i.test(hostLower) || /\/pt-br\/|\/es-[a-z]{2}\//i.test(d.url);
+        const surfaceLangProbe = `${d.item.title || ''} ${d.item.snippet || ''}`;
+        const foreignMarkers = surfaceLangProbe.match(/\b(?:nesta|segunda-feira|ter[cç]a-feira|quarta-feira|quinta-feira|sexta-feira|t[eé]cnico|treinador|derrota|vit[oó]ria|arbitragem|brasileir[aã]o|futebol|campeonato|rodada|pelo|pela|para\s+o|com\s+a|n[aã]o|mas\s+ainda|sobre\s+o|entrar|recuperar\s+senha|pol[ií]tica\s+de\s+privacidade)\b/gi) || [];
+        const distinctForeignMarkers = new Set(foreignMarkers.map(m => m.toLowerCase()));
+        if (hasForeignDomainOrPath || distinctForeignMarkers.size >= 2) {
+          mathScore *= 0.08;
+          langMismatchPenalty = true;
+        }
+      }
 
       if (mathScore <= 1e-5) continue;
 
@@ -2656,7 +2673,8 @@
           temporalWeight: Number(temporalWeight.toFixed(5)),
           rrfNorm: Number(rrfNorm.toFixed(4)),
           ageDays: d.ageDays !== null ? Number(d.ageDays.toFixed(2)) : null,
-          recencyAlpha: alpha
+          recencyAlpha: alpha,
+          langMismatchPenalty
         }
       });
     }
