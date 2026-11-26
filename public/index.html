@@ -40,7 +40,7 @@
         }
       });
       try {
-        var currentVer = 'v20261124_tmwuxtnij';
+        var currentVer = 'v20261126_tmwx27kid';
         var savedVer = localStorage.getItem('__zoz_ver__');
         if (savedVer !== currentVer) {
           if (savedVer) {
@@ -53,7 +53,7 @@
           }
         }
       } catch (_) {}
-      window.__ZOZ_VERSION__ = 'v20261124_tmwuxtnij';
+      window.__ZOZ_VERSION__ = 'v20261126_tmwx27kid';
     })();
   </script>
   <title>ZOZ ROUTER</title>
@@ -115,8 +115,8 @@
   <script>(function(){var l=document.getElementById('mainKatexCssLink');function mark(){try{for(var i=0;i<document.styleSheets.length;i++){var s=document.styleSheets[i];if(s&&s.href&&s.href.indexOf('katex')!==-1){document.documentElement.classList.add('katex-css-ok');return;}}}catch(_){}}if(l){l.addEventListener('load',function(){document.documentElement.classList.add('katex-css-ok');});}window.addEventListener('DOMContentLoaded',mark);mark();})();</script>
   <!-- Stylesheet -->
   <link rel="stylesheet" href="xterm.css?v=20261017_v349">
-  <link rel="preload" as="style" href="style.css?v=20261124_v840">
-  <link rel="stylesheet" href="style.css?v=20261124_v840">
+  <link rel="preload" as="style" href="style.css?v=20261125_v861">
+  <link rel="stylesheet" href="style.css?v=v20261126_tmwx27kid">
 </head>
 <body class="theme-dark h-full w-full bg-[#07080c] text-slate-300 font-sans flex flex-col overflow-hidden bg-mesh-radial">
     <!-- BEGIN: ApplicationWindowHeader -->
@@ -1462,6 +1462,36 @@
               </div>
             </div>
             <small class="form-hint" style="margin-top:6px;">Streaming audio langsung (<code>audio/mpeg</code>) tanpa menyimpan berkas permanen di server; simbol Markdown &amp; blok kode dibersihkan otomatis sebelum dibacakan.</small>
+          </div>
+
+          <!-- Z21 Agent Thinking Effort Settings Card (Di Bawah Suara Bacakan AI / Read Aloud) -->
+          <div class="provider-status-card tts-settings-card zoz-z21-thinking-effort-bar" id="z21ThinkingEffortBar" role="group" aria-label="Pengaturan Usaha Berpikir Agen Z21">
+            <div class="provider-status-header">
+              <div class="provider-status-indicator-box">
+                <span class="pulse-dot active"></span>
+                <span class="status-title"><i class="fa-solid fa-brain" style="color:#fb7185;"></i> Usaha Pemikiran Agen Z21 (Thinking Effort)</span>
+              </div>
+              <div class="status-actions">
+                <span class="zoz-z21-effort-summary-badge" id="z21EffortSummaryBadge">7 Agen Paralel · 3 Analisis + 4 Rencana + 5 Eksekusi</span>
+              </div>
+            </div>
+            <div class="zoz-z21-effort-left" style="margin-top:8px;">
+              <div class="zoz-z21-effort-pills">
+                <button type="button" class="zoz-z21-effort-pill is-active" id="btnZ21EffortLow" data-z21-effort="low" aria-pressed="true" title="Mode Low — 7 Agen Paralel (3 Analisis Struktur &amp; Tool + 4 Rencana Kontrak Edit) + 5 Putaran Eksekusi">
+                  <i class="fa-solid fa-bolt"></i>
+                  <span>Low (7 Agen)</span>
+                </button>
+                <button type="button" class="zoz-z21-effort-pill" id="btnZ21EffortHigh" data-z21-effort="high" aria-pressed="false" title="Mode High — 20 Agen Paralel (2×5 Analisis Struktur, Code Map &amp; Tool + 2×5 Ide &amp; Kontrak Blueprint Matang) + 7 Putaran Eksekusi">
+                  <i class="fa-solid fa-layer-group"></i>
+                  <span>High (20 Agen)</span>
+                </button>
+                <button type="button" class="zoz-z21-effort-pill is-locked" id="btnZ21EffortMax" data-z21-effort="max" aria-pressed="false" aria-disabled="true" title="Mode Max — Segera Hadir (Dikunci sementara untuk pematangan sistem Low &amp; High)">
+                  <i class="fa-solid fa-lock"></i>
+                  <span>Max (Segera)</span>
+                </button>
+              </div>
+            </div>
+            <small class="form-hint" style="margin-top:6px;"><strong>Low (7 Agen)</strong>: <code>3</code> agen analisis + <code>4</code> agen rencana + <code>5</code> putaran eksekusi. <strong>High (20 Agen)</strong>: <code>2×5</code> agen analisis struktur &amp; peta baris kode + <code>2×5</code> agen kontrak blueprint matang + <code>7</code> putaran eksekusi ala Antigravity/Claude Code.</small>
           </div>
 
           <div class="form-group" style="display: none;">
@@ -4090,8 +4120,8 @@
   <script src="xterm.js?v=20261017_v349" defer></script>
   <script src="addon-fit.js?v=20261017_v349" defer></script>
   <!-- Reasoning suppression & Bayesian calibration engine (must load before app.js) -->
-  <script src="text-safety.js?v=20261124_v840" defer></script>
+  <script src="text-safety.js?v=v20261126_tmwx27kid" defer></script>
   <!-- Application script -->
-  <script src="app.js?v=v20261124_tmwuxtnij" defer></script>
+  <script src="app.js?v=v20261126_tmwx27kid" defer></script>
 </body>
 </html>
