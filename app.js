@@ -100,7 +100,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://brokers-prepare-society-combo.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://differential-money-move-conclusions.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -8572,7 +8572,7 @@ MODEL AKTIF: ${currentModel || 'Model Aktif'} | PENJAWAB SEBELUMNYA: ${prevModel
 
   function isCompactOrSmallAgentModel(modelName) {
     if (!modelName || typeof modelName !== 'string') return false;
-    return /(?:gemma|phi|qwen2\.5|llama-?3\.[12]|mistral-small|mini\b|flash\b|nano\b|haiku\b|:[1-9]b\b|:[123]\d[bB]\b|-27b\b|-31b\b|-32b\b)/i.test(modelName.trim());
+    return /(?:gemma-?4|gemma|phi|qwen2\.5|qwen3:(?:[1-9]|1[0-4]|3[0-2])b|deepseek-r1:(?:[1-9]|14|32)b|llama-?3\.[12]|mistral-small|ministral|smollm|mini\b|flash\b|nano\b|haiku\b|:[1-9]b\b|:[123]\d[bB]\b|-27b\b|-31b\b|-32b\b)/i.test(modelName.trim());
   }
 
   function isImperativeLocalMutationPrompt(text) {
@@ -36326,15 +36326,11 @@ ${blocks}
 
   function getZ21ProjectDevDirective(opts = {}) {
     if (opts && opts.compact) {
-      return `[MANDAT EKSEKUSI AGEN LOKAL Z21 (HARNESS CLAUDE-CODE & ANTIGRAVITY)]:
-1. Akses Penuh 7 Tool Host Lokal: \`run_command\`, \`manage_task\`, \`list_dir\`, \`read_file\`, \`write_file\`, \`edit_file\`, \`grep_search\`. Active Workspaces meliputi folder proyek aktif (\`.\`) DAN seluruh \`~\` (\`~/Downloads\`, \`~/Documents\`, \`~/Desktop\`, \`~/Pictures\`, \`~/Videos\`). Anda berjalan LANGSUNG di OS mesin host pengguna.
-2. **Wajib Read-Before-Edit**: Sebelum mengubah file yang sudah ada (mis. \`index.html\`), WAJIB panggil \`read_file\` untuk membaca isi & konteksnya, lalu gunakan \`edit_file\` untuk modifikasi bedah. DILARANG menimpa file utuh yang ada dengan potongan kecil lewat \`write_file\`.
-3. **Eksekusi Tuntas Otomatis (Anti-Tutorial & Anti-Berhenti Tengah Jalan)**: Untuk permintaan aksi (salin video/foto ke folder proyek + sisipkan ke HTML + tambah CSS/JS):
-   - Jalankan SEMUA langkah berantai sampai selesai di dalam loop tool ini (\`run_command\` \`New-Item\`/\`Copy-Item\` -> \`read_file\` -> \`edit_file\` -> verifikasi akhir di disk) dalam satu giliran tuntas!
-   - DILARANG berhenti setelah hanya \`Get-Item\` atau \`Copy-Item\`, DILARANG menulis tutorial *"Langkah 1..3"*, DILARANG meminta konfirmasi teks ulang (*"Silakan konfirmasi..."*), dan DILARANG mengumumkan *"Saya akan menyisipkan..."* tanpa memanggil tool-nya!
-4. **Anti-Halusinasi & Isolasi Mode Disk vs Mode Artifact**:
-   - DILARANG mengklaim file/section sudah ditambahkan/diubah sebelum \`edit_file\`/\`write_file\`/\`run_command\` benar-benar sukses mengembalikan \`ok: true\`.
-   - **[MODE DISK PROYEK AKTIF — MODE ARTIFACT/CANVAS DINONAKTIFKAN]**: DILARANG membungkus file proyek disk lokal dalam \`<<<ZOZ_FILE>>>\` / \`<<<ZOZ_EDIT>>>\` dan DILARANG membuat Artifact HTML baru terpisah di chat. Semua perubahan WAJIB ditulis langsung ke berkas disk proyek melalui \`read_file\` -> \`edit_file\` / \`write_file\` / \`run_command\`.`;
+      return `[MANDAT EKSEKUSI AGEN LOKAL Z21 (HARNESS CLAUDE-CODE & HERMES)]:
+1. Akses Penuh 7 Tool Host Lokal di OS Windows (PowerShell 5.1): \`run_command\`, \`manage_task\`, \`list_dir\`, \`read_file\`, \`write_file\`, \`edit_file\`, \`grep_search\`. Seluruh tool berbagi Active Working Directory (\`cwd\`) dari blok \`[RUNTIME ENVIRONMENT — Z21 LOCAL HARNESS]\` (path relatif diselesaikan di \`cwd\` proyek aktif).
+2. **TOOL_USE_ENFORCEMENT (Hermes Rule)**: Langsung panggil tool di putaran ini — DILARANG berjanji *"Saya akan..."*, menulis rencana/tutorial langkah manual, atau meminta konfirmasi teks ulang!
+3. **Read-Before-Edit & Diagnosa Error**: Sebelum mengubah file yang sudah ada (mis. \`index.html\`), WAJIB panggil \`read_file\` untuk menyalin baris persis TANPA awalan nomor baris, lalu gunakan \`edit_file\`. Jika \`run_command\` atau \`edit_file\` gagal, baca \`[HINT]\` / \`cwd\` / \`abs_path\` pada pesan error dan ubah strategi/parameter — JANGAN mengulang panggilan identik yang sudah gagal!
+4. **Tuntas Sampai Verifikasi & Isolasi Mode Disk**: Jalankan rantai langkah sampai selesai (\`New-Item -ItemType Directory -Force\` / \`Copy-Item\` -> \`read_file\` -> \`edit_file\`). DILARANG mengklaim selesai jika mutasi gagal, dan DILARANG memakai \`<<<ZOZ_FILE>>>\` atau membuat Artifact HTML terpisah.`;
     }
     return `[MANDAT AGEN OTONOM Z21 LOCALHOST (SETARA ANTIGRAVITY — 7 TOOL WORKSPACE & KONTROL TERMINAL PENUH)]:
 1. Anda berada pada Mode Z21 Localhost dengan akses penuh ke **7 tool lokal** pada mesin host pengguna: \`run_command\`, \`manage_task\`, \`list_dir\`, \`read_file\`, \`write_file\`, \`edit_file\`, dan \`grep_search\`.
@@ -41641,6 +41637,42 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     });
   }
 
+  const COMPACT_Z21_TOOL_DESCRIPTIONS = {
+    run_command: 'Jalankan perintah Windows PowerShell 5.1 pada Direktori Kerja Aktif (`cwd`). Path relatif diselesaikan di `cwd`; buat folder tujuan yang belum ada sebelum `Copy-Item`.',
+    read_file: 'Baca isi berkas lengkap bernomor baris. Wajib dipanggil sebelum `edit_file`; path relatif resolved ke folder proyek aktif.',
+    edit_file: 'Ubah potongan teks persis pada berkas yang sudah ada memakai `target` & `replacement` (salin persis dari `read_file` TANPA awalan nomor baris).',
+    write_file: 'Tulis berkas baru atau timpa berkas kecil pada proyek aktif.',
+    list_dir: 'Lihat daftar berkas dan subfolder di folder proyek aktif.',
+    grep_search: 'Cari kata kunci atau regex pada berkas proyek aktif.',
+    manage_task: 'Pantau, kirim input, atau hentikan proses background/PTY hasil `run_command`.'
+  };
+
+  function simplifyToolSchemasForCompactModel(tools, { modelName = '', promptText = '', z21ToolCtx = null } = {}) {
+    if (!Array.isArray(tools) || tools.length === 0) return [];
+    if (!isCompactOrSmallAgentModel(modelName) || z21ToolCtx?.planMode !== 'z21' || z21ToolCtx?.isWebRequest) {
+      return tools;
+    }
+    const needsAdvancedRunCmd = /\b(?:daemon|server|background|latar|pty|tab|docker|sandbox|container|tunnel|watch|dev\s+server)\b/i.test(String(promptText || ''));
+    return tools.map((t) => {
+      if (!t || t.type !== 'function' || !t.function) return t;
+      const cloned = JSON.parse(JSON.stringify(t));
+      const fnName = String(cloned.function.name || '').trim();
+      if (COMPACT_Z21_TOOL_DESCRIPTIONS[fnName]) {
+        cloned.function.description = COMPACT_Z21_TOOL_DESCRIPTIONS[fnName];
+      }
+      if (fnName === 'run_command' && !needsAdvancedRunCmd && cloned.function.parameters?.properties) {
+        delete cloned.function.parameters.properties.sandbox_mode;
+        delete cloned.function.parameters.properties.terminal_session;
+        delete cloned.function.parameters.properties.wait_ms_before_async;
+        delete cloned.function.parameters.properties.is_daemon;
+        if (cloned.function.parameters.properties.shell) {
+          cloned.function.parameters.properties.shell.description = 'Opsional: Shell target ("auto" = PowerShell 5.1 Windows).';
+        }
+      }
+      return cloned;
+    });
+  }
+
   // Sumber tanda tangan dedup per tool (mencegah loop pemanggilan berulang)
   function getAutonomousToolSignature(call) {
     const rawName = call && call.function ? call.function.name : '';
@@ -43256,6 +43288,9 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       isSubagent: true,
       allowedToolsSet,
       abortSignal: taskAbort.signal,
+      detectedProjectDir: managerCtx.baseToolContext?.detectedProjectDir || '',
+      detectedProjectFilePath: managerCtx.baseToolContext?.detectedProjectFilePath || '',
+      projectCwd: taskSpec.cwd || managerCtx.baseToolContext?.projectCwd || managerCtx.baseToolContext?.detectedProjectDir || '',
       terminalCwd: taskSpec.cwd || managerCtx.baseToolContext?.terminalCwd || ''
     };
 
@@ -43991,9 +44026,18 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       z21ToolCtx.detectedSourceMediaPath = detectedSourceMedia;
     }
 
+    const activeSessionProj = String(session?.z21ActiveProjectDir || '').replace(/[\\/]+$/, '');
+    const mentionsZozRouter = /\bzoz[-_\s]?router\b/i.test(String(promptText || ''));
+    const isWrongZozRouterFallback = (p) => Boolean(
+      activeSessionProj &&
+      !/[\\/]zoz-router(?:[\\/]|$)/i.test(activeSessionProj) &&
+      !mentionsZozRouter &&
+      /[\\/]zoz-router(?:[\\/]|$)/i.test(String(p || ''))
+    );
+
     if (z21ToolCtx?.lastReadFilePath) {
       const c = cleanCandidate(z21ToolCtx.lastReadFilePath);
-      if (c && !isLikelyExternalMediaAssetPath(c)) return c;
+      if (c && !isLikelyExternalMediaAssetPath(c) && !isWrongZozRouterFallback(c)) return c;
     }
 
     if (session && Array.isArray(session.messages)) {
@@ -44012,7 +44056,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
               const tHit = sumStr.match(tagPathRe);
               if (tHit && tHit[1]) {
                 const c = cleanCandidate(tHit[1]);
-                if (c && !isLikelyExternalMediaAssetPath(c)) return c;
+                if (c && !isLikelyExternalMediaAssetPath(c) && !isWrongZozRouterFallback(c)) return c;
               }
             }
             const callArr = Array.isArray(st.toolCalls) ? st.toolCalls : [];
@@ -44021,7 +44065,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
               if (argHits) {
                 for (let k = argHits.length - 1; k >= 0; k--) {
                   const c = cleanCandidate(argHits[k]);
-                  if (c && !/\\(?:system32|windows)\\/i.test(c) && !isLikelyExternalMediaAssetPath(c)) return c;
+                  if (c && !/\\(?:system32|windows)\\/i.test(c) && !isLikelyExternalMediaAssetPath(c) && !isWrongZozRouterFallback(c)) return c;
                 }
               }
             }
@@ -44033,19 +44077,20 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         const tagHit = msgTxt.match(tagPathRe);
         if (tagHit && tagHit[1]) {
           const c = cleanCandidate(tagHit[1]);
-          if (c && !isLikelyExternalMediaAssetPath(c)) return c;
+          if (c && !isLikelyExternalMediaAssetPath(c) && !isWrongZozRouterFallback(c)) return c;
         }
         const rawHits = msgTxt.match(winOrHomeRe);
         if (rawHits && rawHits.length > 0) {
           for (let j = rawHits.length - 1; j >= 0; j--) {
             const c = cleanCandidate(rawHits[j]);
-            if (c && !/\\(?:system32|windows)\\/i.test(c) && !isLikelyExternalMediaAssetPath(c)) return c;
+            if (c && !/\\(?:system32|windows)\\/i.test(c) && !isLikelyExternalMediaAssetPath(c) && !isWrongZozRouterFallback(c)) return c;
           }
         }
       }
     }
 
     const fallbackCwd = cleanCandidate(
+      session?.z21ActiveProjectDir ||
       z21ToolCtx?.projectCwd ||
       session?.z21LastListedDir ||
       session?.z21TerminalCwd ||
@@ -44055,6 +44100,94 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       return fallbackCwd;
     }
     return detectedSourceMedia || fallbackCwd;
+  }
+
+  function normalizeZ21DirPath(rawPath) {
+    const p = String(rawPath || '').trim();
+    if (!p) return '';
+    if (/^[A-Za-z]:[\\/]?$/.test(p)) return `${p[0]}:\\`;
+    return p.replace(/[\\/]+$/, '');
+  }
+
+  function resolveCanonicalZ21ProjectRoot(session = null, toolContext = null) {
+    const candidates = [
+      toolContext?.detectedProjectDir,
+      toolContext?.detectedProjectFilePath ? String(toolContext.detectedProjectFilePath).replace(/[\\/][^\\/]+$/, '') : '',
+      session?.z21ActiveProjectDir
+    ];
+    for (const cand of candidates) {
+      const clean = normalizeZ21DirPath(cand);
+      if (!clean || clean === '.' || clean === './') continue;
+      if (typeof isLikelyExternalMediaAssetPath === 'function' && isLikelyExternalMediaAssetPath(clean)) continue;
+      return clean;
+    }
+    return '';
+  }
+
+  function resolveEffectiveZ21ProjectCwd(session = null, toolContext = null, explicitArg = '') {
+    const expClean = String(explicitArg || '').trim();
+    if (expClean && expClean !== '.' && expClean !== './') {
+      return normalizeZ21DirPath(expClean);
+    }
+    const candidates = [
+      toolContext?.detectedProjectDir,
+      toolContext?.detectedProjectFilePath ? String(toolContext.detectedProjectFilePath).replace(/[\\/][^\\/]+$/, '') : '',
+      toolContext?.projectCwd,
+      session?.z21ActiveProjectDir,
+      session?.z21LastListedDir,
+      session?.z21TerminalCwd
+    ];
+    for (const cand of candidates) {
+      const clean = normalizeZ21DirPath(cand);
+      if (!clean || clean === '.' || clean === './') continue;
+      if (typeof isLikelyExternalMediaAssetPath === 'function' && isLikelyExternalMediaAssetPath(clean)) continue;
+      return clean;
+    }
+    return '.';
+  }
+
+  function resolveBareFilenameAgainstActiveProject(rawPath, session = null, toolContext = null) {
+    const trimmed = String(rawPath || '').trim();
+    if (!trimmed) return trimmed;
+    if (/^(?:[A-Za-z]:|~|%USERPROFILE%)/i.test(trimmed)) return trimmed;
+    const noDot = trimmed.replace(/^\.[\\/]/, '');
+    if (!noDot || noDot.includes('/') || noDot.includes('\\') || noDot.includes('..')) {
+      return trimmed;
+    }
+    const lowerName = noDot.toLowerCase();
+    const canonRoot = resolveCanonicalZ21ProjectRoot(session, toolContext);
+    const canonNorm = canonRoot ? canonRoot.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() : '';
+    for (const absCand of [toolContext?.detectedProjectFilePath, toolContext?.lastReadFilePath]) {
+      const s = String(absCand || '').trim();
+      if (!s || !/^(?:[A-Za-z]:[\\/]|\/)/.test(s)) continue;
+      if (canonNorm) {
+        const sNorm = s.replace(/\\/g, '/').toLowerCase();
+        if (!sNorm.startsWith(`${canonNorm}/`)) continue;
+      }
+      const base = (s.split(/[\\/]/).pop() || '').toLowerCase();
+      if (base && base === lowerName) return s;
+    }
+    return trimmed;
+  }
+
+  function buildZ21RuntimeEnvironmentBlock({ session = null, z21ToolCtx = null, modelName = '' } = {}) {
+    const effectiveCwd = resolveEffectiveZ21ProjectCwd(session, z21ToolCtx, '');
+    const cwdDisplay = (effectiveCwd && effectiveCwd !== '.') ? effectiveCwd : '(workspace aktif default `.`)';
+    const primaryFile = String(z21ToolCtx?.detectedProjectFilePath || z21ToolCtx?.lastReadFilePath || '').trim();
+    const lines = [
+      '[RUNTIME ENVIRONMENT — Z21 LOCAL HARNESS]',
+      '- Host OS & Default Shell: Windows (PowerShell 5.1)',
+      `- Active Working Directory (cwd): ${cwdDisplay}`
+    ];
+    if (primaryFile) {
+      lines.push(`- Active Project File: ${primaryFile}`);
+    }
+    lines.push(
+      '- Seluruh tool (`run_command`, `read_file`, `edit_file`, `write_file`, `list_dir`, `grep_search`) berbagi `cwd` aktif di atas.',
+      '- Path relatif (mis. `index.html` atau `assets/videos/clip.mp4`) otomatis diselesaikan di dalam `cwd` aktif — JANGAN mengira berada di folder repo router lain.',
+      '- Pada PowerShell 5.1 Windows, buat folder tujuan yang belum ada memakai `New-Item -ItemType Directory -Force -Path "<folder>" | Out-Null` sebelum menyalin berkas.'
+    );
+    return lines.join('\n');
   }
 
   function buildZ21CodeStructureOutline(rawReadText, targetPath = '') {
@@ -44180,15 +44313,19 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           }
         }
       }
+      const cleanVerifiedDir = normalizeZ21DirPath(dirToInspect);
       if (z21ToolCtx && typeof z21ToolCtx === 'object') {
-        z21ToolCtx.detectedProjectDir = verifiedDirOnDisk ? dirToInspect : '';
+        z21ToolCtx.detectedProjectDir = verifiedDirOnDisk ? cleanVerifiedDir : '';
+        if (verifiedDirOnDisk && cleanVerifiedDir) z21ToolCtx.projectCwd = cleanVerifiedDir;
         z21ToolCtx.detectedProjectFilePath = verifiedFileOnDisk ? detectedEntryFile : '';
         if (verifiedFileOnDisk) z21ToolCtx.lastReadFilePath = detectedEntryFile;
       }
       if (session && typeof session === 'object') {
-        if (verifiedDirOnDisk && dirToInspect) {
-          session.z21ActiveProjectDir = dirToInspect;
-        } else if (dirToInspect && session.z21ActiveProjectDir === dirToInspect && !verifiedDirOnDisk) {
+        if (verifiedDirOnDisk && cleanVerifiedDir) {
+          session.z21ActiveProjectDir = cleanVerifiedDir;
+          session.z21TerminalCwd = cleanVerifiedDir;
+          session.z21LastListedDir = cleanVerifiedDir;
+        } else if (dirToInspect && normalizeZ21DirPath(session.z21ActiveProjectDir) === cleanVerifiedDir && !verifiedDirOnDisk) {
           delete session.z21ActiveProjectDir;
         }
       }
@@ -44318,6 +44455,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
     const mutatedFilesCount = actionLog?.mutatedFiles ? actionLog.mutatedFiles.size : 0;
     const mutatingCmdsCount = Array.isArray(actionLog?.mutatingCommands) ? actionLog.mutatingCommands.length : 0;
     const verifiedMutationCount = mutatedFilesCount + mutatingCmdsCount;
+    const failedEditAttempts = actionLog?.failedEditAttempts || 0;
 
     if (!requiresMutationVerification) {
       return {
@@ -44338,6 +44476,25 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         verifiedMutationCount,
         reason: 'zero_tools_executed',
         retrySystemMessage: 'Kamu belum memanggil tool apa pun. Panggil read_file atau edit_file sekarang.'
+      };
+    }
+
+    if (
+      mutatedFilesCount === 0 &&
+      failedEditAttempts > 0 &&
+      (
+        (typeof isFakeLocalExecutionClaimText === 'function' && isFakeLocalExecutionClaimText(candidateText)) ||
+        (typeof isUnexecutedLocalPlanOrTutorialText === 'function' && isUnexecutedLocalPlanOrTutorialText(candidateText))
+      )
+    ) {
+      const targetHint = z21ToolCtx?.detectedProjectFilePath || z21ToolCtx?.lastReadFilePath || 'index.html';
+      return {
+        requiresMutationVerification: true,
+        passed: false,
+        toolCallsExecutedCount,
+        verifiedMutationCount,
+        reason: 'failed_edit_without_file_mutation',
+        retrySystemMessage: `Perintah terminal sempat berjalan tetapi edit_file pada berkas proyek gagal (0 berkas termutasi, failedEditAttempts=${failedEditAttempts}). Panggil read_file pada "${targetHint}" lalu selesaikan edit_file, atau laporkan kegagalan secara jujur tanpa mengklaim selesai.`
       };
     }
 
@@ -47505,7 +47662,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
         if (clientJailErr) {
           return { text: clientJailErr, blocked: true, sources: [], success: false };
         }
-        const reqCwd = String(args.cwd || args.Cwd || toolContext?.projectCwd || session?.z21TerminalCwd || '.').trim();
+        const canonicalRoot = resolveCanonicalZ21ProjectRoot(session, toolContext);
+        const reqCwd = resolveEffectiveZ21ProjectCwd(session, toolContext, args.cwd || args.Cwd || '');
         const reqShell = String(args.shell || 'auto').trim().toLowerCase();
         const rawWaitAsync = args.wait_ms_before_async ?? args.waitMsBeforeAsync ?? args.WaitMsBeforeAsync;
         const isDaemon = Boolean(args.is_daemon ?? args.isDaemon ?? args.IsDaemon);
@@ -47521,6 +47679,8 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
               planMode: 'z21',
               command: cmdText,
               cwd: reqCwd,
+              ...(reqCwd !== '.' ? { cwd_hint: reqCwd } : {}),
+              ...(canonicalRoot ? { project_root: canonicalRoot } : {}),
               shell: reqShell,
               timeout_ms: timeoutMs,
               ...(rawWaitAsync !== undefined && rawWaitAsync !== null ? { wait_ms_before_async: Number(rawWaitAsync) } : {}),
@@ -47658,36 +47818,42 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             success: false
           };
         }
-        const stickyCwdVal = data.abs_cwd || data.cwd;
-        if (stickyCwdVal && toolContext && typeof toolContext === 'object') {
-          toolContext.projectCwd = stickyCwdVal;
-        }
-        if (stickyCwdVal && session && typeof session === 'object') {
-          session.z21TerminalCwd = stickyCwdVal;
+        const stickyCwdVal = normalizeZ21DirPath(data.abs_cwd || data.cwd);
+        const cmdOk = Boolean(data.ok && data.exit_code === 0);
+        const explicitDirChange = Boolean((args.cwd || args.Cwd) && !/^\.?[\\/]?$/.test(String(args.cwd || args.Cwd).trim()))
+          || /\b(?:cd|chdir|Set-Location|sl|pushd|Push-Location|popd|Pop-Location)\b/i.test(cmdText);
+        if (cmdOk && stickyCwdVal && (explicitDirChange || !canonicalRoot)) {
+          if (toolContext && typeof toolContext === 'object') {
+            toolContext.projectCwd = stickyCwdVal;
+          }
+          if (session && typeof session === 'object') {
+            session.z21TerminalCwd = stickyCwdVal;
+          }
         }
         const outParts = [];
         if (data.stdout) outParts.push(`stdout:\n${data.stdout}`);
         if (data.stderr) outParts.push(`stderr:\n${data.stderr}`);
+        if (!cmdOk && data.error_hint) outParts.push(`[HINT]: ${data.error_hint}`);
         const joinedRaw = outParts.join('\n\n') || '(selesai tanpa output teks)';
         const cappedText = joinedRaw.length > 5000
           ? joinedRaw.slice(0, 1800) + '\n... [output dipotong] ...\n' + joinedRaw.slice(-3100)
           : joinedRaw;
         if (data.backgrounded) {
           return {
-            text: `[Z21 BACKGROUND TASK RUNNING | task_id: ${data.task_id} | pid: ${data.pid || '-'} | daemon: ${Boolean(data.is_daemon)} | cwd: ${data.cwd || '.'}]\nGunakan manage_task({"action":"status","task_id":"${data.task_id}"}), send_input, atau kill bila perlu.\n${cappedText}`.slice(0, 5000),
+            text: `[Z21 BACKGROUND TASK RUNNING | task_id: ${data.task_id} | pid: ${data.pid || '-'} | daemon: ${Boolean(data.is_daemon)} | cwd: ${data.abs_cwd || data.cwd || reqCwd || '.'}]\nGunakan manage_task({"action":"status","task_id":"${data.task_id}"}), send_input, atau kill bila perlu.\n${cappedText}`.slice(0, 5000),
             data,
             sources: [],
             success: true
           };
         }
-        if (Boolean(data.ok && data.exit_code === 0) && toolContext?.readPaginationMap instanceof Map && /(?:Copy-Item|Move-Item|New-Item|Set-Content|Add-Content|Out-File|Rename-Item|\b(?:cp|mv|mkdir|rm|sed|tee|git\s+(?:checkout|reset))\b|\s>>?\s)/i.test(cmdText)) {
+        if (cmdOk && toolContext?.readPaginationMap instanceof Map && /(?:Copy-Item|Move-Item|New-Item|Set-Content|Add-Content|Out-File|Rename-Item|\b(?:cp|mv|mkdir|rm|sed|tee|git\s+(?:checkout|reset))\b|\s>>?\s)/i.test(cmdText)) {
           toolContext.readPaginationMap.clear();
         }
         return {
-          text: `[Z21 PROJECT RUN_COMMAND (${data.runtime || sandboxMode}) | exit_code: ${data.exit_code ?? (data.ok ? 0 : 1)} | cwd: ${data.cwd || '.'}]\n${cappedText}`.slice(0, 5000),
+          text: `[Z21 PROJECT RUN_COMMAND (${data.runtime || sandboxMode}) | exit_code: ${data.exit_code ?? (data.ok ? 0 : 1)} | cwd: ${data.abs_cwd || data.cwd || reqCwd || '.'}]\n${cappedText}`.slice(0, 5000),
           data,
           sources: [],
-          success: Boolean(data.ok && data.exit_code === 0)
+          success: cmdOk
         };
       }
 
@@ -47757,10 +47923,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
       }
 
       const fetchZ21FileToolWithApproval = async (endpointPath, payloadObj, actionName, timeoutMsVal = 12000) => {
+        const canonicalRoot = resolveCanonicalZ21ProjectRoot(session, toolContext);
+        const canonicalCwdHint = resolveEffectiveZ21ProjectCwd(session, toolContext, '');
         const permBase = {
           permission_preset: Z21CommandApprovalController.getPermissionPreset(),
           granted_roots: Z21CommandApprovalController.getGrantedRoots(session),
-          cwd_hint: String(toolContext?.projectCwd || session?.z21LastListedDir || session?.z21TerminalCwd || '').trim()
+          cwd_hint: canonicalCwdHint !== '.' ? canonicalCwdHint : '',
+          ...(canonicalRoot ? { project_root: canonicalRoot } : {})
         };
         let resp = await fetch(getUniversalApiUrl(endpointPath), {
           method: 'POST',
@@ -47794,6 +47963,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             headers: { 'Content-Type': 'application/json', 'X-Zoz-Mode': 'z21' },
             body: JSON.stringify({
               ...payloadObj,
+              ...permBase,
               permission_preset: Z21CommandApprovalController.getPermissionPreset(),
               granted_roots: Z21CommandApprovalController.getGrantedRoots(session),
               approved_outside_workspace: true
@@ -47953,7 +48123,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           };
         }
         if ((data.abs_path || data.path) && session && typeof session === 'object') {
-          session.z21LastListedDir = data.abs_path || data.path;
+          const normListDir = normalizeZ21DirPath(data.abs_path || data.path);
+          session.z21LastListedDir = normListDir;
+          if (toolContext && typeof toolContext === 'object' && !toolContext.projectCwd) {
+            toolContext.projectCwd = normListDir;
+          }
         }
         const rows = Array.isArray(data.entries)
           ? data.entries.map(e => {
@@ -47983,6 +48157,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             filePath = String(Array.from(toolContext.turnActionLog.readFiles)[0] || '').trim();
           }
         }
+        filePath = resolveBareFilenameAgainstActiveProject(filePath, session, toolContext);
         const rawT = args.target ?? args.old_string ?? args.old_str ?? args.old_text ?? args.oldText ?? args.search ?? args.Target;
         const rawR = args.replacement ?? args.new_string ?? args.new_str ?? args.new_text ?? args.newText ?? args.replace ?? args.Replacement;
         const searchTarget = rawT === undefined || rawT === null ? '' : String(rawT);
@@ -48041,8 +48216,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           }
         }
         if (!resp.ok || !data || !data.success) {
+          if (toolContext?.readPaginationMap instanceof Map) {
+            toolContext.readPaginationMap.delete(filePath.toLowerCase());
+            if (data?.abs_path) toolContext.readPaginationMap.delete(String(data.abs_path).toLowerCase());
+            if (data?.path) toolContext.readPaginationMap.delete(String(data.path).toLowerCase());
+          }
           return {
-            text: `Error edit_file (${filePath}): ${data?.error || `HTTP ${resp.status}`}`,
+            text: `Error edit_file (${data?.abs_path || filePath}): ${data?.error || `HTTP ${resp.status}`}`,
             data,
             blocked: Boolean(data?.blocked || resp.status === 403),
             sources: [],
@@ -48213,10 +48393,11 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             success: false
           };
         }
-        const filePath = String(args.path || args.file_path || args.filePath || args.filepath || args.target_file || args.Path || args.file || args.name || '').trim();
+        let filePath = String(args.path || args.file_path || args.filePath || args.filepath || args.target_file || args.Path || args.file || args.name || '').trim();
         if (!filePath) {
           return { text: 'Error read_file: Parameter `path` (atau `file_path`) wajib diisi.', sources: [], success: false };
         }
+        filePath = resolveBareFilenameAgainstActiveProject(filePath, session, toolContext);
         let reqStart = args.start_line ?? args.startLine ?? args.offset;
         let reqEnd = args.end_line ?? args.endLine;
         const reqLimit = args.limit;
@@ -48396,12 +48577,13 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
           ? rawReadText.slice(0, maxBodySlice) + `\n...[Output dipotong otomatis pada batas ${maxToolReadChars.toLocaleString('id-ID')} karakter]`
           : rawReadText;
         const readTag = isZ21Dev ? 'Z21 READ_FILE' : 'SANDBOX READ_FILE';
+        const shownReadPath = isZ21Dev ? (data.abs_path || data.path || filePath) : data.path;
         const actualEnd = data.actual_end_line || data.end_line || data.total_lines || '?';
         const moreNote = (isZ21Dev && data.has_more && data.next_start_line)
-          ? `\n[BELUM SELESAI — tersisa baris ${data.next_start_line}..${data.total_lines}. Panggil tool read_file({"path": ${JSON.stringify(data.path || filePath)}, "start_line": ${data.next_start_line}}) (atau <tool_call>{"name":"read_file","arguments":{"path":${JSON.stringify(data.path || filePath)},"start_line":${data.next_start_line}}}</tool_call>) untuk melanjutkan pembacaan.]`
+          ? `\n[BELUM SELESAI — tersisa baris ${data.next_start_line}..${data.total_lines}. Panggil tool read_file({"path": ${JSON.stringify(shownReadPath)}, "start_line": ${data.next_start_line}}) (atau <tool_call>{"name":"read_file","arguments":{"path":${JSON.stringify(shownReadPath)},"start_line":${data.next_start_line}}}</tool_call>) untuk melanjutkan pembacaan.]`
           : '';
         return {
-          text: `[${readTag}: ${data.path} | baris ${data.start_line || 1}-${actualEnd} dari ${data.total_lines || '?'} | ${data.size || data.bytes || 0} B]\n${clampedRead}${moreNote}`.slice(0, maxToolReadChars),
+          text: `[${readTag}: ${shownReadPath} | baris ${data.start_line || 1}-${actualEnd} dari ${data.total_lines || '?'} | ${data.size || data.bytes || 0} B]\n${clampedRead}${moreNote}`.slice(0, maxToolReadChars),
           data,
           sources: [],
           success: true
@@ -48427,6 +48609,7 @@ Pengguna telah mengizinkan Anda untuk MENGAKSES, MEMBACA, MENGEDIT/MEMODIFIKASI,
             filePath = String(Array.from(toolContext.turnActionLog.readFiles)[0] || '').trim();
           }
         }
+        filePath = isZ21Dev ? resolveBareFilenameAgainstActiveProject(filePath, session, toolContext) : filePath;
         if (!filePath) {
           return { text: 'Error write_file: Parameter `path` (atau `file_path`) wajib diisi.', sources: [], success: false };
         }
@@ -50329,6 +50512,23 @@ ${lines.join('\n')}${lines.length > 1 ? `\n\n[ORCHESTRATION]: Anda dapat memangg
 
   const ZOZ_COT_SPARK_SVG = '<svg class="zoz-cot-spark-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2.5L13.9 8.6L20 10.5L13.9 12.4L12 18.5L10.1 12.4L4 10.5L10.1 8.6L12 2.5Z" fill="currentColor"/><circle cx="18.5" cy="18.5" r="2" fill="currentColor" opacity="0.72"/></svg>';
 
+  /** Potong argumen preview tanpa memutus kutipan terbuka di tengah kata. */
+  function truncateBalancedPreview(raw, maxLen = 64) {
+    const str = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (!str || str.length <= maxLen) return str;
+    const cutLen = Math.max(8, maxLen - 1);
+    let sub = str.slice(0, cutLen).trimEnd();
+    const dblCount = (sub.match(/"/g) || []).length;
+    const sglCount = (sub.match(/'/g) || []).length;
+    if (dblCount % 2 === 1) {
+      return `${sub}…"`;
+    }
+    if (sglCount % 2 === 1) {
+      return `${sub}…'`;
+    }
+    return `${sub}…`;
+  }
+
   /** Bersihkan argumen tool menjadi potongan teks ringkas yang ramah dibaca manusia. */
   function extractNaturalCotArg(argsPreview = '') {
     let raw = String(argsPreview || '').trim();
@@ -50343,8 +50543,7 @@ ${lines.join('\n')}${lines.length > 1 ? `\n\n[ORCHESTRATION]: Anda dapat memangg
       } catch (_) {}
     }
     raw = String(raw || '').replace(/^\s*["'{]+|["'}]+\s*$/g, '').replace(/\s+/g, ' ').trim();
-    if (raw.length > 68) raw = `${raw.slice(0, 65)}...`;
-    return raw;
+    return truncateBalancedPreview(raw, 68);
   }
 
   /** Petakan nama tool ke ikon semantik ZOZ & kalimat tindakan Bahasa Indonesia yang alami. */
@@ -50481,7 +50680,23 @@ ${lines.join('\n')}${lines.length > 1 ? `\n\n[ORCHESTRATION]: Anda dapat memangg
     if (hasFailed) {
       toneClass = 'is-error-note';
       iconClass = 'fa-solid fa-rotate';
-      label = `${label.replace(/[.]+$/, '')} — beralih ke strategi alternatif.`;
+      const errSummary = String(resItem?.summary || '');
+      let failReasonLabel = ' — gagal, menyesuaikan langkah.';
+      if (resItem?.rejected_by_user || /DITOLAK PENGGUNA/i.test(errSummary)) {
+        failReasonLabel = ' — ditolak pengguna.';
+      } else if (/TARGET_NOT_FOUND/i.test(errSummary)) {
+        failReasonLabel = ' — teks target edit tidak cocok.';
+      } else if (/AMBIGUOUS_TARGET/i.test(errSummary)) {
+        failReasonLabel = ' — target edit ambigu.';
+      } else if (/PATH_NOT_FOUND|Could not find a part of the path|Cannot find path|The system cannot find the path/i.test(errSummary)) {
+        failReasonLabel = ' — path tidak ditemukan.';
+      } else {
+        const ecMatch = errSummary.match(/exit_code:\s*([1-9]\d*|-\d+)/i);
+        if (ecMatch) {
+          failReasonLabel = ` — gagal (exit ${ecMatch[1]}).`;
+        }
+      }
+      label = `${label.replace(/[.]+$/, '')}${failReasonLabel}`;
     }
     return { iconClass, toneClass, label };
   }
@@ -51142,7 +51357,8 @@ ${lines.join('\n')}${lines.length > 1 ? `\n\n[ORCHESTRATION]: Anda dapat memangg
     allowInlineToolFallback = false,
     isWebRequest = false,
     isWebRevision = false,
-    isOllamaEngine = false
+    isOllamaEngine = false,
+    z21ToolCtx = null
   }) {
     const hasBrowsedWeb = detectedAutonomousCalls.some(c => c && c.function && ['browse_web_page', 'browse_web', 'extract_web', 'read_url'].includes(normalizeToolName(c.function.name)));
     const hasExecutedSearch = detectedAutonomousCalls.some(c => c && c.function && ['search_web'].includes(normalizeToolName(c.function.name)));
@@ -51220,9 +51436,14 @@ ${lines.join('\n')}${lines.length > 1 ? `\n\n[ORCHESTRATION]: Anda dapat memangg
       ? ' (Jika native tool tidak tersedia, keluarkan blok <tool_call>{"name":"nama_tool","arguments":{...}}</tool_call>.)'
       : '';
 
+    const anyToolFailedInRound = Boolean(Array.isArray(toolExecResults) && toolExecResults.some(isToolExecResultFailure));
     let evidenceDirective = '';
     if (circuitBreakerTripped) {
-      evidenceDirective = 'MANDAT JAWABAN DEDUKTIF: Penelusuran selesai. Berikan penjelasan komprehensif, langsung, dan objektif atas pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian atau menyalin catatan sistem internal ini.';
+      if (hasZ21Local7Tools || hasExecutedBashTool || hasExecutedFileEditor) {
+        evidenceDirective = 'BATAS RETRY TOOL LOKAL TERCAPAI: Beberapa operasi tool gagal berulang pada giliran ini. Laporkan secara JUJUR langkah mana yang benar-benar berhasil (beserta path absolut & ukuran/exit_code) dan langkah mana yang gagal (beserta pesan error aslinya). DILARANG KERAS mengklaim perubahan berkas sudah selesai jika edit_file gagal!';
+      } else {
+        evidenceDirective = 'MANDAT JAWABAN DEDUKTIF: Penelusuran selesai. Berikan penjelasan komprehensif, langsung, dan objektif atas pertanyaan pengguna menggunakan analisis deduktif dan pengetahuan terverifikasi Anda. Dilarang keras menyatakan kegagalan pencarian atau menyalin catatan sistem internal ini.';
+      }
     } else if (hasExecutedWeatherRender) {
       evidenceDirective = 'MANDAT PENYAJIAN CUACA & VISUALISASI INTERAKTIF: JANGAN HANYA menampilkan kartu visualisasi cuaca! Susun penjelasan cuaca yang LENGKAP, DETAIL, hangat, dan terstruktur dalam Bahasa Indonesia berdasarkan seluruh telemetri real-time di atas: (1) Cantumkan token [[ZOZ_WEATHER_DISPLAY:wth_...]] persis pada baris tersendiri, (2) Jelaskan kondisi atmosfer & wilayah/kota yang terdeteksi (waktu & zona waktu), (3) Jabarkan suhu aktual vs suhu terasa, rentang suhu min/maks hari ini, kelembapan udara (%), tutupan awan (%), kecepatan & arah angin, peluang/curah hujan, indeks UV serta matahari terbit/terbenam, (4) Uraikan tren prakiraan 5 jam ke depan (serta prakiraan besok/lusa dari data harian jika pengguna menanyakan besok), dan (5) Berikan saran aktivitas/perlengkapan praktis.'
         + (!isLastRound ? `\n[LANJUTAN MULTI-LANGKAH TERDETEKSI]: Pengguna juga memiliki permintaan lanjutan selain cek cuaca (misalnya rekomendasi hotel/ballroom/venue indoor bila hujan). Evaluasi data cuaca di atas pada blok berpikir Anda lalu panggil search_web atau tool berikutnya SEKARANG sebelum jawaban final.${inlineChainHint}` : '');
@@ -51272,10 +51493,22 @@ Rancang arsitektur UI/UX, tata letak responsif, visualisasi/grafik interaktif, d
         : `AGREGASI Z21 COMMANDER SWARM SELESAI: Evaluasi kelengkapan hasil sub-agen di atas. Anda dapat meluncurkan gelombang verifikasi lanjutan, menjalankan \`bash\` / \`file_editor\` (bila di localhost), atau langsung menyusun sintesis jawaban akhir terpadu.${inlineChainHint}`;
     } else if ((hasExecutedBashTool || hasExecutedFileEditor) && !hasExecutedSearch) {
       if (hasZ21Local7Tools) {
+        const failedEditsSoFar = Number(z21ToolCtx?.turnActionLog?.failedEditAttempts || 0);
+        let maxRepeatToolFail = 0;
+        if (z21ToolCtx?.turnActionLog?.toolFailureCounts instanceof Map) {
+          for (const v of z21ToolCtx.turnActionLog.toolFailureCounts.values()) {
+            if (v > maxRepeatToolFail) maxRepeatToolFail = v;
+          }
+        }
+        const loopGuardNote = (!isLastRound && (failedEditsSoFar >= 2 || maxRepeatToolFail >= 2))
+          ? '\n- **HERMES LOOP GUARD**: Operasi yang sama telah gagal >= 2 kali! JANGAN mengulangi argumen/path yang sama secara membabi buta. Periksa `cwd` / `abs_path` / `[HINT]`, panggil `read_file` pada path absolut berkas target dan salin blok eksak TANPA awalan angka baris, atau ubah strategi perintah PowerShell 5.1.'
+          : (anyToolFailedInRound && !isLastRound
+            ? '\n- **DIAGNOSA ERROR TOOL**: Periksa `cwd`, `abs_path`, dan `[HINT]` pada hasil error di atas sebelum mencoba ulang agar tidak mengulang kesalahan path.'
+            : '');
         evidenceDirective = isLastRound
-          ? 'HASIL EKSEKUSI AGEN LOKAL Z21: Sajikan laporan hasil akhir SECARA JUJUR hanya berdasarkan output tool nyata (path, byte size, exit_code, dan cuplikan kode yang benar-benar terbaca/teredit di disk). DILARANG mengarang perubahan yang belum terjadi dan DILARANG mengeluarkan blok `<<<ZOZ_FILE>>>`.'
+          ? 'HASIL EKSEKUSI AGEN LOKAL Z21: Sajikan laporan hasil akhir SECARA JUJUR hanya berdasarkan output tool nyata (path absolut, byte size, exit_code, dan cuplikan kode yang benar-benar terbaca/teredit di disk). Jika edit_file gagal, nyatakan gagal secara jujur. DILARANG mengarang perubahan yang belum terjadi dan DILARANG mengeluarkan blok `<<<ZOZ_FILE>>>`.'
           : `HARNESS EKSEKUSI Z21 (READ-BEFORE-EDIT & VERIFY): Evaluasi output tool di atas secara kritis.
-- Jika baru memeriksa/menyalin aset sementara permintaan pengguna memerlukan perubahan kode/file (mis. menyisipkan \`<video>\`/CSS/struktur folder ke \`index.html\`): JANGAN BERHENTI dengan panduan manual atau kalimat *"Saya akan..."*! SEGERA panggil \`read_file\` terlebih dahulu (jika belum dibaca) lalu \`edit_file\`/\`write_file\`/\`run_command\` sampai SELURUH tugas selesai & terverifikasi di disk!${inlineChainHint}`;
+- Jika baru memeriksa/menyalin aset sementara permintaan pengguna memerlukan perubahan kode/file (mis. menyisipkan \`<video>\`/CSS/struktur folder ke \`index.html\`): JANGAN BERHENTI dengan panduan manual atau kalimat *"Saya akan..."*! SEGERA panggil \`read_file\` terlebih dahulu (jika belum dibaca) lalu \`edit_file\`/\`write_file\`/\`run_command\` sampai SELURUH tugas selesai & terverifikasi di disk!${loopGuardNote}${inlineChainHint}`;
       } else {
         evidenceDirective = isLastRound
           ? 'HASIL EKSEKUSI SANDBOX / DEVELOPER TOOLS Z21 LOCALHOST: Laporkan hasil perintah terminal atau operasi berkas di atas secara jujur dan presisi berdasarkan stdout, stderr, exit_code, dan isi berkas aktual.'
@@ -51315,7 +51548,6 @@ Rancang arsitektur UI/UX, tata letak responsif, visualisasi/grafik interaktif, d
       evidenceDirective = 'Susun PENJELASAN KOMPREHENSIF, mendalam, dan langsung menjawab pertanyaan pengguna berdasarkan isi artikel & fakta terverifikasi di atas (uraikan definisi, mekanisme, poin analisis utama, dan detail faktual). Jika cuplikan bukti masih singkat sementara masih ada putaran tool, panggil browse_web_page pada URL paling relevan. DILARANG KERAS hanya mencetak daftar link/URL sumber tanpa penjelasan mendalam!';
     }
 
-    const anyToolFailedInRound = Boolean(Array.isArray(toolExecResults) && toolExecResults.some(isToolExecResultFailure));
     const interleavedSelfCorrectionHint = (!isLastRound && !circuitBreakerTripped && !isMidImagePipeline && !isMidWeatherPipeline)
       ? (anyToolFailedInRound
           ? '\n[PENALARAN INTERLEAVED / KOREKSI MANDIRI]: Sebagian atau seluruh tool di atas gagal/kurang lengkap. Evaluasi penyebabnya pada blok berpikir Anda, lalu ubah parameter/kueri atau pilih tool alternatif sebelum menyimpulkan.'
@@ -51356,8 +51588,13 @@ Panggil search_web dengan kueri prakiraan cuaca spesifik (dan/atau tindak lanjut
       claimConstraint = `BATASAN ARSITEK WEB & AKURASI DATA:
 1. Gunakan angka, harga, metrik, kutipan tanggal (${currentFormattedDate}), serta temuan hasil tool di atas secara akurat di dalam dataset awal HTML/JS dan penjelasan website Anda.
 2. Kembalikan berkas website utuh yang valid dari <!DOCTYPE html> hingga </html> di dalam <<<ZOZ_FILE ...>>> ... <<<END_ZOZ_FILE>>> tanpa tag rusak atau komentar placeholder, disertai penjelasan lengkap di luar blok protokol.`;
-    } else if ((hasExecutedBashTool || hasExecutedFileEditor) && !hasExecutedSearch && !circuitBreakerTripped) {
-      claimConstraint = `BATASAN INTEGRITAS EKSEKUSI LOKAL Z21:
+    } else if ((hasExecutedBashTool || hasExecutedFileEditor) && !hasExecutedSearch) {
+      claimConstraint = circuitBreakerTripped
+        ? `BATASAN INTEGRITAS EKSEKUSI LOKAL Z21 (PASCA-BATAS RETRY):
+1. Laporkan secara jujur berkas/perintah yang berhasil dan yang gagal berdasarkan output tool nyata pada giliran ini.
+2. DILARANG mengklaim edit_file/perintah berhasil jika output tool menunjukkan error atau gagal.
+3. DILARANG membungkus file proyek disk lokal dalam blok \`<<<ZOZ_FILE>>>\`.`
+        : `BATASAN INTEGRITAS EKSEKUSI LOKAL Z21:
 1. HANYA laporkan file, folder, ukuran byte, dan baris kode yang benar-benar muncul dalam hasil tool nyata di giliran ini.
 2. Jika bagian dari tugas (mis. menyisipkan \`<video>\` ke \`index.html\`, memperbarui CSS, atau membuat folder/file lain) BELUM dijalankan oleh tool edit/write nyata: JANGAN berhenti menulis panduan/rencana, langsung panggil tool berikutnya (\`read_file\` -> \`edit_file\`) SEKARANG.
 3. DILARANG membungkus file proyek disk lokal dalam blok \`<<<ZOZ_FILE>>>\`.`;
@@ -51471,10 +51708,11 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
             };
             if ((normItemTool === 'run_terminal' || normItemTool === 'run_command') && res.data && typeof res.data === 'object') {
               resultObj.exit_code = res.data.exit_code;
-              resultObj.cwd = res.data.cwd;
+              resultObj.cwd = res.data.abs_cwd || res.data.cwd;
               resultObj.timed_out = Boolean(res.data.timed_out);
               resultObj.truncated = Boolean(res.data.truncated);
               if (res.data.runtime) resultObj.runtime = res.data.runtime;
+              if (res.data.error_hint) resultObj.error_hint = res.data.error_hint;
               if (res.rejected_by_user || res.data.rejected_by_user) resultObj.rejected_by_user = true;
             }
             if (res.display_id) resultObj.display_id = res.display_id;
@@ -51490,12 +51728,36 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
         }
 
         if (itemFailed && !isLastRound && !circuitBreakerTripped && resultObj && typeof resultObj === 'object') {
+          const normFailTool = normalizeToolName(item.call?.function?.name || '');
+          let rawFailArgPath = '';
+          try {
+            const pFail = (typeof item.call?.function?.arguments === 'string')
+              ? ((typeof parseToolJsonSafe === 'function' ? parseToolJsonSafe(item.call.function.arguments) : JSON.parse(item.call.function.arguments)) || {})
+              : (item.call?.function?.arguments || {});
+            rawFailArgPath = String(
+              item.toolExecRes?.data?.abs_path ||
+              item.toolExecRes?.data?.path ||
+              pFail.path || pFail.file_path || pFail.target_file || pFail.filepath || pFail.file || pFail.filePath ||
+              pFail.command || pFail.CommandLine || pFail.cmd || pFail.script || ''
+            ).trim();
+          } catch (_) {}
+          const failKey = `${normFailTool}::${rawFailArgPath.toLowerCase().slice(0, 80)}`;
+          const repeatFailCount = Number(z21ToolCtx?.turnActionLog?.toolFailureCounts?.get?.(failKey) || 1);
           if (item.toolExecRes?.rejected_by_user) {
             resultObj.error_recovery_hint = 'Perintah ditolak oleh pengguna (HITL N). JANGAN mencoba ulang perintah yang sama; hormati keputusan pengguna, ubah pendekatan tanpa perintah berbahaya tersebut, atau jelaskan ke pengguna.';
+          } else if (normFailTool === 'fetch_weather_data') {
+            resultObj.error_recovery_hint = 'API cuaca gagal menjangkau/menemukan wilayah tersebut. Lakukan koreksi mandiri dengan memanggil search_web menggunakan kueri prakiraan cuaca spesifik (jangan ulangi fetch_weather_data).';
+          } else if (normFailTool === 'run_command' || normFailTool === 'bash') {
+            const actualCwd = item.toolExecRes?.data?.abs_cwd || item.toolExecRes?.data?.cwd || resolveEffectiveZ21ProjectCwd(null, z21ToolCtx, '');
+            const hintSuffix = item.toolExecRes?.data?.error_hint ? ` ${item.toolExecRes.data.error_hint}` : '';
+            resultObj.error_recovery_hint = `Perintah gagal pada cwd="${actualCwd}" (exit_code=${item.toolExecRes?.data?.exit_code ?? 1}).${hintSuffix} Gunakan Windows PowerShell 5.1 (buat folder tujuan memakai New-Item -ItemType Directory -Force sebelum Copy-Item) dan JANGAN mengulang perintah gagal yang identik.`;
+          } else if (normFailTool === 'edit_file' || normFailTool === 'file_editor') {
+            const failTarget = item.toolExecRes?.data?.abs_path || rawFailArgPath || 'berkas target';
+            resultObj.error_recovery_hint = repeatFailCount >= 2
+              ? `HERMES LOOP GUARD: edit_file pada "${failTarget}" sudah gagal ${repeatFailCount}x! WAJIB panggil read_file pada path absolut "${failTarget}" dan salin blok target persis TANPA awalan angka baris sebelum mencoba edit_file lagi.`
+              : `edit_file pada "${failTarget}" gagal. Panggil read_file pada path absolut tersebut, salin blok target eksak TANPA awalan angka baris, lalu ulangi edit_file.`;
           } else {
-            resultObj.error_recovery_hint = (normalizeToolName(item.call?.function?.name || '') === 'fetch_weather_data')
-              ? 'API cuaca gagal menjangkau/menemukan wilayah tersebut. Lakukan koreksi mandiri dengan memanggil search_web menggunakan kueri prakiraan cuaca spesifik (jangan ulangi fetch_weather_data).'
-              : 'Tool tidak menemukan data memadai atau gagal. Evaluasi penyebab pada penalaran Anda lalu sesuaikan kueri/parameter atau gunakan tool alternatif.';
+            resultObj.error_recovery_hint = 'Tool tidak menemukan data memadai atau gagal. Evaluasi penyebab pada penalaran Anda lalu sesuaikan kueri/parameter atau gunakan tool alternatif.';
           }
         }
 
@@ -51538,7 +51800,7 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
       const maxInlinePayloadChars = (hasExecutedFileEditor || hasExecutedBashTool)
         ? 78000
         : ((hasExecutedCommunication || hasExecutedWaRead || hasExecutedDocuments) ? 14000 : 12000);
-      const effectiveToolPayload = (circuitBreakerTripped && (!webSources || webSources.length === 0))
+      const effectiveToolPayload = (circuitBreakerTripped && !(hasZ21Local7Tools || hasExecutedBashTool || hasExecutedFileEditor) && (!webSources || webSources.length === 0))
         ? '[STATUS PENELUSURAN]: Selesai. Lanjutkan dengan sintesis deduktif penuh berdasarkan pengetahuan analitis Anda.'
         : roundToolResponsesText.substring(0, maxInlinePayloadChars);
 
@@ -52447,10 +52709,16 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
         mutatedFiles: new Set(),
         mutatingCommands: [],
         readOnlyCommands: [],
-        lastToolErrors: []
+        lastToolErrors: [],
+        failedEditAttempts: 0,
+        failedEditTargets: new Set(),
+        toolFailureCounts: new Map()
       };
     }
     const log = z21ToolCtx.turnActionLog;
+    if (!Number.isFinite(log.failedEditAttempts)) log.failedEditAttempts = 0;
+    if (!(log.failedEditTargets instanceof Set)) log.failedEditTargets = new Set();
+    if (!(log.toolFailureCounts instanceof Map)) log.toolFailureCounts = new Map();
     const norm = (typeof normalizeToolName === 'function' ? normalizeToolName(toolName) : String(toolName || '').toLowerCase());
     let args = {};
     try {
@@ -52483,8 +52751,18 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
         log.readOnlyCommands.push(cmd.slice(0, 180));
       }
     }
-    if (!ok && toolExecRes && toolExecRes.text) {
-      log.lastToolErrors.push(String(toolExecRes.text).slice(0, 200));
+    if (!ok) {
+      const failCmd = String(args.command || args.CommandLine || args.cmd || args.script || '').trim();
+      const failSubject = (norm === 'run_command' || norm === 'run_terminal' || norm === 'bash') ? failCmd : targetPath;
+      const failKey = `${norm}::${failSubject.toLowerCase().slice(0, 80)}`;
+      log.toolFailureCounts.set(failKey, (log.toolFailureCounts.get(failKey) || 0) + 1);
+      if (norm === 'edit_file' || norm === 'write_file' || (norm === 'file_editor' && ['write_file', 'write', 'patch_file', 'patch', 'edit', 'edit_file', ''].includes(editorAction))) {
+        log.failedEditAttempts += 1;
+        if (targetPath) log.failedEditTargets.add(targetPath);
+      }
+      if (toolExecRes && toolExecRes.text) {
+        log.lastToolErrors.push(String(toolExecRes.text).slice(0, 200));
+      }
     }
   }
 
@@ -52546,7 +52824,7 @@ Sajikan penjelasan dan jawaban komprehensif, terstruktur, dan mendalam menggunak
       return String(args.topic || args.topik).slice(0, 40);
     }
     if (args.command || args.cmd || args.script) {
-      return String(args.command || args.cmd || args.script).replace(/\s+/g, ' ').trim().slice(0, 64);
+      return truncateBalancedPreview(String(args.command || args.cmd || args.script).replace(/\s+/g, ' ').trim(), 64);
     }
     if (normTool === 'manage_task') {
       const act = String(args.action || 'list').trim();
@@ -53155,13 +53433,20 @@ $$
         weatherTurnCtx: weatherTurnCtxOr,
         collectedArtifactFiles: [],
         terminalCwd: '',
+        projectCwd: (() => {
+          const eff = resolveEffectiveZ21ProjectCwd(session, null, '');
+          return eff === '.' ? '' : eff;
+        })(),
         turnActionLog: {
           readFiles: new Set(),
           listedDirs: new Set(),
           mutatedFiles: new Set(),
           mutatingCommands: [],
           readOnlyCommands: [],
-          lastToolErrors: []
+          lastToolErrors: [],
+          failedEditAttempts: 0,
+          failedEditTargets: new Set(),
+          toolFailureCounts: new Map()
         },
         lastCommandRejectedByUser: false,
         swarmRuntime: {
@@ -53431,6 +53716,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       }
 
+      if (webCtx?.planMode === 'z21' && isZ21LocalAgentActive) {
+        const runtimeEnvBlock = buildZ21RuntimeEnvironmentBlock({ session, z21ToolCtx, modelName });
+        if (runtimeEnvBlock) {
+          systemContent = systemContent ? `${systemContent}\n\n${runtimeEnvBlock}` : runtimeEnvBlock;
+        }
+      }
+
       const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'ollama', systemContent, modelName);
       if (isDocRequest && !hasNegativePreview && messagesPayload.length > 0) {
         const lastMsg = messagesPayload[messagesPayload.length - 1];
@@ -53511,7 +53803,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       if (hasAttachedWebDocs && selectedOllamaTools.length > 0) {
         selectedOllamaTools = selectedOllamaTools.filter(t => t?.function?.name !== 'browse_web_page');
       }
-      if (selectedOllamaTools.length > 0) requestBody.tools = selectedOllamaTools;
+      if (selectedOllamaTools.length > 0) {
+        selectedOllamaTools = simplifyToolSchemasForCompactModel(selectedOllamaTools, {
+          modelName,
+          promptText,
+          z21ToolCtx
+        });
+        requestBody.tools = selectedOllamaTools;
+      }
       if (session?.id) {
         requestBody.sessionId = session.id;
       }
@@ -54101,7 +54400,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           allowInlineToolFallback: validNativeCalls.length === 0,
           isWebRequest,
           isWebRevision: Boolean(webCtx?.isWebRevisionIntent),
-          isOllamaEngine: true
+          isOllamaEngine: true,
+          z21ToolCtx
         });
         }
         const {
@@ -55802,13 +56102,20 @@ $$
         weatherTurnCtx: weatherTurnCtxOr,
         collectedArtifactFiles: [],
         terminalCwd: '',
+        projectCwd: (() => {
+          const eff = resolveEffectiveZ21ProjectCwd(session, null, '');
+          return eff === '.' ? '' : eff;
+        })(),
         turnActionLog: {
           readFiles: new Set(),
           listedDirs: new Set(),
           mutatedFiles: new Set(),
           mutatingCommands: [],
           readOnlyCommands: [],
-          lastToolErrors: []
+          lastToolErrors: [],
+          failedEditAttempts: 0,
+          failedEditTargets: new Set(),
+          toolFailureCounts: new Map()
         },
         lastCommandRejectedByUser: false,
         swarmRuntime: {
@@ -56090,6 +56397,13 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
         }
       }
 
+      if (webCtx?.planMode === 'z21' && isZ21LocalAgentActive) {
+        const runtimeEnvBlockOr = buildZ21RuntimeEnvironmentBlock({ session, z21ToolCtx, modelName: effectiveInitialModel });
+        if (runtimeEnvBlockOr) {
+          systemContent = systemContent ? `${systemContent}\n\n${runtimeEnvBlockOr}` : runtimeEnvBlockOr;
+        }
+      }
+
       const messagesPayload = buildSanitizedMessagesPayload(session, resolvedImgs, 'openrouter', systemContent, effectiveInitialModel);
       if (isDocRequest && !hasNegativePreview && messagesPayload.length > 0) {
         const lastMsg = messagesPayload[messagesPayload.length - 1];
@@ -56138,9 +56452,14 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
       const collectedImages = [];
       const accumulatedToolCalls = [];
       const rawAutonomousTools = getSelectableAutonomousTools(canRunAutonomous, z21ToolCtx);
-      const selectedAutonomousTools = hasAttachedWebDocs
+      const filteredAutonomousTools = hasAttachedWebDocs
         ? rawAutonomousTools.filter(t => t?.function?.name !== 'browse_web_page')
         : rawAutonomousTools;
+      const selectedAutonomousTools = simplifyToolSchemasForCompactModel(filteredAutonomousTools, {
+        modelName: effectiveInitialModel,
+        promptText,
+        z21ToolCtx
+      });
       const preserveRoundTools = Boolean(hasExplicitToolTrigger && !isPureMathSession);
       streamRenderer = new StreamBufferRenderer(bubbleText, () => smartScrollChatToBottom(false), executedHudHtml, {
         ...runOptions,
@@ -57044,7 +57363,8 @@ Pengguna meminta HANYA KODE PEMROGRAMAN. Tuliskan kode dalam blok markdown biasa
           conversationChain,
           allowInlineToolFallback: Boolean((isDigestionFree && validNativeCalls.length === 0) || !canDigestionUseTools),
           isWebRequest,
-          isWebRevision: Boolean(webCtx?.isWebRevisionIntent)
+          isWebRevision: Boolean(webCtx?.isWebRevisionIntent),
+          z21ToolCtx
         });
         }
         const {
@@ -73869,7 +74189,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://brokers-prepare-society-combo.trycloudflare.com',
+    activeTunnelUrl: 'https://differential-money-move-conclusions.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
@@ -80280,6 +80600,14 @@ Gunakan format Markdown lengkap dengan struktur berikut:
     Z21_HIGH_EFFORT_PHASE1_PERSPECTIVES,
     Z21_HIGH_EFFORT_PHASE2_PERSPECTIVES,
     extractTargetProjectPathFromPromptOrSession,
+    normalizeZ21DirPath,
+    resolveCanonicalZ21ProjectRoot,
+    resolveEffectiveZ21ProjectCwd,
+    resolveBareFilenameAgainstActiveProject,
+    buildZ21RuntimeEnvironmentBlock,
+    simplifyToolSchemasForCompactModel,
+    truncateBalancedPreview,
+    getCotToolMeta,
     hasSessionActiveLocalDiskProject,
     deriveProjectMemoryScope,
     classifyZ21TaskComplexity,
