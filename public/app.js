@@ -100,7 +100,7 @@
   );
 
   const VERCEL_BACKEND_GATEWAY = 'https://zoz-router.vercel.app';
-  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://philosophy-edinburgh-touring-results.trycloudflare.com';
+  const ACTIVE_CLOUDFLARE_TUNNEL = 'https://brokers-prepare-society-combo.trycloudflare.com';
 
   function isValidTunnelUrl(url) {
     if (!url || typeof url !== 'string') return false;
@@ -73869,7 +73869,7 @@ Aturan:
     statusPollTimer: null,
     keepAliveTimer: null,
     apiBaseUrl: '',
-    activeTunnelUrl: 'https://philosophy-edinburgh-touring-results.trycloudflare.com',
+    activeTunnelUrl: 'https://brokers-prepare-society-combo.trycloudflare.com',
     lastValidQr: null,
     lastValidQrTime: 0,
     isFetchingStatus: false,
