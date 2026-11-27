@@ -183,19 +183,41 @@ module.exports = async function handler(req, res) {
     return pingHandler(req, res);
   }
 
+  // 1b. Blokir keras Session Sandbox (ZOZ/Z21) & Z21 Project Dev Tools pada Vercel Serverless (khusus localhost saja)
+  if (
+    pathname.startsWith('/api/z21/sandbox') ||
+    pathname.startsWith('/api/tools/z21-sandbox') ||
+    pathname.startsWith('/api/zoz/sandbox') ||
+    pathname.startsWith('/api/tools/zoz-sandbox') ||
+    pathname.startsWith('/api/z21/dev') ||
+    pathname.startsWith('/api/tools/z21-dev')
+  ) {
+    return sendJson(res, 403, {
+      sandbox: pathname.includes('sandbox'),
+      project_jail: pathname.includes('dev'),
+      success: false,
+      blocked: true,
+      error: 'Akses ditolak: Tool terminal/file lokal hanya aktif pada localhost.'
+    });
+  }
+
   // 2. Caching Layer untuk Kueri Penelusuran Publik GET (Vercel Edge Network CDN)
   const isPrivatePath =
     pathname === '/api/sessions' || pathname.startsWith('/api/sessions/') ||
     pathname === '/api/memories' || pathname.startsWith('/api/memories/') ||
     pathname === '/api/memory/search' || pathname === '/api/tools/memory/search' ||
     pathname === '/api/tools/search-chat-history' || pathname === '/api/tools/chat-history-search' ||
-    pathname === '/api/tools/weather' || pathname === '/api/tools/weather/geocode' || pathname === '/api/tools/geocode' ||
+    pathname === '/api/tools/weather' || pathname.startsWith('/api/tools/weather/') || pathname === '/api/tools/geocode' ||
     pathname === '/api/tools/search-documents' || pathname === '/api/tools/communication-context' ||
     pathname === '/api/chat/status' ||
     pathname.startsWith('/api/wa/') ||
     pathname.startsWith('/api/terminal/') ||
     pathname.startsWith('/api/z21/') ||
+    pathname.startsWith('/api/zoz/') ||
     pathname === '/api/tools/z21-document-builder' ||
+    pathname.startsWith('/api/tools/z21-sandbox') ||
+    pathname.startsWith('/api/tools/zoz-sandbox') ||
+    pathname.startsWith('/api/tools/z21-dev') ||
     pathname === '/api/tts' ||
     pathname === '/tts' ||
     pathname === '/api/tts/voices' ||

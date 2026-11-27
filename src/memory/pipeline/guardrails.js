@@ -109,6 +109,18 @@ function validateAntiInference(factText) {
   return { valid: true };
 }
 
+const POLLUTED_MEMORY_PATTERNS = [
+  /\[(?:KOREKSI\s+(?:INTERNAL|EKSEKUSI|LANJUTAN)|VERIFICATION\s+GATE\s+Z21|DATA\s+(?:HASIL\s+)?PENELUSURAN)\b/i,
+  /\[Verification\s+Gate\s+Z21\s*[—–-]\s*Aksi\s+Belum\s+Terverifikasi/i,
+  /<\u200b?\/?rfl:(?:parameter|tool_call|function)\b|<\u200b?tool_call>\s*\}/i,
+  /Maaf,\s*model\s+tidak\s+menghasilkan\s+teks\s+jawaban/i
+];
+
+function isPollutedMemoryText(text) {
+  if (!text || typeof text !== 'string') return false;
+  return POLLUTED_MEMORY_PATTERNS.some(re => re.test(text));
+}
+
 /**
  * Full sanitization pipeline for ingestion
  */
@@ -118,6 +130,13 @@ function sanitizeFactCandidate(rawText) {
     return {
       accepted: false,
       reason: inferenceCheck.reason,
+      content: ''
+    };
+  }
+  if (isPollutedMemoryText(rawText)) {
+    return {
+      accepted: false,
+      reason: 'Konten berisi residu kontrol internal/halusinasi tool call dan tidak disimpan ke memori.',
       content: ''
     };
   }
@@ -133,5 +152,6 @@ module.exports = {
   PII_PATTERNS,
   redactPII,
   validateAntiInference,
+  isPollutedMemoryText,
   sanitizeFactCandidate
 };

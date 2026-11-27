@@ -155,8 +155,8 @@ function normalizeMessagesForOpenRouter(messages, { normalizeTools = false, incl
       const textPart = { type: 'text', text: rawContent || 'Analisis gambar ini.' };
       const imageParts = imgs.map((img) => {
         let url = img;
-        if (typeof img === 'string' && !img.startsWith('data:image') && !img.startsWith('http://') && !img.startsWith('https://')) {
-          url = `data:image/webp;base64,${img}`;
+        if (typeof img === 'string' && !img.startsWith('data:image') && !img.startsWith('http://') && !img.startsWith('https://') && /^[A-Za-z0-9+/=\s]{16,}$/.test(img) && !img.startsWith('/')) {
+          url = `data:image/webp;base64,${img.replace(/\s+/g, '')}`;
         }
         return { type: 'image_url', image_url: { url } };
       });

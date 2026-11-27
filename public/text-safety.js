@@ -12,9 +12,112 @@
     'reasoning', 'reasoning_content', 'reasoning_details', 'thought', 'thinking', 'thoughts'
   ]);
 
-  const THINKING_TAG_REGEX = /<(think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi;
+  const THINKING_TAG_REGEX = /<(think|thought|thinking|reasoning|ant_thought|thought_process)\b(?![^>]*\/\s*>)[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi;
+  const SELF_CLOSING_THINK_REGEX = /<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*\/\s*>/gi;
+  const RFL_THOUGHT_TAG_REGEX = /<[\u200b-\u200d\ufeff\u2060\s]*rfl:thought\b[^>\n]*>[\s\S]*?(?:<[\u200b-\u200d\ufeff\u2060\s]*\/[\u200b-\u200d\ufeff\u2060\s]*rfl:thought[\u200b-\u200d\ufeff\u2060\s]*>|$)/gi;
+  const RFL_TOOL_TAG_REGEX = /<[\u200b-\u200d\ufeff\u2060\s]*rfl:(tool_call|function|parameter)\b[^>\n]*>[\s\S]*?<[\u200b-\u200d\ufeff\u2060\s]*\/[\u200b-\u200d\ufeff\u2060\s]*rfl:\1[\u200b-\u200d\ufeff\u2060\s]*>|<[\u200b-\u200d\ufeff\u2060\s]*rfl:tool_call\b[^>\n]*>[\s\S]*?<[\u200b-\u200d\ufeff\u2060\s]*\/[\u200b-\u200d\ufeff\u2060\s]*tool_call[\u200b-\u200d\ufeff\u2060\s]*>|<[\u200b-\u200d\ufeff\u2060\s]*rfl:(?:tool_call|function|parameter)\b[^>\n]*>[\s\S]*?(?=\n\n(?!\s*<[\u200b-\u200d\ufeff\u2060\s]*\/?[\u200b-\u200d\ufeff\u2060\s]*rfl:)|$)/gi;
+  const RFL_ORPHAN_TAG_REGEX = /<[\u200b-\u200d\ufeff\u2060\s]*\/?[\u200b-\u200d\ufeff\u2060\s]*rfl:[a-zA-Z0-9_:-]*[^>\n]*>/gi;
+  const HEADLESS_TAG_DEBRIS_RE = /(?:^|[\s\{\[\}\]"'`:])(?:[\u200b-\u200d\ufeff\u2060\s]*\/[\u200b-\u200d\ufeff\u2060\s]*(?:tool_call|function_call|function_calls|rfl:(?:tool_call|function|parameter|thought))|[\u200b-\u200d\ufeff\u2060]+\/?(?:tool_call|function_call|function_calls|rfl:[a-zA-Z0-9_:-]+)|rfl:(?:tool_call|function|parameter|thought))[^>\n]*>/gi;
+
+  function protectMarkdownCodeBlocks(str, { includeInline = false, skipToolPayloadFences = false } = {}) {
+    const saved = [];
+    if (typeof str !== 'string' || !str) return { masked: str || '', saved };
+    let nonFenceCursor = 0;
+    let activeToolDepth = 0;
+    const tagDeltaRe = /<[\u200b-\u200d\ufeff\u2060\s]*(\/?)[\u200b-\u200d\ufeff\u2060\s]*(?:rfl:(?:tool_call|function|parameter)|tool_call|function_call|function_calls)\b[^>\n]*>/gi;
+    let masked = str.replace(/```[^\n`]*\n?[\s\S]*?```/g, (full, offset) => {
+      const gap = str.slice(nonFenceCursor, offset);
+      nonFenceCursor = offset + full.length;
+      if (skipToolPayloadFences) {
+        tagDeltaRe.lastIndex = 0;
+        let dm;
+        while ((dm = tagDeltaRe.exec(gap)) !== null) {
+          if (dm[1]) activeToolDepth = Math.max(0, activeToolDepth - 1);
+          else activeToolDepth++;
+        }
+        if (activeToolDepth > 0) return full;
+        if (/^```(?:tool_call|json)\b/i.test(full)) {
+          const inner = full.replace(/^```[^\n]*\n?/, '').replace(/```$/, '').trim();
+          if (/"(?:name|tool|function|tool_name)"\s*:/.test(inner)) return full;
+        }
+      }
+      const idx = saved.push(full) - 1;
+      return `@@ZOZ_TS_FENCE_${idx}@@`;
+    });
+    if (includeInline) {
+      masked = masked.replace(/`[^`\n]+`/g, (full) => {
+        const idx = saved.push(full) - 1;
+        return `@@ZOZ_TS_FENCE_${idx}@@`;
+      });
+    }
+    return { masked, saved };
+  }
+
+  function restoreMarkdownCodeBlocks(str, saved) {
+    if (!saved || saved.length === 0 || typeof str !== 'string') return str;
+    return str.replace(/@@ZOZ_TS_FENCE_(\d+)@@/g, (_, i) => saved[Number(i)] ?? '');
+  }
+
+  function stripSelectiveZeroWidth(str) {
+    if (typeof str !== 'string' || !str) return '';
+    return str
+      .replace(/\u200d(?=[<\/]|(?:tool_call|function_call|function_calls|rfl:))|(?<=[<\/\>])\u200d/gi, '')
+      .replace(/[\u200b\u200c\ufeff\u2060]/g, '');
+  }
+
+  function stripRflToolBlocksLinear(str) {
+    if (typeof str !== 'string' || !str.includes('rfl:')) return str;
+    const tokenRe = /<[\u200b-\u200d\ufeff\u2060\s]*(\/?)[\u200b-\u200d\ufeff\u2060\s]*rfl:(tool_call|function|parameter)\b[^>\n]*>|<[\u200b-\u200d\ufeff\u2060\s]*(\/)[\u200b-\u200d\ufeff\u2060\s]*tool_call\s*>|(?:^|[\s\{\[\}\]"'`:])(?:[\u200b-\u200d\ufeff\u2060\s]*(\/)[\u200b-\u200d\ufeff\u2060\s]*|[\u200b-\u200d\ufeff\u2060]+)rfl:(tool_call|function|parameter)\b[^>\n]*>/gi;
+    const ranges = [];
+    const stack = [];
+    let m;
+    while ((m = tokenRe.exec(str)) !== null) {
+      const isClose = Boolean(m[1] || m[3] || m[4]);
+      const tagName = (m[2] || m[5] || 'tool_call').toLowerCase();
+      if (!isClose) {
+        stack.push({ start: m.index, endTag: m.index + m[0].length, tag: tagName });
+      } else if (stack.length > 0) {
+        // Find matching frame (or close outer tool_call when /tool_call hits)
+        let matchIdx = stack.length - 1;
+        while (matchIdx > 0 && stack[matchIdx].tag !== tagName && tagName !== 'tool_call') {
+          matchIdx--;
+        }
+        const frame = stack[matchIdx];
+        stack.length = matchIdx;
+        ranges.push([frame.start, m.index + m[0].length]);
+      }
+    }
+    if (stack.length > 0) {
+      const topUnclosed = stack[0];
+      const tail = str.slice(topUnclosed.endTag);
+      const breakMatch = /\n\n(?!\s*(?:<[\u200b-\u200d\ufeff\u2060\s]*\/?[\u200b-\u200d\ufeff\u2060\s]*rfl:|[\{\[]|"[^"]+"\s*:))/i.exec(tail);
+      const endPos = breakMatch ? (topUnclosed.endTag + breakMatch.index) : str.length;
+      ranges.push([topUnclosed.start, endPos]);
+    }
+    if (ranges.length === 0) return str;
+    ranges.sort((a, b) => a[0] - b[0]);
+    const merged = [];
+    for (const r of ranges) {
+      if (merged.length === 0 || r[0] > merged[merged.length - 1][1]) {
+        merged.push(r);
+      } else if (r[1] > merged[merged.length - 1][1]) {
+        merged[merged.length - 1][1] = r[1];
+      }
+    }
+    let out = '';
+    let cursor = 0;
+    for (const [s, e] of merged) {
+      out += str.slice(cursor, s);
+      cursor = e;
+    }
+    return out + str.slice(cursor);
+  }
   const PIPE_THOUGHT_REGEX = /<\|thought\|>[\s\S]*?(?:<\|thought\|>|$)/gi;
   const BRACKET_THINK_REGEX = /\[(?:THOUGHT|REASONING)\][\s\S]*?(?:\[\/(?:THOUGHT|REASONING)\]|$)/gi;
+  const HARMONY_THOUGHT_BLOCK_REGEX = /(?:<\|start\|>\s*(?:assistant\s*)?)?<\|channel\|>\s*(?:analysis|thought|thinking)\b[\s\S]*?(?:<\|end\|>|(?=<\|start\|>|<\|channel\|>\s*(?:final|commentary)\b)|$)/gi;
+  const HARMONY_TOOL_COMMENTARY_REGEX = /(?:<\|start\|>\s*(?:assistant\s*)?)?<\|channel\|>\s*commentary\b[\s\S]*?(?:<\|call\|>|<\|end\|>|(?=<\|start\|>|<\|channel\|>\s*final\b|\n\n(?!\s*[\{\[]))|$)/gi;
+  const HARMONY_CONTROL_TOKEN_REGEX = /<\|start(?:\|>|>)\s*(?:assistant|user|system|developer|tool)?[ \t]*|<\|channel(?:\|>|>)\s*(?:final|analysis|commentary|thought|thinking)?(?:\s+to=[a-zA-Z0-9_.:-]+)?(?:\s+json)?[ \t]*|<\|constrain(?:\|>|>)\s*[a-zA-Z0-9_.-]*[ \t]*|<\|(?:message|end|return|call|eot_id|im_start|im_end|endoftext)(?:\|>|>)[ \t]*/gi;
+  const HARMONY_NON_TOOL_CONTROL_REGEX = /<\|start(?:\|>|>)\s*(?:assistant|user|system|developer|tool)?[ \t]*|<\|channel(?:\|>|>)\s*(?:final|analysis|thought|thinking)[ \t]*|<\|(?:return|eot_id|im_start|im_end|endoftext)(?:\|>|>)[ \t]*/gi;
   const MODEL_TAG_REGEX = /\[(?:Model Penjawab|Model|AI Model|Konteks Percakapan|Konteks Silsilah|Konteks Internal|Catatan Konteks|INSTRUKSI FORMAT WAJIB|Instruksi Sistem & Konteks|INTEGRITAS KONTEKS|AUTONOMIC NERVOUS LOG|BIO-ENDOCRINE|ChatEndocrine):(?:[^\[\]]|\[[^\]]*\])*\](?:\n\n|\s*)/gi;
 
   // ==================== PURE MATHEMATICAL TOKEN TRANSPORT & NON-EUCLIDEAN ENGINE ====================
@@ -177,7 +280,7 @@
     if (mode === 'code' || mode === 'rewrite') {
       const fileName = options.fileName || '';
       if (fileName && options.useZozHeader) {
-        return `<<<ZOZ_FILE name="${fileName}">\n`;
+        return `<<<ZOZ_FILE name="${fileName}">>>\n`;
       }
       return `**${cleanSubject}**\n\n`;
     }
@@ -1122,7 +1225,7 @@
     for (let i = lines.length - 1; i >= 0; i--) {
       const l = lines[i];
       if (/^(?:langkah|step|transkripsi|polaritas|uji\s+opsi|opsi\s+\d|evaluasi)\b/i.test(l)) continue;
-      const m = l.match(/(?:kesimpulan|jawaban(?:\s+akhir|\s+yang\s+benar)?|final\s+answer|therefore|jadi\s+jawabannya)\s*[:=-]\s*(.+)$/i);
+      const m = l.match(/(?:kesimpulan(?:\s+akhir)?|jawaban(?:\s+akhir|\s+yang\s+benar)?|final\s+(?:answer|conclusion)|therefore|jadi\s+jawabannya)\s*[:=-]\s*(.+)$/i);
       if (m && m[1].trim()) return m[1].trim();
     }
     if (requireExplicitMarker) return '';
@@ -1148,7 +1251,10 @@
               const ans = item.correct_option_text || item.correct_option || item.answer;
               const explanation = (item.options_analysis && ans && item.options_analysis[ans]) || '';
               if (ans !== undefined && ans !== null && String(ans).trim()) {
-                parts.push(`**Jawaban yang tepat (${k}):** $${String(ans).replace(/^\$+|\$+$/g, '')}$` + (explanation ? `\n\n${explanation}` : ''));
+                const ansClean = String(ans).replace(/^\$+|\$+$/g, '').trim();
+                const isMathOrChoice = /^(?:[A-Ea-e]|[\\{}^_0-9+\-*/=().]+)$/.test(ansClean);
+                const formattedAns = isMathOrChoice ? `$${ansClean}$` : ansClean;
+                parts.push(`**Jawaban yang tepat (${k}):** ${formattedAns}` + (explanation ? `\n\n${explanation}` : ''));
               }
             }
           }
@@ -1159,23 +1265,36 @@
     return out;
   }
 
-  function stripReasoningText(rawText) {
+  function stripReasoningText(rawText, options = {}) {
     if (typeof rawText !== 'string' || !rawText) return '';
-    let cleaned = rawText
+    const preserveToolCallMarkup = Boolean(options && options.preserveToolCallMarkup);
+    const { masked, saved } = protectMarkdownCodeBlocks(rawText, { skipToolPayloadFences: !preserveToolCallMarkup });
+    let cleaned = masked
+      .replace(SELF_CLOSING_THINK_REGEX, '')
+      .replace(RFL_THOUGHT_TAG_REGEX, '')
+      .replace(HARMONY_THOUGHT_BLOCK_REGEX, '');
+    if (!preserveToolCallMarkup) {
+      cleaned = stripRflToolBlocksLinear(cleaned)
+        .replace(HARMONY_TOOL_COMMENTARY_REGEX, '')
+        .replace(RFL_TOOL_TAG_REGEX, '')
+        .replace(RFL_ORPHAN_TAG_REGEX, '');
+    }
+    cleaned = cleaned
       .replace(THINKING_TAG_REGEX, '')
       .replace(PIPE_THOUGHT_REGEX, '')
       .replace(BRACKET_THINK_REGEX, '')
-      .replace(/<\/?(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
+      .replace(/<[\u200b-\u200d\ufeff\u2060\s]*\/?[\u200b-\u200d\ufeff\u2060\s]*(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>/gi, '')
       .replace(/<\|thought\|>/gi, '')
       .replace(/\[\/?(?:THOUGHT|REASONING)\]/gi, '')
-      .replace(MODEL_TAG_REGEX, '')
-      .trim();
-    if (!cleaned && (/<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b/i.test(rawText) || /<\|thought\|>/i.test(rawText) || /\[(?:thought|reasoning)\]/i.test(rawText))) {
-      const inner = rawText
-        .replace(/^[\s\S]*?(?:<(?:think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|<\|thought\|>|\[(?:thought|reasoning)\])/i, '')
-        .replace(/<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|<\|thought\|>|\[\/(?:thought|reasoning)\]/gi, '')
+      .replace(preserveToolCallMarkup ? HARMONY_NON_TOOL_CONTROL_REGEX : HARMONY_CONTROL_TOKEN_REGEX, '')
+      .replace(MODEL_TAG_REGEX, '');
+    cleaned = restoreMarkdownCodeBlocks(cleaned, saved).trim();
+    if (!cleaned && (/<[\u200b-\u200d\ufeff\u2060\s]*(?:think|thought|thinking|reasoning|ant_thought|thought_process|rfl:thought)\b/i.test(masked) || /<\|thought\|>/i.test(masked) || /\[(?:thought|reasoning)\]/i.test(masked))) {
+      const inner = masked
+        .replace(/^[\s\S]*?(?:<[\u200b-\u200d\ufeff\u2060\s]*(?:think|thought|thinking|reasoning|ant_thought|thought_process|rfl:thought)\b[^>]*>|<\|thought\|>|\[(?:thought|reasoning)\])/i, '')
+        .replace(/<[\u200b-\u200d\ufeff\u2060\s]*\/[\u200b-\u200d\ufeff\u2060\s]*(?:think|thought|thinking|reasoning|ant_thought|thought_process|rfl:thought)\s*>|<\|thought\|>|\[\/(?:thought|reasoning)\]/gi, '')
         .trim();
-      return extractFallbackConclusionFromUnclosedThought(inner, { requireExplicitMarker: true });
+      return restoreMarkdownCodeBlocks(extractFallbackConclusionFromUnclosedThought(inner, { requireExplicitMarker: true }), saved);
     }
     // Bersihkan residu pseudo-cot JSON yang lolos keluar dari tag <think>
     cleaned = cleanPseudoCotJson(cleaned);
@@ -1200,6 +1319,7 @@
     let activeTag = '';
     let activeIsBracket = false;
     let activeIsPipe = false;
+    let activeIsHarmony = false;
     let pending = '';
     let capturedThought = '';
     let extractedThoughtQueue = '';
@@ -1217,10 +1337,13 @@
       }
     };
 
-    const OPEN_REGEX = /<(think|thought|thinking|reasoning|ant_thought|thought_process)\b[^>]*>|\[(thought|reasoning)\]|<\|thought\|>/i;
-    const ORPHAN_CLOSE_REGEX = /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|\[\/(?:thought|reasoning)\]|<\|thought\|>/gi;
-    const OPEN_PREFIXES = ['<think', '<thought', '<thinking', '<reasoning', '<ant_thought', '<thought_process', '<|thought|>', '[thought]', '[reasoning]'];
-    const CLOSE_TAGS = ['</think>', '</thought>', '</thinking>', '</reasoning>', '</ant_thought>', '</thought_process>', '<|thought|>', '[/thought]', '[/reasoning]'];
+    const OPEN_REGEX = /<[\u200b-\u200d\ufeff\u2060\s]*(think|thought|thinking|reasoning|ant_thought|thought_process)\b(?![^>]*\/\s*>)[^>]*>|<(?:[\u200b-\u200d\ufeff\u2060\s]*rfl:)?[\u200b-\u200d\ufeff\u2060\s]*(thought)\b[^>]*>|\[(thought|reasoning)\]|<\|thought\|>|<\|channel\|>\s*(?:analysis|thought|thinking)(?:\s*<\|message\|?>?)?/i;
+    const ORPHAN_CLOSE_REGEX = /<[\u200b-\u200d\ufeff\u2060\s]*\/[\u200b-\u200d\ufeff\u2060\s]*(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|<[\u200b-\u200d\ufeff\u2060\s]*\/[\u200b-\u200d\ufeff\u2060\s]*rfl:thought\s*>|\[\/(?:thought|reasoning)\]|<\|thought\|>/gi;
+    const OPEN_PREFIXES = ['<think', '<thought', '<thinking', '<reasoning', '<ant_thought', '<thought_process', '<rfl:thought', '<|thought|>', '<|channel|>analysis', '<|channel|>thought', '<|channel|>thinking', '<|start|>', '[thought]', '[reasoning]'];
+    const CLOSE_TAGS = ['</think>', '</thought>', '</thinking>', '</reasoning>', '</ant_thought>', '</thought_process>', '</rfl:thought>', '<|thought|>', '<|end|>', '<|channel|>final', '<|channel|>commentary', '<|start|>', '[/thought]', '[/reasoning]'];
+    const HARMONY_OUTSIDE_PREFIXES = ['<|channel|>', '<|message|>', '<|constrain|>', '<|call|>', '<|return|>', '<|eot_id|>', '<|im_start|>', '<|im_end|>', '<|endoftext|>'];
+    const OUTSIDE_PREFIXES = [...OPEN_PREFIXES, ...CLOSE_TAGS, ...HARMONY_OUTSIDE_PREFIXES];
+    const preserveToolCallMarkup = Boolean(options && options.preserveToolCallMarkup);
 
     function findPartialTagTailIndex(s, closingMode) {
       const minPos = Math.max(0, s.length - 128);
@@ -1228,11 +1351,17 @@
         const ch = s[i];
         if (ch !== '<' && ch !== '[') continue;
         const tail = s.slice(i).toLowerCase();
+        const compactTail = tail.replace(/[\u200b-\u200d\ufeff\u2060\s]+/g, '');
+        const pipeEndIdx = tail.indexOf('|>');
+        const hasClosingAngleOutsidePipe = pipeEndIdx >= 0
+          ? tail.indexOf('>', pipeEndIdx + 2) !== -1
+          : tail.includes('>');
         if (closingMode) {
-          const normalizedTail = tail.replace(/\s+>$/, '>');
-          if (CLOSE_TAGS.some(tag => tag.startsWith(normalizedTail) || (tag.startsWith(tail.trimEnd()) && !tail.includes('>')))) return i;
+          const normalizedTail = tail.replace(/[\u200b-\u200d\ufeff\u2060\s]+>/g, '>').replace(/[\u200b-\u200d\ufeff\u2060]+/g, '');
+          if (CLOSE_TAGS.some(tag => tag.startsWith(normalizedTail) || tag.startsWith(compactTail) || (tag.startsWith(tail.replace(/[\u200b-\u200d\ufeff\u2060]+/g, '').trimEnd()) && !hasClosingAngleOutsidePipe))) return i;
         } else {
-          if (OPEN_PREFIXES.some(pref => pref.startsWith(tail) || (pref.startsWith('<') && tail.startsWith(pref) && !tail.includes('>')))) {
+          const cleanTail = tail.replace(/[\u200b-\u200d\ufeff\u2060]+/g, '');
+          if (OUTSIDE_PREFIXES.some(pref => pref.startsWith(compactTail) || pref.startsWith(cleanTail) || (pref.startsWith('<') && (cleanTail.startsWith(pref) || compactTail.startsWith(pref)) && !hasClosingAngleOutsidePipe))) {
             return i;
           }
         }
@@ -1241,29 +1370,34 @@
     }
 
     function push(text, final = false) {
-      let input = pending + String(text || '');
+      let input = pending + String(text || '').replace(SELF_CLOSING_THINK_REGEX, '');
       pending = '';
       let output = '';
+      const zwCls = '[\\u200b-\\u200d\\ufeff\\u2060\\s]*';
 
       while (input.length > 0) {
         if (inside) {
-          const closeRe = activeIsPipe
-            ? /<\|thought\|>/i
-            : (activeTag
-              ? (activeIsBracket
-                ? new RegExp('\\[/' + activeTag + '\\]', 'i')
-                : new RegExp('</' + activeTag + '\\s*>', 'i'))
-              : /<\/(?:think|thought|thinking|reasoning|ant_thought|thought_process)\s*>|\[\/(?:thought|reasoning)\]|<\|thought\|>/i);
+          const closeRe = activeIsHarmony
+            ? /<\|end\|>|(?=<\|start\|>|<\|channel\|>\s*(?:final|commentary)\b)/i
+            : (activeIsPipe
+              ? /<\|thought\|>/i
+              : (activeTag === 'rfl:thought'
+                ? new RegExp(`<${zwCls}\\/${zwCls}rfl:${zwCls}thought\\s*>`, 'i')
+                : (activeTag
+                  ? (activeIsBracket
+                    ? new RegExp('\\[/' + activeTag + '\\]', 'i')
+                    : new RegExp(`<${zwCls}\\/${zwCls}${activeTag}\\s*>`, 'i'))
+                  : ORPHAN_CLOSE_REGEX)));
           const closeMatch = closeRe.exec(input);
           if (!closeMatch) {
             const partialIdx = !final ? findPartialTagTailIndex(input, true) : -1;
             if (partialIdx >= 0) {
               const safeThoughtSlice = input.slice(0, partialIdx);
-              if (capturedThought.length < 6000) capturedThought += safeThoughtSlice;
+              capturedThought = (capturedThought + safeThoughtSlice).slice(-6000);
               recordThought(safeThoughtSlice);
               pending = input.slice(partialIdx);
             } else {
-              if (capturedThought.length < 6000) capturedThought += input;
+              capturedThought = (capturedThought + input).slice(-6000);
               recordThought(input);
             }
             break;
@@ -1281,6 +1415,7 @@
           activeTag = '';
           activeIsBracket = false;
           activeIsPipe = false;
+          activeIsHarmony = false;
           continue;
         }
 
@@ -1298,9 +1433,11 @@
 
         output += input.slice(0, openMatch.index);
         input = input.slice(openMatch.index + openMatch[0].length);
-        activeIsPipe = openMatch[0].toLowerCase() === '<|thought|>';
-        activeIsBracket = Boolean(openMatch[2]);
-        activeTag = activeIsPipe ? '|thought|' : (openMatch[1] || openMatch[2] || '').toLowerCase();
+        activeIsHarmony = /^<\|channel\|>/i.test(openMatch[0]);
+        activeIsPipe = !activeIsHarmony && openMatch[0].toLowerCase() === '<|thought|>';
+        activeIsBracket = Boolean(openMatch[3]);
+        const isRflThought = Boolean(openMatch[2]);
+        activeTag = activeIsHarmony ? '|harmony|' : (activeIsPipe ? '|thought|' : (isRflThought ? 'rfl:thought' : (openMatch[1] || openMatch[3] || '').toLowerCase()));
         inside = true;
       }
 
@@ -1308,14 +1445,22 @@
         output += pending;
         pending = '';
       }
-      const cleanOut = output.replace(ORPHAN_CLOSE_REGEX, '').replace(MODEL_TAG_REGEX, '');
+      const cleanOut = output
+        .replace(ORPHAN_CLOSE_REGEX, '')
+        .replace(preserveToolCallMarkup ? HARMONY_NON_TOOL_CONTROL_REGEX : HARMONY_CONTROL_TOKEN_REGEX, '')
+        .replace(MODEL_TAG_REGEX, '');
       if (cleanOut.trim()) {
         emittedVisibleChars += cleanOut.trim().length;
       }
       if (final && inside && emittedVisibleChars === 0 && capturedThought.trim()) {
         const fallback = extractFallbackConclusionFromUnclosedThought(capturedThought, { requireExplicitMarker: true });
         capturedThought = '';
-        return fallback;
+        return fallback
+          ? fallback
+              .replace(ORPHAN_CLOSE_REGEX, '')
+              .replace(preserveToolCallMarkup ? HARMONY_NON_TOOL_CONTROL_REGEX : HARMONY_CONTROL_TOKEN_REGEX, '')
+              .replace(MODEL_TAG_REGEX, '')
+          : '';
       }
       return cleanOut;
     }
@@ -1345,18 +1490,28 @@
     if (Array.isArray(record)) return record.map(item => sanitizeRecord(item, tagStrippers, entropyGate, isFinalRecord, options));
     if (!record || typeof record !== 'object') return record;
     const preserveReasoning = Boolean(options && options.preserveReasoningFields);
+    const preserveToolCallMarkup = Boolean(options && options.preserveToolCallMarkup);
     const localFinal = Boolean(isFinalRecord || record.done === true || record.finish_reason);
+    const scopedStreamKey = record.index ?? record.id ?? record.model ?? options._streamKey ?? 'default';
+    const childOptions = (options && typeof options === 'object')
+      ? { ...options, _streamKey: scopedStreamKey }
+      : { _streamKey: scopedStreamKey };
     const out = {};
     let extractedThoughtBuf = '';
     for (const [key, value] of Object.entries(record)) {
+      // Jangan pernah sentuh atau sanitasi payload tool_calls (argumen file/edit/bash bisa berisi tag <think>/content atau nested objects)
+      if (key === 'tool_calls' || key === 'tool_call') {
+        out[key] = value;
+        continue;
+      }
       // Hapus kunci reasoning/thought kecuali jalur stream reasoning terstruktur diaktifkan klien
       if (REASONING_KEYS.has(key.toLowerCase())) {
         if (preserveReasoning) out[key] = value;
         continue;
       }
       if ((key === 'content' || key === 'response' || key === 'text') && typeof value === 'string') {
-        const id = key + ':' + (record.index ?? record.id ?? record.model ?? 'default');
-        if (!tagStrippers.has(id)) tagStrippers.set(id, createThinkTagStripper({ captureThought: preserveReasoning }));
+        const id = key + ':' + scopedStreamKey;
+        if (!tagStrippers.has(id)) tagStrippers.set(id, createThinkTagStripper({ captureThought: preserveReasoning, preserveToolCallMarkup }));
         const stripper = tagStrippers.get(id);
         let cleaned = stripper.push(value, localFinal);
         if (preserveReasoning && typeof stripper.drainThought === 'function') {
@@ -1371,8 +1526,8 @@
       } else if ((key === 'content' || key === 'response') && Array.isArray(value)) {
         out[key] = value.map((part, index) => {
           if (part && typeof part === 'object' && typeof part.text === 'string') {
-            const id = `part:${record.index ?? record.id ?? 'default'}:${index}`;
-            if (!tagStrippers.has(id)) tagStrippers.set(id, createThinkTagStripper({ captureThought: preserveReasoning }));
+            const id = `part:${scopedStreamKey}:${index}`;
+            if (!tagStrippers.has(id)) tagStrippers.set(id, createThinkTagStripper({ captureThought: preserveReasoning, preserveToolCallMarkup }));
             const stripper = tagStrippers.get(id);
             let cleaned = stripper.push(part.text, localFinal);
             if (preserveReasoning && typeof stripper.drainThought === 'function') {
@@ -1385,10 +1540,10 @@
             }
             return { ...part, text: cleaned };
           }
-          return sanitizeRecord(part, tagStrippers, entropyGate, localFinal, options);
+          return sanitizeRecord(part, tagStrippers, entropyGate, localFinal, childOptions);
         });
       } else if (value && typeof value === 'object') {
-        out[key] = sanitizeRecord(value, tagStrippers, entropyGate, localFinal, options);
+        out[key] = sanitizeRecord(value, tagStrippers, entropyGate, localFinal, childOptions);
       } else {
         out[key] = value;
       }
@@ -1423,7 +1578,9 @@
     const decoder = typeof TextDecoder !== 'undefined' ? new TextDecoder() : null;
     const tagStrippers = new Map();
     const preserveReasoningFields = Boolean(options && options.preserveReasoningFields);
-    const entropyGate = (options && options.userPrompt)
+    const preserveToolCallMarkup = Boolean(options && options.preserveToolCallMarkup);
+    let sawFinalRecord = false;
+    const entropyGate = (options && options.userPrompt && !preserveToolCallMarkup)
       ? createEntropyStreamGate(options.userPrompt, options)
       : null;
 
@@ -1464,9 +1621,10 @@
       try {
         const parsed = JSON.parse(raw);
         const isFinalRec = Boolean(mode === 'json' || (parsed && (parsed.done === true || (Array.isArray(parsed.choices) && parsed.choices.some(c => c && c.finish_reason)))));
+        if (isFinalRec) sawFinalRecord = true;
         const hadOllamaText = Boolean(parsed && parsed.message && typeof parsed.message.content === 'string' && parsed.message.content.length > 0);
         const hadOpenRouterText = Boolean(parsed && Array.isArray(parsed.choices) && parsed.choices.some(c => c && c.delta && typeof c.delta.content === 'string' && c.delta.content.length > 0));
-        const clean = sanitizeRecord(parsed, tagStrippers, entropyGate, isFinalRec, { preserveReasoningFields });
+        const clean = sanitizeRecord(parsed, tagStrippers, entropyGate, isFinalRec, { preserveReasoningFields, preserveToolCallMarkup });
         if (!isFinalRec) {
           if (hadOllamaText && clean && clean.message && clean.message.content === '' && !clean.message.tool_calls && !clean.message.images && !(preserveReasoningFields && hasStructuredReasoningPayload(clean.message))) {
             return '';
@@ -1496,9 +1654,9 @@
             const deltaObj = {};
             if (flushed.content) deltaObj.content = flushed.content;
             if (flushed.thought) deltaObj.reasoning = flushed.thought;
-            prefixFrame = 'data: ' + JSON.stringify({ choices: [{ index: 0, delta: deltaObj }] }) + eol + eol;
+            prefixFrame = 'data: ' + JSON.stringify({ choices: [{ index: 0, delta: deltaObj }] }) + '\n\n';
           }
-          return prefixFrame + 'data: [DONE]' + eol;
+          return prefixFrame + 'data: [DONE]' + (eol || '\n\n');
         }
         const clean = cleanJson(payload, true);
         return clean ? clean + eol : '';
@@ -1539,12 +1697,12 @@
       } else if (isJsonSequence) {
         if (buffer.trim()) {
           const clean = cleanJson(buffer.trim(), false);
-          if (clean) outputQueue.push(clean);
+          if (clean) outputQueue.push(clean + '\n');
         }
         buffer = '';
         output += drainQueue();
       } else if (buffer.trim()) {
-        output += processLine(buffer, '');
+        output += processLine(buffer, isOpenRouter ? '\n\n' : '');
         buffer = '';
       }
       const flushedEnd = finishTagStrippersDetailed();
@@ -1553,7 +1711,7 @@
           const msgObj = { role: 'assistant' };
           if (flushedEnd.content) msgObj.content = flushedEnd.content;
           if (flushedEnd.thought) msgObj.reasoning = flushedEnd.thought;
-          output += JSON.stringify({ message: msgObj, done: false }) + '\n';
+          output += JSON.stringify({ message: msgObj, done: sawFinalRecord }) + '\n';
         } else if (isOpenRouter) {
           const deltaObj = {};
           if (flushedEnd.content) deltaObj.content = flushedEnd.content;
@@ -1935,6 +2093,12 @@
 
     if (isOriginalQuizQuestion) return false;
 
+    // Guard v844: Jangan pernah membajak klarifikasi kontras ("buakan X tetapi Y") atau perintah/topik terminal, jaringan lokal, & coding sebagai revisi kuis!
+    if (/\bbu?a?kan\b[\s\S]{2,90}\b(?:tetapi|tapi|melainkan)\b/i.test(clean)) return false;
+    if (/\b(?:terminal|powershell|cmd|bash|shell|sandbox|run_command|run_terminal|write_file|read_file|edit_file|list_dir|grep_search|jaringan|ajringan|wifi|wi-?fi|ssid|kecepatan|speedtest|internet|lokal|local|lan\b|wlan\b|router|gateway|server|cloudflare|cloundflare|root|ipconfig|ifconfig|netsh|netstat|ping|port|proses|cpu|ram|gpu|disk|baterai|kode|coding|script|skrip|berkas|file|folder|direktori|website|aplikasi|python|node|git)\b/i.test(lower)) {
+      return false;
+    }
+
     const QUIZ_FAILURE_FEEDBACK_REGEX = /\b(?:anda\s+)?(?:tidak|belum)\s+lulus\b|\b(?:gagal|failed|fail|not\s+passing|re-?take|retake)\b|\b(?:your\s+score|skor(?:\s+anda)?|score|nilai(?:\s+saya)?|passing(?:\s+grade|\s+score)?)\s*(?:is|:|=|adalah)?\s*"?\s*\d{1,3}\s*%/i;
     const QUIZ_REVISION_PHRASE_REGEX = /\b(?:ganti\s+(?:jawabannya|jawaban|opsi|pilihan)|coba\s+ganti|salah\s+ganti|masih\s+salah|bukan\s+itu|jawaban\s+(?:lain|kedua|baru|yang\s+benar|berikutnya)|pilih\s+(?:yang\s+)?lain|opsi\s+lain|alternatif\s+lain|jawaban\s+salah|salah\s+(?:jawabannya|opsinya|pilihannya)|koreksi\s+(?:jawabannya|pilihan)|revisi\s+jawaban|change\s+(?:the\s+)?answer|switch\s+(?:the\s+)?option|try\s+another\s+option|wrong\s+answer)\b/i;
     const LMS_QUIZ_FEEDBACK_REGEX = /\b(?:not\s+quite|that'?s\s+not\s+(?:quite\s+)?right|incorrect|almost(?:,\s+but)?|try\s+again|consider\s+the|think\s+about|pikirkan\s+kembali|kurang\s+tepat|belum\s+tepat)\b/i;
@@ -2028,6 +2192,9 @@
     if (labeled.length >= 2) return labeled;
 
     if (!isAssistantText) {
+      if (/\b(?:write_file|read_file|run_terminal|run_command|edit_file|list_dir|grep_search|sandbox|buat\s+berkas|buatkan\s+website|exit_code|stdout|stderr)\b/i.test(textBlock)) {
+        return [];
+      }
       // Pada teks soal pengguna tanpa label huruf: pisahkan baris kalimat tanya utama & sub-instruksi ("Select the three that apply.") dari baris-baris opsi di bawahnya
       let qIdx = lines.findIndex(l => /\?\s*$/.test(l) || /:\s*$/.test(l) || /\.\.\.\s*$/.test(l) || /\b(?:which|what|manakah|berikut|following|pilih|select|choose|pernyataan)\b/i.test(l));
       while (qIdx !== -1 && qIdx + 1 < lines.length && (QUIZ_INSTRUCTION_LINE_REGEX.test(lines[qIdx + 1]) || /\?\s*$/.test(lines[qIdx + 1]) || /:\s*$/.test(lines[qIdx + 1]))) {
@@ -2042,7 +2209,9 @@
           const wc = l.split(/\s+/).filter(Boolean).length;
           return wc >= 1 && wc <= 36 && !/\?\s*$/.test(l);
         });
-      if (unlabeled.length >= 2) return unlabeled;
+      if (unlabeled.length >= 2 && (qIdx !== -1 || unlabeled.every(l => l.split(/\s+/).length <= 12))) {
+        return unlabeled;
+      }
     } else {
       // Pada teks analisis asisten (misal soal berasal dari gambar/screenshot):
       // Ekstrak baris daftar aktivitas/opsi seperti "Removing redundant data -> Data Preparation" atau bullet "- Opsi"
@@ -2224,11 +2393,11 @@
     }
     if (lastAsstIdx === -1 || !lastAsstMsg) return null;
 
-    // Cari giliran pengguna induk (soal asli) dengan melewati giliran-giliran revisi ("salah ganti") maupun post-hoc format ("abcd sja")
+    // Cari giliran pengguna induk (soal asli) maksimal 6 pesan ke belakang agar prompt lama di sesi panjang tidak bocor
     let parentUserMsg = null;
     let parentUserIdx = -1;
     let candidateOptions = [];
-    for (let i = lastAsstIdx - 1; i >= 0; i--) {
+    for (let i = lastAsstIdx - 1; i >= Math.max(0, lastAsstIdx - 6); i--) {
       if (rawList[i] && rawList[i].role === 'user' && rawList[i].content) {
         const uText = stripInjectedSystemTagsFromUserText(String(rawList[i].content || ''));
         if (!uText || isRevisionQuery(uText) || isPostHocProjectionQuery(uText)) continue;
@@ -3806,6 +3975,10 @@
     const hasTemporal = /\b(hari\s+ini|kemarin|sekarang|terbaru|terkini|minggu\s+ini|bulan\s+ini|tahun\s+ini|today|yesterday|right\s+now|latest|breaking|news|berita|harga|kurs|jadwal|cuaca|update|rilis|202[4-9])\b/i.test(lower);
     if (hasTemporal) return false;
 
+    // Pengecualian mutlak: tugas rekayasa perangkat lunak, CLI/terminal, file I/O, diagnostik jaringan lokal, atau tool calling
+    const isCodingOrToolTask = /\b(?:write_file|read_file|run_terminal|run_command|manage_task|edit_file|list_dir|grep_search|file_editor|patch_file|list_files|bash|terminal|powershell|cmd|shell|sandbox|sandbox_sessions|create_subagent|dispatch_tasks|wait_and_collect|z21_document_builder|execute_python_code|search_web|browse_web_page|python3?|node(?:\.js)?|javascript|typescript|golang|rust|html|css|react|skrip|script|kode|coding|program|parser|berkas|folder|folders?|files?|direktori|downloads?|unduhan|documents?|desktop|pictures?|videos?|music|daemon|background|proses|pid|stdout|stderr|exit_code|unit\s*test|pengujian|website|aplikasi|endpoint|localhost|ipconfig|ifconfig|netsh|netstat|speedtest|ssid|lan|wlan|ajringan|tasklist|systeminfo|mengedoit|mengedit|menambhakan|elihat)\b|\bterhubung\s+ke\s+jaringan\b|(?:gunakan|pakai|lewat|melalui)\s+terminal|(?:^|[\s"'`(])[a-z0-9_.-]+\.(?:js|mjs|cjs|py|ts|jsx|tsx|json|html|css|md|txt|csv|xlsx|pdf|docx|sh|ps1)\b/i.test(raw);
+    if (isCodingOrToolTask) return false;
+
     // Kriteria 1: Himpunan istilah konsep diskrit baris-demi-baris (2-8 baris konsep pendek)
     // Contoh eksplisit:
     // Competitive
@@ -3825,8 +3998,8 @@
     const conceptualTermsRegex = /\b(?:matematika(?:\s+murni)?|pure\s+math|competitive|independent|cooperative|interdependent|zero-sum|non-zero-sum|game\s+theory|nash\s+equilibrium|social\s+interdependence|relational\s+algebra|boolean\s+algebra|truth\s+table|monoid|semigroup|group\s+theory|ring\s+theory|field\s+theory|isomorphism|homomorphism|bijection|injection|surjection|set\s+theory|predicate\s+logic|modal\s+logic|epistemic|ontology|taxonomy|dichotomy|trichotomy|inductive|deductive|abductive|apriori|a\s+priori|aposteriori|a\s+posteriori|modus\s+ponens|modus\s+tollens|contrapositive|tautology|contradiction|contingency|matrix|determinant|eigenvalue|eigenvector|vector\s+space|subspace|orthogonal|basis|dimension|kernel|nullity|topology|metric\s+space|limit|derivative|integral|turunan|diferensial|kalkulus|aljabar|matriks|vektor|aritmatika|persamaan|pertidaksamaan|trigonometri|geometri|peluang|probabilitas|permutasi|kombinasi|himpunan|teorema|aksioma|silogisme|premis|silogistis|kontradiksi|faktorial|logaritma|deret|barisan|calculus|algebra|polynomial|quadratic|logarithm|factorial|permutation|combination|syllogism|premise|axiom|theorem)\b/i;
     if (conceptualTermsRegex.test(lower)) return true;
 
-    // Kriteria 3: Ekspresi simbolik matematika murni, fungsi, kalkulus, atau aritmatika numerik
-    const hasSymbolicMath = /(?:[\d\w]\s*[\+\-\*\/\^=><≤≥≠≈]\s*[\d\w]|f\([a-z]\)\s*=|dy\/dx|d\/dx|\\(?:int|sum|prod|lim|frac|sqrt)|sqrt\s*\(|\bsin\s*\(|\bcos\s*\(|\btan\s*\(|\blog\s*\(|\bln\s*\(|\b\d+\s*[\*x×\+\-\/÷\^]\s*\d+\b)/i.test(raw);
+    // Kriteria 3: Ekspresi simbolik matematika murni, fungsi, kalkulus, atau aritmatika numerik (aman dari path berkas & hyphenated words)
+    const hasSymbolicMath = /(?:\b\d+(?:\.\d+)?\s*[\+\-\*\/÷×\^=><≤≥≠≈]\s*\d+(?:\.\d+)?\b|\b[a-z]\s*[\+\-\*\^=]\s*(?:\d+|[a-z])\b|[a-z]\d*\s*\^\s*\d+|f\([a-z]\)\s*=|dy\/dx|d\/dx|\\(?:int|sum|prod|lim|frac|sqrt)|sqrt\s*\(|\b(?:sin|cos|tan|log|ln)\s*\()/i.test(raw);
     if (hasSymbolicMath) return true;
 
     // Kriteria 4: Struktur silogisme atau penalaran logika formal proposisional
@@ -4165,13 +4338,46 @@
     out = out.replace(/^(?:Saya\s+tidak\s+memiliki\s+persona|I\s+do\s+not\s+have\s+a\s+persona)[^,\n.]*[,.]\s*/i, '');
     out = out.replace(/^(?:Mohon\s+maaf,\s+)?(?:saya\s+tidak\s+dapat\s+berperan\s+sebagai|saya\s+hanya\s+bisa\s+membantu\s+sebagai\s+AI)[^,\n.]*[,.]\s*/i, '');
 
-    // 3. Bersihkan sisa token display tunggal serta residu blok Gemma 4 <|tool_call> / <|tool_response> yang tertinggal
-    out = out.replace(/<\|tool_call\|?>[\s\S]*?(?:<\|?tool_call\|?>|$)/gi, '');
-    out = out.replace(/<\|tool_response\|?>[\s\S]*?(?:<\|?tool_response\|?>|$)/gi, '');
-    out = out.replace(/^\[\[?ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]+\]?\]?\s*$/gim, '');
-    out = out.replace(/^\[\[?ZOZ_WEATHER_DISPLAY:wth_[a-zA-Z0-9_-]+\]?\]?\s*$/gim, '');
+    // 3. Bersihkan sisa token display tunggal serta residu blok Gemma 4 <|tool_call> / <|tool_response> dan Reflection <rfl:...> / headless /tool_call> di luar blok kode valid
+    const { masked: maskedOut, saved: savedCode } = protectMarkdownCodeBlocks(out, { includeInline: true, skipToolPayloadFences: true });
+    let bodyOut = stripRflToolBlocksLinear(maskedOut);
+    bodyOut = bodyOut.replace(/<\|tool_call\|?>[\s\S]*?(?:<\|?tool_call\|?>|<\|\/tool_call\|?>|$)/gi, '');
+    bodyOut = bodyOut.replace(/<\|tool_response\|?>[\s\S]*?(?:<\|?tool_response\|?>|<\|\/tool_response\|?>|$)/gi, '');
+    bodyOut = bodyOut.replace(RFL_TOOL_TAG_REGEX, '');
+    bodyOut = bodyOut.replace(RFL_ORPHAN_TAG_REGEX, '');
+    bodyOut = bodyOut.replace(/<[\u200b-\u200d\ufeff\u2060\s]*(?:tool_call|function_call|function_calls)\b[^>\n]*>[\s\S]*?(?:<[\u200b-\u200d\ufeff\u2060\s]*\/[\u200b-\u200d\ufeff\u2060\s]*(?:tool_call|function_call|function_calls)\s*>|(?=\n\n(?!\s*[\{\["]))|$)/gi, '');
+    bodyOut = bodyOut.replace(/(?:^|\n)[\s\{\[\}\]]*(?:<[\u200b-\u200d\ufeff\u2060\s]*\/?[\u200b-\u200d\ufeff\u2060\s]*(?:tool_call|function_call|function_calls)>?|[\u200b-\u200d\ufeff\u2060]+\/?(?:tool_call|function_call|function_calls|rfl:[a-zA-Z0-9_:-]+)>?|\/(?:tool_call|function_call|function_calls|rfl:(?:tool_call|function|parameter|thought))>)(?:[\s\}\]]*(?:\n|$))+/gi, '\n');
+    bodyOut = bodyOut.replace(/<[\u200b-\u200d\ufeff\u2060\s]*\/?[\u200b-\u200d\ufeff\u2060\s]*(?:tool_call|function_call|function_calls)[^>\n]*>(?:\s*[\}\]]*\s*)?/gi, '');
+    bodyOut = bodyOut.replace(HEADLESS_TAG_DEBRIS_RE, ' ');
+    bodyOut = bodyOut.replace(/^\[\[?ZOZ_IMAGE_DISPLAY:disp_[a-zA-Z0-9_-]+\]?\]?\s*$/gim, '');
+    bodyOut = bodyOut.replace(/^\[\[?ZOZ_WEATHER_DISPLAY:wth_[a-zA-Z0-9_-]+\]?\]?\s*$/gim, '');
+    out = restoreMarkdownCodeBlocks(stripSelectiveZeroWidth(bodyOut), savedCode).trim();
 
-    return out.trim();
+    const isNonEmptyJsonBraceDebris = (s) => {
+      if (!s || /^(?:\{\s*\}|\[\s*\])$/.test(s)) return false;
+      try { JSON.parse(s); return false; } catch (_) {}
+      return /^[\{\}\[\]\(\),;:\s]+$/.test(s) && /[\{\}\[\]]/.test(s);
+    };
+    if (isNonEmptyJsonBraceDebris(out)) {
+      return '';
+    }
+    return out;
+  }
+
+  function isCorruptedToolTagDebrisText(text) {
+    if (typeof text !== 'string') return false;
+    const rawNoZw = stripSelectiveZeroWidth(text).trim();
+    if (!rawNoZw) return /[\u200b\u200c\ufeff\u2060]/.test(text);
+    const isBraceDebris = (s) => {
+      if (!s || /^(?:\{\s*\}|\[\s*\])$/.test(s)) return false;
+      try { JSON.parse(s); return false; } catch (_) {}
+      return /^[\{\}\[\]\(\),;:\s]+$/.test(s) && /[\{\}\[\]]/.test(s);
+    };
+    const { masked: maskedRaw } = protectMarkdownCodeBlocks(text, { includeInline: true, skipToolPayloadFences: true });
+    const hadToolMarker = /(?:<[\u200b-\u200d\ufeff\u2060\s]*\/?[\u200b-\u200d\ufeff\u2060\s]*(?:tool_call|function_call|function_calls|rfl:[a-zA-Z0-9_:-]+)\b[^>\n]*>?|[\u200b-\u200d\ufeff\u2060]+\/?(?:tool_call|function_call|function_calls|rfl:[a-zA-Z0-9_:-]+)\b[^>\n]*>?|(?:^|[\s\{\[\}\]"'`:])(?:\/(?:tool_call|function_call|function_calls|rfl:(?:tool_call|function|parameter|thought))|rfl:(?:tool_call|function|parameter|thought))[^>\n]*>|<\|(?:tool_call|tool_response|call|response)\|?>)/i.test(maskedRaw);
+    const stripped = stripSelectiveZeroWidth(purifyHistoricalAssistantTurn(text)).trim();
+    if (!stripped) return hadToolMarker || isBraceDebris(rawNoZw) || /[\u200b\u200c\ufeff\u2060]/.test(text);
+    return isBraceDebris(stripped);
   }
 
   /**
@@ -4465,12 +4671,25 @@
     return mutated;
   }
 
+  const RAW_ASSISTANT_TAG_LEAK_RE = /(?:[\u200b-\u200d\ufeff\u2060]+\/?(?:tool_call|function_call|function_calls|rfl:[a-z0-9_:-]+)>?|<[\u200b-\u200d\ufeff\u2060\s]*\/?[\u200b-\u200d\ufeff\u2060\s]*(?:rfl:|(?:tool_call|function_call|function_calls)\b)|<\|(?:tool_call|tool_response)\b|(?:^|[\s\{\[\}\]"'`:])(?:\/(?:tool_call|function_call|function_calls|rfl:(?:tool_call|function|parameter|thought))|rfl:(?:tool_call|function|parameter|thought))[^>\n]*>)/i;
+
   function normalizeSessionMessagesPresentation(sessionObj) {
     if (!sessionObj || !Array.isArray(sessionObj.messages)) return false;
     let mutated = false;
     sessionObj.messages.forEach(m => {
-      if (m && m.role === 'user' && normalizeUserMessagePresentation(m)) {
+      if (!m) return;
+      if (m.role === 'user' && normalizeUserMessagePresentation(m)) {
         mutated = true;
+      } else if (m.role === 'assistant' && typeof m.content === 'string') {
+        const { masked: maskedMsg } = protectMarkdownCodeBlocks(m.content, { includeInline: true, skipToolPayloadFences: true });
+        if (RAW_ASSISTANT_TAG_LEAK_RE.test(maskedMsg) || isCorruptedToolTagDebrisText(m.content)) {
+          const cleaned = purifyHistoricalAssistantTurn(m.content);
+          const safeNext = (cleaned && !isCorruptedToolTagDebrisText(cleaned)) ? cleaned : '';
+          if (safeNext !== m.content) {
+            m.content = safeNext;
+            mutated = true;
+          }
+        }
       }
     });
     return mutated;
@@ -4484,6 +4703,7 @@
     stripReasoningText,
     reflowShreddedProse,
     createThinkTagStripper,
+    sanitizeRecord,
     createProviderStreamFilter,
     extractIntentVector,
     computeStreamMetrics,
@@ -4507,11 +4727,13 @@
     computeOptimalSamplingTemperature,
     projectGroundedResponseMathematically,
     purifyHistoricalAssistantTurn,
+    isCorruptedToolTagDebrisText,
     computePersonaResonanceVector,
     sanitizeModelPersonaDrift,
     stripInjectedSystemTagsFromUserText,
     isRevisionQuery,
     isPostHocProjectionQuery,
+    extractCandidateOptionsFromTextBlock,
     identifyChosenOptionsInAssistantTurn,
     extractParentQuizContext,
     computeDamerauLevenshtein,

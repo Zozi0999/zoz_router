@@ -427,13 +427,18 @@ function upsertEntity(entityData) {
   }
 }
 
-function findEntityByName(userId, name, scope = 'global') {
+function findEntityByName(userId, name, scope = 'global', { strictProjectScope = false } = {}) {
+  const { validateScope, isProjectScope } = require('../types');
   const instance = initDatabase();
+  const normScope = scope ? validateScope(scope) : 'global';
+  const strict = Boolean((strictProjectScope || isProjectScope(normScope)) && normScope !== 'global');
 
   if (instance.mode === 'memory') {
     const target = (name || '').toLowerCase();
     for (const e of memStore.entities.values()) {
-      if (isRecordOwnedBy(e, userId) && e.name.toLowerCase() === target && (e.scope === scope || e.scope === 'global')) {
+      const eScope = validateScope(e.scope || 'global');
+      const scopeOk = strict ? (eScope === normScope) : (eScope === normScope || eScope === 'global');
+      if (isRecordOwnedBy(e, userId) && e.name.toLowerCase() === target && scopeOk) {
         return e;
       }
     }
@@ -441,8 +446,11 @@ function findEntityByName(userId, name, scope = 'global') {
   }
 
   const { db } = instance;
-  const stmt = db.prepare("SELECT * FROM entities WHERE user_id = ? AND lower(name) = lower(?) AND (scope = ? OR scope = 'global') LIMIT 1");
-  return queryGet(stmt, userId, name, scope);
+  const sql = strict
+    ? 'SELECT * FROM entities WHERE user_id = ? AND lower(name) = lower(?) AND scope = ? LIMIT 1'
+    : "SELECT * FROM entities WHERE user_id = ? AND lower(name) = lower(?) AND (scope = ? OR scope = 'global') LIMIT 1";
+  const stmt = db.prepare(sql);
+  return queryGet(stmt, userId, name, normScope);
 }
 
 // ==================== RELATIONS API (TEMPORAL GRAPH) ====================
@@ -495,17 +503,22 @@ function addRelation(relationData, { resolveConflict = true } = {}) {
   return rel;
 }
 
-function traverseActiveGraph(userId, entityId, maxHops = 2, scope = null) {
+function traverseActiveGraph(userId, entityId, maxHops = 2, scope = null, { strictProjectScope = false } = {}) {
+  const { validateScope, isProjectScope } = require('../types');
   const instance = initDatabase();
+  const normScope = scope ? validateScope(scope) : null;
+  const strict = Boolean(normScope && (strictProjectScope || isProjectScope(normScope)) && normScope !== 'global');
 
   if (instance.mode === 'memory') {
     const visitedNodes = new Set([entityId]);
     const matchedRelations = [];
     let currentTier = [entityId];
     const isEntityInScope = (eid) => {
-      if (!scope) return true;
+      if (!normScope) return true;
       const ent = memStore.entities.get(eid);
-      return !ent || ent.scope === scope || ent.scope === 'global';
+      if (!ent) return false;
+      const eScope = validateScope(ent.scope || 'global');
+      return strict ? (eScope === normScope) : (eScope === normScope || eScope === 'global');
     };
 
     for (let hop = 0; hop < maxHops; hop++) {
@@ -516,7 +529,13 @@ function traverseActiveGraph(userId, entityId, maxHops = 2, scope = null) {
           if (r.userId === userId && (r.sourceEntityId === nodeId || r.targetEntityId === nodeId) && !r.validUntil) {
             if (!isEntityInScope(r.sourceEntityId) || !isEntityInScope(r.targetEntityId)) continue;
             if (!matchedRelations.some(m => m.id === r.id)) {
-              matchedRelations.push(r);
+              const srcEnt = memStore.entities.get(r.sourceEntityId);
+              const tgtEnt = memStore.entities.get(r.targetEntityId);
+              matchedRelations.push({
+                ...r,
+                source_scope: srcEnt ? validateScope(srcEnt.scope || 'global') : 'global',
+                target_scope: tgtEnt ? validateScope(tgtEnt.scope || 'global') : 'global'
+              });
             }
             const neighbor = r.sourceEntityId === nodeId ? r.targetEntityId : r.sourceEntityId;
             if (!visitedNodes.has(neighbor)) {
@@ -541,16 +560,20 @@ function traverseActiveGraph(userId, entityId, maxHops = 2, scope = null) {
     const nextTier = [];
     for (const nodeId of currentTier) {
       let sql = `
-        SELECT r.*, e1.name as source_name, e2.name as target_name 
+        SELECT r.*, e1.name as source_name, e2.name as target_name, e1.scope as source_scope, e2.scope as target_scope
         FROM relations r
         LEFT JOIN entities e1 ON r.source_entity_id = e1.id
         LEFT JOIN entities e2 ON r.target_entity_id = e2.id
         WHERE r.user_id = ? AND (r.source_entity_id = ? OR r.target_entity_id = ?) AND r.valid_until IS NULL
       `;
       const params = [userId, nodeId, nodeId];
-      if (scope) {
-        sql += " AND (e1.scope IS NULL OR e1.scope = ? OR e1.scope = 'global') AND (e2.scope IS NULL OR e2.scope = ? OR e2.scope = 'global')";
-        params.push(scope, scope);
+      if (normScope) {
+        if (strict) {
+          sql += ' AND e1.scope = ? AND e2.scope = ?';
+        } else {
+          sql += " AND (e1.scope = ? OR e1.scope = 'global') AND (e2.scope = ? OR e2.scope = 'global')";
+        }
+        params.push(normScope, normScope);
       }
       const stmt = db.prepare(sql);
       const rows = queryAll(stmt, ...params);
@@ -779,12 +802,15 @@ function clearAllMemories(userId) {
   }
 }
 
-function listMemories(userId, { category = null, scope = null, q = null, limit = 50, allowLargeLimit = false } = {}) {
+function listMemories(userId, { category = null, scope = null, strictProjectScope = false, q = null, limit = 50, allowLargeLimit = false } = {}) {
+  const { validateScope, isProjectScope } = require('../types');
   const instance = initDatabase();
   const uid = userId || config.DEFAULT_USER_ID;
   const maxCap = allowLargeLimit ? 5000 : 200;
   const safeLimit = Math.max(1, Math.min(parseInt(limit, 10) || 50, maxCap));
   const normCat = category ? (category === 'general_fact' ? 'fact' : category) : null;
+  const normScope = scope ? validateScope(scope) : null;
+  const strict = Boolean(normScope && (strictProjectScope || isProjectScope(normScope)) && normScope !== 'global');
 
   if (instance.mode === 'memory') {
     let list = Array.from(memStore.memories.values())
@@ -797,8 +823,11 @@ function listMemories(userId, { category = null, scope = null, q = null, limit =
         list = list.filter(m => m.category === normCat);
       }
     }
-    if (scope) {
-      list = list.filter(m => m.scope === scope || m.scope === 'global');
+    if (normScope) {
+      list = list.filter(m => {
+        const ms = validateScope(m.scope || 'global');
+        return strict ? (ms === normScope) : (ms === normScope || ms === 'global');
+      });
     }
     if (q && q.trim()) {
       const qLower = q.trim().toLowerCase();
@@ -820,9 +849,9 @@ function listMemories(userId, { category = null, scope = null, q = null, limit =
       params.push(normCat);
     }
   }
-  if (scope) {
-    sql += " AND (scope = ? OR scope = 'global')";
-    params.push(scope);
+  if (normScope) {
+    sql += strict ? ' AND scope = ?' : " AND (scope = ? OR scope = 'global')";
+    params.push(normScope);
   }
   if (q && q.trim()) {
     sql += " AND content LIKE ? ESCAPE '\\'";
@@ -838,9 +867,12 @@ function listMemories(userId, { category = null, scope = null, q = null, limit =
 
 // ==================== SEARCH SIGNALS FOR RECALL ====================
 
-function searchMemoriesFTS5(userId, queryText, scope = 'global', limit = 10) {
+function searchMemoriesFTS5(userId, queryText, scope = 'global', limit = 10, { strictProjectScope = false } = {}) {
+  const { validateScope, isProjectScope } = require('../types');
   const instance = initDatabase();
   const uid = userId || config.DEFAULT_USER_ID;
+  const normScope = scope ? validateScope(scope) : 'global';
+  const strict = Boolean((strictProjectScope || isProjectScope(normScope)) && normScope !== 'global');
   const cleanTokens = (queryText || '').replace(/[^\p{L}\p{N}_]/gu, ' ').trim().split(/\s+/).filter(Boolean).slice(0, 10);
   if (cleanTokens.length === 0) return [];
 
@@ -848,7 +880,8 @@ function searchMemoriesFTS5(userId, queryText, scope = 'global', limit = 10) {
     const list = Array.from(memStore.memories.values()).filter(m => {
       const isOwner = isRecordOwnedBy(m, uid);
       const isActive = m.isActive !== undefined ? m.isActive : m.is_active;
-      const isScope = (m.scope === scope || m.scope === 'global');
+      const ms = validateScope(m.scope || 'global');
+      const isScope = strict ? (ms === normScope) : (ms === normScope || ms === 'global');
       if (!isOwner || !isActive || !isScope) return false;
       const c = (m.content || '').toLowerCase();
       return cleanTokens.some(tok => c.includes(tok.toLowerCase()));
@@ -858,6 +891,8 @@ function searchMemoriesFTS5(userId, queryText, scope = 'global', limit = 10) {
 
   const { db } = instance;
   const ftsMatch = cleanTokens.map(w => `"${w}"*`).join(' OR ');
+  const scopeClause = strict ? 'm.scope = ?' : "(m.scope = ? OR m.scope = 'global')";
+  const likeScopeClause = strict ? 'scope = ?' : "(scope = ? OR scope = 'global')";
 
   try {
     const stmt = db.prepare(`
@@ -867,33 +902,37 @@ function searchMemoriesFTS5(userId, queryText, scope = 'global', limit = 10) {
       WHERE fts.memories_fts MATCH ? 
         AND m.user_id = ?
         AND m.is_active = 1
-        AND (m.scope = ? OR m.scope = 'global')
+        AND ${scopeClause}
       ORDER BY fts.rank ASC
       LIMIT ?
     `);
-    return queryAll(stmt, ftsMatch, uid, scope, limit);
+    return queryAll(stmt, ftsMatch, uid, normScope, limit);
   } catch (_) {
     // Fallback LIKE search if FTS5 table is disabled
     const stmt = db.prepare(`
       SELECT * FROM memories 
-      WHERE user_id = ? AND is_active = 1 AND (scope = ? OR scope = 'global')
+      WHERE user_id = ? AND is_active = 1 AND ${likeScopeClause}
         AND (${cleanTokens.map(() => "content LIKE ? ESCAPE '\\'").join(' OR ')})
       ORDER BY created_at DESC LIMIT ?
     `);
     const likeParams = cleanTokens.map(w => `%${escapeSqlLike(w)}%`);
-    return queryAll(stmt, uid, scope, ...likeParams, limit);
+    return queryAll(stmt, uid, normScope, ...likeParams, limit);
   }
 }
 
-function searchMemoriesVector(userId, queryVec, scope = 'global', limit = 10) {
+function searchMemoriesVector(userId, queryVec, scope = 'global', limit = 10, { strictProjectScope = false } = {}) {
+  const { validateScope, isProjectScope } = require('../types');
   const instance = initDatabase();
   const uid = userId || config.DEFAULT_USER_ID;
+  const normScope = scope ? validateScope(scope) : 'global';
+  const strict = Boolean((strictProjectScope || isProjectScope(normScope)) && normScope !== 'global');
 
   if (instance.mode === 'memory') {
     const rows = Array.from(memStore.memories.values()).filter(m => {
       const isOwner = isRecordOwnedBy(m, uid);
       const isActive = m.isActive !== undefined ? m.isActive : m.is_active;
-      const isScope = (m.scope === scope || m.scope === 'global');
+      const ms = validateScope(m.scope || 'global');
+      const isScope = strict ? (ms === normScope) : (ms === normScope || ms === 'global');
       return isOwner && isActive && isScope;
     }).map(normalizeMemoryRow);
 
@@ -912,13 +951,14 @@ function searchMemoriesVector(userId, queryVec, scope = 'global', limit = 10) {
   }
 
   const { db } = instance;
+  const scopeClause = strict ? 'scope = ?' : "(scope = ? OR scope = 'global')";
   const stmt = db.prepare(`
     SELECT * FROM memories 
-    WHERE user_id = ? AND is_active = 1 AND (scope = ? OR scope = 'global')
+    WHERE user_id = ? AND is_active = 1 AND ${scopeClause}
     ORDER BY updated_at DESC
     LIMIT 1000
   `);
-  const rows = queryAll(stmt, uid, scope);
+  const rows = queryAll(stmt, uid, normScope);
   if (!rows || rows.length === 0) return [];
 
   const scored = [];
@@ -1056,8 +1096,14 @@ function getInsightsData(userId, scope = null) {
   `;
   const relParams = [uid];
   if (scope) {
-    relSql += " AND (e1.scope IS NULL OR e1.scope = ? OR e1.scope = 'global') AND (e2.scope IS NULL OR e2.scope = ? OR e2.scope = 'global')";
-    relParams.push(scope, scope);
+    const { validateScope, isProjectScope } = require('../types');
+    const normScope = validateScope(scope);
+    if (isProjectScope(normScope) && normScope !== 'global') {
+      relSql += ' AND e1.scope = ? AND e2.scope = ?';
+    } else {
+      relSql += " AND (e1.scope = ? OR e1.scope = 'global') AND (e2.scope = ? OR e2.scope = 'global')";
+    }
+    relParams.push(normScope, normScope);
   }
   relSql += ' ORDER BY r.valid_from DESC LIMIT 20';
   const activeRelations = queryAll(db.prepare(relSql), ...relParams);

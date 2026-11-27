@@ -175,6 +175,14 @@ function triggerAsyncBackgroundExtraction({
   setImmediate(async () => {
     try {
       if (!userMessage || userMessage.trim().length < 2) return;
+      const rawUserTrim = String(userMessage || '').trim();
+      const rawAsstTrim = String(assistantResponse || '').trim();
+      const isInternalRetryPrompt = /^\[(?:KOREKSI\s+(?:INTERNAL|EKSEKUSI|LANJUTAN)|VERIFICATION\s+GATE\s+Z21|DATA\s+(?:HASIL\s+)?PENELUSURAN)\b/i.test(rawUserTrim);
+      const isPoisonedAssistantTurn =
+        /\[Verification\s+Gate\s+Z21\s*[—–-]\s*Aksi\s+Belum\s+Terverifikasi/i.test(rawAsstTrim) ||
+        /<\u200b?\/?rfl:(?:parameter|tool_call|function)\b|<\u200b?tool_call>\s*\}/i.test(rawAsstTrim) ||
+        /Maaf,\s*model\s+tidak\s+menghasilkan\s+teks\s+jawaban/i.test(rawAsstTrim);
+      if (isInternalRetryPrompt || isPoisonedAssistantTurn) return;
 
       // 0A. Simpan Pelajaran Koreksi Kesalahan Counterfactual (Error-Learning Memory: P(H_falsified) = 0)
       let resolvedErrorLesson = errorLesson;
@@ -217,7 +225,7 @@ function triggerAsyncBackgroundExtraction({
       if (resolvedErrorLesson && resolvedErrorLesson.content) {
         const sanitizedLesson = sanitizeFactCandidate(resolvedErrorLesson.content);
         if (sanitizedLesson.accepted) {
-          const existingLessons = dbStorage.listMemories(userId, { category: 'error_lesson', limit: 40 });
+          const existingLessons = dbStorage.listMemories(userId, { category: 'error_lesson', scope, strictProjectScope: true, limit: 40 });
           const qProbe = (resolvedErrorLesson.questionText || '').toLowerCase().slice(0, 90);
           const dupLesson = qProbe.length >= 15
             ? existingLessons.find(m => (m.content || '').toLowerCase().includes(qProbe))
@@ -279,9 +287,11 @@ function triggerAsyncBackgroundExtraction({
       if (!resolvedEpisodic && userMessage.trim().length >= 18 && assistantResponse && assistantResponse.trim().length >= 10) {
         const cleanQ = userMessage
           .replace(/\n*\[PROYEKSI (?:RUANG KEADAAN REVISI|OPERATOR ANAPHORA)[\s\S]*$/i, '')
+          .replace(/\n*\[(?:KOREKSI\s+(?:INTERNAL|EKSEKUSI|LANJUTAN)|VERIFICATION\s+GATE\s+Z21)[\s\S]*$/i, '')
           .replace(/\s+/g, ' ')
           .trim();
-        if (cleanQ.length >= 18 && !/^(?:halo|hai|pagi|siang|sore|malam|ok|oke|makasih|thanks|ping|tes)[\s!.?]*$/i.test(cleanQ)) {
+        const isOffensiveOrNsfwNoise = /\b(?:idot|idiot|goblok|tolol|bego|anjing|bangsat|sexs?|porn(?:hub)?|xvideos|xnxx|bokep)\b/i.test(cleanQ);
+        if (cleanQ.length >= 18 && !isOffensiveOrNsfwNoise && !/^(?:halo|hai|pagi|siang|sore|malam|ok|oke|makasih|thanks|ping|tes)[\s!.?]*$/i.test(cleanQ)) {
           const cleanA = assistantResponse.replace(/\s+/g, ' ').trim().slice(0, 260);
           resolvedEpisodic = {
             questionSnippet: cleanQ.slice(0, 240),
@@ -292,7 +302,7 @@ function triggerAsyncBackgroundExtraction({
       if (resolvedEpisodic && resolvedEpisodic.content) {
         const sanitizedEp = sanitizeFactCandidate(resolvedEpisodic.content);
         if (sanitizedEp.accepted) {
-          const existingEps = dbStorage.listMemories(userId, { category: 'episodic_context', limit: 40 });
+          const existingEps = dbStorage.listMemories(userId, { category: 'episodic_context', scope, strictProjectScope: true, limit: 40 });
           const qKey = (resolvedEpisodic.questionSnippet || '').toLowerCase().slice(0, 80);
           const dupEp = qKey.length >= 15
             ? existingEps.find(m => (m.content || '').toLowerCase().includes(qKey))

@@ -12,4 +12,5 @@ __pycache__/
 bin/*.exe
 endorfin analyst/
 .wrangler/
+sandbox_sessions/
 

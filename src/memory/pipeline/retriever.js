@@ -72,15 +72,26 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
   const targetScope = scope || config.DEFAULT_SCOPE;
   const rawMax = options.maxResults !== undefined ? Number(options.maxResults) : config.MAX_RECALL_RESULTS;
   const maxResults = Math.max(1, Math.min(100, Number.isFinite(rawMax) ? Math.floor(rawMax) : config.MAX_RECALL_RESULTS));
+  const minLexicalSimilarity = (options.minSimilarity !== undefined && Number.isFinite(Number(options.minSimilarity)))
+    ? Math.max(0, Math.min(1, Number(options.minSimilarity)))
+    : (config.MIN_LEXICAL_SIMILARITY ?? 0.25);
+  const { validateScope, isProjectScope } = require('../types');
+  const normScope = validateScope(targetScope);
+  const strictProjectScope = Boolean(
+    options.strictProjectScope ||
+    isProjectScope(targetScope) ||
+    isProjectScope(normScope)
+  );
+  const effectiveStrict = Boolean(strictProjectScope && normScope !== 'global');
   const rawRrfK = options.rrfK !== undefined ? Number(options.rrfK) : config.RRF_K;
   const rrfK = Math.max(1, Number.isFinite(rawRrfK) ? rawRrfK : config.RRF_K);
 
   // 1. Vector Signal
   const queryVec = dbStorage.computeFastEmbedding(q);
-  const vectorHits = dbStorage.searchMemoriesVector(uid, queryVec, targetScope, 24);
+  const vectorHits = dbStorage.searchMemoriesVector(uid, queryVec, normScope, 24, { strictProjectScope: effectiveStrict });
 
   // 2. FTS5 BM25 Signal
-  const ftsHits = dbStorage.searchMemoriesFTS5(uid, q, targetScope, 24);
+  const ftsHits = dbStorage.searchMemoriesFTS5(uid, q, normScope, 24, { strictProjectScope: effectiveStrict });
 
   // 3. Graph Signal (Entity match -> Active Relation Traversal, supports punctuation & multi-word entities)
   const graphHits = [];
@@ -107,10 +118,10 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
   const matchedEntities = [];
 
   for (const cand of candidateNames) {
-    const ent = dbStorage.findEntityByName(uid, cand, targetScope);
+    const ent = dbStorage.findEntityByName(uid, cand, normScope, { strictProjectScope: effectiveStrict });
     if (ent && !matchedEntities.some(e => e.id === ent.id)) {
       matchedEntities.push(ent);
-      const activeRelations = dbStorage.traverseActiveGraph(uid, ent.id, config.GRAPH_MAX_HOPS, targetScope);
+      const activeRelations = dbStorage.traverseActiveGraph(uid, ent.id, config.GRAPH_MAX_HOPS, normScope, { strictProjectScope: effectiveStrict });
       for (const rel of activeRelations) {
         if (!graphHits.some(g => g.id === rel.id)) {
           graphHits.push(rel);
@@ -149,15 +160,19 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
     addRank(item, idx + 1, config.WEIGHT_BM25, 'bm25');
   });
 
-  // Graph relations that point to memories or facts
+  // Graph relations that point to memories or facts (hormati scope asli entitas sumber/tujuan)
   graphHits.forEach((rel, idx) => {
-    // If relation has a fact, treat as virtual or linked memory
+    const relSrcScope = rel.source_scope || rel.sourceScope || '';
+    const relTgtScope = rel.target_scope || rel.targetScope || '';
+    const inferredScope = (relSrcScope && relSrcScope !== 'global')
+      ? relSrcScope
+      : ((relTgtScope && relTgtScope !== 'global') ? relTgtScope : (relSrcScope || relTgtScope || 'global'));
     const syntheticItem = {
       id: `rel_${rel.id}`,
       user_id: uid,
       content: rel.fact,
       category: 'technical_stack',
-      scope: targetScope,
+      scope: inferredScope,
       confidence: 1.0,
       episode_id: rel.episode_id ?? rel.episodeId ?? null,
       is_active: 1
@@ -167,7 +182,7 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
 
   // 4B. Counterfactual Error-Lesson Matching (High-Priority P(H_falsified) = 0 Signal)
   const queryTokens = extractContentTokens(q);
-  const allRecent = dbStorage.listMemories(uid, { scope: targetScope, limit: 60 })
+  const allRecent = dbStorage.listMemories(uid, { scope: normScope, strictProjectScope: effectiveStrict, limit: 60 })
     .filter(m => m && m.is_active !== 0 && m.isActive !== 0 && m.is_active !== false);
   if (queryTokens.length >= 2) {
     const errorLessons = allRecent.filter(m => m && (m.category === 'error_lesson' || String(m.content || '').startsWith('[KOREKSI KESALAHAN TERVERIFIKASI]')));
@@ -196,22 +211,34 @@ function recallMemories(userId, queryText, scope = 'global', options = {}) {
     });
   }
 
-  // 4D. Bayesian Core Fact Invariant Prior (P(m_core) > 0)
-  // Fakta terverifikasi pengguna, identitas, preferensi, dan relasi adalah invariant priors
+  // 4D. Bayesian Core Fact Invariant Prior (Hanya injeksikan bila ada kecocokan semantik/leksikal nyata >= threshold)
   const coreMemories = allRecent.filter(m => m && (m.category === 'fact' || m.category === 'preference' || m.category === 'project_context'));
   coreMemories.forEach((coreMem, idx) => {
     const sim = computeTokenOverlapScore(queryTokens, coreMem.content || '');
-    if (!isExplicitCrossSessionRecall && sim <= 0 && idx >= 5) return;
-    const priorWeight = isExplicitCrossSessionRecall ? 1.8 : (sim > 0 ? 0.8 : 0.35);
-    addRank({ ...coreMem }, idx + 1, priorWeight + sim * 1.5, 'core_fact');
+    if (!isExplicitCrossSessionRecall && sim < minLexicalSimilarity) return;
+    const priorWeight = isExplicitCrossSessionRecall ? 1.8 : (0.8 + sim * 2.0);
+    addRank({ ...coreMem }, idx + 1, priorWeight, 'core_fact');
   });
 
-  // Sort by combined RRF score descending (drop poisoned claims, and suppress external episodic on live web queries)
+  // Sort by combined RRF score descending (drop poisoned claims, zero-overlap noise, & enforce strict project-scope isolation)
   const sorted = Array.from(rrfMap.values())
     .filter(entry => {
       if (!entry || !entry.item || entry.score < config.MIN_RELEVANCE_SCORE) return false;
       if (isPoisonedHallucinationText(entry.item.content)) return false;
       if (suppressExternalEpisodic && isExternalNewsOrModelClaimMemory(entry.item)) return false;
+      const lexSim = computeTokenOverlapScore(queryTokens, entry.item.content || '');
+      const hasErrorLessonSignal = entry.signals.has('error_lesson');
+      const requiredLexMin = entry.signals.has('graph') ? Math.min(minLexicalSimilarity, 0.2) : minLexicalSimilarity;
+      if (!isExplicitCrossSessionRecall && !hasErrorLessonSignal && lexSim < requiredLexMin) {
+        return false;
+      }
+      if (effectiveStrict && normScope && normScope !== 'global') {
+        const itemScope = validateScope(entry.item.scope || 'global');
+        const isMatchedPref = entry.item.category === 'preference' && lexSim >= Math.max(0.35, minLexicalSimilarity);
+        if (itemScope !== normScope && !isMatchedPref) {
+          return false;
+        }
+      }
       return true;
     })
     .sort((a, b) => b.score - a.score)

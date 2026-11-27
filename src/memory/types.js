@@ -27,8 +27,13 @@ function validateCategory(cat) {
 }
 
 function validateScope(scope) {
-  const clean = String(scope || '').toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
+  const clean = String(scope || '').toLowerCase().trim().replace(/[:]+/g, '_').replace(/[^a-z0-9_-]/g, '');
   return clean || 'global';
+}
+
+function isProjectScope(scope) {
+  const clean = String(scope || '').toLowerCase().trim();
+  return clean.startsWith('project_') || clean.startsWith('project:') || clean.startsWith('project-');
 }
 
 function createEpisode({
@@ -120,7 +125,7 @@ function createMemoryItem({
     content: validateString(content, '', 3000),
     category: validateCategory(category),
     scope: validateScope(scope),
-    confidence: Math.max(0.0, Math.min(1.0, Number(confidence) || 1.0)),
+    confidence: Number.isFinite(Number(confidence)) ? Math.max(0.0, Math.min(1.0, Number(confidence))) : 1.0,
     episodeId: episodeId || null,
     embeddingJson: embeddingJson ? (typeof embeddingJson === 'string' ? embeddingJson : JSON.stringify(embeddingJson)) : null,
     isActive: isActive ? 1 : 0,
@@ -155,6 +160,7 @@ module.exports = {
   validateString,
   validateCategory,
   validateScope,
+  isProjectScope,
   createEpisode,
   createEntity,
   createRelation,
